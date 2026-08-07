@@ -34,6 +34,7 @@ import { memberApplication, memberNamespace, tenantApplicationSet, tenantNamespa
 import { tenantSelector } from "./tenant-lifecycle.run.ts";
 import type { AppCatalogProvider } from "./app-catalog.ts";
 import type { Activator } from "../../adapters/activation/port.ts";
+import { TENANT_COLUMNS } from "./tenant-columns.ts";
 import { inviteOrResendTenantAdmin, TENANT_APP_SECRET, BOOTSTRAP_TOKEN_KEY, InviteAdminRequest } from "./tenant-admin-invite.ts";
 import { tenantMemberHost } from "./unit-dns.ts";
 import type { AppEnv } from "../../http/app-env.ts";
@@ -320,26 +321,6 @@ function invalid(kind: string, err: { issues: ReadonlyArray<{ path: ReadonlyArra
 
 /** The tenant fields the list/detail views project (JOIN clusters for domain/stage), mirroring the
  *  consumer list — the guid identity + suspend state instead of a repoUrl. */
-const TENANT_COLUMNS = {
-  id: tenants.id,
-  guid: tenants.guid,
-  subdomain: tenants.subdomain,
-  clusterId: tenants.clusterId,
-  domain: clusters.domain,
-  stage: clusters.stage,
-  // The member set and which of them is the IdP: every view that names a namespace, an AppProject or
-  // the tenant's auth host derives it from these two, so they belong in the one projection.
-  members: tenants.members,
-  identityProvider: tenants.identityProvider,
-  seedUsers: tenants.seedUsers,
-  suspended: tenants.suspended,
-  owner: tenants.owner,
-  provenance: tenants.provenance,
-  status: tenants.status,
-  lastRunId: tenants.lastRunId,
-  createdAt: tenants.createdAt,
-  updatedAt: tenants.updatedAt,
-};
 
 // `refuseWhenProvisioning` names the action in the refusal message, or is null when the verb IS allowed
 // on a tenant whose create-tenant run never finished. Only the removal verb is

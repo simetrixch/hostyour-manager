@@ -26,7 +26,7 @@ import type {
 // runKinds.ts follows for RunKind. TenantStatus carries the tenant-only "provisioning" state.
 // AppProvenance is ONE list for both unit kinds, so ConsumerView and TenantView print the same word
 // for the same fact — a hand-written union here is what let the two cards disagree about it.
-import type { AppProvenance, Stage, TenantStatus } from "../../shared/enums.ts";
+import type { AppProvenance, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
 
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
  *  e.g. the Reset wizard renders a DB-only form on NOT_CONFIGURED instead of a dead end. */
@@ -392,6 +392,15 @@ export interface TenantView {
   /** "provisioning" ⇒ create-tenant recorded this row BEFORE deploying and its run never finished
    * — the tenant may be half-deployed or not deployed at all. */
   status: TenantStatus;
+  /** What the last administrator check found, or null where none has run yet.
+   *
+   *  Null is not "fine": a tenant that has never been checked must not read as healthy, which is
+   *  why the three are nullable together rather than defaulted to something reassuring. */
+  adminState: TenantAdminState | null;
+  /** How many the tenant reported. Null where the check could not reach it — a count of zero and
+   *  no answer at all say opposite things. */
+  adminCount: number | null;
+  adminCheckedAt: number | null;
   lastRunId: string | null;
   createdAt: number;
   updatedAt: number;

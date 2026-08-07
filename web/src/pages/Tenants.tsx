@@ -7,6 +7,7 @@ import {
 } from "../api.ts";
 import { TENANT_RUN_KINDS } from "../runKinds.ts";
 import { splitTenantRows, tenantRowOffer } from "../tenantRows.ts";
+import { adminBadge, neverChecked, withoutAnAdministrator } from "../tenantAdmin.ts";
 import { SectionRuns } from "../components/SectionRuns.tsx";
 import { InviteAdminDialog } from "../components/InviteAdminDialog.tsx";
 import { PurgeTenantDialog } from "../components/PurgeTenantDialog.tsx";
@@ -252,6 +253,37 @@ export function Tenants() {
         <TenantOrphanPanel scanning={scanning} scanError={scanError} scan={scan} onPurge={setPurgeFor} />
       )}
 
+      {/* The finding, above everything else on the page. A tenant nobody can get into is the one
+          thing here that needs acting on, and putting it inside a tab would make seeing it depend on
+          which tab happens to be open. Rendered only when there IS one. */}
+      {lists && withoutAnAdministrator(lists.onboarded).length > 0 && (
+        <section className="alert alert--danger" aria-label="Tenants without an administrator">
+          <strong>
+            {withoutAnAdministrator(lists.onboarded).length} tenant(s) reported no administrator
+          </strong>
+          <p>
+            Nobody can get into these. Open one and invite an administrator; the check runs again every
+            six hours and the chip clears by itself once somebody can.
+          </p>
+          <ul className="rows">
+            {withoutAnAdministrator(lists.onboarded).map((t) => (
+              <li key={t.id}>
+                <Link to={`/tenants/${t.id}`}>{t.subdomain}</Link> · {t.domain} · {t.stage}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Said out loud rather than left to be inferred from an absent chip: a tenant nothing has
+          asked about is not a tenant known to be fine, and silence would read as the second. */}
+      {lists && neverChecked(lists.onboarded) > 0 && (
+        <p className="muted">
+          {neverChecked(lists.onboarded)} tenant(s) have not been checked for an administrator yet —
+          the check runs a few minutes after this controller starts, and every six hours after that.
+        </p>
+      )}
+
       <div className="tabs" role="tablist" aria-label="Tenants view">
         <button
           type="button"
@@ -323,6 +355,17 @@ export function Tenants() {
                         {c}
                       </span>
                     ))}
+                    {/* What the administrator check last found. A tenant no check has reached shows
+                        NOTHING here rather than a reassuring chip — tenantAdmin.ts decides that, and
+                        the panel above says how many those are. */}
+                    {(() => {
+                      const badge = adminBadge(t, Date.now());
+                      return badge === null ? null : (
+                        <span className={badge.modifier ? `chip ${badge.modifier}` : "chip"} title={badge.detail}>
+                          {badge.label}
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   {unfinished && (
