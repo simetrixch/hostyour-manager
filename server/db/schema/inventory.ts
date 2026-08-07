@@ -2,7 +2,7 @@ import { sqliteTable, text, integer, uniqueIndex, primaryKey } from "drizzle-orm
 import { sql } from "drizzle-orm";
 import {
   SERVER_STATUS, SERVER_ROLE, SERVER_TAILNET_STATE, SERVER_PASSWORD_LOGIN_STATE, SERVER_AUTHORIZED_KEYS_STATE,
-  STAGE, APP_STATUS, TENANT_STATUS,
+  STAGE, APP_STATUS, TENANT_STATUS, TENANT_ADMIN_STATE,
   APP_PROVENANCE, CLUSTER_STATUS, CLUSTER_TIER, PLANE_STATE,
 } from "../../../shared/enums.ts";
 
@@ -191,6 +191,15 @@ export const tenants = sqliteTable("tenants", {
   // stores it as plain text with no CHECK constraint, so the enum is a TypeScript-side narrowing
   // only and needs no migration.
   status: text("status", { enum: TENANT_STATUS }).notNull().default("active"),
+  // What the last administrator check found, and when. Written by the check-tenants Run and by
+  // nothing else. All three are null until the first check lands, which is how "not yet known" stays
+  // distinguishable from "known to be fine" — a tenant that has never been checked must not read as
+  // healthy on any screen.
+  adminState: text("admin_state", { enum: TENANT_ADMIN_STATE }),
+  // The count the tenant reported. Null where the check could not reach it, because a count of zero
+  // and no answer at all say opposite things and one column must not conflate them.
+  adminCount: integer("admin_count"),
+  adminCheckedAt: integer("admin_checked_at", { mode: "timestamp_ms" }),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(now),
 }, (t) => [uniqueIndex("tenants_cluster_guid_uq").on(t.clusterId, t.guid)]);

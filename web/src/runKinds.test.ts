@@ -33,8 +33,14 @@ describe("CONSUMER_RUN_KINDS", () => {
 // the CLUSTER (targetKind "cluster"), so a targetId filter would silently drop every create-tenant run.
 
 describe("TENANT_RUN_KINDS", () => {
-  it("is exactly the tenant lifecycle kinds (create + add/remove-app + suspend/resume/offboard + purge + backup/restore/migrate)", () => {
-    expect([...TENANT_RUN_KINDS].sort()).toEqual(["add-app", "create-tenant", "remove-app", "tenant-backup", "tenant-migrate", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-restore", "tenant-resume", "tenant-set-size", "tenant-suspend"]);
+  it("is exactly the tenant lifecycle kinds (create + add/remove-app + suspend/resume/offboard + purge + backup/restore/migrate + the administrator check)", () => {
+    expect([...TENANT_RUN_KINDS].sort()).toEqual(["add-app", "check-tenants", "create-tenant", "remove-app", "tenant-backup", "tenant-migrate", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-restore", "tenant-resume", "tenant-set-size", "tenant-suspend"]);
+  });
+
+  it("keeps check-tenants — it targets no tenant row, so only a kind filter surfaces it", () => {
+    // Same reason create-tenant and tenant-purge are here: the run is over EVERY tenant and
+    // therefore targets the controller, so a targetId filter would drop it off the page entirely.
+    expect(TENANT_RUN_KINDS.has("check-tenants")).toBe(true);
   });
 
   it("keeps create-tenant — the run that targets a cluster, not the tenant (would vanish under a targetId filter)", () => {

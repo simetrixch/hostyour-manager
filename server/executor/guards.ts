@@ -121,6 +121,11 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   backup: [],
   restore: [],
   migrate: [],
+  // check-tenants only READS: it asks each tenant whether anybody can still administer it and
+  // writes the answer onto the local inventory row. It places no bytes on any cluster and
+  // harvests no key, so the crypto gate has nothing to protect — and gating it would blind
+  // exactly the plaintext-keystore install to a tenant nobody can get into.
+  "check-tenants": [],
   "create-tenant": [createTenantCryptoGate],
   "add-app": [createTenantCryptoGate],
   "remove-app": [],

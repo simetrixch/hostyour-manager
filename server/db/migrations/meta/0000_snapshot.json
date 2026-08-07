@@ -809,6 +809,27 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "admin_state": {
+          "name": "admin_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "admin_count": {
+          "name": "admin_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "admin_checked_at": {
+          "name": "admin_checked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {

@@ -39,6 +39,8 @@ import { makeRestartWorkloadsDef, makeTenantRestartWorkloadsDef } from "../domai
 import { makeSetSizeDef, makeTenantSetSizeDef } from "../domains/onboarding/set-size.run.ts";
 import type { LifecyclePorts, TenantLifecyclePorts } from "../domains/onboarding/lifecycle.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/onboarding/create-tenant.run.ts";
+import { makeCheckTenantsDef } from "../domains/onboarding/check-tenants.run.ts";
+import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
 import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/onboarding/app-catalog.ts";
 import { makeAddAppDef } from "../domains/onboarding/add-app.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/onboarding/tenant-lifecycle.run.ts";
@@ -655,6 +657,14 @@ function buildTenantOnboarding(
 
   const defs: AnyRunDefinition[] = [
     makeCreateTenantDef(onboardPorts),
+    // The periodic administrator check. It reads only — a Secret off each target cluster and one
+    // GET per tenant — and writes what it found onto the inventory row. A CronJob starts it; the
+    // schedule lives in Kubernetes so this process has none to keep across a restart.
+    makeCheckTenantsDef({
+      resolver: onboardPorts.resolver,
+      resolveUnitApex: onboardPorts.resolveUnitApex,
+      health: new HttpTenantHealthReader(),
+    }),
     makeAddAppDef(onboardPorts),
     makeRemoveAppDef(lifecyclePorts),
     makeSuspendTenantDef(lifecyclePorts),

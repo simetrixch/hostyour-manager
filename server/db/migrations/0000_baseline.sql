@@ -136,6 +136,9 @@ CREATE TABLE `tenants` (
 	`provenance` text DEFAULT 'controller' NOT NULL,
 	`last_run_id` text,
 	`status` text DEFAULT 'active' NOT NULL,
+	`admin_state` text,
+	`admin_count` integer,
+	`admin_checked_at` integer,
 	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
 	`updated_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
 	FOREIGN KEY (`cluster_id`) REFERENCES `clusters`(`id`) ON UPDATE no action ON DELETE restrict

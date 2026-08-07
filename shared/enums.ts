@@ -390,6 +390,7 @@ export const RUN_KIND = [
   "tenant-suspend", "tenant-resume", "tenant-offboard",         // TNT lifecycle
   "tenant-purge",                                               // TNT — force-offboard by guid (orphan removal)
   "tenant-backup", "tenant-restore", "tenant-migrate",          // TNT relocation — the same mechanism over the whole member bracket
+  "check-tenants",                                              // TNT — asks every tenant whether anybody can still administer it
 ] as const;
 export type RunKind = (typeof RUN_KIND)[number];
 
@@ -412,9 +413,23 @@ export const RUN_FAMILY = {
     "operator-key-place", "operator-key-remove", "authorized-keys-read",
   ],
   consumer: ["onboard", "offboard", "purge", "adopt-consumer", "suspend", "resume", "restart-workloads", "set-size", "backup", "restore", "migrate"],
-  tenant: ["create-tenant", "add-app", "remove-app", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-backup", "tenant-restore", "tenant-migrate"],
+  tenant: ["create-tenant", "add-app", "remove-app", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-backup", "tenant-restore", "tenant-migrate", "check-tenants"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;
+
+/**
+ * What the last administrator check found on a tenant.
+ *
+ * Three answers and not two, and the third is the one that keeps the check credible: `unreachable`
+ * means the tenant did not answer — mid-restart, mid-deploy, behind a DNS change — which is a normal
+ * state of a cluster and NOT evidence that nobody can administer it. Reporting those as findings is
+ * how a check gets muted, and a muted check reports nothing at all.
+ *
+ * A row that has never been checked carries none of these: the column is null until the first check
+ * lands, so "not yet known" is distinguishable from "known to be fine".
+ */
+export const TENANT_ADMIN_STATE = ["ok", "none", "unreachable"] as const;
+export type TenantAdminState = (typeof TENANT_ADMIN_STATE)[number];
 
 export const RUN_STATUS = ["planning", "planned", "approved", "running",
   "succeeded", "failed", "cancelled"] as const;

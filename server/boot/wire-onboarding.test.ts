@@ -106,7 +106,7 @@ describe("buildOnboarding enable gates (wire-onboarding.ts)", () => {
     const wiring = buildOnboarding(...setup({ KUBECONFIG_PATH: file }));
     expect(wiring.enabled).toBe(true);
     expect(wiring.tenantEnabled).toBe(true);
-    expect(wiring.defs).toHaveLength(23); // 11 consumer (incl. purge, adopt-consumer, restart-workloads, set-size, backup/restore/migrate) + 12 tenant (incl. tenant-purge, tenant-restart-workloads, tenant-set-size, tenant-backup/-restore/-migrate)
+    expect(wiring.defs).toHaveLength(24); // 11 consumer (incl. purge, adopt-consumer, restart-workloads, set-size, backup/restore/migrate) + 13 tenant (those 12, plus check-tenants)
   });
 
   it("BOTH families stay off without MASTER_FQDN — nothing may write the books without knowing which branch they are", () => {
