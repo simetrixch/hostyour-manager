@@ -1,0 +1,59 @@
+{
+  "name": "hostyourmanager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "tsx watch server/index.ts",
+    "dev:web": "vite",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:boundaries": "depcruise server shared web/src gate-runner/src --config .dependency-cruiser.cjs",
+    "lint:css": "stylelint \"web/**/*.css\"",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && npm run lint:boundaries && npm run lint:css && npm run build:web",
+    "db:generate": "drizzle-kit generate",
+    "build:web": "vite build",
+    "start": "node --import tsx server/index.ts",
+    "prepare": "git config core.hooksPath .githooks || true"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1",
+    "@kubernetes/client-node": "^1",
+    "anser": "^2.3.5",
+    "better-sqlite3": "^12",
+    "drizzle-orm": "^0.44",
+    "hono": "^4",
+    "jose": "^6",
+    "openid-client": "^6",
+    "pino": "^9",
+    "ssh2": "^1.16",
+    "ulid": "^3",
+    "yaml": "^2.9.0",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7",
+    "@types/node": "^24",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/ssh2": "^1",
+    "@vitejs/plugin-react": "^5",
+    "dependency-cruiser": "^16",
+    "drizzle-kit": "^0.31",
+    "eslint": "^9",
+    "react": "^19",
+    "react-dom": "^19",
+    "react-router": "^7",
+    "stylelint": "^16",
+    "stylelint-config-standard": "^36",
+    "tsx": "^4",
+    "typescript": "^5.9",
+    "typescript-eslint": "^8",
+    "vite": "^7",
+    "vitest": "^3"
+  }
+}

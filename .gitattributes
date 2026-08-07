@@ -1,0 +1,41 @@
+# hostyour-manager is edited on Windows and runs on Linux. Enforce LF so a file never
+# reaches a Linux host with CRLF, which breaks a shebang with
+# `bad interpreter: /usr/bin/env bash^M` and makes an entrypoint fail on a
+# character nothing prints.
+
+# Normalize all text to LF in the repo AND on checkout, on every platform.
+* text=auto eol=lf
+
+# Files that MUST be LF where they run.
+*.sh      text eol=lf
+*.bash    text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+*.ts      text eol=lf
+*.tsx     text eol=lf
+*.js      text eol=lf
+*.mjs     text eol=lf
+*.cjs     text eol=lf
+*.css     text eol=lf
+*.html    text eol=lf
+*.sql     text eol=lf
+*.go      text eol=lf
+*.mod     text eol=lf
+*.sum     text eol=lf
+*.conf    text eol=lf
+*.example text eol=lf
+Dockerfile     text eol=lf
+Containerfile  text eol=lf
+
+# Binary artifacts — never touch line endings.
+*.tgz   binary
+*.gz    binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary

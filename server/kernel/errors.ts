@@ -1,0 +1,78 @@
+import type { ApiErrorCode } from "../../shared/api-types.ts";
+
+// One error taxonomy. Codes are shared with the SPA via shared/api-types.ts;
+// HTTP_BY_CODE below is exhaustive over ApiErrorCode, so adding a code without deciding its status
+// is a type error rather than a silent 500. `error-shape.ts` is the only module that turns these
+// into a response.
+const HTTP_BY_CODE: Record<ApiErrorCode, number> = {
+  VALIDATION: 400,
+  MISSING_RUN_SECRET: 400,
+  UNAUTHENTICATED: 401,
+  NOT_A_MEMBER: 403,
+  CSRF_REFUSED: 403,
+  NOT_FOUND: 404,
+  ILLEGAL_TRANSITION: 409,
+  RESOURCE_BUSY: 409,
+  PLAN_REFUSED: 409,
+  IDP_UNREACHABLE: 503,
+  NOT_CONFIGURED: 501,
+  UPSTREAM: 502,
+  RUNNER_BUSY: 409,
+  SANDBOX_DEGRADED: 503,
+  UNDECLARED_TARGET: 500,
+  INTERNAL: 500,
+};
+
+export interface AppErrorOptions {
+  detail?: Record<string, unknown>;
+  cause?: unknown;
+}
+
+export class AppError extends Error {
+  readonly code: ApiErrorCode;
+  readonly http: number;
+  readonly detail: Record<string, unknown> | undefined;
+
+  constructor(code: ApiErrorCode, message: string, opts?: AppErrorOptions) {
+    super(message, opts?.cause !== undefined ? { cause: opts.cause } : undefined);
+    this.name = "AppError";
+    this.code = code;
+    this.http = HTTP_BY_CODE[code];
+    this.detail = opts?.detail;
+  }
+}
+
+// Typed constructors. Branch on `.code`, never on subclass identity.
+export const errValidation = (message: string, detail?: Record<string, unknown>): AppError =>
+  new AppError("VALIDATION", message, detail ? { detail } : undefined);
+export const errNotFound = (message = "Not found"): AppError => new AppError("NOT_FOUND", message);
+export const errCsrfRefused = (): AppError => new AppError("CSRF_REFUSED", "Cross-origin request refused");
+export const errIllegalTransition = (message: string): AppError => new AppError("ILLEGAL_TRANSITION", message);
+export const errResourceBusy = (detail: { resource: string; key: string; holderRunId: string }): AppError =>
+  new AppError("RESOURCE_BUSY", "Resource busy", { detail });
+export const errPlanRefused = (message: string, detail?: Record<string, unknown>): AppError =>
+  new AppError("PLAN_REFUSED", message, detail ? { detail } : undefined);
+export const errUndeclaredTarget = (serverId: string): AppError =>
+  new AppError("UNDECLARED_TARGET", `Step reached an undeclared target: ${serverId}`);
+// A one-time run secret (e.g. the adopt password) is absent — never stored, so lost on a
+// crash/restart. Retry the step and re-enter it, or discard the run.
+export const errMissingRunSecret = (name: string): AppError =>
+  new AppError(
+    "MISSING_RUN_SECRET",
+    `The one-time secret "${name}" is not available — it is never stored, so re-enter it and retry this step (or discard the run).`,
+    { detail: { secret: name } },
+  );
+export const errIdpUnreachable = (): AppError => new AppError("IDP_UNREACHABLE", "The identity provider is unreachable");
+// A feature whose config is absent by declaration (e.g. GITHUB_REPO unset) — 501, an honest
+// "not configured here", never a half-enabled quiet default (no-silent-fallbacks).
+export const errNotConfigured = (message: string): AppError => new AppError("NOT_CONFIGURED", message);
+// An upstream service (GitHub) refused/failed — surface ITS message verbatim (never a mask).
+export const errUpstream = (message: string): AppError => new AppError("UPSTREAM", message);
+// The gate-runner's queue-of-1 is busy with another validation — the
+// second plan fails cleanly rather than hanging.
+export const errRunnerBusy = (): AppError =>
+  new AppError("RUNNER_BUSY", "The validation sandbox is busy with another job — try again in a moment");
+// The gate-runner refused the job because its egress-fence self-probe was not green — fail-closed,
+// because untrusted code is never validated in a degraded sandbox.
+export const errSandboxDegraded = (message = "The validation sandbox is degraded and refused the job"): AppError =>
+  new AppError("SANDBOX_DEGRADED", message);

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Local pre-commit gate. The GitHub Actions CI workflow is disabled (owner request), so the
+# lint + syntax + build checks run HERE, before every commit, instead of in CI.
+#   npm run check = typecheck (tsc) + lint (eslint) + boundary law + CSS tokens + SPA build
+# The heavier vitest/e2e suites are run manually, not on every commit. Bypass (rare) with
+# `git commit --no-verify`.
+exec npm run check

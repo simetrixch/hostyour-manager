@@ -1,0 +1,18 @@
+# gitleaks config for the platform build's credential-scan gate.
+#
+# Test fixtures embed DELIBERATELY-FAKE secrets: the redaction tests
+# (server/security/redact.test.ts) assert that a fake GitHub PAT + a fake OpenSSH key are
+# masked, and the adopt/vault tests use throwaway passwords. Those trip gitleaks' default
+# rules (github-pat, private-key) as false positives. Allowlist *.test.ts + the e2e harness;
+# NON-test source must stay clean (a real leak there still fails the build).
+title = "hostyourmanager"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "fake secrets in test fixtures + e2e harness"
+paths = [
+  '''.*\.test\.ts$''',
+  '''e2e/.*''',
+]
