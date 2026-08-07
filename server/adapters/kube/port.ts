@@ -344,7 +344,7 @@ export interface ClusterReader {
  *
  *  A DIFFERENT group from the tenant operator's annotation on purpose: each component owns the
  *  annotations in its own API group, and the reader here is the service-provisioner
- *  (platform.hostyour.cloud), not the tenant operator (platform.hostyour.cloud). */
+ *  (platform.hostyour.cloud), not the tenant operator (operator.hostyour.cloud). */
 export const CLAIM_RELOCATING_ANNOTATION = "platform.hostyour.cloud/relocating";
 
 // ---- MasterProjectWriter (the one writing kube path) --------------------------------------

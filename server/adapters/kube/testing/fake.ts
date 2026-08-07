@@ -77,7 +77,7 @@ export class FakeClusterReader implements ClusterReader {
       absentTenantCrs?: readonly string[];
       /** Makes deleteTenantCr THROW, modelling every status the live reader does NOT fold into
        *  { deleted: false } — above all the 403 a per-cluster credential without `delete` on
-       *  tenants.platform.hostyour.cloud gets, and any transient API-server failure. Only 404 is absence
+       *  tenants.operator.hostyour.cloud gets, and any transient API-server failure. Only 404 is absence
        *  (absentTenantCrs above); everything else surfaces as UPSTREAM and fails the step, which is what
        *  a tenant-purge test needs to prove the row is NOT settled behind a failed deprovision. */
       throwOnTenantCrDelete?: Error;

@@ -112,7 +112,7 @@ describe("renderTenantAppProject", () => {
 
   it("whitelists Namespace alone — the Tenant CR is the Controller's to write, never a chart's", () => {
     expect(project.spec.clusterResourceWhitelist).toEqual([{ group: "", kind: "Namespace" }]);
-    expect(project.spec.clusterResourceWhitelist).not.toContainEqual({ group: "platform.hostyour.cloud", kind: "Tenant" });
+    expect(project.spec.clusterResourceWhitelist).not.toContainEqual({ group: "operator.hostyour.cloud", kind: "Tenant" });
   });
 
   it("keeps the same fence-4 self-escalation blacklist as the consumer project", () => {

@@ -61,7 +61,7 @@ const doc = (kind: string, over: Partial<RenderedDoc> = {}): RenderedDoc => ({
   apiVersion: "v1", kind, name: `${kind.toLowerCase()}-x`, namespace: `${PROBE}`, raw: { kind }, ...over,
 });
 const NS_DOC = doc("Namespace", { namespace: "", raw: { kind: "Namespace" } });
-const TENANT_DOC = doc("Tenant", { apiVersion: "platform.hostyour.cloud/v1", namespace: "", raw: { apiVersion: "platform.hostyour.cloud/v1", kind: "Tenant" } });
+const TENANT_DOC = doc("Tenant", { apiVersion: "operator.hostyour.cloud/v1", namespace: "", raw: { apiVersion: "operator.hostyour.cloud/v1", kind: "Tenant" } });
 const app = (name: string): AppRef => ({ name });
 
 /** The target cluster's chain as a plan hands it over — profile states the registry host the member

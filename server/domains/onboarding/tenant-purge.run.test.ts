@@ -241,7 +241,7 @@ describe("tenant-purge plan", () => {
   it.each(["master", "master+slave"] as const)("PLANS on a cluster carrying the %s role and still reaches the cluster-side deletes", async (role) => {
     // Placement is not a function of the role: a tenant runs wherever it was created, so a purge must be
     // able to reap it there. The two cluster-side deletes are what makes purge the removal that finishes,
-    // and the controller reaches platform.hostyour.cloud on such a cluster through its own ServiceAccount
+    // and the controller reaches operator.hostyour.cloud on such a cluster through its own ServiceAccount
     // (ClusterRole controller-tenant-reaper) rather than a harvested bearer.
     seedMasterCluster(role);
     const def = makeTenantPurgeDef(ports(new TenantRegistry(new FakePlatformRepo(), CLUSTERS)));

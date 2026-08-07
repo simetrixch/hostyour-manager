@@ -76,7 +76,7 @@ import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 // together with its user, however the claim dies. delete-tenant-crypto destroys the tenant's Vault
 // entry <stage>/tenants/<guid> through the SAME seeder create-tenant wrote it with — a metadata delete,
 // all versions, so a tenant minted later with this guid can never inherit the purged one's signing key.
-// It used to be ONE delete: the cluster-scoped platform.hostyour.cloud/Tenant carried a finalizer that a
+// It used to be ONE delete: the cluster-scoped operator.hostyour.cloud/Tenant carried a finalizer that a
 // reconciler released only once all of that was gone, so deleting the CR WAS the cascade. Nothing
 // reconciles that CR (example-operator is parked) and it is gone; what remained of that design was a
 // step that verified a cascade nobody ran, which is why it refused and no tenant could reach "purged".

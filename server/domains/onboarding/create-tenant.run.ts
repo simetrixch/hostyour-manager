@@ -121,7 +121,7 @@ export interface TenantOnboardPorts {
 const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely
 
 /** The reset nonce a fresh tenant starts at, in its registration. It used to ride the Tenant CR's
- *  platform.hostyour.cloud/reset annotation as well, where a CHANGED value told the reconciler to drop the
+ *  operator.hostyour.cloud/reset annotation as well, where a CHANGED value told the reconciler to drop the
  *  tenant's databases and restart its pods so the boot-seeds repopulate. That reconciler is gone and
  *  the CR with it, so the field is written and nothing acts on a change to it — a data reset has no
  *  mechanism today. The field stays because it is a mandatory part of the registration schema and

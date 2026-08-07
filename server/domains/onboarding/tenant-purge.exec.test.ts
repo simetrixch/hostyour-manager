@@ -347,7 +347,7 @@ describe("tenant-purge execution", () => {
 
   it("DESTROYS the tenant's crypto entry — the step that replaced the refusal", async () => {
     // This run used to stop here. verify-deprovision refused by design: its proof was the RELEASE of
-    // the platform.hostyour.cloud/deprovision-complete finalizer, put on the Tenant CR by a reconciler
+    // the operator.hostyour.cloud/deprovision-complete finalizer, put on the Tenant CR by a reconciler
     // watching it, and no reconciler watches it — so the CR vanished at once and reading THAT as a
     // completed cascade would have recorded "purged" over a tenant whose crypto still stood.
     // The entry now has an owner: the same seeder that wrote it at create-tenant destroys it here, all
