@@ -5,7 +5,7 @@
 // The processes this repo ships, each named by the file that starts it: server/index.ts (the
 // package.json `start` script), web/src/main.tsx (the module script in web/index.html, which vite
 // builds from root=web), gate-runner/src/cli.ts (the gate-runner Containerfile CMD) and
-// server/jobs/registry-reaper.ts (the reaper CronJob command in the controller chart). One pattern,
+// server/jobs/registry-reaper.ts (the reaper CronJob command in the manager chart). One pattern,
 // used both as the roots of the reachability rule and as its own exemption — a root is not
 // reachable from itself.
 const ENTRY_POINTS = "^(server/index\\.ts|web/src/main\\.tsx|gate-runner/src/cli\\.ts|server/jobs/registry-reaper\\.ts)$";

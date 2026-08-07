@@ -4,6 +4,7 @@ import { runActor } from "../kernel/actor.ts";
 import { createLogger, type Logger } from "../kernel/logger.ts";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, type CheckResult } from "./selfchecks.ts";
+import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
 import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
 import { seedUnitSizes } from "../domains/onboarding/unit-size.ts";
 import { createApp } from "../http/app.ts";
@@ -85,6 +86,10 @@ export async function wire(): Promise<Wired> {
   // (unref'd — if a later blocking check fails boot, the exiting process is not held open).
   // Degrade-friendly by design;
   // a genuine DB fault still surfaces (boot fails loud rather than running half-seeded).
+  // The tenant administrator check: a run started on a timer. It is here rather than in a
+  // CronJob because it must write into THIS database, which is a ReadWriteOnce volume held by a
+  // single replica — the same dependency seed-master.ts states for its own reconcile.
+  scheduleTenantCheck(executor, logger);
   await seedMaster(db.db, store, config, logger);
   // The size table (domains/onboarding/unit-size.ts): fill in any of the three sizes this database
   // does not carry yet, and touch none that it does. Create-only, so an installation that edited a
