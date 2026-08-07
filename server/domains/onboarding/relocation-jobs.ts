@@ -36,7 +36,7 @@ export interface RelocationJob {
 }
 
 /** The platform Mongo of one stage, as every in-cluster client dials it (the same coordinates the
- *  tenant operator and the service-provisioner use). The root credential Secret lives beside it. */
+ *  service-provisioner uses). The root credential Secret lives beside it. */
 export const MONGO_NAMESPACE = "mongodb";
 export const MONGO_ROOT_SECRET = { name: "mongodb-credentials", key: "root-password" } as const;
 export function mongoHost(stage: Stage): string {

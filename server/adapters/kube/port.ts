@@ -8,14 +8,13 @@
 //    deploy-slave; or the pod SA's in-cluster access for the master); smoke-reads a namespace on the target cluster
 //    and reads the deploy-state ConfigMap that attest-target checks fail-closed. It ALSO carries the
 //    teardown writes on the TARGET cluster: deleteNamespace (ArgoCD's CreateNamespace=true never
-//    removes the namespace on prune, so the offboard Run must), applyTenantCr / deleteTenantCr (the
-//    cluster-scoped Tenant CR the Controller provisions at create-tenant — its deletion USED to be the
-//    tenant deprovision cascade, and no reconciler runs it today, so the three things that cascade did
-//    are deprovisioned by their own owners: the Vault entry by tenant-purge's delete-tenant-crypto over
-//    the Controller's own seeder, the databases by the ServiceClaim finalizers that fire when the
-//    member namespaces are reaped), plus watchTenantCrGone, which waits for a finalizer to be released
-//    and is used by the MOVE's clear-source, where the relocating annotation is what the wait is
-//    about. It lists namespaces by label, which is how a
+//    removes the namespace on prune, so the offboard Run must). A tenant deprovision USED to be one
+//    delete: a cluster-scoped Tenant CR whose finalizer a reconciler released once everything was
+//    gone. No reconciler serves that CR, so the CR and the three port methods that drove it are gone,
+//    and each thing the cascade did is now deprovisioned by whoever created it — the Vault entry by
+//    tenant-purge's delete-tenant-crypto through the same seeder create-tenant wrote it with, the
+//    databases by the ServiceClaim finalizers that fire when the member namespaces are reaped.
+//    It lists namespaces by label, which is how a
 //    tenant teardown reaps every member namespace rather than only the ones it can derive. It ALSO writes
 //    the per-unit admission boundary (apply/deleteAdmissionPolicy): a
 //    ValidatingAdmissionPolicy is CLUSTER-scoped and belongs where the unit's workloads are admitted,

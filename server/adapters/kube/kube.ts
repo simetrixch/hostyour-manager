@@ -26,12 +26,6 @@ import {
 } from "./kube-map.ts";
 
 const ARGO = { group: "argoproj.io", version: "v1alpha1", plural: "applications" } as const;
-/** The tenant's CLUSTER-scoped CR, named by the bare guid, written by the Controller alone
- *  (domains/onboarding/tenant-cr.ts). The version MUST be the one the CRD SERVES: the CRD
- *  (tenants.operator.hostyour.cloud) declares v1alpha1 and nothing else, and a request against a version the
- *  API server does not serve comes back 404 — which every call here folds into "absent", so a wrong
- *  version turns the deprovision delete into a silent no-op and makes the verify read report the CR gone
- *  while it is still standing. */
 const EXTERNAL_SECRETS = { group: "external-secrets.io", version: "v1beta1", plural: "externalsecrets" } as const;
 /** The two CLUSTER-scoped halves of a unit's admission boundary. Written as a pair (a policy without
  *  its binding enforces nothing) and deleted as a pair. */

@@ -115,8 +115,8 @@ export interface TenantTeardownOpts {
    *     The member DATABASES do not stand: the prune deletes every member's ServiceClaim and the
    *     service-provisioner drops a claim's databases with its user, so the removal costs the data
    *     whichever flavour runs it — each composing run's operator text says so;
-   *   - tenant-purge's PURGE_TEARDOWN settles "purged": its `cascade` deleted the Tenant CR (whereupon the
-   *     tenant operator ran the deprovision) and the namespace, so nothing is left to reap.
+   *   - tenant-purge's PURGE_TEARDOWN settles "purged": it reaped every member namespace and destroyed
+   *     the tenant's Vault entry itself, so nothing is left to reap.
    *  Settling both to "offboarded" leaves the two indistinguishable
    *  in the inventory, a purged tenant keeps its place on the Tenants page's "Offboarded tenants" panel,
    *  and the most destructive verb in the product appears to do nothing.

@@ -76,10 +76,10 @@ import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 // together with its user, however the claim dies. delete-tenant-crypto destroys the tenant's Vault
 // entry <stage>/tenants/<guid> through the SAME seeder create-tenant wrote it with — a metadata delete,
 // all versions, so a tenant minted later with this guid can never inherit the purged one's signing key.
-// It used to be ONE delete: the cluster-scoped operator.hostyour.cloud/Tenant carried a finalizer that a
-// reconciler released only once all of that was gone, so deleting the CR WAS the cascade. Nothing
-// reconciles that CR (example-operator is parked) and it is gone; what remained of that design was a
-// step that verified a cascade nobody ran, which is why it refused and no tenant could reach "purged".
+// It used to be ONE delete: a cluster-scoped Tenant CR carried a finalizer that a reconciler released
+// only once all of that was gone, so deleting the CR WAS the cascade. That reconciler is parked and no
+// controller serves the CR, so what remained of the design was a step verifying a cascade nobody ran —
+// it refused every time and no tenant could reach "purged". The CR and both of its steps are gone.
 // THE OBJECT-STORAGE BUCKET AND ITS DATA ARE DELIBERATELY KEPT — the plan SUMMARY says so plainly, and
 // so does the purge dialog the operator confirms in, because someone approving a "purge" must not
 // believe the tenant's stored objects went with it. It is deliberately NOT also stated as a
@@ -89,20 +89,19 @@ import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 // tenant-offboard and the replace do NEITHER — they un-deploy a tenant and KEEP its cluster state
 // (soft state, re-onboardable); tenant-purge is the one destructive verb.
 //
-// DEPROVISION — issuing the CR delete is not the same as the cascade having RUN, so the cascade ends with
-// a third step that waits for the difference (verify-deprovision, below). deleteTenantCr is non-blocking
-// by contract: it returns as soon as the API server accepts the delete, while the CR sits there with a
-// deletionTimestamp and the deprovision-complete finalizer still holding it. Only the hostyour-tenant-
-// operator can release that finalizer, and it does so ONLY after the Vault path, the object-storage
-// credential and the Mongo databases are actually gone — so the CR's DISAPPEARANCE is the operator's own
-// receipt, and the run waits for it before recording anything. The alternative was to keep recording on
-// issue and soften every sentence about "purged" to say the cascade was merely REQUESTED, which was
-// rejected for one reason: nothing would ever come back to check. An operator that is down, crash-looping
-// or has lost its Vault credential leaves the CR standing, and a row recorded "purged" over it drops off
-// the Tenants page, offers no further removal and cannot be found by the orphan scan either (the pointer
-// went with this run's first step) — a stranded deprovision with no surface anywhere, re-created
-// by the very verb that is supposed to end that state. Failing the step keeps
-// the row unsettled, the tenant listed and the run retryable exactly where it stopped.
+// ISSUED IS NOT DONE, and that distinction is what the settle guard above carries. Deleting a namespace
+// is non-blocking: the API server accepts it and returns while the namespace sits there with a
+// deletionTimestamp, its ServiceClaims still finalizing and their databases still standing. So the
+// record step does not settle on having ISSUED the deletes — the settle guard re-reads the fan-out
+// afterwards and fails the run when anything is still visible.
+//
+// The alternative was to record on issue and soften every sentence about "purged" to say the cascade was
+// merely REQUESTED. It was rejected for one reason: nothing would ever come back to check. A row
+// recorded "purged" over databases that are still there drops off the Tenants page, offers no further
+// removal, and cannot be found by the orphan scan either — the pointer went with this run's first step.
+// That is a stranded deprovision with no surface anywhere, created by the very verb that exists to end
+// that state. Failing the guard keeps the row unsettled, the tenant listed and the run retryable exactly
+// where it stopped.
 //
 // RECORD — a completed purge settles its rows to "purged", NOT to "offboarded".
 // This is the ONE teardown flavour that does (PURGE_TEARDOWN below carries it as `settledStatus`; the

@@ -72,22 +72,6 @@ export class FakeClusterReader implements ClusterReader {
       /** Namespaces that answer "terminating" — a delete was accepted but a finalizer still holds
        *  them. Wins over the delete bookkeeping, so a test can model exactly the stuck case. */
       terminatingNamespaces?: readonly string[];
-      /** Guids whose Tenant CR is already gone — their first delete resolves { deleted: false },
-       *  modelling the 404 the live reader maps (a re-run, or the operator already reaped it). */
-      absentTenantCrs?: readonly string[];
-      /** Makes deleteTenantCr THROW, modelling every status the live reader does NOT fold into
-       *  { deleted: false } — above all the 403 a per-cluster credential without `delete` on
-       *  tenants.operator.hostyour.cloud gets, and any transient API-server failure. Only 404 is absence
-       *  (absentTenantCrs above); everything else surfaces as UPSTREAM and fails the step, which is what
-       *  a tenant-purge test needs to prove the row is NOT settled behind a failed deprovision. */
-      throwOnTenantCrDelete?: Error;
-      /** Guids whose Tenant CR is WEDGED: the delete was accepted, but the tenant operator never
-       *  released its deprovision-complete finalizer, so the CR sits with a deletionTimestamp forever —
-       *  the operator being down, crash-looping, or having lost the Vault credential it needs to finish.
-       *  watchTenantCrGone then observes it STILL present, exactly as a live watch that ran out its
-       *  budget would, which is what proves a purge refuses to record "purged" over a deprovision that
-       *  only got as far as being REQUESTED. */
-      wedgedTenantCrs?: readonly string[];
       /** Scripted Secret values, keyed `${namespace}/${name}/${key}` — an unlisted key reads null
        *  (an absent Secret/key), exactly like the live reader. Lets a tenant activate test seed the
        *  bootstrap token the first-admin invite reads. */
