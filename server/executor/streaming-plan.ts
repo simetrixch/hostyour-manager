@@ -60,20 +60,10 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
   const { deps, active, runId, def, rawParams } = args;
   const controller = new AbortController();
   active.set(runId, controller);
-  const ctx = new RunContext({
-    runId,
-    db: deps.db,
-    creds: deps.creds,
-    bus: deps.bus,
-    logger: deps.logger,
-    params: (rawParams ?? {}) as Record<string, unknown>,
-    secrets: new RunSecretsMap(runId),
-    signal: controller.signal,
-    sshFactory: deps.sshFactory,
-    targetServerId: undefined,
-    declaredTargets: [],
-  });
-  ctx.emitMeta("Validating the repository in the sandbox…");
+  /** The run context, built by the first statement of the try below and therefore absent on the one
+   *  path where building it is what failed. Where there is no context there is no run log to write a
+   *  line into and no SSH session to close, so both uses below skip rather than substitute. */
+  let ctx: RunContext | undefined;
   /** Write down how a validation ENDED BADLY, then release the run's in-memory bookkeeping.
    *
    *  Every line of the recording is a database write, and the database is exactly what can be gone by
@@ -102,16 +92,43 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
     }
     // Reached whether or not the recording landed, because the catch above swallows deliberately.
     active.delete(runId);
-    ctx.close();
+    ctx?.close();
   };
   try {
-    const result = await def.planStream!(rawParams, { db: deps.db, log: (l) => ctx.emitMeta(l), signal: controller.signal });
+    // The prologue is INSIDE the try, and both of its statements are database statements: the
+    // context seeds the run's seq counter with a read of `events`, and the first line is an insert
+    // into it. Which one the database refuses is decided per statement — SQLITE_FULL and SQLITE_BUSY
+    // both are — so the `runs` insert that opened this run can land and these two still fail.
+    //
+    // A failure here is NOT a failure recording and is therefore never swallowed: it is the
+    // validation failing before its first line, so the catch below fails the run, exactly as it does
+    // for a plan that could not be frozen. Swallowing and walking on would send the planner off for
+    // minutes against a sandbox whose output nothing can record, to settle into the same database.
+    //
+    // Outside the try the failure was not merely unheld but unholdable: the prologue throws before
+    // beginStreamingPlan returns, so the `.finally()` there drops the run from `inflight` on the next
+    // microtask and settle() finds nothing left to await. It reached the process every time.
+    ctx = new RunContext({
+      runId,
+      db: deps.db,
+      creds: deps.creds,
+      bus: deps.bus,
+      logger: deps.logger,
+      params: (rawParams ?? {}) as Record<string, unknown>,
+      secrets: new RunSecretsMap(runId),
+      signal: controller.signal,
+      sshFactory: deps.sshFactory,
+      targetServerId: undefined,
+      declaredTargets: [],
+    });
+    ctx.emitMeta("Validating the repository in the sandbox…");
+    const result = await def.planStream!(rawParams, { db: deps.db, log: (l) => ctx!.emitMeta(l), signal: controller.signal });
     if (result.outcome === "rejected") {
       recordOutcome(() => {
         // Freeze the full report into plan_json so the operator reads every expected/found/reason,
         // and the failed run stays soft-deletable. No steps: nothing was planned.
         deps.db.transaction((tx) => tx.update(runs).set({ status: "failed", planJson: result.planJson, error: result.summary, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
-        ctx.emitMeta(`✗ ${result.summary}`);
+        ctx!.emitMeta(`✗ ${result.summary}`);
         writeAudit(deps.db, { actor: "system", action: "run.failed", runId, detail: { rejected: true } });
       }, result.summary);
       return;
@@ -141,7 +158,11 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
     const message = redact(err instanceof Error ? err.message : String(err));
     recordOutcome(() => {
       deps.db.transaction((tx) => tx.update(runs).set({ status: aborted ? "cancelled" : "failed", error: message, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
-      ctx.emitMeta(aborted ? "✕ cancelled during validation" : `✗ validation failed: ${message}`);
+      // Skipped, not substituted, when the prologue is what failed: the run log line is written by
+      // the context, and no context means the two statements that would have written it are the ones
+      // the database just refused. The reason still reaches the operator on the run row above, and
+      // the audit line below is then written rather than lost to a second throw.
+      ctx?.emitMeta(aborted ? "✕ cancelled during validation" : `✗ validation failed: ${message}`);
       writeAudit(deps.db, { actor: "system", action: aborted ? "run.cancelled" : "run.failed", runId, detail: { duringPlanning: true } });
     }, message);
   }

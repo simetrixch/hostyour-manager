@@ -74,39 +74,40 @@ function blockingPlannerDef(gate: Gate, outcome: () => PlanStreamResult<Record<s
   };
 }
 
+const handles: DbHandle[] = [];
+const dirs: string[] = [];
+afterEach(() => {
+  for (const h of handles.splice(0)) { if (h.sqlite.open) h.sqlite.close(); }
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+function makeWith(def: AnyRunDefinition): { db: DbHandle; executor: Executor; lines: string[] } {
+  const dir = mkdtempSync(join(tmpdir(), "ctrl-sp-nodb-"));
+  dirs.push(dir);
+  const db = openDb(join(dir, "controller.db"));
+  handles.push(db);
+  const lines: string[] = [];
+  const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });
+  const executor = new Executor({
+    db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(),
+    logger: capturing, registry: new Map<RunKind, AnyRunDefinition>([["noop", def]]),
+    sshFactory: noSsh, actor: () => "op_system",
+  });
+  return { db, executor, lines };
+}
+
+const runRow = (db: DbHandle, runId: string): { status: string; error: string | null; plan_json: string | null } =>
+  db.sqlite.prepare("SELECT status, error, plan_json FROM runs WHERE id=?").get(runId) as { status: string; error: string | null; plan_json: string | null };
+
+const metaLines = (db: DbHandle, runId: string): string[] =>
+  (db.sqlite.prepare("SELECT text FROM events WHERE run_id=? AND stream='meta'").all(runId) as { text: string }[]).map((r) => r.text);
+
 describe("streaming plan — a plan whose outcome the database cannot take", () => {
   // What a validation does when the database it must settle into has gone away. In a test that is a
   // closed handle; in the controller it is a shutdown that closed it, a full disk, or SQLITE_BUSY.
   // Nothing holds this promise — POST /api/runs/:id/plan answers as soon as the run row exists and
   // SSE takes over — so a throw while settling reaches the process as an unhandled rejection, and
   // Node's answer to that is to terminate the controller with every other run in flight.
-  const handles: DbHandle[] = [];
-  const dirs: string[] = [];
-  afterEach(() => {
-    for (const h of handles.splice(0)) { if (h.sqlite.open) h.sqlite.close(); }
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-  });
-
-  function makeWith(def: AnyRunDefinition): { db: DbHandle; executor: Executor; lines: string[] } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-sp-nodb-"));
-    dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
-    handles.push(db);
-    const lines: string[] = [];
-    const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });
-    const executor = new Executor({
-      db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(),
-      logger: capturing, registry: new Map<RunKind, AnyRunDefinition>([["noop", def]]),
-      sshFactory: noSsh, actor: () => "op_system",
-    });
-    return { db, executor, lines };
-  }
-
-  const runRow = (db: DbHandle, runId: string): { status: string; error: string | null; plan_json: string | null } =>
-    db.sqlite.prepare("SELECT status, error, plan_json FROM runs WHERE id=?").get(runId) as { status: string; error: string | null; plan_json: string | null };
-
-  const metaLines = (db: DbHandle, runId: string): string[] =>
-    (db.sqlite.prepare("SELECT text FROM events WHERE run_id=? AND stream='meta'").all(runId) as { text: string }[]).map((r) => r.text);
 
   it("a validation that PASSED and cannot be written down says so in the log and settles instead of rejecting", async () => {
     const g = gates();
@@ -167,6 +168,82 @@ describe("streaming plan — a plan whose outcome the database cannot take", () 
     expect(JSON.parse(row.plan_json ?? "null")).toEqual(REJECTION_REPORT);
     expect(getRun(db.db, runId)?.steps).toHaveLength(0); // nothing was planned
     expect(metaLines(db, runId)).toContain(`✗ ${REJECTION_SUMMARY}`);
+    expect(lines).toHaveLength(0);
+  });
+});
+
+/** A def whose streaming planner must never be reached: the prologue below fails before it. If it
+ *  ever runs, the run is failed with THIS message instead of the database's, and the assertions on
+ *  the recorded reason say so. */
+function unreachedPlannerDef(): AnyRunDefinition {
+  return {
+    kind: "noop",
+    paramsSchema: z.record(z.string(), z.unknown()),
+    mutating: false,
+    plan: async () => {
+      throw new AppError("INTERNAL", "this def is planned via planStream, not plan()");
+    },
+    planStream: async () => {
+      throw new AppError("INTERNAL", "the planner ran although the prologue had already failed");
+    },
+    steps: () => [{ name: "do-it", title: "Do it", run: async () => undefined }],
+  };
+}
+
+describe("streaming plan — a prologue the database cannot take", () => {
+  // The first two statements of a validation are database statements: seeding the run log's seq
+  // counter READS `events`, and the first log line INSERTS into it. They are not reachable by a
+  // database that dies over time — no await separates them from the `runs` insert that opened the
+  // run — but they are reachable per STATEMENT: SQLITE_FULL, SQLITE_BUSY and a table the schema no
+  // longer offers are all decided one statement at a time, so the `runs` insert lands and the two
+  // `events` statements do not. Nothing holds this promise, so a throw there reaches the process as
+  // an unhandled rejection, and Node's answer to that is to terminate the controller with every
+  // other run in flight.
+  //
+  // `DROP TABLE events` is how the test makes exactly those two statements fail while `runs` stays
+  // writable; the trigger in the second test does the same to the recording's own UPDATE.
+
+  it("a prologue that cannot read the run log fails the run with the reason and settles instead of rejecting", async () => {
+    const { db, executor, lines } = makeWith(unreachedPlannerDef());
+    db.sqlite.exec("DROP TABLE events");
+
+    const { runId } = await executor.planStreamed("noop", {});
+
+    await expect(executor.settle(runId)).resolves.toBeUndefined();
+    const row = runRow(db, runId);
+    expect(row.status).toBe("failed");
+    expect(row.error).toContain("no such table: events");
+    // The run row could still take the reason, so nothing had to fall back to the process log.
+    expect(lines).toHaveLength(0);
+  });
+
+  it("a prologue whose failure cannot be recorded either keeps the reason in the log and settles instead of rejecting", async () => {
+    const { db, executor, lines } = makeWith(unreachedPlannerDef());
+    db.sqlite.exec("DROP TABLE events");
+    // Now the recording of the failure fails too: every UPDATE on `runs` aborts, which is what
+    // SQLITE_FULL does to one statement while the rows already written stay readable.
+    db.sqlite.exec("CREATE TRIGGER runs_no_update BEFORE UPDATE ON runs BEGIN SELECT RAISE(ABORT, 'the disk is full'); END");
+
+    const { runId } = await executor.planStreamed("noop", {});
+
+    await expect(executor.settle(runId)).resolves.toBeUndefined();
+    expect(runRow(db, runId).status).toBe("planning"); // nothing could be written; resumeOnBoot settles it
+    expect(lines.join("\n")).toContain("could not record the plan's outcome");
+    expect(lines.join("\n")).toContain(runId);
+    expect(lines.join("\n")).toContain("no such table: events");
+  });
+
+  it("counter-probe: with the run log intact the prologue writes its first line and nothing is logged", async () => {
+    // Without this the two tests above would pass just as well against a prologue that wrote nothing.
+    const g = gates();
+    const { db, executor, lines } = makeWith(blockingPlannerDef(g, planned));
+    const { runId } = await executor.planStreamed("noop", {});
+    await g.entered;
+    g.release();
+
+    await executor.settle(runId);
+    expect(metaLines(db, runId)[0]).toBe("Validating the repository in the sandbox…");
+    expect(runRow(db, runId).status).toBe("planned");
     expect(lines).toHaveLength(0);
   });
 });
