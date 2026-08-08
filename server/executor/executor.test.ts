@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pino } from "pino";
 import { z } from "zod";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { createLogger } from "../kernel/logger.ts";
@@ -161,6 +162,97 @@ describe("Executor — noop happy path + resume", () => {
 function events(db: DbHandle): string[] {
   return (db.sqlite.prepare("SELECT text FROM events WHERE stream='meta'").all() as { text: string }[]).map((r) => r.text);
 }
+
+describe("Executor — a run whose failure the database cannot take", () => {
+  // What a run does when the thing supervising it has gone away. In a test that is a closed database
+  // handle; in the controller it is a shutdown that closed it, a full disk, or a file the OS took back.
+  // Either way execute() lands in its catch-all, failRun cannot write, and the executor's job is to say
+  // so where it still can and stop. It must NOT reject: nothing holds execute()'s promise — approve()
+  // fires the run and the route answers 202 — so a rejection reaches the process, and Node's answer to
+  // an unhandled rejection is to terminate the controller and every other run in flight with it.
+  const handles: DbHandle[] = [];
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const h of handles.splice(0)) { if (h.sqlite.open) h.sqlite.close(); }
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  /** A def whose one step blocks until the test releases it — the window in which the database goes. */
+  function blockingDef(gate: { started: Promise<void>; release: () => void; open: () => void }): AnyRunDefinition {
+    return {
+      kind: "noop",
+      paramsSchema: z.record(z.string(), z.unknown()),
+      mutating: false,
+      plan: async () => ({
+        kind: "noop", targetKind: "self", targetId: "controller", summary: "blocks, then fails",
+        steps: [{ name: "block", title: "Block" }], warnings: [], requiredSecrets: [],
+      }),
+      steps: () => [{
+        name: "block",
+        title: "Block",
+        run: async () => {
+          gate.open();
+          await gate.started.then(() => undefined);
+          throw new Error("the step failed while nobody was watching");
+        },
+      }],
+    };
+  }
+
+  function makeWith(def: AnyRunDefinition): { db: DbHandle; executor: Executor; lines: string[] } {
+    const dir = mkdtempSync(join(tmpdir(), "ctrl-nodb-"));
+    dirs.push(dir);
+    const db = openDb(join(dir, "controller.db"));
+    handles.push(db);
+    const lines: string[] = [];
+    const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });
+    const executor = new Executor({
+      db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(),
+      logger: capturing, registry: new Map<RunKind, AnyRunDefinition>([["noop", def]]),
+      sshFactory: noSsh, actor: () => "op_system",
+    });
+    return { db, executor, lines };
+  }
+
+  function gates(): { started: Promise<void>; release: () => void; open: () => void; entered: Promise<void> } {
+    let release!: () => void;
+    let open!: () => void;
+    const started = new Promise<void>((r) => { release = r; });
+    const entered = new Promise<void>((r) => { open = r; });
+    return { started, release, open, entered };
+  }
+
+  it("says in the log what it could not write down, and settles instead of rejecting", async () => {
+    const g = gates();
+    const { db, executor, lines } = makeWith(blockingDef(g));
+    const { runId } = await executor.plan("noop", {});
+    await executor.approve(runId);
+    await g.entered;
+
+    db.sqlite.close(); // the supervisor is gone, mid-step
+    g.release();
+
+    await expect(executor.settle(runId)).resolves.toBeUndefined();
+    expect(lines.join("\n")).toContain("could not record the run's failure");
+    expect(lines.join("\n")).toContain(runId);
+  });
+
+  it("counter-probe: with the database open the SAME failure is recorded there and nothing is logged", async () => {
+    // Without this the test above would pass just as well against a failRun that wrote nothing at all.
+    const g = gates();
+    const { db, executor, lines } = makeWith(blockingDef(g));
+    const { runId } = await executor.plan("noop", {});
+    await executor.approve(runId);
+    await g.entered;
+    g.release();
+
+    await executor.settle(runId);
+    expect(getRun(db.db, runId)?.status).toBe("failed");
+    expect(getRun(db.db, runId)?.steps.find((s) => s.name === "block")?.status).toBe("failed");
+    expect(events(db).some((t) => t.includes("✗ failed: Block"))).toBe(true);
+    expect(lines).toHaveLength(0);
+  });
+});
 
 const abortErr = (): Error => Object.assign(new Error("aborted"), { name: "AbortError" });
 

@@ -33,9 +33,11 @@ export function beginStreamingPlan(
     tx.insert(runs).values({ id, kind, targetKind: "cluster", targetId: id, paramsJson: (rawParams ?? {}) as Record<string, unknown>, planJson: null, status: "planning", startedBy: actor }).run(),
   );
   writeAudit(deps.db, { actor, action: "run.planning", targetKind: "cluster", targetId: id, runId: id, detail: { kind } });
-  const p = runStreamingPlan({ deps, active, runId: id, def, rawParams });
+  // ONE promise, as in Executor.fireExecute: the bookkeeping is chained on and the same object goes
+  // into the map, so settle() and the map hold the same thing. `.finally()` attached and then discarded
+  // makes a second promise no caller can reach, which is what surfaces as an unhandled rejection.
+  const p = runStreamingPlan({ deps, active, runId: id, def, rawParams }).finally(() => inflight.delete(id));
   inflight.set(id, p);
-  void p.finally(() => inflight.delete(id));
   return { runId: id };
 }
 

@@ -464,15 +464,35 @@ export class Executor {
     }
   }
 
+  /** Record that a run failed. Every line of the recording is a database write, and the database is
+   *  exactly what can be unavailable when this runs: execute()'s catch-all lands here, and "the
+   *  database no longer answers" is one of the ways it gets there (a shutdown that closed the handle, a
+   *  full disk, a file the OS took away). So the recording is allowed to fail and the reason goes to
+   *  the process log — the only surface left once the run log and the audit table are unreachable —
+   *  and execute() keeps its contract of never rejecting.
+   *
+   *  Letting it escalate is what made an unrecordable run an unhandled rejection: nothing holds
+   *  execute()'s promise (approve() fires the run and the route answers 202 while SSE takes over), so
+   *  the rejection reached the process, and Node's answer to that is to terminate — killing every other
+   *  run in flight over one run whose failure could not be written down.
+   *
+   *  The in-memory bookkeeping is released either way. An AbortController left in `active` for a run
+   *  that is gone makes shutdown() sit out its whole grace period waiting for it, and a RunSecretsMap
+   *  left behind keeps a one-time secret in memory after the run that owned it ended. */
   private failRun(runId: string, message: string): void {
-    this.deps.db.transaction((tx) => tx.update(runs).set({ status: "failed", error: message, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
-    // Same observability law as the step catch: every failure reason lands in the visible
-    // run log (appendMeta redacts), never only in runs.error.
-    this.appendMeta(runId, `✗ run failed: ${message}`);
-    writeAudit(this.deps.db, { actor: "system", action: "run.failed", runId, detail: { error: message } });
-    const r = this.deps.db.select().from(runs).where(eq(runs.id, runId)).get();
-    if (r) this.safeOnTerminal(this.deps.registry.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "failed");
-    releaseLocks(this.deps.db, runId);
+    try {
+      this.deps.db.transaction((tx) => tx.update(runs).set({ status: "failed", error: message, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
+      // Same observability law as the step catch: every failure reason lands in the visible
+      // run log (appendMeta redacts), never only in runs.error.
+      this.appendMeta(runId, `✗ run failed: ${message}`);
+      writeAudit(this.deps.db, { actor: "system", action: "run.failed", runId, detail: { error: message } });
+      const r = this.deps.db.select().from(runs).where(eq(runs.id, runId)).get();
+      if (r) this.safeOnTerminal(this.deps.registry.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "failed");
+      releaseLocks(this.deps.db, runId);
+    } catch (err) {
+      this.deps.logger.error({ err, runId, runError: message }, "could not record the run's failure — the run row still reads whatever it read before, and the reason it failed now exists only in this line");
+    }
+    // Reached whether or not the recording landed, because the catch above swallows deliberately.
     this.active.delete(runId);
     this.runSecrets.delete(runId);
   }
@@ -545,11 +565,17 @@ export class Executor {
   }
 
   /** Fire execute() and register it in `inflight` so settle()/cancel() see the run. Returns the
-   *  execution promise (execute never rejects — its catch-all settles the run failed). */
+   *  execution promise (execute never rejects — its catch-all settles the run failed, and failRun
+   *  cannot throw).
+   *
+   *  ONE promise: the bookkeeping is chained onto execute()'s and the SAME object is both stored and
+   *  returned, so what settle() awaits and what the map holds are the same thing. Attaching `.finally()`
+   *  and discarding the result — the shape this replaces — makes a SECOND promise that no caller can
+   *  ever reach: on a rejection, awaiting settle() handled the first one while the discarded one went
+   *  to the process as an unhandled rejection, with no way for anyone to catch it. */
   private fireExecute(runId: string): Promise<void> {
-    const p = this.execute(runId);
+    const p = this.execute(runId).finally(() => this.inflight.delete(runId));
     this.inflight.set(runId, p);
-    void p.finally(() => this.inflight.delete(runId));
     return p;
   }
 
