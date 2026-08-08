@@ -2,8 +2,9 @@
 // Every git the adapter runs goes through runGit: argv arrays via execFile (never
 // a shell string, never a shell at all), a hardened child env (prompts off, credential helpers
 // off, autocrlf off so bytes round-trip verbatim), and failures surfaced as an AppError that
-// carries git's stderr verbatim. withAskpass materializes a read token as a 0700 one-shot
-// helper script so the credential NEVER appears in the repo URL, in argv, or in .git/config.
+// carries git's stderr verbatim, and a budget beyond which the child is killed. withAskpass
+// materializes a read token as a 0700 one-shot helper script so the credential NEVER appears in
+// the repo URL, in argv, or in .git/config.
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,16 +15,27 @@ import { AppError, errValidation } from "../../kernel/errors.ts";
 const execFileP = promisify(execFile);
 const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024;
 
+/** How long any git may run before it is killed. Same budget the helm renderer and the ssh exec
+ *  give a child that talks to something outside this process, for the same reason: prompts-off
+ *  turns a git WAITING FOR INPUT into a failure, and nothing turned a git waiting for a REMOTE
+ *  into one. A network that black-holes rather than refuses, an authenticating proxy, a host whose
+ *  route is gone — git waits on all three without a bound of its own. */
+const DEFAULT_TIMEOUT_MS = 120_000;
+
 export interface RunGitOptions {
   cwd: string;
   /** Extra env merged over process.env (e.g. GIT_ASKPASS from withAskpass). */
   env?: Record<string, string>;
   signal?: AbortSignal;
   maxBuffer?: number;
+  /** Override the budget where the caller can wait less than the default — a check that runs
+   *  before the listener stands is not a run somebody is watching. */
+  timeoutMs?: number;
 }
 
-// Prompts hard-off (a wedged fetch must fail, not hang), configured credential helpers disabled
-// (the ONLY credential path is the askpass helper), byte-verbatim text handling, no signing.
+// Prompts hard-off — that is HALF of "a wedged fetch must fail, not hang": it ends a git waiting
+// for input, and the budget above ends a git waiting for a remote. Configured credential helpers
+// disabled (the ONLY credential path is the askpass helper), byte-verbatim text, no signing.
 // GIT_CONFIG_* outranks every config file, so a host's gitconfig cannot change adapter behavior.
 function childEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   return {
@@ -40,26 +52,36 @@ function childEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   };
 }
 
-function fail(args: readonly string[], e: unknown): never {
-  const err = e as NodeJS.ErrnoException & { stderr?: string | Buffer };
+function fail(args: readonly string[], e: unknown, budgetMs: number): never {
+  const err = e as NodeJS.ErrnoException & { stderr?: string | Buffer; killed?: boolean };
   if (err.code === "ABORT_ERR") throw e; // the caller aborted — not a git failure
+  // A killed child said nothing on stderr, so without this the message would be the empty one a
+  // remote that never answered produces — the hardest failure to read of the two.
+  if (err.killed === true) {
+    throw new AppError("UPSTREAM", `git ${args[0] ?? ""} exceeded the ${budgetMs}ms budget`, {
+      detail: { code: "TIMEOUT" },
+      cause: e,
+    });
+  }
   const stderr = typeof err.stderr === "string" ? err.stderr : Buffer.isBuffer(err.stderr) ? err.stderr.toString("utf8") : "";
   const reason = stderr.trim() || err.message || "unknown error";
   throw new AppError("UPSTREAM", `git ${args[0] ?? ""} failed: ${reason}`, { detail: { code: String(err.code ?? "") }, cause: e });
 }
 
 export async function runGit(args: string[], opts: RunGitOptions): Promise<string> {
+  const budgetMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   try {
     const { stdout } = await execFileP("git", args, {
       cwd: opts.cwd,
       env: childEnv(opts.env),
       maxBuffer: opts.maxBuffer ?? DEFAULT_MAX_BUFFER,
+      timeout: budgetMs,
       windowsHide: true,
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
     return stdout;
   } catch (e) {
-    fail(args, e);
+    fail(args, e, budgetMs);
   }
 }
 

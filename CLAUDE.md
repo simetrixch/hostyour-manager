@@ -75,7 +75,7 @@ the refusal names every missing scope at once. Half an onboarding is worse than 
 
 ## Tests
 
-`npx vitest run` — **192 files, 2025 tests**. That number is a fact about this repository, and a
+`npx vitest run` — **193 files, 2030 tests**. That number is a fact about this repository, and a
 change that moves it without saying why is a change that has not been reviewed.
 
 - a test asserts behaviour, never the shape of an implementation
@@ -88,7 +88,7 @@ change that moves it without saying why is a change that has not been reviewed.
 
 ```
 npm run check      # typecheck, eslint, boundaries, stylelint, the web build
-npx vitest run     # 192 files, 2025 tests, 4 skipped
+npx vitest run     # 193 files, 2030 tests, 4 skipped
 ```
 
 Both clean, or it is not done.
