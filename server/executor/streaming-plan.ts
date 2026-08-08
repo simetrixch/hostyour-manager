@@ -74,16 +74,46 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
     declaredTargets: [],
   });
   ctx.emitMeta("Validating the repository in the sandbox…");
+  /** Write down how a validation ENDED BADLY, then release the run's in-memory bookkeeping.
+   *
+   *  Every line of the recording is a database write, and the database is exactly what can be gone by
+   *  the time a validation ends: it runs for minutes against a sandbox, and a shutdown that closed the
+   *  handle, a full disk or SQLITE_BUSY all land here. So the recording is allowed to fail and the
+   *  reason goes to the process log — the only surface left once the run log and the audit table are
+   *  unreachable. `reason` is passed in because it is precisely what is lost otherwise: no operator
+   *  will read it off the run row.
+   *
+   *  An escalation here costs the whole controller rather than one plan: nothing holds this promise —
+   *  beginStreamingPlan returns the run id as soon as the row exists, its caller answers, and SSE takes
+   *  over — so the rejection reaches the process, and Node's answer to an unhandled rejection is to
+   *  terminate, killing every other run in flight over one validation whose end could not be recorded.
+   *
+   *  The row is then left reading `planning`. resumeOnBoot fails every run it finds in that state, so
+   *  the next start settles it instead of leaving a ghost the operator can neither approve nor delete.
+   *
+   *  Only the two FAILURE recordings go through here. The `planned` write below deliberately does not:
+   *  a plan that could not be frozen did not succeed, and the catch is its recovery — swallowing there
+   *  would leave a run reading `planning` that nobody ever tried to settle. */
+  const recordOutcome = (record: () => void, reason: string): void => {
+    try {
+      record();
+    } catch (err) {
+      deps.logger.error({ err, runId, planError: reason }, "could not record the plan's outcome — the run row still reads `planning`, and why the validation ended now exists only in this line");
+    }
+    // Reached whether or not the recording landed, because the catch above swallows deliberately.
+    active.delete(runId);
+    ctx.close();
+  };
   try {
     const result = await def.planStream!(rawParams, { db: deps.db, log: (l) => ctx.emitMeta(l), signal: controller.signal });
     if (result.outcome === "rejected") {
-      // Freeze the full report into plan_json so the operator reads every expected/found/reason,
-      // and the failed run stays soft-deletable. No steps: nothing was planned.
-      deps.db.transaction((tx) => tx.update(runs).set({ status: "failed", planJson: result.planJson, error: result.summary, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
-      ctx.emitMeta(`✗ ${result.summary}`);
-      writeAudit(deps.db, { actor: "system", action: "run.failed", runId, detail: { rejected: true } });
-      active.delete(runId);
-      ctx.close();
+      recordOutcome(() => {
+        // Freeze the full report into plan_json so the operator reads every expected/found/reason,
+        // and the failed run stays soft-deletable. No steps: nothing was planned.
+        deps.db.transaction((tx) => tx.update(runs).set({ status: "failed", planJson: result.planJson, error: result.summary, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
+        ctx.emitMeta(`✗ ${result.summary}`);
+        writeAudit(deps.db, { actor: "system", action: "run.failed", runId, detail: { rejected: true } });
+      }, result.summary);
       return;
     }
     const params = def.paramsSchema.parse(result.params);
@@ -109,10 +139,10 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
   } catch (err) {
     const aborted = controller.signal.aborted || (err instanceof Error && err.name === "AbortError");
     const message = redact(err instanceof Error ? err.message : String(err));
-    deps.db.transaction((tx) => tx.update(runs).set({ status: aborted ? "cancelled" : "failed", error: message, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
-    ctx.emitMeta(aborted ? "✕ cancelled during validation" : `✗ validation failed: ${message}`);
-    writeAudit(deps.db, { actor: "system", action: aborted ? "run.cancelled" : "run.failed", runId, detail: { duringPlanning: true } });
-    active.delete(runId);
-    ctx.close();
+    recordOutcome(() => {
+      deps.db.transaction((tx) => tx.update(runs).set({ status: aborted ? "cancelled" : "failed", error: message, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
+      ctx.emitMeta(aborted ? "✕ cancelled during validation" : `✗ validation failed: ${message}`);
+      writeAudit(deps.db, { actor: "system", action: aborted ? "run.cancelled" : "run.failed", runId, detail: { duringPlanning: true } });
+    }, message);
   }
 }
