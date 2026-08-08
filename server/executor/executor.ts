@@ -173,21 +173,45 @@ export class Executor {
    *  loop below has run, every resumed run is in `active`/`inflight`: a cancel on any of them
    *  aborts a real controller and settle() awaits a real promise — with a serial loop, a run
    *  still queued behind a slow resume was invisible to both, so its cancel was acknowledged
-   *  and then every remaining step still executed. Resolves once every resumed run settled. */
+   *  and then every remaining step still executed. Resolves once every resumed run settled.
+   *
+   *  THE WHOLE RECOVERY IS ALLOWED TO FAIL, and boot-time recovery is the one place in the executor
+   *  where swallowing is right rather than merely survivable. It holds nothing it can lose: what it
+   *  works on are rows, the rows stay, and a boot that could not read or normalize them leaves them
+   *  exactly as the crash did for the next boot to take. One try covers all three database statements:
+   *  they share one fate — a busy database or a slow disk at start-up refuses them together — and the
+   *  next boot retries each of them in full, so a finer guard would buy a partial recovery that costs
+   *  the same restart. The reason goes to the process log, the only surface a boot has before it
+   *  serves anything.
+   *
+   *  Escalating costs the installation rather than one recovery. Nobody can hold this promise: it
+   *  resolves only once every resumed run has SETTLED, so boot.ts must not await it or the HTTP
+   *  listener stays down for the length of the longest onboarding. A rejection therefore reaches the
+   *  process, Node ends it, the supervisor restarts, and the same statement fails again — a transient
+   *  SQLITE_BUSY or a slow disk at start-up turns into a restart loop that serves nothing, out of a
+   *  condition that would have cleared on its own.
+   *
+   *  The fire stays INSIDE the try so that a normalization that failed fires nothing at all: execute()
+   *  walks the persisted step rows, and a run still carrying a step that reads `running` — whose legal
+   *  successors are ok/failed/pending/skipped, never `running` again — ends FAILED on `step status
+   *  running → running`, an internal message an operator can answer only with a manual retry. Left
+   *  untouched the run costs one more restart and nothing else.
+   *
+   *  So the catch guards exactly the three database statements: failRun records inside its own try and
+   *  cannot throw, and fireExecute cannot reject. */
   async resumeOnBoot(): Promise<void> {
-    // A run interrupted mid-`planning` cannot be resumed — the gate-runner job died with the old
-    // process. Fail it (with the report absent) so it becomes a soft-deletable settled run instead
-    // of a stuck "planning" ghost the operator can neither approve nor delete.
-    const orphanedPlanning = this.deps.db.select({ id: runs.id }).from(runs).where(eq(runs.status, "planning")).all();
-    for (const run of orphanedPlanning) this.failRun(run.id, "validation was interrupted by a controller restart — re-submit the onboarding");
-
-    const pending = this.deps.db.select().from(runs).where(inArray(runs.status, ["running", "approved"])).all();
-    for (const run of pending) {
+    try {
+      // A run interrupted mid-`planning` cannot be resumed — the gate-runner job died with the old
+      // process. Fail it (with the report absent) so it becomes a soft-deletable settled run instead
+      // of a stuck "planning" ghost the operator can neither approve nor delete.
+      const orphanedPlanning = this.deps.db.select({ id: runs.id }).from(runs).where(eq(runs.status, "planning")).all();
+      for (const run of orphanedPlanning) this.failRun(run.id, "validation was interrupted by a controller restart — re-submit the onboarding");
+      const pending = this.deps.db.select({ id: runs.id }).from(runs).where(inArray(runs.status, ["running", "approved"])).all();
       // Only the steps left RUNNING by the crash: pending ones are already where they belong, and
       // an ok one must never be reset. The state list IS the WHERE, so that holds in the statement.
-      setStepStatusIn(this.deps.db, run.id, ["running"], "pending", { startedAt: null });
-    }
-    await Promise.all(pending.map((run) => this.fireExecute(run.id)));
+      for (const run of pending) setStepStatusIn(this.deps.db, run.id, ["running"], "pending", { startedAt: null });
+      await Promise.all(pending.map((run) => this.fireExecute(run.id)));
+    } catch (err) { this.deps.logger.error({ err }, "boot-time recovery could not read or normalize the runs a crash left behind — nothing was resumed on this boot; they stay as the crash left them and the next boot takes them again"); }
   }
 
   async shutdown(): Promise<void> {

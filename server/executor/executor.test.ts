@@ -360,3 +360,131 @@ describe("Executor — cancel between steps + concurrent resume", () => {
     expect(getRun(db.db, runB)?.status).toBe("cancelled"); // the resume loop must not revive it
   });
 });
+
+describe("Executor — a resume the database cannot take", () => {
+  // resumeOnBoot runs before the controller serves anything, and boot.ts cannot hold its promise:
+  // it resolves only once every resumed run has SETTLED, so awaiting it would keep the listener
+  // down for the length of the longest onboarding. A throw out of its three bare database
+  // statements therefore reaches the process as an unhandled rejection, Node ends the process, the
+  // supervisor restarts it and the same statement fails again — a crash loop out of a condition
+  // (SQLITE_BUSY, a slow disk at start-up) that would have cleared by itself.
+  //
+  // What resume must do instead is carry on: the runs it could not read or normalize are still in
+  // the database, and the next boot reads them again. `DROP TABLE runs` and the trigger below are
+  // how the tests make one statement fail while the rest of the database answers — the per-statement
+  // window SQLITE_FULL and SQLITE_BUSY open — taking the recovery's two ends in turn: the reads that
+  // find the interrupted runs, and the write that prepares one for a resume.
+  const handles: DbHandle[] = [];
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const h of handles.splice(0)) { if (h.sqlite.open) h.sqlite.close(); }
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  /** One ordinary step that records the run it ran for — so a resumed execution is visible, and so
+   *  is its absence. */
+  function resumableDef(ran: string[]): AnyRunDefinition {
+    return {
+      kind: "noop",
+      paramsSchema: z.record(z.string(), z.unknown()),
+      mutating: false,
+      plan: async () => ({
+        kind: "noop", targetKind: "self", targetId: "controller", summary: "one step, interrupted by a crash",
+        steps: [{ name: "work", title: "Work" }], warnings: [], requiredSecrets: [],
+      }),
+      steps: () => [{ name: "work", title: "Work", run: async (ctx) => void ran.push(ctx.runId) }],
+    };
+  }
+
+  /** The run that planned the work and the run that boots after the crash are different processes,
+   *  and only the second one's log is measured. */
+  function makeResume(def: AnyRunDefinition): { db: DbHandle; before: Executor; booting: Executor; lines: string[] } {
+    const dir = mkdtempSync(join(tmpdir(), "ctrl-resume-"));
+    dirs.push(dir);
+    const db = openDb(join(dir, "controller.db"));
+    handles.push(db);
+    const lines: string[] = [];
+    const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });
+    const registry = new Map<RunKind, AnyRunDefinition>([["noop", def]]);
+    const common = { db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), registry, sshFactory: noSsh, actor: () => "op_system" };
+    return { db, before: new Executor({ ...common, logger }), booting: new Executor({ ...common, logger: capturing }), lines };
+  }
+
+  /** The picture a crash leaves: the run mid-flight, its step still reading `running` because
+   *  nothing was left alive to write the outcome. */
+  function crashMidRun(db: DbHandle, runId: string): void {
+    db.sqlite.prepare("UPDATE runs SET status='running', started_at=?, finished_at=NULL WHERE id=?").run(Date.now(), runId);
+    db.sqlite.prepare("UPDATE steps SET status='running', started_at=? WHERE run_id=?").run(Date.now(), runId);
+  }
+
+  const stepStatus = (db: DbHandle, runId: string): string =>
+    (db.sqlite.prepare("SELECT status FROM steps WHERE run_id=?").get(runId) as { status: string }).status;
+
+  it("a boot that cannot READ what was interrupted says so and carries on", async () => {
+    const ran: string[] = [];
+    const { db, before, booting, lines } = makeResume(resumableDef(ran));
+    const { runId } = await before.plan("noop", {});
+    crashMidRun(db, runId);
+    // `steps` references `runs`, so the drop would cascade the step rows away with foreign keys on —
+    // and those rows are what the assertion below reads to show the crash picture was left untouched.
+    db.sqlite.pragma("foreign_keys = OFF");
+    db.sqlite.exec("DROP TABLE runs");
+
+    await expect(booting.resumeOnBoot()).resolves.toBeUndefined();
+
+    expect(lines.join("\n")).toContain("boot-time recovery could not read or normalize");
+    expect(lines.join("\n")).toContain("no such table: runs");
+    expect(ran).toEqual([]);
+    expect(stepStatus(db, runId)).toBe("running"); // untouched — nothing was guessed at
+  });
+
+  it("a run whose interrupted steps cannot be normalized is LEFT for the next boot, not fired", async () => {
+    const ran: string[] = [];
+    const { db, before, booting, lines } = makeResume(resumableDef(ran));
+    const { runId } = await before.plan("noop", {});
+    crashMidRun(db, runId);
+    // Only the reset to `pending` is refused; every other write to `steps` still lands, so a run
+    // fired despite the refusal really would execute. Measured: it walks execute() into a step still
+    // reading `running`, whose legal successors are ok/failed/pending/skipped and never `running`
+    // again, and the run ends `failed` carrying `step status running → running` — which is why the
+    // run must be left alone instead, for a boot that can normalize it.
+    db.sqlite.exec("CREATE TRIGGER steps_no_reset BEFORE UPDATE ON steps WHEN NEW.status='pending' BEGIN SELECT RAISE(ABORT, 'the disk is full'); END");
+
+    await expect(booting.resumeOnBoot()).resolves.toBeUndefined();
+
+    expect(ran).toEqual([]);
+    expect(getRun(db.db, runId)?.status).toBe("running");
+    expect(stepStatus(db, runId)).toBe("running");
+    expect(lines.join("\n")).toContain("boot-time recovery could not read or normalize");
+    expect(lines.join("\n")).toContain("the disk is full");
+  });
+
+  it("counter-probe: with a healthy database the same crash picture really is resumed", async () => {
+    // Without this the two tests above would pass just as well against a resume that fires nothing.
+    const ran: string[] = [];
+    const { db, before, booting, lines } = makeResume(resumableDef(ran));
+    const { runId } = await before.plan("noop", {});
+    crashMidRun(db, runId);
+
+    await booting.resumeOnBoot();
+
+    expect(ran).toEqual([runId]);
+    expect(getRun(db.db, runId)?.status).toBe("succeeded");
+    expect(stepStatus(db, runId)).toBe("ok");
+    expect(events(db).some((t) => t.includes("Run resumed"))).toBe(true);
+    expect(lines).toHaveLength(0);
+  });
+
+  it("counter-probe: with a healthy database a run left validating really is settled", async () => {
+    const { db, before, booting, lines } = makeResume(resumableDef([]));
+    const { runId } = await before.plan("noop", {});
+    db.sqlite.prepare("UPDATE runs SET status='planning' WHERE id=?").run(runId);
+
+    await booting.resumeOnBoot();
+
+    expect(getRun(db.db, runId)?.status).toBe("failed");
+    const row = db.sqlite.prepare("SELECT error FROM runs WHERE id=?").get(runId) as { error: string };
+    expect(row.error).toContain("validation was interrupted by a controller restart");
+    expect(lines).toHaveLength(0);
+  });
+});

@@ -21,6 +21,11 @@ export async function boot(): Promise<void> {
   );
 
   // Resume interrupted runs immediately (no locked boot while the store is plaintext).
+  //
+  // NOT awaited, and there is nothing to catch. It resolves only once every resumed run has settled,
+  // so awaiting it would hold the listener below down for the length of the longest onboarding; and
+  // it does not reject — the recovery records its own failure and lets the boot go on, because a run
+  // it could not read or normalize is still a row the next boot finds.
   void executor.resumeOnBoot();
 
   const server = serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, (info) => {
