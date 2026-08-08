@@ -107,12 +107,22 @@ describe("crypto gate", () => {
     }
   });
 
-  it("redeploy and release carry no crypto gate: both act on a cluster that is already live", async () => {
+  it("redeploy carries no crypto gate: it acts on a cluster that is already live", async () => {
     const { db } = fresh();
-    for (const kind of ["redeploy", "release"] as const) {
-      expect(KIND_GUARDS[kind]).toHaveLength(0);
-      await expect(runGuards(kind, { serverId: "srv_x" }, { db })).resolves.toBeUndefined();
-    }
+    expect(KIND_GUARDS.redeploy).toHaveLength(0);
+    await expect(runGuards("redeploy", { serverId: "srv_x" }, { db })).resolves.toBeUndefined();
+  });
+
+  it("release carries no crypto gate either — what it does carry is the missing install-branch regenerator", async () => {
+    // Unconditional, and nothing to do with the keystore: this database holds no server and no
+    // cluster, the keystore is whatever fresh() set, and the refusal lands anyway — what is missing
+    // is a program, not a property of the target.
+    const { db } = fresh("keyfile");
+    expect(await refused(() => runGuards("release", { serverId: "srv_x" }, { db }))).toBe("PLAN_REFUSED");
+    await expect(runGuards("release", { serverId: "srv_x" }, { db })).rejects.toThrow(/sync-install-branch\.sh/);
+    // Counter-probe: the sibling verb on the same database resolves, so the rejection above is
+    // release's own and not runGuards refusing whatever it is handed.
+    await expect(runGuards("redeploy", { serverId: "srv_x" }, { db })).resolves.toBeUndefined();
   });
 
   it("assertGuardsArmed rejects a registry once create-tenant's gate is disarmed", () => {

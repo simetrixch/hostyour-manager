@@ -36,38 +36,6 @@ export const ARGOCD_FOLLOW_TIMEOUT_MS = 30 * 60_000;
 /** Poll cadence of the follow — slow enough to keep the run log readable. */
 export const ARGOCD_FOLLOW_POLL_MS = 10_000;
 
-/** Regenerate ONE install branch from the pinned release and push it, run on the master.
- *
- *  A SCRATCH clone under ~/release-work/<fqdn>, never the host's live checkout: the generator checks
- *  branches out and merges, which would yank a live checkout off the branch its own cluster runs from
- *  (prepare-branch keeps its clone separate for the same reason). Tags are fetched because the pinned
- *  tag is what the generator regenerates the branch from; the cluster map it reads for the pin lives
- *  in the installation's books — the install branch of the cluster holding the master role — which is
- *  why the clone must carry every branch and not just the trunk (the trunk carries no map at all).
- *  The push credential is the checkout's own origin — the same one prepare-branch pushes an install
- *  branch with.
- *
- *  stdout contract: one `INSTALL_BRANCH <short-head>` line (a short SHA — secret-free). */
-export function regenerateInstallBranchScript(fqdn: string): string {
-  return `#!/usr/bin/env bash
-set -euo pipefail
-${RESOLVE_REPO_DIR}
-WORK="$HOME/release-work/${fqdn}"
-if [ ! -d "$WORK/.git" ]; then
-  origin=$(git -C "$GITOPS_DIR" remote get-url origin)
-  mkdir -p "$(dirname "$WORK")"
-  git clone "$origin" "$WORK"
-fi
-cd "$WORK"
-git fetch --prune --prune-tags --tags --force origin
-git reset --hard
-git clean -fd
-git checkout -B master origin/master
-./tools/ops/sync-install-branch.sh "${fqdn}" --push
-echo "INSTALL_BRANCH $(git rev-parse --short HEAD)"
-`;
-}
-
 /** WHERE a cluster's Applications live, and over which session they are read. A cluster carrying the
  *  MASTER part operates its own ArgoCD in namespace `argocd` on itself. A pure slave has no ArgoCD of
  *  its own: its Application CRs live in the per-slave instance in namespace <name> ON THE MASTER,

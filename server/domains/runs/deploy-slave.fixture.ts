@@ -119,8 +119,6 @@ export interface HostsScript {
   mintExit: number;
   tailnetJoinExit: number;   // install-microk8s tail (slave): --tailnet-join
   tailnetProbeOut: string;   // install-microk8s tail (slave): what the joined client reports back
-  regenerateOut: string;     // the cluster release's set-pin (master): INSTALL_BRANCH <short-head>
-  regenerateExit: number;
   emitOut: string;
   emitExit: number;
   slaveAddExit: number;
@@ -161,8 +159,6 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     mintExit: 0,
     tailnetJoinExit: 0,
     tailnetProbeOut: TAILNET_PROBE_JOINED,
-    regenerateOut: "INSTALL_BRANCH ccc3333",
-    regenerateExit: 0,
     emitOut: EMIT_CREDS_JSON,
     emitExit: 0,
     slaveAddExit: 0,
@@ -209,7 +205,6 @@ export function hostsFactory(f: HostsScript): SshFactory {
       if (command.includes("clusterissuers")) return done();
       // ---- the master's checkout refresh (mint-join-key here, its own step in cluster-release)
       if (command.includes("dc-refresh-checkout-")) { emit(f.masterRefreshOut); return done(f.masterRefreshExit); }
-      if (command.includes("dc-regenerate-install-branch-")) { emit(f.regenerateOut); return done(f.regenerateExit); }
       // ---- the flagged setup.sh calls, ALL of them before the plain one below.
       // The mint answers for both askers: mint-join-key and install-microk8s's join leg.
       if (command.includes("--tailnet-mint-join-key")) { emit(f.mintOut); return done(f.mintExit); }

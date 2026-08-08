@@ -2,11 +2,13 @@ import { describe, it, expect, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { getRun, readEvents } from "../../executor/read.ts";
-import { RELEASE_TAG_RE, parseReleaseTag } from "../../../shared/release.ts";
+import { AppError } from "../../kernel/errors.ts";
 import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
+import { buildRegistry } from "./registry.ts";
+import type { AnyRunDefinition } from "../../executor/types.ts";
 import {
-  makeHarness, disposeHarnesses, stepColumn, PARAMS, SLAVE_ID, MASTER_ID, SLAVE_MARKING_YAML,
+  makeHarness, disposeHarnesses, bareStepCtx, PARAMS, SLAVE_ID, MASTER_ID, SLAVE_MARKING_YAML,
 } from "./deploy-slave.fixture.ts";
 import type { Harness } from "./deploy-slave.fixture.ts";
 
@@ -64,87 +66,51 @@ async function liveMaster(): Promise<Harness> {
 const markingOf = (h: Harness, fqdn: string): string =>
   h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath(fqdn)) ?? "";
 
-describe("release — the cluster release verb", () => {
-  it("plans four steps and starts with attest-target, so the ceiling is checked before anything is written", async () => {
-    const { executor } = await liveSlave();
-    const { plan } = await executor.plan("release", { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" });
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "set-pin", "host-run", "argocd-follow"]);
-    expect(plan.targetKind).toBe("cluster");
-    expect(plan.summary).toContain("1.0.0-stable");
-  });
+describe("release — refused while nothing regenerates an install branch", () => {
+  // A release moves a cluster onto a platform version by regenerating that cluster's install branch
+  // from the pinned tag on the master. Nothing performs that regeneration: the shell that did it is in
+  // no repository and its ansiwise replacement is unbuilt. The two steps AFTER set-pin read the branch
+  // that act produces — host-run runs the installer out of the cluster's checkout of it, argocd-follow
+  // calls Synced against it "the pinned state" — so a release without the regeneration would report a
+  // version the cluster never took. The refusal therefore lands at PLAN time, before a run row exists.
 
-  it("pins the cluster map, runs the installer over SSH and follows ArgoCD — always all three", async () => {
+  it("refuses at plan time, naming the missing script, its replacement and the verb to use instead", async () => {
     const h = await liveSlave();
-    const r = await h.executor.plan("release", { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" });
-    await h.executor.approve(r.runId);
-    await h.executor.settle(r.runId);
-    expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
+    const err = await h.executor
+      .plan("release", { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" })
+      .catch((e: unknown) => e);
 
-    // (1) the pin — the ONE declarative place, in the release grammar, on the trunk.
-    const map = markingOf(h, PARAMS.domain);
-    const pinned = /^release: (.+)$/m.exec(map)?.[1] ?? "";
-    expect(pinned).toMatch(RELEASE_TAG_RE);
-    expect(parseReleaseTag(pinned)).toMatchObject({ version: "1.0.0", channel: "stable" });
-    expect(h.platformRepo.tags.has(pinned)).toBe(true);
-    // The map's identity fields survive the pin write — a release states a version, nothing else.
-    // Plain scalars, the shape install.sh write_map emits: the other writer of this file, so a map's
-    // first release shows ONE changed line rather than every line re-quoted.
-    expect(map).toContain(`fqdn: ${PARAMS.domain}`);
-    expect(map).toContain("apiHost: 100.64.0.11");
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe("PLAN_REFUSED");
+    const message = (err as AppError).message;
+    expect(message).toContain("tools/ops/sync-install-branch.sh"); // what is missing, by name
+    expect(message).toContain("ansiwise");                         // what replaces it
+    expect(message).toContain("redeploy");                         // what to reach for meanwhile
 
-    // (2) the host run — the installer, on the cluster's OWN host, after its checkout was refreshed.
-    const onSlave = h.hosts.log.filter((l) => l.host === "10.1.1.11").map((l) => l.command);
-    expect(onSlave.some((c) => c.includes("dc-refresh-checkout-"))).toBe(true);
-    expect(onSlave.some((c) => c.includes("./setup.sh --prod"))).toBe(true);
-    // ...and the branch regeneration on the MASTER, which is the host whose checkout can push.
-    const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
-    expect(onMaster.some((c) => c.includes("dc-regenerate-install-branch-"))).toBe(true);
-
-    // (3) the follow — a pure slave's Applications live in the per-slave instance on the master.
-    const events = JSON.stringify(readEvents(h.db.db, r.runId));
-    expect(events).toContain("applications in ns s1 on m1 are Synced + Healthy");
-  });
-
-  it("refuses a channel the cluster's stage is above — BEFORE the pin, naming channel, stage and the allowed list", async () => {
-    const h = await liveSlave(); // marked prod
-    const r = await h.executor.plan("release", { serverId: SLAVE_ID, version: "1.0.0", channel: "alpha" });
-    await h.executor.approve(r.runId);
-    await h.executor.settle(r.runId);
-    expect(getRun(h.db.db, r.runId)?.status).toBe("failed");
-
-    const err = stepColumn(h.db, r.runId, "attest-target", "error") ?? "";
-    expect(err).toContain("alpha");
-    expect(err).toContain("prod");
-    expect(err).toContain("dev"); // the stages alpha DOES reach
-    // Nothing was written: no tag minted, no pin committed, and set-pin never even started.
+    // Nothing was planned and nothing was touched: no run row, no tag, no commit on the books branch.
+    expect((h.db.sqlite.prepare("SELECT count(*) AS n FROM runs").get() as { n: number }).n).toBe(0);
     expect(h.platformRepo.tags.size).toBe(0);
-    expect(markingOf(h, PARAMS.domain)).toBe(SLAVE_MARKING_YAML);
     expect(h.platformRepo.commits).toHaveLength(0);
+    expect(markingOf(h, PARAMS.domain)).toBe(SLAVE_MARKING_YAML);
+
+    // Counter-probe: the same harness, the same live cluster, still plans a REDEPLOY. So the refusal
+    // above is this verb's own and not a planner that refuses everything.
+    const ok = await h.executor.plan("redeploy", { serverId: SLAVE_ID });
+    expect(ok.plan.steps.map((s) => s.name)).toEqual(["attest-target", "slave-preflight", "prepare-branch",
+      "mint-join-key", "install-microk8s", "create-mgmt", "gitops-handoff", "verify-slave", "register"]);
   });
 
-  it("mints once: a re-run of the same version and channel reuses the tag the map already names", async () => {
+  it("set-pin refuses where the regeneration stood, so lifting the plan gate cannot ship a silent half-release", async () => {
+    // The plan gate is one line in KIND_GUARDS. If it is lifted before a regenerator exists, the run
+    // must still stop AT the missing act rather than mint a tag, commit a pin, re-run the installer and
+    // report the cluster on a release it never took.
     const h = await liveSlave();
-    const first = await h.executor.plan("release", { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" });
-    await h.executor.approve(first.runId);
-    await h.executor.settle(first.runId);
-    const tag = /^release: (.+)$/m.exec(markingOf(h, PARAMS.domain))?.[1];
+    const def = buildRegistry({ db: h.db.db, platformRepo: h.platformRepo }).get("release") as AnyRunDefinition;
+    const setPin = def.steps({ serverId: SLAVE_ID, version: "1.0.0", channel: "stable" }).find((s) => s.name === "set-pin");
 
-    const second = await h.executor.plan("release", { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" });
-    await h.executor.approve(second.runId);
-    await h.executor.settle(second.runId);
-    expect(getRun(h.db.db, second.runId)?.status).toBe("succeeded");
-    // One tag for one release: the second run adopted the standing one instead of stamping a new ts14
-    // and leaving the first orphaned, and the map still names exactly it.
-    expect([...h.platformRepo.tags.keys()]).toEqual([tag]);
-    expect(/^release: (.+)$/m.exec(markingOf(h, PARAMS.domain))?.[1]).toBe(tag);
-    expect(JSON.stringify(readEvents(h.db.db, second.runId))).toContain("reused, never re-pointed");
-  });
-
-  it("refuses a server whose cluster is not live — there is no running platform to raise", async () => {
-    const h = await makeHarness({ keystore: "keyfile" });
-    h.platformRepo.seed(CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH, CHANNEL_TABLE);
-    const err = await h.executor.plan("release", { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" }).catch((e: unknown) => e);
-    expect((err as Error).message).toMatch(/carries no cluster/);
+    await expect(setPin?.run(bareStepCtx(h.db, h.store))).rejects.toThrow(/sync-install-branch\.sh/);
+    // It never reached a host: the regeneration is the step's only remote leg.
+    expect(h.hosts.log).toHaveLength(0);
   });
 });
 

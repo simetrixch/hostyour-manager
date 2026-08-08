@@ -62,6 +62,32 @@ const createTenantCryptoGate: PlanGuard = async (params, deps) => {
   if (cluster?.tier !== "rehearsal") throw errPlanRefused(GATE_MESSAGE, { code: "O_GATE_1" });
 };
 
+/** Why no cluster can be released today. A release moves a cluster onto a platform version by
+ *  regenerating that cluster's install branch from the pinned tag on the master; nothing in this
+ *  installation performs that regeneration. The shell that did it, `tools/ops/sync-install-branch.sh`,
+ *  is in no repository — it stood on the shell implementation's branch and was never carried onto the
+ *  tree hostyour-cloud ships — and its replacement, an ansiwise program that regenerates one install
+ *  branch at the release it is pinned to, is not built.
+ *
+ *  Exported because the `set-pin` step reads the same string: the gate below is what an operator meets,
+ *  and the step's own refusal is what keeps the step truthful about the one thing it cannot do. */
+export const INSTALL_BRANCH_REGENERATOR_MISSING =
+  "A cluster release cannot run: nothing regenerates the cluster's install branch from the pinned tag. " +
+  "The script that did it on the master (tools/ops/sync-install-branch.sh) is in no repository, and the " +
+  "ansiwise program that replaces it — regenerate one install branch at the release it is pinned to — is " +
+  "not built yet. Without it a release would mint the tag and commit the pin while the cluster kept " +
+  "running the branch it already had, and the installer run and the ArgoCD follow after it would report " +
+  "that unchanged state as the pinned one. To rebuild a live cluster's machine layer in the meantime, " +
+  "use redeploy: it runs the installer and follows ArgoCD, and it moves no pin.";
+
+// The release gate. Unconditional: the missing regenerator is a fact about this build, not about the
+// cluster the operator aimed at, so the refusal lands before the planner reads a single inventory row
+// and no release is ever approvable. Deleting this entry is what re-enables the verb once the step it
+// refuses in has a regenerator to call.
+const clusterReleaseGate: PlanGuard = async () => {
+  throw errPlanRefused(INSTALL_BRANCH_REGENERATOR_MISSING);
+};
+
 /**
  * Total over RUN_KIND — the Record type forces compile-time exhaustiveness, so a new kind
  * cannot forget to declare its guards (security critique N3, made structural).
@@ -74,7 +100,8 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   // cluster access key — so the crypto gate has nothing to protect. Gating them would strand exactly the
   // running cluster they exist to reconcile on a plaintext-keystore install (purge's reasoning).
   redeploy: [],
-  release: [],
+  // ...so the gate release carries is the other one: it has no way to regenerate an install branch.
+  release: [clusterReleaseGate],
   // The tailnet repair verbs act on a host that is ALREADY deployed and harvest no cluster access
   // key, so the crypto gate has nothing to protect — and arming it would strand exactly the host they
   // exist to put back on the private network (purge's reasoning).

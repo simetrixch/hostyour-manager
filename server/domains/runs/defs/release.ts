@@ -1,16 +1,14 @@
 import { z } from "zod";
 import type { Step, RunDefinition } from "../../../executor/types.ts";
 import { errValidation } from "../../../kernel/errors.ts";
-import { remoteScriptCapture } from "../../../executor/stepkit.ts";
+import { INSTALL_BRANCH_REGENERATOR_MISSING } from "../../../executor/guards.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE, composeReleaseTag, parseReleaseTag, type ReleaseChannel } from "../../../../shared/release.ts";
 import { clusterMarkingPath, resolveClusterMarking, setClusterRelease } from "../../inventory/cluster-marking.ts";
 import { PRODUCT_BRANCH } from "../../../../shared/branches.ts";
 import { readChannelStages, assertChannelReaches } from "../../inventory/channel-stages.ts";
 import { activeClusterTarget, loadMaster, masterFqdnOf, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
-import {
-  attestClusterStep, hostRunStep, argocdFollowStep, loadActiveCluster, regenerateInstallBranchScript,
-} from "./cluster-release.kit.ts";
+import { attestClusterStep, hostRunStep, argocdFollowStep, loadActiveCluster } from "./cluster-release.kit.ts";
 
 // `release` — raise the platform version a cluster stands on. The third cluster verb, and the
 // only one that moves a pin.
@@ -33,6 +31,15 @@ import {
 // The steps are four, not three: mutating runs start with attest-target (guards.ts
 // assertGuardsArmed), and that step is where the CHANNEL CEILING is checked — so a channel that may
 // not reach this cluster's stage aborts before anything is minted, committed or pushed.
+//
+// NOTHING REGENERATES AN INSTALL BRANCH TODAY, so no release is plannable: the third of set-pin's
+// three acts has no implementation, and the two steps after it read the branch that act produces —
+// host-run runs the installer out of the cluster's checkout of it, argocd-follow calls Synced against
+// it "the pinned state". A release that skipped the regeneration would therefore not merely do less,
+// it would report a version the cluster never took. KIND_GUARDS refuses the plan
+// (INSTALL_BRANCH_REGENERATOR_MISSING states what is missing and what replaces it), and set-pin throws
+// the same refusal in the regeneration's place, so the verb cannot be re-enabled by lifting the gate
+// alone. What it takes to bring the verb back is a regenerator for that one call site.
 
 export const ReleaseParams = z.object({
   serverId: z.string().startsWith("srv_"),
@@ -60,6 +67,7 @@ function ceilingCheck(target: SlaveTarget, channel: ReleaseChannel, version: str
 }
 
 /** `set-pin`: mint the tag, state it in the cluster map, and regenerate the install branch from it.
+ *  The third act has no implementation and the step throws where it stood.
  *
  *  Mint-once has two halves and both matter. The remote refuses to re-point a tag it already carries
  *  (PlatformRepo.mintTag), and this step does not even ask for a new one when the map already names a
@@ -71,7 +79,6 @@ function setPinStep(target: SlaveTarget, params: ReleaseParams, ports: ReleasePo
     title: "Pin the cluster to the release (mint the tag, write the map, regenerate the branch)",
     run: async (ctx) => {
       const { domain } = target.resolve(ctx.db);
-      const master = loadMaster(ctx.db);
       const repo = requirePlatformRepo(ports);
 
       const standing = (await resolveClusterMarking(repo, domain)).release;
@@ -80,10 +87,9 @@ function setPinStep(target: SlaveTarget, params: ReleaseParams, ports: ReleasePo
       const tag = reusable && standing !== undefined ? standing : composeReleaseTag(params.version, params.channel, new Date());
 
       // The tag is minted on the TRUNK, and only there: it names a state of the PRODUCT, and the
-      // branch regeneration on the master merges refs/tags/<tag> into the install branch
-      // (tools/ops/sync-install-branch.sh). A tag minted on the books branch would name a commit
-      // carrying this installation's registrations, and every cluster regenerated from it would
-      // inherit them.
+      // branch regeneration on the master merges refs/tags/<tag> into the install branch. A tag minted
+      // on the books branch would name a commit carrying this installation's registrations, and every
+      // cluster regenerated from it would inherit them.
       const minted = await repo.withBranch(PRODUCT_BRANCH, (trunk) =>
         trunk.mintTag({ tag, message: `platform release ${tag}` }),
       );
@@ -96,19 +102,14 @@ function setPinStep(target: SlaveTarget, params: ReleaseParams, ports: ReleasePo
         ? `${clusterMarkingPath(domain)} now states release: ${tag}`
         : `${clusterMarkingPath(domain)} already states release: ${tag} — nothing to commit`);
 
-      // The branch regeneration runs on the MASTER: it is the host that keeps a checkout whose origin
-      // can push, and it is the one host every cluster's branch can be regenerated from.
-      const mSession = await ctx.ssh(master.id);
-      const regen = await remoteScriptCapture(ctx, mSession, "regenerate-install-branch", regenerateInstallBranchScript(domain), { timeoutMs: 10 * 60_000 });
-      const head = /^INSTALL_BRANCH (\S+)$/m.exec(regen.stdout)?.[1];
-      if (regen.result.code !== 0 || !head) {
-        throw errValidation(
-          `could not regenerate the install branch ${domain} from ${tag} on the master (exit ${regen.result.code}) — ` +
-          `the generator refuses to auto-resolve a machine setting, which needs a hand-merge on the master; see the run log, then retry the run`,
-        );
-      }
-      ctx.checkpoint({ tag, minted: minted.minted, pinCommitted: pin.changed, branchHead: head });
-      ctx.log("meta", `install branch ${domain} regenerated from ${tag} — head ${head}`);
+      ctx.checkpoint({ tag, minted: minted.minted, pinCommitted: pin.changed });
+      // The third act, and the one with nothing behind it. The regeneration runs on the MASTER — the
+      // host that keeps a checkout whose origin can push, and the one host every cluster's branch can
+      // be regenerated from — and there is no program on it to run: the shell that did this is in no
+      // repository and its ansiwise replacement is unbuilt. The plan gate refuses every release for
+      // this reason, so this throw is what a run reaches only if that gate is lifted before the
+      // regenerator exists, and it names the same reason.
+      throw errValidation(INSTALL_BRANCH_REGENERATOR_MISSING);
     },
   };
 }
