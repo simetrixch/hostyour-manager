@@ -3,7 +3,7 @@ import { loadConfig, type Config } from "../kernel/config.ts";
 import { runActor } from "../kernel/actor.ts";
 import { createLogger, type Logger } from "../kernel/logger.ts";
 import { openDb, type DbHandle } from "../db/client.ts";
-import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, type CheckResult } from "./selfchecks.ts";
+import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf, type CheckResult } from "./selfchecks.ts";
 import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
 import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
 import { seedUnitSizes } from "../domains/onboarding/unit-size.ts";
@@ -97,8 +97,23 @@ export async function wire(): Promise<Wired> {
   // same reason: a re-run must never silently re-price a unit that is already running on a value.
   const seededSizes = seedUnitSizes(db.db);
   if (seededSizes.length > 0) logger.info({ sizes: seededSizes }, "unit size table seeded");
-  const checks = [...runSelfChecks({ db, config, store, bus, registry }), ...(await runAsyncSelfChecks({ db, config }))];
+  // The platform repo rides into the async checks because one of them reads it: the release grammar
+  // the Controller enforces against the build plane's copy of it (selfchecks.ts,
+  // checkReleaseGrammarMirror). It is the same port every registration write goes through, so the
+  // check reads what the runs read, and it is absent on a Controller without onboarding — the check
+  // then skips instead of reporting a comparison it never made.
+  const checks = [
+    ...runSelfChecks({ db, config, store, bus, registry }),
+    ...(await runAsyncSelfChecks({ db, config, ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}) })),
+  ];
   assertBlockingChecksPass(checks);
+  // A blocking failure has thrown by now, so what is left is what boot goes on WITH. /readyz carries
+  // only a check's name and verdict, so the detail — which literals differ, which file could not be
+  // read — is said here or nowhere.
+  for (const c of checks) {
+    if (c.kind === "skipped") logger.info({ check: c.name, detail: c.detail }, "self-check skipped");
+    else if (!c.ok) logger.warn({ check: c.name, detail: c.detail }, "self-check degraded");
+  }
   const session = new SessionCodec(db.db, config);
   const loginTx = new LoginTxCodec(db.db);
   const oidc = createOidcAdapter(config, logger);
@@ -108,10 +123,7 @@ export async function wire(): Promise<Wired> {
   const emergencyStore = new EmergencyStore();
   const emergencyDeps = { config, session, store: emergencyStore, db: db.db, logger };
   const emergencyApp = createEmergencyApp(emergencyDeps);
-  const getReadiness = (): ReadyzView => ({
-    ok: checks.every((c) => c.kind !== "blocking" || c.ok),
-    checks: checks.map((c) => ({ name: c.name, ok: c.ok })),
-  });
+  const getReadiness = (): ReadyzView => readinessOf(checks);
   const app = createApp({
     config,
     logger,

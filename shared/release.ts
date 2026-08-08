@@ -1,7 +1,9 @@
 // Release identity. The single home of the release-tag grammar: the registry reaper's retention
-// classes and the web wizard read it from here. The build plane carries a shell-side copy of
-// RELEASE_TAG_RE — a drift test asserts the two stay identical, so a tag the pipeline accepts and a
-// tag the Controller accepts can never diverge.
+// classes and the web wizard read it from here. The build plane carries a copy of RELEASE_TAG_RE —
+// `global.releaseTagFilter` in the platform repo's platform/values-common.yaml, the inner pattern
+// without anchors. No test can compare them: the two literals live in two repositories and this one
+// cannot see the other. What compares them is the `release.grammar_mirror` boot self-check
+// (server/boot/selfchecks.ts), on a running Controller, where both sides are present.
 //
 // The channel CEILING (alpha->dev, beta->test, stable->prod) is deliberately NOT here: it is read
 // from the tag and enforced in the release pipeline, at the point that writes, and nowhere else.

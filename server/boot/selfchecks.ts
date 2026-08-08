@@ -9,11 +9,17 @@ import { RUN_FAMILY, RUN_KIND, type RunFamily, type RunKind } from "../../shared
 import { reconcileLocks } from "../executor/locks.ts";
 import { renderForbidden } from "../domains/access/forbidden.ts";
 import { SessionCodec } from "../domains/access/session.ts";
+import { readReleaseTagFilter, assertMirrorsReleaseGrammar } from "../domains/inventory/release-grammar.ts";
+import type { PlatformRepo } from "../adapters/git/port.ts";
 import { spaBytes } from "../http/spa.ts";
+import type { ReadyzView } from "../../shared/api-types.ts";
 
 export interface CheckResult {
   name: string;
-  kind: "blocking" | "degrading";
+  /** `blocking` aborts boot, `degrading` is reported and boot goes on, `skipped` states that the check
+   *  had nothing to measure and why. A skipped check is never a pass: `ok` stays false, and readinessOf
+   *  leaves it off /readyz rather than showing a green light for a measurement that did not happen. */
+  kind: "blocking" | "degrading" | "skipped";
   ok: boolean;
   detail: string | undefined;
 }
@@ -198,8 +204,48 @@ export function runSelfChecks(deps: {
   return results;
 }
 
-/** Async blocking checks (jose is Promise-based). Run after runSelfChecks; results concat. */
-export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config }): Promise<CheckResult[]> {
+/**
+ * The release grammar the Controller enforces against the build plane's copy of it: RELEASE_TAG_RE
+ * (shared/release.ts), which validates the `release:` pin of every cluster map, against
+ * global.releaseTagFilter in the platform repo's platform/values-common.yaml, which the image-builder
+ * Trigger fires on and the release pipeline re-verifies. Two literals in two repositories, neither
+ * derived from the other — see domains/inventory/release-grammar.ts for what a byte between them costs.
+ * A running Controller with the platform repo configured is the only place both sides are present, so
+ * it is the only place the question can be answered, which is why the check is here and not in a test.
+ *
+ * DEGRADING rather than blocking, for the reason LAW 0 states at the OIDC check: this one reaches a
+ * REMOTE. A git that is unreachable, slow or momentarily inconsistent would otherwise abort the boot of
+ * a Controller whose only fault is that it cannot read a file right now, and a Controller image older
+ * than the platform trunk would refuse to start on a grammar change instead of serving the clusters,
+ * consumers and tenants that have nothing to do with release tags. What a drift costs is a class of TAG
+ * the two sides disagree about — worth a red line on /readyz and a boot warning naming both literals,
+ * not a Controller that is down.
+ *
+ * Without a platform repo there is no second side, so the check SKIPS and says so. Reporting `ok` there
+ * would be a green light for a comparison that never ran — the one outcome a drift check must not have.
+ */
+async function checkReleaseGrammarMirror(platformRepo: PlatformRepo | undefined): Promise<CheckResult> {
+  const name = "release.grammar_mirror";
+  if (!platformRepo) {
+    return {
+      name,
+      kind: "skipped",
+      ok: false,
+      detail: "the platform repo is not configured on this controller — the build plane's copy of the release grammar cannot be read, so nothing was compared",
+    };
+  }
+  try {
+    assertMirrorsReleaseGrammar(await readReleaseTagFilter(platformRepo));
+    return { name, kind: "degrading", ok: true, detail: undefined };
+  } catch (e) {
+    return { name, kind: "degrading", ok: false, detail: messageOf(e) };
+  }
+}
+
+/** Async checks (jose is Promise-based, the platform-repo read is a git fetch). Run after
+ *  runSelfChecks; results concat. `platformRepo` is optional exactly as the wiring has it —
+ *  wire-onboarding.ts builds the port only with config.github and a books branch behind it. */
+export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; platformRepo?: PlatformRepo }): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   try {
     const codec = new SessionCodec(deps.db.db, deps.config);
@@ -210,7 +256,19 @@ export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config })
   } catch (e) {
     results.push({ name: "session.roundtrip", kind: "blocking", ok: false, detail: messageOf(e) });
   }
+  results.push(await checkReleaseGrammarMirror(deps.platformRepo));
   return results;
+}
+
+/** What /readyz answers: 503 while a BLOCKING check is red (a degrading one never takes the process
+ *  out of rotation), and the name+verdict of every check that MEASURED something. A skipped check is
+ *  left out — listed green it would claim a measurement that did not happen, listed red it would
+ *  alarm on a configuration this platform supports. Its detail is said once, in the boot log. */
+export function readinessOf(checks: CheckResult[]): ReadyzView {
+  return {
+    ok: checks.every((c) => c.kind !== "blocking" || c.ok),
+    checks: checks.filter((c) => c.kind !== "skipped").map((c) => ({ name: c.name, ok: c.ok })),
+  };
 }
 
 export function assertBlockingChecksPass(results: CheckResult[]): void {

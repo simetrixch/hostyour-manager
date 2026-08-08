@@ -11,7 +11,10 @@ import { buildRegistry } from "../domains/runs/registry.ts";
 import { buildOnboarding } from "./wire-onboarding.ts";
 import { RUN_FAMILY, RUN_KIND, type RunFamily, type RunKind } from "../../shared/enums.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
-import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass } from "./selfchecks.ts";
+import { FakePlatformRepo } from "../adapters/git/testing/fake.ts";
+import { RELEASE_TAG_RE } from "../../shared/release.ts";
+import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../domains/inventory/channel-stages.ts";
+import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf } from "./selfchecks.ts";
 
 const BASE_ENV = {
   PUBLIC_URL: "https://m1.example.com",
@@ -138,6 +141,72 @@ describe("boot self-checks", () => {
     // ...and every registered definition answers to the kind it is filed under, so a def registered
     // twice under the wrong key could not make the check pass on a verb nothing implements.
     for (const kind of RUN_KIND) expect((registry.get(kind) as AnyRunDefinition).kind).toBe(kind);
+  });
+
+  // The release grammar this Controller enforces (shared/release.ts RELEASE_TAG_RE) against the build
+  // plane's copy of it (global.releaseTagFilter, platform/values-common.yaml on the platform repo's
+  // trunk). A boot with the platform repo wired is the only place both sides are present.
+  //
+  /** The copy as the platform repo states it: the grammar without its anchors, derived rather than typed. */
+  const MIRROR = RELEASE_TAG_RE.source.replace(/^\^/, "").replace(/\$$/, "");
+  const DRIFTED = MIRROR.replace("{14}", "{12}");
+  const platformRepoCarrying = (filter: string): FakePlatformRepo => {
+    const repo = new FakePlatformRepo();
+    repo.seed(CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH, `global:\n  releaseTagFilter: '${filter}'\n`);
+    return repo;
+  };
+
+  it("release.grammar_mirror is GREEN when the platform repo carries the grammar this process enforces", async () => {
+    const { db } = fresh();
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoCarrying(MIRROR) });
+    const check = results.find((r) => r.name === "release.grammar_mirror");
+    expect(check?.kind).toBe("degrading");
+    expect(check?.ok).toBe(true);
+    expect(readinessOf(results).checks).toContainEqual({ name: "release.grammar_mirror", ok: true });
+  });
+
+  // The counter-probe: one segment of the grammar changed on the platform side is the drift the check
+  // exists to find, and the decision it embodies is that boot goes ON — a Controller with a stale or
+  // unreadable platform checkout still serves everything that has nothing to do with release tags.
+  it("release.grammar_mirror is RED on a drifted copy, names both literals, and does NOT fail boot", async () => {
+    const { db } = fresh();
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoCarrying(DRIFTED) });
+    const check = results.find((r) => r.name === "release.grammar_mirror");
+    expect(check?.kind).toBe("degrading");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(RELEASE_TAG_RE.source);
+    expect(check?.detail).toContain(`^${DRIFTED}$`);
+    expect(() => assertBlockingChecksPass(results)).not.toThrow();
+    // Reported, and reported where an operator looks: /readyz stays 200 and carries the red line.
+    expect(readinessOf(results).ok).toBe(true);
+    expect(readinessOf(results).checks).toContainEqual({ name: "release.grammar_mirror", ok: false });
+  });
+
+  // The second counter-probe: a platform repo whose values file has lost the key. "I could not read
+  // the other side" must not arrive as "the two agree".
+  it("release.grammar_mirror is RED when the platform repo carries no filter at all", async () => {
+    const { db } = fresh();
+    const repo = new FakePlatformRepo();
+    repo.seed(CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH, "global:\n  timezone: Europe/Amsterdam\n");
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: repo });
+    const check = results.find((r) => r.name === "release.grammar_mirror");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("no readable global.releaseTagFilter");
+  });
+
+  // The third counter-probe, and the one that decides whether the check proves anything at all: with no
+  // platform repo (the wiring's own optional — a Controller with onboarding off) there is no second
+  // side. It must SKIP and say so, never report a pass, and never be listed on /readyz as measured.
+  it("release.grammar_mirror SKIPS without a platform repo instead of reporting a pass", async () => {
+    const { db } = fresh();
+    const results = await runAsyncSelfChecks({ db, config });
+    const check = results.find((r) => r.name === "release.grammar_mirror");
+    expect(check?.kind).toBe("skipped");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("platform repo is not configured");
+    expect(() => assertBlockingChecksPass(results)).not.toThrow();
+    expect(readinessOf(results).ok).toBe(true);
+    expect(readinessOf(results).checks.map((c) => c.name)).not.toContain("release.grammar_mirror");
   });
 
   it("the append-only probe leaves no sentinel row behind (rolled back)", () => {
