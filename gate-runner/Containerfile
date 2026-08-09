@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1
+#
+# The gate-runner image: the one-shot `gate` step of the in-cluster Tekton
+# gate-run pipeline. It runs under tsx (one source of truth, no build/runtime skew), like the
+# Controller, and additionally ships helm + kubeconform (the render + schema tools G3 drives).
+# No credentials are baked in; the pipeline's clone step puts the repo at the pinned SHA into the
+# source workspace, and a Calico NetworkPolicy fences the pod's egress (proven from inside, fence.ts).
+#
+# Pins: bump helm/kubeconform deliberately (a render-tool change can shift a verdict). kubeconform
+# validates against schemas bundled at /schemas so a job needs no schema egress.
+
+ARG HELM_VERSION=3.16.0
+ARG KUBECONFORM_VERSION=0.6.7
+
+FROM node:24 AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM node:24-slim AS tools
+ARG HELM_VERSION
+ARG KUBECONFORM_VERSION
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tar && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar -xz -C /tmp \
+    && mv /tmp/linux-amd64/helm /usr/local/bin/helm
+RUN curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar -xz -C /usr/local/bin kubeconform
+
+FROM node:24-slim AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+# helm + kubeconform are the render/schema tools the gates drive.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=tools /usr/local/bin/helm /usr/local/bin/helm
+COPY --from=tools /usr/local/bin/kubeconform /usr/local/bin/kubeconform
+COPY --from=build /app/node_modules ./node_modules
+COPY gate-runner ./gate-runner
+COPY shared ./shared
+COPY package.json ./package.json
+COPY tsconfig.json ./tsconfig.json
+USER node
+# The gate-runner is a ONE-SHOT Tekton task now (not a host HTTP server): it reads its inputs from env +
+# the cloned workspace, proves the egress fence from inside (fail-closed), runs the gates, and writes the
+# report. The `gate` Task overrides this command with the same shape; there is no HTTP surface, so no port
+# and no HTTP healthcheck. TypeScript runs directly via tsx (no dist/ build).
+CMD ["node", "--import", "tsx", "gate-runner/src/cli.ts"]

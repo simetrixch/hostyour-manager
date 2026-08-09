@@ -1,0 +1,716 @@
+/* Shared primitives — buttons, status pills, chips, cards, row lists, panels, forms,
+   alerts, loading/empty states. Every page composes these; nothing page-specific here.
+   Status is icon + colour (never colour alone) so the semantics survive colour-blindness. */
+
+/* ---- Buttons ---- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  height: 2.125rem;
+  padding-inline: 0.875rem;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-2);
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.btn:hover {
+  background: var(--surface-2);
+}
+
+.btn:active {
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--border));
+}
+
+.btn--primary {
+  color: var(--on-accent);
+  background: var(--accent-bg);
+  border-color: var(--accent-bg);
+}
+
+.btn--primary:hover {
+  background: var(--accent-bg-hover);
+  border-color: var(--accent-bg-hover);
+}
+
+.btn--primary:active {
+  background: var(--accent-bg-hover);
+}
+
+.btn--danger {
+  color: var(--down);
+  border-color: color-mix(in srgb, var(--down) 35%, transparent);
+}
+
+.btn--danger:hover {
+  background: color-mix(in srgb, var(--down) 8%, transparent);
+  border-color: color-mix(in srgb, var(--down) 50%, transparent);
+}
+
+/* Solid destructive — ONLY for the final, typed-confirmation-armed action (Reset). */
+.btn--destructive {
+  color: var(--on-accent);
+  background: var(--down);
+  border-color: var(--down);
+}
+
+.btn--destructive:hover {
+  background: color-mix(in srgb, var(--down) 85%, var(--text));
+  border-color: color-mix(in srgb, var(--down) 85%, var(--text));
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.btn--sm {
+  height: 1.875rem;
+  padding-inline: var(--sp-3);
+  font-size: var(--fs-1);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ---- Status pills (.badge badge--<status>) ----
+   One tint recipe driven by --c; the glyph carries the state for colour-blind users:
+   ○ queued/idle · pulsing dot = in flight · ✓ good · ✕ failed · ! degraded · ⊘ cancelled */
+
+.badge {
+  --c: var(--neutral);
+
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5625rem;
+  color: var(--c);
+  font-size: var(--fs-1);
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-transform: capitalize;
+  background: color-mix(in srgb, var(--c) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+  border-radius: var(--r-full);
+}
+
+.badge::before {
+  display: inline-block;
+  flex: none;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* queued / idle — hollow dot */
+.badge--planned::before,
+.badge--planning::before,
+.badge--pending::before,
+.badge--bare::before,
+.badge--undeployed::before {
+  content: "";
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border: 1.5px solid currentcolor;
+  border-radius: 50%;
+}
+
+/* in flight — pulsing solid dot */
+.badge--running::before,
+.badge--approved::before,
+.badge--adopting::before,
+.badge--provisioning::before,
+.badge--draining::before {
+  content: "";
+  width: 0.4375rem;
+  height: 0.4375rem;
+  background: currentcolor;
+  border-radius: 50%;
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+.badge--succeeded::before,
+.badge--ready::before,
+.badge--healthy::before {
+  content: "✓";
+}
+
+.badge--failed::before {
+  content: "✕";
+}
+
+.badge--degraded::before {
+  content: "!";
+}
+
+.badge--cancelled::before,
+.badge--skipped::before {
+  content: "⊘";
+  font-weight: 400;
+}
+
+/* colour families */
+.badge--succeeded,
+.badge--ready,
+.badge--healthy {
+  --c: var(--ok);
+}
+
+.badge--failed {
+  --c: var(--down);
+}
+
+.badge--planned,
+.badge--planning,
+.badge--degraded,
+.badge--draining {
+  --c: var(--warn);
+}
+
+.badge--running,
+.badge--approved,
+.badge--adopting,
+.badge--provisioning {
+  --c: var(--accent);
+}
+
+@keyframes pulse-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---- Chips (small neutral facts, e.g. "key installed") ---- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0.0625rem var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-0);
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--surface-2);
+  border-radius: var(--r-full);
+}
+
+.chip--ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+.chip--warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+/* A chip that is a clickable link (the consumer's own public ingress URL). */
+.chip--link {
+  text-decoration: none;
+}
+
+.chip--link:hover {
+  text-decoration: underline;
+}
+
+/* ---- Cards ---- */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: var(--sp-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  padding: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+/* ---- Panels + row lists (Runs, Awaiting approval) ---- */
+
+.panel__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.panel__title {
+  font-size: var(--fs-3);
+}
+
+.panel__count {
+  padding: 0 var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-1);
+  font-weight: 600;
+  background: var(--surface-2);
+  border-radius: var(--r-full);
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.rows li + li {
+  border-top: 1px solid var(--border);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--text);
+  text-decoration: none;
+  transition: background-color 0.1s ease;
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+}
+
+.row__title {
+  flex: none;
+  font-size: var(--fs-2);
+  font-weight: 500;
+}
+
+.row__meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row__end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-left: auto;
+}
+
+.row__time {
+  color: var(--text-3);
+  font-size: var(--fs-1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.row__chevron {
+  display: inline-flex;
+  color: var(--text-3);
+}
+
+/* A .row that is a <button> (expandable rows): strip the UA button chrome, keep the row look. */
+.row--btn {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* ---- Forms ---- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.field__label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  color: var(--text);
+  font-size: var(--fs-1);
+  font-weight: 600;
+}
+
+.field__opt {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.field__hint {
+  color: var(--text-3);
+  font-size: var(--fs-1);
+  line-height: 1.45;
+}
+
+.field input,
+.input {
+  height: 2.25rem;
+  padding: 0 var(--sp-3);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-2);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+/* A textarea is the same control with room for a value that wraps — an SSH public key, which is one
+   logical line of some 400 characters. It takes the input rules above except the fixed height, which
+   `rows` decides instead, and the horizontal-only padding, which would put the first character on
+   the border. */
+.field textarea {
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  resize: vertical;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.field input::placeholder,
+.field textarea::placeholder,
+.input::placeholder {
+  color: var(--text-3);
+}
+
+.field input:focus-visible,
+.field textarea:focus-visible,
+.input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* Inline validation affordance: only after the user has interacted (:user-invalid),
+   never on pristine fields. The validation rules themselves are untouched. */
+.field input:user-invalid,
+.field textarea:user-invalid,
+.input:user-invalid {
+  border-color: var(--down);
+}
+
+.field input:user-invalid:focus-visible,
+.field textarea:user-invalid:focus-visible,
+.input:user-invalid:focus-visible {
+  border-color: var(--down);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--down) 15%, transparent);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-4);
+}
+
+.form-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+
+/* ---- Alerts / notes / callouts ---- */
+
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.alert--danger {
+  color: var(--down);
+  background: color-mix(in srgb, var(--down) 7%, transparent);
+  border-color: color-mix(in srgb, var(--down) 30%, transparent);
+}
+
+.alert--danger::before {
+  content: "✕";
+  flex: none;
+  font-weight: 700;
+}
+
+.alert--warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+}
+
+.alert--warn::before {
+  content: "!";
+  flex: none;
+  font-weight: 700;
+}
+
+/* Checkbox field: label and box on one row (onboard wizard's private-repo toggle). A standalone
+ * class — NOT a .field descendant — so the .field text-input rules never touch the native box;
+ * accent-color inherits down to the checkbox, so no input selector is needed (keeps stylelint's
+ * ascending-specificity order intact). */
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+/* Nested per-app "Seed data" toggle, shown under a selected app in the create-tenant wizard. */
+.checkbox-field--nested {
+  margin-inline-start: var(--sp-5);
+  font-size: var(--fs-2);
+  color: var(--text-2);
+}
+
+/* Consumer lifecycle status badges (Consumers list) — reuse the shared .badge dot machinery. */
+.badge--active {
+  --c: var(--ok);
+}
+
+.badge--suspended {
+  --c: var(--warn);
+}
+
+.badge--offboarded {
+  --c: var(--neutral);
+}
+
+/* A TENANT a tenant-purge deprovisioned (status "purged"). It shares the neutral
+   tone with .badge--offboarded on purpose: both are terminal, nothing of either tenant is deployed, and
+   a louder tone would read as an alarm about a removal that went exactly as asked. The WORD is the
+   distinction the operator needs, and the two words are what the states now carry — before this one
+   existed a purge settled its rows to "offboarded" and the badge could not tell them apart at all. */
+.badge--purged {
+  --c: var(--neutral);
+}
+
+/* A TENANT whose create-tenant run recorded its row but never finished (status "provisioning"). Its OWN token, deliberately NOT the shared .badge--provisioning pill the
+   server/cluster rows carry: that one is accent-tinted with a PULSING dot, i.e. "in flight", and a
+   tenant whose run died would pulse forever as if it were still making progress. This one is static
+   warn + "!" — unfinished and NOT moving, so it can never be mistaken for a live tenant. */
+.badge--unfinished {
+  --c: var(--warn);
+}
+
+.badge--unfinished::before {
+  content: "!";
+}
+
+.callout {
+  display: flex;
+  gap: var(--sp-2);
+  max-width: 34rem;
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--text-2);
+  font-size: var(--fs-2);
+  line-height: 1.55;
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: var(--r-md);
+}
+
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  max-width: 46rem;
+  color: var(--text-3);
+  font-size: var(--fs-1);
+  line-height: 1.55;
+}
+
+.note svg {
+  flex: none;
+  margin-top: 0.125rem;
+}
+
+/* ---- In-page tabs (a section switch, e.g. Consumers: Reconciliation | Runs) ---- */
+
+.tabs {
+  display: flex;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  height: 2.25rem;
+  padding: 0 var(--sp-3);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.tab--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+/* A tab panel stacks its blocks with the page's own rhythm: the Tenants Reconciliation tab shows the
+   tenant cards AND, underneath, the offboarded tenants that still have a purge to aim at them, and the
+   two must not run into each other. `:not([hidden])` is load-bearing — an unconditional `display` here
+   would beat the `hidden` attribute's UA `display: none` and paint the inactive panel over the active
+   one. Written for the role, not a class, because every tab panel in the app wants the same rhythm. */
+[role="tabpanel"]:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+/* ---- Modal dialog (typed-confirm destructive actions — the one overlay in the app) ----
+   The scrim is a fixed dark wash in BOTH themes — a modal backdrop is the conventional exception to
+   the token-only rule; the panel itself uses surface/border tokens like every other card. */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: rgb(0 0 0 / 55%);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  width: 100%;
+
+  /* The panel never grows past the viewport the backdrop covers (minus that backdrop's own padding).
+     These dialogs carry the blast-radius copy of the destructive verbs — the tenant purge spells out the
+     Tenant CR cascade, the failed-run abort spells out what the compensations do NOT put back — so they
+     are the tallest surfaces in the app. Uncapped, a short screen pushes the type-to-confirm field and
+     the Cancel/Confirm buttons out of a backdrop that is `position: fixed` and therefore cannot scroll:
+     the operator can neither finish reading nor dismiss the very gate the copy exists to be. Capped, the
+     BODY scrolls while title and foot stay put — the same max-height + overflow pairing .log uses. */
+  max-height: calc(100vh - 2 * var(--sp-4));
+  max-width: 30rem;
+  padding: var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.dialog__title {
+  font-size: var(--fs-4);
+}
+
+.dialog__body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: var(--text-2);
+  font-size: var(--fs-2);
+  line-height: 1.55;
+}
+
+.dialog__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+/* ---- Loading / empty states ---- */
+
+.loading {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6) 0;
+  color: var(--text-2);
+  font-size: var(--fs-2);
+}
+
+.spinner {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-7) var(--sp-4);
+  color: var(--text-2);
+  font-size: var(--fs-2);
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .badge::before {
+    animation: none;
+  }
+}
