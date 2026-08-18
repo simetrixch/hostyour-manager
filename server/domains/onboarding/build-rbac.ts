@@ -6,7 +6,7 @@
 // WHY imperatively, and not as chart templates like everything else: the unit's AppProject blacklists
 // Role and RoleBinding (appproject.ts), so nothing the unit deploys through ArgoCD can create them —
 // which is the point, since a unit that could mint its own Role could grant itself anything. The
-// controller is therefore the only writer left, and it writes them the same way it writes the other
+// the manager is therefore the only writer left, and it writes them the same way it writes the other
 // two fences: before the registration exists, idempotently, with a delete inverse.
 //
 // The three grants, each a Role plus the Binding that arms it:
@@ -14,8 +14,8 @@
 //   1. EventListener — create PipelineRuns in <name>-build. The webhook the unit's release ref fires
 //      lands on the shared EventListener, which then has to create a PipelineRun in the unit's OWN
 //      build namespace; without this grant the delivery is accepted and nothing runs.
-//   2. Controller read — get/list/watch PipelineRuns in <name>-build, so the controller can watch a
-//      release run it did not start. Read only: the controller has no task in the release cycle.
+//   2. Manager read — get/list/watch PipelineRuns in <name>-build, so the manager can watch a
+//      release run it did not start. Read only: the manager has no task in the release cycle.
 //   3. argo-sync — patch the unit's OWN Applications, in the ArgoCD namespace they live in. This is
 //      what lets the release pipeline's last step tell ArgoCD to sync the bump it just committed.
 //      Scoped by resourceNames to exactly <name>-dev/-test/-prod.
@@ -40,8 +40,10 @@ import { consumerArgoAppName } from "../../../shared/consumer.ts";
  *  grant has to be a RoleBinding across namespaces rather than a Role the unit's chart could carry. */
 export const EVENTLISTENER_SUBJECT = { namespace: "image-builder", name: "eventlistener-sa" } as const;
 
-/** The controller's own ServiceAccount — the identity behind every kube read this process makes. */
-export const CONTROLLER_SUBJECT = { namespace: "controller", name: "controller" } as const;
+/** This process's own ServiceAccount — the identity behind every kube read it makes. Both halves
+ *  are the chart's: apps/manager/templates/serviceaccount.yaml renders the account, and
+ *  apps/manager/app.yaml names the namespace it is installed into. */
+export const MANAGER_SUBJECT = { namespace: "manager", name: "manager" } as const;
 
 /** The ServiceAccount every PipelineRun in a unit's build namespace runs under. One per build
  *  namespace, so a unit's pipeline holds exactly this unit's grants and no other's. */
@@ -54,7 +56,7 @@ export const BUILD_NAMESPACE_SUFFIX = "-build";
 
 /** The namespace the platform's mail relay runs in — a PLATFORM app of this base
  *  (hostyour-cloud/apps/postfix, its own catalog element), not a unit of any installation, so naming it
- *  here is the same kind of fact as `image-builder` and `controller` above. */
+ *  here is the same kind of fact as `image-builder` and `manager` above. */
 export const RELAY_NAMESPACE = "postfix";
 
 /** The unit's build namespace — where its pipeline, its PipelineRuns and its build credentials live. */
@@ -94,7 +96,7 @@ function grant(input: {
  * master's "argocd" or a slave's per-slave ArgoCD namespace — so the argo-sync grant lands beside the
  * Applications it names rather than in the build namespace. ABSENT for a build-only unit: it has no
  * Applications, so an argo-sync grant would name objects that can never exist; only the two
- * build-namespace grants (the webhook's create, the controller's watch) are rendered.
+ * build-namespace grants (the webhook's create, the manager's watch) are rendered.
  */
 export function renderBuildRbac(input: { name: string; argoNamespace?: string }): BuildRbacGrant[] {
   const buildNs = unitBuildNamespace(input.name);
@@ -107,11 +109,11 @@ export function renderBuildRbac(input: { name: string; argoNamespace?: string })
       subjects: [EVENTLISTENER_SUBJECT],
     }),
     grant({
-      name: `${input.name}-build-controller-read`,
+      name: `${input.name}-build-manager-read`,
       namespace: buildNs,
       label: CONSUMER_PROJECT_LABEL,
       rules: [{ apiGroups: ["tekton.dev"], resources: ["pipelineruns"], verbs: ["get", "list", "watch"] }],
-      subjects: [CONTROLLER_SUBJECT],
+      subjects: [MANAGER_SUBJECT],
     }),
   ];
   if (input.argoNamespace !== undefined) grants.push(renderConsumerArgoSync({ name: input.name, argoNamespace: input.argoNamespace }));

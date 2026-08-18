@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderBuildRbac, renderConsumerArgoSync, renderSmtpOpsGrant, renderTenantArgoSync, tenantSyncUnits, unitBuildNamespace, RELAY_NAMESPACE, EVENTLISTENER_SUBJECT, CONTROLLER_SUBJECT, BUILD_PIPELINE_SERVICE_ACCOUNT } from "./build-rbac.ts";
+import { renderBuildRbac, renderConsumerArgoSync, renderSmtpOpsGrant, renderTenantArgoSync, tenantSyncUnits, unitBuildNamespace, RELAY_NAMESPACE, EVENTLISTENER_SUBJECT, MANAGER_SUBJECT, BUILD_PIPELINE_SERVICE_ACCOUNT } from "./build-rbac.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL, type RoleManifest, type RoleBindingManifest } from "../../adapters/kube/port.ts";
 
@@ -20,7 +20,7 @@ const byName = (name: string, argoNamespace = "argocd"): { role: RoleManifest; b
 describe("renderBuildRbac", () => {
   it("renders exactly three grants, each a Role plus the Binding that arms it", () => {
     const all = grants();
-    expect(all.map((g) => g.role.metadata.name)).toEqual(["example-auth-build-eventlistener", "example-auth-build-controller-read", "example-auth-argo-sync"]);
+    expect(all.map((g) => g.role.metadata.name)).toEqual(["example-auth-build-eventlistener", "example-auth-build-manager-read", "example-auth-argo-sync"]);
     for (const { role, binding } of all) {
       expect(binding.roleRef).toEqual({ apiGroup: "rbac.authorization.k8s.io", kind: "Role", name: role.metadata.name });
       expect(binding.metadata.namespace).toBe(role.metadata.namespace);
@@ -40,12 +40,17 @@ describe("renderBuildRbac", () => {
     expect(binding.subjects).toEqual([{ kind: "ServiceAccount", name: EVENTLISTENER_SUBJECT.name, namespace: EVENTLISTENER_SUBJECT.namespace }]);
   });
 
-  it("lets the controller READ the unit's PipelineRuns — read only, because it has no task in the release cycle", () => {
-    const { role, binding } = byName("example-auth-build-controller-read");
+  it("lets the manager READ the unit's PipelineRuns — read only, because it has no task in the release cycle", () => {
+    const { role, binding } = byName("example-auth-build-manager-read");
     expect(role.metadata.namespace).toBe("example-auth-build");
     expect(role.rules).toEqual([{ apiGroups: ["tekton.dev"], resources: ["pipelineruns"], verbs: ["get", "list", "watch"] }]);
     expect(role.rules[0]!.verbs).not.toContain("create");
-    expect(binding.subjects).toEqual([{ kind: "ServiceAccount", name: CONTROLLER_SUBJECT.name, namespace: CONTROLLER_SUBJECT.namespace }]);
+    // The literals, not MANAGER_SUBJECT's own fields: comparing the rendering against the constant
+    // it was rendered from is a comparison of a value with itself, and it held while the constant
+    // named an account no chart renders. These two names are apps/manager/templates/
+    // serviceaccount.yaml and apps/manager/app.yaml in hostyour-cloud, which this repo cannot read.
+    expect(binding.subjects).toEqual([{ kind: "ServiceAccount", name: "manager", namespace: "manager" }]);
+    expect(MANAGER_SUBJECT).toEqual({ namespace: "manager", name: "manager" });
   });
 
   it("scopes argo-sync to the unit's THREE Applications by name, in the ArgoCD namespace they live in", () => {

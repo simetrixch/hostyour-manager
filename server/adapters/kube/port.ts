@@ -370,7 +370,7 @@ export const CONTROLLER_PROJECT_LABELS = [CONSUMER_PROJECT_LABEL, TENANT_PROJECT
  *  projects: the ones hostyour-cloud's argocd/<stage>/apps/projects.yaml renders, plus ArgoCD's own
  *  built-in "default". Defense in depth behind the plan-time name gate (gates/compose.ts), which
  *  refuses these as unit names before a run exists: the writer fails closed regardless. */
-export const RESERVED_PROJECT_NAMES: readonly string[] = ["default", "core", "data", "services", "observability", "cicd", "builds", "controller"];
+export const RESERVED_PROJECT_NAMES: readonly string[] = ["default", "core", "data", "services", "observability", "cicd", "builds", "manager"];
 
 /** The per-consumer / per-tenant AppProject the Controller renders + writes
  *  (domains/onboarding/appproject.ts). Isolation: name == namespace == the unit; only its own

@@ -277,10 +277,10 @@ describe("onboard run definition", () => {
 
     // only the two build-namespace grants — a build-only unit has no Applications to argo-sync
     expect((prt.buildRbac as FakeBuildRbacWriter).keys()).toEqual([
-      "Role acme-build/acme-build-controller-read",
       "Role acme-build/acme-build-eventlistener",
-      "RoleBinding acme-build/acme-build-controller-read",
+      "Role acme-build/acme-build-manager-read",
       "RoleBinding acme-build/acme-build-eventlistener",
+      "RoleBinding acme-build/acme-build-manager-read",
     ]);
 
     // the release run was watched in the UNIT's own namespace and the record ties tag to builds
@@ -314,11 +314,11 @@ describe("onboard run definition", () => {
     const buildRbac = new FakeBuildRbacWriter();
     await runAll(params(), ports({ buildRbac }), []);
     expect(buildRbac.keys()).toEqual([
-      "Role acme-build/acme-build-controller-read",
       "Role acme-build/acme-build-eventlistener",
+      "Role acme-build/acme-build-manager-read",
       "Role argocd/acme-argo-sync",
-      "RoleBinding acme-build/acme-build-controller-read",
       "RoleBinding acme-build/acme-build-eventlistener",
+      "RoleBinding acme-build/acme-build-manager-read",
       "RoleBinding argocd/acme-argo-sync",
     ]);
     const sync = buildRbac.get("Role", "argocd", "acme-argo-sync") as RoleManifest;

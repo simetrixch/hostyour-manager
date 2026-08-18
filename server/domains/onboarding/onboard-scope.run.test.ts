@@ -108,7 +108,7 @@ describe("onboard scope — a second stage beside a live one", () => {
     const cleanup = deleteBuildRbacCleanup({ registry: reg, resolver: resolver(), buildRbac } as unknown as OnboardPorts, params());
     await cleanup.run(ctx("delete-build-rbac", logs));
     expect(buildRbac.get("Role", "acme-build", "acme-build-eventlistener")).toBeTruthy();
-    expect(buildRbac.get("RoleBinding", "acme-build", "acme-build-controller-read")).toBeTruthy();
+    expect(buildRbac.get("RoleBinding", "acme-build", "acme-build-manager-read")).toBeTruthy();
     expect(buildRbac.get("Role", "argocd", "acme-argo-sync")).toBeUndefined(); // this stage's own
     expect(logs.some((l) => l.includes("the build-namespace grants for acme kept") && l.includes("dev"))).toBe(true);
   });

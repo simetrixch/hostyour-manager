@@ -167,11 +167,11 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     expect(await reg.readRegistration("dev", "acme")).not.toBeNull();
     expect(platform.read(platform.booksBranch, "registrations/acme/build.yaml")).not.toBeNull();
     expect(buildRbac.keys()).toEqual([
-      "Role acme-build/acme-build-controller-read",
       "Role acme-build/acme-build-eventlistener",
+      "Role acme-build/acme-build-manager-read",
       "Role s2/acme-argo-sync",
-      "RoleBinding acme-build/acme-build-controller-read",
       "RoleBinding acme-build/acme-build-eventlistener",
+      "RoleBinding acme-build/acme-build-manager-read",
       "RoleBinding s2/acme-argo-sync",
     ]);
     expect(github.hooksFor("x", "acme")).toHaveLength(1);

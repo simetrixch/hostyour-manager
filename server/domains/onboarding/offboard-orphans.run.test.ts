@@ -129,15 +129,15 @@ describe("offboard assert-no-orphans", () => {
     // Every leftover is NAMED with where it stands — a report of what is gone would be useless here.
     for (const object of [
       "AppProject argocd/acme",
-      "admission policy consumer-acme",
       "ArgoCD repository Secret argocd/repo-acme",
-      "Role acme-build/acme-build-eventlistener",
-      "RoleBinding acme-build/acme-build-eventlistener",
-      "Role acme-build/acme-build-controller-read",
-      "RoleBinding acme-build/acme-build-controller-read",
-      "Role argocd/acme-argo-sync",
-      "RoleBinding argocd/acme-argo-sync",
       "DNS A acme.s1.example",
+      "Role acme-build/acme-build-eventlistener",
+      "Role acme-build/acme-build-manager-read",
+      "Role argocd/acme-argo-sync",
+      "RoleBinding acme-build/acme-build-eventlistener",
+      "RoleBinding acme-build/acme-build-manager-read",
+      "RoleBinding argocd/acme-argo-sync",
+      "admission policy consumer-acme",
     ]) {
       expect(message).toContain(object);
     }
@@ -168,10 +168,10 @@ describe("offboard assert-no-orphans", () => {
     await expect(step.run(ctx(logs))).resolves.toBeUndefined();
 
     expect(buildRbac.keys()).toEqual([
-      "Role acme-build/acme-build-controller-read",
       "Role acme-build/acme-build-eventlistener",
-      "RoleBinding acme-build/acme-build-controller-read",
+      "Role acme-build/acme-build-manager-read",
       "RoleBinding acme-build/acme-build-eventlistener",
+      "RoleBinding acme-build/acme-build-manager-read",
     ]);
     const line = logs.find((l) => l.startsWith("nothing of acme (prod) is left standing"))!;
     expect(line).toContain("kept on purpose because the unit still stands at dev: the acme-build grants");
