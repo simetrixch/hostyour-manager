@@ -8,22 +8,22 @@ envs: [dev, test, prod]
 # (hostyour-cloud/registrations/hostyour-manager/build.yaml). The release pipeline compares the two
 # and fails the run on a mismatch, so a rename here without the registration blocks every release.
 #
-# NO `chart:` — BUILD-ONLY. The controller is the control plane itself and cannot validate, pin or
-# seed its own deploy, so that stays bootstrap-owned in hostyour-cloud/apps/controller. This file
-# exists so the two IMAGES build through the same release pipeline as every other unit.
+# NO `chart:` — BUILD-ONLY. The manager is the control plane itself and cannot validate, pin or
+# seed its own deploy, so that stays bootstrap-owned in hostyour-cloud/apps/manager. This file
+# exists so the three IMAGES build through the same release pipeline as every other unit.
 #
 # The build names are FLAT image names, not paths: each one IS the repo it pushes to in the central
-# registry, is what hostyour-cloud/apps/controller/values-<stage>.yaml carries as `builds[].image`,
+# registry, is what hostyour-cloud/apps/manager/values-<stage>.yaml carries as `builds[].image`,
 # and is what the registration attests. Renaming a build points it at a different repo and makes it
 # invisible to the release bump's search over those pins, so the running chart would silently stay
 # on the old image.
 builds:
-  - name: controller               # the in-cluster app
+  - name: manager                  # the in-cluster app
     containerfile: Containerfile   # repo root
   - name: gate-runner              # the rootful onboarding-sandbox Quadlet, deployed host-side
     containerfile: gate-runner/Containerfile
   # The client-tools image of the move / backup / restore job — mongodump,
-  # mongosh, pg_dumpall, rclone, ssh. It is the tooling THIS controller runs
+  # mongosh, pg_dumpall, rclone, ssh. It is the tooling THIS manager runs
   # (server/domains/onboarding/relocation.ts), so it builds where its caller
   # lives. Its two database client versions are stamped into the Dockerfile by
   # hostyour-cloud/tools/ops/sync-versions, because the servers they talk to are
@@ -31,5 +31,5 @@ builds:
   - name: dbtools
     containerfile: docker/dbtools.Dockerfile
 
-services: []                  # the controller PROVISIONS mongodb/pg/redis/s3 for others; consumes none
+services: []                  # the manager PROVISIONS mongodb/pg/redis/s3 for others; consumes none
 secrets: []                   # bootstrap secrets (OIDC, session, master key, GitOps PAT) are installer-seeded
