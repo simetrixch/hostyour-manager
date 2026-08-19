@@ -133,6 +133,12 @@ const EnvSchema = z.object({
   STORAGE_BOX_HOST: z.string().min(1).optional(),
   STORAGE_BOX_USER: z.string().min(1).optional(),
   STORAGE_BOX_PASSWORD: z.string().min(1).optional(),
+  // The machine-side deployment programs. The redeploy master arm drives deploy-cluster /
+  // deploy-gitops through `ansiwise serve` on the target machine; this is the command that starts
+  // that surface over the run's SSH session — and so names WHICH catalogue checkout the service
+  // reads its programs from, which is the installation's decision, never an assumption. Absent ⇒
+  // the program steps fail loud (errNotConfigured) and every other verb is untouched.
+  ANSIWISE_SERVE_COMMAND: z.string().min(1).optional(),
   // The pinned dbtools job image (<registry-host>/dbtools:<tag>) the relocation Jobs
   // run — mongodb tools, postgresql client, an S3 client and SSH for the staging area. The pin lives
   // as a builds[] entry in apps/controller/values-<stage>.yaml and the Deployment projects it here,
@@ -256,6 +262,10 @@ export interface Config {
   };
   /** The pinned dbtools job image the relocation Jobs run. Absent ⇒ those steps fail loud. */
   dbtoolsImage?: string;
+  /** The command that starts `ansiwise serve` on a target machine over the run's SSH session —
+   *  the door to the machine's deployment programs (redeploy master arm). Absent ⇒ the program
+   *  steps fail loud. */
+  ansiwiseServeCommand?: string;
 }
 
 export class ConfigError extends Error {
@@ -371,6 +381,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
       ? { storageBox: { host: e.STORAGE_BOX_HOST, user: e.STORAGE_BOX_USER, password: e.STORAGE_BOX_PASSWORD } }
       : {}),
     ...(e.DBTOOLS_IMAGE ? { dbtoolsImage: e.DBTOOLS_IMAGE } : {}),
+    ...(e.ANSIWISE_SERVE_COMMAND ? { ansiwiseServeCommand: e.ANSIWISE_SERVE_COMMAND } : {}),
   };
 }
 

@@ -6,7 +6,8 @@ import { servers } from "../../../db/schema/inventory.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
 import { deploySlaveSteps } from "./deploy-slave.ts";
 import { activeClusterTarget, loadMaster, masterFqdnOf, type DeploySlavePorts } from "./deploy-slave.kit.ts";
-import { attestClusterStep, hostRunStep, argocdFollowStep, loadActiveCluster } from "./cluster-release.kit.ts";
+import { attestClusterStep, argocdFollowStep, loadActiveCluster } from "./cluster-release.kit.ts";
+import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 
 // `redeploy` — rebuild the MACHINE LAYER of a cluster that is already live. One of the three
 // distinguishable cluster verbs: adopt takes a bare machine into service, deploy-slave turns an
@@ -23,9 +24,13 @@ import { attestClusterStep, hostRunStep, argocdFollowStep, loadActiveCluster } f
 //                     install, the master-side management plane and the GitOps handoff all reconcile,
 //                     and NOT ONE compensating action is armed. Every one of them (purge MicroK8s,
 //                     --slave-remove, drop the slave part of the cluster map) undoes a WORKING slave.
-//   master, master+   the installer on the host plus the ArgoCD follow. A master has no master-side
-//     slave           registration to redo — it IS the master — so the two building blocks the cluster
-//                     release is made of are the whole machine layer here, minus the pin.
+//   master, master+   the machine layer as the deployment PROGRAMS deliver it, plus the ArgoCD
+//     slave           follow. deploy-cluster rebuilds the node below GitOps and deploy-gitops raises
+//                     what hands the cluster to the reconciler; both run on the machine's own
+//                     `ansiwise serve` surface, each proven by a dry run the machine's gate then
+//                     admits the real run against (ansiwise-run.kit.ts). A master has no master-side
+//                     registration to redo — it IS the master — so those two programs and the follow
+//                     are the whole machine layer here, minus the pin.
 //
 // mutating: true ⇒ steps()[0].name === "attest-target" (guards.ts assertGuardsArmed), which both
 // arms satisfy: the slave arm through deploy-slave's own attest-target, the master arm through the
@@ -39,9 +44,27 @@ export type RedeployParams = z.infer<typeof RedeployParams>;
 /** The def resolves the role from the inventory rather than from its params, and steps() is handed no
  *  database — so the arm is chosen inside a closure the DEF holds, from the db the composition root
  *  gave it. `db` is therefore a port of this def, exactly as the platform repo is one of deploy-slave. */
-export interface RedeployPorts extends DeploySlavePorts {
+export interface RedeployPorts extends DeploySlavePorts, AnsiwisePorts {
   db: Db;
 }
+
+/** The programs the master arm runs, in the order the machine layer stands on them: the cluster
+ *  below GitOps first, then what hands it over. The names are the catalogue's own
+ *  (digita-deploy ansiwise/programs/); each step reads the program's declared answers off the
+ *  machine, so nothing about their INSIDES is repeated here. */
+const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-gitops"] as const;
+
+/** The answers the inventory cannot state, asked for at approve and carried to the step as
+ *  `activation-input:<answer>`. The four optional ones may stay blank — a blank input is
+ *  dropped at approve and the program's own default (or its refusal, by name) decides. */
+const MASTER_ARM_INPUTS = [
+  { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to before a certificate expires" },
+  { field: "letsencrypt_server", label: "The ACME directory this installation registers with (staging to rehearse, production to serve)" },
+  { field: "build_plane", label: "The cluster the image registry stands on — blank when this cluster hosts it itself" },
+  { field: "lan_cidr", label: "The IPv4 range this machine shares with the other clusters — blank when it shares none" },
+  { field: "storage_path", label: "Where the machine's separate storage is mounted — blank when it has none" },
+  { field: "storage_directory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default" },
+];
 
 function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
   const target = activeClusterTarget(params.serverId);
@@ -54,7 +77,11 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
   if (role !== undefined && !isMasterRole(role)) {
     return deploySlaveSteps({ target, mode: "redeploy" }, ports);
   }
-  return [attestClusterStep(target), hostRunStep(target), argocdFollowStep(target)];
+  return [
+    attestClusterStep(target),
+    ...MASTER_ARM_PROGRAMS.map((program) => ansiwiseProgramStep(target, program, ports)),
+    argocdFollowStep(target),
+  ];
 }
 
 export function makeRedeployDef(ports: RedeployPorts): RunDefinition<RedeployParams> {
@@ -94,9 +121,14 @@ export function makeRedeployDef(ports: RedeployPorts): RunDefinition<RedeployPar
             { resource: "master-kube", key: "m" },
           ],
         warnings: [
-          `The installer re-runs on ${server.name} — expect a brief kube-apiserver blip while kubelite restarts.`,
+          `The machine layer re-runs on ${server.name} — expect a brief kube-apiserver blip while kubelite restarts.`,
         ],
-        requiredSecrets: [],
+        // The master arm's programs raise their commands to root with a password the CALLER hands
+        // over per run (the installation's ansiwise.yaml: password_from_caller) — collected at
+        // approve, held in memory, sent with each POST /runs, persisted nowhere. The slave arm
+        // still runs over sudo -n and needs none.
+        requiredSecrets: onMaster ? [ANSIWISE_ELEVATION_SECRET] : [],
+        ...(onMaster ? { requiredInputs: MASTER_ARM_INPUTS } : {}),
       };
     },
     steps: (params) => redeploySteps(params, ports),

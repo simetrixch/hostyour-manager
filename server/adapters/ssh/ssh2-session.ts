@@ -1,7 +1,7 @@
 import { createServer, type Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { Client, type ConnectConfig, type ClientChannel, type SFTPWrapper } from "ssh2";
-import type { SshTarget, SshSession, ExecOptions, ExecResult, PortForward, SshFactory } from "./port.ts";
+import type { SshTarget, SshSession, ExecOptions, ExecResult, PortForward, SshFactory, ChannelOptions, SshChannel } from "./port.ts";
 import { ExecFailedError, ExecTimeoutError, HostKeyMismatchError, sshAbortError } from "./port.ts";
 
 const CONNECT_TIMEOUT_DEFAULT = 15_000;
@@ -175,6 +175,58 @@ class Ssh2Session implements SshSession {
     const r = await this.exec(command, opts);
     if (r.code !== 0) throw new ExecFailedError(r.code, r.stderrTail, command);
     return r;
+  }
+
+  /** The conversation form of exec (see the port): the channel is handed back with stdin OPEN,
+   *  and it stays open until close() or abort. No timeout — a conversation has no single command
+   *  to time; the caller bounds its own work. The abort listener goes on before client.exec for
+   *  the same reason exec()'s does, and it stays on for the channel's whole life: an abort after
+   *  the open must still tear the conversation down, or the remote command outlives the run that
+   *  started it on the manager's side of the wire. */
+  openChannel(command: string, opts: ChannelOptions): Promise<SshChannel> {
+    return new Promise((resolve, reject) => {
+      if (opts.signal.aborted) {
+        reject(sshAbortError());
+        return;
+      }
+      let stream: ClientChannel | undefined;
+      let settled = false;
+      const onAbort = (): void => {
+        stream?.close();
+        if (!settled) {
+          settled = true;
+          reject(sshAbortError());
+        }
+      };
+      opts.signal.addEventListener("abort", onAbort);
+      this.client.exec(command, (err, s) => {
+        if (err) {
+          if (!settled) {
+            settled = true;
+            opts.signal.removeEventListener("abort", onAbort);
+            reject(err);
+          }
+          return;
+        }
+        if (settled) {
+          s.close(); // aborted while the open was in flight — release the channel
+          return;
+        }
+        settled = true;
+        stream = s;
+        let errBuf = "";
+        s.stderr.on("data", (d: Buffer) => {
+          const lines = (errBuf + d.toString("utf8")).split("\n");
+          errBuf = lines.pop() ?? "";
+          for (const line of lines) opts.onStderr?.(line);
+        });
+        s.on("close", () => {
+          if (errBuf) opts.onStderr?.(errBuf);
+          opts.signal.removeEventListener("abort", onAbort);
+        });
+        resolve({ stream: s, close: () => s.close() });
+      });
+    });
   }
 
   /** Upload one file over a THROWAWAY SFTP channel, released the moment the write settles.

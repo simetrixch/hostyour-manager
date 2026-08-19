@@ -2,6 +2,7 @@ import { vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Duplex } from "node:stream";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { parseConfig } from "../../kernel/config.ts";
@@ -133,6 +134,10 @@ export interface HostsScript {
    *  with Error(`message`) and the entry is consumed — e.g. a transport-level
    *  "(SSH) Channel open failure" mid-verify (the MaxSessions incident). */
   execFaults: { match: string; message: string }[];
+  /** What answers an openChannel CONVERSATION (SshSession.openChannel) — a test that drives the
+   *  ansiwise program steps hands back a Duplex carrying the REAL `ansiwise serve` (a socket to
+   *  its listener). The default refuses: the scripted hosts hold no conversations. */
+  openConversation: (command: string) => Promise<Duplex>;
   log: { host: string; command: string }[];
   files: { host: string; path: string; content: string }[];
 }
@@ -170,6 +175,7 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     promOut: "PROM_CHECK data",
     certsOut: "redis/redis-tls|True",
     execFaults: [],
+    openConversation: (command) => Promise.reject(new Error(`no conversation scripted for "${command}"`)),
     log: [],
     files: [],
     ...overrides,
@@ -236,6 +242,11 @@ export function hostsFactory(f: HostsScript): SshFactory {
         f.files.push({ host, path, content: content.toString("utf8") });
       },
       forwardLocalPort: async () => ({ localPort: 0, close: () => undefined }),
+      openChannel: async (command) => {
+        f.log.push({ host, command });
+        const stream = await f.openConversation(command);
+        return { stream, close: () => stream.destroy() };
+      },
       exec: execImpl,
       mustExec: async (command, o) => {
         const r = await execImpl(command, o);
@@ -301,7 +312,7 @@ export function disposeHarnesses(): void {
 // FK-safe seeding (clusters.server_id → servers.id): servers + their ssh keys first.
 // keystore: "keyfile" opens the crypto gate for tests that need a SECOND plan of the same slave
 // (under plaintext the gate counts the first run's leftover planned row as a live slave).
-export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false } = {}): Promise<Harness> {
+export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string } = {}): Promise<Harness> {
   const hosts = opts.hosts ?? scriptedHosts();
   const dir = mkdtempSync(join(tmpdir(), "ctrl-ds-"));
   dirs.push(dir);
@@ -316,7 +327,8 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   platformRepo.seed(platformRepo.booksBranch, clusterMarkingPath("m1.example.com"), MASTER_MARKING_YAML);
   const executor = new Executor({
     db: db.db, creds: store, bus: new RunEventBus(), logger,
-    registry: buildRegistry({ db: db.db, platformRepo }), sshFactory: hostsFactory(hosts), actor: () => "op_system",
+    registry: buildRegistry({ db: db.db, platformRepo, ...(opts.ansiwiseServeCommand !== undefined ? { ansiwiseServeCommand: opts.ansiwiseServeCommand } : {}) }),
+    sshFactory: hostsFactory(hosts), actor: () => "op_system",
   });
   if (opts.keystore) {
     db.db.insert(meta).values({ key: "keystore.mode", value: opts.keystore })

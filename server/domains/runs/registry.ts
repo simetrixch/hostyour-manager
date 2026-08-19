@@ -4,6 +4,7 @@ import type { AnyRunDefinition, RunDefinition } from "../../executor/types.ts";
 import { noopDef } from "./defs/noop.run.ts";
 import { adoptDef } from "./defs/adopt.ts";
 import { makeDeploySlaveDef, type DeploySlavePorts } from "./defs/deploy-slave.ts";
+import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
 import { makeReleaseDef } from "./defs/release.ts";
 import { tailnetDisconnectDef, tailnetReconnectDef, tailnetRejoinDef } from "./defs/tailnet.ts";
@@ -21,10 +22,11 @@ export function register<P>(registry: Registry, def: RunDefinition<P>): void {
 
 /** The ports the ALWAYS-registered defs take. The platform repo exists only when GITHUB_REPO +
  *  GITHUB_WRITE_PAT are configured — so it stays optional and the step that needs it fails loud when
- *  it is absent, rather than a whole run kind disappearing from the registry. `db` is NOT optional:
- *  redeploy reads the target's role to decide which of its two arms it runs, and a definition's
- *  steps() is handed the persisted params and no database. */
-export interface RegistryPorts extends DeploySlavePorts {
+ *  it is absent, rather than a whole run kind disappearing from the registry. The same holds for
+ *  `ansiwiseServeCommand` (ANSIWISE_SERVE_COMMAND): the redeploy master arm's program steps fail
+ *  loud without it. `db` is NOT optional: redeploy reads the target's role to decide which of its
+ *  two arms it runs, and a definition's steps() is handed the persisted params and no database. */
+export interface RegistryPorts extends DeploySlavePorts, AnsiwisePorts {
   db: Db;
 }
 

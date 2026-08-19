@@ -2,6 +2,8 @@
 // .dependency-cruiser.cjs `adapters-own-io-libs` rule enforces it. This file is pure types
 // + error classes (no ssh2 import), so the executor can depend on the port, not the lib.
 
+import type { Duplex } from "node:stream";
+
 export interface SshTarget {
   host: string;
   port: number;
@@ -35,6 +37,28 @@ export interface PortForward {
   close(): void;
 }
 
+export interface ChannelOptions {
+  signal: AbortSignal; // REQUIRED — no unabortable conversations
+  /** The remote command's stderr, line-buffered — its own log stream, kept apart from the
+   *  conversation's bytes so a diagnostic line can never corrupt a protocol frame. */
+  onStderr?: (line: string) => void;
+}
+
+/** A CONVERSATION with a remote command, as opposed to exec()'s one-shot exchange.
+ *
+ *  exec() ends the command's stdin the moment the command starts (ExecOptions.stdin is a
+ *  one-shot buffer), which is right for `kubectl get ...` and makes a request/response protocol
+ *  impossible: the counterpart reads end-of-input before the first request arrives. This keeps
+ *  stdin OPEN — `stream` is the command's stdin and stdout as one byte stream, and whoever holds
+ *  it speaks whatever protocol the command speaks (HTTP, for `ansiwise serve`) for as long as
+ *  the channel lives. */
+export interface SshChannel {
+  /** The conversation: writes reach the remote command's stdin, reads are its stdout. */
+  stream: Duplex;
+  /** End the conversation. The remote command reads end-of-input and exits; idempotent. */
+  close(): void;
+}
+
 export interface SshSession {
   /** exec + stream. Resolves with the exit code (does NOT throw on non-zero — callers
    *  assert, so a step controls its own pass/fail wording). Throws on transport error,
@@ -42,6 +66,10 @@ export interface SshSession {
   exec(command: string, opts: ExecOptions): Promise<ExecResult>;
   /** exec, throw ExecFailedError (with stderr tail) unless code===0. */
   mustExec(command: string, opts: ExecOptions): Promise<ExecResult>;
+  /** Start a command and hold its channel open as a CONVERSATION (see SshChannel). No wall
+   *  clock of its own — a conversation has no single command to time; the caller bounds the
+   *  work it does over the stream and closes it. Abort closes the channel. */
+  openChannel(command: string, opts: ChannelOptions): Promise<SshChannel>;
   putFile(remotePath: string, content: Buffer, mode: number, opts: { signal: AbortSignal }): Promise<void>;
   forwardLocalPort(remoteHost: string, remotePort: number): Promise<PortForward>;
   /** The host-key fingerprint observed on connect (trust-on-first-use recording). */

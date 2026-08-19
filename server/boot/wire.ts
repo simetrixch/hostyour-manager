@@ -70,7 +70,11 @@ export async function wire(): Promise<Wired> {
   // Tekton gate-runner config (ONBOARD_GATE_CONTROLLER_ADDR) + platform repo are both configured
   // (else defs=[] and the mutating consumer routes answer 501). See wire-onboarding.ts.
   const onboarding = buildOnboarding(config, store, db.db, logger);
-  const registry = buildRegistry({ db: db.db, ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}) }, onboarding.defs);
+  const registry = buildRegistry({
+    db: db.db,
+    ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}),
+    ...(config.ansiwiseServeCommand ? { ansiwiseServeCommand: config.ansiwiseServeCommand } : {}),
+  }, onboarding.defs);
   const executor = new Executor({
     db: db.db,
     creds: store,

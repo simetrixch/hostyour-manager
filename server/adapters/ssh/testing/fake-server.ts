@@ -1,4 +1,4 @@
-import { Server, utils, type AuthContext } from "ssh2";
+import { Server, utils, type AuthContext, type ServerChannel } from "ssh2";
 import { fingerprintPublicKey } from "../../../security/fingerprint.ts";
 
 export interface FakeExec {
@@ -10,6 +10,11 @@ export interface FakeExec {
 
 export interface FakeServerOptions {
   execTable?: Record<string, FakeExec>;
+  /** Commands answered by HOLDING THE CHANNEL OPEN — the server side of SshSession.openChannel.
+   *  The handler is handed the exec stream (a Duplex whose reads are the client's writes) and
+   *  drives both directions itself: echo bytes back, or pipe them to a real process's stdio or
+   *  socket. It ends the conversation with stream.exit()+stream.end(); the fixture never does. */
+  conversations?: Record<string, (stream: ServerChannel) => void>;
   acceptPassword?: string;
   authorizedKeys?: string[]; // OpenSSH public lines
   /** Emulate sshd's per-connection cap on CONCURRENT session channels (OpenSSH
@@ -80,6 +85,11 @@ export async function startFakeSshServer(opts: FakeServerOptions = {}): Promise<
         });
         session.on("exec", (acceptExec, _reject, info) => {
           const stream = acceptExec();
+          const conversation = opts.conversations?.[info.command];
+          if (conversation) {
+            conversation(stream);
+            return;
+          }
           const result = opts.execTable?.[info.command] ?? { code: 0 };
           if (result.stdout) stream.write(result.stdout);
           if (result.stderr) stream.stderr.write(result.stderr);

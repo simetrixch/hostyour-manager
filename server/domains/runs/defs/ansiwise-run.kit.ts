@@ -1,0 +1,304 @@
+import type { Step, StepCtx } from "../../../executor/types.ts";
+import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
+import { AnsiwiseClient } from "../../../adapters/ansiwise/client.ts";
+import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../../../adapters/ansiwise/port.ts";
+import { isMasterRole } from "../../../../shared/enums.ts";
+import { loadServer, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
+
+// Driving one ansiwise PROGRAM on a machine, through the machine's own REST surface — the step
+// that replaces `setup.sh --<stage>` on hosts whose machine layer is delivered by the
+// deploy-cluster / deploy-gitops programs (digita-deploy ansiwise/programs/) instead of shell.
+//
+// THE SHAPE IS: prove, then act, and never re-implement the proof. `dry` first, asserted green
+// off the machine's own record; then `run`, which the machine's gate only admits against a green
+// dry of the SAME fingerprint (program + commit + answers). The gate lives in the binary
+// (ansiwise-core Gate) — this step SEQUENCES it and reads `admitted_by` back, it never decides
+// admission itself.
+//
+// THE RUN IS DETACHED ON THE MACHINE AND OUTLIVES THE CHANNEL. POST /runs answers 202 the moment
+// the run is going; everything after that is read from the machine's record. So the step
+// checkpoints the machine's run id and the last event sequence it saw, and a re-entry — after a
+// manager crash, after the channel died mid-follow — RE-ATTACHES with ?from= instead of starting
+// a second run. That matters most on the master: re-running deploy-cluster restarts kubelite,
+// and the manager's own pod loses its API server mid-follow by design.
+
+/** The name the elevation password rides under through approve (Plan.requiredSecrets →
+ *  ctx.secrets). The installation's ansiwise.yaml says `password_from_caller: true`, so the
+ *  password comes with each POST and lives exactly as long as the machine run does. */
+export const ANSIWISE_ELEVATION_SECRET = "ansiwise-elevation";
+
+/** One program's wall clock, dry and run each. The cold-install budget hostRunStep gave
+ *  setup.sh, for the same reason: a redeploy may bring a MicroK8s channel change with it.
+ *  Expiry fails the STEP only — the machine run keeps going detached, and a retry re-attaches
+ *  to it rather than starting a second one. */
+export const ANSIWISE_PROGRAM_TIMEOUT_MS = 45 * 60_000;
+
+/** How the manager starts the conversation: the command run over the target's SSH session whose
+ *  stdio then speaks HTTP (`ansiwise serve` out of the machine's catalogue checkout). WHICH
+ *  checkout the service reads its programs from is that command's to say — configuration, never
+ *  an assumption baked in here. */
+export interface AnsiwisePorts {
+  ansiwiseServeCommand?: string;
+}
+
+export function requireServeCommand(ports: AnsiwisePorts): string {
+  if (!ports.ansiwiseServeCommand) {
+    throw errNotConfigured(
+      "ANSIWISE_SERVE_COMMAND is not configured — this step reaches the machine's deployment programs through " +
+      "`ansiwise serve` on the machine, and which command starts it (and so which catalogue checkout it reads) " +
+      "is the installation's decision. Set ANSIWISE_SERVE_COMMAND to the command that serves the surface on the " +
+      "session's stdio, e.g. `cd /srv/digita-deploy && ansiwise serve`",
+    );
+  }
+  return ports.ansiwiseServeCommand;
+}
+
+/** One phase's progress, persisted so a re-entry re-attaches instead of re-starting. `seen` is
+ *  the last event sequence rendered into the run log — the next follow asks `?from=seen+1`, so
+ *  a crash costs at most the events since the last checkpoint, replayed. */
+interface PhaseMark {
+  id: string;
+  seen: number;
+  exitCode?: number;
+}
+
+interface ProgramCheckpoint {
+  program: string;
+  dry?: PhaseMark;
+  live?: PhaseMark;
+}
+
+/** `run-<program>`: prove the program with a dry run, then run it, following both into the run
+ *  log. Both phases go through the ONE machine surface and the machine's own gate. */
+export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports: AnsiwisePorts): Step {
+  return {
+    name: `run-${program}`,
+    title: `Prove, then run, the ${program} program on the machine (dry → run)`,
+    run: async (ctx) => {
+      const serveCommand = requireServeCommand(ports);
+      const cp = ctx.readCheckpoint<ProgramCheckpoint>() ?? { program };
+      const save = (): void => ctx.checkpoint(cp);
+      // The step's own wall clock, kept apart from ctx.signal: a cancel must stay a cancel,
+      // and an expired budget must fail the step while the detached machine run keeps going.
+      const budget = AbortSignal.timeout(ANSIWISE_PROGRAM_TIMEOUT_MS);
+      const signal = AbortSignal.any([ctx.signal, budget]);
+
+      const session = await ctx.ssh();
+      const channel = await session.openChannel(serveCommand, {
+        signal,
+        onStderr: (line) => ctx.log("stderr", `serve: ${line}`),
+      });
+      const client = new AnsiwiseClient({ kind: "channel", stream: channel.stream });
+      try {
+        const answers = await composeAnswers(ctx, client, program, target, signal);
+        const password = ctx.secrets.get(ANSIWISE_ELEVATION_SECRET)?.toString("utf8");
+        if (password === undefined || password.length === 0) {
+          throw errValidation(
+            `the "${ANSIWISE_ELEVATION_SECRET}" secret is gone (a restart drops run secrets) — retry the step and ` +
+            "supply the machine's elevation password again; the programs raise their commands to root with it",
+          );
+        }
+
+        const dry = await phase(ctx, client, cp, "dry", { program, answers, password, signal, save });
+        if (dry.exitCode !== 0) {
+          throw errValidation(
+            `the DRY run of ${program} on the machine is not green (run ${dry.id}, exit ${dry.exitCode}) — ` +
+            "nothing was acted on; read the run log, fix what the machine named, then retry the step",
+          );
+        }
+        const live = await phase(ctx, client, cp, "run", { program, answers, password, signal, save });
+        if (live.exitCode !== 0) {
+          throw errValidation(
+            `the ${program} run on the machine failed (run ${live.id}, exit ${live.exitCode}) — ` +
+            "read the run log; a retry of this step RE-READS that run's record and refuses again, " +
+            "so fix the machine first, then clear the step by retrying the run from this step",
+          );
+        }
+        ctx.log("meta", `${program}: dry ${dry.id} proved it, run ${live.id} performed it — both green on the machine's own record`);
+      } catch (err) {
+        if (budget.aborted && !ctx.signal.aborted) {
+          throw errValidation(
+            `${program} did not finish within ${ANSIWISE_PROGRAM_TIMEOUT_MS / 60_000} min — the machine run keeps ` +
+            "going detached; retry the step to re-attach to it (the checkpoint holds its id)",
+          );
+        }
+        throw err;
+      } finally {
+        client.close();
+        channel.close();
+      }
+    },
+  };
+}
+
+/** The answers a program run is handed, composed from two places and NOWHERE hardcoded: what the
+ *  inventory is authoritative for (the cluster row and the server row), then — for every answer
+ *  the PROGRAM DECLARES beyond those — what the operator supplied at approve
+ *  (`activation-input:<answer>`). The declaration is read off the machine (`GET
+ *  /programs/{name}`), so which answers exist is the catalogue's to say; an answer nobody
+ *  supplied is OMITTED, and the machine's own validation refuses it by name or fills its
+ *  declared default — this step never re-implements either. */
+async function composeAnswers(
+  ctx: StepCtx,
+  client: AnsiwiseClient,
+  program: string,
+  target: SlaveTarget,
+  signal: AbortSignal,
+): Promise<Record<string, string>> {
+  const { domain, stage } = target.resolve(ctx.db);
+  const server = loadServer(ctx.db, target.serverId);
+  const inventory: Record<string, string> = {
+    fqdn: domain,
+    stage,
+    role: isMasterRole(server.role) ? "master" : "slave",
+    operator_user: server.sshUser,
+  };
+  const declared = await client.program(program, { signal });
+  const answers: Record<string, string> = {};
+  for (const spec of declared.answers) {
+    const known = inventory[spec.name];
+    if (known !== undefined) {
+      answers[spec.name] = known;
+      continue;
+    }
+    const supplied = ctx.secrets.get(`activation-input:${spec.name}`)?.toString("utf8").trim();
+    if (supplied !== undefined && supplied.length > 0) answers[spec.name] = supplied;
+  }
+  return answers;
+}
+
+/** One phase — the proof or the act — idempotent against the checkpoint:
+ *   already green      ⇒ nothing is asked of the machine again;
+ *   started earlier    ⇒ RE-ATTACH: follow `?from=seen+1`, never a second POST;
+ *   not started        ⇒ POST it, then follow.
+ *  The verdict is the RECORD's (`GET /runs/{id}`), never the stream's: a stream can be cut on
+ *  its last line, and the record is what the machine itself stands behind. */
+async function phase(
+  ctx: StepCtx,
+  client: AnsiwiseClient,
+  cp: ProgramCheckpoint,
+  mode: "dry" | "run",
+  o: { program: string; answers: Record<string, string>; password: string; signal: AbortSignal; save: () => void },
+): Promise<PhaseMark> {
+  const slot = mode === "dry" ? "dry" : "live";
+  let mark = cp[slot];
+  if (mark?.exitCode === 0) {
+    ctx.log("meta", `${o.program} ${mode}: run ${mark.id} is already green — nothing to repeat`);
+    return mark;
+  }
+  if (mark === undefined) {
+    let accepted;
+    try {
+      accepted = await client.start(
+        { program: o.program, mode, answers: o.answers, elevationPassword: o.password },
+        { signal: o.signal },
+      );
+    } catch (err) {
+      if (err instanceof AnsiwiseRefused && err.status === 409 && mode === "run") {
+        // The gate said "not yet": the green dry this step holds no longer proves this input —
+        // typically the machine's checkout moved between the two phases, which changes the
+        // fingerprint. The stale proof is dropped so the retry proves the CURRENT input instead
+        // of asking the same refused question forever.
+        delete cp.dry;
+        o.save();
+        throw errValidation(
+          `the machine's gate refused the ${o.program} run: ${err.reason} — the dry proof went stale ` +
+          "(the input changed under it); retry the step to prove the current input and run it",
+        );
+      }
+      throw err instanceof AnsiwiseRefused ? errValidation(`the machine refused to start ${o.program} (${mode}): ${err.reason}`) : err;
+    }
+    mark = { id: accepted.run, seen: -1 };
+    cp[slot] = mark;
+    o.save();
+    const admitted = accepted.admitted_by !== undefined ? ` — admitted by dry ${accepted.admitted_by}` : "";
+    const waived = accepted.waived !== undefined && accepted.waived.length > 0 ? ` — the installation WAIVED ${accepted.waived.join(", ")}` : "";
+    ctx.log("meta", `${o.program} ${mode}: machine run ${mark.id} started (fingerprint ${accepted.fingerprint.slice(0, 12)}…)${admitted}${waived}`);
+  } else {
+    ctx.log("meta", `${o.program} ${mode}: re-attaching to machine run ${mark.id} from event ${mark.seen + 1}`);
+  }
+
+  // 202 means the run is GOING, not that its record exists yet: the run is a detached process
+  // that writes its header a beat after it starts, so the follow waits for the record to appear
+  // before it asks for events. A run that NEVER writes one died before its first step — the
+  // "starts and dies where nobody is watching" case — and is refused by name, bounded.
+  await appearedRecord(client, mark.id, o.program, o.signal);
+
+  for await (const event of client.events(mark.id, { from: mark.seen + 1, signal: o.signal })) {
+    logEvent(ctx, event);
+    mark.seen = event.sequence;
+    // Persisted on the boundaries a reader thinks in, not per line — a re-entry then replays at
+    // most one step's worth of output into the log.
+    if (event.kind === "step-started" || event.kind === "step-finished" || event.kind === "run-finished") o.save();
+  }
+
+  const record = await endedRecord(ctx, client, mark.id, o.signal);
+  mark.exitCode = record.exit_code ?? -1;
+  o.save();
+  return mark;
+}
+
+/** The record once it EXISTS (see the wait in phase). 404 is the one refusal retried here,
+ *  because right after a 202 it means "not written yet" — every other refusal stands. */
+async function appearedRecord(client: AnsiwiseClient, id: string, program: string, signal: AbortSignal): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await client.run(id, { signal });
+      return;
+    } catch (err) {
+      if (!(err instanceof AnsiwiseRefused) || err.status !== 404) throw err;
+      if (attempt >= 40) {
+        throw errValidation(
+          `machine run ${id} (${program}) was accepted but never wrote its record — it started and died before its first step; read the machine's serve log`,
+        );
+      }
+    }
+    await sleepUnlessAborted(250, signal);
+  }
+}
+
+/** The record once it carries an end. The events stream ends when the run does, but the header
+ *  is a separate file the run child replaces — one bounded breath covers the moment between the
+ *  last event and the rewritten header. */
+async function endedRecord(ctx: StepCtx, client: AnsiwiseClient, id: string, signal: AbortSignal): Promise<AnsiwiseRunRecord> {
+  for (let attempt = 0; ; attempt++) {
+    const record = await client.run(id, { signal });
+    if (record.end !== undefined) return record;
+    if (attempt >= 20) {
+      throw errValidation(`machine run ${id} streamed its last event but its record never ended — read the record on the machine`);
+    }
+    ctx.log("meta", `machine run ${id}: events are over, waiting for the record to close`);
+    await sleepUnlessAborted(500, signal);
+  }
+}
+
+/** The machine run's events, rendered into THIS run's log — the operator watches one log. The
+ *  kinds an operator reads are written through; the bookkeeping kinds stay on the machine's own
+ *  record, which keeps every event and is the place to read a run forensically. */
+function logEvent(ctx: StepCtx, e: AnsiwiseEvent): void {
+  switch (e.kind) {
+    case "output":
+      ctx.log(e.stream === "stderr" ? "stderr" : "stdout", e.text ?? "");
+      break;
+    case "log":
+      ctx.log("meta", `${e.step !== undefined ? `${e.step}: ` : ""}${e.message ?? ""}`);
+      break;
+    case "run-started":
+      ctx.log("meta", `machine run started: ${e.program ?? ""} (${e.mode ?? ""})`);
+      break;
+    case "step-started":
+      ctx.log("meta", `step ${e.step ?? "?"} started`);
+      break;
+    case "step-finished":
+      ctx.log("meta", `step ${e.step ?? "?"}: ${e.verdict?.label ?? "?"}${e.verdict?.reason !== undefined ? ` — ${e.verdict.reason}` : ""}`);
+      break;
+    case "command-started":
+      ctx.log("meta", `$ ${(e.argv ?? []).join(" ")}`);
+      break;
+    case "run-finished":
+      ctx.log("meta", `machine run finished: exit ${e.exit_code ?? "?"}${e.issues !== undefined && e.issues.length > 0 ? ` — ${e.issues.join("; ")}` : ""}`);
+      break;
+    default:
+      break;
+  }
+}

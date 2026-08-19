@@ -106,4 +106,65 @@ describe("ssh2 session against a real in-process ssh2.Server", () => {
       createSshSession(pwTarget(srv.port, { hostKeyFingerprint: "SHA256:wrongwrongwrongwrongwrongwrongwrongwrong00" })),
     ).rejects.toBeInstanceOf(HostKeyMismatchError);
   });
+
+  it("openChannel holds a CONVERSATION: two request/response exchanges over ONE channel, which exec's one-shot stdin cannot do", async () => {
+    const srv = await start({
+      acceptPassword: "pw",
+      conversations: {
+        cat: (stream) => {
+          stream.on("data", (d: Buffer) => stream.write(d)); // the counterpart answers each write
+        },
+      },
+    });
+    const session = await createSshSession(pwTarget(srv.port));
+    const channel = await session.openChannel("cat", { signal: new AbortController().signal });
+
+    const exchange = (text: string): Promise<string> =>
+      new Promise((resolve) => {
+        channel.stream.once("data", (d: Buffer) => resolve(d.toString("utf8")));
+        channel.stream.write(text);
+      });
+    // The second exchange is the whole point: after the first answer the channel's stdin is
+    // still open, so the conversation continues — exec() would have ended stdin before it began.
+    expect(await exchange("first request\n")).toBe("first request\n");
+    expect(await exchange("second request\n")).toBe("second request\n");
+    channel.close();
+    session.close();
+  });
+
+  it("openChannel: stderr rides its own callback, line-buffered, apart from the conversation's bytes", async () => {
+    const srv = await start({
+      acceptPassword: "pw",
+      conversations: {
+        serve: (stream) => {
+          stream.stderr.write("starting up\npartial");
+          stream.write("payload");
+        },
+      },
+    });
+    const session = await createSshSession(pwTarget(srv.port));
+    const stderr: string[] = [];
+    const channel = await session.openChannel("serve", { signal: new AbortController().signal, onStderr: (l) => stderr.push(l) });
+    const payload = await new Promise<string>((resolve) => channel.stream.once("data", (d: Buffer) => resolve(d.toString("utf8"))));
+    expect(payload).toBe("payload");
+    expect(stderr).toEqual(["starting up"]); // the partial line waits for its newline or the close
+    channel.close();
+    session.close();
+  });
+
+  it("openChannel rejects with AbortError on an already-aborted signal, and an abort mid-conversation tears the channel down", async () => {
+    const srv = await start({ acceptPassword: "pw", conversations: { cat: () => undefined } });
+    const session = await createSshSession(pwTarget(srv.port));
+    const gone = new AbortController();
+    gone.abort();
+    await expect(session.openChannel("cat", { signal: gone.signal })).rejects.toMatchObject({ name: "AbortError" });
+
+    const ac = new AbortController();
+    const channel = await session.openChannel("cat", { signal: ac.signal });
+    channel.stream.resume(); // ssh2 defers the channel's 'close' behind 'end', which needs a reader
+    const closed = new Promise<void>((resolve) => channel.stream.on("close", () => resolve()));
+    ac.abort();
+    await closed; // the remote command's channel is gone — nothing outlives the run that started it
+    session.close();
+  });
 });

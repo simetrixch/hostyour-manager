@@ -93,6 +93,7 @@ function fakeFactory(preflightOut = HEALTHY_PREFLIGHT, probeOut = PROBE_NO_CLIEN
       close: () => undefined,
       putFile: async () => undefined,
       forwardLocalPort: async () => ({ localPort: 0, close: () => undefined }),
+      openChannel: () => Promise.reject(new Error("no conversation in the adopt fixture")),
       exec: execImpl,
       mustExec: async (command, o) => {
         const r = await execImpl(command, o);

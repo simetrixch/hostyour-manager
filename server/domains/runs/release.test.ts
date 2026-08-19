@@ -1,20 +1,19 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { clusters, servers } from "../../db/schema/inventory.ts";
-import { getRun, readEvents } from "../../executor/read.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
 import { buildRegistry } from "./registry.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import {
-  makeHarness, disposeHarnesses, bareStepCtx, PARAMS, SLAVE_ID, MASTER_ID, SLAVE_MARKING_YAML,
+  makeHarness, disposeHarnesses, bareStepCtx, PARAMS, SLAVE_ID, SLAVE_MARKING_YAML,
 } from "./deploy-slave.fixture.ts";
 import type { Harness } from "./deploy-slave.fixture.ts";
 
-// The cluster release and the master arm of redeploy. Both act on a cluster that is already
-// LIVE, so every test here starts from an active cluster row rather than from a deploy-slave run —
-// what is under test is what the two verbs do to a running cluster, not how it got there.
+// The cluster release. It acts on a cluster that is already LIVE, so every test here starts from
+// an active cluster row rather than from a deploy-slave run — what is under test is what the verb
+// does to a running cluster, not how it got there.
 //
 // The channel ceiling is read from the platform repo's ONE table, so the fake repo carries that file
 // verbatim: a test that seeded a controller-side copy instead would prove the opposite of the rule.
@@ -25,13 +24,6 @@ const CHANNEL_TABLE = [
   "    alpha: [dev]",
   "    beta: [dev, test]",
   "    stable: [dev, test, prod]",
-].join("\n") + "\n";
-
-const MASTER_MARKING_YAML = [
-  "fqdn: m1.example.com",
-  "stage: prod",
-  "role: master+slave",
-  "build-plane: m1.example.com",
 ].join("\n") + "\n";
 
 afterEach(disposeHarnesses);
@@ -46,20 +38,6 @@ async function liveSlave(over: { stage?: "dev" | "test" | "prod"; marking?: stri
     status: "active", tier: "rehearsal", slaveId: 1, planeState: "ready",
   }).run();
   h.db.db.update(servers).set({ status: "healthy" }).where(eq(servers.id, SLAVE_ID)).run();
-  return h;
-}
-
-/** The same, for the cluster that carries the MASTER part — redeploy must hold for every role, not
- *  only for a slave. */
-async function liveMaster(): Promise<Harness> {
-  const h = await makeHarness({ keystore: "keyfile" });
-  h.platformRepo.seed(CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH, CHANNEL_TABLE);
-  h.platformRepo.seed(h.platformRepo.booksBranch, clusterMarkingPath("m1.example.com"), MASTER_MARKING_YAML);
-  h.db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, MASTER_ID)).run();
-  h.db.db.insert(clusters).values({
-    id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com",
-    status: "active", tier: "rehearsal", planeState: "ready",
-  }).run();
   return h;
 }
 
@@ -114,30 +92,6 @@ describe("release — refused while nothing regenerates an install branch", () =
   });
 });
 
-describe("redeploy — the master arm (the same composition holds for every role)", () => {
-  it("composes host-run + argocd-follow on a master+slave, and moves no pin", async () => {
-    const h = await liveMaster();
-    const before = markingOf(h, "m1.example.com");
-
-    const { plan } = await h.executor.plan("redeploy", { serverId: MASTER_ID });
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "host-run", "argocd-follow"]);
-
-    const r = await h.executor.plan("redeploy", { serverId: MASTER_ID });
-    await h.executor.approve(r.runId);
-    await h.executor.settle(r.runId);
-    expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
-
-    // The installer ran on the master itself, and the follow read the master's OWN argocd namespace —
-    // a cluster carrying the master part operates its own ArgoCD instead of hanging off another's.
-    const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
-    expect(onMaster.some((c) => c.includes("./setup.sh --prod"))).toBe(true);
-    expect(onMaster.some((c) => c.includes("-n argocd get applications.argoproj.io"))).toBe(true);
-    expect(JSON.stringify(readEvents(h.db.db, r.runId))).toContain("applications in ns argocd on m1 are Synced + Healthy");
-
-    // No pin was touched, nothing was committed, and the cluster stayed active throughout.
-    expect(markingOf(h, "m1.example.com")).toBe(before);
-    expect(h.platformRepo.commits).toHaveLength(0);
-    expect(h.platformRepo.tags.size).toBe(0);
-    expect(h.db.db.select().from(clusters).where(eq(clusters.id, "cls_master")).get()?.status).toBe("active");
-  });
-});
+// The redeploy MASTER ARM moved to redeploy.ansiwise.test.ts: it no longer runs setup.sh over
+// exec but drives the deploy-cluster / deploy-gitops programs through the REAL `ansiwise serve`,
+// and every suite that starts machine runs shares one file (the engine's run root is per-drive).
