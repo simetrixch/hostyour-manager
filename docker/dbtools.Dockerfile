@@ -13,11 +13,12 @@
 #   openssh-client          ssh / sftp to the Hetzner Storage Box staging area
 #
 # VERSION COUPLING: the database clients are installed per
-# platform/versions.yaml — the MongoDB apt-repo series comes from
-# .images.mongodb and the PostgreSQL client major from .images.postgres, read
-# with yq below. No client version literal lives in this file, so raising a
-# database version and rebuilding the dump tools are ONE change: the release
-# pipeline builds this image from the same tagged tree that carries the raise.
+# hostyour-cloud/platform/versions.yaml — the MongoDB apt-repo series is that
+# file's mongodb pin cut to its series, the PostgreSQL client major its
+# postgres pin cut to the major, both stamped into the ARG defaults below by
+# the sync-versions program. The client literals here are therefore WRITTEN,
+# never decided: raising a database version and rebuilding the dump tools are
+# ONE change, stamped and committed together.
 #
 # Debian, not Alpine: MongoDB ships mongosh and the database tools as glibc
 # builds only (deb/rpm — no musl build exists), so the official per-series apt
@@ -27,9 +28,9 @@
 
 FROM docker.io/library/debian:12-slim
 
-# Stamped by hostyour-cloud/tools/ops/sync-versions out of platform/versions.yaml:
-# MONGO_SERIES is .images.mongodb cut to <major>.<minor>, PG_MAJOR is
-# .images.postgres cut to <major>. Edit them there, never here.
+# Stamped by the sync-versions program out of hostyour-cloud/platform/versions.yaml:
+# MONGO_SERIES is the mongodb pin cut to <major>.<minor>, PG_MAJOR the postgres
+# pin cut to <major>. Edit them there, never here.
 ARG MONGO_SERIES=8.0
 ARG PG_MAJOR=18
 
