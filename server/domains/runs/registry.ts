@@ -7,7 +7,7 @@ import { makeDeploySlaveDef, type DeploySlavePorts } from "./defs/deploy-slave.t
 import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
 import { makeReleaseDef } from "./defs/release.ts";
-import { tailnetDisconnectDef, tailnetReconnectDef, tailnetRejoinDef } from "./defs/tailnet.ts";
+import { makeTailnetDisconnectDef, makeTailnetReconnectDef, makeTailnetRejoinDef } from "./defs/tailnet.ts";
 import { passwordLoginDisableDef, passwordLoginEnableDef } from "./defs/password-login.ts";
 import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from "./defs/operator-key.ts";
 
@@ -42,10 +42,12 @@ export function buildRegistry(ports: RegistryPorts, extra: AnyRunDefinition[] = 
   register(registry, makeReleaseDef(ports));
   // The tailnet repair verbs, on a host that is already deployed: leave the private network, come
   // back with the credential the host holds, or be logged out and joined again with one the master
-  // mints. They take no ports — everything they need is the inventory and the two hosts.
-  register(registry, tailnetDisconnectDef);
-  register(registry, tailnetReconnectDef);
-  register(registry, tailnetRejoinDef);
+  // mints. Every act is a program of the machine's own catalogue driven over `ansiwise serve`, so
+  // they take the serve command, and a rejoin additionally reads the coordinator's address off the
+  // platform repo — both fail loud in the step when unconfigured, like redeploy's.
+  register(registry, makeTailnetDisconnectDef(ports));
+  register(registry, makeTailnetReconnectDef(ports));
+  register(registry, makeTailnetRejoinDef(ports));
   // The password-login switch, on a host this controller already holds a key for: shut the sshd
   // password door and destroy the bootstrap password stored beside the server row, or open the
   // door again for a repair. They take no ports — the inventory and the one host are everything.

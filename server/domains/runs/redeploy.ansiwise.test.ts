@@ -19,11 +19,11 @@ import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
 import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
 import {
-  makeHarness, disposeHarnesses, scriptedHosts, stepColumn, MASTER_ID, logger, type Harness,
+  makeHarness, disposeHarnesses, scriptedHosts, stepColumn, MASTER_ID, SLAVE_ID, MINT_AUTHKEY, logger, type Harness,
 } from "./deploy-slave.fixture.ts";
 
-// The redeploy master arm AND the release on the REAL `ansiwise serve`, and the transport
-// underneath them. Nothing here mocks the machine's surface: the serve fixture starts the actual
+// The redeploy master arm, the release AND the tailnet repair verbs on the REAL `ansiwise serve`,
+// and the transport underneath them. Nothing here mocks the machine's surface: the serve fixture starts the actual
 // binary on a minimal installation whose programs are pure measurements (require_answer_matches),
 // so the gate, the answers validation, the detached run records and the ?from= resume are all the
 // engine's own.
@@ -52,6 +52,26 @@ const approveSecrets = (email: string): Record<string, Buffer> => ({
   "activation-input:letsencrypt_email": Buffer.from(email),
   "activation-input:letsencrypt_server": Buffer.from(ACME_STAGING),
 });
+
+/** A fixture for a program whose REAL declaration carries no answers (the tailnet client verbs):
+ *  one defaulted row, so a run whose caller sent NOTHING still exercises the engine's own record
+ *  semantics — and still goes red if the engine were handed a stray value that shadows the default. */
+const clientVerbYaml = (name: string, word: string): string => [
+  `name: ${name}`,
+  "roles: [master, slave]",
+  "answers:",
+  "  - name: act",
+  "    kind: text",
+  `    default: ${word}`,
+  "    describes: a defaulted answer nothing supplies",
+  "steps:",
+  "  - step: require_answer_matches",
+  "    answer: act",
+  `    pattern: '^${word}$'`,
+  "    refusal: the act does not match",
+  "    on_failure: exit",
+  "",
+].join("\n");
 
 /** What the step composes for deploy-cluster on the fixture master — mirrored here ONLY so a
  *  test can start a dry run itself and hand its id to the step as a checkpoint (the crashed-
@@ -110,6 +130,21 @@ describe.skipIf(bin === undefined)("redeploy over the machine's own deployment p
         { answer: "platform_domain", pattern: "^example\\.com$" },
         { answer: "catalog_repo", pattern: "^acme/acme-catalog$" },
         { answer: "committer_email", pattern: "^[^@]+@[^@]+$" },
+      ]),
+      // The tailnet family. The two client verbs' real programs declare NO answers, so their
+      // fixtures declare one DEFAULTED row: the manager must send nothing at all for the run to go
+      // green, which is exactly the composition contract on a host that may carry no cluster row.
+      // The mint and the rejoin declare what their real counterparts declare, each with a row that
+      // goes red when the manager composes the value wrong or not at all.
+      "tailnet-disconnect": clientVerbYaml("tailnet-disconnect", "leave"),
+      "tailnet-reconnect": clientVerbYaml("tailnet-reconnect", "up"),
+      "tailnet-mint-join-key": programYaml("tailnet-mint-join-key", [
+        { answer: "stage", pattern: "^prod$" },
+        { answer: "slave_fqdn", pattern: "^s1\\.example\\.com$" },
+      ]),
+      "tailnet-rejoin": programYaml("tailnet-rejoin", [
+        { answer: "login_server", pattern: "^https://tale\\.m1\\.example\\.com$" },
+        { answer: "auth_key", pattern: "^dc-tailnet-preauth-" },
       ]),
     });
     ssh = await startFakeSshServer({
@@ -178,7 +213,10 @@ describe.skipIf(bin === undefined)("redeploy over the machine's own deployment p
     const client = new AnsiwiseClient({ kind: "channel", stream: channel.stream });
     try {
       const programs = await client.programs();
-      expect(programs.map((p) => p.name).sort()).toEqual(["deploy-cluster", "deploy-gitops", "regenerate-branch"]);
+      expect(programs.map((p) => p.name).sort()).toEqual([
+        "deploy-cluster", "deploy-gitops", "regenerate-branch",
+        "tailnet-disconnect", "tailnet-mint-join-key", "tailnet-reconnect", "tailnet-rejoin",
+      ]);
       expect(programs.find((p) => p.name === "deploy-cluster")?.answers.map((a) => a.name)).toContain("letsencrypt_email");
 
       const answers = composedAnswers(uniqueEmail());
@@ -249,6 +287,22 @@ describe.skipIf(bin === undefined)("redeploy over the machine's own deployment p
     }
   }
 
+  /** Waits until the machine's record for [id] carries an end. */
+  async function observerEnded(id: string): Promise<void> {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      // 404 right after the accept is "not written yet": a run is a detached process that writes
+      // its header a beat after it starts, which is the same wait the step itself performs.
+      try {
+        const record = await observer.run(id);
+        if (record.exit_code !== undefined && record.exit_code !== null) return;
+      } catch (err) {
+        if (!(err instanceof AnsiwiseRefused) || err.status !== 404) throw err;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error(`machine run ${id} never ended`);
+  }
+
   // ================================ the verb, end to end ================================
 
   it("plan: the master arm composes attest → run-deploy-cluster → run-deploy-gitops → argocd-follow and asks for the password + the missing answers", async () => {
@@ -315,6 +369,49 @@ describe.skipIf(bin === undefined)("redeploy over the machine's own deployment p
     // The proof failed, so the act never started: not one new run-mode record on the machine.
     const runsAfter = (await observer.runs()).filter((x) => x.program === "deploy-cluster" && x.mode === "run").length;
     expect(runsAfter).toBe(runsBefore);
+  });
+
+  it("a checkpoint holding a FINISHED-RED machine run starts a fresh one — a retry that could never work", { timeout: 120_000 }, async () => {
+    // THE TRAP THIS CLOSES. A re-entry keeps its checkpoint, and a mark whose run had already ended
+    // red fell into the re-attach branch: every retry watched the same finished run, read the same
+    // red record, and failed the same way — while the step's own message told the operator to retry
+    // it. Nothing they could do from outside would ever clear it.
+    const h = await liveMaster();
+    const email = uniqueEmail();
+
+    // A machine run that is FINISHED and RED: the program refuses an answer it can judge itself.
+    const bad = await observerStart({
+      program: "deploy-cluster",
+      mode: "dry",
+      answers: { ...composedAnswers(email), letsencrypt_email: "not-an-email" },
+    });
+    await observerEnded(bad.run);
+    const ended = await observer.run(bad.run);
+    expect(ended.exit_code === 0).toBe(false);
+
+    let checkpoint: unknown = {
+      program: "deploy-cluster",
+      dry: { id: bad.run, seen: -1, exitCode: ended.exit_code ?? -1 },
+    };
+    const logs: string[] = [];
+    const ctx = stepCtx(h, {
+      secrets: approveSecrets(email),
+      log: (line) => logs.push(line),
+      readCheckpoint: () => checkpoint,
+      checkpoint: (data) => (checkpoint = data),
+    });
+
+    const step = ansiwiseProgramStep(activeClusterTarget(MASTER_ID), "deploy-cluster", { ansiwiseServeCommand: "ansiwise serve" });
+    await step.run(ctx);
+
+    expect(
+      logs.some((l) => l.includes("cannot be retried by watching it again")),
+      "the step re-attached to a run that had already ended",
+    ).toBe(true);
+    expect(logs.some((l) => l.includes(`re-attaching to machine run ${bad.run}`))).toBe(false);
+    // And it got somewhere: a fresh dry of the CURRENT input, green, plus the run it admitted.
+    const mine = (await observer.runs()).filter((x) => x.fingerprint !== bad.fingerprint && x.exit_code === 0);
+    expect(mine.length).toBeGreaterThan(0);
   });
 
   it("re-entry re-attaches with ?from= instead of starting a second run, and a green checkpoint repeats nothing", { timeout: 120_000 }, async () => {
@@ -427,6 +524,128 @@ describe.skipIf(bin === undefined)("redeploy over the machine's own deployment p
     expect(fresh.filter((x) => x.program === "regenerate-branch" && x.mode === "run")).toHaveLength(0);
     expect(fresh.filter((x) => x.program === "deploy-cluster" || x.program === "deploy-gitops")).toHaveLength(0);
     expect(h.platformRepo.tags.size).toBe(1);
+  });
+
+  // ================================ the tailnet verbs, end to end ================================
+
+  /** A harness whose SLAVE is the tailnet verbs' target, wired to reach the real `ansiwise serve`.
+   *  The cluster row and the profile (where the rejoin reads global.tailnetUrl) are the rejoin's
+   *  world; the two client verbs run without either — the host that needs them most is exactly the
+   *  one whose deploy went wrong. */
+  async function tailnetHost(opts: { cluster?: boolean; tailnetUrl?: string | false } = {}): Promise<Harness> {
+    const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
+    const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise serve" });
+    if (opts.cluster ?? true) {
+      h.db.db.insert(clusters).values({
+        id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1,
+      }).run();
+      if (opts.tailnetUrl !== false) {
+        // Seeded BESIDE the values chain's sentinel file: the fake materializes its own profile on
+        // a branch's first touch unless platform/values-common.yaml already stands there.
+        h.platformRepo.seed("s1.example.com", "platform/values-common.yaml", "global: {}\n");
+        h.platformRepo.seed("s1.example.com", "cluster/profile.yaml", `global:\n  tailnetUrl: ${opts.tailnetUrl ?? "https://tale.m1.example.com"}\n`);
+      }
+    }
+    return h;
+  }
+
+  const elevationOnly = (): Record<string, Buffer> => ({ [ANSIWISE_ELEVATION_SECRET]: Buffer.from("root-pw") });
+
+  for (const kind of ["tailnet-disconnect", "tailnet-reconnect"] as const) {
+    it(`INNOCENT CASE (${kind}): the program runs on the host's own surface over the PUBLIC address — no cluster row needed — and the membership is re-read`, { timeout: 120_000 }, async () => {
+      const h = await tailnetHost({ cluster: false });
+      const before = await observer.runs();
+
+      const r = await h.executor.plan(kind, { serverId: SLAVE_ID });
+      expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", `run-${kind}`, "read-membership"]);
+      expect(r.plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
+      await h.executor.approve(r.runId, elevationOnly());
+      await h.executor.settle(r.runId);
+      expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
+
+      // The machine's OWN records: dry + run, both green — the proof, then the act.
+      const fresh = (await observer.runs()).filter((a) => !before.some((b) => b.id === a.id && b.mode === a.mode));
+      expect(fresh.filter((x) => x.program === kind && x.exit_code === 0).map((x) => x.mode).sort()).toEqual(["dry", "run"]);
+
+      // EVERY session went to the host's PUBLIC address (servers.host) — never the LAN one every
+      // other verb would use — and the master was not touched at all.
+      expect(h.hosts.log.length).toBeGreaterThan(0);
+      expect(h.hosts.log.every((l) => l.host === "s1.example.com")).toBe(true);
+
+      // The stored reading was replaced through the one writer, stamped with THIS run.
+      const row = h.db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
+      expect(row?.tailnetState).toBe("joined"); // what the scripted probe reports
+      expect((row?.tailnetJson as { runId?: string } | null)?.runId).toBe(r.runId);
+    });
+  }
+
+  it("INNOCENT CASE (tailnet-rejoin): mint on the master, carry the credential, ONE rejoin program run on the host — every machine run green, the key nowhere in the run surface", { timeout: 120_000 }, async () => {
+    const h = await tailnetHost();
+    const before = await observer.runs();
+
+    const r = await h.executor.plan("tailnet-rejoin", { serverId: SLAVE_ID });
+    expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", "rejoin", "read-membership"]);
+    await h.executor.approve(r.runId, elevationOnly());
+    await h.executor.settle(r.runId);
+    expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
+
+    // The machine's OWN records: dry + run per program, all green. The rejoin program's rows judge
+    // the COMPOSITION — login_server off the branch's profile, auth_key off the master's key file —
+    // so a wrong value goes red on the machine's side of the wire.
+    const fresh = (await observer.runs()).filter((a) => !before.some((b) => b.id === a.id && b.mode === a.mode));
+    const byProgram = (name: string): string[] => fresh.filter((x) => x.program === name && x.exit_code === 0).map((x) => x.mode).sort();
+    expect(byProgram("tailnet-mint-join-key")).toEqual(["dry", "run"]);
+    expect(byProgram("tailnet-rejoin")).toEqual(["dry", "run"]);
+
+    // Two surfaces: the mint conversation on the MASTER (its usual address), the rejoin on the
+    // host's PUBLIC one; the key file was read and removed on the master.
+    const serves = h.hosts.log.filter((l) => l.command === "ansiwise serve").map((l) => l.host).sort();
+    expect(serves).toEqual(["m1.example.com", "s1.example.com"]);
+    expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "cat /tmp/ansiwise-tailnet-join-key-s1")).toBe(true);
+    expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "rm -f /tmp/ansiwise-tailnet-join-key-s1")).toBe(true);
+
+    // The credential appears NOWHERE in the persisted run surface.
+    expect(JSON.stringify(readEvents(h.db.db, r.runId))).not.toContain(MINT_AUTHKEY);
+
+    // The reading on the row is this run's.
+    const row = h.db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
+    expect((row?.tailnetJson as { runId?: string } | null)?.runId).toBe(r.runId);
+  });
+
+  it("PLANTED DEFECT (tailnet-rejoin): a coordinator address the machine's dry run judges red fails the step BEFORE the logout — no run-mode rejoin starts, and the membership was still re-read", { timeout: 60_000 }, async () => {
+    const h = await tailnetHost({ tailnetUrl: "https://tale.wrong.example.com" });
+    const before = await observer.runs();
+
+    const r = await h.executor.plan("tailnet-rejoin", { serverId: SLAVE_ID });
+    await h.executor.approve(r.runId, elevationOnly());
+    await h.executor.settle(r.runId);
+    expect(getRun(h.db.db, r.runId)?.status).toBe("failed");
+    expect(stepColumn(h.db, r.runId, "rejoin", "error")).toMatch(/DRY run of tailnet-rejoin on the host is not green/);
+
+    // The mint is fine — its two runs are green — and the act never started: not one run-mode
+    // rejoin record on the machine, so the logout never happened.
+    const fresh = (await observer.runs()).filter((a) => !before.some((b) => b.id === a.id && b.mode === a.mode));
+    expect(fresh.filter((x) => x.program === "tailnet-mint-join-key" && x.exit_code === 0).map((x) => x.mode).sort()).toEqual(["dry", "run"]);
+    expect(fresh.filter((x) => x.program === "tailnet-rejoin" && x.mode === "run")).toHaveLength(0);
+
+    // The failure still re-read the host, so the card shows the world as the failed run left it.
+    const row = h.db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
+    expect((row?.tailnetJson as { runId?: string } | null)?.runId).toBe(r.runId);
+  });
+
+  it("PLANTED DEFECT (tailnet-rejoin): a profile without global.tailnetUrl is refused BY NAME before any machine is asked anything", { timeout: 60_000 }, async () => {
+    const h = await tailnetHost({ tailnetUrl: false });
+    const before = await observer.runs();
+
+    const r = await h.executor.plan("tailnet-rejoin", { serverId: SLAVE_ID });
+    await h.executor.approve(r.runId, elevationOnly());
+    await h.executor.settle(r.runId);
+    expect(getRun(h.db.db, r.runId)?.status).toBe("failed");
+    expect(stepColumn(h.db, r.runId, "rejoin", "error")).toMatch(/no readable global\.tailnetUrl/);
+
+    // Not one machine run started, on either surface — no serve conversation was even opened.
+    expect(await observer.runs()).toHaveLength(before.length);
+    expect(h.hosts.log.filter((l) => l.command === "ansiwise serve")).toHaveLength(0);
   });
 
   /** A hand StepCtx for driving one program step directly — the executor-shaped surface with the

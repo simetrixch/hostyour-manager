@@ -120,6 +120,8 @@ export interface HostsScript {
   mintExit: number;
   tailnetJoinExit: number;   // install-microk8s tail (slave): --tailnet-join
   tailnetProbeOut: string;   // install-microk8s tail (slave): what the joined client reports back
+  mintedKeyOut: string;      // tailnet-rejoin (master): what `cat` of the mint program's key file answers
+  mintedKeyExit: number;
   emitOut: string;
   emitExit: number;
   slaveAddExit: number;
@@ -164,6 +166,8 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     mintExit: 0,
     tailnetJoinExit: 0,
     tailnetProbeOut: TAILNET_PROBE_JOINED,
+    mintedKeyOut: MINT_AUTHKEY,
+    mintedKeyExit: 0,
     emitOut: EMIT_CREDS_JSON,
     emitExit: 0,
     slaveAddExit: 0,
@@ -215,6 +219,10 @@ export function hostsFactory(f: HostsScript): SshFactory {
       // The mint answers for both askers: mint-join-key and install-microk8s's join leg.
       if (command.includes("--tailnet-mint-join-key")) { emit(f.mintOut); return done(f.mintExit); }
       if (command.includes("--tailnet-join")) return done(f.tailnetJoinExit);
+      // The mint PROGRAM's key file on the master (tailnet.kit.ts readMintedKey): the cat answers
+      // with the credential, the rm that follows matches the same marker and answers silently.
+      if (command.startsWith("cat ") && command.includes("ansiwise-tailnet-join-key-")) { emit(f.mintedKeyOut); return done(f.mintedKeyExit); }
+      if (command.includes("ansiwise-tailnet-join-key-")) return done();
       if (command.includes("dc-tailnet-probe-")) { emit(f.tailnetProbeOut); return done(); }
       if (command.includes("--emit-mgmt-credentials")) { emit(f.emitOut); return done(f.emitExit); }
       if (command.includes("--slave-add")) return done(f.slaveAddExit);

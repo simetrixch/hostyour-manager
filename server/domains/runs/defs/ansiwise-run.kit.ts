@@ -1,8 +1,9 @@
 import type { Step, StepCtx } from "../../../executor/types.ts";
+import type { SshSession } from "../../../adapters/ssh/port.ts";
 import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { AnsiwiseClient } from "../../../adapters/ansiwise/client.ts";
 import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../../../adapters/ansiwise/port.ts";
-import { isMasterRole } from "../../../../shared/enums.ts";
+import { isMasterRole, type Stage } from "../../../../shared/enums.ts";
 import { loadServer, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 
 // Driving one ansiwise PROGRAM on a machine, through the machine's own REST surface — the step
@@ -56,16 +57,56 @@ export function requireServeCommand(ports: AnsiwisePorts): string {
 /** One phase's progress, persisted so a re-entry re-attaches instead of re-starting. `seen` is
  *  the last event sequence rendered into the run log — the next follow asks `?from=seen+1`, so
  *  a crash costs at most the events since the last checkpoint, replayed. */
-interface PhaseMark {
+export interface PhaseMark {
   id: string;
   seen: number;
   exitCode?: number;
 }
 
-interface ProgramCheckpoint {
+export interface ProgramCheckpoint {
   program: string;
   dry?: PhaseMark;
   live?: PhaseMark;
+}
+
+/** The elevation password, or the loud refusal every program step gives without it. */
+export function requireElevationPassword(ctx: StepCtx): string {
+  const password = ctx.secrets.get(ANSIWISE_ELEVATION_SECRET)?.toString("utf8");
+  if (password === undefined || password.length === 0) {
+    throw errValidation(
+      `the "${ANSIWISE_ELEVATION_SECRET}" secret is gone (a restart drops run secrets) — retry the step and ` +
+      "supply the machine's elevation password again; the programs raise their commands to root with it",
+    );
+  }
+  return password;
+}
+
+/** One conversation with a machine's surface: `ansiwise serve` on the session's stdio, spoken to
+ *  by the typed client. The caller owns the session; close() ends the conversation only. */
+export interface ServeConversation {
+  client: AnsiwiseClient;
+  close(): void;
+}
+
+export async function openServeConversation(
+  ctx: StepCtx,
+  session: SshSession,
+  ports: AnsiwisePorts,
+  signal: AbortSignal,
+): Promise<ServeConversation> {
+  const serveCommand = requireServeCommand(ports);
+  const channel = await session.openChannel(serveCommand, {
+    signal,
+    onStderr: (line) => ctx.log("stderr", `serve: ${line}`),
+  });
+  const client = new AnsiwiseClient({ kind: "channel", stream: channel.stream });
+  return {
+    client,
+    close: (): void => {
+      client.close();
+      channel.close();
+    },
+  };
 }
 
 /** Answers a DEF is authoritative for beyond the inventory row — facts the manager holds in the
@@ -83,7 +124,6 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
     name: `run-${program}`,
     title: `Prove, then run, the ${program} program on the machine (dry → run)`,
     run: async (ctx) => {
-      const serveCommand = requireServeCommand(ports);
       const cp = ctx.readCheckpoint<ProgramCheckpoint>() ?? { program };
       const save = (): void => ctx.checkpoint(cp);
       // The step's own wall clock, kept apart from ctx.signal: a cancel must stay a cancel,
@@ -92,29 +132,19 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
       const signal = AbortSignal.any([ctx.signal, budget]);
 
       const session = await ctx.ssh();
-      const channel = await session.openChannel(serveCommand, {
-        signal,
-        onStderr: (line) => ctx.log("stderr", `serve: ${line}`),
-      });
-      const client = new AnsiwiseClient({ kind: "channel", stream: channel.stream });
+      const conversation = await openServeConversation(ctx, session, ports, signal);
       try {
-        const answers = await composeAnswers(ctx, client, program, target, signal, extra);
-        const password = ctx.secrets.get(ANSIWISE_ELEVATION_SECRET)?.toString("utf8");
-        if (password === undefined || password.length === 0) {
-          throw errValidation(
-            `the "${ANSIWISE_ELEVATION_SECRET}" secret is gone (a restart drops run secrets) — retry the step and ` +
-            "supply the machine's elevation password again; the programs raise their commands to root with it",
-          );
-        }
+        const answers = await composeAnswers(ctx, conversation.client, program, target, signal, extra);
+        const password = requireElevationPassword(ctx);
 
-        const dry = await phase(ctx, client, cp, "dry", { program, answers, password, signal, save });
+        const dry = await programPhase(ctx, conversation.client, cp, "dry", { program, answers, password, signal, save });
         if (dry.exitCode !== 0) {
           throw errValidation(
             `the DRY run of ${program} on the machine is not green (run ${dry.id}, exit ${dry.exitCode}) — ` +
             "nothing was acted on; read the run log, fix what the machine named, then retry the step",
           );
         }
-        const live = await phase(ctx, client, cp, "run", { program, answers, password, signal, save });
+        const live = await programPhase(ctx, conversation.client, cp, "run", { program, answers, password, signal, save });
         if (live.exitCode !== 0) {
           throw errValidation(
             `the ${program} run on the machine failed (run ${live.id}, exit ${live.exitCode}) — ` +
@@ -132,8 +162,7 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
         }
         throw err;
       } finally {
-        client.close();
-        channel.close();
+        conversation.close();
       }
     },
   };
@@ -147,8 +176,13 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
  *  (`activation-input:<answer>`). The declaration is read off the machine (`GET
  *  /programs/{name}`), so which answers exist is the catalogue's to say; an answer nobody
  *  supplied is OMITTED, and the machine's own validation refuses it by name or fills its
- *  declared default — this step never re-implements either. */
-async function composeAnswers(
+ *  declared default — this step never re-implements either.
+ *
+ *  The target's CLUSTER is looked up lazily — only when the program declares an answer the cluster
+ *  row states (fqdn, stage) does the lookup run. A program that declares neither (the tailnet
+ *  client verbs, whose real declarations carry no answers at all) therefore runs against a host
+ *  that carries no cluster row. */
+export async function composeAnswers(
   ctx: StepCtx,
   client: AnsiwiseClient,
   program: string,
@@ -156,19 +190,23 @@ async function composeAnswers(
   signal: AbortSignal,
   extra?: ExtraAnswers,
 ): Promise<Record<string, string | string[]>> {
-  const { domain, stage } = target.resolve(ctx.db);
   const server = loadServer(ctx.db, target.serverId);
-  const inventory: Record<string, string | string[]> = {
-    fqdn: domain,
-    stage,
-    role: isMasterRole(server.role) ? "master" : "slave",
-    operator_user: server.sshUser,
-    ...(extra ? await extra(ctx) : {}),
+  const extraAnswers = extra ? await extra(ctx) : {};
+  let cluster: { domain: string; stage: Stage } | undefined;
+  const resolved = (): { domain: string; stage: Stage } => (cluster ??= target.resolve(ctx.db));
+  const inventory = (name: string): string | undefined => {
+    switch (name) {
+      case "fqdn": return resolved().domain;
+      case "stage": return resolved().stage;
+      case "role": return isMasterRole(server.role) ? "master" : "slave";
+      case "operator_user": return server.sshUser;
+      default: return undefined;
+    }
   };
   const declared = await client.program(program, { signal });
   const answers: Record<string, string | string[]> = {};
   for (const spec of declared.answers) {
-    const known = inventory[spec.name];
+    const known = extraAnswers[spec.name] ?? inventory(spec.name);
     if (known !== undefined) {
       answers[spec.name] = known;
       continue;
@@ -185,7 +223,7 @@ async function composeAnswers(
  *   not started        ⇒ POST it, then follow.
  *  The verdict is the RECORD's (`GET /runs/{id}`), never the stream's: a stream can be cut on
  *  its last line, and the record is what the machine itself stands behind. */
-async function phase(
+export async function programPhase(
   ctx: StepCtx,
   client: AnsiwiseClient,
   cp: ProgramCheckpoint,
@@ -197,6 +235,21 @@ async function phase(
   if (mark?.exitCode === 0) {
     ctx.log("meta", `${o.program} ${mode}: run ${mark.id} is already green — nothing to repeat`);
     return mark;
+  }
+  if (mark?.exitCode !== undefined) {
+    // A FINISHED run that is not green is dropped rather than re-attached to, and this is the case
+    // that made "retry the step" a lie. A re-entry keeps its checkpoint, so a red mark sent every
+    // retry back to watch a run that had already ended red — the same verdict for ever, and nothing
+    // an operator could do about it from the outside. What a retry means here is a fresh proof of
+    // the CURRENT machine, so the mark goes and the branch below starts one.
+    ctx.log(
+      "meta",
+      `${o.program} ${mode}: run ${mark.id} ended with exit ${mark.exitCode} — starting a fresh one, ` +
+        "because a finished run cannot be retried by watching it again",
+    );
+    delete cp[slot];
+    o.save();
+    mark = undefined;
   }
   if (mark === undefined) {
     let accepted;
