@@ -16,14 +16,17 @@ import {
 } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
+import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
+import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
 import {
   makeHarness, disposeHarnesses, scriptedHosts, stepColumn, MASTER_ID, logger, type Harness,
 } from "./deploy-slave.fixture.ts";
 
-// The redeploy master arm on the REAL `ansiwise serve`, and the transport underneath it. Nothing
-// here mocks the machine's surface: the serve fixture starts the actual binary on a minimal
-// installation whose programs are pure measurements (require_answer_matches), so the gate, the
-// answers validation, the detached run records and the ?from= resume are all the engine's own.
+// The redeploy master arm AND the release on the REAL `ansiwise serve`, and the transport
+// underneath them. Nothing here mocks the machine's surface: the serve fixture starts the actual
+// binary on a minimal installation whose programs are pure measurements (require_answer_matches),
+// so the gate, the answers validation, the detached run records and the ?from= resume are all the
+// engine's own.
 //
 // ONE FILE ON PURPOSE: the engine's run root is per-drive ('/var/lib/ansiwise/runs'), so two
 // test files each running a serve fixture in parallel would share records and collide. Everything
@@ -92,6 +95,22 @@ describe.skipIf(bin === undefined)("redeploy over the machine's own deployment p
         { answer: "stage", pattern: "^prod$" },
         { answer: "role", pattern: "^master$" },
       ]),
+      // The release's regeneration, judged the same way: the MAP-sourced answers (markingAnswers
+      // reads them off clusters/active/m1.example.com.yaml — the fixture harness seeds
+      // MASTER_MARKING_YAML) and the approve input each have a row that goes red when the value is
+      // missing or wrong. alert_recipients is deliberately NOT declared here: the program declares
+      // it text_list, and the REST door does not take a list yet (see the handover finding on
+      // ansiwise-rest) — its composition is proven at the unit level in release.test.ts.
+      "regenerate-branch": programYaml("regenerate-branch", [
+        { answer: "fqdn", pattern: "^m1\\.example\\.com$" },
+        { answer: "stage", pattern: "^prod$" },
+        { answer: "role", pattern: "^master$" },
+        { answer: "build_plane", pattern: "^m1\\.example\\.com$" },
+        { answer: "unit_apex", pattern: "^example\\.com$" },
+        { answer: "platform_domain", pattern: "^example\\.com$" },
+        { answer: "catalog_repo", pattern: "^acme/acme-catalog$" },
+        { answer: "committer_email", pattern: "^[^@]+@[^@]+$" },
+      ]),
     });
     ssh = await startFakeSshServer({
       authorizedKeys: [key.publicLine],
@@ -124,13 +143,22 @@ describe.skipIf(bin === undefined)("redeploy over the machine's own deployment p
   }, 30_000);
   afterEach(disposeHarnesses);
 
-  /** A harness whose master carries an ACTIVE cluster — the state redeploy acts on — wired to
-   *  reach the real `ansiwise serve`. */
+  /** A harness whose master carries an ACTIVE cluster — the state redeploy and release act on —
+   *  wired to reach the real `ansiwise serve`. The channel table rides along because a release's
+   *  attest checks the ceiling against it; redeploy never reads it. */
   async function liveMaster(): Promise<Harness> {
     const hosts = scriptedHosts({
       openConversation: async () => openChannel(serve),
     });
     const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise serve" });
+    h.platformRepo.seed(CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH, [
+      "global:",
+      "  channelStages:",
+      "    alpha: [dev]",
+      "    beta: [dev, test]",
+      "    stable: [dev, test, prod]",
+      "",
+    ].join("\n"));
     h.db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, MASTER_ID)).run();
     h.db.db.insert(clusters).values({
       id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com",
@@ -150,7 +178,7 @@ describe.skipIf(bin === undefined)("redeploy over the machine's own deployment p
     const client = new AnsiwiseClient({ kind: "channel", stream: channel.stream });
     try {
       const programs = await client.programs();
-      expect(programs.map((p) => p.name).sort()).toEqual(["deploy-cluster", "deploy-gitops"]);
+      expect(programs.map((p) => p.name).sort()).toEqual(["deploy-cluster", "deploy-gitops", "regenerate-branch"]);
       expect(programs.find((p) => p.name === "deploy-cluster")?.answers.map((a) => a.name)).toContain("letsencrypt_email");
 
       const answers = composedAnswers(uniqueEmail());
@@ -321,6 +349,84 @@ describe.skipIf(bin === undefined)("redeploy over the machine's own deployment p
     await step.run(ctx);
     expect(logs.filter((l) => l.includes("already green"))).toHaveLength(2);
     expect((await observer.runs()).filter((x) => x.fingerprint === dry.fingerprint)).toHaveLength(mine.length);
+  });
+
+  // ================================ the release, end to end ================================
+
+  /** What a release's approve carries: the elevation password, the two deploy-cluster inputs, the
+   *  regenerate-branch committer identity, and the three build-plane PATs the master's own map
+   *  demands (MASTER_MARKING_YAML names m1 as its own build plane). The fixture programs declare
+   *  none of the PAT answers, so the values ride approve and are never sent — exactly the
+   *  composition contract: only what a program declares reaches it. */
+  const releaseSecrets = (email: string): Record<string, Buffer> => ({
+    ...approveSecrets(email),
+    "activation-input:committer_email": Buffer.from(email),
+    "activation-input:build_hostyour_cloud_repo_pat": Buffer.from("github_pat_cloud"),
+    "activation-input:build_hostyour_manager_repo_pat": Buffer.from("github_pat_manager"),
+    "activation-input:build_catalog_repo_pat": Buffer.from("github_pat_catalog"),
+  });
+
+  const releaseParams = { serverId: MASTER_ID, version: "1.0.0", channel: "stable" as const };
+
+  it("INNOCENT CASE (release): pin → refresh → regenerate-branch → deploy-cluster → deploy-gitops, every program proven dry then run on the machine's own records", { timeout: 120_000 }, async () => {
+    const h = await liveMaster();
+    const email = uniqueEmail();
+    const before = await observer.runs();
+
+    const r = await h.executor.plan("release", releaseParams);
+    expect(r.plan.steps.map((s) => s.name)).toEqual([
+      "attest-target", "set-pin", "refresh-checkout",
+      "run-regenerate-branch", "run-deploy-cluster", "run-deploy-gitops", "argocd-follow",
+    ]);
+    await h.executor.approve(r.runId, releaseSecrets(email));
+    await h.executor.settle(r.runId);
+    expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
+
+    // The pin: ONE tag, minted in the release grammar, and the map states it. This is what the
+    // regeneration on a real machine reads back off the branch (the fixture program only measures —
+    // the merge semantics are regenerate-branch's own rows, proven in its catalogue).
+    expect(h.platformRepo.tags.size).toBe(1);
+    const tag = [...h.platformRepo.tags.keys()][0] ?? "";
+    expect(tag).toMatch(/^1\.0\.0-stable-\d{14}$/);
+    expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath("m1.example.com"))).toContain(`release: ${tag}`);
+
+    // The machine's OWN records: dry + run per program, every one green, all three programs.
+    const fresh = (await observer.runs()).filter((a) => !before.some((b) => b.id === a.id && b.mode === a.mode));
+    const byProgram = (name: string): string[] => fresh.filter((x) => x.program === name && x.exit_code === 0).map((x) => x.mode).sort();
+    expect(byProgram("regenerate-branch")).toEqual(["dry", "run"]);
+    expect(byProgram("deploy-cluster")).toEqual(["dry", "run"]);
+    expect(byProgram("deploy-gitops")).toEqual(["dry", "run"]);
+
+    // The machine's checkout was refreshed BEFORE the programs read it (the pin commit and the tag
+    // reach the machine through that step or not at all), the three conversations went over the
+    // machine's serve surface, and the follow still read ArgoCD.
+    const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
+    expect(onMaster.some((c) => c.includes("dc-refresh-checkout-"))).toBe(true);
+    expect(onMaster.filter((c) => c === "ansiwise serve")).toHaveLength(3); // one conversation per program step
+    expect(onMaster.some((c) => c.includes("-n argocd get applications.argoproj.io"))).toBe(true);
+  });
+
+  it("PLANTED DEFECT (release): a committer identity the machine's dry run judges red fails run-regenerate-branch — no run-mode regeneration, and the two deploy programs never start", { timeout: 60_000 }, async () => {
+    const h = await liveMaster();
+    const before = await observer.runs();
+
+    const r = await h.executor.plan("release", releaseParams);
+    // "not-an-email" fails the program's own ^[^@]+@[^@]+$ row — the defect is ON THE MACHINE'S
+    // SIDE of the wire, and the machine's dry run is what catches it. (approveSecrets seeds a VALID
+    // letsencrypt mailbox, so only the committer identity is wrong.)
+    await h.executor.approve(r.runId, { ...releaseSecrets(uniqueEmail()), "activation-input:committer_email": Buffer.from("not-an-email") });
+    await h.executor.settle(r.runId);
+
+    expect(getRun(h.db.db, r.runId)?.status).toBe("failed");
+    expect(stepColumn(h.db, r.runId, "run-regenerate-branch", "error")).toMatch(/DRY run of regenerate-branch on the machine is not green/);
+
+    // The proof failed, so nothing after it was acted on: not one run-mode regeneration, and the
+    // two deploy programs saw no run of ANY mode. The pin stands — set-pin precedes the machine
+    // acts by design, and a retry of the run adopts exactly that tag instead of minting a second.
+    const fresh = (await observer.runs()).filter((a) => !before.some((b) => b.id === a.id && b.mode === a.mode));
+    expect(fresh.filter((x) => x.program === "regenerate-branch" && x.mode === "run")).toHaveLength(0);
+    expect(fresh.filter((x) => x.program === "deploy-cluster" || x.program === "deploy-gitops")).toHaveLength(0);
+    expect(h.platformRepo.tags.size).toBe(1);
   });
 
   /** A hand StepCtx for driving one program step directly — the executor-shaped surface with the

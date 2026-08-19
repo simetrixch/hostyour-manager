@@ -272,9 +272,7 @@ fi
 // base/secrets/* (secrets.<stage> — the --slave-secrets input — and vault-<stage>.txt, both
 // gitignored in hostyour-cloud) survive by construction (the live run confirmed it).
 // stdout contract: one `CHECKOUT_HEAD <old> <new>` line (short HEADs — secret-free).
-// Generic over the host: a master refreshes to its own install branch before --slave-add reads the
-// checkout, and a cluster release refreshes whichever host it is about to run setup.sh on to the
-// branch the release just regenerated. The branch is always the host's own FQDN.
+// The branch is always the host's own FQDN.
 export function refreshCheckoutScript(branch: string): string {
   return `#!/usr/bin/env bash
 set -euo pipefail
@@ -284,6 +282,32 @@ git -C "$GITOPS_DIR" fetch origin
 git -C "$GITOPS_DIR" reset --hard
 git -C "$GITOPS_DIR" checkout -B "${branch}" "origin/${branch}"
 new=$(git -C "$GITOPS_DIR" rev-parse --short HEAD)
+echo "CHECKOUT_HEAD $old $new"
+`;
+}
+
+/** WHERE the deployment programs read and write the platform tree. Not discovered like the $HOME
+ *  checkout above: the programs (digita-deploy ansiwise/programs/) name this path on every
+ *  `repository:` row, so a refresh that fed them has to stand exactly where they read. */
+export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
+
+// The same refresh for the PROGRAMS' checkout at /srv/hostyour-cloud — the tree deploy-branch
+// generated and regenerate-branch / deploy-cluster / deploy-gitops act on. Two scripts because the
+// two worlds keep their checkout in two places: the shell-driven slave verbs discover theirs under
+// $HOME (RESOLVE_REPO_DIR above), the ansiwise programs name /srv/hostyour-cloud outright. `fetch
+// --tags` because a release needs two refs the local clone does not have yet: the pin commit the
+// manager pushed onto the install branch, and the release tag it minted on the trunk — the tag is
+// what regenerate-branch merges, and its git_merge_ref deliberately fetches nothing itself.
+// Same idempotent fetch + reset --hard + checkout -B idiom, same CHECKOUT_HEAD stdout contract.
+export function refreshPlatformCheckoutScript(branch: string): string {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+[ -d "${PLATFORM_CHECKOUT}/.git" ] || { echo "no platform checkout at ${PLATFORM_CHECKOUT} — deploy-branch puts it there; has this machine been installed through the deployment programs?" >&2; exit 3; }
+old=$(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)
+git -C "${PLATFORM_CHECKOUT}" fetch origin --tags
+git -C "${PLATFORM_CHECKOUT}" reset --hard
+git -C "${PLATFORM_CHECKOUT}" checkout -B "${branch}" "origin/${branch}"
+new=$(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)
 echo "CHECKOUT_HEAD $old $new"
 `;
 }

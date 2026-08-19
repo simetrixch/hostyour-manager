@@ -4,29 +4,33 @@ import type { Db } from "../../../db/client.ts";
 import type { SshSession } from "../../../adapters/ssh/port.ts";
 import { clusters, servers } from "../../../db/schema/inventory.ts";
 import { errValidation } from "../../../kernel/errors.ts";
-import { remoteCmd, remoteScriptCapture } from "../../../executor/stepkit.ts";
+import { remoteScriptCapture } from "../../../executor/stepkit.ts";
 import { attestMachineId } from "../../../executor/attest.ts";
 import { ATTEST_TARGET_STEP } from "../../../executor/guards.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
 import { clusterShortName } from "../../inventory/cluster-marking.ts";
-import { argoAppsCmd, parsePipeRows, refreshCheckoutScript, RESOLVE_REPO_DIR } from "./deploy-slave.remote.ts";
+import { argoAppsCmd, parsePipeRows, refreshPlatformCheckoutScript, PLATFORM_CHECKOUT } from "./deploy-slave.remote.ts";
 import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 
-// The two building blocks a cluster stands on below GitOps, shared by the two verbs that rebuild or
-// raise it:
+// The building blocks the two verbs that rebuild or raise a live cluster share:
 //
-//   host-run       re-runs the installer on the host itself, over SSH. ArgoCD cannot deliver this —
-//                  the operating system and the Kubernetes install are what ArgoCD RUNS ON. The
-//                  installer is re-runnable by design, so it always runs: "check whether the scripts
-//                  changed, then decide" is a case distinction someone has to maintain and that will
-//                  eventually be wrong.
-//   argocd-follow  waits until everything ArgoCD drives for that cluster has converged on the branch
-//                  the host now stands on. Without it a run reports success while the cluster is
-//                  still mid-sync, and the state it claims is unproven.
+//   attest-target     the fail-closed precondition below — the cluster is active and the machine
+//                     is still the machine the platform adopted.
+//   refresh-checkout  brings the machine's platform checkout (/srv/hostyour-cloud, the tree every
+//                     deployment program acts on) onto the head of its install branch. The programs
+//                     read that checkout as it stands and deliberately fetch nothing themselves, so
+//                     whatever the manager just pushed — a release's pin commit and its tag above
+//                     all — reaches the machine through this step or not at all.
+//   argocd-follow     waits until everything ArgoCD drives for that cluster has converged on the
+//                     branch the host now stands on. Without it a run reports success while the
+//                     cluster is still mid-sync, and the state it claims is unproven.
 //
-// A cluster RELEASE runs both after it has moved the pin. A REDEPLOY of a cluster carrying the master
-// part runs exactly these two and moves no pin — the machine layer is restorable without a version
-// change. That is the whole difference between the two verbs at this level.
+// The machine layer itself is delivered by the deployment PROGRAMS (deploy-cluster, deploy-gitops,
+// and for a release regenerate-branch before them), each driven over the machine's own
+// `ansiwise serve` surface by ansiwiseProgramStep — ArgoCD cannot deliver this, because the
+// operating system and the Kubernetes install are what ArgoCD RUNS ON. A cluster RELEASE moves the
+// pin first and regenerates the branch from it; a REDEPLOY moves no pin — the machine layer is
+// restorable without a version change. That is the whole difference between the two verbs.
 
 /** How long argocd-follow waits for a cluster to converge. Generous for the same reason the slave
  *  verify window is: after the branch moves, every Application re-syncs and the node may pull images
@@ -72,33 +76,30 @@ export function attestClusterStep(target: SlaveTarget, check?: (ctx: StepCtx) =>
   };
 }
 
-/** `host-run`: refresh the host's checkout to its install branch, then re-run the installer for the
- *  cluster's stage. Runs on the run's OWNED host — for a master that is the master itself, for a slave
- *  its own machine — so the same step serves both without a case distinction of its own. */
-export function hostRunStep(target: SlaveTarget): Step {
+/** `refresh-checkout`: bring the machine's platform checkout onto the head of its install branch,
+ *  tags included. Runs on the run's OWNED host, BEFORE the deployment programs read that checkout —
+ *  a stale tree hands regenerate-branch the previous pin to measure and deploy-cluster old installer
+ *  state, and the programs deliberately fetch nothing themselves (a program acts on the tree it was
+ *  pointed at; which state that tree stands on is the caller's to establish). */
+export function refreshCheckoutStep(target: SlaveTarget): Step {
   return {
-    name: "host-run",
-    title: "Run the installer on the host (refresh the checkout, then setup.sh)",
+    name: "refresh-checkout",
+    title: "Bring the machine's platform checkout onto its install branch head",
     run: async (ctx) => {
-      const { domain, stage } = target.resolve(ctx.db);
+      const { domain } = target.resolve(ctx.db);
       const server = loadServer(ctx.db, target.serverId);
       const session = await ctx.ssh();
-      // The checkout must stand on the branch state this run is delivering BEFORE setup.sh reads it —
-      // a stale tree runs old installer code and silently installs the previous release.
-      const refresh = await remoteScriptCapture(ctx, session, "refresh-checkout", refreshCheckoutScript(domain), { timeoutMs: 2 * 60_000 });
+      const refresh = await remoteScriptCapture(ctx, session, "refresh-checkout", refreshPlatformCheckoutScript(domain), { timeoutMs: 2 * 60_000 });
       const heads = /^CHECKOUT_HEAD (\S+) (\S+)$/m.exec(refresh.stdout);
       if (refresh.result.code !== 0 || !heads) {
         throw errValidation(
-          `could not refresh the GitOps checkout on ${server.name} to origin/${domain} (exit ${refresh.result.code}) — ` +
-          `setup.sh must run from the CURRENT install-branch head, never a stale tree; see the run log, fix the host's checkout, then retry the run`,
+          `could not refresh ${PLATFORM_CHECKOUT} on ${server.name} to origin/${domain} (exit ${refresh.result.code}) — ` +
+          `the deployment programs read that checkout as it stands, so a stale tree would deliver the previous state; ` +
+          `see the run log, fix the machine's checkout, then retry the run`,
         );
       }
-      ctx.log("meta", `${server.name}: checkout refreshed ${heads[1]}..${heads[2]} on ${domain}`);
-      // The whole host-side imperative surface: MicroK8s, addons, storage, cert-manager. The
-      // budget is the cold-install one — a release may bring a MicroK8s channel change with it.
-      await remoteCmd(ctx, session, `${RESOLVE_REPO_DIR}\ncd "$GITOPS_DIR" && sudo -n ./setup.sh --${stage}`, { timeoutMs: 45 * 60_000 });
       ctx.checkpoint({ host: server.name, branch: domain, head: heads[2] });
-      ctx.log("meta", `${server.name}: setup.sh --${stage} completed — the machine layer stands on ${domain}@${heads[2]}`);
+      ctx.log("meta", `${server.name}: ${PLATFORM_CHECKOUT} refreshed ${heads[1]}..${heads[2]} on ${domain}`);
     },
   };
 }

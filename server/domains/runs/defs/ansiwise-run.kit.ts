@@ -27,8 +27,8 @@ import { loadServer, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave
  *  password comes with each POST and lives exactly as long as the machine run does. */
 export const ANSIWISE_ELEVATION_SECRET = "ansiwise-elevation";
 
-/** One program's wall clock, dry and run each. The cold-install budget hostRunStep gave
- *  setup.sh, for the same reason: a redeploy may bring a MicroK8s channel change with it.
+/** One program's wall clock, dry and run each. The cold-install budget the setup.sh host run
+ *  used to get, for the same reason: a redeploy may bring a MicroK8s channel change with it.
  *  Expiry fails the STEP only — the machine run keeps going detached, and a retry re-attaches
  *  to it rather than starting a second one. */
 export const ANSIWISE_PROGRAM_TIMEOUT_MS = 45 * 60_000;
@@ -68,9 +68,17 @@ interface ProgramCheckpoint {
   live?: PhaseMark;
 }
 
+/** Answers a DEF is authoritative for beyond the inventory row — facts the manager holds in the
+ *  platform repo (a cluster map's build plane, apex, catalog repository) and can therefore state
+ *  without asking the operator to re-type what stands written. Async because the source is the git
+ *  port, and keyed by the PROGRAM's answer names: an entry no program declares is simply never
+ *  sent (composeAnswers walks the declaration, not this record). A list-valued entry is an answer
+ *  the program declares as text_list, sent as the JSON array the envelope's grammar takes. */
+export type ExtraAnswers = (ctx: StepCtx) => Promise<Record<string, string | string[]>>;
+
 /** `run-<program>`: prove the program with a dry run, then run it, following both into the run
  *  log. Both phases go through the ONE machine surface and the machine's own gate. */
-export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports: AnsiwisePorts): Step {
+export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports: AnsiwisePorts, extra?: ExtraAnswers): Step {
   return {
     name: `run-${program}`,
     title: `Prove, then run, the ${program} program on the machine (dry → run)`,
@@ -90,7 +98,7 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
       });
       const client = new AnsiwiseClient({ kind: "channel", stream: channel.stream });
       try {
-        const answers = await composeAnswers(ctx, client, program, target, signal);
+        const answers = await composeAnswers(ctx, client, program, target, signal, extra);
         const password = ctx.secrets.get(ANSIWISE_ELEVATION_SECRET)?.toString("utf8");
         if (password === undefined || password.length === 0) {
           throw errValidation(
@@ -131,9 +139,11 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
   };
 }
 
-/** The answers a program run is handed, composed from two places and NOWHERE hardcoded: what the
- *  inventory is authoritative for (the cluster row and the server row), then — for every answer
- *  the PROGRAM DECLARES beyond those — what the operator supplied at approve
+/** The answers a program run is handed, composed from three places and NOWHERE hardcoded: what
+ *  the inventory is authoritative for (the cluster row and the server row), what the DEF is
+ *  authoritative for beyond that (the optional `extra` record — release reads the cluster map,
+ *  where the manager keeps facts an operator must never re-type), then — for every answer the
+ *  PROGRAM DECLARES beyond those — what the operator supplied at approve
  *  (`activation-input:<answer>`). The declaration is read off the machine (`GET
  *  /programs/{name}`), so which answers exist is the catalogue's to say; an answer nobody
  *  supplied is OMITTED, and the machine's own validation refuses it by name or fills its
@@ -144,17 +154,19 @@ async function composeAnswers(
   program: string,
   target: SlaveTarget,
   signal: AbortSignal,
-): Promise<Record<string, string>> {
+  extra?: ExtraAnswers,
+): Promise<Record<string, string | string[]>> {
   const { domain, stage } = target.resolve(ctx.db);
   const server = loadServer(ctx.db, target.serverId);
-  const inventory: Record<string, string> = {
+  const inventory: Record<string, string | string[]> = {
     fqdn: domain,
     stage,
     role: isMasterRole(server.role) ? "master" : "slave",
     operator_user: server.sshUser,
+    ...(extra ? await extra(ctx) : {}),
   };
   const declared = await client.program(program, { signal });
-  const answers: Record<string, string> = {};
+  const answers: Record<string, string | string[]> = {};
   for (const spec of declared.answers) {
     const known = inventory[spec.name];
     if (known !== undefined) {
@@ -178,7 +190,7 @@ async function phase(
   client: AnsiwiseClient,
   cp: ProgramCheckpoint,
   mode: "dry" | "run",
-  o: { program: string; answers: Record<string, string>; password: string; signal: AbortSignal; save: () => void },
+  o: { program: string; answers: Record<string, string | string[]>; password: string; signal: AbortSignal; save: () => void },
 ): Promise<PhaseMark> {
   const slot = mode === "dry" ? "dry" : "live";
   let mark = cp[slot];
