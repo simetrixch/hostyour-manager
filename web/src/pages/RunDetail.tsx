@@ -329,7 +329,7 @@ export function RunDetail() {
           run={run}
           abort={abortOffer(run.kind, tenant, tenantError)}
           onRetry={(secrets) => act(() => retryRun(runId, undefined, secrets))}
-          onAbort={() => act(() => abortRun(runId))}
+          onAbort={(secrets) => act(() => abortRun(runId, secrets))}
           onSkip={() => setShowSkip(true)}
           onDelete={() => setConfirmDelete(true)}
         />

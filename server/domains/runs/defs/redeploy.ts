@@ -4,7 +4,7 @@ import type { Step, RunDefinition } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { servers } from "../../../db/schema/inventory.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
-import { deploySlaveSteps } from "./deploy-slave.ts";
+import { deploySlaveSteps, SLAVE_MACHINE_INPUTS } from "./deploy-slave.ts";
 import { activeClusterTarget, loadMaster, masterFqdnOf, type DeploySlavePorts } from "./deploy-slave.kit.ts";
 import { attestClusterStep, argocdFollowStep, loadActiveCluster } from "./cluster-release.kit.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
@@ -20,10 +20,13 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } fr
 // aimed at a branch the cluster does not run from (activeClusterTarget resolves and refuses).
 //
 // TWO ARMS, decided by the role — because "the machine layer" is a different set of things per role:
-//   pure slave        the identical, idempotent deploy-slave step list, in redeploy mode: the base
-//                     install, the master-side management plane and the GitOps handoff all reconcile,
-//                     and NOT ONE compensating action is armed. Every one of them (purge MicroK8s,
-//                     --slave-remove, drop the slave part of the cluster map) undoes a WORKING slave.
+//   pure slave        the deploy-slave step list in redeploy mode: the map, the machine-layer
+//                     programs, the management plane (a fresh emit re-points the registration) and
+//                     the GitOps handoff all reconcile. The two BIRTH acts are left out — the
+//                     branch cut and the tailnet join, each of which would REPLACE what a live
+//                     slave stands on rather than reconcile it — and NOT ONE compensating action
+//                     is armed: every one of them (purge MicroK8s, the remove-slave program, drop
+//                     the slave part of the cluster map) undoes a WORKING slave.
 //   master, master+   the machine layer as the deployment PROGRAMS deliver it, plus the ArgoCD
 //     slave           follow. deploy-cluster rebuilds the node below GitOps and deploy-gitops raises
 //                     what hands the cluster to the reconciler; both run on the machine's own
@@ -123,12 +126,14 @@ export function makeRedeployDef(ports: RedeployPorts): RunDefinition<RedeployPar
         warnings: [
           `The machine layer re-runs on ${server.name} — expect a brief kube-apiserver blip while kubelite restarts.`,
         ],
-        // The master arm's programs raise their commands to root with a password the CALLER hands
-        // over per run (the installation's ansiwise.yaml: password_from_caller) — collected at
-        // approve, held in memory, sent with each POST /runs, persisted nowhere. The slave arm
-        // still runs over sudo -n and needs none.
-        requiredSecrets: onMaster ? [ANSIWISE_ELEVATION_SECRET] : [],
-        ...(onMaster ? { requiredInputs: MASTER_ARM_INPUTS } : {}),
+        // BOTH arms drive programs now, and the programs raise their commands to root with a
+        // password the CALLER hands over per run (the installation's ansiwise.yaml:
+        // password_from_caller) — collected at approve, held in memory, sent with each POST /runs,
+        // persisted nowhere. The inputs differ: the master arm may host the build plane and is
+        // asked for it; the slave arm reads it off its own cluster map and asks only what the
+        // machine-layer programs declare beyond the inventory.
+        requiredSecrets: [ANSIWISE_ELEVATION_SECRET],
+        requiredInputs: onMaster ? MASTER_ARM_INPUTS : SLAVE_MACHINE_INPUTS,
       };
     },
     steps: (params) => redeploySteps(params, ports),

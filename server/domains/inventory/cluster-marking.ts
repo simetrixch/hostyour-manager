@@ -1,7 +1,10 @@
 // cluster-marking.ts — THE resolution of a cluster to what the platform knows about it: its role,
 // its stage, its short name and whether it carries the build plane. All four come from ONE file,
-// `clusters/active/<fqdn>.yaml`, written by install.sh when the cluster is installed. Nothing else
-// states any of them: a second writer is what let maps drift away from the branches they describe.
+// `clusters/active/<fqdn>.yaml`. A master's map is written when the cluster is installed (the
+// deployment programs' install path); a SLAVE's map is the Controller's to write — deploy-slave's
+// mark-slave step, through writeClusterMarking below — because a slave's branch deliberately
+// carries no books and the per-slave generator reads the map here. No third writer exists: a copy
+// somewhere else is what let maps drift away from the branches they describe.
 //
 // EVERY cluster's map stands on ONE branch — this installation's books (shared/branches.ts), which is
 // the install branch of the cluster holding the master role, and which the platform repo port carries
@@ -16,6 +19,10 @@
 //                may only point at a cluster marked X.
 //   role         master | slave | master+slave — cluster MANAGEMENT only: who operates ArgoCD,
 //                Vault, identity and the build plane for whom. Never a placement rule.
+//   books-cluster  the domain of the cluster that keeps the books — the cluster's own for a
+//                master, the master's for a slave. The slaves ApplicationSet SELECTS on this key
+//                (argocd/apps/slaves-appset.yaml matchLabels), so a slave map without it is
+//                invisible to the generator.
 //   build-plane  the FQDN of the cluster that builds this one's images. The predicate is
 //                `buildPlane := (build-plane == fqdn)`, so one field answers both "do I run the
 //                build plane?" and "whose registry do I pull from?" — a cluster that builds
@@ -36,18 +43,16 @@
 //                dashboard's kubeconfig, and this process's per-slave kube client, which writes.
 //   unit-apex    the public apex units (consumers and tenants) serve under, <name>.<unit-apex>.
 //   platform-domain  the installation's business domain — the mail sender identity and the relay's
-//                sender allowlist. install.sh writes it (defaulting to the unit apex) and
-//                set-role.sh refuses a map without it.
+//                sender allowlist. The branch programs write it (defaulting to the unit apex).
 //   post-url     where units reach the shared example-post service; absent on an installation
 //                that has none.
 //   catalog-repo the <owner>/<name> of the repository holding this installation's tenant charts
-//                and their per-stage pins. install.sh demands it (nothing composes a repository
-//                this cloud does not own) and set-role.sh refuses a map without it.
+//                and their per-stage pins. The branch programs demand it (nothing composes a
+//                repository this cloud does not own).
 //
 // This module PARSES the map and REGENERATES it key by key, so every key the file may carry has to
 // be declared below even where nothing here decides anything with it: a key the schema does not
-// know is a key the next write deletes. unit-apex is the worked example — set-role.sh refuses to
-// stamp a cluster whose map has none.
+// know is a key the next write deletes.
 //
 // The cluster SHORT NAME is NOT a field. It is derived from `fqdn` as its first label, by
 // clusterShortName below — the one derivation in this repo. A stored name would be a second writer
@@ -90,8 +95,8 @@ export function clusterMarkingPath(fqdn: string): string {
  *
  *  STRICT, and that is the load-bearing part. Zod's default is to STRIP a key it does not declare;
  *  serializeMarking then regenerates the whole file from what survived, so an undeclared key is
- *  silently deleted from git by the next release run — a write nobody asked for, on a file install.sh
- *  documents as hand-editable. Strict turns that into an error naming the file and the key, which is
+ *  silently deleted from git by the next release run — a write nobody asked for, on a file whose
+ *  own header documents it as hand-editable. Strict turns that into an error naming the file and the key, which is
  *  also the whole migration path for a renamed field: a map still carrying the retired `lanHost` is
  *  refused out loud instead of quietly losing the only git-side record of where the master dials the
  *  slave. One unreadable map fails every read, because indexMarkings folds them all — the same blast
@@ -100,6 +105,9 @@ const ClusterMarkingFileSchema = z.object({
   fqdn: z.string().min(1),
   stage: z.enum(STAGE),
   role: z.enum(SERVER_ROLE),
+  // Optional because maps predating the key are still valid markings; every map the deployment
+  // programs write (cluster-map.tpl) and every slave map mark-slave writes carries it.
+  "books-cluster": z.string().min(1).optional(),
   "build-plane": z.string().min(1),
   // Checked against the release grammar rather than accepted as free text: the field IS the pin, and
   // a value the grammar does not recognise names no state anything can be regenerated from.
@@ -109,7 +117,7 @@ const ClusterMarkingFileSchema = z.object({
   apiPort: z.number().int().positive().optional(),
   // Nothing in this process decides anything with these four. They are declared and carried so a
   // write does not drop them; optional rather than required because the maps that predate them are
-  // still valid markings. `alert-recipients` is the comma-separated mailbox list set-role.sh renders
+  // still valid markings. `alert-recipients` is the comma-separated mailbox list the branch render puts
   // into cluster/profile.yaml as global.alertRecipients — the trunk carries an empty list, because a
   // mailbox names one installation.
   "unit-apex": z.string().min(1).optional(),
@@ -119,25 +127,26 @@ const ClusterMarkingFileSchema = z.object({
   "catalog-repo": z.string().min(1).optional(),
 }).strict();
 
-/** Every key the strict schema accepts — its whole surface. install.sh is the map's writer, so the
- *  test suite compares this list against the keys install.sh's map-writing block emits: a field the
- *  installer gains fails ONE test naming the key, instead of failing every map read on the next
- *  fresh installation. */
+/** Every key the strict schema accepts — its whole surface. The deployment programs' map template
+ *  (digita-deploy ansiwise/templates/cluster-map.tpl) is the OTHER writer, so the test suite
+ *  compares this list against the keys that template emits: a field the template gains fails ONE
+ *  test naming the key, instead of failing every map read on the next fresh installation. */
 export const CLUSTER_MARKING_FILE_KEYS = Object.keys(ClusterMarkingFileSchema.shape);
 
 /** One cluster's marking, with the derived facts folded in. */
 export interface ClusterMarking {
-  /** The comment block the file opens with, VERBATIM, so a rewrite gives it back. install.sh
-   *  write_map writes ~25 lines above the fields — what the file is, which branches carry it, why
-   *  the short name is never stored, that the release pin has a different writer — and it documents
-   *  the file as hand-editable. Without carrying this, the first release pin would delete the only
-   *  thing that says how to edit it. NOT identity: sameMarking ignores it. */
+  /** The comment block the file opens with, VERBATIM, so a rewrite gives it back. The map
+   *  template writes a header above the fields — what the file is and who writes it — and the file
+   *  is hand-editable. Without carrying this, the first release pin would delete the only thing
+   *  that says how to edit it. NOT identity: sameMarking ignores it. */
   header?: string;
   fqdn: string;
   /** clusterShortName(fqdn) — derived, never read from the file. */
   name: string;
   role: ServerRole;
   stage: Stage;
+  /** The domain of the cluster that keeps the books — the slaves ApplicationSet's selector key. */
+  booksCluster?: string;
   /** Does this cluster RUN the build plane? True exactly when `build-plane` names itself. */
   buildPlane: boolean;
   /** The FQDN of the cluster that builds this one's images (own fqdn when buildPlane). */
@@ -184,6 +193,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
     name: clusterShortName(m.fqdn),
     role: m.role,
     stage: m.stage,
+    ...(m["books-cluster"] !== undefined ? { booksCluster: m["books-cluster"] } : {}),
     buildPlane: m["build-plane"] === m.fqdn,
     buildPlaneFqdn: m["build-plane"],
     ...(m.release !== undefined ? { release: m.release } : {}),
@@ -230,13 +240,13 @@ async function indexMarkings(repo: PlatformRepo): Promise<{ byFqdn: Map<string, 
 /** Resolve ONE cluster's marking, named either by its FQDN (`s1.example.com`) or by its
  *  short name (`s1`) — the two spellings of the same identity, joined by clusterShortName.
  *  A cluster with no map is a typed error, not a default: role/stage/build plane have no safe
- *  fallback, and install.sh writes the map before the cluster is ever reachable. */
+ *  fallback, and every install path writes the map before the cluster is ever reachable. */
 export async function resolveClusterMarking(repo: PlatformRepo, cluster: string): Promise<ClusterMarking> {
   const { byFqdn, byName } = await indexMarkings(repo);
   const found = byFqdn.get(cluster) ?? byName.get(cluster);
   if (!found) {
     throw errValidation(
-      `no cluster map for "${cluster}" — expected ${clusterMarkingPath(cluster)} on ${repo.booksBranch}; every cluster is marked by install.sh at install time, so a missing map means the install never completed or the map was removed by hand`,
+      `no cluster map for "${cluster}" — expected ${clusterMarkingPath(cluster)} on ${repo.booksBranch}; every cluster is marked when it is installed (the branch programs for a master, mark-slave for a slave), so a missing map means the install never completed or the map was removed by hand`,
     );
   }
   return found;
@@ -297,28 +307,25 @@ export function projectClusterMarking(
   return changed;
 }
 
-/** The fields that make a cluster a REACHABLE slave: its master and the endpoint the master's
- *  in-cluster components dial its kube-apiserver on. install.sh writes them at install time;
- *  dropping them again is the one map mutation the Controller makes, and it is what takes a cluster
- *  out of the slaves ApplicationSet. */
-const SLAVE_PART_KEYS = ["master", "apiHost", "apiPort"] as const;
+/** The fields that make a cluster a REACHABLE slave: its master, the endpoint the master's
+ *  in-cluster components dial its kube-apiserver on, and the books-cluster key the slaves
+ *  ApplicationSet selects on. mark-slave writes them; dropping them again is what takes a cluster
+ *  out of the generator — books-cluster included, because a map still carrying the selector key
+ *  without the endpoint would make the generated Application error instead of disappear. */
+const SLAVE_PART_KEYS = ["master", "apiHost", "apiPort", "booksCluster"] as const;
 
-/** Serialize a marking back to the map file. EXPORTED because the map now has two places to be:
- *  commitMarking puts it on the books branch, where the slaves ApplicationSet generator reads it,
- *  and deploy-slave's prepare-branch needs the same bytes on the SLAVE's own branch, where
- *  set-role.sh reads them. One writer, two destinations — composing the file a second time in shell
- *  is how the two would drift.
- *
- *  Serialize a marking back to the map file. Emitted key by key in a fixed order rather than dumped
+/** Serialize a marking back to the map file — commitMarking's own writer.
+ *  Emitted key by key in a fixed order rather than dumped
  *  from an object, so a value can never carry a newline or a colon into a neighbouring field, and
  *  re-parsed before it is handed back — a map that does not read back as the marking it was built
  *  from is never committed. The file's comments are NOT preserved: the map is generated, and the
  *  contract it obeys is documented at the top of this module, not in each copy of the file. */
-export function serializeMarking(m: ClusterMarking): string {
+function serializeMarking(m: ClusterMarking): string {
   const fields: [string, string | number][] = [
     ["fqdn", m.fqdn],
     ["stage", m.stage],
     ["role", m.role],
+    ...(m.booksCluster !== undefined ? ([["books-cluster", m.booksCluster]] as [string, string][]) : []),
     ["build-plane", m.buildPlaneFqdn],
     ...(m.release !== undefined ? ([["release", m.release]] as [string, string][]) : []),
     ...(m.master !== undefined ? ([["master", m.master]] as [string, string][]) : []),
@@ -330,7 +337,7 @@ export function serializeMarking(m: ClusterMarking): string {
     ...(m.postUrl !== undefined ? ([["post-url", m.postUrl]] as [string, string][]) : []),
     ...(m.catalogRepo !== undefined ? ([["catalog-repo", m.catalogRepo]] as [string, string][]) : []),
   ];
-  // PLAIN scalars, the shape install.sh write_map emits — the other writer of this file. Quoting
+  // PLAIN scalars, the shape the map template emits — the other writer of this file. Quoting
   // parses identically but shows every line as changed in the diff of a map's first release, which
   // hides the one line that did change. A value that would not survive plain (a leading indicator, a
   // "key: value" ambiguity) is quoted instead, and the round-trip below proves the choice per value.
@@ -340,9 +347,9 @@ export function serializeMarking(m: ClusterMarking): string {
   const scalar = (v: string | number): string =>
     typeof v === "number" || (/^[A-Za-z0-9]/.test(v) && !/: | #/.test(v)) ? String(v) : JSON.stringify(v);
   const body = fields.map(([k, v]) => `${k}: ${scalar(v)}`).join("\n") + "\n";
-  // The file's own explanation, given back. install.sh writes ~25 lines above the fields and
-  // documents the file as hand-editable; without this the first release pin deletes the only thing
-  // that says how to edit it.
+  // The file's own explanation, given back — the map template writes a header above the fields and
+  // the file is hand-editable; without this the first release pin deletes the only thing that says
+  // how to edit it.
   const yaml = m.header === undefined ? body : `${m.header}\n${body}`;
   const reparsed = foldMarking(clusterMarkingPath(m.fqdn), parseYaml(yaml), yaml);
   if (!sameMarking(reparsed, m)) {
@@ -396,6 +403,33 @@ export async function setClusterRelease(
     message: `release(clusters): pin ${current.name} to ${tag} [${runId}]`,
   });
   return { marking: pinned, changed: true };
+}
+
+/** Write ONE cluster's whole map onto the books branch — deploy-slave's mark-slave step, the
+ *  writer that puts a slave into the slaves ApplicationSet's world. What the caller does not
+ *  state is KEPT from the standing file: the header (the file's own explanation), the release pin
+ *  (set-pin's field, written by a different verb) and post-url (install-time), so marking a slave
+ *  again never deletes what another writer recorded. Commits only when the marking actually
+ *  changed, so a redeploy re-running the step converges instead of committing over itself. */
+export async function writeClusterMarking(
+  repo: PlatformRepo,
+  marking: ClusterMarking,
+  runId: string,
+): Promise<{ changed: boolean }> {
+  const { byFqdn } = await indexMarkings(repo);
+  const current = byFqdn.get(marking.fqdn);
+  const next: ClusterMarking = {
+    ...marking,
+    ...(current?.header !== undefined ? { header: current.header } : {}),
+    ...(current?.release !== undefined ? { release: current.release } : {}),
+    ...(current?.postUrl !== undefined && marking.postUrl === undefined ? { postUrl: current.postUrl } : {}),
+  };
+  if (current && sameMarking(current, next)) return { changed: false };
+  await commitMarking(repo, {
+    marking: next,
+    message: `deploy(clusters): mark ${next.name} (${next.role}, ${next.stage}) [${runId}]`,
+  });
+  return { changed: true };
 }
 
 /** The inverse: drop the slave part, leaving the cluster marked but unreachable — the master's

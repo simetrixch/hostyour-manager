@@ -32,7 +32,9 @@ export function FailedRunActions(props: {
   abort: AbortOffer;
   /** Retry from the failed step. `secrets` carries only the fields the operator actually re-entered. */
   onRetry: (secrets?: Record<string, string>) => void;
-  onAbort: () => void;
+  /** Abort with cleanup. Carries the same re-entered secrets: a terminal run's secrets were wiped
+   *  with it, and a cleanup that drives the machine's programs needs the elevation password again. */
+  onAbort: (secrets?: Record<string, string>) => void;
   onSkip: () => void;
   onDelete: () => void;
 }): ReactNode {
@@ -43,8 +45,14 @@ export function FailedRunActions(props: {
 
   /** Merge whatever was re-entered into one retry payload — secrets keep their keys, each activation
    *  input rides `activation-input:<field>`; blank fields are omitted so the run keeps its sealed value. */
+  /** The re-entered secret fields alone — what a cleanup can need (the activation inputs are the
+   *  failed STEP's business and ride only the retry). */
+  function filledSecrets(): Record<string, string> {
+    return Object.fromEntries(Object.entries(secrets).filter(([, v]) => v.trim()));
+  }
+
   function retry(): void {
-    const filled: Record<string, string> = Object.fromEntries(Object.entries(secrets).filter(([, v]) => v.trim()));
+    const filled: Record<string, string> = filledSecrets();
     for (const inp of run.requiredInputs) {
       const v = inputs[inp.field]?.trim();
       if (v) filled[`activation-input:${inp.field}`] = v;
@@ -110,7 +118,7 @@ export function FailedRunActions(props: {
           onCancel={() => setConfirmAbort(false)}
           onConfirm={() => {
             setConfirmAbort(false);
-            props.onAbort();
+            props.onAbort(filledSecrets());
           }}
         >
           <p>

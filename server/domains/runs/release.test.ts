@@ -13,7 +13,7 @@ import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
 import { getRun } from "../../executor/read.ts";
 import {
   makeHarness, disposeHarnesses, bareStepCtx, PARAMS, SLAVE_ID, MASTER_ID,
-  SLAVE_MARKING_YAML, MASTER_MARKING_YAML,
+  SLAVE_MARKING_YAML, MASTER_MARKING_YAML, REDEPLOY_STEP_NAMES,
 } from "./deploy-slave.fixture.ts";
 import type { Harness } from "./deploy-slave.fixture.ts";
 
@@ -128,8 +128,7 @@ describe("release — plan", () => {
     // Counter-probe: the same harness, the same live slave, still plans a REDEPLOY. So the refusal
     // above is this verb's own reading of the role and not a planner that refuses everything.
     const ok = await h.executor.plan("redeploy", { serverId: SLAVE_ID });
-    expect(ok.plan.steps.map((s) => s.name)).toEqual(["attest-target", "slave-preflight", "prepare-branch",
-      "mint-join-key", "install-microk8s", "create-mgmt", "gitops-handoff", "verify-slave", "register"]);
+    expect(ok.plan.steps.map((s) => s.name)).toEqual(REDEPLOY_STEP_NAMES);
   });
 });
 

@@ -205,7 +205,7 @@ export function buildOnboarding(config: Config, store: CredentialStore, db: Db, 
     ? new GitPlatformRepo({
       platformRepoURL: `https://github.com/${config.github.owner}/${config.github.repo}.git`,
       booksBranch: books,
-      // install.sh cuts this branch and set-domain.sh stamps it; a missing one is a fault to raise,
+      // the deploy-branch program cuts and stamps this branch; a missing one is a fault to raise,
       // never a branch to mint from the trunk (adapters/git/git.ts, createsBooksBranch).
       createsBooksBranch: false,
       workRoot: join(config.dataDir, "onboard-git"),

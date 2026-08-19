@@ -140,7 +140,10 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
   });
 
   app.post("/api/runs/:id/abort", async (c) => {
-    await executor.abortWithCleanup(c.req.param("id"));
+    // The same secret re-entry surface as retry: a terminal run's secrets were wiped with it, and
+    // a cleanup that drives the machine's programs needs the elevation password again.
+    const body = (await c.req.json().catch(() => ({}))) as { secrets?: unknown };
+    await executor.abortWithCleanup(c.req.param("id"), secretsFrom(body.secrets));
     return c.json({ ok: true }, 202);
   });
 }

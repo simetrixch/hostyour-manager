@@ -151,7 +151,7 @@ export interface GitPlatformRepoDeps {
    *  required with no default and stated at both call sites (boot/wire-onboarding.ts).
    *
    *  FALSE for hostyour-cloud: there the books branch IS the master cluster's install branch, which
-   *  install.sh cuts and set-domain.sh stamps — every ArgoCD revision retargeted onto it, the FQDN
+   *  the deploy-branch program cuts and stamps — every ArgoCD revision retargeted onto it, the FQDN
    *  substituted for the placeholder, the other two stages pruned. Re-minting it from the trunk head
    *  would put the unstamped product back under a name the cluster's own ArgoCD tracks, and the whole
    *  cluster would re-render from it. Its absence is an operator-visible fault, so it is raised.
@@ -317,7 +317,7 @@ export class GitPlatformRepo implements PlatformRepo {
           // hostyour-cloud: an installer cuts this branch and a stamper specialises it, so its absence
           // is a fault to report and never a gap to fill — minting it here would publish the
           // unstamped trunk under the name the cluster's own ArgoCD tracks.
-          throw errValidation(`this installation's books branch "${branch}" does not exist on ${this.deps.platformRepoURL} — it is the install branch of the cluster holding the master role, cut by install.sh and stamped by set-domain.sh, and nothing may re-create it from the trunk. Restore the branch (or correct MASTER_FQDN if it names the wrong cluster) and retry.`);
+          throw errValidation(`this installation's books branch "${branch}" does not exist on ${this.deps.platformRepoURL} — it is the install branch of the cluster holding the master role, cut and stamped by the deploy-branch program, and nothing may re-create it from the trunk. Restore the branch (or correct MASTER_FQDN if it names the wrong cluster) and retry.`);
         }
         await this.createBooksBranch(dir, branch);
         await this.syncWorktree(dir, branch);

@@ -326,8 +326,13 @@ export class Executor {
    *  the settled plan overwrites it) and has no step rows at all, so the parse threw a ZodError at the
    *  operator instead of settling the run cancelled — a guaranteed-failing button on a run that had
    *  nothing to clean up in the first place. The params feed the definition's cleanups + precondition, so
-   *  they are parsed there and nowhere else. */
-  async abortWithCleanup(runId: string): Promise<void> {
+   *  they are parsed there and nowhere else.
+   *
+   *  `secrets` is retryFromStep's re-entry surface on the abort path: a terminal run's secrets were
+   *  wiped with the run (finishRun), and a cleanup that drives the machine's programs needs the
+   *  elevation password again — re-supplied here, held in memory, wiped with the cleanup run like
+   *  any other. Stored only on the path that schedules cleanups, because the other path runs nothing. */
+  async abortWithCleanup(runId: string, secrets?: Record<string, Buffer>): Promise<void> {
     const run = this.loadRun(runId);
     if (run.status !== "failed" && run.status !== "cancelled") throw errValidation(`run ${runId} is not failed/cancelled`);
     const def = this.deps.registry.get(run.kind);
@@ -341,6 +346,7 @@ export class Executor {
     const params = def ? def.paramsSchema.parse(run.params) : {};
     await def?.assertAbortable?.(params, { db: this.deps.db });
     scheduleCleanupSteps(this.deps.db, runId, all, names, new Map((def?.cleanups?.(params) ?? []).map((c) => [c.name, c])));
+    if (secrets) this.storeSecrets(runId, secrets);
     writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.cleanup_started", runId });
     this.fireExecute(runId);
   }

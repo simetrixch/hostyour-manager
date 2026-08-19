@@ -3,33 +3,47 @@ import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { assertGuardsArmed } from "../../executor/guards.ts";
 import { buildRegistry } from "./registry.ts";
-import { getRun, readEvents } from "../../executor/read.ts";
+import { getRun } from "../../executor/read.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { hardenPreflightForSlave, parsePreflightOutput } from "./preflight.ts";
 import { hasHardFailure } from "../../../shared/preflight.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
-import { credLabels, sealTokenOnce, newestCredId, APP_SYNC_POLL_MS } from "./defs/deploy-slave.kit.ts";
+import { credLabels, sealTokenOnce, newestCredId, statedTarget } from "./defs/deploy-slave.kit.ts";
+import { deploySlaveSteps, SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
+import { registerStep } from "./defs/deploy-slave.verify.ts";
+import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
-import type { AnyRunDefinition, StepCtx } from "../../executor/types.ts";
+import type { AnyRunDefinition, Step, StepCtx, Cleanup } from "../../executor/types.ts";
 import {
-  SLAVE_ID, MASTER_ID, PARAMS, STEP_NAMES, HEALTHY_SLAVE_PREFLIGHT,
-  scriptedHosts, makeHarness, disposeHarnesses, stepColumn,
-  drainToVerifyDeadline, drainToNextTimer, bareStepCtx,
+  SLAVE_ID, MASTER_ID, PARAMS, STEP_NAMES, HEALTHY_SLAVE_PREFLIGHT, MASTER_MARKING_YAML,
+  scriptedHosts, makeHarness, disposeHarnesses, stepColumn, hostedStepCtx, bareStepCtx,
+  drainToVerifyDeadline, drainToNextTimer,
+  type Harness,
 } from "./deploy-slave.fixture.ts";
 
-// deploy-slave: plan shape, guards, and the per-step failure
-// modes + the verify/register gates. The green 0→7 journey and the lifecycle drills
-// (cleanups, resume, machine-id) live in deploy-slave.journey.test.ts; the two steps that
-// refuse a run whose cluster map and creds blob name different addresses in
-// deploy-slave.address.test.ts; the composed install.sh line (parser contract + the values
-// threaded off the master's map) in deploy-slave.installer.test.ts; the shared two-host
-// hosts fixture in deploy-slave.fixture.ts.
+// deploy-slave: plan shape, guards, the failure modes of everything that runs BEFORE the first
+// program conversation, and the local steps driven directly (mark-slave's map write, the verify
+// gates under fake timers, register's idempotence). Everything that starts a machine run — the
+// journeys over the deployment programs, the credential handshake, the cleanups drill — lives in
+// redeploy.ansiwise.test.ts, the ONE file that talks to a real `ansiwise serve` (the engine's run
+// root is per-drive, so two serve fixtures in parallel would share records and collide).
 
 describe("deploy-slave run — plan, guards, failure modes", () => {
   afterEach(disposeHarnesses);
 
-  it("plans 9 steps over two declared targets with the declared locks; NO required secrets (the PAT is Vault-sourced)", async () => {
+  /** The one secret every approve needs now: the programs raise their commands to root with it. */
+  const elevationOnly = (): Record<string, Buffer> => ({ [ANSIWISE_ELEVATION_SECRET]: Buffer.from("root-pw") });
+
+  /** One step out of the def's own list, for driving it directly. */
+  function stepOf(h: Harness, name: string): Step {
+    const def = buildRegistry({ db: h.db.db, platformRepo: h.platformRepo }).get("deploy-slave") as AnyRunDefinition;
+    const step = def.steps({ ...PARAMS, tier: "rehearsal" }).find((s) => s.name === name);
+    if (!step) throw new Error(`no step ${name}`);
+    return step;
+  }
+
+  it("plans the program-driven step list over two declared targets with the declared locks, and asks for the elevation password + the answers nobody records", async () => {
     const { executor } = await makeHarness();
     const { plan } = await executor.plan("deploy-slave", PARAMS);
     expect(plan.steps.map((s) => s.name)).toEqual(STEP_NAMES);
@@ -44,14 +58,17 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
       { resource: "master-vault", key: "m" },
       { resource: "master-kube", key: "m" },
     ]);
-    // The PAT auto-sources from the platform Vault — approval needs NO secret and there is
-    // no manual override anymore (the Vault is the single source; the warning says so).
-    expect(plan.requiredSecrets).toEqual([]);
+    // The programs raise their commands to root with a password the caller hands over per run;
+    // the inputs are what the programs declare and neither the inventory nor the map can state.
+    expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
+    expect(plan.requiredInputs).toEqual(SLAVE_INSTALL_INPUTS);
+    expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
+      ["committer_email", "letsencrypt_email", "letsencrypt_server", "lan_cidr", "storage_path", "storage_directory"],
+    );
     expect(plan.summary).toContain("s1.example.com");
     expect(plan.summary).toContain("m1");
     expect(plan.warnings).toHaveLength(1);
-    expect(plan.warnings[0]).toContain("GITOPS_REPO_PAT");
-    expect(plan.warnings[0]).toContain("no manual entry at approval");
+    expect(plan.warnings[0]).toContain("detached");
     expect(plan.planHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
@@ -62,28 +79,34 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect((err as AppError).message).toMatch(/master/);
   });
 
-  it("keeps steps({}) pure, 9-step-shaped, starts with attest-target; guards.armed passes", async () => {
+  it("keeps steps({}) pure, program-step-shaped, starts with attest-target; guards.armed passes", async () => {
     const { db } = await makeHarness();
     const registry = buildRegistry({ db: db.db });
     const def = registry.get("deploy-slave") as AnyRunDefinition;
     expect(def.mutating).toBe(true);
     const a = def.steps({});
     const b = def.steps({});
-    expect(a).toHaveLength(9);
+    expect(a.map((s) => s.name)).toEqual(STEP_NAMES);
     expect(a[0]?.name).toBe("attest-target");
     expect(a.map((s) => s.name)).toEqual(b.map((s) => s.name)); // pure in params
     // The boot self-check (guards.armed → assertGuardsArmed) covers deploy-slave.
     expect(() => assertGuardsArmed(registry)).not.toThrow();
   });
 
+  it("resolves every cleanup name the steps can register (abortWithCleanup's lookup path)", async () => {
+    const { db } = await makeHarness();
+    const def = buildRegistry({ db: db.db }).get("deploy-slave") as AnyRunDefinition;
+    const names = (def.cleanups?.({ ...PARAMS, tier: "rehearsal" }) ?? []).map((c) => c.name);
+    expect(names.sort()).toEqual(["microk8s-reset-slave", "remove-slave", "remove-slave-marking"]);
+  });
+
   it("hard-fails attest-target when the server name is not the domain's first label (the split-brain guard)", async () => {
-    // The installer keys every per-slave resource on the domain's FIRST LABEL
-    // (slave.sh: ${fqdn%%.*}) while the run keys the pointer/Application/project/ES paths on
-    // server.name — a disagreement used to split the resources across two names and only die
-    // at step 5/6 after ~20 min. The guard fails BEFORE anything is allocated.
+    // The platform keys every per-slave resource on the domain's FIRST LABEL while the run keys
+    // them on server.name — a disagreement used to split the resources across two names and only
+    // die minutes in. The guard fails BEFORE anything is allocated or mutated.
     const { db, executor, hosts } = await makeHarness();
     const { runId } = await executor.plan("deploy-slave", { ...PARAMS, domain: "s9.example.com" });
-    await executor.approve(runId);
+    await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
     const error = stepColumn(db, runId, "attest-target", "error") ?? "";
@@ -101,11 +124,48 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const hosts = scriptedHosts({ dnsOut: "DNS_WILDCARD none" });
     const { db, executor } = await makeHarness({ hosts });
     const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
+    await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
     expect(stepColumn(db, runId, "attest-target", "error")).toMatch(/DNS wildcard \*\.s1\.example\.com does not resolve/);
     // DNS fails BEFORE the tx — nothing was allocated
+    expect(db.db.select().from(clusters).all()).toHaveLength(0);
+  });
+
+  it("hard-fails attest-target when the box behind the address is NOT the machine we adopted", async () => {
+    const hosts = scriptedHosts({ machineId: "ffffffffffffffffffffffffffffffff" });
+    const { db, executor } = await makeHarness({ hosts, keystore: "keyfile" });
+    // The row remembers the machine adopt saw; the box now answering reports another one.
+    db.db.update(servers).set({ machineId: "abc123def4567890abc123def4567890" }).where(eq(servers.id, SLAVE_ID)).run();
+    const { runId } = await executor.plan("deploy-slave", PARAMS);
+    await executor.approve(runId, elevationOnly());
+    await executor.settle(runId);
+    expect(getRun(db.db, runId)?.status).toBe("failed");
+    expect(stepColumn(db, runId, "attest-target", "error")).toMatch(/not the machine we adopted/);
+  });
+
+  it("attest-target refuses a LIVE cluster and names the verb that does this job", async () => {
+    const { db, executor } = await makeHarness({ keystore: "keyfile" });
+    db.db.insert(clusters).values({
+      id: "cls_live", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "active", slaveId: 1,
+    }).run();
+    db.db.update(servers).set({ status: "healthy" }).where(eq(servers.id, SLAVE_ID)).run();
+    const { runId } = await executor.plan("deploy-slave", PARAMS);
+    await executor.approve(runId, elevationOnly());
+    await executor.settle(runId);
+    expect(getRun(db.db, runId)?.status).toBe("failed");
+    expect(stepColumn(db, runId, "attest-target", "error")).toMatch(/is the redeploy verb/);
+    // nothing moved: the row stays active and single
+    const rows = db.db.select().from(clusters).all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe("active");
+  });
+
+  it("redeploy refuses a server whose cluster is not live — that state is deploy-slave's to finish", async () => {
+    const { db, executor } = await makeHarness({ keystore: "keyfile" });
+    // No cluster row at all: nothing has a machine layer to rebuild yet.
+    const err = await executor.plan("redeploy", { serverId: PARAMS.serverId }).catch((e: unknown) => e);
+    expect((err as Error).message).toMatch(/carries no cluster/);
     expect(db.db.select().from(clusters).all()).toHaveLength(0);
   });
 
@@ -115,7 +175,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     });
     const { db, executor } = await makeHarness({ hosts });
     const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
+    await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
 
     const run = getRun(db.db, runId);
@@ -133,145 +193,96 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const hosts = scriptedHosts({ vaultCode: "000", vaultExit: 7 });
     const { db, executor } = await makeHarness({ hosts });
     const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
+    await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
     expect(stepColumn(db, runId, "slave-preflight", "error")).toMatch(/Master Vault reachable/);
   });
 
-  it("prepare-branch fails when install.sh does not report the scaffolded secrets path", async () => {
-    const hosts = scriptedHosts({ prepareOut: "some unrelated output" });
+  it("prepare-checkouts fails NAMED when the master's checkouts cannot be stood where the branch cut reads — no program starts, no map is written", async () => {
+    const hosts = scriptedHosts({ checkoutsOut: "", checkoutsExit: 3 });
     const { db, executor } = await makeHarness({ hosts });
     const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
-    await executor.settle(runId);
-    const run = getRun(db.db, runId);
-    expect(run?.steps.find((s) => s.name === "prepare-branch")?.status).toBe("failed");
-    expect(stepColumn(db, runId, "prepare-branch", "error")).toMatch(/secrets path/);
-  });
-
-  it("prepare-branch fails NAMED when the master's map carries no catalog-repo — nothing reaches the master", async () => {
-    // A slave belongs to the same installation, so its map is composed from the MASTER's. Of the
-    // values it inherits, catalog-repo is the one that must be there: set-role.sh runs on the
-    // slave's OWN branch and dies outright without it — which is ten minutes in, with the branch
-    // already cut and pushed. So the map is read BEFORE any shell reaches the master, and a map
-    // missing the field fails here, naming the file and what to put into it.
-    const { db, executor, hosts, platformRepo } = await makeHarness();
-    platformRepo.seed(platformRepo.booksBranch, clusterMarkingPath("m1.example.com"),
-      "fqdn: m1.example.com\nstage: prod\nrole: master\nbuild-plane: m1.example.com\n");
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
+    await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
 
     const run = getRun(db.db, runId);
     expect(run?.status).toBe("failed");
-    expect(run?.steps.find((s) => s.name === "prepare-branch")?.status).toBe("failed");
-    const error = stepColumn(db, runId, "prepare-branch", "error") ?? "";
-    expect(error).toContain("clusters/active/m1.example.com.yaml"); // the file, named
-    expect(error).toContain("catalog-repo");                        // the field, named
-    expect(error).toContain("then retry the run");                  // the fix is actionable
-    // The master never saw the prepare-branch shell, and the map cleanup was never armed —
-    // the refusal precedes both, so there is nothing to undo.
-    expect(hosts.log.some((l) => l.command.includes("dc-prepare-branch-"))).toBe(false);
-    const cp = JSON.parse(stepColumn(db, runId, "prepare-branch", "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
-    expect(cp.__cleanups).toBeUndefined();
+    expect(run?.steps.find((s) => s.name === "prepare-checkouts")?.status).toBe("failed");
+    const error = stepColumn(db, runId, "prepare-checkouts", "error") ?? "";
+    expect(error).toContain("origin/m1.example.com");   // the live tree's branch, named
+    expect(error).toContain("product branch");          // the work tree's, named
+    expect(error).toContain("then retry the run");      // the fix is actionable
+    // Nothing downstream ran: no serve conversation was opened on either host, and the run was
+    // parked by onTerminal with its ordinal kept.
+    expect(hosts.log.filter((l) => l.command.includes("ansiwise"))).toHaveLength(0);
+    expect(db.db.select().from(clusters).get()?.status).toBe("planned");
   });
 
-  it("mint-join-key fails when the master emits no valid blob, and the raw output never rides the error", async () => {
-    // A mint that "succeeded" but printed something else means the master ran installer code
-    // that does not know the flag, or its coordinator answered with nothing. Either way the
-    // slave would be handed no credential — and the raw stdout must not travel into the
-    // persisted step error, because on the happy path that string IS the key.
-    const hosts = scriptedHosts({ mintOut: "not json at all" });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
-    await executor.settle(runId);
+  // ---- mark-slave, driven directly (the map write is the manager's own git act) ------------
 
-    const run = getRun(db.db, runId);
-    expect(run?.status).toBe("failed");
-    expect(run?.steps.find((s) => s.name === "mint-join-key")?.status).toBe("failed");
-    const error = stepColumn(db, runId, "mint-join-key", "error") ?? "";
-    expect(error).toContain("valid tailnet join-credential JSON blob");
-    expect(error).not.toContain("not json at all");
-    // Nothing downstream ran: no base install, no key staged on the slave.
-    expect(hosts.log.some((l) => l.command.endsWith("./setup.sh --prod"))).toBe(false);
-    expect(hosts.files.some((x) => x.path.includes("dc-tailnet-authkey-"))).toBe(false);
+  it("mark-slave composes the slave's map FROM the master's and writes it onto the books branch — one address for the map and the handshake", async () => {
+    const h = await makeHarness({ marking: false }); // a fresh deploy: no slave map yet
+    h.db.db.insert(clusters).values({
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+    }).run();
+    const armed: Cleanup[] = [];
+    const checkpoints: unknown[] = [];
+    const ctx = hostedStepCtx(h, { registerCleanup: (c) => armed.push(c), checkpoint: (d) => checkpoints.push(d) });
+    await stepOf(h, "mark-slave").run(ctx);
+
+    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath(PARAMS.domain)) ?? "";
+    // The slave part (what makes the slaves-appset dial it), the identity, and the inheritance —
+    // every installation-wide value is the MASTER's, never asked a second time.
+    for (const want of [
+      "fqdn: s1.example.com", "stage: prod", "role: slave", "master: m1.example.com",
+      // books-cluster is the slaves ApplicationSet's SELECTOR key — a map without it is
+      // invisible to the generator.
+      "books-cluster: m1.example.com",
+      "apiHost: 100.64.0.11", "apiPort: 16443", "build-plane: m1.example.com",
+      "unit-apex: example.com", "platform-domain: example.com",
+      "alert-recipients: ops@example.com", "catalog-repo: acme/acme-catalog",
+    ]) expect(map).toContain(want);
+    // The short name is DERIVED from the fqdn — never stored.
+    expect(map).not.toContain("name:");
+    expect(armed.map((c) => c.name)).toEqual(["remove-slave-marking"]);
+    expect(checkpoints.at(-1)).toEqual({ branch: PARAMS.domain, apiHost: "100.64.0.11", changed: true });
+
+    // Idempotent: the same composition commits nothing the second time.
+    const commits = h.platformRepo.commits.length;
+    await stepOf(h, "mark-slave").run(ctx);
+    expect(h.platformRepo.commits).toHaveLength(commits);
+    expect(checkpoints.at(-1)).toEqual({ branch: PARAMS.domain, apiHost: "100.64.0.11", changed: false });
   });
 
-  it("a slave that cannot join the tailnet FAILS THERE — create-mgmt never runs", async () => {
-    // The failure this ticket exists to prevent is the quiet one: the install finishes, the
-    // slave looks deployed, and the first sign of trouble is the master's ArgoCD unable to
-    // reach it at all. The join is a hard gate inside the bring-up instead.
-    const hosts = scriptedHosts({ tailnetJoinExit: 1 });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
-    await executor.settle(runId);
-
-    const run = getRun(db.db, runId);
-    expect(run?.status).toBe("failed");
-    expect(run?.steps.find((s) => s.name === "install-microk8s")?.status).toBe("failed");
-    expect(stepColumn(db, runId, "install-microk8s", "error") ?? "").toContain("could not join the tailnet");
-    expect(hosts.log.some((l) => l.command.includes("--emit-mgmt-credentials"))).toBe(false);
-    expect(hosts.log.some((l) => l.command.includes("--slave-add"))).toBe(false);
-    // The staged key is removed even on the failing path — it does not outlive the step.
-    expect(hosts.log.some((l) => l.command === `rm -f /tmp/dc-tailnet-authkey-${runId}`)).toBe(true);
+  it("mark-slave keeps what another writer recorded: a standing release pin survives the rewrite", async () => {
+    const h = await makeHarness({
+      marking: [
+        "fqdn: s1.example.com", "stage: prod", "role: slave", "build-plane: m1.example.com",
+        "release: 1.0.0-stable-20260801120000", "master: m1.example.com", "apiHost: 100.64.0.11", "apiPort: 16443",
+      ].join("\n") + "\n",
+    });
+    h.db.db.insert(clusters).values({
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+    }).run();
+    await stepOf(h, "mark-slave").run(hostedStepCtx(h));
+    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath(PARAMS.domain)) ?? "";
+    expect(map).toContain("release: 1.0.0-stable-20260801120000"); // set-pin's field, not this step's
+    expect(map).toContain("unit-apex: example.com");               // the inheritance still landed
   });
 
-  it("mint-join-key fails NAMED when the master's ~/hostyour-cloud refresh fails — no master-side setup.sh runs from a stale tree", async () => {
-    // The stale-master guard's failure mode: the refresh could not converge the master's live
-    // checkout onto origin/<masterFqdn> (missing .git ⇒ exit 3; a failed fetch/reset/checkout ⇒
-    // its own non-zero). The step must fail FAST — before the slave's ~25-min base install —
-    // with the host + branch named, and no master-side setup.sh may run.
-    const hosts = scriptedHosts({ masterRefreshOut: "", masterRefreshExit: 3 });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
-    await executor.settle(runId);
-
-    const run = getRun(db.db, runId);
-    expect(run?.status).toBe("failed");
-    expect(run?.steps.find((s) => s.name === "mint-join-key")?.status).toBe("failed");
-    const error = stepColumn(db, runId, "mint-join-key", "error") ?? "";
-    expect(error).toContain("origin/m1.example.com");     // the branch, named
-    expect(error).toContain("on m1.example.com");         // the host, named
-    expect(error).toContain("then retry the run");               // the fix is actionable
-    // Fails fast and safe: no master-side setup.sh from a stale tree, no base install wasted.
-    expect(hosts.log.some((l) => l.command.includes("--tailnet-mint-join-key"))).toBe(false);
-    expect(hosts.log.some((l) => l.command.includes("--slave-add"))).toBe(false);
-    expect(hosts.log.some((l) => l.command.includes("--emit-mgmt-credentials"))).toBe(false);
-  });
-
-  it("create-mgmt fails STATICALLY (no output echo) when the slave emits an invalid blob", async () => {
-    const hosts = scriptedHosts({ emitOut: '{"server": "https://10.1.1.11:16443", "oops": true}' });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
-    await executor.settle(runId);
-    const run = getRun(db.db, runId);
-    expect(run?.steps.find((s) => s.name === "create-mgmt")?.status).toBe("failed");
-    const error = stepColumn(db, runId, "create-mgmt", "error") ?? "";
-    expect(error).toMatch(/did not emit a valid management-credentials JSON blob/);
-    expect(error).not.toContain("oops"); // the raw output never rides an error message
-  });
-
-  it("install-microk8s fails NAMED when the Vault auto-source fails (the Vault is the only source)", async () => {
-    const hosts = scriptedHosts({ repoPatOut: "", repoPatExit: 3 });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
-    await executor.settle(runId);
-
-    const run = getRun(db.db, runId);
-    expect(run?.status).toBe("failed");
-    expect(run?.steps.find((s) => s.name === "install-microk8s")?.status).toBe("failed");
-    const error = stepColumn(db, runId, "install-microk8s", "error") ?? "";
-    expect(error).toContain("GITOPS_REPO_PAT");
-    expect(error).toContain("secret/prod/system/argocd:repo-pat");
-    expect(error).toContain("then retry the run"); // the fix is actionable: repair the Vault, retry
-    // The PAT never existed: no askpass helper was ever delivered to the slave.
-    expect(hosts.files.some((x) => x.path.includes("dc-askpass-"))).toBe(false);
+  it("mark-slave in REDEPLOY mode arms NO cleanup — dropping the map part of a live slave cascades its teardown", async () => {
+    const h = await makeHarness();
+    h.db.db.insert(clusters).values({
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "active", slaveId: 1,
+    }).run();
+    const steps = deploySlaveSteps(
+      { target: statedTarget(SLAVE_ID, PARAMS.domain, "prod"), mode: "redeploy" },
+      { platformRepo: h.platformRepo },
+    );
+    const armed: Cleanup[] = [];
+    await steps.find((s) => s.name === "mark-slave")?.run(hostedStepCtx(h, { registerCleanup: (c) => armed.push(c) }));
+    expect(armed).toEqual([]);
   });
 
   it("slaveCryptoGate: a real-tier slave is refused under the plaintext keystore", async () => {
@@ -290,153 +301,110 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect((err as AppError).code).toBe("PLAN_REFUSED");
   });
 
-  // ---- verify-slave (HARD vs SOFT) + register --------------------------------------
+  // ---- verify-slave (HARD vs SOFT), driven directly under fake timers ------------------------
 
-  it("verify-slave HARD-fails when an app is not Synced (the bounded retry window expires)", async () => {
-    const hosts = scriptedHosts({ argoAppsOut: "root-applications|OutOfSync|Progressing\nplatform-apps-prod|Synced|Healthy" });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
+  /** A harness whose rows are where verify-slave finds them mid-run. */
+  async function verifyWorld(hostsOver: Parameters<typeof scriptedHosts>[0] = {}): Promise<Harness> {
+    const hosts = scriptedHosts(hostsOver);
+    const h = await makeHarness({ hosts });
+    h.db.db.insert(clusters).values({
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+    }).run();
+    return h;
+  }
+
+  async function expireVerify(h: Harness): Promise<unknown> {
+    const step = stepOf(h, "verify-slave");
     vi.useFakeTimers();
     try {
-      await executor.approve(runId);
+      const outcome = step.run(hostedStepCtx(h)).then(() => undefined, (e: unknown) => e);
       await drainToVerifyDeadline();
+      return await outcome;
     } finally {
       vi.useRealTimers();
     }
-    await executor.settle(runId);
+  }
 
-    const run = getRun(db.db, runId);
-    expect(run?.status).toBe("failed");
-    expect(run?.steps.find((s) => s.name === "verify-slave")?.status).toBe("failed");
-    const error = stepColumn(db, runId, "verify-slave", "error") ?? "";
-    expect(error).toMatch(/s1 applications Synced\+Healthy did not converge/);
-    expect(error).toContain("root-applications (OutOfSync/Progressing)");
-    expect(error).toContain("diagnostics in the run log above");
-    // The master-side diagnostic bundle ran while the gate was failing AND right before the
-    // throw, and its output landed in the run log (the first live run had none of this).
-    expect(hosts.log.filter((l) => l.host === "m1.example.com" && l.command.includes("dc-slave-diag-")).length).toBeGreaterThanOrEqual(1);
-    expect(JSON.stringify(readEvents(db.db, runId))).toContain("verify-slave diagnostics (ns s1)");
-    // parked mid-verify: onTerminal freed the server + parked the cluster (slaveId KEPT)
-    const cluster = db.db.select().from(clusters).where(eq(clusters.domain, PARAMS.domain)).get();
-    expect(cluster?.status).toBe("planned");
-    expect(cluster?.planeState).toBe("verifying");
-    expect(cluster?.slaveId).toBe(1);
-    expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.status).toBe("ready");
+  it("verify-slave HARD-fails when an app is not Synced (the bounded retry window expires), with the diagnostics taken", async () => {
+    const h = await verifyWorld({ argoAppsOut: "root-applications|OutOfSync|Progressing\nplatform-apps-prod|Synced|Healthy" });
+    const err = await expireVerify(h);
+    expect(String((err as Error).message)).toMatch(/s1 applications Synced\+Healthy did not converge/);
+    expect(String((err as Error).message)).toContain("root-applications (OutOfSync/Progressing)");
+    // The master-side diagnostic bundle ran while the gate was failing AND right before the throw.
+    expect(h.hosts.log.filter((l) => l.host === "m1.example.com" && l.command.includes("dc-slave-diag-")).length).toBeGreaterThanOrEqual(1);
   });
 
   it("verify-slave HARD gate 0: a never-Ready ExternalSecret fails NAMED, after force-sync kicks", async () => {
-    // The recorded live failure's signature (root-applications Unknown/Unknown for ~14 min)
-    // pointed at the instance's repo credential never materializing. Gate 0 now reports THAT
-    // directly: the ES name + Ready reason ride the step error, and the step kicked ESO's
-    // error backoff with the chart's force-sync annotation idiom on the way.
-    const hosts = scriptedHosts({ externalSecretsOut: "cluster-slave|True|SecretSynced\nrepo-hostyour-cloud|False|SecretSyncedError" });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    vi.useFakeTimers();
-    try {
-      await executor.approve(runId);
-      await drainToVerifyDeadline();
-    } finally {
-      vi.useRealTimers();
-    }
-    await executor.settle(runId);
-
-    expect(getRun(db.db, runId)?.status).toBe("failed");
-    const error = stepColumn(db, runId, "verify-slave", "error") ?? "";
-    expect(error).toMatch(/s1 ExternalSecrets Ready \(repo \+ cluster credentials\) did not converge/);
-    expect(error).toContain("repo-hostyour-cloud (SecretSyncedError)");
-    // The backoff-breaking kick and the diagnostic bundle both fired on the master.
-    expect(hosts.log.some((l) => l.host === "m1.example.com" && l.command.includes("annotate externalsecrets.external-secrets.io --all force-sync="))).toBe(true);
-    expect(hosts.log.some((l) => l.host === "m1.example.com" && l.command.includes("dc-slave-diag-"))).toBe(true);
-    // ...and gate 1 was never reached: the apps poll must not have run.
-    expect(hosts.log.some((l) => l.command.includes("get applications.argoproj.io"))).toBe(false);
+    const h = await verifyWorld({ externalSecretsOut: "cluster-slave|True|SecretSynced\nrepo-hostyour-cloud|False|SecretSyncedError" });
+    const err = await expireVerify(h);
+    expect(String((err as Error).message)).toMatch(/s1 ExternalSecrets Ready \(repo \+ cluster credentials\) did not converge/);
+    expect(String((err as Error).message)).toContain("repo-hostyour-cloud (SecretSyncedError)");
+    // The backoff-breaking kick fired on the master, and gate 1 was never reached.
+    expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command.includes("annotate externalsecrets.external-secrets.io --all force-sync="))).toBe(true);
+    expect(h.hosts.log.some((l) => l.command.includes("get applications.argoproj.io"))).toBe(false);
   });
 
   it("verify-slave HARD-fails when a slave ESO SecretStore never reaches Ready", async () => {
-    const hosts = scriptedHosts({ secretStoresOut: "external-secrets/vault-backend|True\nredis/vault-backend|False" });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    vi.useFakeTimers();
-    try {
-      await executor.approve(runId);
-      await drainToVerifyDeadline();
-    } finally {
-      vi.useRealTimers();
-    }
-    await executor.settle(runId);
-    expect(getRun(db.db, runId)?.status).toBe("failed");
-    const error = stepColumn(db, runId, "verify-slave", "error") ?? "";
-    expect(error).toMatch(/slave ESO SecretStores Ready did not converge/);
-    expect(error).toContain("redis/vault-backend");
+    const h = await verifyWorld({ secretStoresOut: "external-secrets/vault-backend|True\nredis/vault-backend|False" });
+    const err = await expireVerify(h);
+    expect(String((err as Error).message)).toMatch(/slave ESO SecretStores Ready did not converge/);
+    expect(String((err as Error).message)).toContain("redis/vault-backend");
   });
 
   it("verify-slave survives a transient SSH channel-open refusal mid-poll (MaxSessions pressure) and converges", async () => {
-    // The recorded live failure's OTHER half: the final verify poll died on
-    // "(SSH) Channel open failure: open failed" — the master's sshd refusing one more
-    // channel. The connection is alive and each poll frees its channel, so a refused open
-    // must be a FAILING POLL (retried on the next cadence tick), never a step death.
-    const hosts = scriptedHosts();
-    hosts.execFaults.push({ match: "get externalsecrets.external-secrets.io", message: "(SSH) Channel open failure: open failed" });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
+    // The recorded live failure's other half: a verify poll died on "(SSH) Channel open failure" —
+    // the master's sshd refusing one more channel. The connection is alive and each poll frees its
+    // channel, so a refused open must be a FAILING POLL (retried on the next cadence tick), never
+    // a step death.
+    const h = await verifyWorld();
+    h.hosts.execFaults.push({ match: "get externalsecrets.external-secrets.io", message: "(SSH) Channel open failure: open failed" });
+    const step = stepOf(h, "verify-slave");
     vi.useFakeTimers();
     try {
-      await executor.approve(runId);
-      // The refused HARD-gate-0 probe schedules the retry sleep; one cadence tick later the
-      // fault is consumed and the whole verify converges on scripted microtasks alone.
+      const done = step.run(hostedStepCtx(h));
       await drainToNextTimer();
-      await vi.advanceTimersByTimeAsync(APP_SYNC_POLL_MS + 1_000);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await done;
     } finally {
       vi.useRealTimers();
     }
-    await executor.settle(runId);
-
-    expect(getRun(db.db, runId)?.status).toBe("succeeded");
-    const events = JSON.stringify(readEvents(db.db, runId));
-    expect(events).toContain("transient SSH channel refusal");
-    expect(events).toContain("Channel open failure");
+    // The faulted poll was consumed and the verify still converged on the next cadence tick.
+    expect(h.hosts.execFaults).toHaveLength(0);
   });
 
   it("verify-slave degrades gracefully on the SOFT checks: no metrics + no certs still succeed", async () => {
-    const hosts = scriptedHosts({ promOut: "PROM_CHECK empty", certsOut: "" });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
-    await executor.settle(runId);
-
-    expect(getRun(db.db, runId)?.status).toBe("succeeded");
-    const events = JSON.stringify(readEvents(db.db, runId));
-    expect(events).toContain("obs-agent push may still be warming up");
-    expect(events).toContain("no Certificates on the slave yet");
-    const cp = JSON.parse(stepColumn(db, runId, "verify-slave", "checkpoint_json") ?? "{}") as {
-      data?: { extSecrets?: number; apps?: number; secretStores?: number; prom?: string; certsTotal?: number; certsReady?: number };
-    };
-    expect(cp.data).toEqual({ extSecrets: 2, apps: 2, secretStores: 2, prom: "empty", certsTotal: 0, certsReady: 0 });
+    const h = await verifyWorld({ promOut: "PROM_CHECK empty", certsOut: "" });
+    const checkpoints: unknown[] = [];
+    await stepOf(h, "verify-slave").run(hostedStepCtx(h, { checkpoint: (d) => checkpoints.push(d) }));
+    expect(checkpoints.at(-1)).toEqual({ extSecrets: 2, apps: 2, secretStores: 2, prom: "empty", certsTotal: 0, certsReady: 0 });
   });
 
-  it("register is overwrite-idempotent: re-running step 7 converges (plane + provisionedAt stable)", async () => {
-    const { db, executor, store } = await makeHarness();
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
-    await executor.settle(runId);
-    expect(getRun(db.db, runId)?.status).toBe("succeeded");
+  // ---- register + the credential idioms -------------------------------------------------------
+
+  it("register is overwrite-idempotent: re-running it converges (plane + provisionedAt stable)", async () => {
+    const { db, store } = await makeHarness();
+    // The world create-mgmt leaves behind: the row with the kube facts, the two sealed creds.
+    db.db.insert(clusters).values({
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      planeJson: { kube: { server: "https://100.64.0.11:16443", caData: "TFMtQ0EtREFUQQ==" } },
+    }).run();
+    const ctx = bareStepCtx(db, store);
+    const labels = credLabels("s1");
+    await sealTokenOnce(ctx, { kind: "kubeconfig", label: labels.bearer, serverId: SLAVE_ID, token: "tok-bearer" });
+    await sealTokenOnce(ctx, { kind: "other", label: labels.reviewer, serverId: SLAVE_ID, token: "tok-reviewer" });
+
+    const register = registerStep(statedTarget(SLAVE_ID, PARAMS.domain, "prod"));
+    await register.run(ctx);
     const before = db.db.select().from(clusters).where(eq(clusters.domain, PARAMS.domain)).get();
     expect(before?.status).toBe("active");
+    expect(before?.planeState).toBe("ready");
+    expect(ClusterPlaneV0.parse(before?.planeJson).v).toBe(0);
+    expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.status).toBe("healthy");
 
-    // Re-execute register directly — what a crash-resumed executor does after the last step had
-    // already committed its tx (steps are idempotent by contract).
-    const def = buildRegistry({ db: db.db }).get("deploy-slave") as AnyRunDefinition;
-    const steps = def.steps({ ...PARAMS, tier: "rehearsal" });
-    const register = steps[steps.length - 1];
-    await register?.run(bareStepCtx(db, store));
-
+    await register.run(ctx); // what a crash-resumed executor does
     const after = db.db.select().from(clusters).where(eq(clusters.domain, PARAMS.domain)).get();
-    expect(after?.status).toBe("active");
-    expect(after?.planeState).toBe("ready");
     expect(after?.provisionedAt?.getTime()).toBe(before?.provisionedAt?.getTime()); // kept, not re-stamped
     expect(after?.planeJson).toEqual(before?.planeJson); // byte-stable plane
-    expect(ClusterPlaneV0.parse(after?.planeJson).v).toBe(0);
-    expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.status).toBe("healthy");
   });
 
   it("sealTokenOnce: a CHANGED token for the same label ROTATES the credential in place (retry-robust)", async () => {
@@ -451,7 +419,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(id2).not.toBe(id1);
     const old = db.sqlite.prepare("SELECT rotated_at FROM credentials WHERE id=?").get(id1) as { rotated_at: number | null };
     expect(old.rotated_at).not.toBeNull(); // superseded row carries provenance
-    // step 7's resolver (newest-by-label) finds the rotated-in credential
+    // register's resolver (newest-by-label) finds the rotated-in credential
     expect(await newestCredId(ctx, { serverId: SLAVE_ID, kind: "kubeconfig", label })).toBe(id2);
     // the reuse fast-path stays intact, and every path logs its story
     expect(await sealTokenOnce(ctx, { kind: "kubeconfig", label, serverId: SLAVE_ID, token: "token-mint-two" })).toBe(id2);
@@ -461,9 +429,9 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   });
 
   it("sealTokenOnce: the SAME stable token under an OLD label no longer dies on the fingerprint index (the s1 incident)", async () => {
-    // The live create-mgmt part-3 failure class: the slave's long-lived SA token is STABLE
-    // across runs; a row sealed under the pre-rename label scheme holds the same fingerprint,
-    // the label mismatch defeats the reuse fast-path, and the old GLOBAL unique index
+    // The live create-mgmt failure class: the slave's long-lived SA token is STABLE across runs;
+    // a row sealed under the pre-rename label scheme holds the same fingerprint, the label
+    // mismatch defeats the reuse fast-path, and the old GLOBAL unique index
     // credentials_fingerprint_uq rejected the fresh insert. Migration 0005 made the index
     // non-unique — the seal must now succeed.
     const { db, store } = await makeHarness();
@@ -502,5 +470,14 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(hasHardFailure({ checkedAt: 0, checks: hard })).toBe(true);
     // pure: the input (what adopt persisted) keeps its soft severities
     expect(parsed.find((c) => c.id === "cpu.count")?.severity).toBe("soft");
+  });
+
+  it("the master's map is what mark-slave inherits from — MASTER_MARKING_YAML carries every field the composition reads", () => {
+    // A fixture drift guard: the composition reads build-plane, unit-apex, platform-domain,
+    // alert-recipients and catalog-repo off the master's map; a fixture that lost one would turn
+    // the inheritance tests above green for the wrong reason.
+    for (const key of ["build-plane", "unit-apex", "platform-domain", "alert-recipients", "catalog-repo"]) {
+      expect(MASTER_MARKING_YAML).toContain(`${key}: `);
+    }
   });
 });

@@ -49,7 +49,7 @@ export function SlaveDeployForm(props: {
       </div>
       <div className="form-foot">
         <span className="field__hint">
-          Plans the run first — you approve it on the next screen (the repo PAT is auto-sourced from Vault).
+          Plans the run first — you approve it on the next screen (the machine&apos;s elevation password and the certificate answers are asked for there).
         </span>
         <span className="actions">
           <button type="submit" className="btn btn--primary" disabled={!value.domain.trim()}>

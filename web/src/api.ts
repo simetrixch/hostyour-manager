@@ -98,7 +98,8 @@ export const cancelRun = (id: string): Promise<unknown> => post(`/api/runs/${id}
 export const retryRun = (id: string, stepName?: string, secrets?: Record<string, string>): Promise<unknown> =>
   post(`/api/runs/${id}/retry`, { ...(stepName ? { stepName } : {}), ...encodeSecrets(secrets) });
 export const skipRun = (id: string, stepName: string, reason: string): Promise<unknown> => post(`/api/runs/${id}/skip`, { stepName, reason });
-export const abortRun = (id: string): Promise<unknown> => post(`/api/runs/${id}/abort`);
+export const abortRun = (id: string, secrets?: Record<string, string>): Promise<unknown> =>
+  post(`/api/runs/${id}/abort`, { ...encodeSecrets(secrets) });
 
 // Server inventory (adopt entry point + inventory CRUD).
 export const listServers = (): Promise<{ servers: ServerView[] }> => req("/api/servers");

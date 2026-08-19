@@ -44,8 +44,8 @@ const EnvSchema = z.object({
   // seeds the one role=master server row (this control host) so deploy-slave's loadMaster
   // finds it on a FRESH DB — no manual SQL. All optional: unset ⇒ no seeding (dev/tests).
   // MASTER_FQDN is the control host's FQDN == its install branch (masterFqdnOf reads host);
-  // MASTER_SSH_USER is the OS user that owns ~/hostyour-cloud on the master (the deploy-slave
-  // master-side steps run there). MASTER_SSH_KEY_FILE is where the ESO-materialized private
+  // MASTER_SSH_USER is the OS account the deploy-slave master-side steps run as (its serve
+  // conversations and the checkout upkeep at /srv/hostyour-cloud). MASTER_SSH_KEY_FILE is where the ESO-materialized private
   // key is mounted — read once at boot and sealed into the credential store so ctx.ssh(master)
   // can reach the host (the Controller SSHes to its OWN host over the LAN).
   // MASTER_SSH_HOST_KEY_FP is the master sshd's host-key fingerprint ("SHA256:…", the exact

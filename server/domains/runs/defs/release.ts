@@ -185,7 +185,7 @@ function releaseSteps(params: ReleaseParams, ports: ReleasePorts): Step[] {
     attestClusterStep(target, ceilingCheck(target, params.channel, params.version, ports)),
     setPinStep(target, params, ports),
     refreshCheckoutStep(target),
-    ...RELEASE_PROGRAMS.map((program) => ansiwiseProgramStep(target, program, ports, extra)),
+    ...RELEASE_PROGRAMS.map((program) => ansiwiseProgramStep(target, program, ports, { extra })),
     argocdFollowStep(target),
   ];
 }

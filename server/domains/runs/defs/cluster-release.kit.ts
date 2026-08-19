@@ -57,8 +57,8 @@ async function argoSurface(ctx: StepCtx, target: SlaveTarget): Promise<{ session
 
 /** The fail-closed precondition of every verb that acts on a LIVE cluster: the cluster row is
  *  active (the target lookup refuses anything else) and the machine answering on that host is still
- *  the machine the platform adopted — a stranger VM on a recycled address must never be handed
- *  setup.sh. `check` is where a verb adds its OWN precondition; a release checks the channel ceiling
+ *  the machine the platform adopted — a stranger VM on a recycled address must never be handed the
+ *  deployment programs. `check` is where a verb adds its OWN precondition; a release checks the channel ceiling
  *  there, so the refusal lands before the step that would write a pin. */
 export function attestClusterStep(target: SlaveTarget, check?: (ctx: StepCtx) => Promise<void>): Step {
   return {

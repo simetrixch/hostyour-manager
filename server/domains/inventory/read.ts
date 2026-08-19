@@ -86,8 +86,8 @@ export function masterFqdn(db: Db): string | undefined {
  * The branch this installation keeps its BOOKS on — its cluster maps, its consumer registrations and
  * its tenant registrations (shared/branches.ts). It is the install branch of the cluster holding the
  * master role, so the value IS that cluster's FQDN: the schema states the equivalence on the column
- * this reads (db/schema/inventory.ts, clusters.domain == install branch), and install.sh derives the
- * same name for its own writes (BOOKS_BRANCH).
+ * this reads (db/schema/inventory.ts, clusters.domain == install branch), and the deployment
+ * programs derive the same name for their own writes (the books-cluster answer).
  *
  * MASTER_FQDN wins over the row, and the order is the point rather than a preference. seedMaster
  * REWRITES clusters.domain to the configured value on every boot (boot/seed-master.ts), so the row is

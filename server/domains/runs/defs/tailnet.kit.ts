@@ -170,8 +170,12 @@ async function readMintedKey(ctx: StepCtx, session: SshSession, domain: string, 
  *  re-entry that still needs the value must ask the coordinator again. The rejoin program IS
  *  checkpointed, because it is the long half (logout, join, the certificate re-sign and the wait
  *  for readiness in one machine run) and a re-entry must re-attach to a run in flight rather than
- *  start a second one. */
-function rejoinStep(target: SlaveTarget, serverId: string, ports: TailnetPorts): Step {
+ *  start a second one.
+ *
+ *  EXPORTED because deploy-slave's join is the same act: a fresh slave holds no credential, so the
+ *  shape that mints, carries and spends in one step is the first join too — and the rejoin
+ *  program's deliberate logout-first is a no-op on a machine that was never on the network. */
+export function rejoinStep(target: SlaveTarget, serverId: string, ports: TailnetPorts): Step {
   return {
     name: "rejoin",
     title: "Mint on the master, then log the host out and join it again (one program run)",
@@ -279,8 +283,8 @@ function rejoinStep(target: SlaveTarget, serverId: string, ports: TailnetPorts):
  *  go on showing the reading from before the repair — the state the operator asked the verb to
  *  change. A probe that cannot run leaves the stored reading alone and says so in the log; it does
  *  not fail the step, because the act above already happened and calling the run failed would say
- *  the opposite. */
-function readMembershipStep(serverId: string): Step {
+ *  the opposite. EXPORTED for deploy-slave, whose join changes exactly the same reading. */
+export function readMembershipStep(serverId: string): Step {
   return {
     name: "read-membership",
     title: "Read the host's tailnet membership",

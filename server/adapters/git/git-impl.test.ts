@@ -172,14 +172,14 @@ describe("GitPlatformRepo", () => {
   it(
     "REFUSES to create the books branch for a repository an installer cuts it in — the trunk is never published under its name",
     async () => {
-      // hostyour-cloud's books branch IS the master cluster's install branch: set-domain.sh retargets
-      // every ArgoCD revision onto it, stamps the FQDN over the placeholder and prunes the other two
-      // stages. Minting it from the trunk head would publish the unstamped product under the name
-      // that cluster's own ArgoCD tracks, and the cluster would re-render from it. So the absence is
-      // reported and the remote is left exactly as it was.
+      // hostyour-cloud's books branch IS the master cluster's install branch: the deploy-branch
+      // program retargets every ArgoCD revision onto it, stamps the FQDN over the placeholder and
+      // prunes the other two stages. Minting it from the trunk head would publish the unstamped
+      // product under the name that cluster's own ArgoCD tracks, and the cluster would re-render
+      // from it. So the absence is reported and the remote is left exactly as it was.
       const { originDir, originURL } = makeTrunkOnlyOrigin();
       const repo = makeRepo(originURL, false);
-      await expect(repo.withBranch(BOOKS, async () => undefined)).rejects.toThrow(/install\.sh/);
+      await expect(repo.withBranch(BOOKS, async () => undefined)).rejects.toThrow(/deploy-branch program/);
       expect(git(originDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split("\n").filter(Boolean)).toEqual(["master"]);
     },
     SLOW,

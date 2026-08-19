@@ -4,7 +4,7 @@ import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { AnsiwiseClient } from "../../../adapters/ansiwise/client.ts";
 import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../../../adapters/ansiwise/port.ts";
 import { isMasterRole, type Stage } from "../../../../shared/enums.ts";
-import { loadServer, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 
 // Driving one ansiwise PROGRAM on a machine, through the machine's own REST surface — the step
 // that replaces `setup.sh --<stage>` on hosts whose machine layer is delivered by the
@@ -117,12 +117,25 @@ export async function openServeConversation(
  *  the program declares as text_list, sent as the JSON array the envelope's grammar takes. */
 export type ExtraAnswers = (ctx: StepCtx) => Promise<Record<string, string | string[]>>;
 
+/** What a program step takes beyond the program's name. `elevation_password` is deliberately NOT
+ *  an ExtraAnswers concern although deploy-gitops declares an answer of that name: the ENGINE
+ *  fills that one from the password the POST carries beside the answers, and refuses a caller who
+ *  sends it as an answer ("it is not an answer anybody sends"). */
+export interface ProgramStepOpts {
+  /** Answers the DEF is authoritative for beyond the inventory — see ExtraAnswers. */
+  extra?: ExtraAnswers;
+  /** Run the program on the MASTER's surface instead of the run's owned host — the master-side
+   *  act of a two-machine verb (deploy-slave's branch cut). The master must be declared on the
+   *  plan's targets, exactly like every other aux session. */
+  onMaster?: boolean;
+}
+
 /** `run-<program>`: prove the program with a dry run, then run it, following both into the run
  *  log. Both phases go through the ONE machine surface and the machine's own gate. */
-export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports: AnsiwisePorts, extra?: ExtraAnswers): Step {
+export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports: AnsiwisePorts, opts: ProgramStepOpts = {}): Step {
   return {
     name: `run-${program}`,
-    title: `Prove, then run, the ${program} program on the machine (dry → run)`,
+    title: `Prove, then run, the ${program} program on the ${opts.onMaster ? "master" : "machine"} (dry → run)`,
     run: async (ctx) => {
       const cp = ctx.readCheckpoint<ProgramCheckpoint>() ?? { program };
       const save = (): void => ctx.checkpoint(cp);
@@ -131,10 +144,10 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
       const budget = AbortSignal.timeout(ANSIWISE_PROGRAM_TIMEOUT_MS);
       const signal = AbortSignal.any([ctx.signal, budget]);
 
-      const session = await ctx.ssh();
+      const session = opts.onMaster ? await ctx.ssh(loadMaster(ctx.db).id) : await ctx.ssh();
       const conversation = await openServeConversation(ctx, session, ports, signal);
       try {
-        const answers = await composeAnswers(ctx, conversation.client, program, target, signal, extra);
+        const answers = await composeAnswers(ctx, conversation.client, program, target, signal, opts.extra);
         const password = requireElevationPassword(ctx);
 
         const dry = await programPhase(ctx, conversation.client, cp, "dry", { program, answers, password, signal, save });

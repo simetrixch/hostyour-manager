@@ -96,68 +96,6 @@ export async function remoteScriptCapture(
   }
 }
 
-/** Phase progress, checkpointed via ctx.checkpoint at every transition so a resumed Run can
- *  probe-skip a phase it already finished. Minimal + JSON-serializable by contract. */
-export interface InstallerPhaseCheckpoint {
-  phase: string;
-  state: "probing" | "running" | "verifying" | "done";
-}
-
-/** The three callbacks of an installerPhase — each composes with the remote helpers above:
- *  e.g. `probe` runs remoteExec and returns `r.code === 0`; `run` calls remoteScript with the
- *  supplied opts; `verify` calls remoteCmd (which throws on a non-zero exit). */
-export interface InstallerPhaseCallbacks {
-  /** A CHEAP idempotence check: is the phase ALREADY complete? true ⇒ skip run + verify. */
-  probe(ctx: StepCtx, session: SshSession): Promise<boolean>;
-  /** The long operation. `opts` carries the phase timeout — thread it into remoteScript/
-   *  remoteExec so the long run honours a generous wall clock; streams to ctx.log as usual. */
-  run(ctx: StepCtx, session: SshSession, opts: RemoteOpts): Promise<void>;
-  /** A post-check asserting success. A throw (e.g. via remoteCmd) ⇒ phase NOT marked done. */
-  verify(ctx: StepCtx, session: SshSession): Promise<void>;
-}
-
-export interface InstallerPhaseOpts {
-  /** Wall clock handed to `run` (default {@link DEFAULT_PHASE_TIMEOUT_MS}). */
-  timeoutMs?: number;
-}
-
-/** Generous default for a long install phase — deploy-slave's setup.sh runs ~25 min. */
-export const DEFAULT_PHASE_TIMEOUT_MS = 30 * 60_000;
-
-/** A long, idempotent, resumable remote phase (deploy-slave step 3's
- *  ~25-min `setup.sh` run over SSH). Orchestrates probe → run → verify, checkpointing the
- *  phase state at each transition:
- *   1. probe  — if it reports the phase already complete, log the skip, checkpoint `done`, and
- *      return WITHOUT running or verifying (probe-skip idempotence: a resumed Run converges).
- *   2. run    — the long operation, handed a RemoteOpts carrying the phase timeout.
- *   3. verify — asserts success; a throw propagates and the phase is left NOT `done`.
- *  No retry/backoff here — recovery (re-execute from the last checkpoint) is the executor's job. */
-export async function installerPhase(
-  ctx: StepCtx,
-  session: SshSession,
-  name: string,
-  cb: InstallerPhaseCallbacks,
-  opts?: InstallerPhaseOpts,
-): Promise<void> {
-  const mark = (state: InstallerPhaseCheckpoint["state"]): void =>
-    ctx.checkpoint({ phase: name, state } satisfies InstallerPhaseCheckpoint);
-
-  mark("probing");
-  if (await cb.probe(ctx, session)) {
-    ctx.log("meta", `phase ${name}: already complete (probe) — skipping`);
-    mark("done");
-    return;
-  }
-
-  mark("running");
-  await cb.run(ctx, session, { timeoutMs: opts?.timeoutMs ?? DEFAULT_PHASE_TIMEOUT_MS });
-
-  mark("verifying");
-  await cb.verify(ctx, session);
-
-  mark("done");
-}
-
 /** One inventory transaction (better-sqlite3 is synchronous; a crash between two of these
  *  leaves a consistent, resumable picture). */
 export function localTx<T>(ctx: StepCtx, fn: (tx: Db) => T): T {

@@ -52,16 +52,16 @@ export const ClusterPlaneV0 = z.object({
   v: z.literal(0),
   branch: z.string(), // == clusters.domain
   slaveId: z.number().int().positive(),
-  // The surface `setup.sh --slave-add` creates for this slave on the MASTER's Vault: the KV mount
-  // <name>, the kubernetes auth mount kubernetes-<name>, the policy <name>-eso the slave's ESO logs
-  // in under, and the master's Vault address. Vault is central on the master — there is no per-slave
+  // The surface the register-slave program creates for this slave on the MASTER's Vault: the KV
+  // mount <name>, the kubernetes auth mount kubernetes-<name>, the policy <name>-eso the slave's ESO
+  // logs in under, and the master's Vault address. Vault is central on the master — there is no per-slave
   // Vault instance and none is planned — so these four are the whole Vault story of a slave.
   //
   // KEPT although no code reads it. This document is the account of what the run provisioned, not a
   // cache for the resolver, and the account is what a person reading one row gets; every field is
   // required by the parse and asserted whole by the deploy-slave journey check, so the record cannot
   // quietly stop being written. A code reader is not coming either: the step that undoes this
-  // surface hands `setup.sh --slave-remove` the slave name and lets the installer recompose the four
+  // surface hands the remove-slave program the slave's domain and lets it recompose the four
   // names from it, which is all a reader here could do as well. Deleting the field would in exchange
   // change what the frozen `v: 0` shape means, for a reader whose whole point is to refuse a
   // document it was not written for.

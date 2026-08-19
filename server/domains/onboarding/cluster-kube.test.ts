@@ -11,7 +11,9 @@ import { servers, clusters } from "../../db/schema/inventory.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
 import { FakeClusterReader, FakeMasterArgoReader, FakeMasterProjectWriter } from "../../adapters/kube/testing/fake.ts";
 import type { ClusterReader } from "../../adapters/kube/port.ts";
-import { EMIT_ARGOCD_TOKEN, PARAMS, makeHarness, disposeHarnesses } from "../runs/deploy-slave.fixture.ts";
+import { EMIT_ARGOCD_TOKEN, EMIT_REVIEWER_TOKEN, PARAMS, makeHarness, disposeHarnesses, bareStepCtx } from "../runs/deploy-slave.fixture.ts";
+import { credLabels, sealTokenOnce, statedTarget } from "../runs/defs/deploy-slave.kit.ts";
+import { registerStep } from "../runs/defs/deploy-slave.verify.ts";
 import { makeClusterKubeResolver, type ClusterKubeDeps, type SlaveClusterInput } from "./cluster-kube.ts";
 
 // A plaintext store (keyfile/vault off) is enough — we only need seal/open round-tripping the bearer.
@@ -208,13 +210,22 @@ describe("domains/onboarding/cluster-kube over the plane the deploy-slave run wr
   // The one test whose plane document is not hand-written. A fixture cannot catch a reader that asks
   // for a field name the writer never wrote — the fixture gets edited in the same change as the
   // reader and the suite stays green — which is exactly how a reader here once asked for two fields
-  // the schema never declared and silently took its fallback on every row. Only a document that a
-  // real run produced puts the writer and the reader in the same assertion.
+  // the schema never declared and silently took its fallback on every row. So the document is
+  // produced by the REAL writer: the register step itself, driven over the state create-mgmt leaves
+  // behind (the sealed pair through the run's own sealTokenOnce, the kube facts on the cluster row
+  // in create-mgmt's exact write shape). The full journey needs a live `ansiwise serve` and lives in
+  // redeploy.ansiwise.test.ts, which parses the same plane after a whole run.
   it("resolves a slave from the document register actually wrote, with the values it wrote", async () => {
-    const { db, executor, store } = await makeHarness();
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
-    await executor.approve(runId);
-    await executor.settle(runId);
+    const { db, store } = await makeHarness();
+    db.db.insert(clusters).values({
+      id: "cls_s1", serverId: "srv_slave1", stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      planeJson: { kube: { server: "https://100.64.0.11:16443", caData: "TFMtQ0EtREFUQQ==" } },
+    }).run();
+    const ctx = bareStepCtx(db, store);
+    const labels = credLabels("s1");
+    await sealTokenOnce(ctx, { kind: "kubeconfig", label: labels.bearer, serverId: "srv_slave1", token: EMIT_ARGOCD_TOKEN });
+    await sealTokenOnce(ctx, { kind: "other", label: labels.reviewer, serverId: "srv_slave1", token: EMIT_REVIEWER_TOKEN });
+    await registerStep(statedTarget("srv_slave1", PARAMS.domain, "prod")).run(ctx);
 
     const row = db.db.select().from(clusters).where(eq(clusters.domain, PARAMS.domain)).get()!;
     const written = ClusterPlaneV0.parse(row.planeJson);

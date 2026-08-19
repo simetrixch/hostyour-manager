@@ -18,9 +18,9 @@ import { KV_MOUNT, VaultError } from "./port.ts";
 //    repo-pat write, create/update on secret/data/<stage>/consumer/+/app for the ceremony
 //    seed, delete on secret/metadata/<stage>/consumer/+/app for the offboard delete, and the
 //    same pair on secret/{data,metadata}/<stage>/tenants/+ for the tenant crypto entry,
-//    GitOps-side (hostyour-cloud base/lib/seed-vault.sh) — the calls here fail closed (403)
-//    until they are. That policy is IMPERATIVE (setup.sh --seed-vault), not ArgoCD-owned, so
-//    merging hostyour-cloud does not ship it: an operator must re-run seed-vault on the master.
+//    — the calls here fail closed (403) until they are. That policy is IMPERATIVE (the
+//    deploy-gitops program's vault seed, digita-deploy ansiwise/programs/), not ArgoCD-owned, so
+//    merging hostyour-cloud does not ship it: re-run deploy-gitops on the master to widen it.
 
 /** The Controller's own Vault login facts (kubernetes-auth) — config.vault, the same surface the
  *  credential store's VaultKvClient authenticates with. Optional rather than required because a

@@ -97,13 +97,13 @@ describe("resolveClusterMarking", () => {
     );
   });
 
-  // The key set today's install.sh writes unconditionally into every map, on top of the role
+  // The key set today's map template writes unconditionally into every map, on top of the role
   // fields. The strict schema refuses any key it does not declare, and indexMarkings folds every
   // map on every read — so ONE map in the current format failing to parse kills resolution for
   // every cluster on a fresh installation, which is exactly what these two tests pin down.
   const installerTail = `unit-apex: example.com\nplatform-domain: example.com\n`;
 
-  it("resolves a map exactly as today's install.sh writes it, carrying platform-domain", async () => {
+  it("resolves a map exactly as today's writers leave it, carrying platform-domain", async () => {
     const installerSlave = `${slaveMap}${installerTail}post-url: https://post.example.com\napiHost: 100.64.0.11\napiPort: 16443\n`;
     const repo = repoWith({ [MASTER]: `${masterMap}${installerTail}`, [SLAVE]: installerSlave });
     expect(await resolveClusterMarking(repo, "m1")).toMatchObject({ fqdn: MASTER, platformDomain: "example.com" });
@@ -233,54 +233,42 @@ describe("setClusterRelease", () => {
   });
 });
 
-describe("installer contract", () => {
-  // install.sh (hostyour-cloud) writes the map; this module reads it with a STRICT schema. The two
-  // repos ship separately, so nothing forces them to agree — this test does. It parses the actual
-  // map-writing block out of the sibling checkout (ci.sh runs the three repos mounted side by
-  // side, the same layout as a dev machine) and asserts every key the installer can emit is a key
-  // the schema declares. Without it, a field the installer gains is invisible here until a fresh
+describe("map-writer contract", () => {
+  // The deployment programs write a master's map from ONE template — digita-deploy
+  // ansiwise/templates/cluster-map.tpl — and this module reads every map with a STRICT schema.
+  // The two repos ship separately, so nothing forces them to agree — this test does. It parses
+  // the actual template out of the sibling checkout (ci.sh runs the repos mounted side by side,
+  // the same layout as a dev machine) and asserts every key the template emits is a key the
+  // schema declares. Without it, a field the template gains is invisible here until a fresh
   // installation's map fails every read.
-  const installSh = fileURLToPath(new URL("../../../../hostyour-cloud/install.sh", import.meta.url));
+  const mapTpl = fileURLToPath(new URL("../../../../../digitaplatform/digita-deploy/ansiwise/templates/cluster-map.tpl", import.meta.url));
 
-  it.skipIf(!existsSync(installSh))("every key install.sh writes into the map is declared in the schema", () => {
-    const text = readFileSync(installSh, "utf8");
-    // Anchored on the WRITER, not on a log line: install.sh's map writer is the function
-    // write_map, and a log message inside it may legitimately come and go.
-    const start = text.indexOf("write_map(){");
-    const end = text.indexOf('} > "${MAP}"', start);
-    expect(start, "install.sh no longer carries a write_map function — the map writer moved; update the extraction").toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const block = text.slice(start, end);
+  it.skipIf(!existsSync(mapTpl))("every key the map template writes is declared in the schema", () => {
+    const text = readFileSync(mapTpl, "utf8");
 
+    // A template line is `key: <slot>` at column 0; comment lines start with '#' and never match.
     const keys = new Set<string>();
-    // Heredoc body lines sit at column 0 (`fqdn: ${FQDN}`); the per-role fields are echoes
-    // (`echo "apiHost: ${API_HOST}"`). Comment lines start with '#', so neither pattern sees them.
-    for (const m of block.matchAll(/^([A-Za-z][A-Za-z0-9-]*):/gm)) keys.add(m[1] ?? "");
-    for (const m of block.matchAll(/echo "([A-Za-z][A-Za-z0-9-]*): /g)) keys.add(m[1] ?? "");
+    for (const m of text.matchAll(/^([A-Za-z][A-Za-z0-9-]*):/gm)) keys.add(m[1] ?? "");
     keys.delete("");
-    expect([...keys], "the extraction found no map keys — the block moved or changed shape").toContain("fqdn");
+    expect([...keys], "the extraction found no map keys — the template moved or changed shape").toContain("fqdn");
 
     const undeclared = [...keys].filter((k) => !CLUSTER_MARKING_FILE_KEYS.includes(k));
     expect(
       undeclared,
-      "install.sh writes map keys the strict ClusterMarkingFileSchema refuses — declare them, or every map a fresh install writes fails every read",
+      "the map template writes keys the strict ClusterMarkingFileSchema refuses — declare them, or every map a fresh install writes fails every read",
     ).toEqual([]);
 
-    // COUNTER-PROBE: the extraction above is coupled to write_map's SHAPE, not just its content —
-    // it matches heredoc lines (`fqdn: ${FQDN}`) and echoes (`echo "apiHost: ..."`). A write_map
-    // rewritten in a third style would yield an EMPTY key set, and an empty set trivially satisfies
-    // the assertion above: the comparison would pass while checking nothing. So the same extraction
-    // is run over a block that emits a key in a shape it does not know, and must not see it.
-    const foreign = ['write_map(){', '  printf "%s" "surprise-key: value"', '} > "${MAP}"'].join("\n");
-    const fStart = foreign.indexOf("write_map(){");
-    const fEnd = foreign.indexOf('} > "${MAP}"', fStart);
+    // COUNTER-PROBE: the extraction is coupled to the template's SHAPE — top-level `key:` lines. A
+    // template rewritten in another style would yield an EMPTY key set, and an empty set trivially
+    // satisfies the assertion above: the comparison would pass while checking nothing. So the same
+    // extraction runs over a body that emits a key in a shape it does not know, and must not see it.
+    const foreign = ["# a comment: not a key", "  indented-key: value", "{{ printf \"computed-key: value\" }}"].join("\n");
     const fKeys = new Set<string>();
-    for (const m of foreign.slice(fStart, fEnd).matchAll(/^([A-Za-z][A-Za-z0-9-]*):/gm)) fKeys.add(m[1] ?? "");
-    for (const m of foreign.slice(fStart, fEnd).matchAll(/echo "([A-Za-z][A-Za-z0-9-]*): /g)) fKeys.add(m[1] ?? "");
+    for (const m of foreign.matchAll(/^([A-Za-z][A-Za-z0-9-]*):/gm)) fKeys.add(m[1] ?? "");
     fKeys.delete("");
     expect(
       [...fKeys],
-      "the extraction found a key in a shape it was never taught — this counter-probe exists to prove it CANNOT, so that the toContain(\"fqdn\") guard above is the only thing standing between a rewritten write_map and a silently empty comparison",
+      "the extraction found a key in a shape it was never taught — this counter-probe exists to prove it CANNOT, so that the toContain(\"fqdn\") guard above is the only thing standing between a rewritten template and a silently empty comparison",
     ).toEqual([]);
   });
 });

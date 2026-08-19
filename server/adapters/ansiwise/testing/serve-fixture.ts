@@ -43,15 +43,25 @@ export interface ProbeRow {
   /** The regular expression the answer must match — '.+' passes anything non-empty, '$a' ("end
    *  then a") can never match and is the planted red. */
   pattern: string;
+  /** Declare the answer optional with this default — for a program two verbs share, where one
+   *  verb states the value and the other legitimately leaves the engine's default to fill it.
+   *  The default is then what the pattern judges for the silent verb, so a default that matches
+   *  cannot tell "sent the right value" from "sent nothing"; use it only where that is stated. */
+  fallback?: string;
 }
 
 export function programYaml(name: string, rows: ProbeRow[]): string {
-  const answers = [...new Set(rows.map((r) => r.answer))];
+  const byAnswer = new Map(rows.map((r) => [r.answer, r]));
   return [
     `name: ${name}`,
     "roles: [master, slave]",
     "answers:",
-    ...answers.flatMap((a) => [`  - name: ${a}`, "    kind: text", `    describes: the ${a} this fixture measures`]),
+    ...[...byAnswer.values()].flatMap((r) => [
+      `  - name: ${r.answer}`,
+      "    kind: text",
+      ...(r.fallback !== undefined ? ["    required: false", `    default: '${r.fallback}'`] : []),
+      `    describes: the ${r.answer} this fixture measures`,
+    ]),
     "steps:",
     ...rows.flatMap((r) => [
       "  - step: require_answer_matches",

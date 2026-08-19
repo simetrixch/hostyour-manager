@@ -2,16 +2,13 @@ import { eq, inArray } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { Db } from "../../../db/client.ts";
 import type { StepCtx, Cleanup } from "../../../executor/types.ts";
-import type { SshSession } from "../../../adapters/ssh/port.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { errValidation, errNotFound } from "../../../kernel/errors.ts";
 import { remoteCmd } from "../../../executor/stepkit.ts";
-import { registerSecret } from "../../../security/redact.ts";
 import { MASTER_ROLES, type Stage, type ClusterTier } from "../../../../shared/enums.ts";
 import { errNotConfigured } from "../../../kernel/errors.ts";
 import type { PlatformRepo } from "../../../adapters/git/port.ts";
 import { removeSlaveMarkingPart, clusterMarkingPath } from "../../inventory/cluster-marking.ts";
-import { fetchRepoPatScript, RESOLVE_REPO_DIR, TailnetJoinKeyBlob } from "./deploy-slave.remote.ts";
 
 // The deploy-slave step-kit: the db lookups, credential idioms,
 // timing helpers and compensating actions the steps share. Split out of deploy-slave.ts
@@ -82,109 +79,6 @@ export function requirePlatformRepo(ports: DeploySlavePorts): PlatformRepo {
     );
   }
   return ports.platformRepo;
-}
-
-/** Auto-source the read-only repo PAT (GITOPS_REPO_PAT) from the PLATFORM Vault over the
- *  master's plan-gated session — step 3's ONLY source. Neither an approval-time entry nor a
- *  "repo-pat" run secret exists any more: the platform's canonical PAT — GITOPS_REPO_PAT, a READ-ONLY
- *  fine-grained PAT by definition (secrets.example) — always lives in the PLATFORM Vault at
- *  secret/<stage>/system/argocd:repo-pat, so a manual entry is never needed; it is read over
- *  the master session via the installer's own idiom (the Controller's OWN Vault client
- *  cannot reach it — its `controller` policy covers only secret/controller/cred/*). NO
- *  least-privilege regression: --slave-add already copies this exact key from the platform
- *  Vault into the slave's app/<name>/repo-pat consumable, so the slave's ArgoCD holds this
- *  PAT regardless — auto-sourcing it for the one-time clone grants nothing new.
- *  The security invariants of the removed manual entry still hold: stdout carries ONLY the PAT (fetchRepoPatScript's
- *  contract) and is captured WITHOUT ctx.log — the create-mgmt token-blob idiom: every
- *  captured byte is registered with the redactor BEFORE this function can throw, so an
- *  accidental echo elsewhere is masked. The returned Buffer lives in step memory only; the
- *  caller ships it solely inside the 0700 askpass helper (putFile, removed right after) —
- *  never in argv (ps-visible), never in the persisted origin URL (.git/config stays
- *  credential-free), never persisted, never audited. */
-export async function fetchRepoPatFromMasterVault(ctx: StepCtx, session: SshSession, stage: string): Promise<Buffer> {
-  const path = `/tmp/dc-fetch-repo-pat-${ctx.runId}.sh`;
-  await session.putFile(path, Buffer.from(fetchRepoPatScript(stage), "utf8"), 0o700, { signal: ctx.signal });
-  const lines: string[] = [];
-  let code: number;
-  try {
-    const r = await session.exec(`bash ${path}`, {
-      signal: ctx.signal,
-      timeoutMs: 60_000,
-      onStdout: (l) => {
-        lines.push(l); // NEVER ctx.log — this is the PAT itself
-      },
-      onStderr: (l) => ctx.log("stderr", l),
-    });
-    code = r.code;
-  } finally {
-    try {
-      await session.exec(`rm -f ${path}`, { signal: ctx.signal });
-    } catch {
-      // best-effort — the script itself carries no secret
-    }
-  }
-  const pat = lines.join("\n").trim();
-  if (pat.length > 0) registerSecret(ctx.runId, Buffer.from(pat, "utf8"));
-  if (code !== 0 || pat.length === 0) {
-    throw errValidation(
-      `could not auto-source GITOPS_REPO_PAT from the platform Vault (secret/${stage}/system/argocd:repo-pat) on the master — ` +
-      `see the run log (stderr); fix the Vault value (or the master's reachability), then retry the run`,
-    );
-  }
-  return Buffer.from(pat, "utf8");
-}
-
-/** Mint the slave's tailnet join credential on the master (`--tailnet-mint-join-key`) and return
- *  it. The master owns both halves this needs — the coordinator's admin CLI and the Vault slot the
- *  key is kept in — so it is a master-side setup.sh action like every other master-side mutation
- *  in this run.
- *
- *  ASKED TWICE BY EVERY RUN THAT NEEDS IT, and that is the mechanism, not a duplication. The
- *  installer's mint is create-only: it hands back the SAME key it already stored rather than a
- *  second live one, so a step that needs the value can ask for it again instead of carrying it out
- *  of another step's row (a def may not read another step's checkpoint, and this value must never
- *  BE one). A `mint-join-key` step asks FIRST, before anything is done to the host, so a
- *  coordinator or a Vault that cannot produce the credential costs seconds — in deploy-slave that
- *  is ahead of the slave's ~25-minute base install, in a tailnet rejoin it is before the host is
- *  logged out and left on no network. The step that joins asks AGAIN at the moment it joins, which
- *  is what makes THAT step retryable on its own: the staged file is deleted as soon as the join is
- *  over, and the executor never re-runs a step that already succeeded, so a step that inherited its
- *  credential from an earlier one could never be retried.
- *
- *  stdout carries ONLY the JSON blob (setup.sh's fd-3 contract) and is captured WITHOUT ctx.log: a
- *  pre-auth key puts a machine of the holder's choosing on the private network. Every captured byte
- *  is registered with the redactor BEFORE anything can throw — and in the same step that uses the
- *  value, because that registry is process memory: a controller restart between two steps would
- *  otherwise leave the consuming one unprotected. stderr is the lib's log stream (secret-free by
- *  contract) and streams normally. */
-export async function mintTailnetJoinKey(ctx: StepCtx, session: SshSession, o: { stage: string; domain: string }): Promise<string> {
-  ctx.log("meta", `running --tailnet-mint-join-key ${o.domain} on the master...`);
-  const lines: string[] = [];
-  const mint = await session.exec(`${RESOLVE_REPO_DIR}\ncd "$GITOPS_DIR" && sudo -n ./setup.sh --${o.stage} --tailnet-mint-join-key ${o.domain}`, {
-    signal: ctx.signal,
-    timeoutMs: 5 * 60_000,
-    onStdout: (l) => {
-      lines.push(l); // NEVER ctx.log — this is the join credential
-    },
-    onStderr: (l) => ctx.log("stderr", l),
-  });
-  const raw = lines.join("\n").trim();
-  if (raw.length > 0) registerSecret(ctx.runId, Buffer.from(raw, "utf8"));
-  if (mint.code !== 0) {
-    throw errValidation(
-      `--tailnet-mint-join-key failed on the master (exit ${mint.code}) — see the run log (stderr); ` +
-      `is the tailnet coordinator deployed on the master (cluster/apps/tailnet-coordinator.yaml)?`,
-    );
-  }
-  let authkey: string;
-  try {
-    authkey = TailnetJoinKeyBlob.parse(JSON.parse(raw)).authkey;
-  } catch {
-    // Deliberately static: the raw output must never ride an error message into steps.error.
-    throw errValidation("the master did not emit a valid tailnet join-credential JSON blob ({authkey})");
-  }
-  registerSecret(ctx.runId, Buffer.from(authkey, "utf8"));
-  return authkey;
 }
 
 /** Bounded wait for the slaves-appset to generate + sync Application <name>-apps (step 5).
@@ -324,31 +218,13 @@ export function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<voi
 
 export const microk8sResetSlaveCleanup: Cleanup = {
   name: "microk8s-reset-slave",
-  title: "Remove MicroK8s + the branch clone from the slave (DESTRUCTIVE)",
+  title: "Remove MicroK8s from the slave (DESTRUCTIVE)",
   run: async (ctx: StepCtx) => {
     const session = await ctx.ssh(); // the slave (the run's ownsHost target)
+    // Only the snap goes. The platform checkout at /srv/hostyour-cloud is not this run's to
+    // remove: nothing in this manager put it there (refresh-checkout only brings it onto the
+    // slave's branch head), so taking it away would undo somebody else's work.
     await remoteCmd(ctx, session, "if snap list microk8s >/dev/null 2>&1; then sudo -n snap remove --purge microk8s; fi", { timeoutMs: 10 * 60_000 });
-    // Best-effort: remove any GitOps checkout on the slave (dir name is not hardcoded — find it
-    // by pattern). Never fails the cleanup if none is present.
-    await remoteCmd(ctx, session, 'for _d in "$HOME"/*/; do [ -d "${_d}.git" ] && [ -f "${_d}install.sh" ] && [ -f "${_d}setup.sh" ] && rm -rf "${_d%/}"; done; true');
-  },
-};
-
-export const disableVaultMountsCleanup: Cleanup = {
-  name: "disable-vault-mounts",
-  title: "Disable the per-slave Vault mounts on the master (--slave-remove)",
-  run: async (ctx: StepCtx) => {
-    const domain = String(ctx.params.domain);
-    const stage = String(ctx.params.stage);
-    const cluster = ctx.db.select().from(clusters).where(eq(clusters.domain, domain)).get();
-    if (!cluster || cluster.slaveId === null) {
-      ctx.log("meta", `no cluster row with a slaveId for ${domain} — nothing to remove from Vault`);
-      return;
-    }
-    const server = loadServer(ctx.db, String(ctx.params.serverId));
-    const master = loadMaster(ctx.db);
-    const session = await ctx.ssh(master.id);
-    await remoteCmd(ctx, session, `${RESOLVE_REPO_DIR}\ncd "$GITOPS_DIR" && sudo -n ./setup.sh --${stage} --slave-remove ${server.name}`, { timeoutMs: 10 * 60_000 });
   },
 };
 
