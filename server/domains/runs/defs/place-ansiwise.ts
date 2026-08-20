@@ -35,10 +35,10 @@ import { PLATFORM_CHECKOUT } from "./deploy-slave.remote.ts";
 // platform repo and then looked for programs in it refused on every real machine.
 //
 // WHERE THE CATALOGUE STANDS is CATALOG_CHECKOUT, and that path is the machine's own, not this
-// step's invention: the resident deployment service the machine later runs is written with exactly
-// it (digita-deploy `ansiwise/programs/deploy-gitops.yaml:1268` `working_directory` and `:1277`
-// `--programs`), and the same program clones the same repository to the same path on its own
-// (`git_clone` at `:1210`) once the machine has a secret store. This step is the FIRST placement,
+// step's invention: digita-deploy `ansiwise/programs/deploy-gitops.yaml:1258-1268` clones that same
+// repository to that same path once the machine has a secret store, and `:1315-1316` states that
+// the resident deployment service is given `--programs /srv/ansiwise-catalog/ansiwise/programs` out
+// of it. This step is the FIRST placement,
 // before any of that exists, and it puts the checkout where those rows will find it.
 //
 // PROBE, PLACE, PROBE AGAIN. The step measures the machine first and places only what is missing —
