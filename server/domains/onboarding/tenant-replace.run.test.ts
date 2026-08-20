@@ -165,7 +165,7 @@ function ports(registry: TenantRegistry): TenantOnboardPorts {
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "cluster/profile.yaml", content: `global:\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
+    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
     dns: seededDns(),
     buildRbac: new FakeBuildRbacWriter(),

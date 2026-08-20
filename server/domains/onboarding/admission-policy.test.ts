@@ -17,14 +17,14 @@ function clauseFor(resource: string, contains: string): string {
 describe("unitApexFromChain", () => {
   const common = { path: "platform/values-common.yaml", content: `global:\n  unitApex: platform.${APEX}\n` };
   const stage = { path: "platform/values-prod.yaml", content: "global:\n  env: prod\n" };
-  const profile = { path: "cluster/profile.yaml", content: `global:\n  unitApex: ${APEX}\n` };
+  const profile = { path: "installation/profile.yaml", content: `global:\n  unitApex: ${APEX}\n` };
 
   it("takes the LAST file that states it — the cluster's own profile wins over the platform default", () => {
     expect(unitApexFromChain([common, stage, profile])).toBe(APEX);
   });
 
   it("falls back through the chain when the cluster's profile states none", () => {
-    expect(unitApexFromChain([common, stage, { path: "cluster/profile.yaml", content: "global: {}\n" }])).toBe(`platform.${APEX}`);
+    expect(unitApexFromChain([common, stage, { path: "installation/profile.yaml", content: "global: {}\n" }])).toBe(`platform.${APEX}`);
   });
 
   it("refuses a chain that states it nowhere, naming the files it read", async () => {

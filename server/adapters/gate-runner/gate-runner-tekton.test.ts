@@ -10,7 +10,7 @@ const SHA = "a".repeat(40);
 const CHAIN = [
   { path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
   { path: "platform/values-prod.yaml", content: "global:\n  env: prod\n" },
-  { path: "cluster/profile.yaml", content: "global:\n  vaultUrl: https://vault.m1.example:8200\n" },
+  { path: "installation/profile.yaml", content: "global:\n  vaultUrl: https://vault.m1.example:8200\n" },
 ];
 
 function report(verdict: "pass" | "fail" = "pass"): GateReport {

@@ -68,7 +68,7 @@ const app = (name: string): AppRef => ({ name });
  *  charts require (example-lib.image), so a real render is possible with exactly this request. */
 const CHAIN = [
   { path: "platform/values-prod.yaml", content: "global:\n  env: prod\n" },
-  { path: "cluster/profile.yaml", content: "global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n" },
+  { path: "installation/profile.yaml", content: "global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n" },
 ];
 
 function req(over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest {

@@ -100,7 +100,7 @@ describe("renderArgs", () => {
       "-f",
       "/ws/.gate-cluster-values-1-platform-values-prod.yaml",
       "-f",
-      "/ws/.gate-cluster-values-2-cluster-profile.yaml",
+      "/ws/.gate-cluster-values-2-installation-profile.yaml",
     ]);
     // The cluster's values reach the chart as FILES, exactly as ArgoCD layers them at deploy. A
     // single --set here would be a value the Controller computed, which is the drift this forbids.
@@ -111,7 +111,7 @@ describe("renderArgs", () => {
     expect(stagedChain).toEqual([
       "/ws/.gate-cluster-values-0-platform-values-common.yaml",
       "/ws/.gate-cluster-values-1-platform-values-prod.yaml",
-      "/ws/.gate-cluster-values-2-cluster-profile.yaml",
+      "/ws/.gate-cluster-values-2-installation-profile.yaml",
     ]);
   });
 });

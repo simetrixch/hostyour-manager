@@ -105,7 +105,7 @@ function apexRegistry(unitApex: string): Registry {
   const repo = new FakePlatformRepo();
   repo.seed("s1.example", "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
   repo.seed("s1.example", "platform/values-prod.yaml", "global:\n  env: prod\n");
-  repo.seed("s1.example", "cluster/profile.yaml", `global:\n  unitApex: ${unitApex}\n`);
+  repo.seed("s1.example", "installation/profile.yaml", `global:\n  unitApex: ${unitApex}\n`);
   return new Registry(repo, async () => ({ name: "s1", stage: "prod" }));
 }
 

@@ -143,7 +143,7 @@ function namespaceValidations(input: {
 
 /** The ONE `global.unitApex` the layered cluster values chain resolves to — the public apex a unit's
  *  address is composed under (`<name>.<unitApex>`). The chain is read in LAYERING order and the last
- *  file that states the key wins, exactly as helm layers it, so a cluster's own `cluster/profile.yaml`
+ *  file that states the key wins, exactly as helm layers it, so a cluster's own `installation/profile.yaml`
  *  overrides the platform defaults. A chain that states it nowhere is a VALIDATION error naming the
  *  files that were read: rendering the host rule against a guessed apex would fence the unit off its
  *  own ingress. */

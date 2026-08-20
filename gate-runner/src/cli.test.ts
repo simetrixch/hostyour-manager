@@ -23,7 +23,7 @@ const ENV = {
   CLUSTER_VALUE_FILES: JSON.stringify([
     { path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
     { path: "platform/values-prod.yaml", content: "global:\n  env: prod\n" },
-    { path: "cluster/profile.yaml", content: "global:\n  vaultUrl: https://vault.m1.example:8200\n" },
+    { path: "installation/profile.yaml", content: "global:\n  vaultUrl: https://vault.m1.example:8200\n" },
   ]),
   REPO_URL: "https://github.com/x/acme.git",
   REQUESTED_REF: "main",
@@ -56,7 +56,7 @@ describe("parseEnv", () => {
     expect(i.meta.clusterValueFiles.map((f) => f.path)).toEqual([
       "platform/values-common.yaml",
       "platform/values-prod.yaml",
-      "cluster/profile.yaml",
+      "installation/profile.yaml",
     ]);
     expect(i.fence.mustFailTargets).toEqual(["10.1.1.1:443"]);
     expect(i.fence.mustPassTarget).toBe("github.com:443");

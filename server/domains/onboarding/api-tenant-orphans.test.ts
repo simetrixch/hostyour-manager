@@ -153,7 +153,7 @@ function onboardPorts(registry: TenantRegistry): TenantOnboardPorts {
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerNames: async () => [],
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "cluster/profile.yaml", content: `global:\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
+    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
   };
 }
 

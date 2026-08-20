@@ -115,7 +115,7 @@ export async function provisionUnitDns(
     if (standing !== null && standing !== address) {
       throw errValidation(
         `the host ${opts.recordName} already answers with ${standing}, and ${opts.clusterFqdn} is at ${address} — refusing to point "${opts.unit}" at a cluster the address does not serve. ` +
-          `The host carries no stage: it is <unit>.<unitApex>, and a cluster's unitApex is global.unitApex in its own cluster/profile.yaml, stamped from the unit_apex answer when its install branch is generated — so two clusters in one zone give a unit ONE host, not two. ` +
+          `The host carries no stage: it is <unit>.<unitApex>, and a cluster's unitApex is global.unitApex in its own installation/profile.yaml, stamped from the unit_apex answer when its install branch is generated — so two clusters in one zone give a unit ONE host, not two. ` +
           `Overwriting it would move whatever serves ${opts.recordName} today onto this cluster without deploying it there. ` +
           `Give the two clusters different unit_apex answers if this unit is to stand at both, or remove the standing record if nothing serves it any more.`,
       );

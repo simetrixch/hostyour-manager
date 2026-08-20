@@ -415,13 +415,13 @@ describe("Registry.readClusterValueFiles", () => {
     const repo = new FakePlatformRepo();
     repo.seed("s1.example", "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
     repo.seed("s1.example", "platform/values-prod.yaml", "global:\n  env: prod\n");
-    repo.seed("s1.example", "cluster/profile.yaml", "global:\n  vaultUrl: https://vault.s1.example:8200\n");
+    repo.seed("s1.example", "installation/profile.yaml", "global:\n  vaultUrl: https://vault.s1.example:8200\n");
 
     const files = await new Registry(repo, CLUSTERS).readClusterValueFiles("s1.example", "prod");
     expect(files.map((f) => f.path)).toEqual([
       "platform/values-common.yaml",
       "platform/values-prod.yaml",
-      "cluster/profile.yaml",
+      "installation/profile.yaml",
     ]);
     expect(files[1]!.content).toContain("env: prod");
   });

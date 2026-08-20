@@ -30,19 +30,19 @@ describe("registryHostFromChain", () => {
   const stage = { path: "platform/values-prod.yaml", content: "global: {}\n" };
 
   it("takes the LAST file that states it — the cluster's own profile wins over the platform default", () => {
-    const profile = { path: "cluster/profile.yaml", content: "global:\n  endpoints:\n    registry:\n      host: zot.s1.example.com\n" };
+    const profile = { path: "installation/profile.yaml", content: "global:\n  endpoints:\n    registry:\n      host: zot.s1.example.com\n" };
     expect(registryHostFromChain([common, stage, profile])).toBe("zot.s1.example.com");
   });
 
   it("follows a build plane that is NOT the cluster's master — the profile's host is the answer, never zot.<master>", () => {
     // set-role.sh writes the profile as zot.<build-plane>; with --build-plane pointing at a foreign
     // cluster this is the registry the cluster actually pulls from, while the master is m1.
-    const profile = { path: "cluster/profile.yaml", content: "global:\n  endpoints:\n    registry:\n      host: zot.build1.example.com\n" };
+    const profile = { path: "installation/profile.yaml", content: "global:\n  endpoints:\n    registry:\n      host: zot.build1.example.com\n" };
     expect(registryHostFromChain([common, stage, profile])).toBe("zot.build1.example.com");
   });
 
   it("falls back through the chain when the profile states none", () => {
-    expect(registryHostFromChain([common, stage, { path: "cluster/profile.yaml", content: "global: {}\n" }])).toBe("zot.m1.example.com");
+    expect(registryHostFromChain([common, stage, { path: "installation/profile.yaml", content: "global: {}\n" }])).toBe("zot.m1.example.com");
   });
 
   it("fails loud (VALIDATION) naming the files read when NO file states a registry host", () => {

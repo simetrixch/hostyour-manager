@@ -171,7 +171,7 @@ function fakeTenantSeeder(): VaultSeeder {
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "cluster/profile.yaml", content: `global:\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
+    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
     dns: seededDns(),
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),

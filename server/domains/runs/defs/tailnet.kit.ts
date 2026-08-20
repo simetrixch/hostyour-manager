@@ -77,12 +77,12 @@ function attestTargetStep(serverId: string): Step {
 }
 
 /** WHERE the coordinator serves, as the machine's own rendered configuration states it:
- *  `global.tailnetUrl` in cluster/profile.yaml on the cluster's install branch, written whole by
- *  the deployment programs (digita-deploy ansiwise/templates/cluster-profile.tpl — always
+ *  `global.tailnetUrl` in installation/profile.yaml on the cluster's install branch, written whole by
+ *  the deployment programs (digita-deploy ansiwise/templates/installation-profile.tpl — always
  *  tale.<master>, one coordinator per installation). Read rather than re-composed: a second
  *  composition of the same rule is how the manager and the machine would come to disagree. Only
  *  the tailnetUrl slice of the file is parsed; everything else in it is ignored. */
-const CLUSTER_PROFILE_PATH = "cluster/profile.yaml";
+const CLUSTER_PROFILE_PATH = "installation/profile.yaml";
 
 const TailnetUrlSlice = z.object({
   global: z.object({ tailnetUrl: z.string().startsWith("https://").optional() }).optional(),

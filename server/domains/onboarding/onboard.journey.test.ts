@@ -43,7 +43,7 @@ function platformRepo(domain: string): FakePlatformRepo {
   const repo = new FakePlatformRepo();
   repo.seed(domain, "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
   for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
-  repo.seed(domain, "cluster/profile.yaml", `global:\n  vaultUrl: https://vault.${domain}:8200\n  unitApex: example.com\n`);
+  repo.seed(domain, "installation/profile.yaml", `global:\n  vaultUrl: https://vault.${domain}:8200\n  unitApex: example.com\n`);
   return repo;
 }
 

@@ -1,6 +1,6 @@
 // The cluster's Helm values chain. Every unit's Application layers the same three files through the
 // `$values` source — platform/values-common.yaml, then platform/values-<stage>.yaml, then
-// cluster/profile.yaml, later wins — and that chain is where a cluster's own values (Vault URL and
+// installation/profile.yaml, later wins — and that chain is where a cluster's own values (Vault URL and
 // auth mount, registry host, unit apex) live. The Controller reads the three files off the target
 // cluster's install branch and hands them to the gate sandbox VERBATIM: the gate renders the chart
 // with the same bytes ArgoCD layers at deploy, so an approved render and a deployed render cannot
@@ -19,5 +19,5 @@ export const ClusterValueFilesSchema = z.array(ClusterValueFileSchema);
 
 /** The chain's paths in LAYERING order for one stage — the order the files must be passed to helm. */
 export function clusterValueChainPaths(stage: Stage): readonly string[] {
-  return ["platform/values-common.yaml", `platform/values-${stage}.yaml`, "cluster/profile.yaml"];
+  return ["platform/values-common.yaml", `platform/values-${stage}.yaml`, "installation/profile.yaml"];
 }

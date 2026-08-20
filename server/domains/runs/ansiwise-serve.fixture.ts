@@ -231,7 +231,7 @@ export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean
       // Seeded BESIDE the values chain's sentinel file: the fake materializes its own profile on
       // a branch's first touch unless platform/values-common.yaml already stands there.
       h.platformRepo.seed("s1.example.com", "platform/values-common.yaml", "global: {}\n");
-      h.platformRepo.seed("s1.example.com", "cluster/profile.yaml", `global:\n  tailnetUrl: ${opts.tailnetUrl ?? "https://tale.m1.example.com"}\n`);
+      h.platformRepo.seed("s1.example.com", "installation/profile.yaml", `global:\n  tailnetUrl: ${opts.tailnetUrl ?? "https://tale.m1.example.com"}\n`);
     }
   }
   return h;
@@ -250,7 +250,7 @@ export async function deployWorld(serve: ServeFixture): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise serve", marking: false });
   h.platformRepo.seed("s1.example.com", "platform/values-common.yaml", "global: {}\n");
-  h.platformRepo.seed("s1.example.com", "cluster/profile.yaml", "global:\n  tailnetUrl: https://tale.m1.example.com\n");
+  h.platformRepo.seed("s1.example.com", "installation/profile.yaml", "global:\n  tailnetUrl: https://tale.m1.example.com\n");
   return h;
 }
 

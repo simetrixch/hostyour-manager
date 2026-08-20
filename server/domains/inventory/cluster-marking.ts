@@ -119,7 +119,7 @@ const ClusterMarkingFileSchema = z.object({
   // Nothing in this process decides anything with these four. They are declared and carried so a
   // write does not drop them; optional rather than required because the maps that predate them are
   // still valid markings. `alert-recipients` is the comma-separated mailbox list the branch render puts
-  // into cluster/profile.yaml as global.alertRecipients — the trunk carries an empty list, because a
+  // into installation/profile.yaml as global.alertRecipients — the trunk carries an empty list, because a
   // mailbox names one installation.
   "unit-apex": z.string().min(1).optional(),
   "platform-domain": z.string().min(1).optional(),

@@ -141,7 +141,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "cluster/profile.yaml", content: `global:\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
+    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     // ensure-images defaults: every image present ⇒ the step is a pure probe/no-op, so the
     // existing suites never trigger a build (a test scripts missing tags to exercise that path).
     registryProbe: new FakeRegistryProbe(),

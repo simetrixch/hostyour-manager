@@ -22,7 +22,7 @@ const EXPECTED_KEY = "test/consumer/acme/app"; // <stage>/consumer/<name>/app
 const CHAIN: ClusterValueFile[] = [
   { path: "platform/values-common.yaml", content: "global:\n  clusterIssuer: letsencrypt-prod\n" },
   { path: "platform/values-test.yaml", content: "global:\n  env: test\n  vaultUrl: https://vault.elsewhere:8200\n" },
-  { path: "cluster/profile.yaml", content: `global:\n  vaultUrl: ${VAULT_SERVER}\n` },
+  { path: "installation/profile.yaml", content: `global:\n  vaultUrl: ${VAULT_SERVER}\n` },
 ];
 
 function baseManifest(): ConsumerManifest {
@@ -274,7 +274,7 @@ describe("G7 secret contract", () => {
 });
 
 describe("chainVaultServer", () => {
-  it("takes the LAST file that sets global.vaultUrl — cluster/profile.yaml wins over the stage file", () => {
+  it("takes the LAST file that sets global.vaultUrl — installation/profile.yaml wins over the stage file", () => {
     expect(chainVaultServer(CHAIN)).toBe(VAULT_SERVER);
   });
 
