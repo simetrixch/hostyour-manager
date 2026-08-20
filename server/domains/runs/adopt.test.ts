@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { parseConfig } from "../../kernel/config.ts";
@@ -15,6 +15,7 @@ import { serverCredFlags } from "../inventory/write.ts";
 import { readServerPasswordLogin } from "../../../shared/password-login.ts";
 import { getRun, readEvents } from "../../executor/read.ts";
 import { servers } from "../../db/schema/inventory.ts";
+import { steps as runSteps } from "../../db/schema/runs.ts";
 import { readServerTailnet } from "../../../shared/tailnet.ts";
 import { readServerAuthorizedKeys } from "../../../shared/operator-keys.ts";
 import { ExecFailedError } from "../../adapters/ssh/port.ts";
@@ -62,8 +63,12 @@ const IMAGE_KEY_LINE = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICloudImageKeyAAAAAA
 // inject hard-failing checks; `probeOut` lets one inject a host that is on the tailnet.
 // `sshdOut` answers the password-login probe, which the adopt run runs twice — once before it
 // shuts the daemon's password door and once after — so it is a function of the call count.
+// `host.alreadyBlanket` is the machine's answer to configure-sudo's own question — whether this
+// account already runs every command as root without a password — and `host.commands` collects
+// every command line the run really shipped, so a test can assert on what was NOT sent.
 function fakeFactory(preflightOut = HEALTHY_PREFLIGHT, probeOut = PROBE_NO_CLIENT,
-  sshdOut: (call: number) => string = (call) => (call === 0 ? SSHD_TAKES_PASSWORD : SSHD_KEY_ONLY)): SshFactory {
+  sshdOut: (call: number) => string = (call) => (call === 0 ? SSHD_TAKES_PASSWORD : SSHD_KEY_ONLY),
+  host: { alreadyBlanket?: boolean; commands?: string[] } = {}): SshFactory {
   let sshdCall = 0;
   const installed: string[] = []; // the authorized_keys lines install-key really appended
   return (target: SshTarget) => {
@@ -74,6 +79,12 @@ function fakeFactory(preflightOut = HEALTHY_PREFLIGHT, probeOut = PROBE_NO_CLIEN
       const emit = (s: string): void => {
         for (const l of s.split("\n")) o.onStdout?.(l);
       };
+      host.commands?.push(command);
+      // `sudo -l | grep -q` is the blanket-right question: grep's exit code is the answer, so a
+      // machine that does not already grant it answers 1 here, exactly as the real pipeline would.
+      if (command.startsWith("LC_ALL=C sudo -n -l")) {
+        return { code: host.alreadyBlanket === true ? 0 : 1, stdoutTail: "", stderrTail: "" };
+      }
       if (command === "whoami") emit(target.username);
       else if (command.includes("dc-preflight-")) emit(preflightOut);
       else if (command.includes("dc-baseline-")) emit("BASE nproc 8\nBASE public_ip 203.0.113.7");
@@ -113,7 +124,7 @@ describe("adopt run — end to end through the executor", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  function make(factory: SshFactory = fakeFactory()): { db: DbHandle; executor: Executor; store: CredentialStore; serverId: string } {
+  function make(factory: SshFactory = fakeFactory(), sshUser = "root"): { db: DbHandle; executor: Executor; store: CredentialStore; serverId: string } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-adopt-"));
     dirs.push(dir);
     const db = openDb(join(dir, "c.db"));
@@ -124,7 +135,7 @@ describe("adopt run — end to end through the executor", () => {
       registry: buildRegistry({ db: db.db }), sshFactory: factory, actor: () => "op_system",
     });
     const serverId = "srv_adopt1";
-    db.db.insert(servers).values({ id: serverId, name: "s5", host: "203.0.113.7", sshPort: 22, sshUser: "root" }).run();
+    db.db.insert(servers).values({ id: serverId, name: "s5", host: "203.0.113.7", sshPort: 22, sshUser }).run();
     return { db, executor, store, serverId };
   }
 
@@ -319,6 +330,92 @@ describe("adopt run — end to end through the executor", () => {
     expect(run?.steps.find((s) => s.name === "connect-password")?.status).toBe("failed");
     const server = db.db.select().from(servers).where(eq(servers.id, serverId)).get();
     expect(server?.status).toBe("bare"); // onTerminal reset
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // The passwordless-sudo grant (configure-sudo): what is written, what is not, and what the
+  // operator is told before approving.
+  // ---------------------------------------------------------------------------------------------
+
+  /** The configure-sudo step row's own record — `data` is what ctx.checkpoint wrote (context.ts:179)
+   *  and `__cleanups` is every compensation the step armed (server/executor/cleanup.ts:48). */
+  function configureSudoCheckpoint(db: DbHandle, runId: string): { data?: { sudoersWritten?: boolean }; __cleanups?: string[] } {
+    const row = db.db.select().from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.name, "configure-sudo"))).get();
+    return (row?.checkpointJson ?? {}) as { data?: { sudoersWritten?: boolean }; __cleanups?: string[] };
+  }
+
+  it("grants the blanket right on a non-root account, arms its removal, and says in the log that it STAYS", async () => {
+    const commands: string[] = [];
+    const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, { commands }), "digi1");
+    const { runId } = await executor.plan("adopt", { serverId });
+    await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
+    await executor.settle(runId);
+    expect(getRun(db.db, runId)?.status).toBe("succeeded");
+
+    expect(commands).toContainEqual(expect.stringContaining("install -m 0440 -o root -g root"));
+    expect(commands).toContainEqual(expect.stringContaining("/etc/sudoers.d/90-hostyour"));
+    expect(configureSudoCheckpoint(db, runId)).toMatchObject({ data: { sudoersWritten: true }, __cleanups: ["remove-sudoers"] });
+    // The run log names the lifetime, because nothing else on any screen does: remove-sudoers is a
+    // Cleanup and cleanups run only on abortWithCleanup (server/executor/executor.ts:309).
+    const meta = readEvents(db.db, runId).filter((e) => e.stream === "meta").map((e) => e.text).join("\n");
+    expect(meta).toContain("digi1 ALL=(ALL) NOPASSWD:ALL");
+    expect(meta).toContain("STAYS on the machine after this run succeeds");
+  });
+
+  it("writes NOTHING where the account already runs every command as root without a password — and arms no removal for a grant it did not make", async () => {
+    // The cloud-image case adopt.ts already knows about: `sudo -S` does not consume the password
+    // line there. Writing a second drop-in would leave behind a grant this machine did not need,
+    // and a successful run never takes one back.
+    const commands: string[] = [];
+    const { db, executor, serverId } = make(
+      fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, { commands, alreadyBlanket: true }), "digi1");
+    const { runId } = await executor.plan("adopt", { serverId });
+    await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
+    await executor.settle(runId);
+    expect(getRun(db.db, runId)?.status).toBe("succeeded");
+
+    expect(commands).not.toContainEqual(expect.stringContaining("install -m 0440 -o root -g root"));
+    expect(commands).not.toContainEqual(expect.stringContaining("visudo -c"));
+    const checkpoint = configureSudoCheckpoint(db, runId);
+    expect(checkpoint.data?.sudoersWritten).toBe(false);
+    expect(checkpoint.__cleanups ?? []).not.toContain("remove-sudoers");
+    expect(adoptDef.cleanups?.({ serverId }).map((c) => c.name)).toContain("remove-sudoers"); // still offered, simply not armed
+  });
+
+  it("asks the machine before writing, and asks it in a form whose EXIT CODE is the answer", async () => {
+    const commands: string[] = [];
+    const { executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, { commands }), "digi1");
+    const { runId } = await executor.plan("adopt", { serverId });
+    await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
+    await executor.settle(runId);
+
+    const asked = commands.find((c) => c.startsWith("LC_ALL=C sudo -n -l"));
+    expect(asked).toBeDefined();
+    // -n so a rule set that would PROMPT answers "not granted" instead of hanging; LC_ALL=C because
+    // `sudo -l` prints in the machine's own language; the pattern is the blanket line and no other.
+    expect(asked).toContain("grep -qE");
+    expect(asked).toContain("NOPASSWD:[[:space:]]*ALL");
+    expect(commands.indexOf(asked ?? "")).toBeLessThan(commands.findIndex((c) => c.includes("install -m 0440")));
+  });
+
+  it("the plan an operator approves names the standing grant and every use of the password — and neither on a root adoption", async () => {
+    // Plan.warnings reaches no screen (server/executor/read.ts toRunView projects none, and RunView
+    // has no such member), so the summary is the only record the approve card shows.
+    const nonRoot = make(fakeFactory(), "digi1");
+    const { plan } = await nonRoot.executor.plan("adopt", { serverId: nonRoot.serverId });
+    expect(plan.summary).toContain('digi1 ALL=(ALL) NOPASSWD:ALL');
+    expect(plan.summary).toContain("/etc/sudoers.d/90-hostyour");
+    expect(plan.summary).toContain("LEAVES IT THERE");
+    expect(plan.summary).toContain("proves sudo in the preflight and installs an SSH key");
+    // CONDITIONAL, because configure-sudo writes nothing where the machine already grants blanket
+    // passwordless sudo (adopt.ts:260-263) — a summary asserting the install unconditionally would
+    // tell the operator the password did something it did not.
+    expect(plan.summary).toContain("Where this machine does not already grant passwordless sudo");
+
+    const asRoot = make();
+    const rootPlan = (await asRoot.executor.plan("adopt", { serverId: asRoot.serverId })).plan;
+    expect(rootPlan.summary).toContain("The password you enter is used once to install an SSH key");
+    expect(rootPlan.summary).not.toContain("NOPASSWD");
   });
 
   it("blocks on a hard preflight failure (non-Ubuntu arch)", async () => {

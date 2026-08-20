@@ -26,6 +26,17 @@ import { controllerKeyMarker } from "../../../../shared/operator-keys.ts";
 // a reinstall or a cloud-init rewrite can reopen, the second is a working credential that outlives
 // the machine's configuration. Password login is put back only by a deliberate
 // password-login-enable run.
+//
+// A server adopted as a NON-ROOT account that did not already grant blanket passwordless sudo also
+// leaves this run carrying /etc/sudoers.d/90-hostyour, and it carries it for as long as this manager
+// administers the machine. Where the machine already grants it, configure-sudo writes nothing
+// (:260-263) and there is nothing here to take back. That right is what the
+// manager's own `sudo -n` commands stand on afterwards — deploy-slave.remote.ts's verification
+// commands, deploy-slave.kit.ts:232, tailnet-probe.ts:48 and the password-login run kinds, which
+// declare `requiredSecrets: []` (password-login.kit.ts:409) and so hold no password to raise
+// themselves with. Nothing in this product takes the right back: remove-sudoers is a Cleanup and
+// cleanups run only on abortWithCleanup (server/executor/executor.ts:309, :348). What configure-sudo
+// does NOT do is add one where the machine already grants it.
 
 export const AdoptParams = z.object({
   serverId: z.string().startsWith("srv_"),
@@ -66,9 +77,27 @@ const removeSudoersCleanup: Cleanup = {
   title: "Remove the passwordless-sudo drop-in",
   run: async (ctx: StepCtx) => {
     const session = await ctx.ssh();
-    await remoteExec(ctx, session, "sudo -n rm -f /etc/sudoers.d/90-hostyour");
+    await remoteExec(ctx, session, `sudo -n rm -f ${SUDOERS_DROP_IN}`);
   },
 };
+
+/** The drop-in configure-sudo writes, and the only file remove-sudoers deletes. */
+export const SUDOERS_DROP_IN = "/etc/sudoers.d/90-hostyour";
+
+/** Asks the machine whether this account ALREADY carries the blanket right the drop-in would write.
+ *  The exit code is the whole answer, so nothing is parsed console-side: `sudo -l` lists the rules
+ *  that apply to the account, `-n` refuses to prompt — a rule set that would ask for a password
+ *  exits non-zero here, which is the answer "not granted" — and the pattern matches the one line
+ *  that says every command, as every user, without a password.
+ *
+ *  A rule set granting a NARROWER NOPASSWD list does not match and the drop-in is written, because
+ *  the right this adoption needs afterwards is the blanket one: `sudo -n` reaches root at
+ *  verify-key-login (:298) and enable-ntp (:311), at every verification command in
+ *  deploy-slave.remote.ts, and in the password-login run kinds, which carry no password at all.
+ *  `LC_ALL=C` because `sudo -l` prints in the machine's own language. */
+export const SUDO_ALREADY_BLANKET =
+  "LC_ALL=C sudo -n -l 2>/dev/null | " +
+  "grep -qE '^[[:space:]]*\\(ALL([[:space:]]*:[[:space:]]*ALL)?\\)[[:space:]]+NOPASSWD:[[:space:]]*ALL[[:space:]]*$'";
 
 // The baseline probe (step 7). BASE key value lines, parsed console-side.
 const BASELINE_SCRIPT = `#!/usr/bin/env bash
@@ -224,11 +253,22 @@ function adoptSteps(params: AdoptParams): Step[] {
           return;
         }
         const session = await ctx.openPasswordSession();
+        // MEASURED FIRST, and nothing is written where the answer is yes. A cloud image commonly
+        // grants the first account `ALL=(ALL) NOPASSWD:ALL` already (that is the case the comment
+        // below is about), and a machine adopted before carries this run's own drop-in — in both,
+        // writing one adds a grant the machine does not need and that no successful run takes back:
+        // remove-sudoers is a Cleanup, and cleanups run only on abortWithCleanup (executor.ts:309).
+        const already = await remoteExec(ctx, session, SUDO_ALREADY_BLANKET);
+        if (already.code === 0) {
+          ctx.log("meta", `"${server.sshUser}" already runs every command as root without a password on this machine — nothing is written, and ${SUDOERS_DROP_IN} is left as this run found it.`);
+          ctx.checkpoint({ sudoersWritten: false });
+          return;
+        }
         const pw = requirePassword(ctx);
         const pwLine = Buffer.concat([pw, Buffer.from("\n")]);
         const sudoersLine = `${server.sshUser} ALL=(ALL) NOPASSWD:ALL\n`;
         const tmp = `/tmp/dc-sudoers-${ctx.runId}`;
-        ctx.log("meta", `Passwordless sudo for "${server.sshUser}": writing /etc/sudoers.d/90-hostyour = ${sudoersLine.trim()} (overwrites any existing drop-in; your password is used only for sudo and never written to the file)`);
+        ctx.log("meta", `Passwordless sudo for "${server.sshUser}": writing ${SUDOERS_DROP_IN} = ${sudoersLine.trim()} — it STAYS on the machine after this run succeeds; only aborting the run with cleanup removes it. (Overwrites any existing drop-in of that name; your password is used only for sudo and never written to the file.)`);
         // Write the rule to a user-owned temp file FIRST, with NOTHING but the rule on
         // stdin. NEVER concatenate the sudo password with the file content: if the box
         // already grants passwordless sudo (common on cloud images), `sudo -S` does not
@@ -243,11 +283,12 @@ function adoptSteps(params: AdoptParams): Step[] {
           // `install` sets owner/group/mode atomically and does NOT read stdin, so the
           // password (consumed by sudo only when it actually prompts, ignored otherwise)
           // can never reach the file.
-          await remoteCmd(ctx, session, `sudo -S -p '' install -m 0440 -o root -g root ${tmp} /etc/sudoers.d/90-hostyour`, { stdin: pwLine });
+          await remoteCmd(ctx, session, `sudo -S -p '' install -m 0440 -o root -g root ${tmp} ${SUDOERS_DROP_IN}`, { stdin: pwLine });
           await remoteCmd(ctx, session, "sudo -n visudo -c >/dev/null");
         } finally {
           await remoteExec(ctx, session, `rm -f ${tmp}`);
         }
+        ctx.checkpoint({ sudoersWritten: true });
       },
     },
     {
@@ -347,6 +388,31 @@ function adoptSteps(params: AdoptParams): Step[] {
   ];
 }
 
+/** What the operator's password is spent on, which is not one thing on a machine adopted as a
+ *  non-root account: the preflight proves sudo with it (:178) and configure-sudo installs the
+ *  drop-in with it (:284), where one is needed. As root neither happens — the preflight's sudo.ok passes on "running as
+ *  root" and configure-sudo is a no-op — and the key is the only use left. */
+function passwordUses(sshUser: string): string {
+  return sshUser === "root"
+    ? "The password you enter is used once to install an SSH key"
+    : "The password you enter proves sudo in the preflight and installs an SSH key. Where this machine does not already grant passwordless sudo, it also installs the drop-in that grants it";
+}
+
+/** The standing right a non-root adoption leaves on the machine, in the ONE record the operator
+ *  reads before approving. Plan.warnings is not that record: the executor's read path projects no
+ *  `warnings` onto RunView (server/executor/read.ts toRunView) and RunView has no such member
+ *  (shared/api-types.ts), so a warning string is frozen into plan_json and rendered on no screen;
+ *  the summary is what the approve card shows (web/src/pages/RunDetail.tsx:207). */
+function sudoGrant(sshUser: string): string {
+  if (sshUser === "root") return "";
+  return (
+    ` Unless "${sshUser}" already runs every command as root without a password, this run writes ` +
+    `${SUDOERS_DROP_IN} = "${sshUser} ALL=(ALL) NOPASSWD:ALL" and LEAVES IT THERE: deploy-slave and the ` +
+    `password-login run kinds reach root on this machine with "sudo -n" and carry no password of their own. ` +
+    `Only aborting this run with cleanup removes it.`
+  );
+}
+
 export const adoptDef: RunDefinition<AdoptParams> = {
   kind: "adopt",
   paramsSchema: AdoptParams,
@@ -366,8 +432,9 @@ export const adoptDef: RunDefinition<AdoptParams> = {
       targetId: params.serverId,
       summary:
         `Adopt server "${server.name}" (${dialled.host}:${server.sshPort}, user ${server.sshUser}): ` +
-        `${stepDefs.length} steps, ~2 min. The password you enter is used once to install an SSH key; it is never stored, ` +
-        `and any copy kept for one-click adopt is destroyed. The server takes key logins only afterwards.`,
+        `${stepDefs.length} steps, ~2 min. ${passwordUses(server.sshUser)}; it is never stored, ` +
+        `and any copy kept for one-click adopt is destroyed. The server takes key logins only afterwards.` +
+        sudoGrant(server.sshUser),
       steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
       warnings,
       requiredSecrets: ["adopt-password"],
