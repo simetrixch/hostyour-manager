@@ -14,6 +14,7 @@ function server(over: Partial<ServerView>): ServerView {
     tailnetState: "unknown", tailnet: { kind: "none" },
     passwordLoginState: "unknown", passwordLogin: { kind: "none" },
     authorizedKeysState: "unknown", authorizedKeys: { kind: "none" },
+    release: { kind: "unknown", reason: "no cluster map" },
     createdAt: 0, adoptedAt: null, hasPassword: false, hasKey: true,
     ...over,
   };

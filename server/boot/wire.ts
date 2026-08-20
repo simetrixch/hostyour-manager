@@ -25,6 +25,8 @@ import { registerRunRoutes } from "../domains/runs/api.ts";
 import { registerClustersRoutes, registerServerRoutes } from "../domains/inventory/api.ts";
 import { createGitHubClient } from "../adapters/github/github.ts";
 import { registerBranchRoutes } from "../domains/branches/api.ts";
+import { registerReleaseRoutes } from "../domains/releases/api.ts";
+import { searchPlatformApps } from "../domains/registry-cleanup/search.ts";
 import { registerConsumerRoutes, registerTenantRoutes } from "../domains/onboarding/api.ts";
 import { registerUnitSizeRoutes } from "../domains/onboarding/api-unit-sizes.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
@@ -128,6 +130,21 @@ export async function wire(): Promise<Wired> {
   // GitHub adapter — ONE instance for Branches + Reset. Absent when GITHUB_REPO/GITHUB_WRITE_PAT
   // are unset — the routes then answer 501 NOT_CONFIGURED, never a quiet no-op.
   const github = config.github ? createGitHubClient(config.github) : undefined;
+  // hostyour-cloud as ONE carrier of the pin search: its branch list over the REST API, its files
+  // over the platform repo's per-branch worktree — the same two adapters the registrations already
+  // ride, composed here so the release surface reads the branches the reaper reads. Both halves have
+  // to be present: without either there is no walk to make, and the surface says so rather than
+  // answering with an empty pin set.
+  const platformRepo = onboarding.platformRepo;
+  const readPlatformAppPins =
+    github && platformRepo
+      ? () =>
+          searchPlatformApps({
+            booksBranch: platformRepo.booksBranch,
+            listBranches: () => github.listBranches(),
+            withBranch: (branch, fn) => platformRepo.withBranch(branch, fn),
+          })
+      : undefined;
   const emergencyStore = new EmergencyStore();
   const emergencyDeps = { config, session, store: emergencyStore, db: db.db, logger };
   const emergencyApp = createEmergencyApp(emergencyDeps);
@@ -140,9 +157,13 @@ export async function wire(): Promise<Wired> {
     registerAuth: (a) => registerAuthRoutes(a, { config, oidc, session, loginTx, db: db.db, logger }),
     registerProtected: (a) => {
       registerRunRoutes(a, { executor, db: db.db, bus, config, logger });
-      registerClustersRoutes(a, { db: db.db, storeMode: () => (store.mode() === "plaintext" ? "plaintext" : "sealed"), logger });
-      registerServerRoutes(a, { db: db.db, creds: store, executor, actor: runActor });
+      registerClustersRoutes(a, { db: db.db, storeMode: () => (store.mode() === "plaintext" ? "plaintext" : "sealed"), logger, ...(platformRepo ? { platformRepo } : {}) });
+      registerServerRoutes(a, { db: db.db, creds: store, executor, actor: runActor, ...(platformRepo ? { platformRepo } : {}) });
       registerBranchRoutes(a, { db: db.db, config, ...(github ? { github } : {}) });
+      // Which release each installation stands on, and which version each of its platform apps runs.
+      // The app half rides the pin search bound above; the cluster half reads the maps through the
+      // same platform repo port every registration write goes through.
+      registerReleaseRoutes(a, { db: db.db, ...(platformRepo ? { platformRepo } : {}), ...(readPlatformAppPins ? { readPlatformAppPins } : {}) });
       // Consumer onboarding routes. The read path (the consumer list) is always live; the mutating
       // triggers answer 501 NOT_CONFIGURED unless the onboarding Run family is wired (buildOnboarding
       // above registered it with its real git/kube/vault/gate-runner adapters).

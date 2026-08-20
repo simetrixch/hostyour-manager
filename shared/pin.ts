@@ -32,10 +32,53 @@ export function pinKey(pin: BuildPin): string {
   return `${pin.image}:${pin.tag}`;
 }
 
+/** ONE pin found by the carrier search, with WHERE it stands — "<repo>@<branch>:<path>". The location
+ *  travels with the pin so a run log and any refusal name the file an operator has to open. */
+export interface PinHit {
+  carrier: string;
+  pin: BuildPin;
+}
+
+/** ONE pin of a GLOB carrier class, with its location already apart: the branch it stands on, the
+ *  chart directory it stands in and the stage its file states pins for. The walk holds all three
+ *  while it reads, so a reader that groups pins — which version does app X run on installation Y —
+ *  takes them from the hit instead of parsing them back out of `carrier`. */
+export interface GlobPinHit extends PinHit {
+  branch: string;
+  chart: string;
+  /** null for the tenant catalog's values.yaml, the one pin file that names no stage. */
+  stage: Stage | null;
+}
+
+/** What ONE glob class's walk produced: every branch it READ, and every pin it found on them.
+ *  The branch list travels with the hits, and is the same listing the walk itself used: "this branch
+ *  pins nothing" and "there is no such branch" are different answers, the hits alone cannot tell them
+ *  apart, and a second listing taken to tell them apart could disagree with the first. */
+export interface GlobSearch {
+  branches: string[];
+  hits: GlobPinHit[];
+}
+
 /** The per-stage values file of a chart directory — where a unit's own pins and the platform pins
  *  stand. A pin outside the files named here is invisible to both the bump and the floor. */
 export function stagePinFile(stage: Stage): string {
   return `values-${stage}.yaml`;
+}
+
+/** One pin FILE a glob carrier class reads, and the stage that file states pins for. The stage
+ *  travels WITH the file name rather than being recovered from it afterwards: the reader that groups
+ *  pins per installation needs to know which stage a pin is deployed at, and a second parser of the
+ *  `values-<stage>.yaml` convention is a second place the convention can be got wrong. */
+export interface PinFile {
+  file: string;
+  /** null where the file states no stage — the tenant catalog's values.yaml, the product default a
+   *  fresh installation renders whatever stage it is at. */
+  stage: Stage | null;
+}
+
+/** The per-stage values file of a chart directory as a PinFile — what class (c) reads. */
+export function stagePinFiles(): PinFile[] {
+  return STAGE.map((stage) => ({ file: stagePinFile(stage), stage }));
 }
 
 /** A tenant catalog chart pins in TWO files, and both are live.
@@ -47,8 +90,8 @@ export function stagePinFile(stage: Stage): string {
  *
  *  Both are floor: the default is what a fresh installation deploys, the per-stage file what a
  *  running one does, and retention may delete neither. */
-export function catalogPinFiles(): string[] {
-  return ["values.yaml", ...STAGE.map((s) => `pins-${s}.yaml`)];
+export function catalogPinFiles(): PinFile[] {
+  return [{ file: "values.yaml", stage: null }, ...STAGE.map((stage) => ({ file: `pins-${stage}.yaml`, stage }))];
 }
 
 /**

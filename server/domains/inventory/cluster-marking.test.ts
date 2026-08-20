@@ -8,6 +8,7 @@ import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import {
   clusterShortName, clusterMarkingPath, resolveClusterMarking, buildPlaneFqdnFromMarkings,
   projectClusterMarking, removeSlaveMarkingPart, setClusterRelease,
+  readClusterReleases, clusterReleaseRead,
   CLUSTER_MARKING_FILE_KEYS,
 } from "./cluster-marking.ts";
 
@@ -230,6 +231,57 @@ describe("setClusterRelease", () => {
   it("refuses to read a map whose pin is not a release tag — the field IS the pin, so free text names nothing", async () => {
     const repo = repoWith({ [SLAVE]: `${slaveMap}release: latest\n` });
     await expect(resolveClusterMarking(repo, "s1")).rejects.toThrow(/must be a release tag/);
+  });
+});
+
+describe("readClusterReleases + clusterReleaseRead — a version is reported ONLY where a map states one", () => {
+  const TAG = "1.2.0-stable-20260728120000";
+
+  it("reports the pinned tag for a cluster whose map carries one", async () => {
+    const releases = await readClusterReleases(repoWith({ [MASTER]: `${masterMap}release: ${TAG}\n` }));
+    expect(releases.ok).toBe(true);
+    expect(clusterReleaseRead(MASTER, releases)).toEqual({ kind: "pinned", tag: TAG });
+  });
+
+  it("a map that carries NO release key reads unknown, and says that no release run has pinned it", async () => {
+    // The counter-probe of this whole surface: `masterMap` has no release key, which is every
+    // cluster between its install and its first release. Nothing here may substitute a version —
+    // there is no second statement of a cluster's release to substitute FROM.
+    const releases = await readClusterReleases(repoWith({ [MASTER]: masterMap }));
+    const read = clusterReleaseRead(MASTER, releases);
+    expect(read.kind).toBe("unknown");
+    expect(read).not.toHaveProperty("tag");
+    expect(JSON.stringify(read)).not.toContain(TAG);
+    if (read.kind === "unknown") expect(read.reason).toMatch(/carries no release key.*no release run has pinned/);
+  });
+
+  it("does not lend one cluster's pin to another — two maps, one pinned, and the other stays unknown", async () => {
+    const releases = await readClusterReleases(
+      repoWith({ [MASTER]: `${masterMap}release: ${TAG}\n`, [SLAVE]: slaveMap }),
+    );
+    expect(clusterReleaseRead(MASTER, releases)).toEqual({ kind: "pinned", tag: TAG });
+    expect(clusterReleaseRead(SLAVE, releases).kind).toBe("unknown");
+    expect(JSON.stringify(clusterReleaseRead(SLAVE, releases))).not.toContain(TAG);
+  });
+
+  it("a cluster with no map at all reads unknown and names the file that would state it", () => {
+    const read = clusterReleaseRead(SLAVE, { ok: true, byFqdn: new Map() });
+    expect(read).toEqual({ kind: "unknown", reason: expect.stringContaining(clusterMarkingPath(SLAVE)) });
+  });
+
+  it("RETURNS the failure instead of throwing — one unreadable map must not blank a whole page", async () => {
+    // resolveClusterMarking throws here (right for a run, wrong for a list). A map whose release is
+    // free text is the case that reaches it, since the strict schema refuses the whole read.
+    const releases = await readClusterReleases(repoWith({ [MASTER]: `${masterMap}release: latest\n` }));
+    expect(releases.ok).toBe(false);
+    const read = clusterReleaseRead(MASTER, releases);
+    expect(read.kind).toBe("unknown");
+    if (read.kind === "unknown") expect(read.reason).toMatch(/must be a release tag/);
+  });
+
+  it("names the missing configuration when there is no platform repo to read maps from", async () => {
+    const releases = await readClusterReleases(undefined);
+    expect(releases).toEqual({ ok: false, reason: expect.stringContaining("wire-onboarding.ts:204") });
   });
 });
 

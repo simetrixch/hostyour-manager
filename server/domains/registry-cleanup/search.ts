@@ -1,7 +1,11 @@
 // THE search over the image pins of the platform — the same one the release bump performs when it
 // asks "who pins the image I just built?", run here to answer the reaper's opposite question: "which
-// tags does anything still pin?". One search, two readers, so a tag the bump would write can never be
+// tags does anything still pin?". ONE search behind both, so a tag the bump would write can never be
 // a tag the reaper thinks nobody references.
+//
+// A THIRD reader takes class (c) alone (searchPlatformApps below): the release surface, which asks
+// which version each platform app runs on one installation. Same walk, so the versions it reports
+// and the tags the reaper protects come from one picture of the branches, never two.
 //
 // The search space is three carrier classes, over EVERY stage:
 //
@@ -30,7 +34,10 @@
 // carrier at that stage.
 import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
-import { parseBuildPins, stagePinFile, catalogPinFiles, type BuildPin } from "../../../shared/pin.ts";
+import {
+  parseBuildPins, stagePinFile, stagePinFiles, catalogPinFiles,
+  type GlobPinHit, type GlobSearch, type PinFile, type PinHit,
+} from "../../../shared/pin.ts";
 import { parse as parseYaml } from "yaml";
 import type { BranchScope, RepoReader } from "../../adapters/git/port.ts";
 
@@ -62,18 +69,14 @@ export interface SearchDeps {
   unit: Pick<RepoReader, "cloneAtRef" | "readFile" | "dispose">;
 }
 
-/** ONE pin found, with WHERE it stands — "<repo>@<branch>:<path>". The location travels with the pin
- *  so the run log and any refusal name the file an operator has to open. */
-export interface PinHit {
-  carrier: string;
-  pin: BuildPin;
-}
-
 /** The directory of hostyour-cloud that holds one registration per unit. */
 const REGISTRATIONS_DIR = "registrations";
 /** The chart directories of the two glob classes. */
 const DEPLOY_CHARTS_DIR = "charts";
 const CLOUD_APPS_DIR = "apps";
+/** The repository each glob class stands in, as the carrier string names it. */
+const DEPLOY_LABEL = "catalog";
+const CLOUD_LABEL = "hostyour-cloud";
 
 /** The delivery branch a unit's chart pins stand on for one stage. */
 function deliveryBranch(stage: Stage): string {
@@ -89,9 +92,24 @@ const at = (repo: string, branch: string, path: string): string => `${repo}@${br
 export async function searchCarriers(deps: SearchDeps, signal?: AbortSignal): Promise<PinHit[]> {
   return [
     ...(await searchUnitCharts(deps, signal)),
-    ...(await searchGlob(deps.deploy, "catalog", DEPLOY_CHARTS_DIR, catalogPinFiles())),
-    ...(await searchGlob(deps.cloud, "hostyour-cloud", CLOUD_APPS_DIR, STAGE.map(stagePinFile))),
+    ...(await searchGlob(deps.deploy, DEPLOY_LABEL, DEPLOY_CHARTS_DIR, catalogPinFiles())).hits,
+    ...(await searchPlatformApps(deps.cloud)).hits,
   ];
+}
+
+/**
+ * Class (c) ON ITS OWN: what the platform apps pin, branch by branch and stage by stage. The same
+ * walk searchCarriers folds into the floor above — one enumeration, two readers, so the versions a
+ * surface reports and the tags the reaper protects can never come from two different pictures of the
+ * same branches.
+ *
+ * The reader that takes this class alone is the release surface: an install branch stands on the
+ * release a cluster actually runs, so `apps/<app>/values-<stage>.yaml` on the branch named after a
+ * cluster's FQDN states which image version that cluster's platform apps run. Fail-closed as above — a
+ * truncated branch listing or an unparseable pin file throws rather than answering short.
+ */
+export function searchPlatformApps(cloud: CarrierRepo): Promise<GlobSearch> {
+  return searchGlob(cloud, CLOUD_LABEL, CLOUD_APPS_DIR, stagePinFiles());
 }
 
 /** Class (a): every stage registration with a chartPath, read out of its unit's own delivery branch. */
@@ -158,20 +176,22 @@ async function readUnitChart(
 /** Classes (b) and (c): the pin files of every immediate child of `dir`, on every branch
  *  of one GitOps repo, in the pin files that class names. A chart without one of them is not a
  *  carrier through it — unlike class (a), nothing claimed it was. */
-async function searchGlob(repo: CarrierRepo, label: string, dir: string, files: string[]): Promise<PinHit[]> {
-  const hits: PinHit[] = [];
+async function searchGlob(repo: CarrierRepo, label: string, dir: string, files: readonly PinFile[]): Promise<GlobSearch> {
+  const hits: GlobPinHit[] = [];
+  const branches: string[] = [];
   for (const branch of await repo.listBranches()) {
+    branches.push(branch.name);
     await repo.withBranch(branch.name, async (scope) => {
       for (const chart of await scope.listDir(dir)) {
-        for (const file of files) {
+        for (const { file, stage } of files) {
           const path = `${dir}/${chart}/${file}`;
           const text = await scope.readFile(path);
           if (text === null) continue;
           const carrier = at(label, branch.name, path);
-          hits.push(...parseBuildPins(carrier, text).map((pin) => ({ carrier, pin })));
+          hits.push(...parseBuildPins(carrier, text).map((pin) => ({ carrier, pin, branch: branch.name, chart, stage })));
         }
       }
     });
   }
-  return hits;
+  return { branches, hits };
 }

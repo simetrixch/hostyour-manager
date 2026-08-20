@@ -70,6 +70,7 @@ import { writeAudit } from "../../db/audit-writer.ts";
 import { AppError, errValidation } from "../../kernel/errors.ts";
 import { SERVER_ROLE, STAGE, type ServerRole, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_TAG_RE } from "../../../shared/release.ts";
+import type { ClusterReleaseRead } from "../../../shared/api-types.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 
 /** The directory the maps live in. */
@@ -235,6 +236,53 @@ async function indexMarkings(repo: PlatformRepo): Promise<{ byFqdn: Map<string, 
   }
   return { byFqdn, byName };
   });
+}
+
+/** Every cluster map of this installation, or the reason there is none to show.
+ *
+ *  resolveClusterMarking answers for ONE cluster and THROWS when it cannot — right for a run, wrong
+ *  for a surface that is merely listing every cluster: one unreadable map would take the whole page
+ *  down, and a page that renders nothing says less than one that renders the rows and names what it
+ *  could not read. So the failure is RETURNED, and every consumer states it beside the row it belongs
+ *  to instead of inventing a release for it. */
+export type ClusterReleases =
+  | { ok: true; byFqdn: ReadonlyMap<string, ClusterMarking> }
+  | { ok: false; reason: string };
+
+/** Read the maps for that surface. `repo` is absent on a Controller whose platform repo is not
+ *  configured — there is then no books branch to read and no map anywhere, which is a reason and not
+ *  an error. Everything else that goes wrong (a branch that will not fetch, a map that fails the
+ *  strict schema, two maps deriving one short name) arrives as the message the read threw with. */
+export async function readClusterReleases(repo: PlatformRepo | undefined): Promise<ClusterReleases> {
+  if (!repo) {
+    return {
+      ok: false,
+      reason: "there is no platform repo to read — it is built only where GitHub is configured AND a books branch is named (server/boot/wire-onboarding.ts:204), and the cluster maps that state which release a cluster stands on live on that branch",
+    };
+  }
+  try {
+    const { byFqdn } = await indexMarkings(repo);
+    return { ok: true, byFqdn };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** The ONE derivation of "which release does this cluster stand on" out of a maps read. THREE ways
+ *  there is no answer and each says which it was: the maps could not be read, no map stands for this
+ *  FQDN, or the map stands and carries no release key — the last being every cluster no release run
+ *  has touched yet. None of them resolves to a version: this file is the only statement of a
+ *  cluster's release, so a version reported from anywhere else would be invented. */
+export function clusterReleaseRead(fqdn: string, releases: ClusterReleases): ClusterReleaseRead {
+  if (!releases.ok) return { kind: "unknown", reason: releases.reason };
+  const marking = releases.byFqdn.get(fqdn);
+  if (!marking) {
+    return { kind: "unknown", reason: `no cluster map for ${fqdn} — expected ${clusterMarkingPath(fqdn)} on the books branch, which is where every cluster is marked when it is installed` };
+  }
+  if (marking.release === undefined) {
+    return { kind: "unknown", reason: `${clusterMarkingPath(fqdn)} carries no release key — no release run has pinned ${fqdn} yet` };
+  }
+  return { kind: "pinned", tag: marking.release };
 }
 
 /** Resolve ONE cluster's marking, named either by its FQDN (`s1.example.com`) or by its

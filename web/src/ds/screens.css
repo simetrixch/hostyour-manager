@@ -105,6 +105,49 @@
   font-size: var(--fs-1);
 }
 
+/* The Releases panel: one row per installation, and under it what that installation's own install
+   branch pins for its own stage. The app lines are a flat list inside the row rather than a nested
+   .rows card — a card inside a card reads as a second panel. */
+.releases__detail {
+  padding: 0 var(--sp-4) var(--sp-3);
+}
+
+.releases__why {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-1);
+}
+
+.releases__apps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.releases__app {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.releases__app-name {
+  font-size: var(--fs-1);
+  font-weight: 500;
+}
+
+.releases__app-tag {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  text-overflow: ellipsis;
+}
+
 /* ---- RunDetail: sticky run header ---- */
 
 .runhead {

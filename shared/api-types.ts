@@ -181,6 +181,25 @@ export interface OperatorKeyView {
   onServerIds: string[];
 }
 
+/** WHICH platform release a cluster stands on, as the cluster's OWN map states it — the `release`
+ *  key of clusters/active/<fqdn>.yaml (server/domains/inventory/cluster-marking.ts), written by the
+ *  release run's set-pin step and by nothing else.
+ *
+ *  A version is reported ONLY where a map states a tag. Everything else — no map stands for this
+ *  cluster, the map carries no release key, the maps could not be read at all — is "unknown" and says
+ *  in `reason` which of those it was. There is no second place to fall back to and there must not be
+ *  one: the install branch is regenerated from exactly this pin, so a version derived from anywhere
+ *  else would be a guess presented as the answer to the one question this type exists for.
+ *
+ *  "no-cluster" is separate from "unknown" because a surface paints them differently and must: a
+ *  machine that is not a cluster stands on no release and never did, which is the ordinary state of
+ *  a freshly added server — while a CLUSTER whose release cannot be named is something an operator
+ *  has to see. Sharing one member would make the first read as the second on every bare row. */
+export type ClusterReleaseRead =
+  | { kind: "pinned"; tag: string }
+  | { kind: "unknown"; reason: string }
+  | { kind: "no-cluster" };
+
 export interface ServerView {
   id: string;
   name: string;
@@ -216,6 +235,10 @@ export interface ServerView {
   /** The reading behind `authorizedKeysState`: when it was taken, by which run, and every key line
    *  it found. */
   authorizedKeys: ServerAuthorizedKeysRead;
+  /** The platform release the cluster on this machine stands on — a FIFTH axis beside `status` and
+   *  the three readings above, and unlike them not a reading of the machine at all: it is read from
+   *  the cluster map on the books branch, the one declarative statement of a cluster's version. */
+  release: ClusterReleaseRead;
   createdAt: number;
   adoptedAt: number | null;
   /** A bootstrap password is on file (never the value) — enables 1-click adopt. */
@@ -310,6 +333,58 @@ export interface ClustersView {
     ssh: ClustersSourceState;
   };
   storeMode: StoreMode;
+}
+
+/* ---- Releases: which version each installation stands on, and which version each of its apps runs ----
+ *
+ * The two halves answer one question at two depths. The CLUSTER half is the release pin in
+ * clusters/active/<fqdn>.yaml — the tag the install branch is regenerated from, one statement per
+ * cluster (ClusterReleaseRead above, carried on ServerView too). The APP half is what that branch's
+ * `apps/<app>/values-<stage>.yaml` files pin, read by the SAME pin search whose result is the
+ * registry reaper's protected floor (server/domains/registry-cleanup/search.ts, searchPlatformApps) —
+ * one enumeration, so what this surface reports and what retention protects can never disagree. */
+
+/** ONE platform app's pinned image on ONE installation — a `builds[]` entry of that installation's
+ *  own apps/<app>/values-<stage>.yaml, in the pin grammar's own words (shared/pin.ts BuildPin). */
+export interface AppReleaseView {
+  /** The directory under `apps/` — the chart the pin stands in. */
+  app: string;
+  /** builds[].name — which image of that chart this is. */
+  build: string;
+  /** builds[].image — the registry repository the tag belongs to. */
+  image: string;
+  /** builds[].tag — the image tag this installation deploys. */
+  tag: string;
+}
+
+/** What ONE installation stands on. An installation is a registered cluster: its FQDN IS its install
+ *  branch (clusters.domain), and that branch carries both halves of the answer. */
+export interface InstallationReleaseView {
+  /** The cluster's FQDN == clusters.domain == the install branch its state stands on. */
+  branch: string;
+  /** The server the cluster runs on, and that server's name — what an operator recognises the
+   *  installation by on the Servers page, where the same machine carries the same release. */
+  serverId: string;
+  name: string;
+  stage: Stage;
+  role: ServerRole;
+  /** The platform release the cluster's map pins — the same value ServerView carries. */
+  release: ClusterReleaseRead;
+  /** The pins standing on `branch` in `apps/<app>/values-<stage>.yaml` for THIS cluster's stage, or
+   *  null when the repository carries no branch of that name at all. The two are not the same fact:
+   *  an empty list means the branch was read and pins nothing, null means there was nothing to read. */
+  apps: AppReleaseView[] | null;
+}
+
+/** GET /api/releases — one row per registered cluster, plus the same FAIL-SOFT envelope the orphan and
+ *  detected scans carry: `error` set means the pin search itself could not run, so every `apps` is null
+ *  and the UI must render the error rather than "this installation pins nothing"; `reason` set means
+ *  the platform repo is not configured, so there was nothing to search with. The cluster rows and their
+ *  release pins are still answered in both cases — those come from the database and the cluster maps. */
+export interface ReleasesView {
+  installations: InstallationReleaseView[];
+  error?: string;
+  reason?: "onboarding-not-configured";
 }
 
 /** /readyz response — the degrading self-checks surface. */

@@ -1,5 +1,5 @@
 import type {
-  ClustersView, RunView, ServerView, HealthView,
+  ClustersView, ReleasesView, RunView, ServerView, HealthView,
   BranchesView, BranchDiffView, ResetRequest, ResetResult, ApiErrorCode,
   // The tenant-purge targeting surface + the two reads that name one. Declared
   // ONCE in shared/api-types.ts and returned by the server domain module itself (tenant-orphans.ts), so
@@ -71,6 +71,10 @@ const put = <T>(path: string, body: Record<string, unknown>): Promise<T> =>
 export const getHealth = (): Promise<HealthView> => req<HealthView>("/healthz");
 
 export const getClusters = (): Promise<ClustersView> => req<ClustersView>("/api/clusters");
+/** Which release each installation stands on, and which version each of its platform apps runs. The
+ *  app half is fed by the SAME pin search that builds the registry reaper's protected floor, so a
+ *  version shown here is a version retention refuses to delete. */
+export const getReleases = (): Promise<ReleasesView> => req<ReleasesView>("/api/releases");
 export const listRuns = (): Promise<RunView[]> => req<RunView[]>("/api/runs");
 export const getRun = (id: string): Promise<RunView> => req<RunView>(`/api/runs/${id}`);
 

@@ -11,6 +11,7 @@ function server(tailnetState: ServerTailnetState, tailnet: ServerTailnetRead): S
     role: "slave", status: "ready", tailnetState, tailnet,
     passwordLoginState: "unknown", passwordLogin: { kind: "none" },
     authorizedKeysState: "unknown", authorizedKeys: { kind: "none" },
+    release: { kind: "unknown", reason: "no cluster map" },
     createdAt: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true,
   };
 }

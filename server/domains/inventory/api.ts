@@ -6,17 +6,23 @@ import type { ClustersView, StoreMode } from "../../../shared/api-types.ts";
 import { listRuns } from "../../executor/read.ts";
 import { listLocks } from "../../executor/locks.ts";
 import { listServers, getServer } from "./read.ts";
+import { readClusterReleases } from "./cluster-marking.ts";
 import { createServer, deleteServer, openBootstrapPassword, serverCredFlags, CreateServerInput } from "./write.ts";
 import { createOperatorKey, deleteOperatorKey, listOperatorKeys, CreateOperatorKeyInput } from "./operator-keys.ts";
 import { errNotFound } from "../../kernel/errors.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Executor } from "../../executor/executor.ts";
+import type { PlatformRepo } from "../../adapters/git/port.ts";
 import { isMasterRole } from "../../../shared/enums.ts";
 
 export interface ClustersApiDeps {
   db: Db;
   storeMode: () => StoreMode; // already mapped in wire so inventory stays decoupled from security
   logger: Logger;
+  /** The books branch the cluster maps stand on. Absent on a Controller whose platform repo is not
+   *  configured — every server's release then reads "unknown" with that as its reason, which is the
+   *  same degrade-loud contract the mutating onboarding routes follow. */
+  platformRepo?: PlatformRepo;
 }
 
 export interface ServerApiDeps {
@@ -24,6 +30,8 @@ export interface ServerApiDeps {
   creds: CredentialStore;
   executor: Executor;
   actor: () => string;
+  /** As ClustersApiDeps.platformRepo — /api/servers projects the same ServerView. */
+  platformRepo?: PlatformRepo;
 }
 
 /**
@@ -34,11 +42,15 @@ export interface ServerApiDeps {
  * `servers` = the MANAGED servers only (the slaves). The master — this controller itself —
  * is not something it manages, so it must never inflate the managed count (UI mirrors reality
  * 1:1); it rides the dedicated `master` field instead.
+ *
+ * Async because of ONE read: the cluster maps, which state the release each cluster stands on. It is
+ * made once for the whole view and folded onto every projection; a failure to make it does not fail
+ * the view — it becomes the reason each row's release reads "unknown".
  */
-export function buildClustersView(db: Db, storeMode: StoreMode): ClustersView {
+export async function buildClustersView(db: Db, storeMode: StoreMode, platformRepo?: PlatformRepo): Promise<ClustersView> {
   const runs = listRuns(db);
   const needsYou = runs.filter((r) => r.status === "planned");
-  const inventory = listServers(db);
+  const inventory = listServers(db, undefined, await readClusterReleases(platformRepo));
   return {
     asOf: Date.now(),
     verdict: needsYou.length > 0 ? "warn" : "ok",
@@ -52,7 +64,7 @@ export function buildClustersView(db: Db, storeMode: StoreMode): ClustersView {
 }
 
 export function registerClustersRoutes(app: Hono<AppEnv>, deps: ClustersApiDeps): void {
-  app.get("/api/clusters", (c) => c.json(buildClustersView(deps.db, deps.storeMode())));
+  app.get("/api/clusters", async (c) => c.json(await buildClustersView(deps.db, deps.storeMode(), deps.platformRepo)));
   // The whole lock table, and the ONE read that has no browser caller: nothing in web/src lists locks
   // yet. It is served anyway because a refused approve answers 409 with the single claim that
   // collided (resource, key, holderRunId) and nothing else, so neither the operator nor a reader of
@@ -67,7 +79,9 @@ export function registerClustersRoutes(app: Hono<AppEnv>, deps: ClustersApiDeps)
 export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): void {
   const { db, creds, executor } = deps;
 
-  app.get("/api/servers", async (c) => c.json({ servers: listServers(db, await serverCredFlags(creds)) }));
+  app.get("/api/servers", async (c) =>
+    c.json({ servers: listServers(db, await serverCredFlags(creds), await readClusterReleases(deps.platformRepo)) }),
+  );
 
   app.post("/api/servers", async (c) => {
     const input = CreateServerInput.parse(await c.req.json().catch(() => ({})));
@@ -102,7 +116,10 @@ export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): vo
   // the Run screen's ceremony prompts for the password (graceful fallback).
   app.post("/api/servers/:id/adopt", async (c) => {
     const id = c.req.param("id");
-    if (!getServer(db, id)) throw errNotFound(`server ${id}`);
+    // Presence only — the projection is discarded, so no cluster map is read for it.
+    if (!getServer(db, id, undefined, { ok: false, reason: "the adopt route only asks whether the server exists" })) {
+      throw errNotFound(`server ${id}`);
+    }
     const body = (await c.req.json().catch(() => ({}))) as { password?: string; intendedDomain?: string };
     const { runId } = await executor.plan("adopt", {
       serverId: id,

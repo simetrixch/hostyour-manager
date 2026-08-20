@@ -116,7 +116,12 @@ export async function createServer(db: Db, creds: CredentialStore, actor: string
   }
   if (input.password) await sealBootstrapPassword(creds, id, input.name, input.password);
   writeAudit(db, { actor, action: "server.created", targetKind: "server", targetId: id, detail: { name: input.name, host: input.host } });
-  const view = getServer(db, id, new Map([[id, { hasPassword: Boolean(input.password), hasKey: false }]]));
+  // No cluster map is read here, and none states anything about this row yet: a server is registered
+  // before it is a cluster, so its projection's release reads "not a cluster yet" either way.
+  const view = getServer(db, id, new Map([[id, { hasPassword: Boolean(input.password), hasKey: false }]]), {
+    ok: false,
+    reason: "the cluster maps are not read when a server is created",
+  });
   if (!view) throw errValidation("server not found immediately after creation");
   return view;
 }

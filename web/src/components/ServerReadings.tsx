@@ -4,11 +4,17 @@ import { isMasterRole } from "../../../shared/enums.ts";
 import { tailnetChip } from "../tailnetState.ts";
 import { passwordLoginChip, passwordLoginVerbOffer } from "../passwordLoginState.ts";
 import { authorizedKeysChip, authorizedKeysVerbOffer } from "../authorizedKeysState.ts";
+import { releaseChip } from "../clusterRelease.ts";
 import { PasswordLoginActions } from "./PasswordLoginActions.tsx";
 
 // Everything a server's card says about the machine ITSELF, as opposed to its position in the slave
 // lifecycle: three READINGS beside the status badge — is it on the private network, does its sshd
-// take a password, and who is in its authorized_keys — and the verbs that act on the last two.
+// take a password, and who is in its authorized_keys — the verbs that act on the last two, and the
+// platform RELEASE the cluster on this machine stands on.
+//
+// The release is not a fourth reading and is deliberately not worded like one. The three readings are
+// snapshots a run took off the host and each says when; the release is what the cluster map declares,
+// so it carries no age and names no run — it stands until a release run rewrites it.
 //
 // This block sits OUTSIDE the lifecycle stepper on the page, because the master belongs in it too:
 // it is an internet-facing machine with an sshd and an authorized_keys like any other, while the
@@ -31,6 +37,10 @@ export function ServerReadings(props: {
   const ak = authorizedKeysChip(server, now);
   const plv = passwordLoginVerbOffer(server);
   const akv = authorizedKeysVerbOffer(server);
+  // The release is NOT one of the readings: those are snapshots a run took off the machine, this is
+  // what the cluster map declares. It is null exactly where the machine is no cluster, which is the
+  // one row that has no release question at all.
+  const rel = releaseChip(server.release);
   const readings = [tn, pl, ak];
   return (
     <>
@@ -44,9 +54,11 @@ export function ServerReadings(props: {
             {r.label}
           </span>
         ))}
+        {rel && <span className={rel.className}>{rel.label}</span>}
         {server.hasKey && <span className="chip chip--ok">key installed</span>}
         {server.hasPassword && <span className="chip chip--ok">password on file</span>}
       </div>
+      {rel && <p className="servercard__reading">{rel.detail}</p>}
       {readings.map((r) => (
         <p key={r.label} className="servercard__reading">
           {r.detail}
