@@ -266,6 +266,20 @@ function adoptSteps(params: AdoptParams): Step[] {
         }
         const pw = requirePassword(ctx);
         const pwLine = Buffer.concat([pw, Buffer.from("\n")]);
+        // BLANKET, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT. The owner ruled on it with the
+        // alternatives on the table: a named list of the commands this product elevates, or no
+        // passwordless sudo at all.
+        //
+        // A named list would have to be kept in step with two other repositories — every
+        // `elevated: true` row of the installation's programs and every step in ansiwise-plugins
+        // that raises one — and a list that falls behind breaks a running installation the moment
+        // somebody adds a row. No passwordless sudo at all was refused because the run kinds that
+        // reach root without a password carry none by design: deploy-slave.kit.ts:232,
+        // tailnet-probe.ts:48 and the password-login runs, which declare `requiredSecrets: []`.
+        //
+        // #19 stands in the backlog for a later rebuild along the lines ansiwise takes: elevation is
+        // declared per row there, so the scope could come from the declaration rather than from a
+        // list somebody maintains.
         const sudoersLine = `${server.sshUser} ALL=(ALL) NOPASSWD:ALL\n`;
         const tmp = `/tmp/dc-sudoers-${ctx.runId}`;
         ctx.log("meta", `Passwordless sudo for "${server.sshUser}": writing ${SUDOERS_DROP_IN} = ${sudoersLine.trim()} — it STAYS on the machine after this run succeeds; only aborting the run with cleanup removes it. (Overwrites any existing drop-in of that name; your password is used only for sudo and never written to the file.)`);
