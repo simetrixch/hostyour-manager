@@ -137,8 +137,16 @@ const EnvSchema = z.object({
   // deploy-gitops through `ansiwise serve` on the target machine; this is the command that starts
   // that surface over the run's SSH session — and so names WHICH catalogue checkout the service
   // reads its programs from, which is the installation's decision, never an assumption. Absent ⇒
-  // the program steps fail loud (errNotConfigured) and every other verb is untouched.
+  // the program steps fail loud (errNotConfigured) and every other run kind is untouched.
   ANSIWISE_SERVE_COMMAND: z.string().min(1).optional(),
+  // WHERE a machine fetches the binary that answers that command. `<version>` stands for the version
+  // platform/versions.yaml pins, filled in by the place-ansiwise step — a URL without that
+  // placeholder names ONE build for ever and would put the pin and the placed binary in
+  // disagreement, so it is refused here rather than at the machine. Absent ⇒ the placement step
+  // fails loud (errNotConfigured) and every other run kind is untouched.
+  ANSIWISE_DOWNLOAD_URL: z.string().url().includes("<version>", {
+    message: "ANSIWISE_DOWNLOAD_URL must carry <version> where the pinned version goes",
+  }).optional(),
   // The pinned dbtools job image (<registry-host>/dbtools:<tag>) the relocation Jobs
   // run — mongodb tools, postgresql client, an S3 client and SSH for the staging area. The pin lives
   // as a builds[] entry in apps/controller/values-<stage>.yaml and the Deployment projects it here,
@@ -249,12 +257,12 @@ export interface Config {
   };
   /** Present ⇒ the unit DNS provider is wired: the DNS-only Cloudflare token the
    *  provision-dns/remove-dns steps manage the one record per unit with. Absent ⇒ those steps fail
-   *  loud — DNS is a mandatory part of the verbs. */
+   *  loud — DNS is a mandatory part of the run kinds. */
   dns?: {
     cloudflareApiToken: string;
   };
   /** Present ⇒ the Hetzner Storage Box is wired: the SSH staging area every relocation dump
-   *  lands on. Absent ⇒ the dump/restore steps fail loud — the box is a mandatory part of the verbs. */
+   *  lands on. Absent ⇒ the dump/restore steps fail loud — the box is a mandatory part of the run kinds. */
   storageBox?: {
     host: string;
     user: string;
@@ -266,6 +274,9 @@ export interface Config {
    *  the door to the machine's deployment programs (redeploy master arm). Absent ⇒ the program
    *  steps fail loud. */
   ansiwiseServeCommand?: string;
+  /** Where a machine fetches that binary, `<version>` standing for the pinned version
+   *  (place-ansiwise). Absent ⇒ the placement step fails loud. */
+  ansiwiseDownloadUrl?: string;
 }
 
 export class ConfigError extends Error {
@@ -382,6 +393,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
       : {}),
     ...(e.DBTOOLS_IMAGE ? { dbtoolsImage: e.DBTOOLS_IMAGE } : {}),
     ...(e.ANSIWISE_SERVE_COMMAND ? { ansiwiseServeCommand: e.ANSIWISE_SERVE_COMMAND } : {}),
+    ...(e.ANSIWISE_DOWNLOAD_URL ? { ansiwiseDownloadUrl: e.ANSIWISE_DOWNLOAD_URL } : {}),
   };
 }
 

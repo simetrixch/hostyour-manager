@@ -24,8 +24,8 @@ import {
   freshRuns, expectProven, expectAbsent, settled, recordAppeared, observerStart, observerEnded, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
 
-// EVERY verb that drives the machine's deployment programs, on the REAL `ansiwise serve`:
-// redeploy (both arms), release, the tailnet repair verbs, deploy-slave, and the transport
+// EVERY run kind that drives the machine's deployment programs, on the REAL `ansiwise serve`:
+// redeploy (both arms), release, the tailnet repair run kinds, deploy-slave, and the transport
 // underneath them all. Nothing here mocks the machine's surface: the serve fixture starts the
 // actual binary on a minimal installation whose programs are pure measurements
 // (require_answer_matches), so the gate, the answers validation, the detached run records and the
@@ -45,7 +45,7 @@ import {
 const bin = ansiwiseBinary();
 const key = generateServerKeypair("test@manager");
 
-describe.skipIf(bin === undefined)("the manager's verbs over the machine's own deployment programs (REAL ansiwise serve)", () => {
+describe.skipIf(bin === undefined)("the manager's run kinds over the machine's own deployment programs (REAL ansiwise serve)", () => {
   if (bin === undefined) {
     // eslint-disable-next-line no-console -- the skip must be loud, not silent (see NO_BINARY)
     console.warn(NO_BINARY);
@@ -180,7 +180,7 @@ describe.skipIf(bin === undefined)("the manager's verbs over the machine's own d
     expect(h.platformRepo.tags.size).toBe(0);
   });
 
-  it("PLANTED DEFECT (verb): a dry the machine judges red FAILS the step before anything is acted on — no run-mode machine run starts", { timeout: 60_000 }, async () => {
+  it("PLANTED DEFECT (redeploy): a dry the machine judges red FAILS the step before anything is acted on — no run-mode machine run starts", { timeout: 60_000 }, async () => {
     const h = await liveMaster(serve);
     const runsBefore = (await observer.runs()).filter((x) => x.program === "deploy-cluster" && x.mode === "run").length;
 
@@ -329,7 +329,7 @@ describe.skipIf(bin === undefined)("the manager's verbs over the machine's own d
     expect(h.platformRepo.tags.size).toBe(1);
   });
 
-  // ================================ the tailnet verbs, end to end ================================
+  // ================================ the tailnet run kinds, end to end ================================
 
   for (const kind of ["tailnet-disconnect", "tailnet-reconnect"] as const) {
     it(`INNOCENT CASE (${kind}): the program runs on the host's own surface over the PUBLIC address — no cluster row needed — and the membership is re-read`, { timeout: 120_000 }, async () => {
@@ -347,7 +347,7 @@ describe.skipIf(bin === undefined)("the manager's verbs over the machine's own d
       expectProven(freshRuns(before, await observer.runs()), [kind]);
 
       // EVERY session went to the host's PUBLIC address (servers.host) — never the LAN one every
-      // other verb would use — and the master was not touched at all.
+      // other run kind would use — and the master was not touched at all.
       expect(h.hosts.log.length).toBeGreaterThan(0);
       expect(h.hosts.log.every((l) => l.host === "s1.example.com")).toBe(true);
 
@@ -422,7 +422,7 @@ describe.skipIf(bin === undefined)("the manager's verbs over the machine's own d
 
   // ================================ deploy-slave, end to end ================================
 
-  it("INNOCENT CASE (deploy-slave): the whole verb runs green — every program dry-proven then run on the machines' own records, one address everywhere, the tokens nowhere", { timeout: 300_000 }, async () => {
+  it("INNOCENT CASE (deploy-slave): the whole run kind runs green — every program dry-proven then run on the machines' own records, one address everywhere, the tokens nowhere", { timeout: 300_000 }, async () => {
     const h = await deployWorld(serve);
     const email = uniqueEmail();
     const before = await observer.runs();

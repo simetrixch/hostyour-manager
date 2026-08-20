@@ -10,7 +10,7 @@ import { loadOperatorKey } from "../../inventory/operator-keys.ts";
 import { recordAuthorizedKeysReading, type AuthorizedKeysReadingResult } from "../operator-keys-probe.ts";
 import { loadServer } from "./deploy-slave.kit.ts";
 
-// The shared half of the three operator-key verbs (defs/operator-key.ts): the scripts they ship to
+// The shared half of the three operator-key run kinds (defs/operator-key.ts): the scripts they ship to
 // a host, the steps they are composed of, and the one plan builder they state their target in.
 //
 // WHAT AN ACT IS ALLOWED TO TOUCH. One line of one file: the line in ~/.ssh/authorized_keys whose
@@ -117,9 +117,9 @@ echo "no line for '${label}' is in $ak ($hits removed, $(count "$ak") line(s) le
 `;
 }
 
-/** The verbs this kit builds — every RUN_KIND literal that acts on one operator key, named by the
+/** The run kinds this kit builds — every RUN_KIND literal that acts on one operator key, named by the
  *  family rather than listed, so a third one cannot be added to the enum without the maps below
- *  refusing to compile. The read verb is NOT one of them: it is named for the file because it
+ *  refusing to compile. The read run kind is NOT one of them: it is named for the file because it
  *  reports every key in it, including the ones this platform never placed. */
 export type OperatorKeyKind = Extract<RunKind, `operator-key-${string}`>;
 
@@ -178,7 +178,7 @@ function actStep(kind: OperatorKeyKind, target: OperatorKeyTarget): Step {
       const r = await remoteScript(ctx, session, place ? "operator-key-place" : "operator-key-remove", script, { timeoutMs: 60_000 });
       const after = await recordAuthorizedKeysReading(ctx, session, target.serverId);
 
-      // The one failure this whole verb is shaped around: an edit that took this controller's own
+      // The one failure this whole run kind is shaped around: an edit that took this controller's own
       // login identity out of the file would leave nobody able to reach the machine, and it is
       // checked before the script's own exit code because it is the more serious answer.
       const had = controllerKeyCount(before);
@@ -219,7 +219,7 @@ export const removeOperatorKeyCleanup: Cleanup = {
   },
 };
 
-/** The whole of the read verb: one probe, one row rewritten. It fails when the probe does not run,
+/** The whole of the read run kind: one probe, one row rewritten. It fails when the probe does not run,
  *  because the reading IS the run — a read that recorded nothing has done nothing. */
 function readStep(serverId: string): Step {
   return {
@@ -308,7 +308,7 @@ export function operatorKeyPlan(kind: OperatorKeyKind, target: OperatorKeyTarget
   };
 }
 
-/** The plan the read verb is approved on. It writes nothing on the host and takes the same host lock
+/** The plan the read run kind is approved on. It writes nothing on the host and takes the same host lock
  *  anyway: a reading taken while a placement is mid-write would describe a file that existed for no
  *  longer than one `install`. */
 export function authorizedKeysReadPlan(serverId: string, db: Db): Plan {

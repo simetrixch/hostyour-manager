@@ -72,7 +72,7 @@ export interface PasswordLoginProbe {
  *
  *  "off" is claimed ONLY when both keywords were READ and both said no. A missing line therefore
  *  reads as "on", which is the direction a security surface has to fall in: an unmeasured door is
- *  not a shut one, and the verb that shuts it fails loudly rather than letting this fold guess. */
+ *  not a shut one, and the run kind that shuts it fails loudly rather than letting this fold guess. */
 export function passwordLoginReading(
   probe: PasswordLoginProbe,
   meta: { runId: string; observedAt: number },

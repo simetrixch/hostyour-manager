@@ -12,6 +12,8 @@ import { Executor } from "../../executor/executor.ts";
 import { buildRegistry } from "./registry.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
+import { ANSIWISE_PIN_PATH } from "../inventory/ansiwise-pin.ts";
+import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import { servers } from "../../db/schema/inventory.ts";
 import { meta } from "../../db/schema/meta.ts";
 import { ExecFailedError } from "../../adapters/ssh/port.ts";
@@ -39,7 +41,7 @@ export const MASTER_ID = "srv_master1";
 export const PARAMS = { serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com" };
 export const STEP_NAMES = [
   "attest-target", "slave-preflight", "prepare-checkouts", "run-deploy-slave-branch", "mark-slave",
-  "run-deploy-host", "refresh-checkout", "run-deploy-cluster", "run-deploy-gitops",
+  "place-ansiwise", "run-deploy-host", "refresh-checkout", "run-deploy-cluster", "run-deploy-gitops",
   "rejoin", "read-membership", "create-mgmt", "gitops-handoff", "verify-slave", "register",
 ];
 /** The redeploy slave arm: the same list minus the two birth acts (the branch cut with its
@@ -124,6 +126,20 @@ export interface HostsScript {
   secretStoresOut: string; // verify HARD gate 2 (slave): `ns/name|Ready` rows
   promOut: string;         // verify SOFT (master): PROM_CHECK data|empty|skipped
   certsOut: string;        // verify SOFT (slave): `ns/name|Ready` rows
+  // ---- what the machine carries of the placement (place-ansiwise). The probe READS these four and
+  // the placing script WRITES them, exactly as the real script's own contract says it does — so a
+  // second run of that step measures what the first one left, and a double-run assertion is about
+  // idempotence rather than about a value the test changed in between.
+  /** The version /usr/local/bin/ansiwise points at; undefined = the machine carries no binary. */
+  placedBinary: string | undefined;
+  /** Whether /srv/hostyour-cloud is a checkout. */
+  platformCheckout: boolean;
+  /** Whether that checkout carries ansiwise/programs. */
+  programs: boolean;
+  /** What the checkout carries once the placing script clones it — the branch's own content. */
+  programsAfterClone: boolean;
+  /** The commands of the placement's own two the machine is missing (curl, git). */
+  missingCommands: string[];
   /** One-shot exec fault injections: the FIRST exec whose command contains `match` REJECTS
    *  with Error(`message`) and the entry is consumed — e.g. a transport-level
    *  "(SSH) Channel open failure" mid-verify (the MaxSessions incident). */
@@ -159,12 +175,50 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     secretStoresOut: "external-secrets/vault-backend|True\nredis/vault-backend|True",
     promOut: "PROM_CHECK data",
     certsOut: "redis/redis-tls|True",
+    // A slave as deploy-slave meets it: adopted, and carrying nothing of the placement yet.
+    placedBinary: undefined,
+    platformCheckout: false,
+    programs: false,
+    programsAfterClone: true,
+    missingCommands: ["git"],
     execFaults: [],
     openConversation: (command) => Promise.reject(new Error(`no conversation scripted for "${command}"`)),
     log: [],
     files: [],
     ...overrides,
   };
+}
+
+/** What the placement probe reads off the scripted machine, in the probe script's own lines. */
+function placementProbeOut(f: HostsScript): string {
+  return [
+    `BINARY ${f.placedBinary ?? "absent"}`,
+    `CATALOG ${f.platformCheckout ? "present" : "absent"}`,
+    `PROGRAMS ${f.programs ? "present" : "absent"}`,
+    ...f.missingCommands.map((c) => `MISSING ${c}`),
+    "PROBED",
+  ].join("\n");
+}
+
+/** The placing script's effect on the scripted machine, applied from the script the step UPLOADED —
+ *  which is the only place that says what this run of it places. A script the step composed without
+ *  a section therefore changes nothing here either, the way the real one does not. */
+function applyPlacement(f: HostsScript, host: string): string {
+  const script = f.files.filter((x) => x.host === host && x.path.includes("dc-place-ansiwise-")).at(-1)?.content ?? "";
+  const out: string[] = [];
+  if (script.includes("apt-get install")) f.missingCommands = [];
+  const version = /^echo "PLACED_BINARY (\S+)"$/m.exec(script)?.[1];
+  if (version !== undefined) {
+    f.placedBinary = version;
+    out.push(`PLACED_BINARY ${version}`);
+  }
+  if (script.includes("PLACED_CATALOG")) {
+    f.platformCheckout = true;
+    f.programs = f.programsAfterClone;
+    out.push("PLACED_CATALOG abc1234");
+  }
+  out.push("PLACED");
+  return out.join("\n");
 }
 
 export function hostsFactory(f: HostsScript): SshFactory {
@@ -185,6 +239,11 @@ export function hostsFactory(f: HostsScript): SshFactory {
       if (command.includes("dc-dns-probe-")) { emit(f.dnsOut); return done(); }
       if (command.includes("dc-slave-preflight-")) { emit(f.preflightOut); return done(); }
       if (command.startsWith("curl") && command.includes("/v1/sys/health")) { emit(f.vaultCode); return done(f.vaultExit); }
+      // ---- the placement every program act stands on: the probe reads the machine, the placing
+      // script changes it. Both are answered off the same four fields, so what the second probe of a
+      // step reports is what the placing script in between actually left.
+      if (command.includes("dc-place-probe-") || command.includes("dc-place-verify-")) { emit(placementProbeOut(f)); return done(); }
+      if (command.includes("dc-place-ansiwise-")) { emit(applyPlacement(f, host)); return done(); }
       // ---- the git upkeep around the programs
       if (command.includes("dc-prepare-checkouts-")) { emit(f.checkoutsOut); return done(f.checkoutsExit); }
       if (command.includes("dc-refresh-checkout-")) { emit(f.refreshOut); return done(f.refreshExit); }
@@ -270,6 +329,22 @@ export const MASTER_MARKING_YAML = [
   "catalog-repo: acme/acme-catalog",
 ].join("\n") + "\n";
 
+/** The version platform/versions.yaml pins for the binary, and the file that carries it — the ONE
+ *  source place-ansiwise reads. Every harness seeds it on the trunk, because without it the step
+ *  refuses and no run of any cluster run kind gets past its machine layer. */
+export const ANSIWISE_PIN = "0.4.2";
+export const VERSIONS_YAML = [
+  "cliTools:",
+  "  ansiwise:",
+  `    version: "${ANSIWISE_PIN}"`,
+  "  yq:",
+  '    version: "v4.53.3"',
+].join("\n") + "\n";
+
+/** Where the scripted installation fetches that version from. `<version>` is what the step fills in,
+ *  so the address in the placing script names the pin above and nothing else. */
+export const ANSIWISE_DOWNLOAD_URL = "https://downloads.example.invalid/ansiwise/<version>/ansiwise-linux-amd64";
+
 const handles: DbHandle[] = [];
 const dirs: string[] = [];
 
@@ -282,7 +357,7 @@ export function disposeHarnesses(): void {
 // FK-safe seeding (clusters.server_id → servers.id): servers + their ssh keys first.
 // keystore: "keyfile" opens the crypto gate for tests that need a SECOND plan of the same slave
 // (under plaintext the gate counts the first run's leftover planned row as a live slave).
-export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string } = {}): Promise<Harness> {
+export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string; versionsYaml?: string } = {}): Promise<Harness> {
   const hosts = opts.hosts ?? scriptedHosts();
   const dir = mkdtempSync(join(tmpdir(), "ctrl-ds-"));
   dirs.push(dir);
@@ -295,9 +370,17 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   // master that installed itself carries one by construction, and mark-slave composes the slave's
   // map from it. A test about a master map without a field seeds over this.
   platformRepo.seed(platformRepo.booksBranch, clusterMarkingPath("m1.example.com"), MASTER_MARKING_YAML);
+  // The binary's pin, on the trunk where place-ansiwise reads it. A test about a pin that is missing
+  // or malformed seeds over this.
+  platformRepo.seed(PRODUCT_BRANCH, ANSIWISE_PIN_PATH, opts.versionsYaml ?? VERSIONS_YAML);
   const executor = new Executor({
     db: db.db, creds: store, bus: new RunEventBus(), logger,
-    registry: buildRegistry({ db: db.db, platformRepo, ...(opts.ansiwiseServeCommand !== undefined ? { ansiwiseServeCommand: opts.ansiwiseServeCommand } : {}) }),
+    registry: buildRegistry({
+      db: db.db, platformRepo,
+      platformRepoUrl: "https://github.com/acme/hostyour-cloud.git",
+      ansiwiseDownloadUrl: ANSIWISE_DOWNLOAD_URL,
+      ...(opts.ansiwiseServeCommand !== undefined ? { ansiwiseServeCommand: opts.ansiwiseServeCommand } : {}),
+    }),
     sshFactory: hostsFactory(hosts), actor: () => "op_system",
   });
   if (opts.keystore) {

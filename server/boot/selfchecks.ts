@@ -109,9 +109,9 @@ function checkGuardsArmed(registry: Registry): void {
 }
 
 /**
- * The verb list is TOTAL over the run families (shared/enums.ts RUN_FAMILY): every RUN_KIND literal
+ * The run kind list is TOTAL over the run families (shared/enums.ts RUN_FAMILY): every RUN_KIND literal
  * belongs to exactly one family, and every family this boot registered it registered WHOLE. Blocking,
- * because half a family is a verb the UI offers, the plan route accepts and nothing can execute — the
+ * because half a family is a run kind the UI offers, the plan route accepts and nothing can execute — the
  * operator finds it, asks for it, and only then learns the plan route answers "unknown run kind".
  *
  * A WHOLLY absent family is a configuration, not a fault: buildOnboarding returns no defs for a family
@@ -119,9 +119,9 @@ function checkGuardsArmed(registry: Registry): void {
  * is honest about what it does not offer. Asserting a definition for every literal instead would abort
  * a controller running with onboarding off.
  *
- * The grouping is NOT a list of kinds that may be missing: a verb added to a family with no definition
- * behind it leaves that family half-registered and fails this check, and a verb in no family fails it
- * outright. What may vary per boot is which families are wired, never which verbs a family has.
+ * The grouping is NOT a list of kinds that may be missing: a run kind added to a family with no definition
+ * behind it leaves that family half-registered and fails this check, and a run kind in no family fails it
+ * outright. What may vary per boot is which families are wired, never which run kinds a family has.
  */
 function checkRegistryTotal(registry: Registry): void {
   const claimedBy = new Map<RunKind, RunFamily>();

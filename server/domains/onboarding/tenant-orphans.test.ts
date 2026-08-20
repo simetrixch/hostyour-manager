@@ -288,14 +288,14 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
   it("an UNREADABLE precondition falls back to ORPHAN — overstating leftovers beats hiding a live tenant", () => {
     // No step rows for this run at all (nothing seeded): the question "how far did it get" has no answer.
     // A wrong "orphan" costs a purge that reaps nothing; a wrong "not-deployed" hides a deployed tenant
-    // no other verb in the product can name — so the unknown falls on the loud side.
+    // no other run kind in the product can name — so the unknown falls on the loud side.
     expect(resolveRunTenantState(db.db, RUN, frozen()).state).toBe("orphan");
   });
 
   it("an OFFBOARDED row says the tenant was already removed, and is NOT re-offered as a purge", () => {
     // Unlike the orphan scan (which treats a settled row as absent, because a live pointer beside it is
     // leftover state), the run screen must TELL the operator the row is settled rather than aim
-    // a destructive verb at a tenant that is already gone. A surviving footprint is the scan's job.
+    // a destructive run kind at a tenant that is already gone. A surviving footprint is the scan's job.
     seedRow({ status: "offboarded" });
     seedRun();
     const state = resolveRunTenantState(db.db, RUN, frozen());

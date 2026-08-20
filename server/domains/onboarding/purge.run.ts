@@ -110,7 +110,7 @@ export type PurgePorts = LifecyclePorts & {
    *  (fail-soft, like the grants). */
   repoCredential?: RepoCredentialWriter;
   /** The unit's public DNS record — purge removes it (remove-dns). Fail-CLOSED unlike the
-   *  rest of this teardown: purge is the verb after failed offboards, exactly where a record left
+   *  rest of this teardown: purge is the run kind after failed offboards, exactly where a record left
    *  pointing nowhere would appear, so an API failure fails the run rather than skipping it. */
   dns?: DnsProvider;
 };
@@ -333,7 +333,7 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
       run: async (ctx) => {
         // The inverse of onboard's setup-webhook, BY NAME. It names no host — the delete matches the
         // EventListener path on whichever address the hook carries (onboard-webhook.ts), which is what
-        // a purge needs most: the verb exists for the states nobody recorded. PER UNIT — the repo
+        // a purge needs most: the run kind exists for the states nobody recorded. PER UNIT — the repo
         // carries exactly ONE hook however many stages the unit is deployed at — so it is kept while
         // another stage stands, whose releases fire through it. Fail-soft: for a true orphan (no
         // inventory row) the repoURL + sealed PAT are unknown, so removeConsumerWebhook logs + skips
@@ -465,8 +465,8 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         // The same measurement offboard makes, for the same reason and with more force here: purge's
         // delete-repo-credential and delete-build-rbac are fail-soft, so this run can reach its end
         // having logged a warning over a Role or a Secret that is still standing. purge is also the
-        // verb an operator turns to when offboard refused at ITS scan — settling the row here without
-        // looking would let the backstop record exactly what the stricter verb declined to record.
+        // run kind an operator turns to when offboard refused at ITS scan — settling the row here without
+        // looking would let the backstop record exactly what the stricter run kind declined to record.
         // What counts as an orphan, and what the platform keeps on purpose, is stated in
         // offboard-orphans.ts; both answers depend on whether the unit still stands at another stage.
         await assertNoOrphans(ctx, ports, loadPurgeTarget(ctx.db, p), "purge");

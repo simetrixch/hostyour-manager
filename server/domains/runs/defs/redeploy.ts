@@ -10,10 +10,10 @@ import { attestClusterStep, argocdFollowStep, loadActiveCluster } from "./cluste
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 
 // `redeploy` — rebuild the MACHINE LAYER of a cluster that is already live. One of the three
-// distinguishable cluster verbs: adopt takes a bare machine into service, deploy-slave turns an
+// distinguishable cluster run kinds: adopt takes a bare machine into service, deploy-slave turns an
 // adopted server into a live slave, redeploy rebuilds what is under GitOps on a cluster that is
 // already running, and release raises the platform version. Nothing here moves a pin — a machine
-// layer is restorable without a version change, and that is exactly what this verb is for.
+// layer is restorable without a version change, and that is exactly what this run kind is for.
 //
 // It takes only the server. The FQDN and the stage are NOT the operator's to state: they are what the
 // active cluster row on that server already says, and asking for them again is how a redeploy could be

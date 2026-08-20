@@ -11,7 +11,7 @@ import { servers, clusters } from "../../db/schema/inventory.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { makeTailnetDisconnectDef, makeTailnetReconnectDef, makeTailnetRejoinDef, type TailnetParams } from "./defs/tailnet.ts";
 
-// The PLAN of the three repair verbs — everything the operator approves before a machine is asked
+// The PLAN of the three repair run kinds — everything the operator approves before a machine is asked
 // anything: which address the run is aimed at, what it locks, whose hosts it names, and what it
 // demands at approve. The acts themselves are ansiwise programs now, and driving them takes a real
 // `ansiwise serve`; the executed proofs — the program runs, the address every session actually
@@ -19,7 +19,7 @@ import { makeTailnetDisconnectDef, makeTailnetReconnectDef, makeTailnetRejoinDef
 // machine runs (the engine's run root is per-drive, so two serve fixtures in parallel would share
 // records and collide).
 //
-// The address property the whole family rests on is stated HERE, on the plan: a verb whose purpose
+// The address property the whole family rests on is stated HERE, on the plan: a run kind whose purpose
 // is to repair the private network may not travel over it, and may not travel over the LAN address
 // either — so the host target carries `transport: "public"`, which the executor resolves to
 // servers.host (executor/transport.ts) and the frozen plan_json records.
@@ -38,8 +38,8 @@ const DEFS: Record<string, RunDefinition<TailnetParams>> = {
   "tailnet-rejoin": makeTailnetRejoinDef({}),
 };
 
-/** The one manager-side step of each verb beside the shared attest/read pair: the program step for
- *  the two single-host verbs (named run-<program>, and the program is named like the kind), and the
+/** The one manager-side step of each run kind beside the shared attest/read pair: the program step for
+ *  the two single-host run kinds (named run-<program>, and the program is named like the kind), and the
  *  mint-carry-rejoin choreography for the third. */
 const MIDDLE_STEP: Record<string, string> = {
   "tailnet-disconnect": "run-tailnet-disconnect",
@@ -47,7 +47,7 @@ const MIDDLE_STEP: Record<string, string> = {
   "tailnet-rejoin": "rejoin",
 };
 
-describe("the tailnet repair verbs — the plan they are approved on", () => {
+describe("the tailnet repair run kinds — the plan they are approved on", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   afterEach(() => {
@@ -92,12 +92,12 @@ describe("the tailnet repair verbs — the plan they are approved on", () => {
       expect(plan.summary).not.toContain(TAILNET_ADDRESS);
     });
 
-    it(`${kind} owns the host it repairs, so it takes the same server lock every host verb takes`, async () => {
+    it(`${kind} owns the host it repairs, so it takes the same server lock every host run kind takes`, async () => {
       const db = setup();
       const plan = await def.plan({ serverId: SLAVE_ID }, { db: db.db });
       // Without this a repair could run its logout on a host a deploy-slave in flight was joining.
       // A run that has settled holds no lock at all (the executor releases them on every terminal
-      // path), so the broken deploy these verbs exist for still cannot block them.
+      // path), so the broken deploy these run kinds exist for still cannot block them.
       expect(deriveServerLocks(plan.targets ?? [])).toEqual([{ resource: "server", key: SLAVE_ID }]);
       // The master is driven, not owned — only the host being repaired is claimed.
       expect(plan.targets?.filter((t) => t.ownsHost).map((t) => t.serverId)).toEqual([SLAVE_ID]);

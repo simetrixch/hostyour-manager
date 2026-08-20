@@ -1,5 +1,5 @@
 // The unit's ONE public DNS record (the address belongs to the unit, not to the server) —
-// provisioned at onboard/create-tenant, removed at offboard AND at both purge verbs, over the
+// provisioned at onboard/create-tenant, removed at offboard AND at both purge run kinds, over the
 // DnsProvider port (adapters/dns). One record per unit STANDING AT A STAGE, by kind of unit:
 //
 //   consumer — A `<name>.<unitApex>`. The chart renders exactly ONE host, and by DNS rule a
@@ -26,8 +26,8 @@
 // record (or the wildcard) provides.
 //
 // Every step here is fail-CLOSED — an unwired provider or an API failure breaks the run, in the
-// removal verbs too: "no address is left pointing nowhere" holds without exception, and purge is the
-// verb that runs after failed offboards, exactly where the leftovers would appear. Absent records
+// removal run kinds too: "no address is left pointing nowhere" holds without exception, and purge is the
+// run kind that runs after failed offboards, exactly where the leftovers would appear. Absent records
 // are the idempotent no-op (delete-by-(name,type) resolves 0).
 import type { StepCtx } from "../../executor/types.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
@@ -41,7 +41,7 @@ import { errValidation } from "../../kernel/errors.ts";
 // on the access and refresh cookies in example-auth/backend/src/auth/cookies.ts). A browser sends a
 // cookie to every host at or below its Domain, so a consumer standing on a tenant's label is handed
 // that tenant's users' sessions by their own browsers, with nothing in the tenant compromised. Both
-// onboarding verbs therefore hold their candidate against the other side's set: gate G23 refuses a
+// onboarding run kinds therefore hold their candidate against the other side's set: gate G23 refuses a
 // consumer name a tenant already stands on (gates/compose.ts), and the create-tenant step
 // ensure-subdomain-free refuses a subdomain a consumer already holds (tenant-replace.ts).
 
@@ -67,10 +67,10 @@ export function tenantMemberHost(member: string, subdomain: string, unitApex: st
   return `${member}.${subdomain}.${unitApex}`;
 }
 
-function requireDns(dns: DnsProvider | undefined, unit: string, verb: string): DnsProvider {
+function requireDns(dns: DnsProvider | undefined, unit: string, runKind: string): DnsProvider {
   if (!dns) {
     throw errValidation(
-      `${verb} "${unit}" requires the DNS provider but none is wired on this controller (CLOUDFLARE_DNS_API_TOKEN unset) — DNS is a mandatory part of this verb, never a silent skip`,
+      `${runKind} "${unit}" requires the DNS provider but none is wired on this controller (CLOUDFLARE_DNS_API_TOKEN unset) — DNS is a mandatory part of this run kind, never a silent skip`,
     );
   }
   return dns;
@@ -90,7 +90,7 @@ async function resolveClusterAddress(dns: DnsProvider, clusterFqdn: string, sign
 /** Create (or move onto the current cluster address) the unit's ONE record. Shared by the consumer
  *  onboard and create-tenant provision-dns steps AND by the relocation switch-dns (a move IS a
  *  content update of exactly this record) — the caller composes the record name per kind and names
- *  its verb for the refusal message. */
+ *  its run kind for the refusal message. */
 export async function provisionUnitDns(
   ctx: StepCtx,
   opts: {
@@ -98,7 +98,7 @@ export async function provisionUnitDns(
     unit: string;
     recordName: string;
     clusterFqdn: string;
-    verb?: string;
+    runKind?: string;
     /** The MOVE alone. switch-dns repoints a record the unit already owns onto the target cluster,
      *  so overwriting an address that is not the target's IS the step. Every other caller is putting
      *  a unit onto a cluster for the first time and must not take a live address off whatever answers
@@ -106,7 +106,7 @@ export async function provisionUnitDns(
     overwriteAddress?: boolean;
   },
 ): Promise<void> {
-  const dns = requireDns(opts.dns, opts.unit, opts.verb ?? "onboard");
+  const dns = requireDns(opts.dns, opts.unit, opts.runKind ?? "onboard");
   const address = await resolveClusterAddress(dns, opts.clusterFqdn, ctx.signal);
   if (!opts.overwriteAddress) {
     // Read before write, because upsertRecord overwrites the first match in place and reports it as
@@ -129,7 +129,7 @@ export async function provisionUnitDns(
   );
 }
 
-/** Remove the unit's ONE record (offboard + both purge verbs). Fail-closed on the API, absent=ok:
+/** Remove the unit's ONE record (offboard + both purge run kinds). Fail-closed on the API, absent=ok:
  *  a unit whose run died before provision-dns simply deletes nothing. */
 export async function removeUnitDns(
   ctx: StepCtx,

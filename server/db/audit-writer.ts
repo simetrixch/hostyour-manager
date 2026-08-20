@@ -5,7 +5,7 @@ import type { TargetKind } from "../../shared/enums.ts";
 
 export interface AuditEntry {
   actor: string; // operator id, or "system" (resume-on-boot)
-  action: string; // dot-namespaced verb
+  action: string; // dot-namespaced action name
   targetKind?: TargetKind;
   targetId?: string;
   runId?: string;

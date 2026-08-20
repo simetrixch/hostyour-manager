@@ -12,14 +12,14 @@ import { attestTargetStep, loadAppCluster, type LifecyclePorts } from "./lifecyc
 // is not a generator selector, so the Application keeps being generated either way and the chart
 // renders the off state (replicas 0, no Ingress). A prune-based suspend would be destructive by
 // construction — the charts render ServiceClaims whose deprovision finalizer runs on EVERY claim
-// deletion, an ArgoCD prune included, and drops the user AND the databases. So each verb flips the
+// deletion, an ArgoCD prune included, and drops the user AND the databases. So each run kind flips the
 // field, waits for ArgoCD to converge on the new render, and moves the row. Both are mutating
 // (attest-target first) and keep the consumer row throughout.
 
 export const SuspendResumeParams = z.object({ appId: z.string().startsWith("app_") });
 export type SuspendResumeParams = z.infer<typeof SuspendResumeParams>;
 
-/** The branches both verbs must hold, in the order the other consumer runs claim them (onboard,
+/** The branches both run kinds must hold, in the order the other consumer runs claim them (onboard,
  *  offboard, purge, backup, restore, migrate). The FLIP commits on the books branch — the install
  *  branch of the cluster holding the master role — so that is the key that serializes it; a lock on
  *  the consumer's own cluster domain names a branch this run never writes and would let a concurrent
@@ -32,7 +32,7 @@ const gitBranchLocks = (booksBranch: string, domain: string) => [
 const masterKubeLock = { resource: "master-kube" as const, key: "m" };
 
 /** Wait for the GENERATED Application (`<name>-<stage>`) to converge on the render the flip just
- *  asked for. Both verbs wait for the SAME condition — Synced/Healthy — because neither prunes: the
+ *  asked for. Both run kinds wait for the SAME condition — Synced/Healthy — because neither prunes: the
  *  suspended render is still a full, healthy Application, it simply carries no replicas and no
  *  Ingress. `intent` only names the state in the message. Sync REVISIONS are deliberately not
  *  compared: the registration states no revision at all, the Application follows the delivery branch,

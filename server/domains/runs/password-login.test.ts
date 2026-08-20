@@ -111,7 +111,7 @@ function expectInOrder(script: string, markers: readonly string[]): void {
   }
 }
 
-describe("the password-login verbs — the shape of an act that cannot be tested against a host", () => {
+describe("the password-login run kinds — the shape of an act that cannot be tested against a host", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   afterEach(() => {
@@ -120,7 +120,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
   });
 
   /** An adopted slave with a key and a stored bootstrap password — the second door — plus the
-   *  master, which these verbs may target like any other internet-facing machine. */
+   *  master, which these run kinds may target like any other internet-facing machine. */
   async function setup(): Promise<{ db: DbHandle; store: CredentialStore }> {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-pwlogin-"));
     dirs.push(dir);
@@ -146,9 +146,9 @@ describe("the password-login verbs — the shape of an act that cannot be tested
     return { db, store };
   }
 
-  /** Plan the verb, then run every one of its steps against the plan's own targets, collecting the
+  /** Plan the run kind, then run every one of its steps against the plan's own targets, collecting the
    *  scripts it shipped and the cleanups it registered. */
-  async function runVerb(
+  async function runOfKind(
     kind: string,
     db: DbHandle,
     store: CredentialStore,
@@ -181,7 +181,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
 
   it("writes ONE drop-in and it sorts FIRST — a 99- file is the bug, not the fix", async () => {
     const { db, store } = await setup();
-    const { rec } = await runVerb("password-login-disable", db, store);
+    const { rec } = await runOfKind("password-login-disable", db, store);
     const script = rec.scripts.get("password-login-disable") ?? "";
     expect(script).toContain("/etc/ssh/sshd_config.d/00-hostyour-passwords.conf");
     // Nothing this run writes may sort after cloud-init's file, which states the keyword `yes`.
@@ -192,7 +192,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
 
   it("states BOTH keywords, because keyboard-interactive is the same door through PAM", async () => {
     const { db, store } = await setup();
-    const { rec } = await runVerb("password-login-disable", db, store);
+    const { rec } = await runOfKind("password-login-disable", db, store);
     const script = rec.scripts.get("password-login-disable") ?? "";
     expect(script).toContain("PasswordAuthentication no");
     expect(script).toContain("KbdInteractiveAuthentication no");
@@ -200,7 +200,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
 
   it("validates BEFORE it reloads, and reloads rather than restarts", async () => {
     const { db, store } = await setup();
-    const { rec } = await runVerb("password-login-disable", db, store);
+    const { rec } = await runOfKind("password-login-disable", db, store);
     const script = rec.scripts.get("password-login-disable") ?? "";
     // `sshd -t` refuses a configuration the daemon could not start on; the reload is the moment a
     // bad drop-in would otherwise take sshd down.
@@ -213,7 +213,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
 
   it("puts the drop-in back when the daemon could not be told to re-read it", async () => {
     const { db, store } = await setup();
-    const { rec } = await runVerb("password-login-disable", db, store);
+    const { rec } = await runOfKind("password-login-disable", db, store);
     const script = rec.scripts.get("password-login-disable") ?? "";
     // `sshd -T` parses the FILES and has no channel to the running process, so a valid drop-in the
     // daemon never read would be reported by the very next reading as a shut door. Both failure
@@ -228,7 +228,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
 
   it("refuses a host whose AuthenticationMethods still names a password method, before writing", async () => {
     const { db, store } = await setup();
-    const { rec } = await runVerb("password-login-disable", db, store);
+    const { rec } = await runOfKind("password-login-disable", db, store);
     const script = rec.scripts.get("password-login-disable") ?? "";
     // A host with `publickey,keyboard-interactive` — the usual PAM two-factor setup — has one
     // method list, and turning both keywords off leaves sshd nothing it can complete. `sshd -t`
@@ -244,7 +244,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
 
   it("reads keyboard-interactive under BOTH names sshd prints it by", async () => {
     const { db, store } = await setup();
-    const { rec } = await runVerb("password-login-disable", db, store);
+    const { rec } = await runOfKind("password-login-disable", db, store);
     const script = rec.scripts.get("password-login-disable") ?? "";
     // OpenSSH 8.7 renamed the dumped keyword. On 8.6 and earlier — Ubuntu 20.04 is 8.2, which the
     // preflight only warns about — only `challengeresponseauthentication` is printed, and reading
@@ -254,7 +254,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
 
   it("proves the KEY door is open before it shuts the password door", async () => {
     const { db, store } = await setup();
-    const { rec, stepNames } = await runVerb("password-login-disable", db, store);
+    const { rec, stepNames } = await runOfKind("password-login-disable", db, store);
     // Its own step in the plan, so the operator sees the order before approving.
     expect(stepNames.indexOf("verify-key-login")).toBeLessThan(stepNames.indexOf("disable-password-login"));
     const script = rec.scripts.get("password-login-disable") ?? "";
@@ -268,7 +268,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
 
   it("takes its verdict from the DAEMON after the reload, never from the file it just wrote", async () => {
     const { db, store } = await setup();
-    const { rec } = await runVerb("password-login-disable", db, store);
+    const { rec } = await runOfKind("password-login-disable", db, store);
     const script = rec.scripts.get("password-login-disable") ?? "";
     // read_effective is `sshd -T` and nothing else (password-login-probe.ts SSHD_HELPERS), and the
     // assertion on the result comes after the write. A grep of the drop-in would have passed on the
@@ -287,7 +287,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
       [KEY_ONLY, []],
     ] as const) {
       const { db, store } = await setup();
-      const { cleanups } = await runVerb("password-login-disable", db, store, () => probe);
+      const { cleanups } = await runOfKind("password-login-disable", db, store, () => probe);
       expect(cleanups).toEqual(expected);
     }
   });
@@ -296,14 +296,14 @@ describe("the password-login verbs — the shape of an act that cannot be tested
     // The executor resolves a run's registered names against def.cleanups(); a name it cannot
     // resolve gets a row with no implementation behind it.
     expect(passwordLoginDisableDef.cleanups?.({ serverId: SLAVE_ID }).map((c) => c.name)).toEqual(["restore-password-login"]);
-    // The enable verb registers none: opening a door cannot lock anybody out.
+    // The enable run kind registers none: opening a door cannot lock anybody out.
     expect(passwordLoginEnableDef.cleanups).toBeUndefined();
   });
 
   it("destroys the SECOND door — the bootstrap password sealed beside the server row", async () => {
     const { db, store } = await setup();
     expect((await serverCredFlags(store)).get(SLAVE_ID)?.hasPassword).toBe(true);
-    await runVerb("password-login-disable", db, store);
+    await runOfKind("password-login-disable", db, store);
     // Purged, not revoked: a revoked row keeps the encrypted blob, and the blob IS the password.
     expect((await serverCredFlags(store)).get(SLAVE_ID)?.hasPassword).toBe(false);
     expect((await store.list({ serverId: SLAVE_ID, kind: "other" }))).toHaveLength(0);
@@ -315,7 +315,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
     const { db, store } = await setup();
     let call = 0;
     // Before the act the daemon takes a password; after it, it does not.
-    await runVerb("password-login-disable", db, store, () => (call++ === 0 ? TAKES_PASSWORD : KEY_ONLY));
+    await runOfKind("password-login-disable", db, store, () => (call++ === 0 ? TAKES_PASSWORD : KEY_ONLY));
     const row = db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
     expect(row?.passwordLoginState).toBe("off");
     const read = readServerPasswordLogin(row?.passwordLoginJson);
@@ -328,9 +328,9 @@ describe("the password-login verbs — the shape of an act that cannot be tested
     }
   });
 
-  it("the enable verb opens the same one file, validates the same way, and arms nothing", async () => {
+  it("the enable run kind opens the same one file, validates the same way, and arms nothing", async () => {
     const { db, store } = await setup();
-    const { rec, cleanups, stepNames } = await runVerb("password-login-enable", db, store, () => KEY_ONLY);
+    const { rec, cleanups, stepNames } = await runOfKind("password-login-enable", db, store, () => KEY_ONLY);
     const script = rec.scripts.get("password-login-enable") ?? "";
     expect(script).toContain("/etc/ssh/sshd_config.d/00-hostyour-passwords.conf");
     expect(script).toContain("PasswordAuthentication yes");
@@ -343,7 +343,7 @@ describe("the password-login verbs — the shape of an act that cannot be tested
   for (const kind of Object.keys(DEFS)) {
     it(`${kind} starts with ${ATTEST_TARGET_STEP} and owns its host`, async () => {
       const { db, store } = await setup();
-      const { stepNames } = await runVerb(kind, db, store);
+      const { stepNames } = await runOfKind(kind, db, store);
       expect(stepNames[0]).toBe(ATTEST_TARGET_STEP);
       // mutating ⇒ the executor refuses to let an operator skip that first step: a run that
       // changes which credentials a machine accepts proves first which machine it is talking to.
@@ -367,10 +367,10 @@ describe("the password-login verbs — the shape of an act that cannot be tested
       const { db, store } = await setup();
       // The master carries no adoptedAt at all: it is never adopted, it self-registers at boot
       // (server/boot/seed-master.ts). Keying the refusal on that column would have locked these
-      // verbs out of the one host whose password door was actually measured.
+      // run kinds out of the one host whose password door was actually measured.
       expect(db.db.select().from(servers).where(eq(servers.id, MASTER_ID)).get()?.adoptedAt).toBeNull();
       await expect(DEFS[kind]!.plan({ serverId: MASTER_ID }, { db: db.db })).resolves.toBeTruthy();
-      const { stepNames } = await runVerb(kind, db, store, () => TAKES_PASSWORD, MASTER_ID);
+      const { stepNames } = await runOfKind(kind, db, store, () => TAKES_PASSWORD, MASTER_ID);
       expect(stepNames[0]).toBe(ATTEST_TARGET_STEP);
     });
   }

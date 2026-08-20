@@ -13,7 +13,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 
 // adopt-consumer tests — mirrors purge.run.test.ts conventions (the same fake
-// kube/git clients, the same in-memory DB): the twin recovery verb, NAME-keyed with no appId. The
+// kube/git clients, the same in-memory DB): the twin recovery run kind, NAME-keyed with no appId. The
 // load-bearing properties: attest-target FIRST and fail-closed, read-pointer refuses an
 // already-tracked consumer and a missing/mixed-identity registration, attest-live is SOFT (a missing app
 // or an unreadable cluster never blocks the adoption — it is RECORDED, not gated), and record-inventory
@@ -192,7 +192,7 @@ describe("adopt-consumer run definition", () => {
   });
 
   it("a registration with suspended:true is adopted with status SUSPENDED — the row repeats the record of intent", async () => {
-    // Recording it "active" would put the wrong lifecycle verb on its card — a suspended unit is
+    // Recording it "active" would put the wrong lifecycle run kind on its card — a suspended unit is
     // resumed, not suspended again.
     seedCluster();
     await runAll(ports(await deployedRegistry({ suspended: true })), []);

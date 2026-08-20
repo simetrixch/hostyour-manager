@@ -33,14 +33,14 @@ export interface RegistryPorts extends DeploySlavePorts, AnsiwisePorts {
 export function buildRegistry(ports: RegistryPorts, extra: AnyRunDefinition[] = []): Registry {
   const registry: Registry = new Map();
   register(registry, noopDef);
-  // The cluster verbs: adopt takes a bare machine into service, deploy-slave turns an adopted
+  // The cluster run kinds: adopt takes a bare machine into service, deploy-slave turns an adopted
   // server into a live slave, redeploy rebuilds the machine layer of a cluster that is already live,
   // and release raises the platform version that cluster stands on.
   register(registry, adoptDef);
   register(registry, makeDeploySlaveDef(ports));
   register(registry, makeRedeployDef(ports));
   register(registry, makeReleaseDef(ports));
-  // The tailnet repair verbs, on a host that is already deployed: leave the private network, come
+  // The tailnet repair run kinds, on a host that is already deployed: leave the private network, come
   // back with the credential the host holds, or be logged out and joined again with one the master
   // mints. Every act is a program of the machine's own catalogue driven over `ansiwise serve`, so
   // they take the serve command, and a rejoin additionally reads the coordinator's address off the

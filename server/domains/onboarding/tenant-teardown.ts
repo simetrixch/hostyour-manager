@@ -1,8 +1,8 @@
 // tenant-teardown.ts — the ONE pointer-driven teardown of a deployed tenant, shared by every run that
-// has to take a tenant off its cluster without owning the whole tenant-offboard verb: the create-tenant
+// has to take a tenant off its cluster without owning the whole tenant-offboard run kind: the create-tenant
 // IDEMPOTENT-BY-SUBDOMAIN replace prepends one teardown per existing
 // same-subdomain tenant, create-tenant's own ABORT-WITH-CLEANUP registers it as its compensating
-// inverse, and the orphan removal reaps a tenant the row-keyed verbs cannot even
+// inverse, and the orphan removal reaps a tenant the row-keyed run kinds cannot even
 // name. It mirrors offboard-tenant.run.ts's offboardSteps shape — its own steps are named remove ->
 // watch-prune -> delete-projects -> record, under the composing run's `stepPrefix` and the guid, where
 // offboardSteps has remove-tenant -> watch-removal -> delete-appproject -> record-offboard on a tenant it
@@ -14,7 +14,7 @@
 // POINTER-DRIVEN, never row-driven — the load-bearing property. Every step works from the frozen
 // TenantTeardownTarget (guid/stage/clusterId + the fan-out watch set) and NEVER loadTenantCluster, so
 // it also reaches an ORPHAN: a tenant that exists in GitOps + ArgoCD but has NO tenants row. Every
-// removal verb resolves its target BY that row (lifecycle.ts loadTenantCluster throws NOT_FOUND), so an
+// removal run kind resolves its target BY that row (lifecycle.ts loadTenantCluster throws NOT_FOUND), so an
 // orphan is otherwise unreachable through the product.
 //
 // Boundary: domain layer (onboarding) — the TenantRegistry + the per-cluster kube resolver + the pure
@@ -111,7 +111,7 @@ export interface TenantTeardownOpts {
    *  three composing runs leave genuinely different tenants behind:
    *   - the pointer-only flavours (REPLACE_TEARDOWN, create-tenant's ABORT_TEARDOWN) settle "offboarded":
    *     they issue no cluster-side delete of their own, so the member namespaces, the Tenant CR, the
-   *     Vault path and the object-storage credential all stand and a purge is still the verb for it.
+   *     Vault path and the object-storage credential all stand and a purge is still the run kind for it.
    *     The member DATABASES do not stand: the prune deletes every member's ServiceClaim and the
    *     service-provisioner drops a claim's databases with its user, so the removal costs the data
    *     whichever flavour runs it — each composing run's operator text says so;
@@ -119,7 +119,7 @@ export interface TenantTeardownOpts {
    *     the tenant's Vault entry itself, so nothing is left to reap.
    *  Settling both to "offboarded" leaves the two indistinguishable
    *  in the inventory, a purged tenant keeps its place on the Tenants page's "Offboarded tenants" panel,
-   *  and the most destructive verb in the product appears to do nothing.
+   *  and the most destructive run kind in the product appears to do nothing.
    *
    *  Typed TenantSettledStatus, not TenantStatus: a teardown settles a row, so the only answers that mean
    *  anything here are the TERMINAL ones — and the record step compares this value against what the row
@@ -151,7 +151,7 @@ export const REPLACE_TEARDOWN: TenantTeardownOpts = {
  *  SUCCEEDED with the row settled while those Applications are still standing — a settled row is off the
  *  Tenants page's card list, offers no live action on its detail page and cannot be found by the orphan
  *  scan either (the first teardown step git-rm'd its pointer), which is exactly the settled-but-unfinished
- *  state the removal family exists to end, re-created at the tail of the removal verb. A row settled
+ *  state the removal family exists to end, re-created at the tail of the removal run kind. A row settled
  *  "purged" is the sharper form of the same lie, since that status states the tenant was DEPROVISIONED
  *  and drops it off the Tenants page altogether. The OBSERVATION stays soft; the
  *  SETTLING does not. Failing here also keeps the target reachable for another attempt in the only way the
@@ -224,7 +224,7 @@ function settlePruneGuardStep(ports: TenantLifecyclePorts, t: TenantTeardownTarg
  *  the returned list, and that is the load-bearing detail: the record step MUST be the LAST step of the
  *  whole removal. It flips the tenants + tenant_apps rows to the flavour's terminal status, and a row that
  *  claims a removal happened while the Tenant CR, the namespace, the Vault path and the Mongo databases
- *  are still standing is exactly the settled-but-unfinished lie the removal verbs exist to end: a
+ *  are still standing is exactly the settled-but-unfinished lie the removal run kinds exist to end: a
  *  settled row drops off the Tenants page's card list, its detail page offers no live action, and the
  *  pointer the FIRST step already git-rm'd keeps the orphan scan blind — so a delete that failed after the
  *  flip leaves a live tenant nothing in the product can name again. Owning the placement here makes that

@@ -219,7 +219,7 @@ export function buildOnboarding(config: Config, store: CredentialStore, db: Db, 
   const clusterStage = platformRepo ? clusterStageFromMarkings(platformRepo) : undefined;
   // The unit DNS provider — ONE Cloudflare client for both families' provision-dns and
   // remove-dns steps. Absent (no token) ⇒ those steps fail loud (DNS is a mandatory part of the
-  // verbs), never a silent skip.
+  // run kinds), never a silent skip.
   const dns = config.dns ? new CloudflareDns({ apiToken: config.dns.cloudflareApiToken }) : undefined;
   // A cluster's own values chain on its install branch. The tenant runs carry no consumer Registry,
   // so this reader serves them off the SAME platform-repo worktree: folded to the public unit apex
@@ -257,7 +257,7 @@ export function buildOnboarding(config: Config, store: CredentialStore, db: Db, 
   // pointer registry that answers that lives here.
   // ONE seeder for BOTH families, because there is one Vault and one Controller identity: the
   // consumer onboard seeds a consumer's ceremony secrets through it and create-tenant seeds a
-  // tenant's crypto entry, and each verb's removal destroys what its own seed wrote. Built here
+  // tenant's crypto entry, and each run kind's removal destroys what its own seed wrote. Built here
   // rather than inside one family so neither can end up with a second identity.
   // The seeder writes over the Controller's OWN kubernetes-auth login — the same VAULT_* surface the
   // credential store authenticates with (config.vault) — because there is one Vault, on the master,
@@ -379,7 +379,7 @@ function buildConsumerOnboarding(
   // The consumer-repo writer: commits the release-kit (release/ scripts + the
   // release workflow) into the CONSUMER's own repo at onboard, and offboard/purge git-rm it. It opens
   // the SAME sealed one-PAT-per-consumer the reader clones with (openCredential) via askpass; it
-  // resolves the consumer repo's default branch itself. ONE stateless instance serves all three verbs.
+  // resolves the consumer repo's default branch itself. ONE stateless instance serves all three run kinds.
   const consumerRepo = new GitConsumerRepo({ openCredential });
 
   // The unit's build grants (provision-build-rbac + its teardown inverses). Master-local like the
@@ -669,14 +669,14 @@ function buildTenantOnboarding(
     makeRemoveAppDef(lifecyclePorts),
     makeSuspendTenantDef(lifecyclePorts),
     makeResumeTenantDef(lifecyclePorts),
-    // The tenant twin of the consumer restart verb: same act, walked over the tenant's member
+    // The tenant twin of the consumer restart run kind: same act, walked over the tenant's member
     // namespaces instead of a consumer's single one.
     makeTenantRestartWorkloadsDef(lifecyclePorts),
     makeTenantSetSizeDef(lifecyclePorts),
     makeOffboardTenantDef(lifecyclePorts),
     // tenant-purge / force-offboard removes a tenant's WHOLE footprint BY GUID even with no inventory
     // row (the orphaned partial create-tenant), and additionally destroys the crypto entry (the deprovision
-    // cascade) + the namespace. Same narrow port set as the other lifecycle verbs — the teardown and the
+    // cascade) + the namespace. Same narrow port set as the other lifecycle run kinds — the teardown and the
     // two cluster-side deletes all resolve through the per-cluster resolver.
     makeTenantPurgeDef(lifecyclePorts),
     // tenant-backup / tenant-restore / tenant-migrate — the same ONE relocation mechanism over the

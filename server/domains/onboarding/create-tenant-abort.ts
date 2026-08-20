@@ -20,7 +20,7 @@ import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run
  *  CR and no namespace, so there is NO cluster-side backstop here. A fan-out that refuses to prune must
  *  FAIL the cleanup visibly rather than delete the isolation AppProject and record the tenant offboarded
  *  while its workloads keep serving the public FQDN; the operator's next move is then tenant-purge, which
- *  is the one destructive verb. (Contrast PURGE_TEARDOWN, which is fail-soft precisely because its
+ *  is the one destructive run kind. (Contrast PURGE_TEARDOWN, which is fail-soft precisely because its
  *  cluster-side deletes are that backstop.) */
 const ABORT_TEARDOWN: TenantTeardownOpts = {
   stepPrefix: "abort",
@@ -28,7 +28,7 @@ const ABORT_TEARDOWN: TenantTeardownOpts = {
   wording: { title: "Roll back", removing: "rolling back tenant", settled: "rolled-back tenant" },
   // "offboarded", never "purged": an abort issues no cluster-side delete of its own, so the
   // rolled-back tenant's namespaces and Vault crypto entry all still
-  // stand — a purge is still the verb that reaps them, which is exactly what an "offboarded" row goes
+  // stand — a purge is still the run kind that reaps them, which is exactly what an "offboarded" row goes
   // on offering. The member DATABASES do NOT survive the rollback: the prune it waits for deletes
   // every member's ServiceClaim, and the service-provisioner drops a claim's databases together with
   // its user on any claim deletion, prune included.
@@ -44,7 +44,7 @@ const ABORT_LIVE_REFUSAL: TenantLiveRefusal = {
     "aborting this create-tenant run would run its rollback: git-rm the tenant's registration, wait for ArgoCD to prune its whole fan-out," +
     " delete every member's isolation AppProject, its admission policy and the argo-sync grant, and record the tenant offboarded — un-deploying a tenant that is serving.",
   instead:
-    "offboard the tenant instead — that is the removal verb for a tenant that is serving. It keeps the tenant's IDENTITY (its Vault crypto entry, its namespaces) for a re-onboard," +
+    "offboard the tenant instead — that is the removal run kind for a tenant that is serving. It keeps the tenant's IDENTITY (its Vault crypto entry, its namespaces) for a re-onboard," +
     " but its member DATABASES are dropped with the prune's ServiceClaim deletions, so run a backup first if the data has to come back." +
     " This run has nothing left to roll back; delete the run once you no longer need its log.",
 };

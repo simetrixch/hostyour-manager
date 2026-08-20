@@ -34,8 +34,8 @@ import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-mem
 const TEST_MEMBER_RECORDS = testMembers([{ name: "erp", seedReference: false, seedDemo: false }]);
 
 // The SERVER-SIDE live-tenant refusal on tenant-purge, at BOTH of its ends — the mirror image of the
-// refusals in api-tenant-provisional.test.ts. Those keep the LIVE-tenant verbs off a tenant that is not
-// there; this one keeps the DESTRUCTIVE verb off a tenant that IS. tenant-purge deletes the Tenant CR,
+// refusals in api-tenant-provisional.test.ts. Those keep the LIVE-tenant run kinds off a tenant that is not
+// there; this one keeps the DESTRUCTIVE run kind off a tenant that IS. tenant-purge deletes the Tenant CR,
 // and the tenant operator answers that by deleting the tenant's Vault path, revoking its object-storage
 // credential and dropping its Mongo databases — none of it recoverable — so the one row state that must
 // never reach it is a tenant that is still deployed and serving.
@@ -184,7 +184,7 @@ describe("POST /api/tenants/purge refuses a tenant that is still LIVE", () => {
     expect(getRun(db.db, runId)?.status).toBe("planned");
   });
 
-  it("NO row at all is allowed — naming a tenant the inventory does not know is why this verb exists", async () => {
+  it("NO row at all is allowed — naming a tenant the inventory does not know is why this run kind exists", async () => {
     seedCluster();
     const { app, executor, cookie, registry } = await makeTenant();
     await registry.commitTenant({ stage: "prod", guid: GUID, registration: registration(), runId: "run_onb" }); // an orphan: live pointer, no row
@@ -223,7 +223,7 @@ describe("POST /api/tenants/purge refuses a tenant that is still LIVE", () => {
   it("a LIVE row whose pointer is GONE is allowed — the failed-offboard state has no other way out", async () => {
     // tenant-offboard's remove-tenant committed the pointer removal and a later step failed, so the row
     // still says active while the tenant is already un-deployed and only leftovers stand. Refusing here
-    // would leave that tenant with NO removal verb at all: offboard cannot settle it while its fan-out
+    // would leave that tenant with NO removal run kind at all: offboard cannot settle it while its fan-out
     // refuses to prune, and the orphan scan cannot see it because the pointer is gone. ABSENT is the one
     // pointer state that counts as un-deployed — the same rule the teardown's own remove step follows.
     seedCluster();

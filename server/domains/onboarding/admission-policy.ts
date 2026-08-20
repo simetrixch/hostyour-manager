@@ -7,7 +7,7 @@
 //
 // Three clauses, one per resource, and each one is a whole answer:
 //   Ingress   — every rule's FQDN is one the platform GRANTED: `<name>.<unitApex>` always, plus the
-//               unit's attested `fqdn` where its stage registration carries one (the onboard verb
+//               unit's attested `fqdn` where its stage registration carries one (the onboard run kind
 //               writes it there after gate G19 refused every name the platform already serves — the
 //               policy renders from that attested value, never from the manifest). NOT `*.<name>`:
 //               the platform's DNS carries one record per unit, so no resolver exists for a

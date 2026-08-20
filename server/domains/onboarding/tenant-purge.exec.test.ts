@@ -1,5 +1,5 @@
 // The EXECUTION half of tenant-purge — what the run does against a cluster: the orphan cases the
-// verb exists for, the belt that refuses an uninventoried tenant whose workloads still RUN, the
+// run kind exists for, the belt that refuses an uninventoried tenant whose workloads still RUN, the
 // namespace reap and what it can prove, and the row settlement. The PLAN half is
 // tenant-purge.run.test.ts.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -83,7 +83,7 @@ function entry(cluster = "s1"): TenantRegistration {
 type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter; seeder?: VaultSeeder | null };
 
 /** Records the crypto deletes a purge issues. The purge never SEEDS, so those throw: a purge that
- *  wrote a tenant's identity instead of destroying it would be the exact inverse of the verb. */
+ *  wrote a tenant's identity instead of destroying it would be the exact inverse of the run kind. */
 class FakePurgeSeeder implements VaultSeeder {
   readonly deletedCrypto: TenantCryptoDeleteInput[] = [];
   async seed(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds"); }
@@ -210,7 +210,7 @@ describe("tenant-purge execution", () => {
     expect(cluster.deletedNamespaces).toEqual(NAMESPACES); // the backstop reap fired on EVERY member namespace
     // The record step is a clean SOFT-SKIP: there is no row to mark, and none was invented. That must
     // survive every change to WHAT the record step writes (the purge gaining its own terminal
-    // status was one such change): naming an orphan is the entire reason this verb exists, and a record step that
+    // status was one such change): naming an orphan is the entire reason this run kind exists, and a record step that
     // insisted on a row would fail the one run that has none.
     expect(db.db.select().from(tenants).all()).toHaveLength(0);
     expect(logs.some((l) => l.includes(`purged tenant ${GUID} had no inventory row`))).toBe(true);
@@ -219,7 +219,7 @@ describe("tenant-purge execution", () => {
     expect(logs.some((l) => l.includes(`crypto entry prod/tenants/${GUID} destroyed`))).toBe(true);
   });
 
-  // THE ORPHAN BELT. The two orphan cases above are the reason this verb exists, and both are
+  // THE ORPHAN BELT. The two orphan cases above are the reason this run kind exists, and both are
   // recognised by what the cluster shows: nothing of them RUNS. A tenant the inventory never learned
   // about but that still serves looks identical in git — same missing row, same standing pointer —
   // and purging it deletes its Tenant CR and with it, unrecoverably, its Vault path, its

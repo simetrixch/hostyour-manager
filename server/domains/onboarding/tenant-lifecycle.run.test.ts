@@ -317,7 +317,7 @@ describe("tenant-offboard run", () => {
     // the strict readTenant, which THROWS on a body that fails its schema. A live tenant whose
     // registration carries a malformed field therefore failed AT THIS STEP, identically on every retry:
     // no removal was ever committed, the pointer stayed in catalog and the whole fan-out kept
-    // serving. That would break the one NON-destructive removal verb — the one api.ts deliberately keeps
+    // serving. That would break the one NON-destructive removal run kind — the one api.ts deliberately keeps
     // open on a still-provisioning tenant because it is the clean way OUT — and leave tenant-purge, which
     // deletes the Tenant CR and with it the tenant's Mongo databases and Vault path, as the only way to
     // remove a tenant. The tolerant scan answers "unreadable", which is NOT "absent", so the pointer is

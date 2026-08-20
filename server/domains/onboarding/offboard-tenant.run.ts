@@ -42,7 +42,7 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         // hardest HERE: readTenant THROWS (INTERNAL) on a body failing YAML/schema, so an ACTIVE tenant
         // whose registration drifted would fail at this very step, identically on every retry, and the
         // registration would stay committed with the whole fan-out still serving. That would break the
-        // one NON-destructive removal verb — the verb api.ts deliberately keeps open on a
+        // one NON-destructive removal run kind — the run kind api.ts deliberately keeps open on a
         // still-provisioning tenant because it is the clean way OUT — and leave tenant-purge, which
         // destroys the tenant's Vault crypto entry, as the only way to remove a tenant.
         // "unreadable" means a registration DOES stand and must still be git-rm'd BY PATH, which is all

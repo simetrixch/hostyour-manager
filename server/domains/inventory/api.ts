@@ -80,7 +80,7 @@ export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): vo
   });
 
   // The operator-key surface: a human's own public key, held so the platform can place it on a
-  // machine and take it off again. Read/write only — the three verbs that touch a host are runs,
+  // machine and take it off again. Read/write only — the three run kinds that touch a host are runs,
   // reached through POST /api/runs like every other, because putting a key on a machine is an act
   // with a plan, an approval and a log and not a row this route could flip.
   app.get("/api/operator-keys", (c) => c.json({ keys: listOperatorKeys(db) }));
@@ -91,7 +91,7 @@ export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): vo
   });
 
   // Forgets the row; it takes nothing off any machine. The domain refuses while a stored reading
-  // still finds the key on a host, because the removal verb needs this row to name the line.
+  // still finds the key on a host, because the removal run kind needs this row to name the line.
   app.delete("/api/operator-keys/:id", (c) => {
     deleteOperatorKey(db, deps.actor(), c.req.param("id"));
     return c.json({ ok: true });

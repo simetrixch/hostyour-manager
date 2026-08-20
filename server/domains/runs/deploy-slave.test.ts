@@ -144,7 +144,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(stepColumn(db, runId, "attest-target", "error")).toMatch(/not the machine we adopted/);
   });
 
-  it("attest-target refuses a LIVE cluster and names the verb that does this job", async () => {
+  it("attest-target refuses a LIVE cluster and names the run kind that does this job", async () => {
     const { db, executor } = await makeHarness({ keystore: "keyfile" });
     db.db.insert(clusters).values({
       id: "cls_live", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "active", slaveId: 1,
@@ -154,7 +154,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
-    expect(stepColumn(db, runId, "attest-target", "error")).toMatch(/is the redeploy verb/);
+    expect(stepColumn(db, runId, "attest-target", "error")).toMatch(/is the redeploy run kind/);
     // nothing moved: the row stays active and single
     const rows = db.db.select().from(clusters).all();
     expect(rows).toHaveLength(1);

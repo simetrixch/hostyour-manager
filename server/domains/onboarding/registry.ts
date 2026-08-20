@@ -158,7 +158,7 @@ export interface RegistrationCommit {
   /** The ATTESTED build names of the unit — build.yaml's own field. Empty ⇒ the unit builds nothing. */
   builds: string[];
   /** The deploy group of ONE stage, plus the OPTIONAL attested fqdn — the manifest's declared extra
-   *  FQDN, copied here by the onboard verb after G19 refused every name the platform already serves.
+   *  FQDN, copied here by the onboard run kind after G19 refused every name the platform already serves.
    *  Absent ⇒ a build-only unit: build.yaml is written, no stage file. */
   deploy?: { stage: Stage; chartPath: string; cluster: string; databases: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string };
 }

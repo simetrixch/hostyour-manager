@@ -45,7 +45,7 @@ export class RunContext {
   private seq: number;
   // One SSH session PER target server AND PER ADDRESS (one session per target host and address). A run that touches >1
   // host (slave + master) must never share a single cached session, or a master-side step silently
-  // runs on the slave — and the address belongs in the key for the same reason: a verb that asked
+  // runs on the slave — and the address belongs in the key for the same reason: a run kind that asked
   // for the public address because the other one may be dead must never be handed a session that
   // went out on the other one. An entry whose transport has died is dropped rather than returned
   // (getSsh). close() closes every entry.
@@ -218,7 +218,7 @@ export class RunContext {
     if (cached) {
       // The transport died under the cached session — the adapter tears its client down after three
       // unanswered keepalives, which a command that takes the host's own networking down outlives
-      // (the tailnet repair verbs are made of exactly such commands). Handing it back would fail
+      // (the tailnet repair run kinds are made of exactly such commands). Handing it back would fail
       // every remaining step on a bare "not connected" instead of reopening on the same address, and
       // the run log would not even say the connection had been lost.
       this.sshSessions.delete(key);

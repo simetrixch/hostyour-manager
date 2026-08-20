@@ -43,9 +43,9 @@ export interface ProbeRow {
   /** The regular expression the answer must match — '.+' passes anything non-empty, '$a' ("end
    *  then a") can never match and is the planted red. */
   pattern: string;
-  /** Declare the answer optional with this default — for a program two verbs share, where one
-   *  verb states the value and the other legitimately leaves the engine's default to fill it.
-   *  The default is then what the pattern judges for the silent verb, so a default that matches
+  /** Declare the answer optional with this default — for a program two run kinds share, where one
+   *  run kind states the value and the other legitimately leaves the engine's default to fill it.
+   *  The default is then what the pattern judges for the silent run kind, so a default that matches
    *  cannot tell "sent the right value" from "sent nothing"; use it only where that is stated. */
   fallback?: string;
 }

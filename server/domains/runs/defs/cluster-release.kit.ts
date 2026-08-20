@@ -12,7 +12,7 @@ import { clusterShortName } from "../../inventory/cluster-marking.ts";
 import { argoAppsCmd, parsePipeRows, refreshPlatformCheckoutScript, PLATFORM_CHECKOUT } from "./deploy-slave.remote.ts";
 import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 
-// The building blocks the two verbs that rebuild or raise a live cluster share:
+// The building blocks the two run kinds that rebuild or raise a live cluster share:
 //
 //   attest-target     the fail-closed precondition below — the cluster is active and the machine
 //                     is still the machine the platform adopted.
@@ -30,7 +30,7 @@ import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./
 // `ansiwise serve` surface by ansiwiseProgramStep — ArgoCD cannot deliver this, because the
 // operating system and the Kubernetes install are what ArgoCD RUNS ON. A cluster RELEASE moves the
 // pin first and regenerates the branch from it; a REDEPLOY moves no pin — the machine layer is
-// restorable without a version change. That is the whole difference between the two verbs.
+// restorable without a version change. That is the whole difference between the two run kinds.
 
 /** How long argocd-follow waits for a cluster to converge. Generous for the same reason the slave
  *  verify window is: after the branch moves, every Application re-syncs and the node may pull images
@@ -55,10 +55,10 @@ async function argoSurface(ctx: StepCtx, target: SlaveTarget): Promise<{ session
   return { session: await ctx.ssh(master.id), namespace: name, where: `ns ${name} on ${master.name}` };
 }
 
-/** The fail-closed precondition of every verb that acts on a LIVE cluster: the cluster row is
+/** The fail-closed precondition of every run kind that acts on a LIVE cluster: the cluster row is
  *  active (the target lookup refuses anything else) and the machine answering on that host is still
  *  the machine the platform adopted — a stranger VM on a recycled address must never be handed the
- *  deployment programs. `check` is where a verb adds its OWN precondition; a release checks the channel ceiling
+ *  deployment programs. `check` is where a run kind adds its OWN precondition; a release checks the channel ceiling
  *  there, so the refusal lands before the step that would write a pin. */
 export function attestClusterStep(target: SlaveTarget, check?: (ctx: StepCtx) => Promise<void>): Step {
   return {
@@ -151,7 +151,7 @@ export function argocdFollowStep(target: SlaveTarget): Step {
   };
 }
 
-/** The cluster a verb acts on, with its server — the lookup both cluster-level defs make in plan(),
+/** The cluster a run kind acts on, with its server — the lookup both cluster-level defs make in plan(),
  *  where a database IS available. Refuses anything but an ACTIVE cluster: a release and a redeploy
  *  both act on a cluster that is already running. */
 export function loadActiveCluster(db: Db, serverId: string): {
@@ -162,7 +162,7 @@ export function loadActiveCluster(db: Db, serverId: string): {
   const cluster = db.select().from(clusters).where(eq(clusters.serverId, serverId)).get();
   if (!cluster) throw errValidation(`server ${server.name} carries no cluster — deploy it first`);
   if (cluster.status !== "active") {
-    throw errValidation(`cluster ${cluster.id} for ${cluster.domain} is '${cluster.status}' — this verb acts on a LIVE cluster`);
+    throw errValidation(`cluster ${cluster.id} for ${cluster.domain} is '${cluster.status}' — this run kind acts on a LIVE cluster`);
   }
   return { server, cluster };
 }

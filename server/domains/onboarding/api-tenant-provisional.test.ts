@@ -27,9 +27,9 @@ import type { AppEnv } from "../../http/app-env.ts";
 
 // The SERVER-SIDE refusals on a tenant whose create-tenant run never finished.
 // create-tenant records its tenants row BEFORE it deploys (record-provisional), so a "provisioning" row
-// means the tenant may have no namespace, no example-auth ingress and no fan-out at all. Every verb that
+// means the tenant may have no namespace, no example-auth ingress and no fan-out at all. Every run kind that
 // assumes a LIVE tenant must therefore refuse it AT THE ROUTE — the Tenants UI hides those buttons too,
-// but a hidden button is a convenience and this is the guard. The one verb that must NOT be refused is
+// but a hidden button is a convenience and this is the guard. The one run kind that must NOT be refused is
 // the removal: tenant-offboard is the clean way OUT of that state, and blocking it would strand exactly
 // the tenant this whole change exists to make reachable.
 //

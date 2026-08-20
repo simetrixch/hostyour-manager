@@ -14,7 +14,7 @@ import { tenantWatchNamespaces } from "./tenant-lifecycle.run.ts";
 // it. So putting a new value in front of a unit was only ever half an act — the Secret changed and
 // the pods did not — and nothing on the platform did the other half.
 //
-// WHY A VERB AND NOT A WATCHER. Replacing a secret value is an EXPLICIT operator procedure on this
+// WHY A RUN KIND AND NOT A WATCHER. Replacing a secret value is an EXPLICIT operator procedure on this
 // platform, by decision: every ExternalSecret carries refreshPolicy OnChange and refreshInterval "0",
 // so nothing reads Vault on a timer anywhere (hostyour-cloud
 // charts/external-secret/templates/externalsecret.yaml states the rule). What was missing was that
@@ -26,13 +26,13 @@ import { tenantWatchNamespaces } from "./tenant-lifecycle.run.ts";
 //
 // WHAT IT DOES NOT DO. It moves no secret. The two steps before this one belong to the operator:
 // write the new value into Vault, then DELETE the target Secret so ESO materializes it again from
-// Vault. This verb takes the third, and its plan summary says so plainly — "restart" is a word an
+// Vault. This run kind takes the third, and its plan summary says so plainly — "restart" is a word an
 // operator can read as "replace the secrets", and it does not.
 //
-// TWO VERBS, ONE MECHANISM. A consumer owns ONE namespace, a tenant owns one PER MEMBER — so the
-// tenant verb is not the consumer verb with a different id, it walks the member namespaces
+// TWO RUN KINDS, ONE MECHANISM. A consumer owns ONE namespace, a tenant owns one PER MEMBER — so the
+// tenant run kind is not the consumer run kind with a different id, it walks the member namespaces
 // (tenantWatchNamespaces, the same inventory projection the tenant watches are built from) and rolls
-// each. Splitting it the other way — one verb taking a namespace — would put the naming rule in the
+// each. Splitting it the other way — one run kind taking a namespace — would put the naming rule in the
 // caller's hands and let a typo roll nothing while reporting success.
 //
 // mutating: true ⇒ attest-target is step 0 (guards.assertGuardsArmed), so a run approved against a
@@ -41,9 +41,9 @@ import { tenantWatchNamespaces } from "./tenant-lifecycle.run.ts";
 export const RestartWorkloadsParams = z.object({ appId: z.string().startsWith("app_") });
 export type RestartWorkloadsParams = z.infer<typeof RestartWorkloadsParams>;
 
-/** The ONE claim both verbs make. No `git-branch` lock of any kind, where every other consumer and
- *  tenant verb claims two: those read or write a registration, and this one neither reads nor writes
- *  git at all — a branch claim it does not need would block the flip verbs and serialize nothing. What
+/** The ONE claim both run kinds make. No `git-branch` lock of any kind, where every other consumer and
+ *  tenant run kind claims two: those read or write a registration, and this one neither reads nor writes
+ *  git at all — a branch claim it does not need would block the flip run kinds and serialize nothing. What
  *  it does need is that no teardown of the same unit runs beside it, and `master-kube` is what every
  *  one of those already claims. */
 const RESTART_LOCKS = [{ resource: "master-kube" as const, key: "m" }];

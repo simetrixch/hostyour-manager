@@ -6,7 +6,7 @@
 // so no run, param or step could ask for the other one, and the run log never said which address a
 // session had actually gone out on.
 //
-// A verb that repairs the private network is what forced the change: it cannot travel over the
+// A run kind that repairs the private network is what forced the change: it cannot travel over the
 // network it is repairing, so it names the public address, and the run has to say so afterwards.
 // The REQUEST lives on the plan's target (RunTargetRef.transport, executor/types.ts), which is
 // frozen into plan_json at approval; the ANSWER is logged the moment a session is opened.

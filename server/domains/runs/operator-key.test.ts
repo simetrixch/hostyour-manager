@@ -21,7 +21,7 @@ import { fingerprintPublicKey } from "../../security/fingerprint.ts";
 import type { SshFactory, SshSession, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
 import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from "./defs/operator-key.ts";
 
-// What a test can and cannot prove about these verbs, stated plainly because the difference is the
+// What a test can and cannot prove about these run kinds, stated plainly because the difference is the
 // whole point of them.
 //
 // It CANNOT prove that a human can then log in, or that a removed key stops working. That needs a
@@ -123,7 +123,7 @@ const DEFS: Record<string, AnyRunDefinition> = {
   "authorized-keys-read": authorizedKeysReadDef as unknown as AnyRunDefinition,
 };
 
-describe("the operator-key verbs — one line of one file, and never this controller's own", () => {
+describe("the operator-key run kinds — one line of one file, and never this controller's own", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   afterEach(() => {
@@ -158,9 +158,9 @@ describe("the operator-key verbs — one line of one file, and never this contro
     return { db, store, keyId: key.id };
   }
 
-  /** Plan the verb, then run every one of its steps against the plan's own targets. `file` is asked
+  /** Plan the run kind, then run every one of its steps against the plan's own targets. `file` is asked
    *  on every probe, so a test can hand back one file before the act and another after it. */
-  async function runVerb(
+  async function runOfKind(
     kind: string,
     db: DbHandle,
     store: CredentialStore,
@@ -206,7 +206,7 @@ describe("the operator-key verbs — one line of one file, and never this contro
 
   it("deletes by a marker this controller's own line cannot carry", async () => {
     const { db, store, keyId } = await setup();
-    const { rec } = await runVerb("operator-key-remove", db, store, {
+    const { rec } = await runOfKind("operator-key-remove", db, store, {
       keyId, file: twoStage([CONTROLLER_LINE, PAT_LINE], [CONTROLLER_LINE]),
     });
     const script = rec.scripts.get("operator-key-remove") ?? "";
@@ -220,7 +220,7 @@ describe("the operator-key verbs — one line of one file, and never this contro
 
   it("filters with grep -v, so every other line survives byte for byte", async () => {
     const { db, store, keyId } = await setup();
-    const { rec } = await runVerb("operator-key-place", db, store, {
+    const { rec } = await runOfKind("operator-key-place", db, store, {
       keyId, file: twoStage([CONTROLLER_LINE, FOREIGN_LINE], [CONTROLLER_LINE, FOREIGN_LINE, PAT_LINE]),
     });
     const script = rec.scripts.get("operator-key-place") ?? "";
@@ -233,7 +233,7 @@ describe("the operator-key verbs — one line of one file, and never this contro
 
   it("tells a grep that FAILED apart from one that selected nothing, before it writes", async () => {
     const { db, store, keyId } = await setup();
-    const { rec } = await runVerb("operator-key-place", db, store, {
+    const { rec } = await runOfKind("operator-key-place", db, store, {
       keyId, file: twoStage([CONTROLLER_LINE], [CONTROLLER_LINE, PAT_LINE]),
     });
     const script = rec.scripts.get("operator-key-place") ?? "";
@@ -246,7 +246,7 @@ describe("the operator-key verbs — one line of one file, and never this contro
 
   it("re-reads the file and checks the arithmetic BEFORE the install, so a human's key is not lost", async () => {
     const { db, store, keyId } = await setup();
-    const { rec } = await runVerb("operator-key-remove", db, store, {
+    const { rec } = await runOfKind("operator-key-remove", db, store, {
       keyId, file: twoStage([CONTROLLER_LINE, PAT_LINE], [CONTROLLER_LINE]),
     });
     const script = rec.scripts.get("operator-key-remove") ?? "";
@@ -264,7 +264,7 @@ describe("the operator-key verbs — one line of one file, and never this contro
 
   it("places ONE line and replaces its own predecessor, so a rotated key leaves nothing working", async () => {
     const { db, store, keyId } = await setup();
-    const { rec } = await runVerb("operator-key-place", db, store, {
+    const { rec } = await runOfKind("operator-key-place", db, store, {
       keyId, file: twoStage([CONTROLLER_LINE], [CONTROLLER_LINE, PAT_LINE]),
     });
     const script = rec.scripts.get("operator-key-place") ?? "";
@@ -278,13 +278,13 @@ describe("the operator-key verbs — one line of one file, and never this contro
     // The removal deletes by marker; this key sits under a comment nothing here wrote, so the line
     // survives — and the run must say so instead of reporting a removal that did not happen.
     const stillThere = [CONTROLLER_LINE, `${PAT_KEY} pat@his-own-laptop`];
-    await expect(runVerb("operator-key-remove", db, store, { keyId, file: () => stillThere }))
+    await expect(runOfKind("operator-key-remove", db, store, { keyId, file: () => stillThere }))
       .rejects.toThrow(/STILL in the file/);
   });
 
   it("fails a placement the read-back cannot confirm", async () => {
     const { db, store, keyId } = await setup();
-    await expect(runVerb("operator-key-place", db, store, { keyId, file: () => [CONTROLLER_LINE] }))
+    await expect(runOfKind("operator-key-place", db, store, { keyId, file: () => [CONTROLLER_LINE] }))
       .rejects.toThrow(/is not in the file after the write/);
   });
 
@@ -292,7 +292,7 @@ describe("the operator-key verbs — one line of one file, and never this contro
     const { db, store, keyId } = await setup();
     // The one catastrophic outcome: the platform's own way into the machine is gone. It is checked
     // before the script's exit code, because it is the more serious answer.
-    await expect(runVerb("operator-key-place", db, store, {
+    await expect(runOfKind("operator-key-place", db, store, {
       keyId, file: twoStage([CONTROLLER_LINE], [PAT_LINE]),
     })).rejects.toThrow(/this controller's own key is no longer in the file/);
   });
@@ -304,7 +304,7 @@ describe("the operator-key verbs — one line of one file, and never this contro
       [[CONTROLLER_LINE, PAT_LINE], []],
     ] as const) {
       const { db, store, keyId } = await setup();
-      const { cleanups } = await runVerb("operator-key-place", db, store, {
+      const { cleanups } = await runOfKind("operator-key-place", db, store, {
         keyId, file: twoStage(before as string[] | null, [CONTROLLER_LINE, PAT_LINE]),
       });
       expect(cleanups).toEqual(expected);
@@ -324,7 +324,7 @@ describe("the operator-key verbs — one line of one file, and never this contro
 
   it("writes the reading back on the row, naming every line and who it belongs to", async () => {
     const { db, store, keyId } = await setup();
-    await runVerb("operator-key-place", db, store, {
+    await runOfKind("operator-key-place", db, store, {
       keyId, file: twoStage([CONTROLLER_LINE, FOREIGN_LINE], [CONTROLLER_LINE, FOREIGN_LINE, PAT_LINE]),
     });
     const row = db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
@@ -339,9 +339,9 @@ describe("the operator-key verbs — one line of one file, and never this contro
     }
   });
 
-  it("the read verb changes nothing and records what it found", async () => {
+  it("the read run kind changes nothing and records what it found", async () => {
     const { db, store } = await setup();
-    const { rec, stepNames, cleanups } = await runVerb("authorized-keys-read", db, store, {
+    const { rec, stepNames, cleanups } = await runOfKind("authorized-keys-read", db, store, {
       file: () => [CONTROLLER_LINE, PAT_LINE],
     });
     expect(stepNames).toEqual([ATTEST_TARGET_STEP, "read-authorized-keys"]);
@@ -355,13 +355,13 @@ describe("the operator-key verbs — one line of one file, and never this contro
     const { db, store } = await setup();
     // The host answered and said the file cannot be opened. That is a reading, and it is written —
     // reporting it as "no keys found" would state as fact the exact thing the run failed to measure.
-    await runVerb("authorized-keys-read", db, store, { file: () => null });
+    await runOfKind("authorized-keys-read", db, store, { file: () => null });
     expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.authorizedKeysState).toBe("unreadable");
   });
 
-  it("fails the read verb when the PROBE did not run — a reading IS the run", async () => {
+  it("fails the read run kind when the PROBE did not run — a reading IS the run", async () => {
     const { db, store } = await setup();
-    await expect(runVerb("authorized-keys-read", db, store, { probeFails: true }))
+    await expect(runOfKind("authorized-keys-read", db, store, { probeFails: true }))
       .rejects.toThrow(/could not be read/);
     // Nothing is written when the probe never ran: the row keeps what it had, rather than a guess.
     expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.authorizedKeysState).toBe("unknown");

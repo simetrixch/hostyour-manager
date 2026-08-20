@@ -36,7 +36,7 @@ import {
 import type { TargetCluster } from "./relocation-target.ts";
 
 /** The tenant relocation port set — the kind-neutral relocation ports over the tenant lifecycle set
- *  (TenantRegistry + resolver + the apex/DNS/argo-sync plumbing the tenant verbs already carry). */
+ *  (TenantRegistry + resolver + the apex/DNS/argo-sync plumbing the tenant run kinds already carry). */
 export interface TenantRelocationPorts extends RelocationPorts, TenantLifecyclePorts {
   platformRepoURL: string;
 }

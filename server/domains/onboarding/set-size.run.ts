@@ -33,7 +33,7 @@ export async function consumerComposition(
 //
 // WHY IT EXISTS. The size table says what `small` means; a unit's registration carries the figures it
 // was written with. Those two are deliberately not the same thing: editing the table must not silently
-// re-size every running customer, and re-sizing one customer must not require a table edit. This verb
+// re-size every running customer, and re-sizing one customer must not require a table edit. This run kind
 // is the bridge, and it is the ONLY way a table change reaches something already deployed.
 //
 // SO IT IS ALSO THE RE-APPLY. Asking for the size a unit already has is not a no-op: the run re-reads
@@ -104,7 +104,7 @@ export function makeSetSizeDef(ports: LifecyclePorts): RunDefinition<SetSizePara
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         // The BOOKS branch, where the consumer registrations stand, plus the consumer's own cluster
-        // branch — the claim every verb that commits a registration makes (suspend-resume.run.ts says
+        // branch — the claim every run kind that commits a registration makes (suspend-resume.run.ts says
         // why the books lock comes first).
         locks: [
           { resource: "git-branch", key: ports.registry.branch },

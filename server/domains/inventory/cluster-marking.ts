@@ -408,7 +408,7 @@ export async function setClusterRelease(
 /** Write ONE cluster's whole map onto the books branch — deploy-slave's mark-slave step, the
  *  writer that puts a slave into the slaves ApplicationSet's world. What the caller does not
  *  state is KEPT from the standing file: the header (the file's own explanation), the release pin
- *  (set-pin's field, written by a different verb) and post-url (install-time), so marking a slave
+ *  (set-pin's field, written by a different run kind) and post-url (install-time), so marking a slave
  *  again never deletes what another writer recorded. Commits only when the marking actually
  *  changed, so a redeploy re-running the step converges instead of committing over itself. */
 export async function writeClusterMarking(

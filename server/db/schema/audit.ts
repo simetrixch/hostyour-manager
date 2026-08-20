@@ -15,7 +15,7 @@ export const audit = sqliteTable("audit", {
   id: text("id").primaryKey(),                                     // "aud_" + ulid
   ts: integer("ts", { mode: "timestamp_ms" }).notNull().default(now),
   actor: text("actor").notNull(),                                  // operator id, or "system"
-  action: text("action").notNull(),                               // dot-namespaced verb
+  action: text("action").notNull(),                               // dot-namespaced action name
   targetKind: text("target_kind", { enum: TARGET_KIND }),
   targetId: text("target_id"),
   runId: text("run_id"),

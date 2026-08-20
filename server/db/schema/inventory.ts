@@ -46,7 +46,7 @@ export const servers = sqliteTable("servers", {
   // (domains/runs/tailnet-probe.ts): adopt's `baseline`, which reads a machine the platform has
   // never touched; deploy-slave's `install-microk8s`, which reads it again right after the host
   // joins — that second one is what a live slave's row actually carries, since the client only
-  // exists after the base install; and the `read-membership` step every tailnet repair verb ends
+  // exists after the base install; and the `read-membership` step every tailnet repair run kind ends
   // with, which is what makes a disconnect or a rejoin visible on the card that offered it. State
   // and document go down in ONE statement, so a membership can never be stored without the moment
   // and the run that produced it. The default is "unknown" — the honest reading of a row nothing
@@ -60,7 +60,7 @@ export const servers = sqliteTable("servers", {
   // nothing else: a drop-in file can say `PasswordAuthentication no` while the daemon answers
   // `yes`, because sshd takes the FIRST occurrence of a keyword and reads its drop-in directory in
   // alphabetical order. Three moments write it — adopt's `disable-password-login`, which reads the
-  // host before it shuts the door and again after, and the two password-login verbs, which do the
+  // host before it shuts the door and again after, and the two password-login run kinds, which do the
   // same on a host that is already adopted. The default is "unknown", the honest reading of a row
   // nothing has looked at, and the only literal no step writes.
   passwordLoginState: text("password_login_state", { enum: SERVER_PASSWORD_LOGIN_STATE }).notNull().default("unknown"),
@@ -72,7 +72,7 @@ export const servers = sqliteTable("servers", {
   // classifies each line against two things this controller knows — the marker adopt wrote and the
   // fingerprint of the ssh_key credential sealed for this server. Four moments write it: adopt's
   // `baseline`, which reads a machine straight after the controller's own key landed on it, and the
-  // three operator-key verbs. The default is "unknown", the honest reading of a row nothing has
+  // three operator-key run kinds. The default is "unknown", the honest reading of a row nothing has
   // looked at, and the only literal no step writes.
   authorizedKeysState: text("authorized_keys_state", { enum: SERVER_AUTHORIZED_KEYS_STATE }).notNull().default("unknown"),
   authorizedKeysJson: text("authorized_keys_json", { mode: "json" }),  // ServerAuthorizedKeysV0 (shared/operator-keys.ts)
@@ -157,7 +157,7 @@ export const apps = sqliteTable("apps", {
 // is mutable (suspend/resume field-flips, add-app), unlike the append-once `apps` row — hence updatedAt.
 // Written by the create-tenant Run's `record-provisional` step (the FIRST writer — it records INTENT
 // before any git/kube mutation, status "provisioning", so a run that dies mid-way still leaves a row
-// every removal verb can name) and settled to "active" by its `record-inventory` step; read by
+// every removal run kind can name) and settled to "active" by its `record-inventory` step; read by
 // add-app/suspend/resume/offboard. `lastRunId` is a loose ref to runs(id) (text, not a Drizzle FK) to
 // avoid an inventory<->runs import cycle — same convention as apps.lastRunId.
 export const tenants = sqliteTable("tenants", {

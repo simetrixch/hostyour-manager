@@ -3,7 +3,7 @@
 //
 // THE PROBLEM. An ORPHAN is a tenant that exists in GitOps + ArgoCD (pointer, fan-out, isolation
 // AppProject, namespace, Tenant CR, Vault path, Mongo databases) with NO tenants row. Every other
-// removal verb (tenant-offboard / -suspend / remove-app) resolves its target BY that row (lifecycle.ts
+// removal run kind (tenant-offboard / -suspend / remove-app) resolves its target BY that row (lifecycle.ts
 // loadTenantCluster throws NOT_FOUND), and the Tenants list is a projection of the same rows, so an
 // orphan is not merely unremovable: it is INVISIBLE. create-tenant no longer MAKES orphans — its
 // record-provisional step writes the row before the first mutation — but three sources remain and this
@@ -127,7 +127,7 @@ export type CreateTenantPurgeTarget = z.infer<typeof CreateTenantPurgeTarget>;
  *  "ok", the "skipped" an abort's abandonUnfinished leaves on a step that never completed, and the
  *  `undefined` of a run with no such step row — falls on the side of "it may have mutated", deliberately:
  *  overstating what a run left behind costs the operator a purge that reaps nothing, while understating
- *  it hides a deployed tenant that no other verb in the product can name. */
+ *  it hides a deployed tenant that no other run kind in the product can name. */
 function startedDeploying(db: Db, runId: string): boolean {
   const status = getRunStepStatus(db, runId, ATTEST_TARGET_STEP);
   return status !== "pending" && status !== "failed";

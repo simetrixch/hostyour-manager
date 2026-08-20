@@ -17,8 +17,8 @@ export type ServerStatus = (typeof SERVER_STATUS)[number];
  *  Named once because two readers must key on the same set, and a disagreement between them shows
  *  as a button that plans a run the server then refuses: the password-login plan, which will not
  *  shut a host's password door unless something else can still reach it, and the card that offers
- *  that verb. `adoptedAt` is NOT that set — the master's row carries none and it is the one host
- *  most in need of the verb. */
+ *  that run kind. `adoptedAt` is NOT that set — the master's row carries none and it is the one host
+ *  most in need of the run kind. */
 export function hasControllerKey(status: ServerStatus): boolean {
   return status !== "bare" && status !== "adopting";
 }
@@ -218,13 +218,13 @@ export type DriftVerdict = (typeof DRIFT_VERDICT)[number];
 //                    was live in GitOps with no apps row (its onboard died before record-inventory, or
 //                    the registration was written by hand), so the row is the registration's word
 //                    attested against the live cluster, never gate-validated by that run. Consumer-only
-//                    — there is no adopt verb for a tenant.
+//                    — there is no adopt run kind for a tenant.
 //
 // Two literals, not three. "imported" was the consumer onboard's word for exactly what the tenant
 // writer called "controller", so one act carried two names and a reader of either concluded they meant
 // different things: a query for one word answered about one unit kind and silently left out the other.
 // Its declared second meaning — a consumer taken over from a cluster this platform did not build — was
-// reserved for a connect-cluster verb that is in no RUN_KIND, so nothing else wrote it either.
+// reserved for a connect-cluster run kind that is in no RUN_KIND, so nothing else wrote it either.
 //
 // The column is plain SQLite text with no CHECK constraint (like tenants.status), so this list is a
 // TypeScript-side narrowing only: the DDL, the migration baseline and its snapshot are unchanged. No
@@ -319,7 +319,7 @@ export type AuthorizedKeyKind = (typeof AUTHORIZED_KEY_KIND)[number];
 //                     on it that the Controller cannot also take off.
 //   - "unaccounted" — at least one line is FOREIGN, or at least one did not read as a key here. The
 //                     point of the axis: a departed operator's hand-placed key, or an image's
-//                     provisioning key, is a working way in that no verb here can remove, and it
+//                     provisioning key, is a working way in that no run kind here can remove, and it
 //                     must not sit unseen — and a line this build cannot read may be a certificate
 //                     sshd authenticates with, which is the same thing with a different cause.
 export const SERVER_AUTHORIZED_KEYS_STATE = ["unknown", "unreadable", "accounted", "unaccounted"] as const;
@@ -333,34 +333,34 @@ export type ServerAuthorizedKeysState = (typeof SERVER_AUTHORIZED_KEYS_STATE)[nu
 export const CREDENTIAL_KIND = ["ssh_key", "pat", "kubeconfig", "other"] as const;
 export type CredentialKind = (typeof CREDENTIAL_KIND)[number];
 
-// Every verb the Controller can run. A literal with no definition behind it is a verb the UI offers,
+// Every run kind the Controller can run. A literal with no definition behind it is a run kind the UI offers,
 // the API accepts and nothing can execute — the plan route answers "unknown run kind" only after the
-// operator has already asked for it. A verb therefore enters this list WITH its implementation and
+// operator has already asked for it. A run kind therefore enters this list WITH its implementation and
 // leaves it WITH its implementation, never before either. Two checks keep that true: the source census
 // (server/domains/runs/registry-census.test.ts) proves every literal is implemented SOMEWHERE, and the
-// registry.total boot check (server/boot/selfchecks.ts) proves the running process offers no verb it
+// registry.total boot check (server/boot/selfchecks.ts) proves the running process offers no run kind it
 // cannot serve, via the RUN_FAMILY grouping below.
 export const RUN_KIND = [
   "noop",                                                       // permanent resume-proof fixture
-  // The cluster verbs. `adopt` takes a bare machine into service, `deploy-slave` turns an adopted
+  // The cluster run kinds. `adopt` takes a bare machine into service, `deploy-slave` turns an adopted
   // server into a live slave, `redeploy` rebuilds the machine layer of a cluster that is already
   // live, and `release` raises the platform version the cluster stands on. Distinct on purpose:
-  // each answers a different question, and a boolean on another verb hides that.
+  // each answers a different question, and a boolean on another run kind hides that.
   "adopt", "deploy-slave", "redeploy", "release",
-  // The tailnet repair verbs, on a host that is already deployed. Three acts, not one with a
+  // The tailnet repair run kinds, on a host that is already deployed. Three acts, not one with a
   // switch: `tailnet-disconnect` takes the host off the private network and leaves it there,
   // `tailnet-reconnect` puts it back with the credential the host still holds, and
   // `tailnet-rejoin` is for when it holds none — the master mints a fresh one, which only the
-  // coordinator can do. Each reaches its host on the PUBLIC address, because a verb cannot
+  // coordinator can do. Each reaches its host on the PUBLIC address, because a run kind cannot
   // travel over the network it is repairing.
   "tailnet-disconnect", "tailnet-reconnect", "tailnet-rejoin",
-  // The password-login verbs, on a host this controller already holds a key for. `password-login-
+  // The password-login run kinds, on a host this controller already holds a key for. `password-login-
   // disable` shuts the sshd password door and destroys the bootstrap password sealed beside the
   // server row — two doors, and only the second one outlives the machine's configuration.
   // `password-login-enable` opens the sshd door again for a repair, which is the only reason it
   // exists: adoption already leaves the door shut.
   "password-login-disable", "password-login-enable",
-  // The operator-key verbs, on a host this controller already holds a key for. The two acts are
+  // The operator-key run kinds, on a host this controller already holds a key for. The two acts are
   // named for what they place — one human's key, under its own label and its own marker, so a
   // removal can never reach the controller's own line. The read is named for the FILE, because it
   // reports every key in it and not only the ones this platform put there: a key nobody here placed
@@ -373,15 +373,15 @@ export const RUN_KIND = [
   // it completes, because it moves no secret of its own — writing Vault and deleting the target
   // Secret are the operator's two steps before it.
   // consumer + tenant, because the gap is the same on both sides and a tenant owns one namespace
-  // PER MEMBER — so the tenant verb walks them, it is not the consumer verb with another id.
+  // PER MEMBER — so the tenant run kind walks them, it is not the consumer run kind with another id.
   "restart-workloads", "tenant-restart-workloads",
   // The ONLY way a size-table change reaches something already deployed: it writes the table's
   // CURRENT figures into the unit's registration. Asking for the size a unit already has is therefore
-  // not a no-op but the re-apply — which is why the verb is named for the act (set a size) and not for
+  // not a no-op but the re-apply — which is why the run kind is named for the act (set a size) and not for
   // a change (resize), and why editing the table alone moves nothing.
   "set-size", "tenant-set-size",
   "adopt-consumer",                                             // ONB — reconstruct the apps row from the GitOps pointer; NOT "adopt" (taken by the server-adopt above)
-  // The relocation verbs — ONE mechanism over the Hetzner Storage Box, three slices of it:
+  // The relocation run kinds — ONE mechanism over the Hetzner Storage Box, three slices of it:
   // backup = close access, dump every store, verify, reopen (the box folder stays); restore = provide
   // the target and rebuild the unit from a folder; migrate = both halves plus the repoint and the
   // one-record DNS switch. Never three code paths — the defs compose shared step builders.

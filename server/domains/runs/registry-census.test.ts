@@ -5,22 +5,22 @@ import { join } from "node:path";
 import { RUN_KIND, type RunKind } from "../../../shared/enums.ts";
 import { KIND_GUARDS } from "../../executor/guards.ts";
 
-// A census over the verb list, not a behaviour test. RUN_KIND is what the UI offers, what the plan
+// A census over the run kind list, not a behaviour test. RUN_KIND is what the UI offers, what the plan
 // route accepts and what the runs table records, so a literal with no definition behind it is not an
-// inert leftover: the operator finds the verb, asks for it, and only then learns nothing implements it.
-// This asserts it against the SOURCE, which is where a verb is actually implemented or not. The boot
+// inert leftover: the operator finds the run kind, asks for it, and only then learns nothing implements it.
+// This asserts it against the SOURCE, which is where a run kind is actually implemented or not. The boot
 // check registry.total (server/boot/selfchecks.ts) asserts the narrower runtime property — no family
 // half-registered — because a definition that exists but is not wired in one configuration is a
 // configuration, while a definition that does not exist anywhere is a lie in the enum.
 //
 // It reads the definition modules rather than importing them: a definition is built by a factory that
 // takes ports, so importing one would mean supplying adapters, and the census would then be testing
-// the wiring instead of the verb list.
+// the wiring instead of the run kind list.
 
 const SERVER_DIR = fileURLToPath(new URL("../..", import.meta.url));
 
 /** Every `.ts` file under server/, minus tests and fixtures — the definitions live in two places
- *  (domains/runs/defs for the cluster verbs, domains/onboarding for the unit verbs), and hard-coding
+ *  (domains/runs/defs for the cluster run kinds, domains/onboarding for the unit run kinds), and hard-coding
  *  those two directories is how a definition moved to a third would start reading as missing. */
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -47,7 +47,7 @@ function implementedKinds(): Set<string> {
 }
 
 describe("run-kind census: every RUN_KIND literal has a definition behind it", () => {
-  it("names verbs at all (the census has something to check)", () => {
+  it("names run kinds at all (the census has something to check)", () => {
     expect(RUN_KIND.length).toBeGreaterThan(10);
     expect(implementedKinds().size).toBeGreaterThan(10);
   });
@@ -58,17 +58,17 @@ describe("run-kind census: every RUN_KIND literal has a definition behind it", (
     expect(orphans, `RUN_KIND literals no run definition implements: ${orphans.join(", ")}`).toEqual([]);
   });
 
-  it("keeps the guard table total over the same list, with no entry for a verb that is gone", () => {
+  it("keeps the guard table total over the same list, with no entry for a run kind that is gone", () => {
     // KIND_GUARDS is a Record<RunKind, …>, so TypeScript already forbids a missing entry. What it
-    // cannot forbid is the entry OUTLIVING its verb — a key removed from RUN_KIND leaves the object
+    // cannot forbid is the entry OUTLIVING its run kind — a key removed from RUN_KIND leaves the object
     // literal compiling as an excess property in some positions — so the two lists are compared here.
     expect(Object.keys(KIND_GUARDS).sort()).toEqual([...RUN_KIND].sort());
   });
 
-  it("files every guard entry under a verb the source implements", () => {
+  it("files every guard entry under a run kind the source implements", () => {
     const implemented = implementedKinds();
     const guarded = (Object.keys(KIND_GUARDS) as RunKind[]).filter((kind) => KIND_GUARDS[kind].length > 0);
     const dangling = guarded.filter((kind) => !implemented.has(kind));
-    expect(dangling, `guards armed on verbs nothing implements: ${dangling.join(", ")}`).toEqual([]);
+    expect(dangling, `guards armed on run kinds nothing implements: ${dangling.join(", ")}`).toEqual([]);
   });
 });

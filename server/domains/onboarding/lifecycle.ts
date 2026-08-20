@@ -1,5 +1,5 @@
-// Shared building blocks for the lifecycle Runs: the CONSUMER verbs (offboard,
-// suspend, resume — LifecyclePorts) and the TENANT verbs (remove-app, tenant-suspend/-resume/
+// Shared building blocks for the lifecycle Runs: the CONSUMER run kinds (offboard,
+// suspend, resume — LifecyclePorts) and the TENANT run kinds (remove-app, tenant-suspend/-resume/
 // -offboard — TenantLifecyclePorts). They need NO gate-runner — they move/remove/flip the pointer
 // and wait for the master ArgoCD to reconcile — so they fit the standard synchronous plan() path.
 // The Controller acts master-locally (pod on the master), so the clients ride in the *Ports type,
@@ -76,7 +76,7 @@ export function attestTargetStep(ports: LifecyclePorts, appId: string): Step {
 
 /** Does the unit stay registered at another stage? Every teardown step whose object belongs to the UNIT
  *  rather than to the unit-in-a-stage has to ask before it removes anything, and both consumer removal
- *  verbs (offboard, purge) ask through this one helper.
+ *  run kinds (offboard, purge) ask through this one helper.
  *
  *  What is per stage, because a cluster carries exactly one stage and a unit's stages therefore sit on
  *  different clusters: the stage registration, the generated Application, the isolation AppProject, the
@@ -118,7 +118,7 @@ export async function unitStaysRegistered(
   return true;
 }
 
-/** Take the relocation mark off the unit's namespaces — the FIRST thing every removal verb does, on
+/** Take the relocation mark off the unit's namespaces — the FIRST thing every removal run kind does, on
  *  the cluster it is about to strip, before it removes the registration.
  *
  *  A move writes CLAIM_RELOCATING_ANNOTATION on the SOURCE namespaces at repoint, and while it stands
@@ -126,11 +126,11 @@ export async function unitStaysRegistered(
  *  (apps/service-provisioner/templates/configmap.yaml). Only two things ever take it off again: a
  *  later move ARRIVING on that cluster, and the source namespace being deleted by clear-source. A move
  *  that dies between repoint and clear-source and is then abandoned therefore leaves it standing — and
- *  a mark standing on a cluster is a removal verb's problem, because the prune that a registration
+ *  a mark standing on a cluster is a removal run kind's problem, because the prune that a registration
  *  removal sets off runs the very teardown the mark disarms: offboard and purge would report success
  *  while every database of the unit stayed on the cluster, with nothing recording that it did.
  *
- *  Clearing here rather than reading and refusing is right because a mark this verb finds is stale by
+ *  Clearing here rather than reading and refusing is right because a mark this run kind finds is stale by
  *  construction: a move and a removal of the same unit cannot run at once (both claim the master-kube
  *  lock and the registration branch), so no live move is relying on it.
  *

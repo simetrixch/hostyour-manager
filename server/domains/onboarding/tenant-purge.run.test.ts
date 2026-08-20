@@ -1,4 +1,4 @@
-// The PLAN half of tenant-purge — what the verb freezes before anything mutates: the target it
+// The PLAN half of tenant-purge — what the run kind freezes before anything mutates: the target it
 // resolves (row-derived or guid-only), the ordered steps, the locks, and every refusal that can be
 // made from params and inventory alone. The EXECUTION half is tenant-purge.exec.test.ts; the two
 // share this file's fixtures through the header both copies carry, and they were split along the

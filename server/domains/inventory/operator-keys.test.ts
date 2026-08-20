@@ -110,7 +110,7 @@ describe("operator keys — the rows", () => {
     const db = setup();
     const view = createOperatorKey(db.db, "op_me", { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
     recordKeys(db, [PAT_FP]);
-    // Deleting the row touches no machine, and the removal verb needs the row to name the line —
+    // Deleting the row touches no machine, and the removal run kind needs the row to name the line —
     // so a row deleted now leaves a working key nothing here can take off.
     expect(() => deleteOperatorKey(db.db, "op_me", view.id)).toThrowError(/s1/);
     expect(() => deleteOperatorKey(db.db, "op_me", view.id)).toThrowError(/with an operator-key-remove run first/);

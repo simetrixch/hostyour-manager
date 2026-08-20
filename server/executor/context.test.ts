@@ -191,7 +191,7 @@ describe("RunContext — multi-target SSH cache (one session per target host and
   });
 });
 
-// The seam the tailnet repair verbs rest on: WHICH of a server's two addresses a session opens on
+// The seam the tailnet repair run kinds rest on: WHICH of a server's two addresses a session opens on
 // is the plan's to state, and the cache is keyed on the address that was actually taken. Measured
 // here on the RunContext, because the property is about address selection, not about connectivity —
 // taking a network down is not something a test can reach.

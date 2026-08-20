@@ -9,11 +9,11 @@ import { purgeBootstrapPassword } from "../../inventory/write.ts";
 import { recordPasswordLoginReading, SSHD_HELPERS } from "../password-login-probe.ts";
 import { loadServer } from "./deploy-slave.kit.ts";
 
-// The shared half of the two password-login verbs (defs/password-login.ts) and of the adoption step
+// The shared half of the two password-login run kinds (defs/password-login.ts) and of the adoption step
 // that shuts the door in the first place: the scripts they ship to a host, the steps they are
 // composed of, and the one plan builder they state their target in.
 //
-// WHY THIS IS A VERB AND NOT A CHECKBOX. Nothing this controller stores changes what a daemon
+// WHY THIS IS A RUN KIND AND NOT A CHECKBOX. Nothing this controller stores changes what a daemon
 // answers on port 22. A switch that flipped a column would be the same shape as the file that
 // caused this work — a thing that looks like protection, is inert, and stops the next reader
 // looking. The switch is a run because only a run can write the drop-in, validate it, reload the
@@ -90,7 +90,7 @@ const READ_EFFECTIVE = `read_effective() {
  *  disabled, and a host whose every list is skipped authenticates nobody — it logs "contains
  *  disabled method, skipping" and has nothing left to try. So a host carrying
  *  `publickey,keyboard-interactive` (the usual PAM two-factor setup) or `publickey,password` is
- *  shut out by the very change this verb makes, and neither `sshd -t` nor the read-back would say
+ *  shut out by the very change this run kind makes, and neither `sshd -t` nor the read-back would say
  *  so: the file is valid, `passwordauthentication no` is exactly what was asked for, and OpenSSH
  *  only meets the contradiction at the next login attempt. This is the one check that has to run
  *  BEFORE anything is written. */
@@ -225,7 +225,7 @@ export const restorePasswordLoginCleanup: Cleanup = {
   },
 };
 
-/** Step 0 of both verbs, and the reason they are declared mutating: the run changes which
+/** Step 0 of both run kinds, and the reason they are declared mutating: the run changes which
  *  credentials a machine accepts, so it proves the box answering the address is the box that was
  *  adopted before it changes anything on it. */
 function attestTargetStep(serverId: string): Step {
@@ -240,7 +240,7 @@ function attestTargetStep(serverId: string): Step {
   };
 }
 
-/** The disable verb's own key-login proof, spelled as its own step so the operator sees it in the
+/** The disable run kind's own key-login proof, spelled as its own step so the operator sees it in the
  *  plan before approving. The session it opens IS a key session — ctx.ssh() authenticates with the
  *  sealed ssh_key credential and nothing else — so reaching the two commands is the proof; the
  *  daemon-side half of the same question (`pubkeyauthentication yes`) is asserted by the act script
@@ -338,7 +338,7 @@ export function purgeBootstrapPasswordStep(serverId: string): Step {
   };
 }
 
-/** The verbs this kit builds — every RUN_KIND literal in the family, named by the family rather
+/** The run kinds this kit builds — every RUN_KIND literal in the family, named by the family rather
  *  than listed, so a third one cannot be added to the enum without the maps below refusing to
  *  compile. */
 export type PasswordLoginKind = Extract<RunKind, `password-login-${string}`>;
@@ -372,15 +372,15 @@ const WARNINGS: Record<PasswordLoginKind, string[]> = {
 };
 
 /**
- * The plan both verbs are approved on. Nothing exotic: the host is reached on its usual address,
- * because unlike the tailnet verbs this act does not travel over the thing it changes — reload
+ * The plan both run kinds are approved on. Nothing exotic: the host is reached on its usual address,
+ * because unlike the tailnet run kinds this act does not travel over the thing it changes — reload
  * leaves the established session alone.
  *
  * The target OWNS its host, which derives the `server:<id>` lock every host-mutating run takes.
  * Without it, this could shut the password door on a machine an adopt in flight was still using a
  * password on.
  *
- * The MASTER is a legitimate target, unlike in the tailnet verbs: their reason for refusing it is
+ * The MASTER is a legitimate target, unlike in the tailnet run kinds: their reason for refusing it is
  * that it runs the coordinator the others log in to, and nothing here has a counterpart to that.
  * The master is an internet-facing machine with an sshd like any other.
  */

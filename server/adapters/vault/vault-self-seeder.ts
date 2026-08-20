@@ -91,7 +91,7 @@ export class VaultSelfSeeder implements VaultSeeder {
 
   async seedBuildRepoPat(input: BuildRepoPatSeedInput): Promise<VaultSeedOutcome> {
     // cas=0 makes the write attest-or-create: the seven hand-seeded platform units re-run the onboard
-    // verb over a path that already stands, and the cas conflict is the existence proof
+    // run kind over a path that already stands, and the cas conflict is the existence proof
     // (`created: false`) without any read, not even of metadata.
     const { addr, token } = await this.login();
     try {

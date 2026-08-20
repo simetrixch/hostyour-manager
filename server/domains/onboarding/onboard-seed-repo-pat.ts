@@ -11,7 +11,7 @@ import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
  *  read. The controller runs on the build-plane cluster, so its own Vault IS the build plane's and
  *  there is no target-cluster resolution. Stage-free: one build plane, one PAT per unit.
  *
- *  ATTEST-OR-CREATE (cas=0): the seven platform units were hand-seeded before the verb existed, so a
+ *  ATTEST-OR-CREATE (cas=0): the seven platform units were hand-seeded before the run kind existed, so a
  *  path that already stands is attested (`created: false`) and never overwritten — the write-only
  *  rule on data holds, and the cas conflict is the existence proof. UNCONDITIONAL in both onboard
  *  forms and fail-closed: a failed write fails the run. The value is opened from the sealed store

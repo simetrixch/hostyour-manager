@@ -119,7 +119,7 @@ export function setupWebhookStep(ports: OnboardPorts, p: OnboardParams): Step {
  *  hook that would fire spurious builds on a not-fully-onboarded consumer.
  *  Fail-soft (removeConsumerWebhook): a removal failure never blocks the abort.
  *
- *  PER UNIT, so it asks the registration tree first, exactly as the removal verbs do. The repo carries
+ *  PER UNIT, so it asks the registration tree first, exactly as the removal run kinds do. The repo carries
  *  ONE hook however many stages deploy from it, and setup-webhook registers this cleanup even when its
  *  ensureHook only found the first stage's hook already there — so without the read, aborting the
  *  onboard of a second stage deletes the hook the live stage releases through, and its pushes stop

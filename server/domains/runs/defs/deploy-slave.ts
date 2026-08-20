@@ -15,6 +15,7 @@ import {
   type DeploySlavePorts, type SlaveInstallInput, type SlaveTarget,
 } from "./deploy-slave.kit.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, type ExtraAnswers } from "./ansiwise-run.kit.ts";
+import { placeAnsiwiseStep } from "./place-ansiwise.ts";
 import { masterCheckoutsScript, SLAVE_API_PORT } from "./deploy-slave.remote.ts";
 import { refreshCheckoutStep } from "./cluster-release.kit.ts";
 import { rejoinStep, readMembershipStep } from "./tailnet.kit.ts";
@@ -33,6 +34,10 @@ import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
 // its registration (register-slave); the SLAVE is built by the same three machine-layer programs
 // every cluster is (deploy-host, deploy-cluster, deploy-gitops), joins the private network with a
 // credential the master mints, and emits the one credentials file the registration is made from.
+//
+// Before the first of those programs, place-ansiwise puts the binary they are driven through and the
+// checkout they are read from onto the slave: a machine adopted from bare metal carries neither, and
+// every program step would otherwise open a conversation with a command that is not there.
 //
 // mutating: true ⇒ the attest-target law (guards.ts assertGuardsArmed) requires
 // steps()[0].name === "attest-target", and slaveCryptoGate restricts a plaintext-keystore install
@@ -78,7 +83,7 @@ export const SLAVE_INSTALL_INPUTS = [
 ];
 
 /** Register [cleanup] before the step runs — for a step whose body is a generic program step and
- *  cannot know which compensating action the VERB arms around it. Registered before the first
+ *  cannot know which compensating action the RUN KIND arms around it. Registered before the first
  *  mutating act, because a step that dies halfway leaves a partial resource only the cleanup can
  *  compensate (every cleanup here tolerates already-absent state, so early registration is safe). */
 function armed(cleanup: Cleanup | undefined, step: Step): Step {
@@ -120,14 +125,14 @@ function operatorKeyAnswer(serverId: string): ExtraAnswers {
   };
 }
 
-/** The install step list BOTH cluster verbs run: deploy-slave takes a READY server through it, and
+/** The install step list BOTH cluster run kinds run: deploy-slave takes a READY server through it, and
  *  redeploy re-runs it against a slave that is already live. `mode` decides two things. Per step,
  *  whether the compensating action that would UNDO it is armed — never on a redeploy, where every
  *  one of them undoes a WORKING slave. And whether the two BIRTH acts run at all: the branch cut
  *  (a slave's branch is cut once; the program's push takes no force, so re-cutting a standing
  *  branch is refused rather than rewritten) and the tailnet join (the join program deliberately
  *  discards the node key first, which on a LIVE slave would rotate the address the cluster map
- *  states — repairing a live slave's membership is the tailnet verbs' own job). */
+ *  states — repairing a live slave's membership is the tailnet run kinds' own job). */
 export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePorts & AnsiwisePorts): Step[] {
   const { target, mode } = input;
   const sid = target.serverId;
@@ -287,14 +292,19 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         ctx.checkpoint({ branch: domain, apiHost, changed });
       },
     },
+    // The binary every program act below is spoken to through, and the checkout those programs are
+    // read from and act on. It stands FIRST among the machine-side acts because none of them can run
+    // without it: `ansiwise serve` is a binary reading a catalogue, and a machine at its first
+    // installation carries neither. Idempotent by measurement, which is what lets a redeploy run the
+    // same step against a machine that already carries both.
+    placeAnsiwiseStep(target, ports),
     // ---- the machine layer, exactly as every cluster gets it: the three deployment programs on
     // the slave's own surface, each dry-proven then run. deploy-host makes the box workable (the
     // packages, the key proof) and must precede the checkout refresh, which needs git.
     ansiwiseProgramStep(target, "deploy-host", ports, { extra: operatorKeyAnswer(sid) }),
     // The programs read /srv/hostyour-cloud as it stands and deliberately fetch nothing — this is
-    // what brings the slave's checkout onto the branch the cut just pushed. A machine without the
-    // checkout is refused here BY NAME rather than cloned: no program puts the platform checkout
-    // on a slave yet, and this manager does not invent one — the refusal names the path to stand up.
+    // what brings the slave's checkout onto the branch the cut just pushed. The checkout itself was
+    // placed above; this step is what moves it onto that branch's head.
     refreshCheckoutStep(target),
     armed(redeploying ? undefined : microk8sResetSlaveCleanup,
       ansiwiseProgramStep(target, "deploy-cluster", ports, { extra: machineAnswers })),
@@ -432,8 +442,9 @@ export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): Run
   // microk8s-reset-slave (deploy-cluster) → remove-slave-marking (mark-slave, armed first and so
   // run last — by then remove-slave has already dropped the map's slave part itself, FIRST, which
   // is that program's own contract, so the last cleanup finds nothing left to drop). attest-target,
-  // slave-preflight and the checkout steps create nothing a cleanup could compensate (the install
-  // branch on the remote is the operator's to keep — a retry resumes onto it).
+  // slave-preflight and the checkout steps arm nothing: the install branch on the remote is the
+  // operator's to keep, and the binary and the checkout place-ansiwise puts on the machine are what a
+  // retry resumes onto — a cleanup that removed them would buy a second download and a second clone.
   cleanups: () => [microk8sResetSlaveCleanup, removeSlaveCleanup(ports), removeSlaveMarkingCleanup(ports)],
   onTerminal: (status, { db, params }) => {
     if (status === "succeeded") return; // the register step set the terminal states

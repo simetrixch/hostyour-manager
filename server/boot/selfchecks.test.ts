@@ -87,7 +87,7 @@ describe("boot self-checks", () => {
 
   // The boot of a controller with onboarding off: buildOnboarding contributes no defs, so the consumer
   // and tenant families are absent WHOLE and their routes answer 501 NOT_CONFIGURED. Such a boot must
-  // serve the verbs it does hold, so every blocking check has to pass.
+  // serve the run kinds it does hold, so every blocking check has to pass.
   it("passes every blocking check with NEITHER onboarding family wired", async () => {
     const { db, store, bus, registry } = fresh(config);
     const results = [...runSelfChecks({ db, config, store, bus, registry }), ...(await runAsyncSelfChecks({ db, config }))];
@@ -97,7 +97,7 @@ describe("boot self-checks", () => {
     expect([...registry.keys()].sort()).toEqual([...RUN_FAMILY.fixture, ...RUN_FAMILY.cluster].sort());
   });
 
-  // The counter-probe of registry.total: HALF a family — some of its verbs wired, some missing — is
+  // The counter-probe of registry.total: HALF a family — some of its run kinds wired, some missing — is
   // the partial-wiring bug the check exists to catch, and it must ABORT boot rather than be noted.
   // Removing one definition from an otherwise wired family is that state exactly.
   it("registry.total is RED when a wired family is missing one of its kinds, and that fails boot", () => {
@@ -112,19 +112,19 @@ describe("boot self-checks", () => {
     expect(() => assertBlockingChecksPass(results)).toThrow(/registry\.total/);
   });
 
-  // The second counter-probe: a literal belonging to NO family — the definition-less verb that has no
+  // The second counter-probe: a literal belonging to NO family — the definition-less run kind that has no
   // family to be half of. RUN_KIND is `as const`, so such a literal cannot be added in TypeScript; the
   // probe appends to the runtime array and restores it, which is the state that build would ship.
   it("registry.total is RED when a RUN_KIND literal belongs to no family, and that fails boot", () => {
     const { db, store, bus, registry } = fresh();
     const kinds = RUN_KIND as unknown as string[];
-    kinds.push("ghost-verb");
+    kinds.push("ghost-kind");
     try {
       const results = runSelfChecks({ db, config, store, bus, registry });
       const check = results.find((r) => r.name === "registry.total");
       expect(check?.kind).toBe("blocking");
       expect(check?.ok).toBe(false);
-      expect(check?.detail).toContain("ghost-verb");
+      expect(check?.detail).toContain("ghost-kind");
       expect(() => assertBlockingChecksPass(results)).toThrow(/registry\.total/);
     } finally {
       kinds.pop();
@@ -139,7 +139,7 @@ describe("boot self-checks", () => {
     const { registry } = fresh();
     expect([...RUN_KIND].filter((kind) => !registry.has(kind))).toEqual([]);
     // ...and every registered definition answers to the kind it is filed under, so a def registered
-    // twice under the wrong key could not make the check pass on a verb nothing implements.
+    // twice under the wrong key could not make the check pass on a run kind nothing implements.
     for (const kind of RUN_KIND) expect((registry.get(kind) as AnyRunDefinition).kind).toBe(kind);
   });
 

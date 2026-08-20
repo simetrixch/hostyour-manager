@@ -110,7 +110,7 @@ export async function assertOnboardAbortable(ports: OnboardPorts, p: OnboardPara
   if (row && CONSUMER_LIVE_STATUS.includes(row.status)) {
     throw errValidation(
       `consumer "${p.consumerName}" is ${row.status} on ${p.domain} (${p.stage}) and its registration still stands — ${rollback}: un-deploying a consumer that is serving. ` +
-        `Offboard is the removal verb for a serving consumer. This run has nothing left to roll back; delete the run once you no longer need its log.`,
+        `Offboard is the removal run kind for a serving consumer. This run has nothing left to roll back; delete the run once you no longer need its log.`,
     );
   }
   const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
@@ -119,7 +119,7 @@ export async function assertOnboardAbortable(ports: OnboardPorts, p: OnboardPara
     throw errValidation(
       `Application ${p.argoAppName} reads Synced/Healthy on ${p.domain} — the run failed on a watch, but the deployment it watched for has since SUCCEEDED, and ${rollback}: un-deploying work that landed. ` +
         `Retry the run from its failed step instead: every step re-reads the world, so the retry passes the watch, records the consumer in the inventory and the run settles green. ` +
-        `Offboard is the removal verb once it is recorded.`,
+        `Offboard is the removal run kind once it is recorded.`,
     );
   }
 }

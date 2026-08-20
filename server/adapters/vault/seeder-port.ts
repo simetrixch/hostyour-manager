@@ -207,7 +207,7 @@ export interface VaultSeeder {
   seedMongodb(input: MongodbSeedInput): Promise<VaultSeedOutcome>;
   /** Write the unit's build repo PAT to secret/build/<name>/repo-pat — ONCE (cas=0). An existing
    *  entry is ATTESTED, never overwritten (`created: false`): the seven hand-seeded platform units
-   *  re-run the onboard verb over a path that already stands, and the cas conflict is exactly the
+   *  re-run the onboard run kind over a path that already stands, and the cas conflict is exactly the
    *  existence proof that keeps the write-only rule intact (no read, not even of metadata).
    *  Fail-closed on every other error. */
   seedBuildRepoPat(input: BuildRepoPatSeedInput): Promise<VaultSeedOutcome>;

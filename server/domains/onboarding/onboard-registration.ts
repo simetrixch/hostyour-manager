@@ -68,7 +68,7 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
 }
 
 /** The build-only form's registration commit: build.yaml alone — a build-only unit has no stage
- *  file. For a unit hand-seeded before the verb existed this is the ATTEST case: identical content
+ *  file. For a unit hand-seeded before the run kind existed this is the ATTEST case: identical content
  *  commits nothing (the platform repo's empty-staged-diff no-op), a changed fact (a new sealed
  *  credential id, a new build name) commits the correction — either way the controller is the writer
  *  of the registration. */

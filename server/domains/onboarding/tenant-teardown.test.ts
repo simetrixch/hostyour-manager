@@ -366,11 +366,11 @@ describe("tenantTeardownSteps — the settle guard", () => {
     expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()?.status).toBe("offboarded");
   });
 
-  it("the pointer-only REPLACE flavour settles 'offboarded' — it deletes no cluster state, so purge is still its verb", () => {
+  it("the pointer-only REPLACE flavour settles 'offboarded' — it deletes no cluster state, so purge is still its run kind", () => {
     // The replace un-deploys the same-subdomain tenant it displaces and keeps everything that tenant IS
     // (namespace, Tenant CR, Vault path, object-storage credential, Mongo databases). Recording it "purged"
     // would tell the operator a deprovision happened that did not, and would drop the row off the Tenants
-    // page — taking with it the one verb that could still reap what the replace deliberately left standing.
+    // page — taking with it the one run kind that could still reap what the replace deliberately left standing.
     expect(REPLACE_TEARDOWN.settledStatus).toBe("offboarded");
   });
 
@@ -447,7 +447,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
     // same fail-soft teardown; only `settledStatus` differs, and the rows have to follow it. When the
     // builder hard-coded "offboarded" a finished purge was indistinguishable from an offboard, so a fully
     // deprovisioned tenant stayed on the Tenants page's "Offboarded tenants" panel and went on offering
-    // the purge that had just completed — the most destructive verb in the product looking like a no-op.
+    // the purge that had just completed — the most destructive run kind in the product looking like a no-op.
     seedTenantRow();
     const reg = new TenantRegistry(new FakePlatformRepo(), CLUSTERS);
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });

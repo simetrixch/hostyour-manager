@@ -1,4 +1,4 @@
-// relocation.ts — the ONE carrier behind move, backup and restore. The three verbs are
+// relocation.ts — the ONE carrier behind move, backup and restore. The three run kinds are
 // slices of a single step vocabulary built here and in relocation-restore.ts / relocation-migrate.ts:
 // backup = close access, dump every store, verify the folder, reopen (the folder STAYS); restore =
 // provide the target and rebuild the unit from the folder; migrate = both halves plus the repoint
@@ -16,7 +16,7 @@ import { loadActiveTargetCluster, type TargetCluster } from "./relocation-target
 
 /** What every relocation step reaches the world through. `jobTimeoutMs` is the per-Job budget — a
  *  dump of a big store is the longest thing this domain runs. `storageBox`/`dbtoolsImage` are
- *  optional in the WIRING but mandatory for the verbs: an absent one fails the step loud (the DNS
+ *  optional in the WIRING but mandatory for the run kinds: an absent one fails the step loud (the DNS
  *  provider's shape), never a silent skip. */
 export interface RelocationPorts {
   resolver: ClusterKubeResolver;
@@ -105,16 +105,16 @@ export interface RelocationWorld {
 /** The per-kind world factory the step builders close over — resolved fresh at every step. */
 export type WorldOf = (ctx: StepCtx) => Promise<RelocationWorld>;
 
-export function requireStorageBox(ports: RelocationPorts, verb: string): StorageBoxAccess {
+export function requireStorageBox(ports: RelocationPorts, runKind: string): StorageBoxAccess {
   if (!ports.storageBox) {
-    throw errValidation(`${verb} requires the Hetzner Storage Box but none is wired on this controller (STORAGE_BOX_HOST/USER/PASSWORD unset — secret/<stage>/app/storage-box) — the staging area is a mandatory part of this verb, never a silent skip`);
+    throw errValidation(`${runKind} requires the Hetzner Storage Box but none is wired on this controller (STORAGE_BOX_HOST/USER/PASSWORD unset — secret/<stage>/app/storage-box) — the staging area is a mandatory part of this run kind, never a silent skip`);
   }
   return ports.storageBox;
 }
 
-export function requireDbtoolsImage(ports: RelocationPorts, verb: string): string {
+export function requireDbtoolsImage(ports: RelocationPorts, runKind: string): string {
   if (ports.dbtoolsImage === undefined) {
-    throw errValidation(`${verb} requires the dbtools job image but none is pinned on this controller (DBTOOLS_IMAGE unset — the dbtools builds[] entry of hostyour-cloud/apps/controller) — the dump and restore run as Jobs of exactly that image`);
+    throw errValidation(`${runKind} requires the dbtools job image but none is pinned on this controller (DBTOOLS_IMAGE unset — the dbtools builds[] entry of hostyour-cloud/apps/controller) — the dump and restore run as Jobs of exactly that image`);
   }
   return ports.dbtoolsImage;
 }
@@ -158,7 +158,7 @@ export async function runRelocationJob(ports: RelocationPorts, ctx: StepCtx, clu
   return result.logs;
 }
 
-/** The workloads still ASKING for replicas — the off measurement shared with the suspend verbs:
+/** The workloads still ASKING for replicas — the off measurement shared with the suspend run kinds:
  *  `available` cannot tell 0-of-0 from off, so the desired count is what is read. */
 const stillRunning = (workloads: readonly WorkloadStatus[], exempt?: (w: WorkloadStatus) => boolean): string[] =>
   workloads.filter((w) => w.desired > 0 && !(exempt?.(w) ?? false)).map((w) => `${w.kind}/${w.name} (${w.ready}/${w.desired})`);

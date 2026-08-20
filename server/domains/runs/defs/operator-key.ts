@@ -4,9 +4,9 @@ import {
   authorizedKeysReadPlan, authorizedKeysReadSteps, operatorKeyPlan, operatorKeySteps, removeOperatorKeyCleanup,
 } from "./operator-key.kit.ts";
 
-// A human operator's own key on the machines, as three verbs. Each is a run like every other: a
+// A human operator's own key on the machines, as three run kinds. Each is a run like every other: a
 // plan, an approval, steps and a log. The shared scripts, steps and plans live in
-// operator-key.kit.ts; what stands here is the one thing that must be written out per verb, its own
+// operator-key.kit.ts; what stands here is the one thing that must be written out per run kind, its own
 // `kind` literal (the source census in registry-census.test.ts reads exactly that field).
 //
 // THREE ACTS, AND WHY THE THIRD IS NOT A DETAIL OF THE OTHER TWO.

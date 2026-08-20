@@ -42,7 +42,7 @@ import type { RepoReader, ConsumerRepo } from "../../adapters/git/port.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";
 import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 
-// The "onboard" Run: check → registration → provision → inject → trigger → watch. The verb
+// The "onboard" Run: check → registration → provision → inject → trigger → watch. The run kind
 // knows TWO forms of ONE step chain:
 //
 //  - DEPLOYABLE (the manifest declares a chart): the full chain, ending in the deployment the
@@ -230,7 +230,7 @@ export interface OnboardPorts {
   buildPlane?: BuildPlane;
   /** The unit's ONE public DNS record (provision-dns / remove-dns). Optional but
    *  UNCONDITIONALLY needed by the deployable form — absent ⇒ the step fails loud (DNS is a
-   *  mandatory part of the verb), never a silent skip. */
+   *  mandatory part of the run kind), never a silent skip. */
   dns?: DnsProvider;
   /** The shared HMAC secret (GITHUB_WEBHOOK_SECRET) the image-builder EventListener validates each
    *  delivery's X-Hub-Signature-256 against. The seeder is write-only, so the controller reads it from
@@ -323,7 +323,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
 function buildOnlySteps(ports: OnboardPorts, p: BuildOnlyOnboardParams): Step[] {
   const release: ReleaseCycleRuntime = {};
   return [
-    // No attest-target: there is no target cluster whose deploy-state could be attested — the verb
+    // No attest-target: there is no target cluster whose deploy-state could be attested — the run kind
     // touches git, the local Vault and the build plane's own namespaces, all on the cluster the
     // controller itself runs on.
     preflightScopesStep(ports, p),

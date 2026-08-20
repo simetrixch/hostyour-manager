@@ -54,7 +54,7 @@ const removeKeyCleanup: Cleanup = {
   run: async (ctx: StepCtx) => {
     const server = loadServer(ctx.db, String(ctx.params.serverId));
     const session = await ctx.ssh();
-    // Deletes by the marker this run's own key carries and by nothing else. The operator-key verbs
+    // Deletes by the marker this run's own key carries and by nothing else. The operator-key run kinds
     // write a marker that starts `hostyour-operator:`, so neither pattern can reach the other's
     // line: this one is `hostyour` followed immediately by a colon.
     await remoteExec(ctx, session, `sed -i '\\#${controllerKeyMarker(server.name)}#d' ~/.ssh/authorized_keys`);
@@ -311,7 +311,7 @@ function adoptSteps(params: AdoptParams): Step[] {
         // The FIRST authorized-keys reading, taken here because this is the first moment it is worth
         // anything: the controller's own key is on the box, so the reading can tell that line apart
         // from every other. Cloud images ship with the provisioning key of whoever ordered the
-        // machine still in this file, and that key is a working way in that no verb here can
+        // machine still in this file, and that key is a working way in that no run kind here can
         // remove — a server that finished adopting must not have to wait for someone to press a
         // button before that becomes visible.
         const authorizedKeys = await recordAuthorizedKeysReading(ctx, session, sid);
@@ -324,7 +324,7 @@ function adoptSteps(params: AdoptParams): Step[] {
     //
     // Their PLACE at the end is what keeps a failed adoption recoverable. onTerminal resets the row
     // from `adopting` back to `bare`, and a `bare` row offers one-click adopt and refuses the
-    // password-login verbs — which is correct only while the machine is still as it was found. Every
+    // password-login run kinds — which is correct only while the machine is still as it was found. Every
     // step that can fail on the host now runs before these two, so a run that resets the row leaves
     // the daemon still taking the password the row still has.
     //

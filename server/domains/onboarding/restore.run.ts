@@ -30,7 +30,7 @@ export type TenantRestoreParams = z.infer<typeof TenantRestoreParams>;
 
 const masterKubeLock: LockClaim = { resource: "master-kube", key: "m" };
 
-/** The restore verb over any world: the target half of the relocation sequence, opened at the end. */
+/** The restore run kind over any world: the target half of the relocation sequence, opened at the end. */
 function restoreSteps(ports: RelocationPorts, worldOf: WorldOf, targetClusterId: string, what: string): Step[] {
   return [
     attestRestoreTargetStep(ports, worldOf, targetClusterId),

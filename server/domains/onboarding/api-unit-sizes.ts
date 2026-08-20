@@ -53,7 +53,7 @@ export interface UnitSizeApiDeps {
   db: Db;
   /** Absent ⇒ onboarding is not configured on this controller: the table stays readable and editable
    *  (it is what this installation sells, whether or not it can currently deploy anything), and the
-   *  two verbs that put a UNIT on a size answer 501. */
+   *  two run kinds that put a UNIT on a size answer 501. */
   executor?: Executor;
   /** The consumer registration registry, for reading what a consumer BRINGS — its own PostgreSQL, its
    *  own MongoDB — so the size picker can compose the figures that unit would actually get. Absent ⇒
@@ -134,7 +134,7 @@ export function registerUnitSizeRoutes(app: Hono<AppEnv>, deps: UnitSizeApiDeps)
     });
   });
 
-  // ---- Putting a UNIT on a size: the two verbs, one per family ----
+  // ---- Putting a UNIT on a size: the two run kinds, one per family ----
   //
   // They live here beside the table and not with the other consumer/tenant routes, because they are
   // the other half of one mechanism: the table says what a size means, these two are the only way that

@@ -14,7 +14,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 
 // restart-workloads / tenant-restart-workloads — the last step of putting a new secret value in front
-// of a unit. What is asserted is exactly what the verb promises and nothing more: the PATCH reached
+// of a unit. What is asserted is exactly what the run kind promises and nothing more: the PATCH reached
 // the right namespace(s) under ONE stamp, no registration was written, and a cluster that refuses the
 // patch fails the run instead of reporting a delivery that only ever got as far as the Secret.
 
@@ -141,8 +141,8 @@ describe("restart-workloads run (consumer)", () => {
     // mutating ⇒ attest-target is step 0: a run approved against a cluster that has since changed
     // identity refuses BEFORE it patches.
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "restart-workloads"]);
-    // NO git-branch claim at all, unlike every other consumer verb: this run neither reads nor writes
-    // git, so a branch lock would block the flip verbs and serialize nothing. master-kube is what keeps
+    // NO git-branch claim at all, unlike every other consumer run kind: this run neither reads nor writes
+    // git, so a branch lock would block the flip run kinds and serialize nothing. master-kube is what keeps
     // a teardown of the same unit from running beside it — every teardown claims it.
     expect(plan.locks).toEqual([{ resource: "master-kube", key: "m" }]);
     expect(plan.summary).toContain("MOVES NO SECRET");
@@ -159,7 +159,7 @@ describe("tenant-restart-workloads run", () => {
     await runAll(makeTenantRestartWorkloadsDef(tenantPorts(reg, cluster)).steps({ tenantId: "tnt_1" }), "run_tr", { tenantId: "tnt_1" }, logs);
 
     // A tenant owns one namespace PER MEMBER — rolling only one of them would leave the other members
-    // on the old value, which is the whole reason the tenant verb is not the consumer verb.
+    // on the old value, which is the whole reason the tenant run kind is not the consumer run kind.
     expect(cluster.restarted.map((r) => r.namespace).sort()).toEqual([...expected].sort());
     // ONE stamp for the whole tenant, so the member namespaces read afterwards as one act.
     expect(new Set(cluster.restarted.map((r) => r.stampedAt)).size).toBe(1);
@@ -176,7 +176,7 @@ describe("tenant-restart-workloads run", () => {
     // The operator approves a namespace LIST, not a count: the members are what can be checked against
     // the Vault entry whose value was just replaced.
     expect(plan.summary).toContain(memberNamespace(GUID, "erp"));
-    // Every OTHER tenant verb claims `catalog@<books>` plus the cluster branch because it writes
+    // Every OTHER tenant run kind claims `catalog@<books>` plus the cluster branch because it writes
     // the registration; this one writes nothing, so it queues behind none of them.
     expect(plan.locks).toEqual([{ resource: "master-kube", key: "m" }]);
   });

@@ -96,7 +96,7 @@ export interface TenantOnboardPorts {
   activator?: Activator;
   /** The tenant's ONE wildcard DNS record `*.<subdomain>.<unitApex>` (provision-dns).
    *  Optional but UNCONDITIONALLY needed by that step — absent ⇒ it fails loud (DNS is a mandatory
-   *  part of the verb), never a silent skip. */
+   *  part of the run kind), never a silent skip. */
   dns?: DnsProvider;
   /** The public apex (global.unitApex) of the target cluster, read off its values chain on the
    *  platform repo — the tenant family's own repo is catalog, so the apex arrives as a
@@ -231,7 +231,7 @@ type TenantRecordPhase = "provisional" | "settled";
  *  live tenant back to "provisioning" would paint it as unfinished, hide its live actions behind the
  *  provisional refusals and pull it out of the reconciliation view. Insert-only is therefore not an
  *  optimisation, it is the correctness rule.
- *  Returns the tenants row id (the caller logs it — it is the handle every removal verb needs). */
+ *  Returns the tenants row id (the caller logs it — it is the handle every removal run kind needs). */
 function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase: TenantRecordPhase): string {
   const settle = phase === "settled";
   const status: TenantStatus = settle ? "active" : "provisioning";
@@ -305,7 +305,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // THE ROOT-CAUSE FIX. The tenants row used to be written LAST, so it
         // recorded SUCCESS while git and the cluster had already been mutated several steps earlier: a
         // failure in between left a tenant that exists in GitOps + ArgoCD but has NO tenants row, and
-        // EVERY removal verb resolves its target BY that row (lifecycle.ts loadTenantCluster throws
+        // EVERY removal run kind resolves its target BY that row (lifecycle.ts loadTenantCluster throws
         // NOT_FOUND) — so the tenant was not merely broken, it was unreachable through the product.
         // Recording INTENT here, right after the attest and the subdomain belt (both read-only) and
         // therefore before ANY git or kube mutation (the replace teardowns git-rm pointers,

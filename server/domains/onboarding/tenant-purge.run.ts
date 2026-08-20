@@ -18,14 +18,14 @@ import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 
 // tenant-purge / force-offboard by GUID — the tenant analogue of the consumer
-// purge.run.ts, and the ONLY verb that can name an ORPHAN: a tenant that exists in GitOps + ArgoCD
+// purge.run.ts, and the ONLY run kind that can name an ORPHAN: a tenant that exists in GitOps + ArgoCD
 // (registration, fan-out, member AppProjects, member namespaces, Vault crypto entry, Mongo
-// databases) with NO inventory row, which EVERY other removal verb (tenant-offboard / -suspend /
+// databases) with NO inventory row, which EVERY other removal run kind (tenant-offboard / -suspend /
 // remove-app) structurally
 // cannot address because they resolve their target BY that row (lifecycle.ts loadTenantCluster throws
 // NOT_FOUND). create-tenant's record-provisional step stops NEW orphans at the source, but the ones
 // already out there — plus a run that died before that first step, and hand-written pointers — still
-// need a verb that needs no row. tenant-purge removes a tenant's WHOLE footprint BY GUID: the guid is
+// need a run kind that needs no row. tenant-purge removes a tenant's WHOLE footprint BY GUID: the guid is
 // the sole tenant identity — every member namespace and AppProject is <guid>-<member> and the Vault
 // entry is the bare guid (tenant-crypto-mint.ts) — and every member namespace additionally carries the label
 // platform/tenant=<guid>, so the whole footprint is nameable from guid+stage+cluster alone. It is a
@@ -37,7 +37,7 @@ import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 // shared live-tenant rule (tenant-live-guard.ts) at BOTH ends: on the route before a Run exists (api.ts),
 // and again in attest-target below when that Run is approved — because a plan-time refusal alone does not
 // hold (approve re-validates nothing, so a purge planned against a "provisioning" row stays approvable
-// after a create-tenant retry settles that row to "active"). Offboard is the removal verb for a tenant
+// after a create-tenant retry settles that row to "active"). Offboard is the removal run kind for a tenant
 // that is still serving, and it keeps the tenant's data. What NEITHER end can refuse is a live tenant with
 // NO row (an orphan from before record-provisional, or a hand-written pointer), so the plan summary states
 // the destructive outcome plainly rather than reassuring: that summary is the only remaining gate.
@@ -87,7 +87,7 @@ import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 // RunView (read.ts toRunView) and RunView has no such member (shared/api-types.ts), so a warning string
 // is frozen into plan_json and rendered on no screen.
 // tenant-offboard and the replace do NEITHER — they un-deploy a tenant and KEEP its cluster state
-// (soft state, re-onboardable); tenant-purge is the one destructive verb.
+// (soft state, re-onboardable); tenant-purge is the one destructive run kind.
 //
 // ISSUED IS NOT DONE, and that distinction is what the settle guard above carries. Deleting a namespace
 // is non-blocking: the API server accepts it and returns while the namespace sits there with a
@@ -99,7 +99,7 @@ import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 // merely REQUESTED. It was rejected for one reason: nothing would ever come back to check. A row
 // recorded "purged" over databases that are still there drops off the Tenants page, offers no further
 // removal, and cannot be found by the orphan scan either — the pointer went with this run's first step.
-// That is a stranded deprovision with no surface anywhere, created by the very verb that exists to end
+// That is a stranded deprovision with no surface anywhere, created by the very run kind that exists to end
 // that state. Failing the guard keeps the row unsettled, the tenant listed and the run retryable exactly
 // where it stopped.
 //
@@ -111,7 +111,7 @@ import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 // stand, which is exactly why a purge is offered on such a row. After a purge NONE of that is left, so
 // there is nothing to reap and nothing to offer. Settling both to the one literal made a finished purge
 // INVISIBLE: the tenant stayed on the Tenants page's "Offboarded tenants" panel and went on advertising
-// the purge it had just completed, so the most destructive verb in the product appeared to do nothing and
+// the purge it had just completed, so the most destructive run kind in the product appeared to do nothing and
 // could be re-triggered forever with no visible effect. Purged rows leave the Tenants list altogether
 // (web tenantRows.ts) while the row itself is KEPT as the trace (never deleted) and its detail page
 // still tells the whole truth by URL. Two consequences ride along and are stated where they hold: a purged
@@ -127,7 +127,7 @@ import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 // databases standing behind a row that says the tenant is gone — and a settled row is off the Tenants
 // list, has no removal on its detail page, and cannot be found by the orphan scan either (the first
 // teardown step already git-rm'd its pointer). That is precisely the settled-but-unfinished state
-// the removal verbs exist to end, so it must not be re-created at the tail of the removal verb — and a
+// the removal run kinds exist to end, so it must not be re-created at the tail of the removal run kind — and a
 // row settled "purged" is the sharper form of it, since that status states the deprovision as fact. With
 // the cascade inside, a failed delete leaves the row exactly as it was: the tenant stays visible and its
 // failed run retries from the step that failed.
@@ -170,7 +170,7 @@ export const PURGE_TEARDOWN: TenantTeardownOpts = {
 };
 
 /** How a tenant-purge NAMES ITSELF in the shared live-tenant refusal (tenant-live-guard.ts). Built HERE,
- *  from the verb that owns the consequence, and handed to BOTH ends of that rule — the route's plan-time
+ *  from the run kind that owns the consequence, and handed to BOTH ends of that rule — the route's plan-time
  *  refusal (api.ts) and the attest-target belt below — so an operator reads the identical sentence
  *  whichever end refuses, and neither end can describe the destruction differently from the other. */
 export function purgeLiveRefusal(t: TenantPurgeRequest): TenantLiveRefusal {
@@ -216,7 +216,7 @@ function loadPurgeCluster(db: Db, p: TenantPurgeRequest): TenantPurgeCluster {
     throw errValidation(`stage mismatch: cluster ${p.clusterId} is ${row.stage}, tenant-purge targets ${p.stage}`);
   }
   // Cluster STATUS is deliberately not checked: leftovers on a cluster that is no longer active are
-  // exactly what this verb is for.
+  // exactly what this run kind is for.
   return { guid: p.guid, domain: row.domain, stage: row.stage, clusterId: row.id, cluster: clusterShortName(row.domain) };
 }
 
@@ -407,7 +407,7 @@ function tenantPurgeSteps(ports: TenantLifecyclePorts, params: TenantPurgeParams
         // semantics this run intends — destructive where the move needs a hand-off — so it is
         // refused outright while the annotation stands.
         // THE ORPHAN BELT. assertTenantNotLive above answers from the INVENTORY, and an orphan has no
-        // row there — that is what this verb is for. But "no row" and "not running" are two different
+        // row there — that is what this run kind is for. But "no row" and "not running" are two different
         // statements, and the pointer cannot tell them apart either: an orphan whose pointer survived
         // and a live tenant the inventory never learned about look identical in git. The CLUSTER can
         // tell them apart, because a tenant that still serves has workloads that are READY, and an

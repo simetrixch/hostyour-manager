@@ -47,7 +47,7 @@ export function loadOperatorKey(db: Db, id: string): typeof operatorKeys.$inferS
 /** What every server's stored reading says about one fingerprint. THREE outcomes, because they are
  *  three different facts and the middle one is not the absence of the other two:
  *   - `holding`  — a readable reading found the key. The KIND comes along, because the two cases need
- *                  different words: a line under this platform's own marker is one the removal verb
+ *                  different words: a line under this platform's own marker is one the removal run kind
  *                  can take off, and a line under any other comment is one only a hand edit can.
  *   - `undecided` — a reading EXISTS on the row and this build cannot decode it (a document written by
  *                  a newer controller, or one that fails its own schema). Whether the key is on that
@@ -143,9 +143,9 @@ export function createOperatorKey(db: Db, actor: string, input: CreateOperatorKe
  * Forget an operator's key.
  *
  * REFUSED while a stored reading still finds it on a host. Deleting the row does not touch a single
- * machine, and the removal verb needs the row to know which line to delete — so a row deleted while
+ * machine, and the removal run kind needs the row to know which line to delete — so a row deleted while
  * the key is still out there would leave a working key on the estate that nothing here can take off
- * again: the remove verb keys on `hostyour-operator:<label>`, and the label goes with the row.
+ * again: the remove run kind keys on `hostyour-operator:<label>`, and the label goes with the row.
  *
  * The refusal names what clears each host, and it is not the same thing on every host. Where the
  * key sits under this platform's marker, an operator-key-remove run takes it off. Where it sits

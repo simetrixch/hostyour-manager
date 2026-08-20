@@ -40,6 +40,10 @@ export const ANSIWISE_PROGRAM_TIMEOUT_MS = 45 * 60_000;
  *  an assumption baked in here. */
 export interface AnsiwisePorts {
   ansiwiseServeCommand?: string;
+  /** WHERE a machine fetches the binary that answers that command, with `<version>` standing for the
+   *  version the platform repo pins (place-ansiwise). Which release surface an installation takes its
+   *  binary from is its own decision; WHICH version is placed never is. */
+  ansiwiseDownloadUrl?: string;
 }
 
 export function requireServeCommand(ports: AnsiwisePorts): string {
@@ -125,7 +129,7 @@ export interface ProgramStepOpts {
   /** Answers the DEF is authoritative for beyond the inventory — see ExtraAnswers. */
   extra?: ExtraAnswers;
   /** Run the program on the MASTER's surface instead of the run's owned host — the master-side
-   *  act of a two-machine verb (deploy-slave's branch cut). The master must be declared on the
+   *  act of a two-machine run kind (deploy-slave's branch cut). The master must be declared on the
    *  plan's targets, exactly like every other aux session. */
   onMaster?: boolean;
 }
@@ -193,7 +197,7 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
  *
  *  The target's CLUSTER is looked up lazily — only when the program declares an answer the cluster
  *  row states (fqdn, stage) does the lookup run. A program that declares neither (the tailnet
- *  client verbs, whose real declarations carry no answers at all) therefore runs against a host
+ *  client run kinds, whose real declarations carry no answers at all) therefore runs against a host
  *  that carries no cluster row. */
 export async function composeAnswers(
   ctx: StepCtx,

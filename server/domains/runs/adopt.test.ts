@@ -51,7 +51,7 @@ const SSHD_TAKES_PASSWORD = ["SSHD effective readable", "SSHD password yes", "SS
 const SSHD_KEY_ONLY = ["SSHD effective readable", "SSHD password no", "SSHD keyboard no", "SSHD pubkey yes"].join("\n");
 
 // The key whoever ordered the machine put in the image — the normal state of a fresh cloud server,
-// and a working way in that no verb on this platform can remove. The fake host's authorized_keys
+// and a working way in that no run kind on this platform can remove. The fake host's authorized_keys
 // holds this plus whatever line install-key really appends (captured off the shipped command), so
 // the probe reads back the key the run actually sealed — classification then rests on the sealed
 // fingerprint, exactly as on a real host.
@@ -134,7 +134,7 @@ describe("adopt run — end to end through the executor", () => {
     // The two irreversible steps come after verify-key-login — never before it, since shutting the
     // password door is the change that can make a machine unreachable — and after every step that
     // can still fail on the host. A run that fails resets the row to `bare`, and a `bare` row offers
-    // one-click adopt and refuses the password-login verbs: correct only while the machine is still
+    // one-click adopt and refuses the password-login run kinds: correct only while the machine is still
     // as it was found, which is what their place at the end keeps true.
     expect(plan.steps.map((s) => s.name)).toEqual([
       "connect-password", "preflight", "generate-key", "install-key", "configure-sudo",

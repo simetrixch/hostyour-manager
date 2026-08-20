@@ -11,14 +11,14 @@ import { loadServer, loadMaster } from "./deploy-slave.kit.ts";
 import type { SlaveInstallInput } from "./deploy-slave.kit.ts";
 
 // Step 0 of the shared slave install list — the fail-closed precondition pinned as the first step of
-// every mutating run, and the one step that differs between the two verbs that run this list. It lives
+// every mutating run, and the one step that differs between the two run kinds that run this list. It lives
 // beside verify-slave/register (deploy-slave.verify.ts) rather than in the def, for the same reason
 // they do: the 400-line file-size doctrine.
 //
 // What it establishes, in the order a failure is cheapest to discover:
 //   1. the target is not the master, and the server NAME agrees with the domain's first label;
-//   2. the cluster row is in a state this verb may start on — the ONE place deploy and redeploy
-//      disagree, and the reason redeploy is a verb instead of a boolean;
+//   2. the cluster row is in a state this run kind may start on — the ONE place deploy and redeploy
+//      disagree, and the reason redeploy is a run kind instead of a boolean;
 //   3. the wildcard *.<domain> resolves, and the machine answering is the machine we adopted;
 //   4. the ordinal is allocated and the rows flipped, in ONE transaction.
 
@@ -71,7 +71,7 @@ export function attestTargetStep(input: SlaveInstallInput): Step {
       if (byDomain) {
         const startable = byDomain.status === "planned" || byDomain.status === "provisioning" || redeployActive;
         if (!startable) {
-          throw errValidation(`cluster ${byDomain.id} for ${domain} is '${byDomain.status}' — deploy-slave starts on a planned/provisioning cluster${byDomain.status === "active" ? "; rebuilding the machine layer of a LIVE cluster in place is the redeploy verb" : ""}`);
+          throw errValidation(`cluster ${byDomain.id} for ${domain} is '${byDomain.status}' — deploy-slave starts on a planned/provisioning cluster${byDomain.status === "active" ? "; rebuilding the machine layer of a LIVE cluster in place is the redeploy run kind" : ""}`);
         }
         if (byDomain.slaveId === null) throw errValidation(`cluster ${byDomain.id} has no slaveId — not a deploy-slave row; clean it up manually`);
         if (input.slaveId !== undefined && input.slaveId !== byDomain.slaveId) {

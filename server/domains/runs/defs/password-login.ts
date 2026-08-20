@@ -2,9 +2,9 @@ import { z } from "zod";
 import type { RunDefinition } from "../../../executor/types.ts";
 import { passwordLoginPlan, passwordLoginSteps, restorePasswordLoginCleanup } from "./password-login.kit.ts";
 
-// The per-server password-login switch, as two verbs. Each is a run like every other: a plan, an
+// The per-server password-login switch, as two run kinds. Each is a run like every other: a plan, an
 // approval, steps and a log. The shared scripts, steps and plan live in password-login.kit.ts; what
-// stands here is the one thing that must be written out per verb, its own `kind` literal (the
+// stands here is the one thing that must be written out per run kind, its own `kind` literal (the
 // source census in registry-census.test.ts reads exactly that field).
 //
 // TWO ACTS, AND THEY ARE NOT SYMMETRIC.
@@ -16,7 +16,7 @@ import { passwordLoginPlan, passwordLoginSteps, restorePasswordLoginCleanup } fr
 //                           second is a working credential this controller holds, and it outlives
 //                           the machine's configuration.
 //   password-login-enable   ONE door, the daemon's. Nothing re-seals a bootstrap password, because
-//                           this run has no password to seal — it is a repair verb, for the case
+//                           this run has no password to seal — it is a repair run kind, for the case
 //                           where a machine has to be reachable without this controller's key.
 //
 // THE SWITCH DEFAULTS TO OFF, AND ADOPTION SETS IT. The adopt run shuts the door itself, right

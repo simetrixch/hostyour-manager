@@ -194,7 +194,7 @@ export class TenantRegistry {
   }
 
   /** Every guid DEPLOYED at this stage, read from the GitOps registrations alone — the discovery source
-   *  the row-keyed verbs cannot provide: an ORPHAN has a live registration and NO
+   *  the row-keyed run kinds cannot provide: an ORPHAN has a live registration and NO
    *  tenants row, so scanning git is the only way to NAME it at all (and a tenant-purge is keyed on the
    *  guid). Unfiltered by design; the caller decides what to do with a guid it does not know. The guids
    *  it could NOT read are the orphan scan's business — listTenantPointers carries those out. */
@@ -269,9 +269,9 @@ export class TenantRegistry {
     // MEMBER into members[] — the two lists move together, which the schema then holds them to.
     const apps = op === "append" ? [...current.entry.apps, { name: app, seedReference, seedDemo }] : current.entry.apps.filter((a) => a.name !== app);
     const members = op === "append" ? [...current.entry.members, member!] : current.entry.members.filter((m) => m.name !== app);
-    const verb = op === "append" ? "add-app" : "remove-app";
+    const runKind = op === "append" ? "add-app" : "remove-app";
     const sign = op === "append" ? "+" : "-";
-    return this.write(stage, guid, { ...current.entry, apps, members }, `${verb}(${guid}): ${sign}${app} ${trailer(runId)}`);
+    return this.write(stage, guid, { ...current.entry, apps, members }, `${runKind}(${guid}): ${sign}${app} ${trailer(runId)}`);
   }
 
   /** Flip the tenant-wide suspended field — a FIELD flip, NOT a git-mv: the file stays at its one path,
@@ -282,8 +282,8 @@ export class TenantRegistry {
   async setTenantSuspended(stage: Stage, guid: string, suspended: boolean, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
-    const verb = suspended ? "tenant-suspend" : "tenant-resume";
-    return this.write(stage, guid, { ...current.entry, suspended }, `${verb}(${guid}) ${trailer(runId)}`);
+    const runKind = suspended ? "tenant-suspend" : "tenant-resume";
+    return this.write(stage, guid, { ...current.entry, suspended }, `${runKind}(${guid}) ${trailer(runId)}`);
   }
 
   /** Flip the tenant-wide quiesced field — the deeper pause a relocation holds the tenant in while
@@ -294,8 +294,8 @@ export class TenantRegistry {
   async setTenantQuiesced(stage: Stage, guid: string, quiesced: boolean, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
-    const verb = quiesced ? "quiesce" : "unquiesce";
-    return this.write(stage, guid, { ...current.entry, quiesced }, `${verb}(${guid}) ${trailer(runId)}`);
+    const runKind = quiesced ? "quiesce" : "unquiesce";
+    return this.write(stage, guid, { ...current.entry, quiesced }, `${runKind}(${guid}) ${trailer(runId)}`);
   }
 
   /** Write the tenant's `quota` — the six figures that bound EVERY member namespace of it, resolved

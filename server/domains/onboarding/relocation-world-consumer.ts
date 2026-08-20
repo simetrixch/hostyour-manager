@@ -32,7 +32,7 @@ import {
 
 /** The consumer relocation port set: the kind-neutral relocation ports PLUS the consumer registry
  *  (LifecyclePorts, so the shared attest-target step composes) and the target-side provisioning
- *  writers the migrate/restore verbs re-arm on the target. */
+ *  writers the migrate/restore run kinds re-arm on the target. */
 export interface ConsumerRelocationPorts extends RelocationPorts, LifecyclePorts {
   registry: Registry;
   platformRepoURL: string;

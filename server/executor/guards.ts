@@ -78,19 +78,19 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   // regeneration — a slave target (release.ts plan()).
   redeploy: [],
   release: [],
-  // The tailnet repair verbs act on a host that is ALREADY deployed and harvest no cluster access
+  // The tailnet repair run kinds act on a host that is ALREADY deployed and harvest no cluster access
   // key, so the crypto gate has nothing to protect — and arming it would strand exactly the host they
   // exist to put back on the private network (purge's reasoning).
   "tailnet-disconnect": [],
   "tailnet-reconnect": [],
   "tailnet-rejoin": [],
-  // The password-login verbs change one daemon's configuration and one stored credential on a host
+  // The password-login run kinds change one daemon's configuration and one stored credential on a host
   // that is ALREADY adopted, and harvest no cluster access key — so the crypto gate has nothing to
-  // protect. Gating the disable verb would additionally block, on exactly the plaintext-keystore
+  // protect. Gating the disable run kind would additionally block, on exactly the plaintext-keystore
   // install the gate exists for, the one act that takes a way into that host away.
   "password-login-disable": [],
   "password-login-enable": [],
-  // The operator-key verbs edit one line of one file on a host that is ALREADY adopted, and harvest
+  // The operator-key run kinds edit one line of one file on a host that is ALREADY adopted, and harvest
   // no cluster access key — so the crypto gate has nothing to protect. Gating the removal would additionally
   // block, on exactly the plaintext-keystore install the gate exists for, the one act that takes a
   // human's standing access to a machine away.
@@ -116,10 +116,10 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   "set-size": [],
   // adopt-consumer RECORDS an existing deployment: its only mutation is the
   // local inventory row, it places no bytes on any cluster — so the crypto gate has nothing to protect, and
-  // gating it would strand exactly the invisible consumer the verb exists to recover (purge's reasoning).
+  // gating it would strand exactly the invisible consumer the run kind exists to recover (purge's reasoning).
   "adopt-consumer": [],
-  // The relocation verbs act on a unit that is ALREADY deployed and harvest no new cluster access
-  // key — backup/restore are recovery verbs (purge's reasoning: gating them would strand exactly the
+  // The relocation run kinds act on a unit that is ALREADY deployed and harvest no new cluster access
+  // key — backup/restore are recovery run kinds (purge's reasoning: gating them would strand exactly the
   // data they exist to save), and migrate moves between clusters whose keys the keystore already holds.
   backup: [],
   restore: [],

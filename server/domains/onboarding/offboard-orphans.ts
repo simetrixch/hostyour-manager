@@ -1,4 +1,4 @@
-// The orphan scan of BOTH consumer removal verbs — the LAST measurement offboard and purge make,
+// The orphan scan of BOTH consumer removal run kinds — the LAST measurement offboard and purge make,
 // between their deletes and the row flip, answering one question: is anything of this consumer still
 // standing that nothing else will ever take away?
 //
@@ -42,10 +42,10 @@
 // teardown makes (tenant-teardown.ts settlePruneGuardStep): the removals stay soft about PROCEEDING,
 // the RECORD does not — a row saying the consumer left is what makes a leftover unfindable.
 //
-// PURGE RUNS IT TOO, and that is not a nicety. purge is the verb an operator reaches for AFTER an
+// PURGE RUNS IT TOO, and that is not a nicety. purge is the run kind an operator reaches for AFTER an
 // offboard failed here, and its own delete-repo-credential and delete-build-rbac are fail-soft in
 // exactly the same way; a purge that flipped the row without looking would settle the very state
-// offboard had just refused to settle, through the verb meant to be the backstop.
+// offboard had just refused to settle, through the run kind meant to be the backstop.
 import type { StepCtx } from "../../executor/types.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { AppCluster, LifecyclePorts } from "./lifecycle.ts";
@@ -58,7 +58,7 @@ import { renderBuildRbac, renderConsumerArgoSync, unitBuildNamespace } from "./b
 
 /** What the scan reads through: the lifecycle set (the registration branch + the per-cluster kube
  *  clients) plus the three writers whose objects it looks for. The writers are optional exactly as
- *  they are on the removal verbs, and the scan says so rather than counting an unlooked-at object as
+ *  they are on the removal run kinds, and the scan says so rather than counting an unlooked-at object as
  *  gone. */
 export type OrphanScanPorts = LifecyclePorts & {
   buildRbac?: BuildRbacWriter;
@@ -71,10 +71,10 @@ export type OrphanScanPorts = LifecyclePorts & {
 const grantRef = (o: BuildRbacObject): string => `${o.kind} ${o.namespace}/${o.name}`;
 
 /** Read back everything this removal was supposed to take and refuse to let the row be recorded while
- *  any of it stands. `unit` is the stage being removed; the tree decides what belongs to it. `verb`
+ *  any of it stands. `unit` is the stage being removed; the tree decides what belongs to it. `runKind`
  *  names the run in the refusal ("offboard" / "purge") so an operator reads which removal left the
  *  leftover, not which module found it. */
-export async function assertNoOrphans(ctx: StepCtx, ports: OrphanScanPorts, unit: AppCluster, verb: string): Promise<void> {
+export async function assertNoOrphans(ctx: StepCtx, ports: OrphanScanPorts, unit: AppCluster, runKind: string): Promise<void> {
   const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(unit.clusterId);
   // ONE tree read answers both halves: whether THIS stage's registration is gone, and whether the unit
   // stands anywhere else — which is what decides whether the build-namespace grants are a leftover or
@@ -125,7 +125,7 @@ export async function assertNoOrphans(ctx: StepCtx, ports: OrphanScanPorts, unit
   // claims to have taken the address away.
   if (!ports.dns) {
     throw errValidation(
-      `cannot look for a leftover DNS record of ${unit.name}: no DNS provider is wired on this controller (CLOUDFLARE_DNS_API_TOKEN unset) — the unit's address is a mandatory part of the verb, never a silent skip`,
+      `cannot look for a leftover DNS record of ${unit.name}: no DNS provider is wired on this controller (CLOUDFLARE_DNS_API_TOKEN unset) — the unit's address is a mandatory part of the run kind, never a silent skip`,
     );
   }
   const host = consumerUnitHost(unit.name, unitApexFromChain(await ports.registry.readClusterValueFiles(unit.domain, unit.stage)));
@@ -133,7 +133,7 @@ export async function assertNoOrphans(ctx: StepCtx, ports: OrphanScanPorts, unit
 
   if (left.length > 0) {
     throw errValidation(
-      `the ${verb} of ${unit.name} (${unit.stage}) left ${left.length} object(s) standing on ${unit.domain}: ${left.join("; ")}. ` +
+      `the ${runKind} of ${unit.name} (${unit.stage}) left ${left.length} object(s) standing on ${unit.domain}: ${left.join("; ")}. ` +
         `Nothing else takes any of these away — the registration and the address are this run's own to remove, and the cluster objects were written outside any chart, so no ArgoCD prune reaches them. ` +
         `Repair them and retry this step. ` +
         `The inventory row is deliberately NOT recorded offboarded: a row saying ${unit.name} left ${unit.stage} while these stand is what makes a leftover unfindable.`,

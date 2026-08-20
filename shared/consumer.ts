@@ -226,7 +226,7 @@ export const ConsumerManifestSchema = z.object({
   mongodb: MongodbModeSchema.default("shared"),
   // The OPTIONAL extra public FQDN the consumer serves under IN ADDITION to `<name>.<unitApex>` —
   // never instead: one Ingress, two spec.rules entries, told apart by the Host header. Declaring is
-  // not granting: the onboard verb ATTESTS the value into the stage registration (the builds[]
+  // not granting: the onboard run kind ATTESTS the value into the stage registration (the builds[]
   // declare-and-attest shape), and the admission policy admits only the ATTESTED value, so a
   // manifest naming a foreign FQDN gets nothing. The platform never verifies domain control and
   // creates no DNS record for it — the customer points their DNS here, or the name does not resolve.
@@ -386,7 +386,7 @@ export const ConsumerRegistrationSchema = z
     // Part of the deploy group: a stage registration always carries it, and the ApplicationSet reads
     // it bare, so an absent one is a render failure rather than a namespace with no ceiling.
     quota: UnitQuotaSchema.optional(),
-    // The ATTESTED extra public FQDN — the onboard verb copies the manifest's `fqdn` here AFTER
+    // The ATTESTED extra public FQDN — the onboard run kind copies the manifest's `fqdn` here AFTER
     // refusing a name the platform already serves. The admission policy and the consumer chart read
     // THIS value, never the manifest, which is what makes declaring different from being granted.
     // OPTIONAL even in the stage form (most units serve only `<name>.<unitApex>`), so it stands

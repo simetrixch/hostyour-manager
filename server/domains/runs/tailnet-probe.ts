@@ -9,7 +9,7 @@
 //                  forever: a warn chip saying "no client" about the machine the master's ArgoCD
 //                  and Vault are talking to. redeploy re-runs the same step list, so it re-reads.
 //   the tailnet    their last step, so a disconnect, a reconnect or a rejoin is visible on the card
-//   repair verbs   that offered it instead of leaving the reading from before the repair standing.
+//   repair run kinds   that offered it instead of leaving the reading from before the repair standing.
 // All of them go through recordTailnetReading, so there is one probe, one fold and one write.
 //
 // WHY THE CLIENT'S OWN STATE AND NOT THE ADDRESS. `tailscale ip -4` prints nothing and exits

@@ -10,7 +10,7 @@ import { activeClusterTarget, requirePlatformRepo, type DeploySlavePorts, type S
 import { attestClusterStep, refreshCheckoutStep, argocdFollowStep, loadActiveCluster } from "./cluster-release.kit.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, type ExtraAnswers } from "./ansiwise-run.kit.ts";
 
-// `release` — raise the platform version a cluster stands on. The third cluster verb, and the
+// `release` — raise the platform version a cluster stands on. The third cluster run kind, and the
 // only one that moves a pin.
 //
 // A cluster release has the same shape as a unit release — version plus channel, the channel ceiling,
@@ -227,7 +227,7 @@ export function makeReleaseDef(ports: ReleasePorts): RunDefinition<ReleaseParams
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [{ serverId: server.id, ownsHost: true, label: `${server.name} (${server.role})` }],
         // Every branch this run touches: the trunk, where the tag is minted; and the cluster's own
-        // install branch — which for the master this verb releases IS the books branch the pin is
+        // install branch — which for the master this run kind releases IS the books branch the pin is
         // committed on, claimed here by the master's own domain. master-kube because argocd-follow
         // reads the master's ArgoCD.
         locks: [

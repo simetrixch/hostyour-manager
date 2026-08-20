@@ -17,9 +17,9 @@ import {
 } from "./deploy-slave.fixture.ts";
 import type { Harness } from "./deploy-slave.fixture.ts";
 
-// The cluster release, at the fake-repo level: what the verb PLANS, what set-pin writes, which
+// The cluster release, at the fake-repo level: what the run kind PLANS, what set-pin writes, which
 // answers the manager reads off the cluster map, and the two refusals that stop a release before it
-// touches a machine — the wrong role and the channel ceiling. What the verb does ON the machine —
+// touches a machine — the wrong role and the channel ceiling. What the run kind does ON the machine —
 // the three programs over the real `ansiwise serve` — is proven in redeploy.ansiwise.test.ts,
 // the one file every machine-run suite shares (the engine's run root is per-drive).
 //
@@ -126,7 +126,7 @@ describe("release — plan", () => {
     expect(markingOf(h, PARAMS.domain)).toBe(SLAVE_MARKING_YAML);
 
     // Counter-probe: the same harness, the same live slave, still plans a REDEPLOY. So the refusal
-    // above is this verb's own reading of the role and not a planner that refuses everything.
+    // above is this run kind's own reading of the role and not a planner that refuses everything.
     const ok = await h.executor.plan("redeploy", { serverId: SLAVE_ID });
     expect(ok.plan.steps.map((s) => s.name)).toEqual(REDEPLOY_STEP_NAMES);
   });

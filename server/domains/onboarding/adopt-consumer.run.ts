@@ -15,7 +15,7 @@ import { upsertAppRow } from "./onboard-steps.ts";
 // footprint by name, adopt-consumer RECORDS one: it reconstructs the missing apps row FROM the GitOps
 // registration, so a consumer whose onboard died before record-inventory (the LAST onboard step) — or
 // whose registration was written by hand — becomes visible under Consumers and reachable by the
-// row-keyed verbs again (offboard reads repoURL + the sealed PAT off the row it writes). swissbookai is
+// row-keyed run kinds again (offboard reads repoURL + the sealed PAT off the row it writes). swissbookai is
 // the founding case: healthy in the cluster, invisible in the Controller.
 //
 // DESIGN — a distinct RUN_KIND "adopt-consumer" (NOT "adopt", which adopts a SERVER), NOT a
@@ -62,7 +62,7 @@ interface AdoptTarget {
  *  are independently resumable, and the row must be written from what the registration says NOW.
  *   - absent            — nothing to adopt.
  *   - body name drift   — a body whose `name` disagrees with its directory would put THAT name's repo
- *                         on THIS name's row, a mixed identity every later verb would act on.
+ *                         on THIS name's row, a mixed identity every later run kind would act on.
  *   - no deploy group   — the file at <stage>.yaml is a build registration; it deploys nothing. */
 async function readStageRegistration(ports: AdoptConsumerPorts, t: AdoptTarget): Promise<ConsumerStageRegistration> {
   const current = await ports.registry.readRegistration(t.stage, t.name);
@@ -123,7 +123,7 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
       run: async (ctx) => {
         // The ONE fail-closed gate (step 0 of this mutating run): the target cluster must still be a
         // provisioned hostyour cluster whose deploy-state agrees with the derived domain/stage — a row
-        // recorded against the wrong cluster would aim every later row-keyed verb (offboard!) at it.
+        // recorded against the wrong cluster would aim every later row-keyed run kind (offboard!) at it.
         // Same shape as purge's attest-target: keyed on the name, so lifecycle's appId-keyed
         // attestTargetStep cannot be reused.
         const t = loadAdoptTarget(ctx.db, p);
@@ -170,7 +170,7 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
         // target cluster and the generated Application's ArgoCD status — and put both truths into the
         // step log BEFORE any row is written, so an adopt is never a silent leap of faith. It REFUSES
         // NOTHING: a suspended/missing/crash-looping app is still adoptable (the pointer is the record
-        // of intent, and adopting is precisely how the operator gets the row-keyed verbs back to fix
+        // of intent, and adopting is precisely how the operator gets the row-keyed run kinds back to fix
         // or remove it), and an unreachable slave must not strand the adoption either — the Consumers
         // card re-probes live per row anyway. Fanned with allSettled so one failing read still yields
         // the other, exactly like the live route.
@@ -229,7 +229,7 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
         const current = await readStageRegistration(ports, t);
         // The row's status mirrors the registration's own `suspended` field, not a blanket "active":
         // a suspended unit renders with no workloads, and recording it "active" would put the wrong
-        // lifecycle verb on its card. The registration is the record of intent; the row repeats it.
+        // lifecycle run kind on its card. The registration is the record of intent; the row repeats it.
         const status = current.suspended ? ("suspended" as const) : ("active" as const);
         localTx(ctx, (tx) =>
           upsertAppRow(tx, {
@@ -249,7 +249,7 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
           "meta",
           `consumer ${t.name} recorded on cluster ${t.clusterId} (${t.stage}, provenance adopted, status ${status}) — ` +
             `row reconstructed from the registration${current.repoCredentialId ? `, sealed repo credential ${current.repoCredentialId} copied verbatim` : ", no repo credential recorded on the registration"}. ` +
-            "The consumer now appears under Consumers and every row-keyed verb (offboard/suspend/resume) can reach it.",
+            "The consumer now appears under Consumers and every row-keyed run kind (offboard/suspend/resume) can reach it.",
         );
       },
     },

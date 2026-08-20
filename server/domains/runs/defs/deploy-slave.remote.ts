@@ -53,7 +53,7 @@ export const WORK_CHECKOUT = "/srv/hostyour-cloud-slave";
 export function refreshPlatformCheckoutScript(branch: string): string {
   return `#!/usr/bin/env bash
 set -euo pipefail
-[ -d "${PLATFORM_CHECKOUT}/.git" ] || { echo "no platform checkout at ${PLATFORM_CHECKOUT} — the machine's installation puts it there; has this machine been installed through the deployment programs?" >&2; exit 3; }
+[ -d "${PLATFORM_CHECKOUT}/.git" ] || { echo "no platform checkout at ${PLATFORM_CHECKOUT} — the place-ansiwise step clones it there before any program runs, so a machine reaching this step without one lost it afterwards" >&2; exit 3; }
 old=$(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)
 git -C "${PLATFORM_CHECKOUT}" fetch origin --tags
 git -C "${PLATFORM_CHECKOUT}" reset --hard

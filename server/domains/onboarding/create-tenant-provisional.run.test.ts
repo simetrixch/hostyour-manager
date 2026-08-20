@@ -31,7 +31,7 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 //
 //   RECORD INTENT, NOT SUCCESS. The tenants row used to be written LAST, so it recorded
 //   SUCCESS while git and the cluster had been mutated several steps earlier — and a failure in between
-//   left a tenant every removal verb was structurally unable to name. record-provisional now writes it
+//   left a tenant every removal run kind was structurally unable to name. record-provisional now writes it
 //   FIRST, at status "provisioning"; record-inventory only settles it to "active". The load-bearing
 //   asymmetry these tests pin is that "provisioning" is INSERT-ONLY: a resumed run must never demote a
 //   row record-inventory already lifted to "active".
@@ -294,7 +294,7 @@ describe("record-provisional — the row exists BEFORE anything is deployed", ()
 // `activate` (the first-admin invite) is deliberately the LAST step, after record-inventory, so a failed
 // invite never rolls back a live deployment — and an HTTP 503 from a freshly started tenant example-auth
 // is a known live condition. The failed run's screen therefore has to resolve the tenants ROW, not
-// conclude "failed create-tenant ⇒ orphan" and hold out the one verb that deprovisions the tenant.
+// conclude "failed create-tenant ⇒ orphan" and hold out the one run kind that deprovisions the tenant.
 describe("a create-tenant that fails only at `activate` leaves a LIVE tenant", () => {
   const TOKEN_PATH = `${memberNamespace(GUID, "auth")}/hostyour-app-secrets/AUTH_BOOTSTRAP_TOKEN`;
 

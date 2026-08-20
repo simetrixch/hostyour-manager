@@ -1,5 +1,5 @@
 // The TARGET-side steps of the relocation carrier — the "second half" of the sequence that IS the restore
-// verb, and that a migrate composes after its dump half: provide the target, rebuild the unit from
+// run kind, and that a migrate composes after its dump half: provide the target, rebuild the unit from
 // the box folder, prove completeness BEFORE DNS, switch the one record, smoke, and settle the
 // inventory. Kind differences all live behind the RelocationWorld.
 import type { Step, StepCtx } from "../../executor/types.ts";
@@ -121,7 +121,7 @@ export function verifyCompletenessStep(ports: RelocationPorts, worldOf: WorldOf,
 
 /** Switch the unit's ONE record onto the target cluster's address — a content update of exactly the
  *  record the unit already owns (a move is a DNS change and nothing more). */
-export function switchDnsStep(ports: RelocationPorts, worldOf: WorldOf, targetClusterId: string, verb: string): Step {
+export function switchDnsStep(ports: RelocationPorts, worldOf: WorldOf, targetClusterId: string, runKind: string): Step {
   return {
     name: "switch-dns",
     title: "Switch the unit's one DNS record to the target cluster",
@@ -131,7 +131,7 @@ export function switchDnsStep(ports: RelocationPorts, worldOf: WorldOf, targetCl
       const recordName = await w.dnsRecordName(ctx, target);
       // The one caller that overwrites a foreign address: the record answers with the SOURCE cluster
       // until this step, and moving it onto the target is the whole of the switch.
-      await provisionUnitDns(ctx, { dns: ports.dns, unit: w.unit, recordName, clusterFqdn: target.domain, verb, overwriteAddress: true });
+      await provisionUnitDns(ctx, { dns: ports.dns, unit: w.unit, recordName, clusterFqdn: target.domain, runKind, overwriteAddress: true });
     },
   };
 }

@@ -322,8 +322,8 @@ function invalid(kind: string, err: { issues: ReadonlyArray<{ path: ReadonlyArra
 /** The tenant fields the list/detail views project (JOIN clusters for domain/stage), mirroring the
  *  consumer list — the guid identity + suspend state instead of a repoUrl. */
 
-// `refuseWhenProvisioning` names the action in the refusal message, or is null when the verb IS allowed
-// on a tenant whose create-tenant run never finished. Only the removal verb is
+// `refuseWhenProvisioning` names the action in the refusal message, or is null when the run kind IS allowed
+// on a tenant whose create-tenant run never finished. Only the removal run kind is
 // allowed: tenant-offboard's teardown is idempotent and copes with a half-deployed fan-out, so it is the
 // clean way out, while suspend/resume flip a pointer that may never have been written at all.
 const TENANT_LIFECYCLE = [
@@ -740,7 +740,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   }
 
   // Tenant purge / force-offboard: remove a tenant's WHOLE footprint BY GUID even when NO inventory row
-  // exists (an ORPHAN — see tenant-purge.run.ts), and the only verb that also destroys the crypto entry and
+  // exists (an ORPHAN — see tenant-purge.run.ts), and the only run kind that also destroys the crypto entry and
   // the namespace, which the pointer-driven offboard leaves standing on a half-created tenant.
   // Keyed on guid+stage+cluster, NOT a path :id — there may be no tenant row to name — so it
   // takes a body, exactly like the consumer purge. Unlike that one it plans through planStreamed: the
@@ -751,7 +751,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     if (!onboardingEnabled) throw errNotConfigured("tenant onboarding is not configured on this controller");
     const parsed = TenantPurgeRequest.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) invalid("tenant-purge", parsed.error);
-    // The one refusal this destructive verb owes the sibling verbs' guarantee: a tenant the inventory
+    // The one refusal this destructive run kind owes the sibling run kinds' guarantee: a tenant the inventory
     // still calls live, whose pointer still stands, is DEPLOYED — offboard removes such a tenant, purge
     // would deprovision it. Asked here so the operator is refused immediately, before a Run exists — and
     // asked AGAIN, from the same rule, in the run's own attest-target step (tenant-purge.run.ts), because

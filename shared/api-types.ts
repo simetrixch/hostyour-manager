@@ -643,7 +643,7 @@ export interface OrphanScanView extends OrphanScan {
   reason?: "onboarding-not-configured";
 }
 
-/* ---- Consumers: the DETECTED scan + the adopt verb it feeds ----
+/* ---- Consumers: the DETECTED scan + the adopt run kind it feeds ----
  *
  * The CONSUMER TWIN of the tenant orphan scan above, declared beside it so the two families keep one
  * vocabulary. A DETECTED consumer is one whose GitOps registration (registrations/<name>/<stage>.yaml)
@@ -790,14 +790,14 @@ export interface RunTenantRowView {
  *                      deployed and nothing was recorded: the tenant is NAMED and yet carries no row.
  *                      NOT purgeable — there is nothing out there to purge.
  *   - "orphan"       — a guid was frozen, the run mutated, and NO tenants row carries the tenant. Nothing
- *                      else in the product can name it (every other removal verb resolves BY that row),
+ *                      else in the product can name it (every other removal run kind resolves BY that row),
  *                      so the run screen is the only place it can be reached. PURGEABLE.
  *   - "unfinished"   — the row is "provisioning": record-provisional wrote it and the run never settled
  *                      it. The same state the Tenants list badges "unfinished". PURGEABLE.
  *   - "live"         — the row is "active"/"suspended": record-inventory SETTLED the tenant and its app
  *                      rows, i.e. the fan-out synced and the namespace smoke-checked. NOT purgeable.
  *   - "offboarded" — the row is settled UN-DEPLOYED (kept for audit). Its cluster state was
- *                      deliberately kept, so a purge is still the verb that reaps it — but not from HERE:
+ *                      deliberately kept, so a purge is still the run kind that reaps it — but not from HERE:
  *                      one removal already ran on this screen's tenant, and the tenant page is where the
  *                      second half is aimed. NOT purgeable.
  *   - "purged" — the row is settled DEPROVISIONED: a tenant-purge completed,
@@ -814,7 +814,7 @@ export interface RunTenantRowView {
  *  tenant example-auth a known live condition. A run that failed ONLY there therefore sits behind a tenant
  *  that is deployed, recorded active and serving. Deciding from "failed create-tenant" alone would tell
  *  that operator the tenant "may still exist in GitOps and on the cluster" and is "listed as unfinished
- *  on the Tenants page" — both untrue — and would offer the one verb that deletes the Tenant CR and
+ *  on the Tenants page" — both untrue — and would offer the one run kind that deletes the Tenant CR and
  *  thereby drops the live tenant's Mongo databases and its Vault path. The Tenants list and the tenant
  *  detail page already gate their purge on status === "provisioning" (web tenantRows.ts); this makes the
  *  run screen decide from the same fact, so it cannot describe — or act on — the same tenant differently.

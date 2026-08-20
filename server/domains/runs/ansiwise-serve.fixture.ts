@@ -15,7 +15,7 @@ import { makeHarness, scriptedHosts, logger, MASTER_ID, SLAVE_ID, type Harness }
 
 // The fixture half of the ONE suite that talks to a real `ansiwise serve`
 // (redeploy.ansiwise.test.ts): the measuring programs the serve installation carries, the worlds
-// the verbs run in, and the observer/step plumbing. Split out of the test file (the file-size
+// the run kinds run in, and the observer/step plumbing. Split out of the test file (the file-size
 // doctrine); nothing here asserts — the suite does.
 
 export const ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory";
@@ -64,10 +64,10 @@ export const composedAnswers = (email: string): Record<string, string> => ({
   letsencrypt_server: ACME_STAGING,
 });
 
-/** A fixture for a program whose REAL declaration carries no answers (the tailnet client verbs):
+/** A fixture for a program whose REAL declaration carries no answers (the tailnet client run kinds):
  *  one defaulted row, so a run whose caller sent NOTHING still exercises the engine's own record
  *  semantics — and still goes red if the engine were handed a stray value that shadows the default. */
-const clientVerbYaml = (name: string, word: string): string => [
+const clientRunKindYaml = (name: string, word: string): string => [
   `name: ${name}`,
   "roles: [master, slave]",
   "answers:",
@@ -85,12 +85,12 @@ const clientVerbYaml = (name: string, word: string): string => [
 ].join("\n");
 
 /** The measuring programs the ONE serve installation carries — a fixture per real program the
- *  verbs drive, each judging the COMPOSITION: every row goes red when the manager composes the
+ *  run kinds drive, each judging the COMPOSITION: every row goes red when the manager composes the
  *  value wrong or not at all, so a green run IS the proof the manager composed what the program
  *  declared. */
 export function fixturePrograms(): Record<string, string> {
   return {
-    // TWO verbs run deploy-cluster — redeploy's master arm (m1/master) and deploy-slave's machine
+    // TWO run kinds run deploy-cluster — redeploy's master arm (m1/master) and deploy-slave's machine
     // layer (s1/slave) — so the identity rows take either spelling; books_cluster and build_plane
     // carry the master's domain as their fallback, because the master arm legitimately sends
     // neither (the real program defaults them to the machine's own domain) while a slave that
@@ -162,11 +162,11 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "catalog_repo", pattern: "^acme/acme-catalog$" },
       { answer: "committer_email", pattern: "^[^@]+@[^@]+$" },
     ]),
-    // The tailnet family. The two client verbs' real programs declare NO answers, so their
+    // The tailnet family. The two client run kinds' real programs declare NO answers, so their
     // fixtures declare one DEFAULTED row: the manager must send nothing at all for the run to go
     // green, which is exactly the composition contract on a host that may carry no cluster row.
-    "tailnet-disconnect": clientVerbYaml("tailnet-disconnect", "leave"),
-    "tailnet-reconnect": clientVerbYaml("tailnet-reconnect", "up"),
+    "tailnet-disconnect": clientRunKindYaml("tailnet-disconnect", "leave"),
+    "tailnet-reconnect": clientRunKindYaml("tailnet-reconnect", "up"),
     "tailnet-mint-join-key": programYaml("tailnet-mint-join-key", [
       { answer: "stage", pattern: "^prod$" },
       { answer: "slave_fqdn", pattern: "^s1\\.example\\.com$" },
@@ -194,7 +194,7 @@ export function serveConversation(serve: ServeFixture): (stream: ServerChannel) 
   };
 }
 
-// ---- the worlds the verbs run in, each wired to reach the real serve on every host ----
+// ---- the worlds the run kinds run in, each wired to reach the real serve on every host ----
 
 /** A harness whose master carries an ACTIVE cluster — the state redeploy and release act on.
  *  The channel table rides along because a release's attest checks the ceiling against it. */
@@ -217,8 +217,8 @@ export async function liveMaster(serve: ServeFixture): Promise<Harness> {
   return h;
 }
 
-/** A harness whose SLAVE is the tailnet verbs' target. The cluster row and the profile (where the
- *  rejoin reads global.tailnetUrl) are the rejoin's world; the two client verbs run without either
+/** A harness whose SLAVE is the tailnet run kinds' target. The cluster row and the profile (where the
+ *  rejoin reads global.tailnetUrl) are the rejoin's world; the two client run kinds run without either
  *  — the host that needs them most is exactly the one whose deploy went wrong. */
 export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean; tailnetUrl?: string | false } = {}): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });

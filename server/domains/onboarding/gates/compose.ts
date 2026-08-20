@@ -237,7 +237,7 @@ export function gateG18(input: {
   };
 }
 
-/** G19 FQDN grant (HARD). A manifest may DECLARE one extra public FQDN (`fqdn`); the onboard verb
+/** G19 FQDN grant (HARD). A manifest may DECLARE one extra public FQDN (`fqdn`); the onboard run kind
  *  ATTESTS it into the stage registration, and only the attested value ever reaches the admission
  *  policy and the chart. What this gate refuses is a name the platform ALREADY SERVES:
  *

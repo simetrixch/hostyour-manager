@@ -73,7 +73,11 @@ export async function wire(): Promise<Wired> {
   const registry = buildRegistry({
     db: db.db,
     ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}),
+    // The same repository that port writes, as the address a MACHINE clones it from (place-ansiwise),
+    // composed from the same two settings.
+    ...(config.github ? { platformRepoUrl: `https://github.com/${config.github.owner}/${config.github.repo}.git` } : {}),
     ...(config.ansiwiseServeCommand ? { ansiwiseServeCommand: config.ansiwiseServeCommand } : {}),
+    ...(config.ansiwiseDownloadUrl ? { ansiwiseDownloadUrl: config.ansiwiseDownloadUrl } : {}),
   }, onboarding.defs);
   const executor = new Executor({
     db: db.db,

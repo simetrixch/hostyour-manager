@@ -14,16 +14,20 @@ import { removeSlaveMarkingPart, clusterMarkingPath } from "../../inventory/clus
 // timing helpers and compensating actions the steps share. Split out of deploy-slave.ts
 // (files ≤400 lines) — the def composes these; nothing here is a step.
 
-/** The one port deploy-slave takes: the writer of the platform repo, through which the run marks the
- *  slave reachable in clusters/active/<fqdn>.yaml on the books branch — the install branch of the
- *  cluster holding the master role, which is where install.sh put the map. Optional because the run is registered
+/** The platform repo, in the two shapes deploy-slave reaches it: as the WRITER through which the run
+ *  marks the slave reachable in clusters/active/<fqdn>.yaml on the books branch — the install branch
+ *  of the cluster holding the master role, which is where install.sh put the map — and as the ADDRESS
+ *  the machine itself clones that same repository from (place-ansiwise). Both are built where the
+ *  ports are built, out of the same two settings, so the tree this manager writes and the tree the
+ *  machine reads are one repository stated once. Optional because the run is registered
  *  unconditionally while the platform repo needs GITHUB_REPO + GITHUB_WRITE_PAT — absent, the map
  *  step fails LOUD with what to configure rather than deploying a slave the master can never reach. */
 export interface DeploySlavePorts {
   platformRepo?: PlatformRepo;
+  platformRepoUrl?: string;
 }
 
-/** WHICH verb is driving the shared slave step list. The steps are the same either way — what
+/** WHICH run kind is driving the shared slave step list. The steps are the same either way — what
  *  differs is what a failure means. `deploy` installs a slave that is not live yet, so every step
  *  that creates something arms the compensating action that undoes it. `redeploy` reconciles a slave
  *  that IS live, and arms none of them: `snap remove --purge microk8s`, `--slave-remove` and dropping
@@ -46,8 +50,8 @@ export function statedTarget(serverId: string, domain: string, stage: Stage): Sl
 }
 
 /** redeploy's target: the ACTIVE cluster the server already carries states both. The lookup is at the
- *  same time the verb's guard — a server with no active cluster has no machine layer to rebuild — so
- *  the two verbs can never aim at the same cluster state. */
+ *  same time the run kind's guard — a server with no active cluster has no machine layer to rebuild — so
+ *  the two run kinds can never aim at the same cluster state. */
 export function activeClusterTarget(serverId: string): SlaveTarget {
   return {
     serverId,
@@ -221,9 +225,10 @@ export const microk8sResetSlaveCleanup: Cleanup = {
   title: "Remove MicroK8s from the slave (DESTRUCTIVE)",
   run: async (ctx: StepCtx) => {
     const session = await ctx.ssh(); // the slave (the run's ownsHost target)
-    // Only the snap goes. The platform checkout at /srv/hostyour-cloud is not this run's to
-    // remove: nothing in this manager put it there (refresh-checkout only brings it onto the
-    // slave's branch head), so taking it away would undo somebody else's work.
+    // Only the snap goes. The platform checkout at /srv/hostyour-cloud and the binary beside it are
+    // what a retry of the run resumes onto — place-ansiwise clones the one and installs the other,
+    // both idempotently — so removing them would buy a second download and a second clone and
+    // nothing else.
     await remoteCmd(ctx, session, "if snap list microk8s >/dev/null 2>&1; then sudo -n snap remove --purge microk8s; fi", { timeoutMs: 10 * 60_000 });
   },
 };

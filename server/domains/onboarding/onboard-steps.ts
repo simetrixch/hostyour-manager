@@ -54,7 +54,7 @@ export function removeRegistrationCleanup(ports: OnboardPorts, p: DeployableOnbo
  *  while the Application still references it (ArgoCD then refuses every operation on it) and the
  *  admission boundary comes down while the workloads still serve. FAIL-LOUD, like the tenant abort and
  *  for its reason: an abort deletes no namespace, so there is no cluster-side backstop — a fan-in that
- *  will not prune must stop the abort visibly (the run stays failed, re-abortable; purge is the verb
+ *  will not prune must stop the abort visibly (the run stays failed, re-abortable; purge is the run kind
  *  that force-reaps). An Application that never existed (the run died before its first sync) reads
  *  Missing immediately, so this passes at once on a run with nothing deployed. */
 export function watchConsumerPruneCleanup(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
@@ -164,7 +164,7 @@ export function removeCeremonySecretsCleanup(ports: OnboardPorts, p: DeployableO
 /** The teardown inverse of provision-build-rbac — registered by that step, run only on an explicit
  *  abort-with-cleanup. Tolerates already-absent grants (idempotent).
  *
- *  It obeys the same per-stage/per-unit split the removal verbs do (offboard.run.ts SCOPE), because the
+ *  It obeys the same per-stage/per-unit split the removal run kinds do (offboard.run.ts SCOPE), because the
  *  apply it inverts REPLACES objects an earlier stage created rather than only creating its own: the two
  *  grants in the stage-free `<name>-build` namespace exist once per unit, so an abort takes them only
  *  when no OTHER stage of the unit stands. Without that read, aborting the onboard of a second stage

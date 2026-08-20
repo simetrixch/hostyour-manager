@@ -85,6 +85,7 @@ export async function remoteScriptCapture(
       },
       onStderr: (line: string) => ctx.log("stderr", line),
       ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts?.stdin !== undefined ? { stdin: opts.stdin } : {}),
     });
     return { result, stdout: out.join("\n") };
   } finally {

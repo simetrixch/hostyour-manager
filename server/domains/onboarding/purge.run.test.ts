@@ -176,7 +176,7 @@ describe("purge run definition", () => {
 
   it("refuses to record the row while a fail-soft delete left an object standing — the backstop settles nothing offboard would not", async () => {
     // An operator reaches for purge exactly when offboard refused at ITS scan. If purge flipped the row
-    // without looking, the weaker verb would settle the state the stricter one declined to: the
+    // without looking, the weaker run kind would settle the state the stricter one declined to: the
     // consumer would stop appearing as active while its AppProject and grants stood on the cluster.
     seedApp();
     const reg = new Registry(new FakePlatformRepo(), prodClusterStage);

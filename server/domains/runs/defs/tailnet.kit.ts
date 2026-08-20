@@ -16,34 +16,34 @@ import {
   ANSIWISE_ELEVATION_SECRET, ANSIWISE_PROGRAM_TIMEOUT_MS, type AnsiwisePorts, type ProgramCheckpoint,
 } from "./ansiwise-run.kit.ts";
 
-// The shared half of the three tailnet repair verbs (defs/tailnet.ts): the steps they are composed
+// The shared half of the three tailnet repair run kinds (defs/tailnet.ts): the steps they are composed
 // of and the one plan builder they all state their targets in. The ACTS themselves are the tailnet
 // PROGRAMS of the machine's own catalogue (digita-deploy ansiwise/programs/), each driven over the
 // machine's `ansiwise serve` surface and proven by a dry run the machine's gate then admits the
 // real run against — nothing here ships a script to a host any more.
 //
-// WHAT MAKES THESE VERBS DIFFERENT FROM EVERY OTHER RUN. Each one reaches its host on the PUBLIC
+// WHAT MAKES THESE RUN KINDS DIFFERENT FROM EVERY OTHER RUN. Each one reaches its host on the PUBLIC
 // address — servers.host, stated on the plan's own target (RunTargetRef.transport) and resolved by
 // executor/transport.ts — because an act that takes a host off the private network, or puts it
 // back, cannot travel over that network. Nothing else about them is special: a plan, an approval,
-// steps and a log, like every verb.
+// steps and a log, like every run kind.
 //
 // A run in flight is not cut by a disconnect. Nothing in this controller dials a tailnet address:
 // every SSH session goes to servers.lan_host or servers.host, so what a disconnect takes away is
 // the host's membership of the private network, not this controller's way to it.
 
-/** What the three verbs need beyond the inventory: the command that serves the machine's programs
+/** What the three run kinds need beyond the inventory: the command that serves the machine's programs
  *  (every act is a program run), and — for a rejoin — the platform repo the coordinator's address
  *  is read off. */
 export interface TailnetPorts extends DeploySlavePorts, AnsiwisePorts {}
 
-/** The two programs a rejoin drives, by the catalogue's own names. The two single-host verbs need
+/** The two programs a rejoin drives, by the catalogue's own names. The two single-host run kinds need
  *  no constant: their programs are named exactly like the RUN KINDS, and tailnetSteps hands the
  *  kind through. */
 const MINT_PROGRAM = "tailnet-mint-join-key";
 const REJOIN_PROGRAM = "tailnet-rejoin";
 
-/** The verbs this kit builds — every RUN_KIND literal in the tailnet family, named by the family
+/** The run kinds this kit builds — every RUN_KIND literal in the tailnet family, named by the family
  *  rather than listed, so a fourth one cannot be added to the enum without the map below refusing
  *  to compile. */
 export type TailnetKind = Extract<RunKind, `tailnet-${string}`>;
@@ -280,7 +280,7 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
 
 /** The last step of all three: read the host and write the pair on its server row, through the one
  *  writer every other reading goes through (domains/runs/tailnet-probe.ts). Without it a card would
- *  go on showing the reading from before the repair — the state the operator asked the verb to
+ *  go on showing the reading from before the repair — the state the operator asked the run kind to
  *  change. A probe that cannot run leaves the stored reading alone and says so in the log; it does
  *  not fail the step, because the act above already happened and calling the run failed would say
  *  the opposite. EXPORTED for deploy-slave, whose join changes exactly the same reading. */
@@ -304,8 +304,8 @@ export function tailnetSteps(kind: TailnetKind, serverId: string, ports: Tailnet
   if (MODE[kind] === "rejoin") {
     return [attestTargetStep(serverId), rejoinStep(target, serverId, ports), readMembershipStep(serverId)];
   }
-  // The kind IS the program's name for the two single-host verbs — the catalogue names its
-  // programs after the verbs, and both declare no answers, so the generic program step fits whole.
+  // The kind IS the program's name for the two single-host run kinds — the catalogue names its
+  // programs after the run kinds, and both declare no answers, so the generic program step fits whole.
   return [attestTargetStep(serverId), ansiwiseProgramStep(target, kind, ports), readMembershipStep(serverId)];
 }
 
@@ -313,7 +313,7 @@ const SUMMARY: Record<TailnetMode, (o: { name: string; steps: number; host: stri
   disconnect: (o) =>
     `Take "${o.name}" off the tailnet: ${o.steps} steps, reaching it on its public address ${o.host} — the ` +
     `tailnet-disconnect program on the host's own ansiwise surface, proven by a dry run first. ` +
-    `It keeps answering there afterwards, which is how the two verbs that put it back reach it.`,
+    `It keeps answering there afterwards, which is how the two run kinds that put it back reach it.`,
   reconnect: (o) =>
     `Put "${o.name}" back on the tailnet with the credential it already holds: ${o.steps} steps, reaching it on its ` +
     `public address ${o.host} — the tailnet-reconnect program on the host's own ansiwise surface. ` +
@@ -326,7 +326,7 @@ const SUMMARY: Record<TailnetMode, (o: { name: string; steps: number; host: stri
 
 const WARNINGS: Record<TailnetMode, string[]> = {
   disconnect: ["The host belongs to no private network afterwards, until a reconnect or a rejoin puts it back."],
-  reconnect: ["A host whose credential is gone cannot re-establish this way — the run fails, and tailnet-rejoin is the verb that mints a fresh one."],
+  reconnect: ["A host whose credential is gone cannot re-establish this way — the run fails, and tailnet-rejoin is the run kind that mints a fresh one."],
   rejoin: [
     "The host is logged out before it joins again, so it is on no network for the length of this run.",
     "The mint is create-only: a stored credential the coordinator still accepts is handed back rather than replaced.",
@@ -335,7 +335,7 @@ const WARNINGS: Record<TailnetMode, string[]> = {
 };
 
 /**
- * The plan all three verbs are approved on. What it states beyond the usual:
+ * The plan all three run kinds are approved on. What it states beyond the usual:
  *
  *  - the HOST target names `transport: "public"`, so the frozen plan_json records which of the
  *    server's two addresses this run was approved to use, and the executor opens the session on it
@@ -345,7 +345,7 @@ const WARNINGS: Record<TailnetMode, string[]> = {
  *    takes. Without it a rejoin could run its logout on a slave while a deploy-slave in
  *    flight was joining it, both runs would report success, and the host would end up off the
  *    network with its single-use join credential already redeemed. A run that has SETTLED — the
- *    failed deploy-slave these verbs exist for — holds no lock to be blocked by: every terminal
+ *    failed deploy-slave these run kinds exist for — holds no lock to be blocked by: every terminal
  *    path in the executor releases them (finishRun / failRun), whatever the outcome. The master,
  *    when a rejoin needs one, is not owned: the run drives its programs, it does not own the box.
  */
