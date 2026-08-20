@@ -1,14 +1,20 @@
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 import type { Step, StepCtx, RunDefinition } from "../../../executor/types.ts";
-import { errValidation } from "../../../kernel/errors.ts";
+import type { Db } from "../../../db/client.ts";
+import { servers } from "../../../db/schema/inventory.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE, composeReleaseTag, parseReleaseTag, type ReleaseChannel } from "../../../../shared/release.ts";
 import { clusterMarkingPath, resolveClusterMarking, setClusterRelease } from "../../inventory/cluster-marking.ts";
 import { PRODUCT_BRANCH } from "../../../../shared/branches.ts";
 import { readChannelStages, assertChannelReaches } from "../../inventory/channel-stages.ts";
-import { activeClusterTarget, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
-import { attestClusterStep, refreshCheckoutStep, argocdFollowStep, loadActiveCluster } from "./cluster-release.kit.ts";
-import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, type ExtraAnswers } from "./ansiwise-run.kit.ts";
+import { activeClusterTarget, loadMaster, masterFqdnOf, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { attestClusterStep, refreshCheckoutStep, prepareRegenerationStep, argocdFollowStep, loadActiveCluster } from "./cluster-release.kit.ts";
+import { slaveMachineAnswers, SLAVE_INSTALL_INPUTS } from "./deploy-slave.ts";
+import {
+  ansiwiseProgramStep, requireProgramsStep, ANSIWISE_ELEVATION_SECRET,
+  type AnsiwisePorts, type ExtraAnswers, type ProgramOnSurface,
+} from "./ansiwise-run.kit.ts";
 
 // `release` — raise the platform version a cluster stands on. The third cluster run kind, and the
 // only one that moves a pin.
@@ -22,32 +28,46 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, typ
 // unit release has, because a platform version can change what sets the machine up, and ArgoCD
 // cannot deliver what it runs on.
 //
-// It ALWAYS does all of it, in order: mint the tag and commit the pin, bring the machine's checkout
-// onto that commit, regenerate the install branch AT the pin (the regenerate-branch program, on the
-// machine), rebuild the machine layer from the regenerated revision (deploy-cluster, deploy-gitops —
-// the exact two programs redeploy's master arm runs), then let ArgoCD follow. There is no "did the
-// machine layer change" switch — every program is idempotent by design, and a conditional would be a
-// case distinction someone has to maintain and that would eventually be wrong. It would also make
-// the state unprovable: a run that sometimes skips the machine cannot claim the machine layer
-// matches the pin.
+// It ALWAYS does all of it, in order: prove the catalogue carries every program it will drive, mint
+// the tag and commit the pin, bring the checkout the regeneration reads onto that commit, regenerate
+// the install branch AT the pin, rebuild the machine layer from the regenerated revision
+// (deploy-cluster, deploy-gitops — the exact two programs redeploy's master arm runs), then let
+// ArgoCD follow. There is no "did the machine layer change" switch — every program is idempotent by
+// design, and a conditional would be a case distinction someone has to maintain and that would
+// eventually be wrong. It would also make the state unprovable: a run that sometimes skips the
+// machine cannot claim the machine layer matches the pin.
 //
 // THE REGENERATION IS THE MACHINE'S OWN ACT, never re-implemented here. set-pin states the release
-// in the cluster map and nothing else; regenerate-branch (digita-deploy ansiwise/programs/) then
-// READS that pin off the branch itself (measure_value_in_branch_file) and merges refs/tags/<tag>
-// into the branch — everything only the branch has, the books above all, is kept, and a conflict
-// outside the regenerated paths stops the run with the paths named. The step before it exists
-// because the program deliberately fetches nothing: refresh-checkout is what carries the pin commit
-// and the tag onto the machine.
+// in the cluster map and nothing else; the regeneration program (digita-deploy ansiwise/programs/)
+// then READS that pin off a branch (measure_value_in_branch_file) and merges refs/tags/<tag> into
+// the branch it regenerates — everything only that branch has, the books above all, is kept, and a
+// conflict outside the regenerated paths stops the run with the paths named. The step before it
+// exists because the program deliberately fetches nothing: a checkout step is what carries the pin
+// commit and the tag onto the machine.
 //
-// MASTER ONLY, refused for a slave at plan time. The pin lives in the cluster map on the BOOKS
-// branch — the install branch of the cluster holding the master role — and regenerate-branch reads
-// the pin off the very branch it regenerates, out of the checkout standing on it. A slave's install
-// branch deliberately carries no cluster map and no books at all (deploy-slave-branch cuts it that
-// way: the books live on the master's branch, and a second copy goes stale the moment the
-// Controller writes to that one), so nothing on it states a pin to regenerate at, and the master's
-// checkout stands on the master's branch, not the slave's. A program that regenerates a SLAVE's
-// branch at its pin — deploy-slave-branch's shape, reading the books off the master's branch — is
-// not built; until it is, a slave release is refused rather than guessed at.
+// TWO ARMS, decided by the role, because a cluster's pin and its branch are not always on the same
+// machine:
+//   master, master+   regenerate-branch, on the cluster's own host. The pin stands in the map on the
+//     slave           BOOKS branch, which for this cluster IS its own install branch, so the program
+//                     reads the pin off the very branch it regenerates, out of the checkout standing
+//                     on it. refresh-checkout brings that one checkout onto the pin commit.
+//   pure slave        regenerate-slave-branch, ON THE MASTER. A slave's install branch deliberately
+//                     carries no cluster map and no books at all (deploy-slave-branch cuts it that
+//                     way: the books live on the master's branch, and a second copy goes stale the
+//                     moment the Controller writes to that one), so the slave's pin stands on the
+//                     MASTER's branch under the SLAVE's name — two names that come apart, which is
+//                     what measure_value_in_branch_file's run_answer slot fills. The program reads
+//                     that map out of the master's live checkout and merges into a second checkout
+//                     there, standing on the slave's branch; prepare-regeneration stands both, and
+//                     the SLAVE's own checkout is refreshed after the regeneration, onto the branch
+//                     head it just pushed.
+//
+// THE PIN IS COMMITTED ONLY AFTER THE RUN CAN NO LONGER FAIL ON AN ABSENT PROGRAM. set-pin makes the
+// two git writes and the machine's turn comes several steps later, so a catalogue that does not carry
+// the regeneration program would leave the map recording a cluster standing on a release it never
+// received — which is exactly what cluster-marking.ts's `release` field exists to make impossible.
+// require-programs asks every surface for its program list BEFORE set-pin, which is why the two steps
+// stand in that order and not the other one.
 
 export const ReleaseParams = z.object({
   serverId: z.string().startsWith("srv_"),
@@ -58,21 +78,44 @@ export const ReleaseParams = z.object({
 });
 export type ReleaseParams = z.infer<typeof ReleaseParams>;
 
-export interface ReleasePorts extends DeploySlavePorts, AnsiwisePorts {}
+/** `db` is NOT optional, for the reason redeploy's ports carry one: which arm a release runs is a
+ *  question about the target's ROLE, and a definition's steps() is handed the persisted params and no
+ *  database. */
+export interface ReleasePorts extends DeploySlavePorts, AnsiwisePorts {
+  db: Db;
+}
 
-/** The programs a release drives on the machine, in the order the pinned state stands on them: the
- *  install branch regenerated at the pin, then the machine layer exactly as redeploy's master arm
- *  delivers it — the cluster below GitOps first, then what hands it over. The names are the
- *  catalogue's own (digita-deploy ansiwise/programs/); each step reads the program's declared
- *  answers off the machine, so nothing about their INSIDES is repeated here. */
-const RELEASE_PROGRAMS = ["regenerate-branch", "deploy-cluster", "deploy-gitops"] as const;
+/** The programs a release drives, in the order the pinned state stands on them: the install branch
+ *  regenerated at the pin, then the machine layer exactly as redeploy's master arm delivers it — the
+ *  cluster below GitOps first, then what hands it over. The names are the catalogue's own
+ *  (digita-deploy ansiwise/programs/); each step reads the program's declared answers off the
+ *  machine, so nothing about their INSIDES is repeated here.
+ *
+ *  The two lists differ in ONE entry and in WHERE it runs: a slave's regeneration is the master's
+ *  act, on the master's surface, because that is where the slave's pin and the slave's books stand.
+ *  The two machine-layer programs are the slave's own either way — a machine layer is delivered on
+ *  the machine it belongs to. */
+const MASTER_RELEASE_PROGRAMS: readonly ProgramOnSurface[] = [
+  { program: "regenerate-branch" },
+  { program: "deploy-cluster" },
+  { program: "deploy-gitops" },
+];
+const SLAVE_RELEASE_PROGRAMS: readonly ProgramOnSurface[] = [
+  { program: "regenerate-slave-branch", onMaster: true },
+  { program: "deploy-cluster" },
+  { program: "deploy-gitops" },
+];
 
 /** The answers the inventory cannot state, asked for at approve and carried to the steps as
  *  `activation-input:<answer>`. committer_email is regenerate-branch's (a forge shows it beside
  *  every commit and some refuse a push without one); the letsencrypt pair is deploy-cluster's; the
  *  three optional ones may stay blank — a blank input is dropped at approve and the program's own
  *  default (or its refusal, by name) decides. build_plane is deliberately NOT here: the cluster map
- *  states it, and markingAnswers below is where the manager reads it. */
+ *  states it, and markingAnswers below is where the manager reads it.
+ *
+ *  The SLAVE arm asks deploy-slave's own list instead (SLAVE_INSTALL_INPUTS): the same machine-layer
+ *  inputs plus the branch program's committer identity, which is what its three programs declare
+ *  between them — and it names no build plane, because a slave's map states one. */
 const RELEASE_INPUTS = [
   { field: "committer_email", label: "The mailbox the regenerated branch's commits are made under" },
   { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to before a certificate expires" },
@@ -147,7 +190,7 @@ function setPinStep(target: SlaveTarget, params: ReleaseParams, ports: ReleasePo
         : `${clusterMarkingPath(domain)} already states release: ${tag} — nothing to commit`);
 
       ctx.checkpoint({ tag, minted: minted.minted, pinCommitted: pin.changed });
-      ctx.log("meta", `the pin is stated — regenerate-branch reads it off ${clusterMarkingPath(domain)} on the branch and brings the branch to ${tag}`);
+      ctx.log("meta", `the pin is stated — the regeneration reads it off ${clusterMarkingPath(domain)} and brings ${domain}'s branch to ${tag}`);
     },
   };
 }
@@ -161,7 +204,7 @@ function setPinStep(target: SlaveTarget, params: ReleaseParams, ports: ReleasePo
  *  declares (kind text_list) — splitting it here is the one translation, made once. The optional map
  *  fields ride only where the map states them; a required answer the map lacks is then refused by
  *  the machine BY NAME, which is the loudest sentence available for an incomplete map. */
-export function markingAnswers(target: SlaveTarget, ports: ReleasePorts): ExtraAnswers {
+export function markingAnswers(target: SlaveTarget, ports: DeploySlavePorts): ExtraAnswers {
   return async (ctx: StepCtx) => {
     const { domain } = target.resolve(ctx.db);
     const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
@@ -178,14 +221,48 @@ export function markingAnswers(target: SlaveTarget, ports: ReleasePorts): ExtraA
   };
 }
 
+/** WHICH arm a server earns. An UNRESOLVABLE server is not an error path: the boot check calls
+ *  steps({}) with no params at all, purely to assert that step 0 is attest-target, and on that
+ *  question the two arms agree — so it gets the master shape, and a real run, which always names a
+ *  server, gets the arm that server's role earns. */
+function releasesOnMaster(db: Db, serverId: string): boolean {
+  const role = db.select({ role: servers.role }).from(servers).where(eq(servers.id, serverId)).get()?.role;
+  return role === undefined || isMasterRole(role);
+}
+
 function releaseSteps(params: ReleaseParams, ports: ReleasePorts): Step[] {
   const target = activeClusterTarget(params.serverId);
-  const extra = markingAnswers(target, ports);
-  return [
+  const onMaster = releasesOnMaster(ports.db, params.serverId);
+  const programs = onMaster ? MASTER_RELEASE_PROGRAMS : SLAVE_RELEASE_PROGRAMS;
+  // The map-sourced answers differ with the arm because the programs do. A master's regeneration is
+  // handed the installation's own values out of the map it stands on; a slave's regeneration reads
+  // the master's map ITSELF, on the machine, and declares none of them — so what is left to state is
+  // what the two machine-layer programs take, which is deploy-slave's own reading of the slave's map,
+  // shared rather than copied.
+  const extra = onMaster ? markingAnswers(target, ports) : slaveMachineAnswers(target, ports);
+  const step = (p: ProgramOnSurface): Step =>
+    ansiwiseProgramStep(target, p.program, ports, { extra, ...(p.onMaster === true ? { onMaster: true } : {}) });
+  // The head every arm shares, in the order the header states and for the reason it states: the
+  // ceiling and the machine's identity, then the catalogue's programs, THEN the two git writes.
+  const head = [
     attestClusterStep(target, ceilingCheck(target, params.channel, params.version, ports)),
+    requireProgramsStep(ports, programs),
     setPinStep(target, params, ports),
+  ];
+  if (onMaster) {
+    return [...head, refreshCheckoutStep(target), ...programs.map(step), argocdFollowStep(target)];
+  }
+  return [
+    ...head,
+    // REPLACES refresh-checkout here rather than joining it: refreshCheckoutStep opens the run's
+    // OWNED host, which for a slave release is the slave, and would leave the master's books tree —
+    // the one carrying this slave's pin — unfetched.
+    prepareRegenerationStep(target),
+    ...programs.filter((p) => p.onMaster === true).map(step),
+    // The slave's own checkout, and only NOW: before the regeneration the branch head this step
+    // fetches is the one the release has not delivered yet.
     refreshCheckoutStep(target),
-    ...RELEASE_PROGRAMS.map((program) => ansiwiseProgramStep(target, program, ports, { extra })),
+    ...programs.filter((p) => p.onMaster !== true).map(step),
     argocdFollowStep(target),
   ];
 }
@@ -197,22 +274,14 @@ export function makeReleaseDef(ports: ReleasePorts): RunDefinition<ReleaseParams
     mutating: true,
     plan: async (params, { db }) => {
       const { server, cluster } = loadActiveCluster(db, params.serverId);
-      if (!isMasterRole(server.role)) {
-        throw errValidation(
-          `a release names a cluster carrying the MASTER part, and "${server.name}" (${cluster.domain}) is a slave. ` +
-          "The release pin lives in the cluster map on the books branch — the master's own install branch — and " +
-          "regenerate-branch reads that pin off the very branch it regenerates, out of the checkout standing on it; " +
-          "a slave's install branch deliberately carries no cluster map and no books at all (deploy-slave-branch cuts " +
-          "it that way: the books live on the master's branch, and a second copy goes stale the moment the Controller " +
-          "writes to that one), so nothing on it states a pin to regenerate at. The program that regenerates a SLAVE's " +
-          "branch at its pin — deploy-slave-branch's shape, reading the books off the master's branch — is not built; " +
-          "until it is, releasing a slave is refused rather than guessed at. To rebuild the slave's machine layer " +
-          "without a version change, use redeploy.",
-        );
-      }
+      const onMaster = isMasterRole(server.role);
+      const master = loadMaster(db);
+      const booksBranch = masterFqdnOf(db, master);
       // The build-plane PATs are demanded exactly where the machine will demand them: the map says
       // whether this cluster carries the build plane, and regenerate-branch's stated_when answers
       // hold or lapse on the same fact (build_plane == fqdn), so plan and machine can never disagree.
+      // The slave arm asks for none: regenerate-slave-branch declares no credential answer at all —
+      // a slave's secrets file is nothing a branch program of the master's writes.
       const marking = await resolveClusterMarking(requirePlatformRepo(ports), cluster.domain);
       const stepDefs = releaseSteps(params, ports);
       return {
@@ -220,31 +289,42 @@ export function makeReleaseDef(ports: ReleasePorts): RunDefinition<ReleaseParams
         targetKind: "cluster",
         targetId: cluster.id,
         summary:
-          `Release platform ${params.version}-${params.channel} onto "${server.name}" (${cluster.domain}, ${cluster.stage}): ` +
+          `Release platform ${params.version}-${params.channel} onto "${server.name}" (${cluster.domain}, ${cluster.stage}, role ${server.role}): ` +
           `pin the cluster map, regenerate the install branch at the pin, rebuild the machine layer from it ` +
-          `(the regenerate-branch, deploy-cluster and deploy-gitops programs on the machine's own ansiwise surface), ` +
-          `then wait for ArgoCD to converge. ${stepDefs.length} steps on the host itself.`,
+          `(the ${onMaster ? "regenerate-branch" : "regenerate-slave-branch"}, deploy-cluster and deploy-gitops programs over the ansiwise surface), ` +
+          `then wait for ArgoCD to converge. ${stepDefs.length} steps ` +
+          `${onMaster ? "on the host itself" : `over two hosts — the slave and the master "${master.name}", whose branch carries this slave's pin and books`}.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
-        targets: [{ serverId: server.id, ownsHost: true, label: `${server.name} (${server.role})` }],
-        // Every branch this run touches: the trunk, where the tag is minted; and the cluster's own
-        // install branch — which for the master this run kind releases IS the books branch the pin is
-        // committed on, claimed here by the master's own domain. master-kube because argocd-follow
-        // reads the master's ArgoCD.
+        // The master arm owns only its own host. The slave arm additionally reaches the master, where
+        // the regeneration runs out of the two checkouts the step before it stands.
+        targets: onMaster
+          ? [{ serverId: server.id, ownsHost: true, label: `${server.name} (${server.role})` }]
+          : [
+            { serverId: server.id, ownsHost: true, label: `${server.name} (slave)` },
+            { serverId: master.id, ownsHost: false, label: `${master.name} (master)` },
+          ],
+        // Every branch this run touches: the trunk, where the tag is minted; the cluster's own
+        // install branch, which the regeneration merges the tag into; and the BOOKS branch, where the
+        // pin is committed. For a master those last two are one branch and the key is stated once;
+        // for a slave they are two machines' two branches. master-kube because argocd-follow reads
+        // the master's ArgoCD either way — a slave's Applications live in its instance THERE.
         locks: [
           { resource: "git-branch", key: PRODUCT_BRANCH },
           { resource: "git-branch", key: cluster.domain },
+          ...(onMaster ? [] : [{ resource: "git-branch" as const, key: booksBranch }]),
           { resource: "master-kube", key: "m" },
         ],
         warnings: [
           `The machine layer re-runs on ${server.name} at the regenerated revision — expect a brief kube-apiserver blip while kubelite restarts.`,
           `The install branch ${cluster.domain} is regenerated by merging the tag into it and pushed; everything only the branch has is kept, and a conflict outside the regenerated paths stops the run with the paths named.`,
+          ...(onMaster ? [] : [`The regeneration runs on ${master.name}, out of its second checkout — the pin and the books stand on ${booksBranch}, never on the slave's own branch.`]),
         ],
         // The programs raise their commands to root with a password the CALLER hands over per run
         // (the installation's ansiwise.yaml: password_from_caller) — collected at approve, held in
         // memory, sent with each POST /runs, persisted nowhere. The build-plane PATs ride the same
         // channel exactly when the map says this cluster builds (see BUILD_PLANE_PAT_SECRETS).
-        requiredSecrets: [ANSIWISE_ELEVATION_SECRET, ...(marking.buildPlane ? BUILD_PLANE_PAT_SECRETS : [])],
-        requiredInputs: RELEASE_INPUTS,
+        requiredSecrets: [ANSIWISE_ELEVATION_SECRET, ...(onMaster && marking.buildPlane ? BUILD_PLANE_PAT_SECRETS : [])],
+        requiredInputs: onMaster ? RELEASE_INPUTS : SLAVE_INSTALL_INPUTS,
       };
     },
     steps: (params) => releaseSteps(params, ports),

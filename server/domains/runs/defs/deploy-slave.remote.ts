@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PLATFORM_CHECKOUT } from "./place-ansiwise.ts";
 
 // The REMOTE surface of the deploy-slave Run: the few shell scripts and kubectl commands the
 // steps still ship to the two hosts, plus the contracts they parse back. Everything that BUILDS
@@ -32,15 +33,12 @@ if [ -n "$ip" ]; then echo "DNS_WILDCARD $ip"; else echo "DNS_WILDCARD none"; fi
 `;
 }
 
-/** WHERE the deployment programs read and write the platform tree. The programs (digita-deploy
- *  ansiwise/programs/) name this path on every `repository:` row, so a refresh that fed them has
- *  to stand exactly where they read. */
-export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
-
-/** WHERE deploy-slave-branch cuts a slave's branch ON THE MASTER: a second checkout with the same
- *  origin, stood on the product branch by the caller — cutting in the LIVE checkout would yank the
- *  machine's working tree off the branch its reconciler and its installer stand on. The program
- *  names the path on its own rows; this constant is the caller's half of the same contract. */
+/** WHERE the master writes a SLAVE's branch — deploy-slave-branch cuts it here and
+ *  regenerate-slave-branch merges the release tag into it here: a second checkout with the same
+ *  origin, stood on the branch the program demands by the caller (the product branch for a cut, the
+ *  slave's own branch for a regeneration). Working in the LIVE checkout would yank the machine's
+ *  tree off the branch its reconciler and its installer stand on. Both programs name the path on
+ *  their own rows; this constant is the caller's half of the same contract. */
 export const WORK_CHECKOUT = "/srv/hostyour-cloud-slave";
 
 // The refresh for the PLATFORM checkout at /srv/hostyour-cloud — the tree the deployment programs
@@ -95,6 +93,48 @@ git -C "${WORK_CHECKOUT}" reset --hard
 git -C "${WORK_CHECKOUT}" checkout -B master origin/master
 git -C "${WORK_CHECKOUT}" clean -fd
 git -C "${WORK_CHECKOUT}" branch -D "${o.slaveFqdn}" >/dev/null 2>&1 || true
+echo "WORK_HEAD $(git -C "${WORK_CHECKOUT}" rev-parse --short HEAD)"
+`;
+}
+
+// prepare-regeneration (the step before regenerate-slave-branch), run over the MASTER's session —
+// the same two checkouts as the cut above, stood on what a REGENERATION reads instead of what a cut
+// reads, and it is a separate script because all three differences would otherwise be a mode flag:
+//
+//   1. `fetch --tags`, on BOTH checkouts — one flag standing on two different needs. The WORK
+//      checkout is the one that merges: the program's git_merge_ref row names
+//      /srv/hostyour-cloud-slave and takes refs/tags/<tag>, which the release minted on the trunk
+//      moments ago, so without the tag that row has nothing to merge. The LIVE checkout merges
+//      nothing — what it needs is the pin COMMIT on the books branch, which a plain `fetch origin`
+//      already delivers, exactly as masterCheckoutsScript above fetches that same tree. The cut
+//      needs no tag at all.
+//   2. the LIVE checkout on the head of the master's own install branch, which is the books branch:
+//      it carries the SLAVE's cluster map, where the pin the manager just committed stands, and
+//      the master's own map, which the program copies for the installation-wide values.
+//   3. the WORK checkout STANDING on the SLAVE's branch, not on the product branch. The program's
+//      git_merge_ref row refuses a checkout standing on any other branch rather than moving it, and
+//      the branch already exists — this is a cluster that was cut once and is being brought forward.
+//      No local branch is deleted here: `checkout -B` off origin/<slave> heals a stale or wrong
+//      local branch (name AND content), and deleting one would throw away nothing a merge needs.
+//
+// stdout contract: `LIVE_HEAD <short>` + `WORK_HEAD <short>` (secret-free) — the cut's own contract,
+// because both steps assert the same two facts.
+export function masterRegenerationCheckoutsScript(o: { masterFqdn: string; slaveFqdn: string }): string {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+[ -d "${PLATFORM_CHECKOUT}/.git" ] || { echo "no platform checkout at ${PLATFORM_CHECKOUT} on the master — the machine's installation puts it there" >&2; exit 3; }
+git -C "${PLATFORM_CHECKOUT}" fetch origin --tags
+git -C "${PLATFORM_CHECKOUT}" reset --hard
+git -C "${PLATFORM_CHECKOUT}" checkout -B "${o.masterFqdn}" "origin/${o.masterFqdn}"
+echo "LIVE_HEAD $(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)"
+if [ ! -d "${WORK_CHECKOUT}/.git" ]; then
+  origin=$(git -C "${PLATFORM_CHECKOUT}" remote get-url origin)
+  git clone "$origin" "${WORK_CHECKOUT}"
+fi
+git -C "${WORK_CHECKOUT}" fetch origin --tags
+git -C "${WORK_CHECKOUT}" reset --hard
+git -C "${WORK_CHECKOUT}" checkout -B "${o.slaveFqdn}" "origin/${o.slaveFqdn}"
+git -C "${WORK_CHECKOUT}" clean -fd
 echo "WORK_HEAD $(git -C "${WORK_CHECKOUT}" rev-parse --short HEAD)"
 `;
 }

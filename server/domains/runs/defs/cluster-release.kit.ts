@@ -9,8 +9,9 @@ import { attestMachineId } from "../../../executor/attest.ts";
 import { ATTEST_TARGET_STEP } from "../../../executor/guards.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
 import { clusterShortName } from "../../inventory/cluster-marking.ts";
-import { argoAppsCmd, parsePipeRows, refreshPlatformCheckoutScript, PLATFORM_CHECKOUT } from "./deploy-slave.remote.ts";
-import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { argoAppsCmd, parsePipeRows, refreshPlatformCheckoutScript, masterRegenerationCheckoutsScript } from "./deploy-slave.remote.ts";
+import { PLATFORM_CHECKOUT } from "./place-ansiwise.ts";
+import { loadServer, loadMaster, masterFqdnOf, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 
 // The building blocks the two run kinds that rebuild or raise a live cluster share:
 //
@@ -21,12 +22,16 @@ import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./
 //                     read that checkout as it stands and deliberately fetch nothing themselves, so
 //                     whatever the manager just pushed — a release's pin commit and its tag above
 //                     all — reaches the machine through this step or not at all.
+//   prepare-regeneration  the MASTER-side counterpart of that step, for the one case where the tree
+//                     a program reads is not the run's own host's: a slave's regeneration reads the
+//                     pin and the books off the master's checkout and merges into a second one there.
 //   argocd-follow     waits until everything ArgoCD drives for that cluster has converged on the
 //                     branch the host now stands on. Without it a run reports success while the
 //                     cluster is still mid-sync, and the state it claims is unproven.
 //
 // The machine layer itself is delivered by the deployment PROGRAMS (deploy-cluster, deploy-gitops,
-// and for a release regenerate-branch before them), each driven over the machine's own
+// and for a release the regeneration before them — regenerate-branch on a master's own host,
+// regenerate-slave-branch on the master for a slave), each driven over the machine's own
 // `ansiwise serve` surface by ansiwiseProgramStep — ArgoCD cannot deliver this, because the
 // operating system and the Kubernetes install are what ArgoCD RUNS ON. A cluster RELEASE moves the
 // pin first and regenerates the branch from it; a REDEPLOY moves no pin — the machine layer is
@@ -100,6 +105,43 @@ export function refreshCheckoutStep(target: SlaveTarget): Step {
       }
       ctx.checkpoint({ host: server.name, branch: domain, head: heads[2] });
       ctx.log("meta", `${server.name}: ${PLATFORM_CHECKOUT} refreshed ${heads[1]}..${heads[2]} on ${domain}`);
+    },
+  };
+}
+
+/** `prepare-regeneration`: the slave arm's REPLACEMENT for refresh-checkout before the regeneration,
+ *  run over the MASTER's session — which is the whole reason it exists. refreshCheckoutStep opens the
+ *  run's OWNED host, and for a slave release that is the slave; the tree regenerate-slave-branch reads
+ *  is the MASTER's, standing on the books branch where the pin the step before this one committed and
+ *  the map naming this slave both live. A run that refreshed only the slave would hand the master's
+ *  program the previous pin to measure, out of a tree that never fetched.
+ *
+ *  It stands the master's two checkouts exactly where that program reads and writes: the live one on
+ *  the books branch (the pin, the master's map), the work one on the slave's own branch (what the
+ *  merge moves). The SLAVE's own checkout is refreshed AFTER the regeneration, by refreshCheckoutStep
+ *  — before it, the branch head that step would fetch is the one this release has not delivered yet. */
+export function prepareRegenerationStep(target: SlaveTarget): Step {
+  return {
+    name: "prepare-regeneration",
+    title: "Stand the master's two checkouts where the slave's regeneration reads and merges",
+    run: async (ctx) => {
+      const { domain } = target.resolve(ctx.db);
+      const master = loadMaster(ctx.db);
+      const masterFqdn = masterFqdnOf(ctx.db, master);
+      const session = await ctx.ssh(master.id); // the AUX target — declared in `targets`
+      const cap = await remoteScriptCapture(ctx, session, "prepare-regeneration",
+        masterRegenerationCheckoutsScript({ masterFqdn, slaveFqdn: domain }), { timeoutMs: 5 * 60_000 });
+      const live = /^LIVE_HEAD (\S+)$/m.exec(cap.stdout)?.[1];
+      const work = /^WORK_HEAD (\S+)$/m.exec(cap.stdout)?.[1];
+      if (cap.result.code !== 0 || !live || !work) {
+        throw errValidation(
+          `could not stand the master's checkouts for ${domain}'s regeneration (exit ${cap.result.code}) — the live tree ` +
+          `must hold origin/${masterFqdn}'s head, where the pin and the books stand, and the work tree origin/${domain} ` +
+          "with the release tag fetched; see the run log, fix the master's checkouts, then retry the run",
+        );
+      }
+      ctx.checkpoint({ master: master.name, booksBranch: masterFqdn, liveHead: live, slaveBranch: domain, workHead: work });
+      ctx.log("meta", `${master.name}: live on ${masterFqdn} @ ${live}, work on ${domain} @ ${work} — the regeneration reads the first and merges into the second`);
     },
   };
 }

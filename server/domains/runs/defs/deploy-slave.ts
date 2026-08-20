@@ -3,8 +3,9 @@ import { eq, and } from "drizzle-orm";
 import type { Step, Cleanup, RunDefinition } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { STAGE, CLUSTER_TIER } from "../../../../shared/enums.ts";
-import { errValidation } from "../../../kernel/errors.ts";
+import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
+import { readAnsiwisePin } from "../../inventory/ansiwise-pin.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
 import { PREFLIGHT_SCRIPT, parsePreflightOutput, makeCheck, hardenPreflightForSlave, podCidrOverlapCheck, formatNicsLine } from "../preflight.ts";
 import { hasHardFailure, type PreflightReport } from "../../../../shared/preflight.ts";
@@ -14,8 +15,11 @@ import {
   microk8sResetSlaveCleanup, removeSlaveMarkingCleanup, requirePlatformRepo, statedTarget,
   type DeploySlavePorts, type SlaveInstallInput, type SlaveTarget,
 } from "./deploy-slave.kit.ts";
-import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, type ExtraAnswers } from "./ansiwise-run.kit.ts";
-import { placeAnsiwiseStep } from "./place-ansiwise.ts";
+import {
+  ansiwiseProgramStep, requireElevationPassword, ANSIWISE_ELEVATION_SECRET,
+  type AnsiwisePorts, type ExtraAnswers,
+} from "./ansiwise-run.kit.ts";
+import { placeAnsiwise, VERSION_PLACEHOLDER } from "./place-ansiwise.ts";
 import { masterCheckoutsScript, SLAVE_API_PORT } from "./deploy-slave.remote.ts";
 import { refreshCheckoutStep } from "./cluster-release.kit.ts";
 import { rejoinStep, readMembershipStep } from "./tailnet.kit.ts";
@@ -102,8 +106,12 @@ function armed(cleanup: Cleanup | undefined, step: Step): Step {
  *  cluster map — the record mark-slave wrote earlier in the same run (and re-reads on a redeploy).
  *  books_cluster is the master's domain (deploy-cluster/-gitops default it to the machine's own,
  *  which for a slave would install a second books keeper); build_plane is the map's, whose
- *  self-naming form the programs read the same way as "this machine". */
-function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts): ExtraAnswers {
+ *  self-naming form the programs read the same way as "this machine".
+ *
+ *  Shared with release's slave arm, which drives the same two machine-layer programs against the same
+ *  slave and owes them the same two answers — two readings of one map is how the run kinds would come
+ *  to hand one slave different books. */
+export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts): ExtraAnswers {
   return async (ctx) => {
     const { domain } = target.resolve(ctx.db);
     const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
@@ -123,6 +131,95 @@ function operatorKeyAnswer(serverId: string): ExtraAnswers {
   return async (ctx) => {
     const key = (await ctx.creds.list({ serverId, kind: "ssh_key" })).at(-1);
     return key?.publicKey !== undefined ? { operator_public_key: key.publicKey } : {};
+  };
+}
+
+/** WHERE the machine fetches the pinned binary from. Which release surface an installation takes its
+ *  binary from is the installation's decision, exactly as the command that serves the programs is;
+ *  the VERSION never is — the placement fills `<version>` in from the pin. */
+function requireDownloadUrl(ports: AnsiwisePorts): string {
+  if (!ports.ansiwiseDownloadUrl) {
+    throw errNotConfigured(
+      "ANSIWISE_DOWNLOAD_URL is not configured — this step places the ansiwise binary on the machine, and where a " +
+      `version of it is fetched from is the installation's decision. Set ANSIWISE_DOWNLOAD_URL to that address with ` +
+      `${VERSION_PLACEHOLDER} standing where the version goes, e.g. ` +
+      `https://example.invalid/ansiwise/${VERSION_PLACEHOLDER}/ansiwise-linux-amd64`,
+    );
+  }
+  return ports.ansiwiseDownloadUrl;
+}
+
+/** WHICH REPOSITORY the programs come from. It is not the platform repository and cannot be derived
+ *  from it — the two trees are named apart in the file that pins this platform's versions — so an
+ *  installation states it, the way it states where the binary is fetched from. */
+function requireCatalogUrl(ports: AnsiwisePorts): string {
+  if (!ports.ansiwiseCatalogUrl) {
+    throw errNotConfigured(
+      "ANSIWISE_CATALOG_URL is not configured — this step places the program catalogue on the machine, and which " +
+      "repository carries it is the installation's decision. It is NOT the platform repository: that one is the " +
+      "material the programs act on and carries no ansiwise/ tree. Set ANSIWISE_CATALOG_URL to the clone address of " +
+      "the installation repository holding ansiwise.yaml and ansiwise/programs/, e.g. " +
+      "https://github.com/example/example-deploy.git",
+    );
+  }
+  return ports.ansiwiseCatalogUrl;
+}
+
+/** The address the machine clones the platform checkout from. Built where the platform repo port is
+ *  built, from the same two settings, so the tree the manager writes and the tree the machine reads
+ *  are one repository stated once. */
+function requirePlatformRepoUrl(ports: DeploySlavePorts): string {
+  if (!ports.platformRepoUrl) {
+    throw errNotConfigured(
+      "the platform repo is not configured — this step clones the platform checkout onto the machine, and without it " +
+      "the deployment programs have nothing to act on. GITHUB_REPO names that repository",
+    );
+  }
+  return ports.platformRepoUrl;
+}
+
+/** `place-ansiwise` — the binary, the catalogue and the platform checkout on a machine reached by
+ *  THIS MANAGER. The placement itself (place-ansiwise.ts) takes a machine and values and is the same
+ *  act wherever a machine is reached from; what stands here is the half only a manager can do —
+ *  resolving a SlaveTarget into those values. The install branch comes off the cluster the target
+ *  names, the account off the server row (`loadServer` refuses a server id this manager does not
+ *  carry), the version off platform/versions.yaml on the trunk, and the three addresses off the
+ *  installation's settings, each refused BY NAME while nothing has been asked of the machine yet.
+ *
+ *  A machine at its FIRST installation stands in no server row, so it cannot start THIS step, and
+ *  nothing else places the CATALOGUE or the platform checkout on it: this is the only caller of
+ *  `placeAnsiwise` there is. ansiwise-client places the BINARY on a bare machine of its own
+ *  (session_transport.dart:63-71) and places neither of the other two.
+ *  Keeping the resolution out here is what makes the placement itself demand nothing such a machine
+ *  cannot state — the shape a first-install placement would have to satisfy, not one that runs. */
+export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): Step {
+  return {
+    name: "place-ansiwise",
+    title: "Place the ansiwise binary and the program catalogue on the machine",
+    run: async (ctx) => {
+      const { domain } = target.resolve(ctx.db);
+      const server = loadServer(ctx.db, target.serverId);
+      const request = {
+        version: await readAnsiwisePin(requirePlatformRepo(ports)),
+        downloadUrl: requireDownloadUrl(ports),
+        catalogUrl: requireCatalogUrl(ports),
+        ...(ports.ansiwiseCatalogToken !== undefined ? { catalogToken: ports.ansiwiseCatalogToken } : {}),
+        repoUrl: requirePlatformRepoUrl(ports),
+        branch: domain,
+        user: server.sshUser,
+        elevationPassword: requireElevationPassword(ctx),
+      };
+      const session = await ctx.ssh();
+      const verdict = await placeAnsiwise({
+        name: server.name,
+        runScript: async (name, script, o) => {
+          const cap = await remoteScriptCapture(ctx, session, name, script, o);
+          return { code: cap.result.code, stdout: cap.stdout };
+        },
+        log: (line) => ctx.log("meta", line),
+      }, request);
+      ctx.checkpoint(verdict);
+    },
   };
 }
 

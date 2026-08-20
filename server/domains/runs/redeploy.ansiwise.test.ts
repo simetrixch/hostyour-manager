@@ -19,10 +19,11 @@ import {
   disposeHarnesses, stepColumn, MASTER_ID, SLAVE_ID, MINT_AUTHKEY,
 } from "./deploy-slave.fixture.ts";
 import {
-  uniqueEmail, approveSecrets, elevationOnly, deploySecrets, releaseSecrets, composedAnswers,
+  uniqueEmail, approveSecrets, elevationOnly, deploySecrets, composedAnswers,
   fixturePrograms, serveConversation, liveMaster, tailnetHost, deployWorld, liveSlaveWorld,
   freshRuns, expectProven, expectAbsent, settled, recordAppeared, observerStart, observerEnded, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
+import { releaseSuite } from "./release.ansiwise.suite.ts";
 
 // EVERY run kind that drives the machine's deployment programs, on the REAL `ansiwise serve`:
 // redeploy (both arms), release, the tailnet repair run kinds, deploy-slave, and the transport
@@ -34,7 +35,8 @@ import {
 // ONE FILE ON PURPOSE: the engine's run root is per-drive ('/var/lib/ansiwise/runs'), so two
 // test files each running a serve fixture in parallel would share records and collide. Everything
 // that starts machine runs lives here, sequentially; the programs, the worlds and the plumbing
-// live in ansiwise-serve.fixture.ts.
+// live in ansiwise-serve.fixture.ts, and the release's own suites in release.ansiwise.suite.ts —
+// registered INTO this file's describe rather than collected as a second file, for that same reason.
 //
 // TWO RUNS IN ONE SECOND USED TO BE ONE RUN. The machine named a run by second + pid, so a service
 // asked twice within a second answered with one id and the two wrote over each other's record. The
@@ -87,8 +89,9 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       const programs = await client.programs();
       expect(programs.map((p) => p.name).sort()).toEqual([
         "deploy-cluster", "deploy-gitops", "deploy-host", "deploy-slave-branch",
-        "emit-cluster-credentials", "regenerate-branch", "register-slave", "remove-slave",
-        "tailnet-disconnect", "tailnet-mint-join-key", "tailnet-reconnect", "tailnet-rejoin",
+        "emit-cluster-credentials", "regenerate-branch", "regenerate-slave-branch", "register-slave",
+        "remove-slave", "tailnet-disconnect", "tailnet-mint-join-key", "tailnet-reconnect",
+        "tailnet-rejoin",
       ]);
       expect(programs.find((p) => p.name === "deploy-cluster")?.answers.map((a) => a.name)).toContain("letsencrypt_email");
 
@@ -272,62 +275,9 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   });
 
   // ================================ the release, end to end ================================
-
-  const releaseParams = { serverId: MASTER_ID, version: "1.0.0", channel: "stable" as const };
-
-  it("INNOCENT CASE (release): pin → refresh → regenerate-branch → deploy-cluster → deploy-gitops, every program proven dry then run on the machine's own records", { timeout: 120_000 }, async () => {
-    const h = await liveMaster(serve);
-    const email = uniqueEmail();
-    const before = await observer.runs();
-
-    const r = await h.executor.plan("release", releaseParams);
-    expect(r.plan.steps.map((s) => s.name)).toEqual([
-      "attest-target", "set-pin", "refresh-checkout",
-      "run-regenerate-branch", "run-deploy-cluster", "run-deploy-gitops", "argocd-follow",
-    ]);
-    await h.executor.approve(r.runId, releaseSecrets(email));
-    await h.executor.settle(r.runId);
-    expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
-
-    // The pin: ONE tag, minted in the release grammar, and the map states it. This is what the
-    // regeneration on a real machine reads back off the branch (the fixture program only measures —
-    // the merge semantics are regenerate-branch's own rows, proven in its catalogue).
-    expect(h.platformRepo.tags.size).toBe(1);
-    const tag = [...h.platformRepo.tags.keys()][0] ?? "";
-    expect(tag).toMatch(/^1\.0\.0-stable-\d{14}$/);
-    expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath("m1.example.com"))).toContain(`release: ${tag}`);
-
-    // The machine's OWN records: dry + run per program, every one green, all three programs.
-    expectProven(freshRuns(before, await observer.runs()), ["regenerate-branch", "deploy-cluster", "deploy-gitops"]);
-
-    // The machine's checkout was refreshed BEFORE the programs read it (the pin commit and the tag
-    // reach the machine through that step or not at all), the three conversations went over the
-    // machine's serve surface, and the follow still read ArgoCD.
-    const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
-    expect(onMaster.some((c) => c.includes("dc-refresh-checkout-"))).toBe(true);
-    expect(onMaster.filter((c) => c === "ansiwise serve")).toHaveLength(3); // one conversation per program step
-    expect(onMaster.some((c) => c.includes("-n argocd get applications.argoproj.io"))).toBe(true);
-  });
-
-  it("PLANTED DEFECT (release): a committer identity the machine's dry run judges red fails run-regenerate-branch — no run-mode regeneration, and the two deploy programs never start", { timeout: 60_000 }, async () => {
-    const h = await liveMaster(serve);
-    const before = await observer.runs();
-
-    // "not-an-email" fails the program's own ^[^@]+@[^@]+$ row — the defect is ON THE MACHINE'S
-    // SIDE of the wire, and the machine's dry run is what catches it. (releaseSecrets seeds a VALID
-    // letsencrypt mailbox, so only the committer identity is wrong.)
-    const runId = await settled(h, "release", releaseParams, { ...releaseSecrets(uniqueEmail()), "activation-input:committer_email": Buffer.from("not-an-email") });
-    expect(getRun(h.db.db, runId)?.status).toBe("failed");
-    expect(stepColumn(h.db, runId, "run-regenerate-branch", "error")).toMatch(/DRY run of regenerate-branch on the machine is not green/);
-
-    // The proof failed, so nothing after it was acted on: not one run-mode regeneration, and the
-    // two deploy programs saw no run of ANY mode. The pin stands — set-pin precedes the machine
-    // acts by design, and a retry of the run adopts exactly that tag instead of minting a second.
-    const fresh = freshRuns(before, await observer.runs());
-    expect(fresh.filter((x) => x.program === "regenerate-branch" && x.mode === "run")).toHaveLength(0);
-    expect(fresh.filter((x) => x.program === "deploy-cluster" || x.program === "deploy-gitops")).toHaveLength(0);
-    expect(h.platformRepo.tags.size).toBe(1);
-  });
+  // Registered from release.ansiwise.suite.ts — the one serve fixture this file starts, the release's
+  // own tests in their own file. That module says why the split is of the FILE and not the process.
+  releaseSuite(() => serve, () => observer);
 
   // ================================ the tailnet run kinds, end to end ================================
 

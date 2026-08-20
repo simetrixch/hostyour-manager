@@ -140,7 +140,7 @@ const EnvSchema = z.object({
   // the program steps fail loud (errNotConfigured) and every other run kind is untouched.
   ANSIWISE_SERVE_COMMAND: z.string().min(1).optional(),
   // WHERE a machine fetches the binary that answers that command. `<version>` stands for the version
-  // platform/versions.yaml pins, filled in by the place-ansiwise step — a URL without that
+  // platform/versions.yaml pins, filled in by the placement itself (place-ansiwise.ts) — a URL without that
   // placeholder names ONE build for ever and would put the pin and the placed binary in
   // disagreement, so it is refused here rather than at the machine. Absent ⇒ the placement step
   // fails loud (errNotConfigured) and every other run kind is untouched.

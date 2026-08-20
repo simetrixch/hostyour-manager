@@ -141,6 +141,62 @@ export interface ProgramStepOpts {
   onMaster?: boolean;
 }
 
+/** WHICH program runs on WHICH surface — one entry per program step a run kind will take, in the
+ *  order it takes them. `onMaster` reads exactly as it does in ProgramStepOpts above. */
+export interface ProgramOnSurface {
+  program: string;
+  onMaster?: boolean;
+}
+
+/** `require-programs`: prove every program this run will drive is one the machine's catalogue
+ *  carries, on the surface it will actually be driven over.
+ *
+ *  IT EXISTS BECAUSE OF WHERE THE ABSENCE WOULD OTHERWISE BE FOUND. composeAnswers reads a program's
+ *  declaration off the machine (`GET /programs/{name}`), and a name nothing carries is a 404 THERE —
+ *  inside the program step, which a release reaches only after set-pin has already minted the tag and
+ *  committed the pin. An installation whose catalogue checkout is older than this manager would then
+ *  be recorded standing on a release it never received, and the map and the branch would disagree —
+ *  the one thing the `release` field exists to make impossible (cluster-marking.ts). Asking first
+ *  costs one conversation per surface and puts that failure in front of every write.
+ *
+ *  It reads the LIST rather than each name, so one conversation answers for every program on that
+ *  surface and a refusal can say what the catalogue DOES carry — the operator's next question either
+ *  way. Nothing is acted on: this step only asks. */
+export function requireProgramsStep(ports: AnsiwisePorts, programs: readonly ProgramOnSurface[]): Step {
+  return {
+    name: "require-programs",
+    title: "Prove the machine's catalogue carries every program this run drives",
+    run: async (ctx) => {
+      const surfaces = [false, true].filter((onMaster) => programs.some((p) => (p.onMaster ?? false) === onMaster));
+      const carried: Record<string, string[]> = {};
+      for (const onMaster of surfaces) {
+        const wanted = programs.filter((p) => (p.onMaster ?? false) === onMaster).map((p) => p.program);
+        const where = onMaster ? "master" : "machine";
+        const session = onMaster ? await ctx.ssh(loadMaster(ctx.db).id) : await ctx.ssh();
+        const conversation = await openServeConversation(ctx, session, ports, ctx.signal);
+        try {
+          const names = (await conversation.client.programs({ signal: ctx.signal })).map((p) => p.name);
+          const missing = wanted.filter((name) => !names.includes(name));
+          if (missing.length > 0) {
+            throw errValidation(
+              `the ${where}'s catalogue carries no program called ${missing.map((m) => `"${m}"`).join(", ")} — it offers ` +
+              `${names.join(", ")}. This run drives ${wanted.join(", ")} on that surface, and it is asked here rather ` +
+              "than at the program step so that nothing is written first: a release commits its pin before the machine's " +
+              "turn, and a pin naming a release the cluster never received is a record that contradicts itself. Bring " +
+              "the machine's catalogue checkout onto a revision that carries the program, then retry the run",
+            );
+          }
+          carried[where] = wanted;
+          ctx.log("meta", `the ${where}'s catalogue carries ${wanted.join(", ")} — ${names.length} programs offered`);
+        } finally {
+          conversation.close();
+        }
+      }
+      ctx.checkpoint(carried);
+    },
+  };
+}
+
 /** `run-<program>`: prove the program with a dry run, then run it, following both into the run
  *  log. Both phases go through the ONE machine surface and the machine's own gate. */
 export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports: AnsiwisePorts, opts: ProgramStepOpts = {}): Step {

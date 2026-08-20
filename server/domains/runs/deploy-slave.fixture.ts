@@ -110,7 +110,11 @@ export interface HostsScript {
   preflightOut: string;
   vaultCode: string;
   vaultExit: number;
-  checkoutsOut: string;   // prepare-checkouts (master): LIVE_HEAD + WORK_HEAD lines
+  // prepare-checkouts AND prepare-regeneration (master): LIVE_HEAD + WORK_HEAD lines. ONE field for
+  // two steps, because the two scripts assert the same two facts under the same stdout contract —
+  // WHICH branches they stand the checkouts on is decided in deploy-slave.remote.ts's two builders
+  // and proven there, not by a second scripted answer repeating the same two words.
+  checkoutsOut: string;
   checkoutsExit: number;
   refreshOut: string;     // refresh-checkout (slave): CHECKOUT_HEAD <old> <new>
   refreshExit: number;
@@ -151,7 +155,11 @@ export interface HostsScript {
    *  ansiwise program steps hands back a Duplex carrying the REAL `ansiwise serve` (a socket to
    *  its listener). The default refuses: the scripted hosts hold no conversations. */
   openConversation: (command: string) => Promise<Duplex>;
-  log: { host: string; command: string }[];
+  /** Every exec and every conversation, with what the caller put on the command's STANDARD INPUT
+   *  where it sent any. The credentials of a placement ride that input and nothing else — they may
+   *  reach no file and no argument list — so a caller that composed them and then did not hand them
+   *  through is invisible in `files` and in `command`, and this is where it shows. */
+  log: { host: string; command: string; stdin?: Buffer }[];
   files: { host: string; path: string; content: string }[];
 }
 
@@ -251,7 +259,7 @@ export function hostsFactory(f: HostsScript): SshFactory {
   return (target: SshTarget) => {
     const host = target.host;
     const execImpl = async (command: string, o: ExecOptions): Promise<ExecResult> => {
-      f.log.push({ host, command });
+      f.log.push({ host, command, ...(o.stdin !== undefined ? { stdin: o.stdin } : {}) });
       const faultIdx = f.execFaults.findIndex((x) => command.includes(x.match));
       if (faultIdx !== -1) {
         const [fault] = f.execFaults.splice(faultIdx, 1);
@@ -275,7 +283,7 @@ export function hostsFactory(f: HostsScript): SshFactory {
       }
       if (command.includes("dc-place-ansiwise-")) { emit(applyPlacement(f, host)); return done(); }
       // ---- the git upkeep around the programs
-      if (command.includes("dc-prepare-checkouts-")) { emit(f.checkoutsOut); return done(f.checkoutsExit); }
+      if (command.includes("dc-prepare-checkouts-") || command.includes("dc-prepare-regeneration-")) { emit(f.checkoutsOut); return done(f.checkoutsExit); }
       if (command.includes("dc-refresh-checkout-")) { emit(f.refreshOut); return done(f.refreshExit); }
       // ---- the two credential files the manager reads over the session and removes
       if (command.startsWith("cat ") && command.includes("ansiwise-cluster-credentials")) { emit(f.credsOut); return done(f.credsExit); }
@@ -332,7 +340,7 @@ export interface Harness {
 
 /** A slave's cluster map as mark-slave leaves it on the books branch — identity plus the slave
  *  part that makes the master's slaves ApplicationSet able to dial it. Seeded by tests that start
- *  from a slave that ALREADY IS one (redeploy, release's refusal); a fresh deploy writes its own. */
+ *  from a slave that ALREADY IS one (redeploy, release's slave arm); a fresh deploy writes its own. */
 export const SLAVE_MARKING_YAML = [
   `fqdn: ${PARAMS.domain}`,
   `stage: ${PARAMS.stage}`,
