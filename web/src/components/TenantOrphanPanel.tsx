@@ -47,7 +47,7 @@ function OrphanRows({ orphans, onPurge }: { orphans: OrphanTenantView[]; onPurge
 }
 
 /** What the ORPHAN SCAN found — tenants the GitOps pointers know and the inventory
- *  does not, so they are on no list of the Tenants page and no row-keyed verb can reach them. Its own
+ *  does not, so they are on no list of the Tenants page and no row-keyed run kind can reach them. Its own
  *  component, like FailedCreateTenantCallout is on the run screen: the page owns the scan STATE and the
  *  purge hand-off, this owns how a fail-soft scan result is told honestly.
  *

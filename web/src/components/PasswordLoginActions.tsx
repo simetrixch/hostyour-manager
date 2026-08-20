@@ -1,7 +1,7 @@
-import type { PasswordLoginVerbOffer } from "../passwordLoginState.ts";
+import type { PasswordLoginRunKindOffer } from "../passwordLoginState.ts";
 
-// The two password-login verbs on a server's card. Props-only, like TailnetActions: WHICH of them
-// this server may be offered is decided by passwordLoginVerbOffer (passwordLoginState.ts, a pure
+// The two password-login run kinds on a server's card. Props-only, like TailnetActions: WHICH of them
+// this server may be offered is decided by passwordLoginRunKindOffer (passwordLoginState.ts, a pure
 // module a test can reach), and what each one does is decided by the run it plans — this renders
 // buttons.
 //
@@ -11,7 +11,7 @@ import type { PasswordLoginVerbOffer } from "../passwordLoginState.ts";
 // approval before either happens.
 
 export function PasswordLoginActions(props: {
-  offer: PasswordLoginVerbOffer;
+  offer: PasswordLoginRunKindOffer;
   onDisable: () => void;
   onEnable: () => void;
 }) {

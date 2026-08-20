@@ -22,7 +22,7 @@ describe("relocationRun", () => {
 });
 
 describe("relocationLine", () => {
-  it("names the verb in plain words — a migrate reads as a MOVE", () => {
+  it("names the run kind in plain words — a migrate reads as a MOVE", () => {
     expect(relocationLine(run({ kind: "tenant-migrate", status: "planned" }))).toBe("A move is planned — approve it");
     expect(relocationLine(run({ kind: "restore", status: "running" }))).toBe("A restore is running — watch it");
     expect(relocationLine(run({ kind: "tenant-backup", status: "failed" }))).toBe("The last backup failed — open it to retry");

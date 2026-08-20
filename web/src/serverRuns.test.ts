@@ -36,13 +36,13 @@ describe("relevantRun — the ONE run a server's card surfaces", () => {
 });
 
 describe("runLine — what the card calls the run", () => {
-  it("names the three tailnet repair verbs in words, not in kind literals", () => {
+  it("names the three tailnet repair run kinds in words, not in kind literals", () => {
     expect(runLine(run({ kind: "tailnet-disconnect", status: "planned" }))).toBe("A tailnet disconnect is planned — approve it");
     expect(runLine(run({ kind: "tailnet-reconnect", status: "running" }))).toBe("A tailnet reconnect is running — watch it");
     expect(runLine(run({ kind: "tailnet-rejoin", status: "failed" }))).toBe("The last tailnet rejoin failed — open it to retry");
   });
 
-  it("falls back to '<kind> run' for a verb whose name is already a noun phrase", () => {
+  it("falls back to '<kind> run' for a run kind whose name is already a noun phrase", () => {
     expect(runLine(run({ kind: "release", status: "planned" }))).toBe("A release run is planned — approve it");
   });
 

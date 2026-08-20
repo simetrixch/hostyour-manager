@@ -150,7 +150,7 @@ function ClusterOrphanRows({ orphans, onPurge }: {
 }
 
 /** What the DETECTED scan found — consumers the GitOps pointers know and the
- *  inventory does not, so they appear nowhere under Consumers and no row-keyed verb can reach them.
+ *  inventory does not, so they appear nowhere under Consumers and no row-keyed run kind can reach them.
  *  The consumer twin of TenantOrphanPanel, obeying the same honesty rules: the page owns the scan
  *  STATE and the adopt/purge hand-offs, this owns how a fail-soft scan result is told honestly.
  *

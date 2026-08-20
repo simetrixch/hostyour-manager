@@ -1,12 +1,12 @@
 import { suspendConsumer, resumeConsumer, restartConsumerWorkloads } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 
-/** The consumer verbs that plan from a plain confirm — no target to pick, no body to fill, so one
+/** The consumer run kinds that plan from a plain confirm — no target to pick, no body to fill, so one
  *  dialog serves them all. restart-workloads sits beside suspend/resume because it has that same
  *  shape, NOT because it is a lifecycle state: it changes nothing about what the consumer IS. */
 export type LifecycleAction = "suspend" | "resume" | "restart-workloads";
 
-/** The API call each verb plans. A lookup rather than a chain of comparisons, so a verb added to the
+/** The API call each run kind plans. A lookup rather than a chain of comparisons, so a run kind added to the
  *  union with no call behind it fails the build instead of silently planning a suspend. */
 const LIFECYCLE_CALL: Record<LifecycleAction, (appId: string) => Promise<{ runId: string }>> = {
   suspend: suspendConsumer,
@@ -14,7 +14,7 @@ const LIFECYCLE_CALL: Record<LifecycleAction, (appId: string) => Promise<{ runId
   "restart-workloads": restartConsumerWorkloads,
 };
 
-/** Per verb: the dialog's title verb, its button, and what the operator is approving. The restart
+/** Per run kind: the dialog's title, its button label, and what the operator is approving. The restart
  *  copy is written out rather than composed, because "restart workloads" must NOT read as "replace the
  *  secrets" — replacing one is the operator's two steps BEFORE this (write Vault, delete the target
  *  Secret), and pods coming back on the same value is exactly what happens when those were skipped. */
@@ -39,7 +39,7 @@ const LIFECYCLE_COPY: Record<LifecycleAction, { title: string; button: string; e
   },
 };
 
-/** Confirm one of the no-target consumer verbs. Confirming only PLANS the run and opens it; the
+/** Confirm one of the no-target consumer run kinds. Confirming only PLANS the run and opens it; the
  *  cluster is untouched until the operator approves on the Run screen, which is what the copy says. */
 export function ConsumerLifecycleDialog(props: {
   name: string;

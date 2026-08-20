@@ -26,7 +26,7 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
  *  operator must retype the guid, not just click through a dialog.
  *
  *  A tenant whose create-tenant run never finished (status "provisioning") shows
- *  the unfinished badge + notice and offers only the two verbs that mean anything on it: OFFBOARD (the
+ *  the unfinished badge + notice and offers only the two run kinds that mean anything on it: OFFBOARD (the
  *  clean row-keyed way out) and PURGE (the force-removal by guid). Everything that assumes a live tenant
  *  — add-app, remove-app, suspend, resume — is hidden here AND refused by its route; the route is the
  *  guard, this is only the honest surface.
@@ -36,17 +36,17 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
  *  things:
  *   - "offboarded" keeps exactly ONE action, and that is deliberate: an offboard un-deploys a tenant and
  *     KEEPS its cluster state — the <guid> namespace, its Tenant CR, its Vault path, its object-storage
- *     credential and its Mongo databases all outlive the row — so purge is the only verb that reaps them,
+ *     credential and its Mongo databases all outlive the row — so purge is the only run kind that reaps them,
  *     and the purge route accepts precisely this row state (server tenant-live-guard.ts). That makes
  *     offboard-then-purge the one removal ORDER the routes support, and this page one of the two surfaces
  *     where the second half is reachable (the other is the offboarded list on the Tenants page): the
  *     orphan scan cannot find such a tenant, because every removal git-rm's the pointer as its first step
  *     and that scan reads pointers.
- *   - "purged" keeps NONE. The tenant is deprovisioned, so there is nothing left to reap and no verb to
+ *   - "purged" keeps NONE. The tenant is deprovisioned, so there is nothing left to reap and no run kind to
  *     offer. This page matters more for it than for any other state, not less: a purged tenant is off the
  *     Tenants list entirely, so this URL is where the operator still gets the full account of what went —
  *     which is why the bar states the deprovision plainly instead of hedging about which removal ran.
- *  WHICH verbs a row is offered is the shared rule (tenantRowOffer, tenantRows.ts), asked once for this
+ *  WHICH run kinds a row is offered is the shared rule (tenantRowOffer, tenantRows.ts), asked once for this
  *  page and the list, so neither can offer a purge the other withholds. */
 export function TenantDetail() {
   const { id } = useParams();
@@ -65,7 +65,7 @@ export function TenantDetail() {
   // The size dialog's target (null = closed) — its own state beside the confirm dialogs, because it
   // asks WHICH size where those only confirm.
   const [sizeT, setSizeT] = useState<TenantDetailView | null>(null);
-  const [relocT, setRelocT] = useState<{ t: TenantDetailView; verb: "move" | "restore" } | null>(null);
+  const [relocT, setRelocT] = useState<{ t: TenantDetailView; kind: "move" | "restore" } | null>(null);
   // The one shared runs list, for the relocation state band (relocationBand.ts).
   const [runs, setRuns] = useState<RunView[]>([]);
 
@@ -287,7 +287,7 @@ export function TenantDetail() {
             </button>
           )}
           {!unfinished && !t.suspended && (
-            <button type="button" className="btn" disabled={busy} onClick={() => setRelocT({ t, verb: "move" })}>
+            <button type="button" className="btn" disabled={busy} onClick={() => setRelocT({ t, kind: "move" })}>
               Move…
             </button>
           )}
@@ -329,7 +329,7 @@ export function TenantDetail() {
               {offboardT.stage}/tenants/{offboardT.guid}
             </span>
             , its object-storage bucket and credential and its <strong>Mongo databases all SURVIVE an offboard</strong>.{" "}
-            <strong>Purge</strong> is the verb that removes those as well, and it runs <strong>after</strong> this offboard, never
+            <strong>Purge</strong> is the run kind that removes those as well, and it runs <strong>after</strong> this offboard, never
             before it: a purge aimed at a tenant the inventory still records active or suspended, whose GitOps pointer still stands,
             is refused. Once this offboard has settled the row, the purge is offered here at the foot of this page and on the{" "}
             <strong>Offboarded tenants</strong> list on the Tenants page. (The orphan scan there is no route to it — it reads GitOps
@@ -383,7 +383,7 @@ export function TenantDetail() {
               <span className="mono">
                 {t.stage}/tenants/{t.guid}
               </span>
-              , its object-storage bucket and credential and its Mongo databases all still stand. <strong>Purge</strong> is the verb
+              , its object-storage bucket and credential and its Mongo databases all still stand. <strong>Purge</strong> is the run kind
               that reaps exactly those, and this is where it is aimed at a tenant that is already off the Tenants cards. Its last run
               names, step by step, what it deleted or found already absent.
             </span>
@@ -398,7 +398,7 @@ export function TenantDetail() {
               A PURGED tenant lost its Vault path — its identity cannot be rebuilt by a restore, which
               deliberately never writes Vault. */}
           {!purged && (
-            <button type="button" className="btn btn--primary" disabled={busy} onClick={() => setRelocT({ t, verb: "restore" })}>
+            <button type="button" className="btn btn--primary" disabled={busy} onClick={() => setRelocT({ t, kind: "restore" })}>
               Restore…
             </button>
           )}
@@ -443,20 +443,20 @@ export function TenantDetail() {
 
       {relocT && (
         <RelocationTargetDialog
-          title={relocT.verb === "move" ? `Move tenant "${relocT.t.subdomain}" to another cluster?` : `Restore tenant "${relocT.t.subdomain}" from its backup?`}
-          verb={relocT.verb}
-          confirmLabel={relocT.verb === "move" ? "Plan move" : "Plan restore"}
+          title={relocT.kind === "move" ? `Move tenant "${relocT.t.subdomain}" to another cluster?` : `Restore tenant "${relocT.t.subdomain}" from its backup?`}
+          kind={relocT.kind}
+          confirmLabel={relocT.kind === "move" ? "Plan move" : "Plan restore"}
           stage={relocT.t.stage}
           currentClusterId={relocT.t.clusterId}
           loadTargets={listTenantTargets}
           onCancel={() => setRelocT(null)}
           onConfirm={(targetClusterId) => {
-            const { verb } = relocT;
+            const { kind } = relocT;
             setRelocT(null);
-            void act(() => (verb === "move" ? migrateTenant(tenantId, targetClusterId) : restoreTenant(tenantId, targetClusterId)));
+            void act(() => (kind === "move" ? migrateTenant(tenantId, targetClusterId) : restoreTenant(tenantId, targetClusterId)));
           }}
         >
-          {relocT.verb === "move" ? (
+          {relocT.kind === "move" ? (
             <p>
               This <strong>plans</strong> a move and opens it — you approve on the next screen. The WHOLE bracket moves under the
               unchanged guid <span className="mono">{relocT.t.guid}</span>: access closes while every store is dumped to the Storage

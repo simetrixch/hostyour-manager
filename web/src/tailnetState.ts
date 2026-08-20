@@ -25,7 +25,7 @@ export const TAILNET_READING_FRESH_MS = 60 * 60 * 1000;
 
 /** What takes a new reading. Every sentence that mentions re-reading ends with this, so the card
  *  never implies a live probe behind the number. Deliberately not a list of run kinds: adopt,
- *  deploy-slave, redeploy and each of the three tailnet repair verbs take one, and a list here
+ *  deploy-slave, redeploy and each of the three tailnet repair run kinds take one, and a list here
  *  would be a fifth place to keep in step with them. */
 const RE_READ = "only a run takes a new one";
 
@@ -136,8 +136,8 @@ export function tailnetChip(server: ServerView, now: number): TailnetChip {
   }
 }
 
-/** Which of the three tailnet repair verbs a server's card may offer. */
-export interface TailnetVerbOffer {
+/** Which of the three tailnet repair run kinds a server's card may offer. */
+export interface TailnetRunKindOffer {
   disconnect: boolean;
   reconnect: boolean;
   rejoin: boolean;
@@ -148,7 +148,7 @@ export interface TailnetVerbOffer {
 const CLIENT_SEEN: ReadonlySet<ServerTailnetState> = new Set<ServerTailnetState>(["joined", "not-joined", "client-unreadable"]);
 
 /**
- * Which verbs this card may offer, and on what.
+ * Which run kinds this card may offer, and on what.
  *
  * All three drive the tailnet CLIENT on the host, so the one thing they share is that a run has
  * seen a client there: on a host with none the first command exits saying so, and a host nothing
@@ -156,7 +156,7 @@ const CLIENT_SEEN: ReadonlySet<ServerTailnetState> = new Set<ServerTailnetState>
  *
  * They are deliberately NOT keyed on the membership itself. A reading is a snapshot, so "joined" an
  * hour ago says nothing about now; hiding reconnect from a host that once read joined would let a
- * stale number decide what the operator may attempt. Each verb reads the live state on the host and
+ * stale number decide what the operator may attempt. Each run kind reads the live state on the host and
  * returns saying so when there is nothing to do.
  *
  * Two conditions stand on their own. The MASTER is offered none of them — it runs the coordinator
@@ -164,7 +164,7 @@ const CLIENT_SEEN: ReadonlySet<ServerTailnetState> = new Set<ServerTailnetState>
  * too (server/domains/runs/defs/tailnet.kit.ts). REJOIN additionally needs a live cluster, because
  * the credential is minted per slave against the coordinator under that cluster's FQDN and stage.
  */
-export function tailnetVerbOffer(server: ServerView, o: { liveCluster: boolean }): TailnetVerbOffer {
+export function tailnetRunKindOffer(server: ServerView, o: { liveCluster: boolean }): TailnetRunKindOffer {
   const seen = !isMasterRole(server.role) && CLIENT_SEEN.has(server.tailnetState);
   return { disconnect: seen, reconnect: seen, rejoin: seen && o.liveCluster };
 }

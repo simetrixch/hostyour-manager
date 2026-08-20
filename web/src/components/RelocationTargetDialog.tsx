@@ -12,7 +12,7 @@ export interface RelocationTargetView {
   status: string;
 }
 
-/** The target picker of the two relocation verbs that need one: MOVE takes the unit to a
+/** The target picker of the two relocation run kinds that need one: MOVE takes the unit to a
  *  DIFFERENT active cluster of its own stage, RESTORE rebuilds it on any active cluster of that
  *  stage — its own included (the disaster-recovery case). The choices are filtered to what the run
  *  would accept (same stage, active, and for a move never the current cluster), so the dialog can
@@ -20,7 +20,7 @@ export interface RelocationTargetView {
  *  confirming only PLANS the run and opens the Run screen. Reuses the shared .dialog shell. */
 export function RelocationTargetDialog(props: {
   title: string;
-  verb: "move" | "restore";
+  kind: "move" | "restore";
   confirmLabel: string;
   /** The unit's stage — the boundary a relocation never crosses. */
   stage: string;
@@ -57,7 +57,7 @@ export function RelocationTargetDialog(props: {
   }, []);
 
   const admitted = (targets ?? []).filter(
-    (t) => t.status === "active" && t.stage === props.stage && (props.verb === "restore" || t.id !== props.currentClusterId),
+    (t) => t.status === "active" && t.stage === props.stage && (props.kind === "restore" || t.id !== props.currentClusterId),
   );
 
   return (
@@ -86,7 +86,7 @@ export function RelocationTargetDialog(props: {
           </label>
           {targets !== null && admitted.length === 0 && (
             <p className="note">
-              No admissible target: a {props.verb} needs an ACTIVE {props.stage} cluster{props.verb === "move" ? " other than the unit's own" : ""}.
+              No admissible target: a {props.kind} needs an ACTIVE {props.stage} cluster{props.kind === "move" ? " other than the unit's own" : ""}.
             </p>
           )}
         </div>

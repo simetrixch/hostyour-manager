@@ -13,7 +13,7 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
  *  kind-agnostic (the same factoring as OnboardApproveForm).
  *
  *  WHY this exists: a failed create-tenant CAN leave the tenant standing in GitOps and on the cluster —
- *  a fan-out, an isolation AppProject, a namespace, a Tenant CR — and purge is the only verb that removes
+ *  a fan-out, an isolation AppProject, a namespace, a Tenant CR — and purge is the only run kind that removes
  *  ALL of it, because it is keyed on the MINTED guid rather than on an inventory row. The operator is
  *  already looking at the run that failed, and this run's own frozen params carry that guid, so the offer
  *  belongs right here instead of sending them to hunt through the Tenants page. It is also the only place
@@ -31,7 +31,7 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
  *  example-auth is a known live condition. A run that failed only there sits behind a tenant whose fan-out
  *  synced, whose namespace smoke-checked and whose rows record-inventory already settled to "active": it
  *  is SERVING. Claiming there that the tenant "may still exist" and is "listed as unfinished" would be
- *  false on both counts, and the button beside that copy plans the one verb that deletes the Tenant CR
+ *  false on both counts, and the button beside that copy plans the one run kind that deletes the Tenant CR
  *  and thereby drops the live tenant's Mongo databases and its Vault path. So the server resolves the
  *  tenants ROW (GET /api/tenants/runs/:runId/tenant-state) and this renders ONE branch per state, each
  *  carrying its own words AND its own actions — the offer exists only where purge is genuinely the
@@ -179,7 +179,7 @@ export function FailedCreateTenantCallout({ tenant, error }: { tenant: RunTenant
             — the row is kept for history, and this screen offers no removal on it: one already ran. An offboard
             <strong> un-deploys</strong> a tenant and deliberately KEEPS everything it is — its namespace, its Tenant CR, its Vault
             path, its object-storage bucket and credential and its Mongo databases — so it stays re-onboardable. <strong>Purge</strong>{" "}
-            is the verb that removes those as well, and the tenant&apos;s own page is where it is aimed. Its removal run names every
+            is the run kind that removes those as well, and the tenant&apos;s own page is where it is aimed. Its removal run names every
             artifact it deleted or found already absent, step by step. The orphan scan cannot answer this — it reads the GitOps
             pointers, and this tenant&apos;s pointer went with the first step of the offboard.
           </span>

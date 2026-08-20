@@ -7,10 +7,10 @@ import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { RelocationTargetDialog } from "./RelocationTargetDialog.tsx";
 
 /** The consumer half of the relocation surface, split out of Consumers.tsx along the
- *  400-line budget: the offboarded-rows panel (whose one verb is Restore) and the two dialogs the
+ *  400-line budget: the offboarded-rows panel (whose one run kind is Restore) and the two dialogs the
  *  page opens for Back up and Move…/Restore…. All plan-then-approve: confirming only PLANS a run. */
 
-/** Offboarded consumers (their row is kept): nothing to reconcile, ONE verb left — Restore rebuilds the
+/** Offboarded consumers (their row is kept): nothing to reconcile, ONE run kind left — Restore rebuilds the
  *  consumer from its Storage Box folder onto a chosen cluster of its stage. */
 export function OffboardedConsumers(props: { rows: ConsumerView[]; runs: RunView[]; onRestore: (c: ConsumerView) => void }): ReactNode {
   if (props.rows.length === 0) return null;
@@ -55,20 +55,20 @@ export function ConsumerBackupDialog(props: { c: ConsumerView; onCancel: () => v
   );
 }
 
-export function ConsumerRelocationDialog(props: { c: ConsumerView; verb: "move" | "restore"; onCancel: () => void; onConfirm: (targetClusterId: string) => void }): ReactNode {
-  const { c, verb } = props;
+export function ConsumerRelocationDialog(props: { c: ConsumerView; kind: "move" | "restore"; onCancel: () => void; onConfirm: (targetClusterId: string) => void }): ReactNode {
+  const { c, kind } = props;
   return (
     <RelocationTargetDialog
-      title={verb === "move" ? `Move "${c.name}" to another cluster?` : `Restore "${c.name}" from its backup?`}
-      verb={verb}
-      confirmLabel={verb === "move" ? "Plan move" : "Plan restore"}
+      title={kind === "move" ? `Move "${c.name}" to another cluster?` : `Restore "${c.name}" from its backup?`}
+      kind={kind}
+      confirmLabel={kind === "move" ? "Plan move" : "Plan restore"}
       stage={c.stage}
       currentClusterId={c.clusterId}
       loadTargets={listOnboardTargets}
       onCancel={props.onCancel}
       onConfirm={props.onConfirm}
     >
-      {verb === "move" ? (
+      {kind === "move" ? (
         <p>
           This <strong>plans</strong> a move and opens it — you approve on the next screen. A move is a backup, a restore into the
           target and a repoint: access closes while every store is dumped to the Storage Box, the unit deploys closed on the

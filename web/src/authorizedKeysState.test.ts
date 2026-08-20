@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { AuthorizedKeyFact, ServerAuthorizedKeysRead, ServerView } from "../../shared/api-types.ts";
 import { SERVER_AUTHORIZED_KEYS_STATE, type ServerAuthorizedKeysState } from "../../shared/enums.ts";
 import {
-  authorizedKeysChip, authorizedKeysVerbOffer, operatorKeyPlacement, AUTHORIZED_KEYS_READING_FRESH_MS,
+  authorizedKeysChip, authorizedKeysRunKindOffer, operatorKeyPlacement, AUTHORIZED_KEYS_READING_FRESH_MS,
 } from "./authorizedKeysState.ts";
 
 // The card is where an operator finds out that somebody else can log in to a machine, so the wording
@@ -69,7 +69,7 @@ describe("the authorized-keys chip", () => {
     // The fingerprint is what an operator can cross-check on the box with ssh-keygen -lf.
     expect(chip.detail).toMatch(/SHA256:hetz/);
     expect(chip.detail).toMatch(/someone@example\.com/);
-    expect(chip.detail).toMatch(/no verb can remove them/);
+    expect(chip.detail).toMatch(/no run kind can remove them/);
   });
 
   it("says an unreadable file is unmeasured, not empty", () => {
@@ -110,20 +110,20 @@ describe("the authorized-keys chip", () => {
 });
 
 describe("what the card may offer", () => {
-  it("offers the read verb exactly where this controller holds a key, and never on the reading", () => {
+  it("offers the read run kind exactly where this controller holds a key, and never on the reading", () => {
     for (const status of ["ready", "healthy", "degraded", "provisioning", "draining", "undeployed"] as const) {
-      expect(authorizedKeysVerbOffer(server("unknown", { kind: "none" }, { status })).read, status).toBe(true);
+      expect(authorizedKeysRunKindOffer(server("unknown", { kind: "none" }, { status })).read, status).toBe(true);
     }
     // A host adopt has never touched, and one whose key is being installed right now: there is no
     // session to read over.
     for (const status of ["bare", "adopting"] as const) {
-      expect(authorizedKeysVerbOffer(server("accounted", read([key()]), { status })).read, status).toBe(false);
+      expect(authorizedKeysRunKindOffer(server("accounted", read([key()]), { status })).read, status).toBe(false);
     }
   });
 
   it("offers both acts on the same predicate, whatever the reading says", () => {
     // A snapshot may not decide what an operator is allowed to attempt: "not on the host" an hour
-    // ago says nothing about now, and each verb reads the live file and reports what it found.
+    // ago says nothing about now, and each run kind reads the live file and reports what it found.
     for (const s of [server("accounted", read([])), server("unknown", { kind: "none" })]) {
       expect(operatorKeyPlacement(s, "SHA256:pat")).toMatchObject({ place: true, remove: true });
     }

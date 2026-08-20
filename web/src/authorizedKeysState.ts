@@ -10,7 +10,7 @@
 //   2. No sentence tells the operator to do something. The card's own buttons are the buttons.
 //
 // One rule is this chip's alone: a key nobody here placed is never softened. It is a working way
-// into the machine that no verb on this surface can take off, and this chip is where an operator
+// into the machine that no run kind on this surface can take off, and this chip is where an operator
 // finds out it exists.
 import type { AuthorizedKeyFact, ServerView } from "../../shared/api-types.ts";
 import { hasControllerKey } from "../../shared/enums.ts";
@@ -111,7 +111,7 @@ export function authorizedKeysChip(server: ServerView, now: number): AuthorizedK
         ...(facts.unparsed > 0 ? [`${facts.unparsed} unreadable`] : []),
       ];
       const named = foreign.length > 0
-        ? `${foreign.length} key(s) here were placed by nothing on this platform, so no verb can remove them — ` +
+        ? `${foreign.length} key(s) here were placed by nothing on this platform, so no run kind can remove them — ` +
           `${foreign.map((k) => `${k.fingerprint}${k.comment ? ` (${k.comment})` : ""}`).join(", ")}. `
         : "";
       const unread = facts.unparsed > 0
@@ -135,19 +135,19 @@ export function authorizedKeysChip(server: ServerView, now: number): AuthorizedK
   }
 }
 
-/** Which authorized-keys verbs a server's card may offer. */
-export interface AuthorizedKeysVerbOffer {
+/** Which authorized-keys run kinds a server's card may offer. */
+export interface AuthorizedKeysRunKindOffer {
   read: boolean;
 }
 
-/** Every one of these verbs drives one host over this controller's own key, so the one thing they
+/** Every one of these run kinds drives one host over this controller's own key, so the one thing they
  *  share is that the controller HAS one — hasControllerKey (shared/enums.ts), the same predicate the
  *  plans refuse on, so a card can never offer a run the server then rejects.
  *
  *  Deliberately NOT keyed on the reading. A reading is a snapshot, so hiding the read button from a
  *  host that looked clean an hour ago would let a stale value decide what the operator may look at —
  *  on the one surface where being wrong means a key nobody is watching. */
-export function authorizedKeysVerbOffer(server: ServerView): AuthorizedKeysVerbOffer {
+export function authorizedKeysRunKindOffer(server: ServerView): AuthorizedKeysRunKindOffer {
   return { read: hasControllerKey(server.status) };
 }
 
@@ -158,7 +158,7 @@ export interface OperatorKeyPlacement {
   state: "present" | "absent" | "unread";
   line: string;
   /** Both acts are offered on the same predicate the plan refuses on, and never on the state above:
-   *  a snapshot may not decide what an operator is allowed to attempt, and each verb reads the live
+   *  a snapshot may not decide what an operator is allowed to attempt, and each run kind reads the live
    *  file and says what it found. */
   place: boolean;
   remove: boolean;

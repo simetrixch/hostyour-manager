@@ -8,7 +8,7 @@ import {
   disconnectTailnet, reconnectTailnet, rejoinTailnet, disablePasswordLogin, enablePasswordLogin,
   readAuthorizedKeys,
 } from "../api.ts";
-import { tailnetVerbOffer } from "../tailnetState.ts";
+import { tailnetRunKindOffer } from "../tailnetState.ts";
 import { addressLines } from "../serverDialAddress.ts";
 import { OPEN_RUN, relevantRun, runLine } from "../serverRuns.ts";
 import { IconShield } from "../components/icons.tsx";
@@ -131,10 +131,10 @@ export function Servers() {
     }
   }
 
-  /** Plan one of the per-server verbs and hand off to its Run screen — the three tailnet repairs,
+  /** Plan one of the per-server run kinds and hand off to its Run screen — the three tailnet repairs,
    *  the two password-login acts and the authorized-keys reading all take the same one argument and
    *  differ only in which client helper is called, so they share this. */
-  async function planServerVerb(plan: () => Promise<{ runId: string }>): Promise<void> {
+  async function planServerRunKind(plan: () => Promise<{ runId: string }>): Promise<void> {
     setError(null);
     try {
       const { runId } = await plan();
@@ -254,7 +254,7 @@ export function Servers() {
           {servers.map((s) => {
             // The ONE run that concerns this server (serverRuns.ts), read per CARD and not inside
             // the lifecycle block below: the lifecycle renders for slaves only, while every card
-            // now carries verbs of its own — a planned password-login run on the MASTER, or a failed
+            // now carries run kinds of its own — a planned password-login run on the MASTER, or a failed
             // one, would otherwise be surfaced nowhere at all, there being no global runs list.
             const run = relevantRun(s.id, runs);
             const runIsOpen = run !== undefined && OPEN_RUN.includes(run.status);
@@ -271,15 +271,15 @@ export function Servers() {
                     machine doing the dialling and never the one dialled (serverDialAddress.ts). */}
                 {addressLines(s).map((line) => <div key={line} className="servercard__target">{line}</div>)}
                 {/* The three READINGS beside the status badge — private network, password door, and
-                    who is in authorized_keys — plus the verbs that act on the last two. Their own
+                    who is in authorized_keys — plus the run kinds that act on the last two. Their own
                     component, and rendered for the master too: none of them is a position in the
                     slave lifecycle below. */}
                 <ServerReadings
                   server={s}
                   now={Date.now()}
-                  onDisablePasswordLogin={() => void planServerVerb(() => disablePasswordLogin(s.id))}
-                  onEnablePasswordLogin={() => void planServerVerb(() => enablePasswordLogin(s.id))}
-                  onReadAuthorizedKeys={() => void planServerVerb(() => readAuthorizedKeys(s.id))}
+                  onDisablePasswordLogin={() => void planServerRunKind(() => disablePasswordLogin(s.id))}
+                  onEnablePasswordLogin={() => void planServerRunKind(() => enablePasswordLogin(s.id))}
+                  onReadAuthorizedKeys={() => void planServerRunKind(() => readAuthorizedKeys(s.id))}
                 />
                 {run && (
                   <p className="servercard__run">
@@ -294,16 +294,16 @@ export function Servers() {
                     const showAdopt = !runIsOpen && lc.next === "adopt";
                     const showDeploy = !runIsOpen && lc.next === "deploy" && prov?.id !== s.id;
                     const showClusters = lc.next === "clusters";
-                    // A LIVE cluster carries the two verbs that act on one: redeploy rebuilds its
+                    // A LIVE cluster carries the two run kinds that act on one: redeploy rebuilds its
                     // machine layer in place at the release it already stands on, release raises that
                     // release. Both are distinct from the destructive Delete.
                     const showRedeploy = lc.next === "clusters";
                     const showRelease = lc.next === "clusters" && rel?.id !== s.id;
                     const showDelete = s.status === "bare";
-                    // The tailnet repair verbs are offered on their own rule (tailnetState.ts), not
+                    // The tailnet repair run kinds are offered on their own rule (tailnetState.ts), not
                     // on the lifecycle: they act on the host's membership of the private network,
                     // which is the second axis this card carries beside its status.
-                    const tnv = tailnetVerbOffer(s, { liveCluster: lc.next === "clusters" });
+                    const tnOffer = tailnetRunKindOffer(s, { liveCluster: lc.next === "clusters" });
                     return (
                       <>
                         <ol className="lifecycle" aria-label="Server lifecycle">
@@ -318,7 +318,7 @@ export function Servers() {
                         </ol>
                         <p className="servercard__state">{lc.state}</p>
                         {(showAdopt || showDeploy || showClusters || showRedeploy || showRelease || showDelete ||
-                          tnv.disconnect || tnv.reconnect || tnv.rejoin) && (
+                          tnOffer.disconnect || tnOffer.reconnect || tnOffer.rejoin) && (
                           <div className="actions">
                             {showAdopt && (
                               <button type="button" className="btn btn--primary" onClick={() => void doAdopt(s.id)}>
@@ -360,10 +360,10 @@ export function Servers() {
                               </button>
                             )}
                             <TailnetActions
-                              offer={tnv}
-                              onDisconnect={() => void planServerVerb(() => disconnectTailnet(s.id))}
-                              onReconnect={() => void planServerVerb(() => reconnectTailnet(s.id))}
-                              onRejoin={() => void planServerVerb(() => rejoinTailnet(s.id))}
+                              offer={tnOffer}
+                              onDisconnect={() => void planServerRunKind(() => disconnectTailnet(s.id))}
+                              onReconnect={() => void planServerRunKind(() => reconnectTailnet(s.id))}
+                              onRejoin={() => void planServerRunKind(() => rejoinTailnet(s.id))}
                             />
                             {showDelete && (
                               <button type="button" className="btn btn--danger" onClick={() => setDeleteTarget({ id: s.id, name: s.name })}>

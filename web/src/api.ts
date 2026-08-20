@@ -142,11 +142,11 @@ export const redeploySlave = (serverId: string): Promise<{ runId: string }> => p
 export const releaseCluster = (serverId: string, opts: { version: string; channel: string }): Promise<{ runId: string }> =>
   planRun("release", { serverId, version: opts.version, channel: opts.channel });
 
-// The three tailnet repair verbs. Each takes ONLY the server: the address they reach it on is the
+// The three tailnet repair run kinds. Each takes ONLY the server: the address they reach it on is the
 // public one and the plan states it, and a rejoin reads the FQDN and the stage off the server's own
 // cluster row — so there is nothing here for the operator to re-state and nothing to get wrong.
 /** Take the host off the private network. It keeps answering on its public address, which is how
- *  the two verbs below reach it afterwards. */
+ *  the two run kinds below reach it afterwards. */
 export const disconnectTailnet = (serverId: string): Promise<{ runId: string }> => planRun("tailnet-disconnect", { serverId });
 /** Put the host back on with the credential it already holds — nothing is minted, and the master is
  *  not touched. */
@@ -155,7 +155,7 @@ export const reconnectTailnet = (serverId: string): Promise<{ runId: string }> =
  *  reconnect cannot answer, where the host holds none. */
 export const rejoinTailnet = (serverId: string): Promise<{ runId: string }> => planRun("tailnet-rejoin", { serverId });
 
-// The password-login switch. A verb and not a PATCH field: nothing this controller stores changes
+// The password-login switch. A run kind and not a PATCH field: nothing this controller stores changes
 // what a daemon answers on port 22, so the switch has to be a run that writes the drop-in,
 // validates it, reloads the daemon and reads back what the daemon resolved.
 /** Stop this host's sshd taking passwords, and destroy the bootstrap password sealed for it — two
@@ -174,7 +174,7 @@ export const listOperatorKeys = (): Promise<{ keys: OperatorKeyView[] }> => req(
 export const createOperatorKey = (input: { label: string; publicKey: string }): Promise<{ key: OperatorKeyView }> =>
   post("/api/operator-keys", input);
 /** Forgets the row. It takes nothing off any machine, and the server refuses while a stored reading
- *  still finds the key on a host — the removal verb needs this row to name the line it deletes. */
+ *  still finds the key on a host — the removal run kind needs this row to name the line it deletes. */
 export const deleteOperatorKey = (id: string): Promise<unknown> => req(`/api/operator-keys/${id}`, { method: "DELETE" });
 /** Put ONE key in ONE host's authorized_keys. One server per run on purpose: which hosts carry a key
  *  is a per-server state, so five that took it and a sixth that refused are five runs that succeeded
@@ -343,7 +343,7 @@ export const migrateConsumer = (appId: string, targetClusterId: string): Promise
  *  "none detected". */
 export const scanDetectedConsumers = (): Promise<DetectedScanView> => req<DetectedScanView>("/api/consumers/detected");
 /** The by-NAME identity an adopt targets — identical to PurgeInput (the G1 identity law), its own
- *  name so the two verbs read as what they are: one removes a footprint, one records it. */
+ *  name so the two run kinds read as what they are: one removes a footprint, one records it. */
 export interface AdoptConsumerInput {
   consumerName: string;
   stage: Stage;
@@ -392,7 +392,7 @@ export interface TenantView {
   owner: string | null;
   /** The same server enum ConsumerView carries, taken from shared/enums.ts rather than restated as a
    *  union here: a literal that leaves that list must break THIS build, not survive as a word the
-   *  server never sends. A tenant is only ever "controller" — there is no adopt verb for one. */
+   *  server never sends. A tenant is only ever "controller" — there is no adopt run kind for one. */
   provenance: AppProvenance;
   /** "provisioning" ⇒ create-tenant recorded this row BEFORE deploying and its run never finished
    * — the tenant may be half-deployed or not deployed at all. */

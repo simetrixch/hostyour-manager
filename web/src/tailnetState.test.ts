@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { ServerTailnetRead, ServerView } from "../../shared/api-types.ts";
 import { SERVER_TAILNET_STATE, type ServerTailnetState } from "../../shared/enums.ts";
-import { tailnetChip, tailnetVerbOffer, TAILNET_READING_FRESH_MS } from "./tailnetState.ts";
+import { tailnetChip, tailnetRunKindOffer, TAILNET_READING_FRESH_MS } from "./tailnetState.ts";
 
 const NOW = 1_700_000_000_000;
 
@@ -130,26 +130,26 @@ describe("the age in the sentence", () => {
   });
 });
 
-describe("tailnetVerbOffer — which repair verbs a card may offer", () => {
+describe("tailnetRunKindOffer — which repair run kinds a card may offer", () => {
   const live = { liveCluster: true };
 
   it("offers all three on a live slave a run has seen a client on", () => {
-    expect(tailnetVerbOffer(server("joined", facts()), live)).toEqual({ disconnect: true, reconnect: true, rejoin: true });
+    expect(tailnetRunKindOffer(server("joined", facts()), live)).toEqual({ disconnect: true, reconnect: true, rejoin: true });
   });
 
   it("offers them on a NOT-JOINED host too — a reading is a snapshot, not the live state", () => {
     // Hiding reconnect from a host that once read joined, or disconnect from one that read
-    // not-joined, would let an hour-old number decide what the operator may attempt. Each verb
+    // not-joined, would let an hour-old number decide what the operator may attempt. Each run kind
     // reads the host itself and returns saying so when there is nothing to do.
     for (const state of ["not-joined", "client-unreadable", "joined"] as const) {
-      expect(tailnetVerbOffer(server(state, facts({ backendState: state })), live).reconnect, state).toBe(true);
-      expect(tailnetVerbOffer(server(state, facts({ backendState: state })), live).disconnect, state).toBe(true);
+      expect(tailnetRunKindOffer(server(state, facts({ backendState: state })), live).reconnect, state).toBe(true);
+      expect(tailnetRunKindOffer(server(state, facts({ backendState: state })), live).disconnect, state).toBe(true);
     }
   });
 
   it("offers none where no run has seen a client — there is nothing on the host to drive", () => {
     for (const state of ["no-client", "unknown"] as const) {
-      expect(tailnetVerbOffer(server(state, { kind: "none" }), live), state).toEqual({
+      expect(tailnetRunKindOffer(server(state, { kind: "none" }), live), state).toEqual({
         disconnect: false, reconnect: false, rejoin: false,
       });
     }
@@ -157,18 +157,18 @@ describe("tailnetVerbOffer — which repair verbs a card may offer", () => {
 
   it("offers none on the master, which runs the coordinator the others log in to", () => {
     const master: ServerView = { ...server("joined", facts()), role: "master" };
-    expect(tailnetVerbOffer(master, live)).toEqual({ disconnect: false, reconnect: false, rejoin: false });
+    expect(tailnetRunKindOffer(master, live)).toEqual({ disconnect: false, reconnect: false, rejoin: false });
   });
 
   it("withholds only REJOIN without a live cluster — the credential is minted per slave", () => {
-    expect(tailnetVerbOffer(server("joined", facts()), { liveCluster: false })).toEqual({
+    expect(tailnetRunKindOffer(server("joined", facts()), { liveCluster: false })).toEqual({
       disconnect: true, reconnect: true, rejoin: false,
     });
   });
 
   it("covers every reading state, so a new one cannot be forgotten here", () => {
     for (const state of SERVER_TAILNET_STATE) {
-      expect(Object.values(tailnetVerbOffer(server(state, facts()), live)).every((v) => typeof v === "boolean"), state).toBe(true);
+      expect(Object.values(tailnetRunKindOffer(server(state, facts()), live)).every((v) => typeof v === "boolean"), state).toBe(true);
     }
   });
 });

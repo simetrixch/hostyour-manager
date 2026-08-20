@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { ServerPasswordLoginRead, ServerView } from "../../shared/api-types.ts";
 import { SERVER_PASSWORD_LOGIN_STATE, type ServerPasswordLoginState } from "../../shared/enums.ts";
-import { passwordLoginChip, passwordLoginVerbOffer, PASSWORD_LOGIN_READING_FRESH_MS } from "./passwordLoginState.ts";
+import { passwordLoginChip, passwordLoginRunKindOffer, PASSWORD_LOGIN_READING_FRESH_MS } from "./passwordLoginState.ts";
 
 // The card is where an operator finds out that a machine takes passwords, so the wording is the
 // substance: an open door has to read as open, and a reading nobody has taken has to read as
@@ -90,29 +90,29 @@ describe("passwordLoginChip — an open door is never worded softly, and an unre
   });
 });
 
-describe("passwordLoginVerbOffer — the buttons follow the key this controller holds, never the reading", () => {
-  it("offers both verbs on a host this controller has a key for", () => {
-    expect(passwordLoginVerbOffer(server("on", facts()))).toEqual({ disable: true, enable: true });
+describe("passwordLoginRunKindOffer — the buttons follow the key this controller holds, never the reading", () => {
+  it("offers both run kinds on a host this controller has a key for", () => {
+    expect(passwordLoginRunKindOffer(server("on", facts()))).toEqual({ disable: true, enable: true });
   });
 
   it("offers neither before the key is installed — there would be nothing to fall back on", () => {
     // The plan refuses the same two statuses through the same predicate
     // (defs/password-login.kit.ts), so the card cannot offer a run the server will reject.
     for (const status of ["bare", "adopting"] as const) {
-      expect(passwordLoginVerbOffer(server("unknown", { kind: "none" }, { status }))).toEqual({ disable: false, enable: false });
+      expect(passwordLoginRunKindOffer(server("unknown", { kind: "none" }, { status }))).toEqual({ disable: false, enable: false });
     }
   });
 
-  it("keeps offering the disable verb on a host that once read off — a snapshot may not gate an act", () => {
+  it("keeps offering the disable run kind on a host that once read off — a snapshot may not gate an act", () => {
     // A reading an hour old says nothing about now, and this is the one surface where being wrong
     // means an open door nobody is looking at.
-    expect(passwordLoginVerbOffer(server("off", facts({ observedAt: 0 }))).disable).toBe(true);
+    expect(passwordLoginRunKindOffer(server("off", facts({ observedAt: 0 }))).disable).toBe(true);
   });
 
-  it("offers both on the MASTER, which carries no adoptedAt at all and needs the verb most", () => {
+  it("offers both on the MASTER, which carries no adoptedAt at all and needs the run kind most", () => {
     // seed-master registers the master at boot with status "healthy" and never adopts it, so a rule
     // keyed on adoptedAt would hide these buttons from the one host whose door was measured.
-    expect(passwordLoginVerbOffer(server("on", facts(), { role: "master", status: "healthy", adoptedAt: null })))
+    expect(passwordLoginRunKindOffer(server("on", facts(), { role: "master", status: "healthy", adoptedAt: null })))
       .toEqual({ disable: true, enable: true });
   });
 });

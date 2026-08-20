@@ -19,7 +19,7 @@ export function relocationRun(unitTargetId: string, runs: RunView[]): RunView | 
   return own.find((r) => OPEN_RUN.includes(r.status)) ?? (own[0]?.status === "failed" ? own[0] : undefined);
 }
 
-/** The band's one sentence — the verb in plain words (a migrate is a MOVE to the operator). */
+/** The band's one sentence — the run kind in plain words (a migrate is a MOVE to the operator). */
 export function relocationLine(run: RunView): string {
   const noun = run.kind === "migrate" || run.kind === "tenant-migrate" ? "move" : run.kind === "restore" || run.kind === "tenant-restore" ? "restore" : "backup";
   if (run.status === "planned") return `A ${noun} is planned — approve it`;

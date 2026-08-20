@@ -7,7 +7,7 @@ import type { RunKind } from "../../shared/enums.ts";
 // CLUSTER (targetKind "cluster"), so a targetId filter would silently drop every onboard run.
 
 describe("CONSUMER_RUN_KINDS", () => {
-  it("is exactly the consumer lifecycle kinds (incl. purge — force-offboard by name — adopt-consumer — row reconstruction from the registration — restart-workloads and the relocation verbs backup/restore/migrate)", () => {
+  it("is exactly the consumer lifecycle kinds (incl. purge — force-offboard by name — adopt-consumer — row reconstruction from the registration — restart-workloads and the relocation run kinds backup/restore/migrate)", () => {
     expect([...CONSUMER_RUN_KINDS].sort()).toEqual(["adopt-consumer", "backup", "migrate", "offboard", "onboard", "purge", "restart-workloads", "restore", "resume", "set-size", "suspend"]);
   });
 
@@ -15,7 +15,7 @@ describe("CONSUMER_RUN_KINDS", () => {
     expect(CONSUMER_RUN_KINDS.has("onboard")).toBe(true);
   });
 
-  it("keeps every consumer lifecycle verb", () => {
+  it("keeps every consumer lifecycle run kind", () => {
     for (const k of ["onboard", "offboard", "purge", "adopt-consumer", "suspend", "resume", "restart-workloads", "set-size", "backup", "restore", "migrate"] as const) {
       expect(CONSUMER_RUN_KINDS.has(k)).toBe(true);
     }
@@ -47,7 +47,7 @@ describe("TENANT_RUN_KINDS", () => {
     expect(TENANT_RUN_KINDS.has("create-tenant")).toBe(true);
   });
 
-  it("keeps every tenant lifecycle verb", () => {
+  it("keeps every tenant lifecycle run kind", () => {
     for (const k of ["create-tenant", "add-app", "remove-app", "tenant-suspend", "tenant-resume", "tenant-restart-workloads", "tenant-set-size", "tenant-offboard", "tenant-purge", "tenant-backup", "tenant-restore", "tenant-migrate"] as const) {
       expect(TENANT_RUN_KINDS.has(k)).toBe(true);
     }

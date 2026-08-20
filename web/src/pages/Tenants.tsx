@@ -149,7 +149,7 @@ function TenantLive({ tenantId }: { tenantId: string }) {
  *  the shared status rule (splitTenantRows, tenantRows.ts) rather than filtering rows away: the cards show
  *  the tenants that still run, and the OFFBOARDED ones get their own compact list underneath. They have to
  *  stay reachable because an offboard KEEPS the tenant's cluster state on purpose and purge is the only
- *  verb that reaps it — and no other surface can find such a tenant, since every removal git-rm's the
+ *  run kind that reaps it — and no other surface can find such a tenant, since every removal git-rm's the
  *  pointer as its first step and the orphan scan below reads pointers.
  *
  *  PURGED tenants are the one kind this page shows NOWHERE (owner decision). A purge
@@ -213,7 +213,7 @@ export function Tenants() {
   }
 
   // Offboarded tenants keep their inventory row for audit and have nothing live to reconcile, so
-  // they leave the CARDS — but not the page: they move to their own list below it, where the one verb
+  // they leave the CARDS — but not the page: they move to their own list below it, where the one run kind
   // they still have is offered (see the component docblock). A PROVISIONING tenant stays on the cards:
   // create-tenant records the row before it deploys, so this is exactly the
   // half-created tenant the operator has to see and act on — it is marked unfinished, not moved away.
@@ -403,7 +403,7 @@ export function Tenants() {
 
         {/* The OFFBOARDED tenants (the row kept for history). They are off the cards above
             because there is nothing live to reconcile, but they are NOT done with: an offboard un-deploys
-            a tenant and deliberately KEEPS its cluster state, so purge is the only verb that reaps it and
+            a tenant and deliberately KEEPS its cluster state, so purge is the only run kind that reaps it and
             the purge route accepts exactly this row state (server tenant-live-guard.ts). This list is what
             makes such a tenant reachable from the inventory at all — the orphan scan above reads GitOps
             pointers, and every removal git-rm's the pointer as its FIRST step, so that scan can never
@@ -420,7 +420,7 @@ export function Tenants() {
             <p className="note">
               These tenants are un-deployed and their rows are kept for history. An offboard deliberately KEEPS everything the
               tenant is — its namespace, its Tenant CR, its Vault path, its object-storage bucket and credential and its Mongo
-              databases — so it stays re-onboardable, and <strong>purge</strong> is the verb that reaps exactly that, which is why it
+              databases — so it stays re-onboardable, and <strong>purge</strong> is the run kind that reaps exactly that, which is why it
               is offered here and runs AFTER the offboard. A tenant that has already been purged is not on this list: it is recorded
               purged and leaves the page entirely, since there is nothing left to reap. Re-running a removal is safe either way —
               every step reaps only what is still there — and a tenant&apos;s last run names what it actually deleted.

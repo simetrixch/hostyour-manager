@@ -1,4 +1,4 @@
-// How a server's PASSWORD LOGIN is worded on its card, and which of the two verbs the card offers.
+// How a server's PASSWORD LOGIN is worded on its card, and which of the two run kinds the card offers.
 // A pure module beside tailnetState.ts / serverRuns.ts, for the same reason those are: vitest runs
 // with environment "node" and includes no .tsx, so wording left inside the page cannot be tested —
 // and wording is the whole substance here.
@@ -121,14 +121,14 @@ export function passwordLoginChip(server: ServerView, now: number): PasswordLogi
   }
 }
 
-/** Which of the two password-login verbs a server's card may offer. */
-export interface PasswordLoginVerbOffer {
+/** Which of the two password-login run kinds a server's card may offer. */
+export interface PasswordLoginRunKindOffer {
   disable: boolean;
   enable: boolean;
 }
 
 /**
- * Which verbs this card may offer, and on what.
+ * Which run kinds this card may offer, and on what.
  *
  * Both drive one host's sshd over this controller's own key, so the one thing they share is that
  * the controller HAS one — hasControllerKey (shared/enums.ts), which is the same predicate the plan
@@ -137,12 +137,12 @@ export interface PasswordLoginVerbOffer {
  * They are deliberately NOT keyed on the reading. A reading is a snapshot, so "off" an hour ago
  * says nothing about now, and hiding the disable button from a host that once read off would let a
  * stale value decide what the operator may attempt — on the one surface where being wrong means an
- * open door nobody is looking at. Each verb reads the live daemon and says what it found.
+ * open door nobody is looking at. Each run kind reads the live daemon and says what it found.
  *
- * The MASTER is offered both, unlike the tailnet verbs: it is an internet-facing machine with an
+ * The MASTER is offered both, unlike the tailnet run kinds: it is an internet-facing machine with an
  * sshd like any other, and its own card is the only place its password door is visible.
  */
-export function passwordLoginVerbOffer(server: ServerView): PasswordLoginVerbOffer {
+export function passwordLoginRunKindOffer(server: ServerView): PasswordLoginRunKindOffer {
   const reachable = hasControllerKey(server.status);
   return { disable: reachable, enable: reachable };
 }

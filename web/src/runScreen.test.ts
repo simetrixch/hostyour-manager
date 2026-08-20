@@ -156,7 +156,7 @@ describe("abortOffer", () => {
     const afterOffboard = abortOffer("create-tenant", offboarded, null);
     expect(afterOffboard.offered).toBe(false);
     expect(afterOffboard.offered === false && afterOffboard.why).toContain("already been offboarded");
-    // ...and it points at the verb that DOES still have work on such a tenant, on the page that offers it
+    // ...and it points at the run kind that DOES still have work on such a tenant, on the page that offers it
     // (tenantRows.ts calls an offboarded row purgeable) — a refusal that named no way forward would just
     // read as a broken button.
     expect(afterOffboard.offered === false && afterOffboard.why).toMatch(/purge/i);

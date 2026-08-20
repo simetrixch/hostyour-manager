@@ -16,7 +16,7 @@ describe("tenantRowOffer", () => {
   // tenant the owner wants gone WITH its data that nothing in the product can finish removing, and no
   // other path reaches it: every removal git-rm's the pointer as its first step, so the orphan scan
   // (which reads pointers) can never return it.
-  it("offers the purge on an offboarded tenant — the only verb that reaps what the offboard kept", () => {
+  it("offers the purge on an offboarded tenant — the only run kind that reaps what the offboard kept", () => {
     expect(tenantRowOffer("offboarded")).toEqual({ settled: true, listed: true, purgeable: true });
   });
 
@@ -28,7 +28,7 @@ describe("tenantRowOffer", () => {
 
   // The other half of the same rule, which must NOT loosen: a tenant the inventory records live is
   // refused by the purge route while its GitOps pointer still stands, and the browser cannot read that
-  // pointer — so no purge is offered here at all. Offboard is the verb these two get, and a purge may
+  // pointer — so no purge is offered here at all. Offboard is the run kind these two get, and a purge may
   // follow it.
   it("offers no purge on a live tenant — offboard first, then purge what it leaves behind", () => {
     expect(tenantRowOffer("active")).toEqual({ settled: false, listed: true, purgeable: false });
@@ -39,7 +39,7 @@ describe("tenantRowOffer", () => {
   // the row is terminal like an offboarded one — but there is nothing left to reap, and while the two
   // shared the one "offboarded" literal the panel kept the tenant AND kept offering the purge that had
   // just finished. Both halves are asserted, because each was wrong on its own: `listed: false` takes it
-  // off the Tenants page, `purgeable: false` stops the product advertising the most destructive verb it
+  // off the Tenants page, `purgeable: false` stops the product advertising the most destructive run kind it
   // has on a tenant with nothing to remove. The route still ACCEPTS a re-purge (server
   // tenant-live-guard.ts) — that is the migration path for rows purged before this state existed — so
   // this flag is narrower than the route on purpose, and only about what is OFFERED.
@@ -57,7 +57,7 @@ describe("tenantRowOffer", () => {
 describe("splitTenantRows", () => {
   // A PARTITION, not a filter: the offboarded tenant must come back on the settled list, because a row
   // the page drops has no surface anywhere in the product — and it is the one row that still needs a
-  // verb (see the offer test above).
+  // run kind (see the offer test above).
   it("keeps an offboarded tenant on the settled list instead of dropping it", () => {
     const settledRow = row("tnt_gone", "offboarded");
     const lists = splitTenantRows([row("tnt_live", "active"), settledRow, row("tnt_half", "provisioning")]);

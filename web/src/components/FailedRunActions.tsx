@@ -136,7 +136,7 @@ export function FailedRunActions(props: {
                   is <strong>un-deployed</strong>: its GitOps pointer is removed, ArgoCD prunes its whole fan-out, its{" "}
                   <span className="mono">{abort.tenant.guid}</span> isolation AppProject is deleted and its inventory row — if it has
                   one — is marked offboarded (kept). Its namespace, its Tenant CR, its Vault path and its Mongo databases are
-                  NOT touched; purge is the verb that removes those. A fan-out that will NOT prune stops the cleanup at that step
+                  NOT touched; purge is the run kind that removes those. A fan-out that will NOT prune stops the cleanup at that step
                   rather than deleting the AppProject and settling the row over workloads that keep serving — tenant-purge is then the
                   remedy.
                 </p>

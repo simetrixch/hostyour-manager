@@ -161,7 +161,7 @@ export function OperatorKeys() {
         <span>
           What each server carries is what its LAST reading found — a snapshot one run took, never a live probe. Read a server
           again from its card on Servers; a key that appeared while nobody was placing anything shows up there as foreign, which
-          means no verb here can remove it.
+          means no run kind here can remove it.
         </span>
       </p>
 

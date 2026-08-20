@@ -67,7 +67,7 @@ export function PurgeTenantDialog(props: { target: PurgeTenantTarget; onConfirm:
       <p>
         What the purge never asks is whether the tenant is still in USE. A tenant the inventory records active or suspended whose
         GitOps pointer still stands is refused before it can even be planned, and refused again when this run is approved — offboard
-        is the removal verb for that one, it keeps the tenant&apos;s data, and a purge may follow it to reap what it leaves standing —
+        is the removal run kind for that one, it keeps the tenant&apos;s data, and a purge may follow it to reap what it leaves standing —
         but a serving tenant with <strong>no inventory row at all</strong> is reachable here, and it would be torn down and
         deprovisioned exactly as described above.{" "}
         <strong>Be certain this guid is the one you mean to destroy.</strong> Confirming only <strong>plans</strong> the run — you

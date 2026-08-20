@@ -1,15 +1,15 @@
-import type { TailnetVerbOffer } from "../tailnetState.ts";
+import type { TailnetRunKindOffer } from "../tailnetState.ts";
 
-// The three tailnet repair verbs on a server's card. Props-only, like ClusterReleaseForm: WHICH of
-// them this server may be offered is decided by tailnetVerbOffer (tailnetState.ts, a pure module a
+// The three tailnet repair run kinds on a server's card. Props-only, like ClusterReleaseForm: WHICH of
+// them this server may be offered is decided by tailnetRunKindOffer (tailnetState.ts, a pure module a
 // test can reach), and what each one does is decided by the run it plans — this renders buttons.
 //
-// Each verb reaches the host on its PUBLIC address, which is why the titles say so: an operator who
+// Each run kind reaches the host on its PUBLIC address, which is why the titles say so: an operator who
 // presses "Leave tailnet" has to know the host stays reachable afterwards, or the button reads as a
 // one-way door.
 
 export function TailnetActions(props: {
-  offer: TailnetVerbOffer;
+  offer: TailnetRunKindOffer;
   onDisconnect: () => void;
   onReconnect: () => void;
   onRejoin: () => void;

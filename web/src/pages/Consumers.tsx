@@ -85,7 +85,7 @@ export function Consumers() {
   // The relocation dialogs: "Back up" is a plain confirm (no target — the folder is named
   // after the unit); "Move…"/"Restore…" pick a target cluster. Confirming only PLANS the run.
   const [backupFor, setBackupFor] = useState<ConsumerView | null>(null);
-  const [relocFor, setRelocFor] = useState<{ c: ConsumerView; verb: "move" | "restore" } | null>(null);
+  const [relocFor, setRelocFor] = useState<{ c: ConsumerView; kind: "move" | "restore" } | null>(null);
   // The one shared runs list, for the per-card relocation state band (relocationBand.ts).
   const [runs, setRuns] = useState<RunView[]>([]);
   // The purge dialog's prefill: {} = opened blank from the header button, {name, clusterId} = opened
@@ -164,7 +164,7 @@ export function Consumers() {
 
   // Offboarded consumers keep their inventory row for audit but have nothing live to
   // reconcile, so they are hidden from the Reconciliation tab — and surfaced in their own list
-  // below, because ONE verb still applies to them: Restore rebuilds such a consumer from its
+  // below, because ONE run kind still applies to them: Restore rebuilds such a consumer from its
   // Storage Box folder.
   const visibleRows = rows?.filter((c) => c.status !== "offboarded") ?? null;
   const offboardedRows = rows?.filter((c) => c.status === "offboarded") ?? [];
@@ -335,7 +335,7 @@ export function Consumers() {
                     Back up
                   </button>
                   {c.status === "active" && (
-                    <button type="button" className="btn" onClick={() => setRelocFor({ c, verb: "move" })}>
+                    <button type="button" className="btn" onClick={() => setRelocFor({ c, kind: "move" })}>
                       Move…
                     </button>
                   )}
@@ -355,7 +355,7 @@ export function Consumers() {
           </ul>
         )}
 
-        <OffboardedConsumers rows={offboardedRows} runs={runs} onRestore={(c) => setRelocFor({ c, verb: "restore" })} />
+        <OffboardedConsumers rows={offboardedRows} runs={runs} onRestore={(c) => setRelocFor({ c, kind: "restore" })} />
       </div>
 
       <div role="tabpanel" id="panel-runs" aria-labelledby="tab-runs" hidden={tab !== "runs"}>
@@ -432,12 +432,12 @@ export function Consumers() {
       {relocFor && (
         <ConsumerRelocationDialog
           c={relocFor.c}
-          verb={relocFor.verb}
+          kind={relocFor.kind}
           onCancel={() => setRelocFor(null)}
           onConfirm={(targetClusterId) => {
-            const { c, verb } = relocFor;
+            const { c, kind } = relocFor;
             setRelocFor(null);
-            void act((id) => (verb === "move" ? migrateConsumer(id, targetClusterId) : restoreConsumer(id, targetClusterId)), c.id);
+            void act((id) => (kind === "move" ? migrateConsumer(id, targetClusterId) : restoreConsumer(id, targetClusterId)), c.id);
           }}
         />
       )}

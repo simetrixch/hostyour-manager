@@ -635,7 +635,7 @@
   width: 100%;
 
   /* The panel never grows past the viewport the backdrop covers (minus that backdrop's own padding).
-     These dialogs carry the blast-radius copy of the destructive verbs — the tenant purge spells out the
+     These dialogs carry the blast-radius copy of the destructive run kinds — the tenant purge spells out the
      Tenant CR cascade, the failed-run abort spells out what the compensations do NOT put back — so they
      are the tallest surfaces in the app. Uncapped, a short screen pushes the type-to-confirm field and
      the Cancel/Confirm buttons out of a backdrop that is `position: fixed` and therefore cannot scroll:
