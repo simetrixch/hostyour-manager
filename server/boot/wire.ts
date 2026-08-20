@@ -80,6 +80,8 @@ export async function wire(): Promise<Wired> {
     ...(config.github ? { platformRepoUrl: `https://github.com/${config.github.owner}/${config.github.repo}.git` } : {}),
     ...(config.ansiwiseServeCommand ? { ansiwiseServeCommand: config.ansiwiseServeCommand } : {}),
     ...(config.ansiwiseDownloadUrl ? { ansiwiseDownloadUrl: config.ansiwiseDownloadUrl } : {}),
+    ...(config.ansiwiseCatalogUrl ? { ansiwiseCatalogUrl: config.ansiwiseCatalogUrl } : {}),
+    ...(config.ansiwiseCatalogToken ? { ansiwiseCatalogToken: config.ansiwiseCatalogToken } : {}),
   }, onboarding.defs);
   const executor = new Executor({
     db: db.db,

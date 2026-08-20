@@ -43,7 +43,7 @@ export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
  *  names the path on its own rows; this constant is the caller's half of the same contract. */
 export const WORK_CHECKOUT = "/srv/hostyour-cloud-slave";
 
-// The refresh for the PROGRAMS' checkout at /srv/hostyour-cloud — the tree the deployment programs
+// The refresh for the PLATFORM checkout at /srv/hostyour-cloud — the tree the deployment programs
 // act on and deliberately never fetch into themselves (a program acts on the tree it was pointed
 // at; which state that tree stands on is the caller's to establish). `fetch --tags` because a
 // release needs two refs the local clone does not have yet: the pin commit the manager pushed onto

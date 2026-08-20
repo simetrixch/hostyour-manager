@@ -44,6 +44,13 @@ export interface AnsiwisePorts {
    *  version the platform repo pins (place-ansiwise). Which release surface an installation takes its
    *  binary from is its own decision; WHICH version is placed never is. */
   ansiwiseDownloadUrl?: string;
+  /** WHICH REPOSITORY the programs that command serves are read from: the clone address of the
+   *  installation repository carrying `ansiwise.yaml` and `ansiwise/programs/`. place-ansiwise puts
+   *  a checkout of it at CATALOG_CHECKOUT, which is the checkout the serve command has to read. */
+  ansiwiseCatalogUrl?: string;
+  /** The credential that repository is read with, for a private one. It reaches the machine over the
+   *  run's session and is written to no file there. */
+  ansiwiseCatalogToken?: string;
 }
 
 export function requireServeCommand(ports: AnsiwisePorts): string {

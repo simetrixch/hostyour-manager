@@ -126,17 +126,20 @@ export interface HostsScript {
   secretStoresOut: string; // verify HARD gate 2 (slave): `ns/name|Ready` rows
   promOut: string;         // verify SOFT (master): PROM_CHECK data|empty|skipped
   certsOut: string;        // verify SOFT (slave): `ns/name|Ready` rows
-  // ---- what the machine carries of the placement (place-ansiwise). The probe READS these four and
+  // ---- what the machine carries of the placement (place-ansiwise). The probe READS these five and
   // the placing script WRITES them, exactly as the real script's own contract says it does — so a
   // second run of that step measures what the first one left, and a double-run assertion is about
   // idempotence rather than about a value the test changed in between.
   /** The version /usr/local/bin/ansiwise points at; undefined = the machine carries no binary. */
   placedBinary: string | undefined;
-  /** Whether /srv/hostyour-cloud is a checkout. */
+  /** Whether /srv/hostyour-cloud — the tree the programs ACT on — is a checkout. */
   platformCheckout: boolean;
-  /** Whether that checkout carries ansiwise/programs. */
+  /** Whether /srv/ansiwise-catalog — the tree the programs are READ from — is a checkout. */
+  catalogCheckout: boolean;
+  /** Whether that catalogue checkout carries ansiwise/programs. */
   programs: boolean;
-  /** What the checkout carries once the placing script clones it — the branch's own content. */
+  /** What the catalogue checkout carries once the placing script clones it — the repository's own
+   *  content. `false` is a ANSIWISE_CATALOG_URL naming a repository that is not the catalogue. */
   programsAfterClone: boolean;
   /** The commands of the placement's own two the machine is missing (curl, git). */
   missingCommands: string[];
@@ -178,6 +181,7 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     // A slave as deploy-slave meets it: adopted, and carrying nothing of the placement yet.
     placedBinary: undefined,
     platformCheckout: false,
+    catalogCheckout: false,
     programs: false,
     programsAfterClone: true,
     missingCommands: ["git"],
@@ -189,12 +193,30 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
   };
 }
 
-/** What the placement probe reads off the scripted machine, in the probe script's own lines. */
-function placementProbeOut(f: HostsScript): string {
+/** The DIRECTORIES the scripted machine carries. The probe asks about paths, so the machine answers
+ *  about paths: a probe that looked for the programs in the platform checkout — the shape that made
+ *  the first version of place-ansiwise refuse on every real machine — finds nothing there, instead of
+ *  being handed the field it meant to read. */
+function machineDirs(f: HostsScript): string[] {
+  return [
+    ...(f.platformCheckout ? ["/srv/hostyour-cloud/.git"] : []),
+    ...(f.catalogCheckout ? ["/srv/ansiwise-catalog/.git"] : []),
+    ...(f.programs ? ["/srv/ansiwise-catalog/ansiwise/programs"] : []),
+  ];
+}
+
+/** What the placement probe reads off the scripted machine, answered off the probe script the step
+ *  UPLOADED: every `[ -d "<path>" ]` line of it is decided against the directories above, under the
+ *  name that line echoes. A probe naming no directory at all is refused rather than answered with a
+ *  machine that carries nothing — that answer would place over a working installation. */
+function placementProbeOut(f: HostsScript, host: string, path: string): string {
+  const script = f.files.filter((x) => x.host === host && x.path === path).at(-1)?.content ?? "";
+  const dirs = machineDirs(f);
+  const asked = [...script.matchAll(/^\[ -d "([^"]+)" \] && echo "([A-Z]+) present"/gm)];
+  if (asked.length === 0) throw new Error(`the probe script at ${path} asks about no directory — the fixture cannot answer it`);
   return [
     `BINARY ${f.placedBinary ?? "absent"}`,
-    `CATALOG ${f.platformCheckout ? "present" : "absent"}`,
-    `PROGRAMS ${f.programs ? "present" : "absent"}`,
+    ...asked.map((m) => `${m[2]} ${dirs.includes(m[1] ?? "") ? "present" : "absent"}`),
     ...f.missingCommands.map((c) => `MISSING ${c}`),
     "PROBED",
   ].join("\n");
@@ -213,9 +235,13 @@ function applyPlacement(f: HostsScript, host: string): string {
     out.push(`PLACED_BINARY ${version}`);
   }
   if (script.includes("PLACED_CATALOG")) {
-    f.platformCheckout = true;
+    f.catalogCheckout = true;
     f.programs = f.programsAfterClone;
     out.push("PLACED_CATALOG abc1234");
+  }
+  if (script.includes("PLACED_PLATFORM")) {
+    f.platformCheckout = true;
+    out.push("PLACED_PLATFORM abc1234");
   }
   out.push("PLACED");
   return out.join("\n");
@@ -239,10 +265,14 @@ export function hostsFactory(f: HostsScript): SshFactory {
       if (command.includes("dc-dns-probe-")) { emit(f.dnsOut); return done(); }
       if (command.includes("dc-slave-preflight-")) { emit(f.preflightOut); return done(); }
       if (command.startsWith("curl") && command.includes("/v1/sys/health")) { emit(f.vaultCode); return done(f.vaultExit); }
-      // ---- the placement every program act stands on: the probe reads the machine, the placing
-      // script changes it. Both are answered off the same four fields, so what the second probe of a
-      // step reports is what the placing script in between actually left.
-      if (command.includes("dc-place-probe-") || command.includes("dc-place-verify-")) { emit(placementProbeOut(f)); return done(); }
+      // ---- the placement every program act stands on: the probe is answered off the probe script
+      // the step UPLOADED — every `[ -d "<path>" ]` line of it decided against machineDirs — and the
+      // placing script's effect is applied off the placing script the step uploaded. So what the
+      // second probe of a step reports is what the placing script in between actually left.
+      if (command.includes("dc-place-probe-") || command.includes("dc-place-verify-")) {
+        emit(placementProbeOut(f, host, command.replace(/^bash /, "")));
+        return done();
+      }
       if (command.includes("dc-place-ansiwise-")) { emit(applyPlacement(f, host)); return done(); }
       // ---- the git upkeep around the programs
       if (command.includes("dc-prepare-checkouts-")) { emit(f.checkoutsOut); return done(f.checkoutsExit); }
@@ -345,6 +375,11 @@ export const VERSIONS_YAML = [
  *  so the address in the placing script names the pin above and nothing else. */
 export const ANSIWISE_DOWNLOAD_URL = "https://downloads.example.invalid/ansiwise/<version>/ansiwise-linux-amd64";
 
+/** WHICH repository the scripted installation reads its programs from — a second repository beside
+ *  the platform one, which is the whole point: the platform checkout is the material the programs
+ *  act on and carries no ansiwise/ tree. */
+export const ANSIWISE_CATALOG_URL = "https://github.com/acme/acme-deploy.git";
+
 const handles: DbHandle[] = [];
 const dirs: string[] = [];
 
@@ -379,6 +414,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
       db: db.db, platformRepo,
       platformRepoUrl: "https://github.com/acme/hostyour-cloud.git",
       ansiwiseDownloadUrl: ANSIWISE_DOWNLOAD_URL,
+      ansiwiseCatalogUrl: ANSIWISE_CATALOG_URL,
       ...(opts.ansiwiseServeCommand !== undefined ? { ansiwiseServeCommand: opts.ansiwiseServeCommand } : {}),
     }),
     sshFactory: hostsFactory(hosts), actor: () => "op_system",

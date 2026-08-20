@@ -147,6 +147,24 @@ const EnvSchema = z.object({
   ANSIWISE_DOWNLOAD_URL: z.string().url().includes("<version>", {
     message: "ANSIWISE_DOWNLOAD_URL must carry <version> where the pinned version goes",
   }).optional(),
+  // WHICH REPOSITORY carries the programs that binary runs — the clone address of the installation
+  // repository holding `ansiwise.yaml` and `ansiwise/programs/`, placed by place-ansiwise at
+  // /srv/ansiwise-catalog, which is the checkout ANSIWISE_SERVE_COMMAND above has to read from. The
+  // platform repository (GITHUB_REPO) is NOT that repository: it is the MATERIAL the programs act
+  // on, and it carries no `ansiwise/` tree at all (hostyour-cloud platform/versions.yaml:22-24 names
+  // the two trees apart). Absent ⇒ the placement step fails loud (errNotConfigured).
+  //
+  // NOTE WHICH VARIABLE IS WHICH: CATALOG_REPO above is the TENANT chart catalog the onboarding Run
+  // family writes, named owner/repo. One installation may keep both in one repository; the manager
+  // still takes them as two settings, because one of them is handed to a machine and the other is
+  // written to with CATALOG_WRITE_PAT.
+  ANSIWISE_CATALOG_URL: z.string().url().optional(),
+  // The credential the machine reads that repository with, needed when it is private. It is handed
+  // to the machine over the run's SSH session and never written into a file there. Nothing here can
+  // check what it may do: set a READ-ONLY token — what runs programs on a machine must not be able
+  // to rewrite the repository they come from. Absent ⇒ the clone is attempted without a credential,
+  // which is right for a public catalogue and fails loud on a private one.
+  ANSIWISE_CATALOG_TOKEN: z.string().min(1).optional(),
   // The pinned dbtools job image (<registry-host>/dbtools:<tag>) the relocation Jobs
   // run — mongodb tools, postgresql client, an S3 client and SSH for the staging area. The pin lives
   // as a builds[] entry in apps/controller/values-<stage>.yaml and the Deployment projects it here,
@@ -277,6 +295,12 @@ export interface Config {
   /** Where a machine fetches that binary, `<version>` standing for the pinned version
    *  (place-ansiwise). Absent ⇒ the placement step fails loud. */
   ansiwiseDownloadUrl?: string;
+  /** The clone address of the repository carrying `ansiwise.yaml` and `ansiwise/programs/` — the
+   *  catalogue place-ansiwise puts at /srv/ansiwise-catalog. Absent ⇒ the placement step fails loud. */
+  ansiwiseCatalogUrl?: string;
+  /** The credential that repository is read with, for a private one. Absent ⇒ the clone carries
+   *  none. */
+  ansiwiseCatalogToken?: string;
 }
 
 export class ConfigError extends Error {
@@ -394,6 +418,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     ...(e.DBTOOLS_IMAGE ? { dbtoolsImage: e.DBTOOLS_IMAGE } : {}),
     ...(e.ANSIWISE_SERVE_COMMAND ? { ansiwiseServeCommand: e.ANSIWISE_SERVE_COMMAND } : {}),
     ...(e.ANSIWISE_DOWNLOAD_URL ? { ansiwiseDownloadUrl: e.ANSIWISE_DOWNLOAD_URL } : {}),
+    ...(e.ANSIWISE_CATALOG_URL ? { ansiwiseCatalogUrl: e.ANSIWISE_CATALOG_URL } : {}),
+    ...(e.ANSIWISE_CATALOG_TOKEN ? { ansiwiseCatalogToken: e.ANSIWISE_CATALOG_TOKEN } : {}),
   };
 }
 

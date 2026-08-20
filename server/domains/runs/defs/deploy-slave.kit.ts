@@ -225,10 +225,10 @@ export const microk8sResetSlaveCleanup: Cleanup = {
   title: "Remove MicroK8s from the slave (DESTRUCTIVE)",
   run: async (ctx: StepCtx) => {
     const session = await ctx.ssh(); // the slave (the run's ownsHost target)
-    // Only the snap goes. The platform checkout at /srv/hostyour-cloud and the binary beside it are
-    // what a retry of the run resumes onto — place-ansiwise clones the one and installs the other,
-    // both idempotently — so removing them would buy a second download and a second clone and
-    // nothing else.
+    // Only the snap goes. The two checkouts — the platform tree at /srv/hostyour-cloud and the
+    // catalogue at /srv/ansiwise-catalog — and the binary beside them are what a retry of the run
+    // resumes onto, all three placed idempotently by place-ansiwise, so removing them would buy a
+    // second download and two more clones and nothing else.
     await remoteCmd(ctx, session, "if snap list microk8s >/dev/null 2>&1; then sudo -n snap remove --purge microk8s; fi", { timeoutMs: 10 * 60_000 });
   },
 };

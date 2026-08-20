@@ -35,9 +35,10 @@ import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
 // every cluster is (deploy-host, deploy-cluster, deploy-gitops), joins the private network with a
 // credential the master mints, and emits the one credentials file the registration is made from.
 //
-// Before the first of those programs, place-ansiwise puts the binary they are driven through and the
-// checkout they are read from onto the slave: a machine adopted from bare metal carries neither, and
-// every program step would otherwise open a conversation with a command that is not there.
+// Before the first of those programs, place-ansiwise puts the binary they are driven through, the
+// catalogue they are read from and the platform checkout they act on onto the slave: a machine
+// adopted from bare metal carries none of them, and every program step would otherwise open a
+// conversation with a command that is not there.
 //
 // mutating: true ⇒ the attest-target law (guards.ts assertGuardsArmed) requires
 // steps()[0].name === "attest-target", and slaveCryptoGate restricts a plaintext-keystore install
@@ -292,11 +293,11 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         ctx.checkpoint({ branch: domain, apiHost, changed });
       },
     },
-    // The binary every program act below is spoken to through, and the checkout those programs are
-    // read from and act on. It stands FIRST among the machine-side acts because none of them can run
-    // without it: `ansiwise serve` is a binary reading a catalogue, and a machine at its first
-    // installation carries neither. Idempotent by measurement, which is what lets a redeploy run the
-    // same step against a machine that already carries both.
+    // The binary every program act below is spoken to through, the catalogue those programs are read
+    // from, and the platform checkout they act on. It stands FIRST among the machine-side acts
+    // because none of them can run without all three: `ansiwise serve` is a binary reading a
+    // catalogue, and a machine at its first installation carries none of them. Idempotent by
+    // measurement, which is what lets a redeploy run the same step against a machine that carries them.
     placeAnsiwiseStep(target, ports),
     // ---- the machine layer, exactly as every cluster gets it: the three deployment programs on
     // the slave's own surface, each dry-proven then run. deploy-host makes the box workable (the
@@ -443,8 +444,9 @@ export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): Run
   // run last — by then remove-slave has already dropped the map's slave part itself, FIRST, which
   // is that program's own contract, so the last cleanup finds nothing left to drop). attest-target,
   // slave-preflight and the checkout steps arm nothing: the install branch on the remote is the
-  // operator's to keep, and the binary and the checkout place-ansiwise puts on the machine are what a
-  // retry resumes onto — a cleanup that removed them would buy a second download and a second clone.
+  // operator's to keep, and the binary, the catalogue and the checkout place-ansiwise puts on the
+  // machine are what a retry resumes onto — a cleanup that removed them would buy a second download
+  // and two more clones.
   cleanups: () => [microk8sResetSlaveCleanup, removeSlaveCleanup(ports), removeSlaveMarkingCleanup(ports)],
   onTerminal: (status, { db, params }) => {
     if (status === "succeeded") return; // the register step set the terminal states

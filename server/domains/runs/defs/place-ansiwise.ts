@@ -3,6 +3,7 @@ import type { SshSession } from "../../../adapters/ssh/port.ts";
 import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { remoteScriptCapture } from "../../../executor/stepkit.ts";
 import { readAnsiwisePin } from "../../inventory/ansiwise-pin.ts";
+import { PRODUCT_BRANCH } from "../../../../shared/branches.ts";
 import { requireElevationPassword, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 import { loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { PLATFORM_CHECKOUT } from "./deploy-slave.remote.ts";
@@ -12,7 +13,7 @@ import { PLATFORM_CHECKOUT } from "./deploy-slave.remote.ts";
 // and that command is a binary reading a catalogue of program files out of a checkout: a machine
 // that carries neither answers nothing, and the run dies on its first program with a shell error.
 //
-// TWO PLACEMENTS, ONE STEP, and they belong together because neither is worth anything alone:
+// THREE PLACEMENTS, ONE STEP, and they belong together because none of them is worth anything alone:
 //
 //   the BINARY     /usr/local/bin/ansiwise, at the version platform/versions.yaml pins
 //                  (inventory/ansiwise-pin.ts) — never at whatever the caller happens to hold. It is
@@ -20,16 +21,25 @@ import { PLATFORM_CHECKOUT } from "./deploy-slave.remote.ts";
 //                  onto it, which is what makes the placed version READABLE afterwards: the binary
 //                  takes no --version flag, so the name of the file the link points at is the only
 //                  statement about which one is there, and it is one this step wrote itself.
+//   the CATALOGUE  the checkout at CATALOG_CHECKOUT, cloned from ANSIWISE_CATALOG_URL — the
+//                  `ansiwise.yaml` and the `ansiwise/programs/` every later step starts a program
+//                  out of by name.
 //   the MATERIAL   the platform checkout at PLATFORM_CHECKOUT, cloned on the machine's install
 //                  branch. Every deployment program ACTS on that tree — their `repository:` rows
 //                  name the path — so a machine without it has nothing for them to work on.
 //
-// WHAT THIS STEP DOES NOT YET PLACE IS THE CATALOGUE ITSELF. The program files are not in the
-// platform repository: hostyour-cloud/platform/versions.yaml:22-24 names `platform` as that
-// repository and `deploy` as "the installation repository carrying the ansiwise programs", and
-// `ls ansiwise` in a hostyour-cloud checkout answers nothing. So this step refuses a machine that
-// has no catalogue rather than reporting a success whose first program would die with a shell
-// error. Placing it is the open half of hostyour-manager#14.
+// THE CATALOGUE AND THE MATERIAL ARE TWO REPOSITORIES, and the first version of this step asserted
+// they were one. `hostyour-cloud/platform/versions.yaml:22-24` names the two trees: `platform` is
+// that repository, `deploy` is "the installation repository carrying the ansiwise programs".
+// `ls ansiwise` in a hostyour-cloud checkout answers nothing, so a step that cloned only the
+// platform repo and then looked for programs in it refused on every real machine.
+//
+// WHERE THE CATALOGUE STANDS is CATALOG_CHECKOUT, and that path is the machine's own, not this
+// step's invention: the resident deployment service the machine later runs is written with exactly
+// it (digita-deploy `ansiwise/programs/deploy-gitops.yaml:1268` `working_directory` and `:1277`
+// `--programs`), and the same program clones the same repository to the same path on its own
+// (`git_clone` at `:1210`) once the machine has a secret store. This step is the FIRST placement,
+// before any of that exists, and it puts the checkout where those rows will find it.
 //
 // PROBE, PLACE, PROBE AGAIN. The step measures the machine first and places only what is missing —
 // which is what makes a second run a no-op rather than a re-installation — and then measures again
@@ -37,15 +47,36 @@ import { PLATFORM_CHECKOUT } from "./deploy-slave.remote.ts";
 // reported success without looking would report it just as happily when curl wrote an error page
 // into the file it installed.
 //
-// IT KNOWS NOTHING ABOUT A SLAVE. What it takes is a session, a branch and the pin, so the same step
-// serves a master at its first installation — the case that has no install branch, no checkout and
-// no binary either.
+// IT TAKES A SLAVE TARGET, and the manager's tables with it. `placeAnsiwiseStep(target: SlaveTarget,
+// ports)` below resolves the cluster through `target.resolve(ctx.db)` — the install branch the
+// platform checkout is stood on — and reads the server row through `loadServer(ctx.db,
+// target.serverId)` for the ssh user the placement elevates as; `loadServer` (deploy-slave.kit.ts)
+// refuses a server id the manager does not carry. A machine at its FIRST installation stands in no
+// such row, so it cannot start this step, and no other placement mechanism exists for it.
+//
+// WHAT COMPOSES THE PLACEMENT IS FREE OF ALL THAT: `probeScript()`, `parseProbe()` and `placement()`
+// take values and return strings, touch no database and no session, so the same three placements can
+// be composed wherever such a machine is reached from.
 
 /** The name every caller starts, and the link this step points at the version it placed. */
 export const ANSIWISE_BINARY_LINK = "/usr/local/bin/ansiwise";
 
 /** Where the versioned binaries stand. The link above names one of them. */
 const ANSIWISE_BINARY_DIR = "/usr/local/bin";
+
+/** WHERE the catalogue stands on the machine: the checkout `ansiwise serve` reads its programs and
+ *  its `ansiwise.yaml` from, and the path the machine's own resident service is later written with
+ *  (see the header). ANSIWISE_SERVE_COMMAND is the command that starts that surface over the run's
+ *  session, so an installation whose command reads a different directory serves different programs
+ *  than this step placed — nothing here can check that, and the step's log states the path it wrote
+ *  so the two can be compared. */
+export const CATALOG_CHECKOUT = "/srv/ansiwise-catalog";
+
+/** The branch the catalogue is taken from: the trunk, for the reason the pin is read off the trunk
+ *  (inventory/ansiwise-pin.ts) — the programs are the product, and a machine at its first
+ *  installation has no install branch to read them off. The machine's own later clone of the same
+ *  repository names the same branch. */
+const CATALOG_BRANCH = PRODUCT_BRANCH;
 
 /** What ANSIWISE_DOWNLOAD_URL writes where the pinned version belongs. One placeholder and one
  *  source: the URL says WHERE a version is fetched from, the pin says WHICH — so the two can never
@@ -60,18 +91,21 @@ const REQUIRED_COMMANDS = ["curl", "git"] as const;
 /** The packages that carry them on the pinned distribution. */
 const REQUIRED_PACKAGES = "curl ca-certificates git";
 
-/** The step's wall clock. A clone of the platform repo and one package install over a cold apt
- *  cache are the two long acts in it. */
+/** The step's wall clock. Two clones and one package install over a cold apt cache are the long acts
+ *  in it. */
 const PLACE_ANSIWISE_TIMEOUT_MS = 10 * 60_000;
 
 /** What a value put into a remote command may look like. Everything this step composes a command
- *  from arrives from OUTSIDE this process — a version out of a file on the platform repo, a URL and
- *  a clone address out of the environment, a branch off the cluster row — so each is held against
- *  its shape before it reaches a shell. */
+ *  from arrives from OUTSIDE this process — a version out of a file on the platform repo, two clone
+ *  addresses out of the environment, a branch off the cluster row — so each is held against its
+ *  shape before it reaches a shell. */
 const VERSION_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
 const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const URL_RE = /^https:\/\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+$/;
 const USER_RE = /^[a-z_][a-z0-9_-]*$/;
+/** The credential rides one LINE of the script's standard input, so anything with a line break in it
+ *  would leave the rest of that value standing where the script expects the next credential. */
+const SECRET_LINE_RE = /^[^\r\n]+$/;
 
 /** WHERE the machine fetches the pinned binary from, with the version filled in. Which release
  *  surface an installation takes its binary from is the installation's decision, exactly as the
@@ -88,6 +122,22 @@ function requireDownloadUrl(ports: AnsiwisePorts, version: string): string {
   return ports.ansiwiseDownloadUrl.split(VERSION_PLACEHOLDER).join(version);
 }
 
+/** WHICH REPOSITORY the programs come from. It is not the platform repository and cannot be derived
+ *  from it — the two trees are named apart in the file that pins this platform's versions — so an
+ *  installation states it, the way it states where the binary is fetched from. */
+function requireCatalogUrl(ports: AnsiwisePorts): string {
+  if (!ports.ansiwiseCatalogUrl) {
+    throw errNotConfigured(
+      "ANSIWISE_CATALOG_URL is not configured — this step places the program catalogue on the machine, and which " +
+      "repository carries it is the installation's decision. It is NOT the platform repository: that one is the " +
+      "material the programs act on and carries no ansiwise/ tree. Set ANSIWISE_CATALOG_URL to the clone address of " +
+      "the installation repository holding ansiwise.yaml and ansiwise/programs/, e.g. " +
+      "https://github.com/example/example-deploy.git",
+    );
+  }
+  return ports.ansiwiseCatalogUrl;
+}
+
 /** The address the machine clones the platform checkout from. Built where the platform repo port is
  *  built, from the same two settings, so the tree the manager writes and the tree the machine reads
  *  are one repository stated once. */
@@ -95,21 +145,23 @@ function requirePlatformRepoUrl(ports: DeploySlavePorts): string {
   if (!ports.platformRepoUrl) {
     throw errNotConfigured(
       "the platform repo is not configured — this step clones the platform checkout onto the machine, and without it " +
-      "the deployment programs have neither their catalogue nor the tree they act on. GITHUB_REPO names that repository",
+      "the deployment programs have nothing to act on. GITHUB_REPO names that repository",
     );
   }
   return ports.platformRepoUrl;
 }
 
-/** What the machine answers about itself. Three separate facts, because each is placed separately
- *  and a run that finds two of them standing must not redo the third. */
+/** What the machine answers about itself. Separate facts, because each is placed separately and a
+ *  run that finds three of them standing must not redo the fourth. */
 export interface MachinePlacement {
   /** The version the link points at, `unversioned` when something else stands under that name, or
    *  undefined when nothing does. */
   binary?: string | undefined;
   /** Whether PLATFORM_CHECKOUT is a git checkout. */
+  platform: boolean;
+  /** Whether CATALOG_CHECKOUT is a git checkout. */
   catalog: boolean;
-  /** Whether that checkout carries the program files. */
+  /** Whether that catalogue checkout carries the program files. */
   programs: boolean;
   /** The commands of REQUIRED_COMMANDS the machine is missing. */
   missingCommands: string[];
@@ -132,8 +184,9 @@ if [ -n "$target" ] && [ -x "$target" ]; then
 else
   echo "BINARY absent"
 fi
-[ -d "${PLATFORM_CHECKOUT}/.git" ] && echo "CATALOG present" || echo "CATALOG absent"
-[ -d "${PLATFORM_CHECKOUT}/ansiwise/programs" ] && echo "PROGRAMS present" || echo "PROGRAMS absent"
+[ -d "${PLATFORM_CHECKOUT}/.git" ] && echo "PLATFORM present" || echo "PLATFORM absent"
+[ -d "${CATALOG_CHECKOUT}/.git" ] && echo "CATALOG present" || echo "CATALOG absent"
+[ -d "${CATALOG_CHECKOUT}/ansiwise/programs" ] && echo "PROGRAMS present" || echo "PROGRAMS absent"
 for c in ${REQUIRED_COMMANDS.join(" ")}; do
   command -v "$c" >/dev/null 2>&1 || echo "MISSING $c"
 done
@@ -151,6 +204,7 @@ export function parseProbe(stdout: string): MachinePlacement {
   const binary = lines.find((l) => l.startsWith("BINARY "))?.slice("BINARY ".length);
   return {
     binary: binary === undefined || binary === "absent" ? undefined : binary,
+    platform: lines.includes("PLATFORM present"),
     catalog: lines.includes("CATALOG present"),
     programs: lines.includes("PROGRAMS present"),
     missingCommands: lines.filter((l) => l.startsWith("MISSING ")).map((l) => l.slice("MISSING ".length)),
@@ -162,27 +216,57 @@ export interface PlaceInput {
   downloadUrl: string;
   repoUrl: string;
   branch: string;
-  /** The account the checkout is handed to — the one every later step reaches the machine as, and
+  catalogUrl: string;
+  /** The credential the catalogue repository is read with, absent for a public one. */
+  catalogToken?: string | undefined;
+  /** The credential that raises a command to root, validated once at the top of the script. */
+  elevationPassword: string;
+  /** The account the checkouts are handed to — the one every later step reaches the machine as, and
    *  the one refresh-checkout fetches into it with, which it cannot do on a root-owned tree. */
   user: string;
   /** What the probe found missing. Nothing that stands is touched. */
-  place: { commands: boolean; binary: boolean; catalog: boolean };
+  place: { commands: boolean; binary: boolean; platform: boolean; catalog: boolean };
+}
+
+/** The script the machine runs and what its standard input carries, composed together because the
+ *  script READS that input line by line: a script whose parts and a buffer whose lines were decided
+ *  apart could disagree about how many credentials there are, and the shell would then read the
+ *  elevation password into the variable meant for the catalogue's. */
+export interface RemotePlacement {
+  script: string;
+  stdin: Buffer;
+}
+
+/** Whether the placement carries the catalogue credential to the machine: only a run that actually
+ *  clones the catalogue needs it, and only an installation that stated one has it. */
+function carriesCatalogToken(o: PlaceInput): boolean {
+  return o.place.catalog && o.catalogToken !== undefined;
 }
 
 /** The placing script, composed of only the parts the probe asked for.
  *
- *  Root is reached by validating the elevation credential ONCE with the password on standard input
- *  and running everything after it with `sudo -n`: the password never stands in the script, which is
- *  a file on the machine's disk for as long as the step runs. */
-export function placeScript(o: PlaceInput): string {
+ *  NO CREDENTIAL STANDS IN THE SCRIPT, which is a file on the machine's disk for as long as the step
+ *  runs, and none stands in a command's arguments, which are in the machine's process listing. Both
+ *  ride standard input: the script reads the catalogue's credential into a variable of its own and
+ *  hands it to git through git's own configuration-by-environment, and `sudo -S` reads the elevation
+ *  password off the line after it and everything from there on runs `sudo -n`. */
+export function placement(o: PlaceInput): RemotePlacement {
   assertShape(o.version, VERSION_RE, "version");
   assertShape(o.branch, BRANCH_RE, "branch");
   assertShape(o.user, USER_RE, "operator account");
   assertShape(o.downloadUrl, URL_RE, "download address");
   assertShape(o.repoUrl, URL_RE, "clone address");
+  assertShape(o.catalogUrl, URL_RE, "catalogue address");
+  assertSecretLine(o.elevationPassword, "elevation password");
+  const withToken = carriesCatalogToken(o);
+  if (withToken) assertSecretLine(o.catalogToken ?? "", "catalogue credential");
   const parts = [`#!/usr/bin/env bash
-set -euo pipefail
-sudo -S -p '' -v`];
+set -euo pipefail`];
+  if (withToken) {
+    parts.push(`IFS= read -r ANSIWISE_CATALOG_TOKEN
+export ANSIWISE_CATALOG_TOKEN`);
+  }
+  parts.push("sudo -S -p '' -v");
   if (o.place.commands) {
     parts.push(`sudo -n apt-get update
 sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y ${REQUIRED_PACKAGES}`);
@@ -196,12 +280,32 @@ sudo -n ln -sfn "${ANSIWISE_BINARY_DIR}/ansiwise-${o.version}" "${ANSIWISE_BINAR
 echo "PLACED_BINARY ${o.version}"`);
   }
   if (o.place.catalog) {
-    parts.push(`sudo -n install -d -o "${o.user}" -g "${o.user}" "${PLATFORM_CHECKOUT}"
+    // The credential reaches git as an authorization it composes itself, out of the environment: the
+    // helper string is what stands in the argument list and in the checkout's config, the value
+    // never does. GIT_TERMINAL_PROMPT=0 turns a repository this credential cannot read into a
+    // refusal the run log names, instead of a git that waits for a username nobody can type.
+    const credential = withToken
+      ? ` -c credential.helper='!f(){ printf "username=x-access-token\\npassword=%s\\n" "$ANSIWISE_CATALOG_TOKEN"; };f'`
+      : "";
+    parts.push(`export GIT_TERMINAL_PROMPT=0
+sudo -n install -d -o "${o.user}" -g "${o.user}" "${CATALOG_CHECKOUT}"
+git${credential} clone --branch "${CATALOG_BRANCH}" "${o.catalogUrl}" "${CATALOG_CHECKOUT}"
+echo "PLACED_CATALOG $(git -C "${CATALOG_CHECKOUT}" rev-parse --short HEAD)"`);
+  }
+  if (o.place.platform) {
+    parts.push(`export GIT_TERMINAL_PROMPT=0
+sudo -n install -d -o "${o.user}" -g "${o.user}" "${PLATFORM_CHECKOUT}"
 git clone --branch "${o.branch}" "${o.repoUrl}" "${PLATFORM_CHECKOUT}"
-echo "PLACED_CATALOG $(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)"`);
+echo "PLACED_PLATFORM $(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)"`);
   }
   parts.push('echo "PLACED"');
-  return parts.join("\n") + "\n";
+  return {
+    script: parts.join("\n") + "\n",
+    stdin: Buffer.from(
+      (withToken ? `${o.catalogToken ?? ""}\n` : "") + `${o.elevationPassword}\n`,
+      "utf8",
+    ),
+  };
 }
 
 function assertShape(value: string, shape: RegExp, what: string): void {
@@ -210,8 +314,16 @@ function assertShape(value: string, shape: RegExp, what: string): void {
   }
 }
 
-/** `place-ansiwise`: give the machine the binary and the catalogue every later step needs, at the
- *  pinned version, and place nothing that already stands. */
+/** The same guard for a value that may not be shown: a credential rides ONE line of the script's
+ *  standard input, and a refusal that quoted it would put it in the run log. */
+function assertSecretLine(value: string, what: string): void {
+  if (!SECRET_LINE_RE.test(value)) {
+    throw errValidation(`the ${what} carries a line break or is empty — it rides one line of the placement's standard input`);
+  }
+}
+
+/** `place-ansiwise`: give the machine the binary, the catalogue and the tree the programs act on, at
+ *  the pinned version, and place nothing that already stands. */
 export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): Step {
   return {
     name: "place-ansiwise",
@@ -221,6 +333,7 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
       const server = loadServer(ctx.db, target.serverId);
       const version = await readAnsiwisePin(requirePlatformRepo(ports));
       const downloadUrl = requireDownloadUrl(ports, version);
+      const catalogUrl = requireCatalogUrl(ports);
       const repoUrl = requirePlatformRepoUrl(ports);
       const session = await ctx.ssh();
 
@@ -229,29 +342,36 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
         commands: before.missingCommands.length > 0,
         binary: before.binary !== version,
         catalog: !before.catalog,
+        platform: !before.platform,
       };
-      if (!place.commands && !place.binary && !place.catalog) {
-        assertPrograms(before, domain);
+      if (!place.commands && !place.binary && !place.catalog && !place.platform) {
+        assertPrograms(before, catalogUrl);
         ctx.checkpoint({ version, placed: false });
-        ctx.log("meta", `${server.name} already carries ansiwise ${version} and the checkout at ${PLATFORM_CHECKOUT} — nothing to place`);
+        ctx.log("meta", `${server.name} already carries ansiwise ${version}, the catalogue at ${CATALOG_CHECKOUT} and the checkout at ${PLATFORM_CHECKOUT} — nothing to place`);
         return;
       }
       ctx.log("meta",
         `placing on ${server.name}: ${[
           place.commands ? `the commands it is missing (${before.missingCommands.join(", ")})` : undefined,
           place.binary ? `ansiwise ${version} (it carries ${before.binary ?? "none"})` : undefined,
-          place.catalog ? `the checkout at ${PLATFORM_CHECKOUT} from ${repoUrl} on ${domain}` : undefined,
+          place.catalog ? `the catalogue at ${CATALOG_CHECKOUT} from ${catalogUrl} on ${CATALOG_BRANCH}` : undefined,
+          place.platform ? `the checkout at ${PLATFORM_CHECKOUT} from ${repoUrl} on ${domain}` : undefined,
         ].filter((s) => s !== undefined).join(", ")}`);
 
-      const script = placeScript({ version, downloadUrl, repoUrl, branch: domain, user: server.sshUser, place });
-      const cap = await remoteScriptCapture(ctx, session, "place-ansiwise", script, {
+      const composed = placement({
+        version, downloadUrl, repoUrl, branch: domain, catalogUrl,
+        ...(ports.ansiwiseCatalogToken !== undefined ? { catalogToken: ports.ansiwiseCatalogToken } : {}),
+        elevationPassword: requireElevationPassword(ctx), user: server.sshUser, place,
+      });
+      const cap = await remoteScriptCapture(ctx, session, "place-ansiwise", composed.script, {
         timeoutMs: PLACE_ANSIWISE_TIMEOUT_MS,
-        stdin: Buffer.from(`${requireElevationPassword(ctx)}\n`, "utf8"),
+        stdin: composed.stdin,
       });
       if (cap.result.code !== 0 || !cap.stdout.includes("PLACED")) {
         throw errValidation(
-          `could not place ansiwise ${version} and the checkout on ${server.name} (exit ${cap.result.code}) — ` +
-          "read the run log for the command that failed, fix the machine, then retry the run",
+          `could not place ansiwise ${version}, the catalogue and the checkout on ${server.name} (exit ${cap.result.code}) — ` +
+          "read the run log for the command that failed; a clone the machine was not allowed to read is what a private " +
+          "catalogue with no ANSIWISE_CATALOG_TOKEN looks like. Fix the machine or the setting, then retry the run",
         );
       }
 
@@ -265,11 +385,14 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
         );
       }
       if (!after.catalog) {
+        throw errValidation(`${CATALOG_CHECKOUT} on ${server.name} is still not a checkout after the clone — read the run log`);
+      }
+      if (!after.platform) {
         throw errValidation(`${PLATFORM_CHECKOUT} on ${server.name} is still not a checkout after the clone — read the run log`);
       }
-      assertPrograms(after, domain);
+      assertPrograms(after, catalogUrl);
       ctx.checkpoint({ version, placed: true });
-      ctx.log("meta", `${server.name} carries ansiwise ${version} (${ANSIWISE_BINARY_LINK}) and the checkout at ${PLATFORM_CHECKOUT} on ${domain}`);
+      ctx.log("meta", `${server.name} carries ansiwise ${version} (${ANSIWISE_BINARY_LINK}), the catalogue at ${CATALOG_CHECKOUT} on ${CATALOG_BRANCH} and the checkout at ${PLATFORM_CHECKOUT} on ${domain} — ANSIWISE_SERVE_COMMAND has to serve its programs out of ${CATALOG_CHECKOUT}`);
     },
   };
 }
@@ -280,25 +403,14 @@ async function probe(ctx: StepCtx, session: SshSession, name: string): Promise<M
 }
 
 /** The catalogue is the program FILES, not the checkout that holds them: a machine carrying none of
- *  them leaves every later step starting a program by a name nothing declares.
- *
- *  THE CATALOGUE IS NOT IN THE PLATFORM REPOSITORY, and this refusal used to say it was.
- *  `hostyour-cloud/platform/versions.yaml:22-24` names the two trees: `platform` is that repository,
- *  `deploy` is "the installation repository carrying the ansiwise programs". `ls ansiwise` in a
- *  hostyour-cloud checkout answers nothing — so the clone this step makes is the MATERIAL every
- *  program acts on (their `repository:` rows name that path) and never the catalogue they are read
- *  from.
- *
- *  Placing the catalogue is the open half of hostyour-manager#14. This refuses rather than passes,
- *  because a step that placed the binary, cloned the material and reported success would hand back a
- *  machine whose first program dies with a shell error. */
-function assertPrograms(state: MachinePlacement, branch: string): void {
+ *  them leaves every later step starting a program by a name nothing declares. A checkout that
+ *  stands there and carries no `ansiwise/programs` is a checkout of the wrong repository, and it is
+ *  refused rather than cloned over — replacing a tree somebody put there is not this step's to do. */
+function assertPrograms(state: MachinePlacement, catalogUrl: string): void {
   if (state.programs) return;
   throw errValidation(
-    "the machine carries no ansiwise/programs — " +
-    `${PLATFORM_CHECKOUT} on ${branch} is the platform checkout, which is the material the programs ` +
-    "act on, and the programs themselves live in the installation repository. Placing that checkout " +
-    "is the open half of hostyour-manager#14: which repository it is is the installation's decision " +
-    "and needs a setting of its own, the way ANSIWISE_DOWNLOAD_URL names where the binary comes from",
+    `${CATALOG_CHECKOUT} on the machine carries no ansiwise/programs — ANSIWISE_CATALOG_URL names ${catalogUrl}, and ` +
+    "the catalogue is the repository holding ansiwise.yaml and ansiwise/programs/. Point the setting at that " +
+    `repository, or take ${CATALOG_CHECKOUT} off the machine so this step clones it again`,
   );
 }
