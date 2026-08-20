@@ -28,7 +28,7 @@ import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./
  *  password comes with each POST and lives exactly as long as the machine run does. */
 export const ANSIWISE_ELEVATION_SECRET = "ansiwise-elevation";
 
-/** One program's wall clock, dry and run each. The cold-install budget the setup.sh host run
+/** One program's wall clock, dry and run each. The cold-install budget the host run
  *  used to get, for the same reason: a redeploy may bring a MicroK8s channel change with it.
  *  Expiry fails the STEP only — the machine run keeps going detached, and a retry re-attaches
  *  to it rather than starting a second one. */

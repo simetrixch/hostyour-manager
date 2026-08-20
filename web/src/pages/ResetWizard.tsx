@@ -213,7 +213,7 @@ export function ResetWizard() {
         This is destructive and immediate. Run it while the Controller is still alive — GitHub cleanup must happen
         BEFORE any VM restore. It touches ONLY GitHub and the Controller database; the per-slave Vault mounts, ArgoCD
         instances and Headlamp contexts on the master disappear only when you restore the master VM — if you do NOT
-        restore the master, run <span className="mono">setup.sh --&lt;stage&gt; --slave-remove &lt;name&gt;</span> per slave afterwards.
+        restore the master, run the <span className="mono">remove-slave</span> program on the master per slave afterwards.
       </p>
 
       {error !== null && (

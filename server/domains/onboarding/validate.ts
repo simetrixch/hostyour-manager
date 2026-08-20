@@ -24,7 +24,7 @@ import { composeReport, gateG16, gateG17, gateG18, gateG19, gateG23, type Foreig
 import { mapBuildsToChartPins, type ChartPinMapping } from "./builds.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 
-/** The cluster's OWN FQDN (`global.domain`, set-domain.sh's stamp) off the values chain, read like
+/** The cluster's OWN FQDN (`global.domain`, stamped when the install branch is generated) off the values chain, read like
  *  unitApexFromChain — LAST file that states it wins. It anchors G19's infrastructure clause: the
  *  platform's own hostnames (vault.<fqdn>, argo.<fqdn>, build.<fqdn>, zot.<fqdn>) are composed
  *  under it and have no registration, so the attested-fqdn set cannot see them. Null when the chain
