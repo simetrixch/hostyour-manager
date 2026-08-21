@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../../http/app.ts";
@@ -7,7 +8,7 @@ import { parseConfig } from "../../kernel/config.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "./session.ts";
-import { EmergencyStore, createEmergencyApp, serveAdminSocket } from "./emergency.ts";
+import { EmergencyStore, createEmergencyApp, createAdminSocketApp, serveAdminSocket } from "./emergency.ts";
 
 const config = parseConfig({
   PUBLIC_URL: "https://m1.example",
@@ -116,5 +117,116 @@ describe("break-glass", () => {
     const prot = await mainApp.request("/protected", { headers: { cookie: `${SESSION_COOKIE}=${cookie}` } });
     expect(prot.status).toBe(200);
     expect(await prot.json()).toMatchObject({ ok: true, via: "emergency" });
+  });
+});
+
+describe("admin.sock app", () => {
+  const handles: DbHandle[] = [];
+  const dirs: string[] = [];
+  function fresh(): { db: DbHandle; session: SessionCodec; store: EmergencyStore } {
+    const dir = mkdtempSync(join(tmpdir(), "ctrl-sockapp-"));
+    dirs.push(dir);
+    const db = openDb(join(dir, "controller.db"));
+    handles.push(db);
+    return { db, session: new SessionCodec(db.db, config), store: new EmergencyStore() };
+  }
+  afterEach(() => {
+    for (const h of handles.splice(0)) h.sqlite.close();
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("POST /auth/session hands out a session that passes the main app's chokepoint as a bearer", async () => {
+    const { db, session, store } = fresh();
+    const sockApp = createAdminSocketApp({ config, session, store, db: db.db, logger });
+    const mainApp = createApp({
+      config,
+      logger,
+      getReadiness: () => ({ ok: true, checks: [] }),
+      session,
+      registerAuth: () => undefined,
+      registerProtected: (a) => a.get("/protected", (c) => c.json({ sub: c.get("operator").sub, via: c.get("operator").via })),
+    });
+
+    const minted = await sockApp.request("/auth/session", { method: "POST" });
+    expect(minted.status).toBe(200);
+    const { session: bearer } = (await minted.json()) as { session: string };
+    expect(bearer).toBeTruthy();
+
+    const prot = await mainApp.request("/protected", { headers: { authorization: `Bearer ${bearer}` } });
+    expect(prot.status).toBe(200);
+    expect(await prot.json()).toMatchObject({ sub: "op_emergency", via: "emergency" });
+  });
+
+  it("the session route audits the login exactly as the :8485 redeem does", async () => {
+    const { db, session, store } = fresh();
+    const sockApp = createAdminSocketApp({ config, session, store, db: db.db, logger });
+    const emergencyApp = createEmergencyApp({ config, session, store, db: db.db, logger });
+
+    await sockApp.request("/auth/session", { method: "POST" });
+    await emergencyApp.request(`/auth/emergency?token=${store.mint()}`);
+
+    const rows = db.sqlite.prepare("SELECT actor, action, detail_json FROM audit WHERE action = 'operator.login' ORDER BY id").all() as {
+      actor: string;
+      action: string;
+      detail_json: string;
+    }[];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual(rows[1]);
+    expect(rows[0]?.actor).toBe("op_emergency");
+    expect(JSON.parse(rows[0]?.detail_json ?? "null")).toEqual({ method: "emergency" });
+  });
+
+  it("POST /auth/break-glass still hands out a redeem URL, and the token in it redeems once", async () => {
+    const { db, session, store } = fresh();
+    const sockApp = createAdminSocketApp({ config, session, store, db: db.db, logger });
+    const emergencyApp = createEmergencyApp({ config, session, store, db: db.db, logger });
+
+    const res = await sockApp.request("/auth/break-glass", { method: "POST" });
+    expect(res.status).toBe(200);
+    const { url } = (await res.json()) as { url: string };
+    expect(url).toContain(`http://127.0.0.1:${config.emergencyPort}/auth/emergency?token=`);
+
+    const path = url.slice(`http://127.0.0.1:${config.emergencyPort}`.length);
+    expect((await emergencyApp.request(path)).status).toBe(302);
+    expect((await emergencyApp.request(path)).status).toBe(401); // single-use
+  });
+
+  it("an unknown route on the socket is a 404, not a session", async () => {
+    const { db, session, store } = fresh();
+    const sockApp = createAdminSocketApp({ config, session, store, db: db.db, logger });
+    expect((await sockApp.request("/auth/session")).status).toBe(404); // GET — the route is POST
+    expect((await sockApp.request("/", { method: "POST" })).status).toBe(404);
+  });
+
+  // The listener really speaks HTTP over AF_UNIX — the app tests above prove the routes, this one
+  // proves the transport carrying them, which is the whole change to serveAdminSocket. AF_UNIX is
+  // Linux semantics (Windows refuses the bind), so it runs where the check battery runs on Linux.
+  it.skipIf(process.platform === "win32")("serveAdminSocket answers a real HTTP request over the unix socket", async () => {
+    const { db, session, store } = fresh();
+    const dir = mkdtempSync(join(tmpdir(), "ctrl-sock-"));
+    dirs.push(dir);
+    const socketPath = join(dir, "admin.sock");
+    const server = serveAdminSocket(socketPath, { config, session, store, db: db.db, logger });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.on("listening", () => resolve());
+        server.on("error", (err) => reject(err));
+      });
+      const body = await new Promise<{ status: number; text: string }>((resolve, reject) => {
+        const req = httpRequest({ socketPath, path: "/auth/session", method: "POST" }, (res) => {
+          let text = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk: string) => (text += chunk));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, text }));
+        });
+        req.on("error", reject);
+        req.end();
+      });
+      expect(body.status).toBe(200);
+      const { session: bearer } = JSON.parse(body.text) as { session: string };
+      expect((await session.verify(bearer)).kind).toBe("ok");
+    } finally {
+      server.close();
+    }
   });
 });

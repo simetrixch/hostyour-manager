@@ -33,7 +33,8 @@ export async function boot(): Promise<void> {
   });
 
   // Break-glass: a second listener on 127.0.0.1:8485 only — never Traefik-routed, so
-  // WAN-unreachable by construction. Tokens are minted solely through the 0700 admin.sock.
+  // WAN-unreachable by construction. It redeems tokens; both the tokens and the sessions a
+  // programmatic caller carries as `Authorization: Bearer` come solely off the 0700 admin.sock.
   serve({ fetch: wired.emergencyApp.fetch, port: config.emergencyPort, hostname: "127.0.0.1" }, (info) => {
     logger.info({ port: info.port }, "break-glass listener up (127.0.0.1 only)");
   });
