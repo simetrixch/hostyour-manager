@@ -11,7 +11,7 @@ import type { Stage } from "../../../shared/enums.ts";
 import { consumerArgoAppName, ConsumerRegistrationSchema, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
-import { serializePointer, parseFlatYaml, type Registry } from "./registry.ts";
+import { serializePointer, parseRegistration, type Registry } from "./registry.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import { unitApexFromChain, consumerAdmissionPolicyName, renderConsumerAdmissionPolicy } from "./admission-policy.ts";
 import { renderConsumerAppProject } from "./appproject.ts";
@@ -110,7 +110,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         // the granted rule) would be refused there. readRegistration answers null for absent and
         // throws on an unreadable branch/file — the throw propagates and the step is retried.
         const reg = dumpedRegistrationYaml !== undefined
-          ? ConsumerRegistrationSchema.parse(parseFlatYaml(dumpedRegistrationYaml))
+          ? ConsumerRegistrationSchema.parse(parseRegistration(dumpedRegistrationYaml))
           : (await ports.registry.readRegistration(ac.stage, ac.name))?.entry ?? null;
         const repoURL = reg?.repoURL ?? ctx.db.select({ repoUrl: apps.repoUrl }).from(apps).where(eq(apps.id, appId)).get()?.repoUrl;
         if (repoURL === undefined || repoURL === null) throw errValidation(`consumer "${ac.name}" has no repo URL on record — the target AppProject cannot be rendered`);
@@ -167,7 +167,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         c.log("meta", `registration for ${ac.name} repointed ${ac.domain} -> ${target.domain} (${commit}) — the source appset stops generating the Application and the target starts`);
       },
       writeRegistrationFromDump: async (c, registrationYaml, target) => {
-        const entry = ConsumerRegistrationSchema.parse(parseFlatYaml(registrationYaml));
+        const entry = ConsumerRegistrationSchema.parse(parseRegistration(registrationYaml));
         // The dumped registration is re-committed AT THE TARGET, closed: the unit deploys quiesced,
         // its claims provision empty stores, and only after the data is restored does open-access lift it.
         await ports.registry.commitRegistration({

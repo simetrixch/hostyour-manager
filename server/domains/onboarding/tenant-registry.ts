@@ -1,6 +1,6 @@
 // TenantRegistry — the Controller's ONLY writer of the catalog
 // repo's registrations/**. The structural twin of the consumer registration Registry (registry.ts),
-// reusing the SAME laws through registry.ts's shared primitives (serializePointer / parseFlatYaml /
+// reusing the SAME laws through registry.ts's shared primitives (serializePointer / parseRegistration /
 // makeRegistrationGuard / trailer):
 //   - PATH GUARD: every write path matches registrations/<guid>/<stage>.yaml exactly — a traversal or
 //     a stray path is a programming error (INTERNAL), never a commit.

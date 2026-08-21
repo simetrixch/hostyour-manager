@@ -1,13 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
-import type { StepCtx } from "../../executor/types.ts";
-import type { SshSession } from "../../adapters/ssh/port.ts";
 import {
-  makeHarness, disposeHarnesses, scriptedHosts, hostsFactory, logger,
-  SLAVE_ID, PARAMS, ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, ANSIWISE_CATALOG_URL,
-  type HostsScript, type Harness,
+  makeHarness, disposeHarnesses, scriptedHosts, hostsFactory,
+  ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, ANSIWISE_CATALOG_URL, PARAMS, type HostsScript,
 } from "./deploy-slave.fixture.ts";
-import { statedTarget, type DeploySlavePorts } from "./defs/deploy-slave.kit.ts";
-import { ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
+import {
+  ELEVATION, CATALOG_TOKEN, PORTS_URL, ports, placeCtx, target, placingScripts,
+} from "./place-ansiwise.fixture.ts";
 import { placeAnsiwiseStep } from "./defs/deploy-slave.ts";
 import {
   placeAnsiwise, parseProbe, placement, probeScript,
@@ -42,62 +40,7 @@ import {
 // later step starts a program BY NAME, and a machine with the tree and none of the files fails on
 // the first of them with nothing said about why.
 
-const ELEVATION = "elevation-password-SECRET-0007";
-const CATALOG_TOKEN = "catalog-read-token-SECRET-0008";
-const PORTS_URL = "https://github.com/acme/hostyour-cloud.git";
-
 afterEach(() => disposeHarnesses());
-
-/** The ports the step takes, with one of them left out where a test is about an installation that
- *  did not configure it, or the catalogue credential added where it is about a private catalogue. */
-function ports(h: Harness, variant?: "download-url" | "repo-url" | "catalog-url" | "with-token"): DeploySlavePorts & AnsiwisePorts {
-  return {
-    platformRepo: h.platformRepo,
-    ...(variant === "repo-url" ? {} : { platformRepoUrl: PORTS_URL }),
-    ...(variant === "download-url" ? {} : { ansiwiseDownloadUrl: ANSIWISE_DOWNLOAD_URL }),
-    ...(variant === "catalog-url" ? {} : { ansiwiseCatalogUrl: ANSIWISE_CATALOG_URL }),
-    ...(variant === "with-token" ? { ansiwiseCatalogToken: CATALOG_TOKEN } : {}),
-  };
-}
-
-/** One step run against the scripted slave. `runId` is what makes the uploaded script's path unique,
- *  exactly as a second run of the real step has a second run id. */
-function placeCtx(h: Harness, hosts: HostsScript, runId: string, log: string[]): StepCtx {
-  const factory = hostsFactory(hosts);
-  const session = (): Promise<SshSession> => factory({
-    host: "10.1.1.11", port: 22, username: "ubuntu",
-    auth: { kind: "key", privateKey: Buffer.from("k") },
-  });
-  let checkpoint: unknown;
-  return {
-    runId,
-    stepName: "place-ansiwise",
-    db: h.db.db,
-    creds: h.store,
-    params: { serverId: SLAVE_ID },
-    secrets: {
-      get: (name) => (name === ANSIWISE_ELEVATION_SECRET ? Buffer.from(ELEVATION, "utf8") : undefined),
-      wipe: () => undefined,
-    },
-    signal: new AbortController().signal,
-    logger,
-    ssh: session,
-    openPasswordSession: () => Promise.reject(new Error("not in this test")),
-    closePasswordSession: () => undefined,
-    attest: () => Promise.resolve(),
-    log: (_stream, text) => log.push(text),
-    checkpoint: (data) => (checkpoint = data),
-    readCheckpoint: <T,>() => checkpoint as T | undefined,
-    registerCleanup: () => undefined,
-  };
-}
-
-const target = statedTarget(SLAVE_ID, PARAMS.domain, "prod");
-
-/** The placing scripts this run of the step put on the machine — none means it placed nothing. */
-function placingScripts(hosts: HostsScript): string[] {
-  return hosts.files.filter((f) => f.path.includes("dc-place-ansiwise-")).map((f) => f.content);
-}
 
 describe("place-ansiwise", () => {
   it("places the pin, the catalogue and the checkout on a machine carrying none of them — and a SECOND run places nothing", async () => {
@@ -281,11 +224,15 @@ describe("place-ansiwise", () => {
 });
 
 describe("the placement scripts", () => {
-  it("reads the five facts a placement decides on, and closes with PROBED", () => {
+  it("reads the six facts a placement decides on, and closes with PROBED", () => {
     const state = parseProbe([
-      "BINARY 0.4.2", "PLATFORM present", "CATALOG present", "PROGRAMS absent", "MISSING git", "MISSING curl", "PROBED",
+      "BINARY 0.4.2", "PLATFORM present", "CATALOG present", "PROGRAMS absent",
+      "SERVICE enabled", "SERVICE not-active", "MISSING git", "MISSING curl", "PROBED",
     ].join("\n"));
-    expect(state).toEqual({ binary: "0.4.2", platform: true, catalog: true, programs: false, missingCommands: ["git", "curl"] });
+    expect(state).toEqual({
+      binary: "0.4.2", platform: true, catalog: true, programs: false,
+      service: { enabled: true, active: false }, missingCommands: ["git", "curl"],
+    });
     expect(parseProbe("BINARY absent\nPLATFORM absent\nCATALOG absent\nPROGRAMS absent\nPROBED").binary).toBeUndefined();
   });
 
@@ -310,16 +257,17 @@ describe("the placement scripts", () => {
       version: "0.4.2", downloadUrl: "https://x.example.invalid/0.4.2/ansiwise", repoUrl: PORTS_URL,
       branch: "s1.example.com", catalogUrl: ANSIWISE_CATALOG_URL, elevationPassword: ELEVATION, user: "ubuntu",
     };
-    const all = placement({ ...base, place: { commands: true, binary: true, platform: true, catalog: true } }).script;
+    const all = placement({ ...base, place: { commands: true, binary: true, platform: true, catalog: true, service: false } }).script;
     expect(all).toContain("apt-get install -y curl ca-certificates git");
     expect(all).toContain(`clone --branch "s1.example.com" "${PORTS_URL}"`);
     expect(all).toContain(`clone --branch "master" "${ANSIWISE_CATALOG_URL}"`);
     expect(all).toContain('echo "PLACED_BINARY 0.4.2"');
 
-    const none = placement({ ...base, place: { commands: false, binary: false, platform: false, catalog: false } }).script;
+    const none = placement({ ...base, place: { commands: false, binary: false, platform: false, catalog: false, service: false } }).script;
     expect(none).not.toContain("apt-get");
     expect(none).not.toContain("curl -fsSL");
     expect(none).not.toContain("clone");
+    expect(none).not.toContain("install-service");
     expect(none).toContain('echo "PLACED"');
   });
 
@@ -331,16 +279,16 @@ describe("the placement scripts", () => {
       version: "0.4.2", downloadUrl: "https://x.example.invalid/0.4.2/ansiwise", repoUrl: PORTS_URL,
       branch: "s1.example.com", catalogUrl: ANSIWISE_CATALOG_URL, elevationPassword: ELEVATION, user: "ubuntu",
     };
-    const withToken = placement({ ...base, catalogToken: CATALOG_TOKEN, place: { commands: false, binary: false, platform: false, catalog: true } });
+    const withToken = placement({ ...base, catalogToken: CATALOG_TOKEN, place: { commands: false, binary: false, platform: false, catalog: true, service: false } });
     expect(withToken.stdin.toString("utf8")).toBe(`${CATALOG_TOKEN}\n${ELEVATION}\n`);
     expect(withToken.script).not.toContain(CATALOG_TOKEN);
     expect(withToken.script).not.toContain(ELEVATION);
 
     // A public catalogue, and a run that clones nothing: no credential is read, so none is sent.
-    const noToken = placement({ ...base, place: { commands: false, binary: false, platform: false, catalog: true } });
+    const noToken = placement({ ...base, place: { commands: false, binary: false, platform: false, catalog: true, service: false } });
     expect(noToken.stdin.toString("utf8")).toBe(`${ELEVATION}\n`);
     expect(noToken.script).not.toContain("read -r ANSIWISE_CATALOG_TOKEN");
-    const nothingToClone = placement({ ...base, catalogToken: CATALOG_TOKEN, place: { commands: false, binary: true, platform: false, catalog: false } });
+    const nothingToClone = placement({ ...base, catalogToken: CATALOG_TOKEN, place: { commands: false, binary: true, platform: false, catalog: false, service: false } });
     expect(nothingToClone.stdin.toString("utf8")).toBe(`${ELEVATION}\n`);
     expect(nothingToClone.script).not.toContain("read -r ANSIWISE_CATALOG_TOKEN");
   });
@@ -349,7 +297,7 @@ describe("the placement scripts", () => {
     const base = {
       version: "0.4.2", downloadUrl: "https://x.example.invalid/0.4.2/ansiwise", repoUrl: PORTS_URL,
       branch: "s1.example.com", catalogUrl: ANSIWISE_CATALOG_URL, elevationPassword: ELEVATION, user: "ubuntu",
-      place: { commands: false, binary: true, platform: true, catalog: true },
+      place: { commands: false, binary: true, platform: true, catalog: true, service: false },
     };
     expect(() => placement({ ...base, version: '1.0"; rm -rf /' })).toThrow(/is not a value this placement may put into a command/);
     expect(() => placement({ ...base, branch: "$(id)" })).toThrow(/is not a value this placement may put into a command/);

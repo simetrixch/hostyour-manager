@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { seedQuota, type UnitQuota } from "../../../shared/unit-size.ts";
 import { z } from "zod";
-import { Registry, serializePointer, parseFlatYaml, makeRegistrationGuard, trailer, clusterStageFromMarkings, type ClusterStageResolver } from "./registry.ts";
+import { Registry, serializePointer, parseRegistration, makeRegistrationGuard, trailer, clusterStageFromMarkings, type ClusterStageResolver } from "./registry.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { ConsumerRegistrationSchema, type ConsumerRegistration } from "../../../shared/consumer.ts";
 import type { Stage } from "../../../shared/enums.ts";
@@ -97,7 +97,7 @@ describe("serializePointer (generic over the registration schemas)", () => {
     const y = serializePointer(ConsumerRegistrationSchema, ConsumerRegistrationSchema.parse({ ...unit(), ...group }));
     expect(y).toContain('databases: ["example_auth"]');
     expect(y).toContain('services: ["postgresql"]');
-    const back = ConsumerRegistrationSchema.parse(parseFlatYaml(y));
+    const back = ConsumerRegistrationSchema.parse(parseRegistration(y));
     expect(back.databases).toEqual(["example_auth"]);
     expect(back.services).toEqual(["postgresql"]);
   });
@@ -119,7 +119,7 @@ describe("serializePointer (deep-equal round-trip)", () => {
     // A reference `!==` holds only for flat scalars: a nested value always re-parses to a NEW
     // reference, so a reference compare would throw INTERNAL on every nested commit.
     expect(() => serializePointer(NestedSchema, nested)).not.toThrow();
-    expect(NestedSchema.parse(parseFlatYaml(serializePointer(NestedSchema, nested)))).toEqual(nested);
+    expect(NestedSchema.parse(parseRegistration(serializePointer(NestedSchema, nested)))).toEqual(nested);
   });
 
   it("emits nested values as one-line JSON (valid YAML, injection-safe)", () => {
@@ -130,7 +130,7 @@ describe("serializePointer (deep-equal round-trip)", () => {
 
   it("round-trips an empty nested array", () => {
     const minimal: Nested = { cluster: "s1", apps: [], suspended: false };
-    expect(NestedSchema.parse(parseFlatYaml(serializePointer(NestedSchema, minimal)))).toEqual(minimal);
+    expect(NestedSchema.parse(parseRegistration(serializePointer(NestedSchema, minimal)))).toEqual(minimal);
   });
 
   it("still serializes a flat entry (deep-equal reduces to identity on scalars)", () => {
@@ -138,15 +138,50 @@ describe("serializePointer (deep-equal round-trip)", () => {
   });
 });
 
-describe("parseFlatYaml", () => {
+// THE HAND-SEEDED BOOTSTRAP REGISTRATION, as the installation repository renders it:
+// registrations/hostyour-manager/build.yaml from ansiwise/templates/platform-build-registration.tpl
+// through deploy-branch.yaml:695-701 — the one registration nothing running can write, because the
+// unit it registers is the one whose image the Controller runs. Ordinary YAML: comment block, bare
+// scalars, block-style list. `suspended` is the ONE byte the two forms differ in and the whole
+// defect — the template writes it QUOTED at platform-build-registration.tpl:31 and ConsumerRegistrationSchema takes a boolean —
+// so both forms are exercised and which layer refuses which is stated rather than assumed.
+const bootstrapBuildYaml = (suspended: string): string => `# The platform's own Controller, registered as a unit so it is built the way everything else is.
+#
+# \`name\` is the basename of the repository, the invariant the deploy-request trigger routes by.
+name: hostyour-manager
+repoURL: https://github.com/simetrixch/hostyour-manager.git
+builds:
+  - manager
+  - gate-runner
+  - dbtools
+# Not suspended: the fan-out's selector matches this exactly.
+suspended: ${suspended}
+`;
+
+describe("parseRegistration", () => {
   it("restores nested objects and arrays from one-line JSON values", () => {
-    const parsed = parseFlatYaml('apps: [{"name":"shop"}]\nservices: ["postgresql"]\n');
+    const parsed = parseRegistration('apps: [{"name":"shop"}]\nservices: ["postgresql"]\n');
     expect(parsed).toEqual({ apps: [{ name: "shop" }], services: ["postgresql"] });
   });
 
-  it("skips blank lines and throws INTERNAL on a line without a colon", () => {
-    expect(parseFlatYaml('\nname: "acme"\n\n')).toEqual({ name: "acme" });
-    expect(() => parseFlatYaml("garbage-without-colon")).toThrow(/unparseable registration line/);
+  it("skips blank lines and throws INTERNAL on a document that is not a mapping", () => {
+    expect(parseRegistration('\nname: "acme"\n\n')).toEqual({ name: "acme" });
+    expect(() => parseRegistration("garbage-without-colon")).toThrow(/not a YAML mapping/);
+    expect(() => parseRegistration("- one\n- two\n")).toThrow(/not a YAML mapping/);
+    expect(() => parseRegistration("")).toThrow(/not a YAML mapping/);
+  });
+
+  it("folds the bootstrap build registration — including the quoted suspended at platform-build-registration.tpl:31, which the SCHEMA then refuses", () => {
+    const entry = ConsumerRegistrationSchema.parse(parseRegistration(bootstrapBuildYaml("false")));
+    expect(entry.name).toBe("hostyour-manager");
+    expect(entry.builds).toEqual(["manager", "gate-runner", "dbtools"]);
+    expect(entry.suspended).toBe(false);
+    // Folding is NECESSARY and NOT SUFFICIENT: the reader folds the quoted form the template renders
+    // today just as well, and the schema is what refuses it.
+    expect(parseRegistration(bootstrapBuildYaml('"false"')).suspended).toBe("false");
+    const quoted = ConsumerRegistrationSchema.safeParse(parseRegistration(bootstrapBuildYaml('"false"')));
+    expect(quoted.success).toBe(false);
+    expect(quoted.error?.issues).toContainEqual(expect.objectContaining({ path: ["suspended"], expected: "boolean" }));
   });
 });
 
@@ -317,6 +352,26 @@ describe("Registry.listAttestedBuildNames", () => {
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "registrations/broken/build.yaml", "name: broken\nrepoURL: not-a-url\n");
     await expect(new Registry(repo, CLUSTERS).listAttestedBuildNames("acme")).rejects.toThrow(/registrations\/broken\/build\.yaml/);
+  });
+
+  // END TO END OVER THE HAND-SEEDED FILE — the layer G16 stands on. The pure reader folding the bytes
+  // proves nothing about the gate, so this seeds the installer's file into the tree and asks the
+  // method the gate calls.
+  it("reads the hand-seeded bootstrap build.yaml through the tree, comments and block list included", async () => {
+    const repo = new FakePlatformRepo();
+    repo.seed(repo.booksBranch, "registrations/hostyour-manager/build.yaml", bootstrapBuildYaml("false"));
+    expect(await new Registry(repo, CLUSTERS).listAttestedBuildNames("acme")).toEqual(["manager", "gate-runner", "dbtools"].map((build) => ({ unit: "hostyour-manager", build })));
+  });
+
+  // AND WHAT A FRESH INSTALLATION STILL HITS. platform-build-registration.tpl:31 writes `suspended: "false"`, so this method
+  // throws and G16 (validate.ts:234) refuses every other consumer's onboarding — and, through
+  // wire-onboarding.ts:615's exceptUnit-less call, the first tenant too. It stops the day that
+  // template line becomes a boolean; the schema fact pinned here holds either way.
+  it("THROWS on the quoted suspended the template writes today — the fresh-installation refusal", async () => {
+    const repo = new FakePlatformRepo();
+    repo.seed(repo.booksBranch, "registrations/hostyour-manager/build.yaml", bootstrapBuildYaml('"false"'));
+    await expect(new Registry(repo, CLUSTERS).listAttestedBuildNames("acme")).rejects.toThrow(/build\.yaml is not a readable build registration/);
+    await expect(new Registry(repo, CLUSTERS).listAttestedBuildNames("acme")).rejects.toThrow(/expected boolean, received string/);
   });
 });
 

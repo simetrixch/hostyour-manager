@@ -16,8 +16,9 @@ import { readServerTailnet } from "../../../shared/tailnet.ts";
 import { SLAVE_MACHINE_INPUTS } from "./defs/deploy-slave.ts";
 import {
   STEP_NAMES, REDEPLOY_STEP_NAMES, PARAMS, EMIT_ARGOCD_TOKEN, EMIT_REVIEWER_TOKEN, EMIT_CREDS_JSON,
-  disposeHarnesses, stepColumn, MASTER_ID, SLAVE_ID, MINT_AUTHKEY,
+  disposeHarnesses, stepColumn, MASTER_ID, SLAVE_ID, MINT_AUTHKEY, ANSIWISE_PIN,
 } from "./deploy-slave.fixture.ts";
+import { ANSIWISE_SERVICE_PORT } from "./defs/place-ansiwise.ts";
 import {
   uniqueEmail, approveSecrets, elevationOnly, deploySecrets, composedAnswers,
   fixturePrograms, serveConversation, liveMaster, tailnetHost, deployWorld, liveSlaveWorld,
@@ -382,6 +383,15 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     await h.executor.approve(r.runId, deploySecrets(email));
     await h.executor.settle(r.runId);
     expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
+
+    // hm#22, on the whole run kind: the deployment that makes the machine is the deployment that
+    // leaves it SERVING. Nobody typed a command after this run, and the unit is enabled — so a
+    // restart brings it back — running, and starting the PINNED binary on the address the manager
+    // dials, all four read off the machine and not off the installer.
+    expect(h.hosts.serviceEnabled).toBe(true);
+    expect(h.hosts.serviceActive).toBe(true);
+    expect(h.hosts.serviceExecVersion).toBe(ANSIWISE_PIN);
+    expect(h.hosts.serviceExecListen).toBe(`100.64.0.11:${ANSIWISE_SERVICE_PORT}`);
 
     // The machines' OWN records: dry + run per program, every one green — the branch cut and the
     // registration on the master's surface, the machine layer, the join and the emit on the slave's.

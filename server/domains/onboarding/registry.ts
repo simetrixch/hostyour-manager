@@ -1,14 +1,14 @@
 // Registry — the Controller's ONLY writer of the platform repo's
 // registrations/**, and the ONE writer of EVERY file of a unit. Policy lives here; transport lives in
 // the PlatformRepo git adapter. The laws, factored into reusable primitives (serializePointer /
-// parseFlatYaml / trailer / makeRegistrationGuard / assertClusterStage) so the tenant-shaped registry
+// parseRegistration / trailer / makeRegistrationGuard / assertClusterStage) so the tenant-shaped registry
 // (tenant-registry.ts) obeys the same ones:
 //   - PATH GUARD: every write path matches its registry's namespace regex — a traversal or a stray
 //     path is a programming error (INTERNAL), never a commit. makeRegistrationGuard(pattern) mints one
 //     guard per namespace (registrations/<unit>/… here; registrations/<guid>/… in the tenant registry).
 //   - SERIALIZE -> VALIDATE -> RE-PARSE: the registration is schema-validated, serialized, and the
 //     serialized bytes are re-parsed + re-validated before staging (anti-injection). Values are
-//     JSON-encoded, which is valid YAML (JSON ⊂ YAML) and cannot smuggle extra keys; JSON.parse
+//     JSON-encoded, which is valid YAML (JSON ⊂ YAML) and cannot smuggle extra keys; the YAML parse
 //     restores nested objects/arrays. The round-trip verifier compares by DEEP equality (canonical
 //     JSON), not reference — a nested value (builds[], apps[]) always re-parses to a NEW reference, so
 //     a reference `!==` would falsely throw INTERNAL on every nested commit.
@@ -26,6 +26,7 @@
 // branch of the cluster holding the master role, which is where the generators are stamped to read
 // them. Never the trunk — a registration there would belong to every installation cut from it.
 import type { z } from "zod";
+import { parse as parseYaml } from "yaml";
 import { ConsumerRegistrationSchema, type ConsumerRegistration, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
 import { clusterValueChainPaths, type ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { UnitQuota } from "../../../shared/unit-size.ts";
@@ -105,7 +106,7 @@ export function serializePointer<T extends object>(schema: z.ZodType<T>, entry: 
       .filter(([, v]) => v !== undefined)
       .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
       .join("\n") + "\n";
-  const reparsed = schema.parse(parseFlatYaml(yaml)) as unknown as Record<string, unknown>;
+  const reparsed = schema.parse(parseRegistration(yaml)) as unknown as Record<string, unknown>;
   for (const [k, v] of Object.entries(validated)) {
     if (v !== undefined && !deepEqual(reparsed[k], v)) {
       throw new AppError("INTERNAL", `registration serialize round-trip diverged at "${k}"`);
@@ -114,18 +115,53 @@ export function serializePointer<T extends object>(schema: z.ZodType<T>, entry: 
   return yaml;
 }
 
-/** Parse flat "key: <json>" YAML back into an object — each value is JSON, so JSON.parse restores
- *  nested objects/arrays. Exported so both registries re-parse registrations with the same reader. */
-export function parseFlatYaml(text: string): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const line of text.split("\n")) {
-    const t = line.trim();
-    if (!t) continue;
-    const i = t.indexOf(":");
-    if (i < 0) throw new AppError("INTERNAL", `unparseable registration line: ${line}`);
-    out[t.slice(0, i).trim()] = JSON.parse(t.slice(i + 1).trim());
+/** Parse a registration body back into an object. serializePointer WRITES flat "key: <json>", which
+ *  is a SUBSET of YAML, so a body is READ with a real YAML parser — the same asymmetry
+ *  tenant-registry.ts readTenant states for the tenant half, and for its reason: a registration
+ *  written by hand, with comments and block-style lists, still folds.
+ *
+ *  ONE registration is always written by hand. `registrations/hostyour-manager/build.yaml` is
+ *  rendered from `ansiwise/templates/platform-build-registration.tpl` by the installation
+ *  repository's `ansiwise/programs/deploy-branch.yaml:695-701` on a first installation, because the
+ *  unit it registers is the one whose image this process runs — nothing is up yet that could write
+ *  it. Under the flat reader that file failed on its first comment line, and listAttestedBuildNames
+ *  throws where the stage scan skips, so gate G16 (validate.ts:234) refuses EVERY OTHER consumer's
+ *  onboarding on a fresh installation, with a message about build-name uniqueness.
+ *
+ *  FOLDING IT IS NECESSARY AND NOT SUFFICIENT — THE REFUSAL IS STILL STANDING. The template writes
+ *  `suspended: "false"` at platform-build-registration.tpl:31; this reader folds that file and
+ *  ConsumerRegistrationSchema then refuses it on `suspended` with `Invalid input: expected boolean,
+ *  received string`, which listAttestedBuildNames converts to the same errValidation as before. G16
+ *  keeps refusing until that one template line reads `suspended: false`. The quotes buy nothing: the
+ *  build fan-out selects on matchLabels `suspended: "false"` over a git FILES generator
+ *  (hostyour-cloud apps/consumer-build/files/applicationset.yaml), and the boolean form
+ *  serializePointer writes has matched that selector for every unit in every installation — flip()
+ *  below records that same fact.
+ *
+ *  THE TENANT PATH IS ON THIS READ TOO. wire-onboarding.ts:615 passes
+ *  `() => registrations.listAttestedBuildNames()` with NO exceptUnit, so create-tenant.run.ts:628
+ *  scans every unit including this one: on a fresh installation the FIRST TENANT fails here as well,
+ *  not only the first other consumer.
+ *
+ *  TWO WRITERS STAND OVER THIS ONE FILE AND NOTHING ARBITRATES. commitRegistration and flip() emit it
+ *  in serializePointer's flat `key: <json>` dialect, while deploy-branch.yaml:695-701 and
+ *  regenerate-branch.yaml:517-522 render the template to the same path unconditionally and
+ *  regenerate-branch.yaml:535-539 commits `registrations` — so the next installer run puts the
+ *  commented form back over whatever this process wrote.
+ *
+ *  A document that is not a mapping is INTERNAL: a registration is an object, so a scalar or a list
+ *  at the top level is a file that is not one. */
+export function parseRegistration(text: string): Record<string, unknown> {
+  let doc: unknown;
+  try {
+    doc = parseYaml(text);
+  } catch (e) {
+    throw new AppError("INTERNAL", `registration is not valid YAML: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return out;
+  if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
+    throw new AppError("INTERNAL", `registration is not a YAML mapping: ${JSON.stringify(doc) ?? "empty"}`);
+  }
+  return doc as Record<string, unknown>;
 }
 
 /** The [<runId>] commit-message trailer — every registration commit ends with it. */
@@ -183,7 +219,7 @@ export class Registry {
   /** Read a unit's registration for a stage, or null when it carries none there. */
   async readRegistration(stage: Stage, name: string): Promise<RegistrationRead | null> {
     const raw = await this.repo.withBranch(this.branch, (books) => books.readFile(stagePath(stage, name)));
-    return raw === null ? null : { entry: ConsumerRegistrationSchema.parse(parseFlatYaml(raw)) };
+    return raw === null ? null : { entry: ConsumerRegistrationSchema.parse(parseRegistration(raw)) };
   }
 
   /** Read a unit's BUILD registration — `registrations/<unit>/build.yaml`, the stage-free half — or
@@ -191,7 +227,7 @@ export class Registry {
    *  ApplicationSet's post-selector filters on, and flip() below is its only writer after onboarding. */
   async readBuildRegistration(name: string): Promise<RegistrationRead | null> {
     const raw = await this.repo.withBranch(this.branch, (books) => books.readFile(buildPath(name)));
-    return raw === null ? null : { entry: ConsumerRegistrationSchema.parse(parseFlatYaml(raw)) };
+    return raw === null ? null : { entry: ConsumerRegistrationSchema.parse(parseRegistration(raw)) };
   }
 
   /** WHICH stages a unit stands at — every `registrations/<unit>/<stage>.yaml` the branch carries. The
@@ -230,7 +266,7 @@ export class Registry {
       if (raw === null) continue; // no build.yaml — the unit attests no build name
       let entry: ConsumerRegistration;
       try {
-        entry = ConsumerRegistrationSchema.parse(parseFlatYaml(raw));
+        entry = ConsumerRegistrationSchema.parse(parseRegistration(raw));
       } catch (e) {
         throw errValidation(`${path} is not a readable build registration, so the build-name uniqueness check cannot be trusted: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -261,7 +297,7 @@ export class Registry {
         if (raw === null) continue; // the unit does not deploy at this stage
         let entry: ConsumerRegistration;
         try {
-          entry = ConsumerRegistrationSchema.parse(parseFlatYaml(raw));
+          entry = ConsumerRegistrationSchema.parse(parseRegistration(raw));
         } catch (e) {
           throw errValidation(`${path} is not a readable stage registration, so the fqdn uniqueness check cannot be trusted: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -294,7 +330,7 @@ export class Registry {
       try {
         const raw = await books.readFile(path);
         if (raw === null) continue; // no file for this stage — the unit is build-only, or lives elsewhere
-        const r = ConsumerRegistrationSchema.safeParse(parseFlatYaml(raw));
+        const r = ConsumerRegistrationSchema.safeParse(parseRegistration(raw));
         if (!r.success) {
           skipped.push({ name, stage, reason: `${path} failed its schema: ${schemaWhy(r.error)}` });
           continue;
@@ -317,7 +353,7 @@ export class Registry {
         if (on !== cluster) continue; // registered at this stage, but on another cluster
         registrations.push({ name, entry: { ...r.data, chartPath, cluster: on, databases, services, size, mongodb, quota } });
       } catch (e) {
-        // parseFlatYaml throws AppError on an unparseable line; JSON.parse throws SyntaxError.
+        // parseRegistration throws AppError on invalid YAML and on a document that is not a mapping.
         skipped.push({ name, stage, reason: `${path} is not readable registration YAML: ${e instanceof Error ? e.message : String(e)}` });
       }
     }
@@ -490,7 +526,7 @@ export class Registry {
     return this.repo.withBranch(this.branch, async (books) => {
       const raw = await books.readFile(stagePath(stage, name));
       if (raw === null) throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);
-      const entry = ConsumerRegistrationSchema.parse(parseFlatYaml(raw));
+      const entry = ConsumerRegistrationSchema.parse(parseRegistration(raw));
       const next = { ...entry, ...patch };
       const write = [{ path: guard(stagePath(stage, name)), content: serializePointer(ConsumerRegistrationSchema, next) }];
 
@@ -498,13 +534,13 @@ export class Registry {
       if (patch.suspended !== undefined) {
         const buildRaw = await books.readFile(buildPath(name));
         if (buildRaw !== null) {
-          const build = ConsumerRegistrationSchema.parse(parseFlatYaml(buildRaw));
+          const build = ConsumerRegistrationSchema.parse(parseRegistration(buildRaw));
           const others = (await this.stagesIn(books, name)).filter((s) => s !== stage);
           let anyRunning = patch.suspended === false;
           for (const s of others) {
             if (anyRunning) break;
             const other = await books.readFile(stagePath(s, name));
-            if (other !== null && ConsumerRegistrationSchema.parse(parseFlatYaml(other)).suspended === false) anyRunning = true;
+            if (other !== null && ConsumerRegistrationSchema.parse(parseRegistration(other)).suspended === false) anyRunning = true;
           }
           const buildSuspended = !anyRunning;
           if (build.suspended !== buildSuspended) {

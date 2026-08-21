@@ -18,6 +18,7 @@ import { servers } from "../../db/schema/inventory.ts";
 import { meta } from "../../db/schema/meta.ts";
 import { ExecFailedError } from "../../adapters/ssh/port.ts";
 import type { SshFactory, SshSession, SshTarget, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
+import { placementProbeOut, applyPlacement } from "./deploy-slave.placement.fixture.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { VERIFY_SLAVE_TIMEOUT_MS } from "./defs/deploy-slave.verify.ts";
 
@@ -42,7 +43,8 @@ export const PARAMS = { serverId: SLAVE_ID, stage: "prod", domain: "s1.example.c
 export const STEP_NAMES = [
   "attest-target", "slave-preflight", "prepare-checkouts", "run-deploy-slave-branch", "mark-slave",
   "place-ansiwise", "run-deploy-host", "refresh-checkout", "run-deploy-cluster", "run-deploy-gitops",
-  "rejoin", "read-membership", "create-mgmt", "gitops-handoff", "verify-slave", "register",
+  "rejoin", "read-membership", "enable-ansiwise-service", "create-mgmt", "gitops-handoff",
+  "verify-slave", "register",
 ];
 /** The redeploy slave arm: the same list minus the two birth acts (the branch cut with its
  *  checkout preparation, and the tailnet join with its membership read). */
@@ -142,6 +144,32 @@ export interface HostsScript {
   catalogCheckout: boolean;
   /** Whether that catalogue checkout carries ansiwise/programs. */
   programs: boolean;
+  /** What the service manager on the machine says about ansiwise.service — the two facts the probe
+   *  asks for separately, written by the install-service invocation the placing script carries. */
+  serviceEnabled: boolean;
+  serviceActive: boolean;
+  /** What the unit STARTS, which is what `systemctl show -p ExecStart` answers: the version of the
+   *  file its command names, and the address on that command's `--listen`. install-service composes
+   *  that command out of the binary it was run as and the options it was given, so both are read off
+   *  the placing script the step uploaded. undefined is a machine whose service manager knows no
+   *  such unit. */
+  serviceExecVersion: string | undefined;
+  serviceExecListen: string | undefined;
+  /** The version of the binary the RUNNING process is, which is NOT what the unit says while a unit
+   *  was rewritten and the process kept going: install-service ends at `systemctl enable --now`
+   *  (ansiwise-cli bin/ansiwise.dart), and `--now` starts a unit that is not active and does nothing
+   *  to one that is. Only a restart moves this. Nothing the probe asks reads it — it is the machine
+   *  the report is about, and a test asserts it off the machine directly. */
+  serviceRunningVersion: string | undefined;
+  /** Whether /etc/ansiwise/service-token stands on the machine. deploy-gitops's file_from_vault row
+   *  writes it, so a machine that has been through that program carries it — and one that has not
+   *  is the machine the service placement has to refuse rather than enable a unit that cannot read
+   *  its own credential. */
+  serviceTokenFile: boolean;
+  /** Whether the service the install-service invocation enabled actually COMES UP. False is what a
+   *  unit that installs cleanly and then fails to bind looks like: install-service exits zero and
+   *  the service manager says the machine is not serving. */
+  serviceStartsAfterInstall: boolean;
   /** What the catalogue checkout carries once the placing script clones it — the repository's own
    *  content. `false` is a ANSIWISE_CATALOG_URL naming a repository that is not the catalogue. */
   programsAfterClone: boolean;
@@ -192,6 +220,15 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     catalogCheckout: false,
     programs: false,
     programsAfterClone: true,
+    // No surface of its own yet, and the token file already there: enable-ansiwise-service stands
+    // AFTER run-deploy-gitops in the list, and that program's file_from_vault row is what writes it.
+    serviceEnabled: false,
+    serviceActive: false,
+    serviceExecVersion: undefined,
+    serviceExecListen: undefined,
+    serviceRunningVersion: undefined,
+    serviceTokenFile: true,
+    serviceStartsAfterInstall: true,
     missingCommands: ["git"],
     execFaults: [],
     openConversation: (command) => Promise.reject(new Error(`no conversation scripted for "${command}"`)),
@@ -199,60 +236,6 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     files: [],
     ...overrides,
   };
-}
-
-/** The DIRECTORIES the scripted machine carries. The probe asks about paths, so the machine answers
- *  about paths: a probe that looked for the programs in the platform checkout — the shape that made
- *  the first version of place-ansiwise refuse on every real machine — finds nothing there, instead of
- *  being handed the field it meant to read. */
-function machineDirs(f: HostsScript): string[] {
-  return [
-    ...(f.platformCheckout ? ["/srv/hostyour-cloud/.git"] : []),
-    ...(f.catalogCheckout ? ["/srv/ansiwise-catalog/.git"] : []),
-    ...(f.programs ? ["/srv/ansiwise-catalog/ansiwise/programs"] : []),
-  ];
-}
-
-/** What the placement probe reads off the scripted machine, answered off the probe script the step
- *  UPLOADED: every `[ -d "<path>" ]` line of it is decided against the directories above, under the
- *  name that line echoes. A probe naming no directory at all is refused rather than answered with a
- *  machine that carries nothing — that answer would place over a working installation. */
-function placementProbeOut(f: HostsScript, host: string, path: string): string {
-  const script = f.files.filter((x) => x.host === host && x.path === path).at(-1)?.content ?? "";
-  const dirs = machineDirs(f);
-  const asked = [...script.matchAll(/^\[ -d "([^"]+)" \] && echo "([A-Z]+) present"/gm)];
-  if (asked.length === 0) throw new Error(`the probe script at ${path} asks about no directory — the fixture cannot answer it`);
-  return [
-    `BINARY ${f.placedBinary ?? "absent"}`,
-    ...asked.map((m) => `${m[2]} ${dirs.includes(m[1] ?? "") ? "present" : "absent"}`),
-    ...f.missingCommands.map((c) => `MISSING ${c}`),
-    "PROBED",
-  ].join("\n");
-}
-
-/** The placing script's effect on the scripted machine, applied from the script the step UPLOADED —
- *  which is the only place that says what this run of it places. A script the step composed without
- *  a section therefore changes nothing here either, the way the real one does not. */
-function applyPlacement(f: HostsScript, host: string): string {
-  const script = f.files.filter((x) => x.host === host && x.path.includes("dc-place-ansiwise-")).at(-1)?.content ?? "";
-  const out: string[] = [];
-  if (script.includes("apt-get install")) f.missingCommands = [];
-  const version = /^echo "PLACED_BINARY (\S+)"$/m.exec(script)?.[1];
-  if (version !== undefined) {
-    f.placedBinary = version;
-    out.push(`PLACED_BINARY ${version}`);
-  }
-  if (script.includes("PLACED_CATALOG")) {
-    f.catalogCheckout = true;
-    f.programs = f.programsAfterClone;
-    out.push("PLACED_CATALOG abc1234");
-  }
-  if (script.includes("PLACED_PLATFORM")) {
-    f.platformCheckout = true;
-    out.push("PLACED_PLATFORM abc1234");
-  }
-  out.push("PLACED");
-  return out.join("\n");
 }
 
 export function hostsFactory(f: HostsScript): SshFactory {
@@ -281,7 +264,11 @@ export function hostsFactory(f: HostsScript): SshFactory {
         emit(placementProbeOut(f, host, command.replace(/^bash /, "")));
         return done();
       }
-      if (command.includes("dc-place-ansiwise-")) { emit(applyPlacement(f, host)); return done(); }
+      if (command.includes("dc-place-ansiwise-")) {
+        const placed = applyPlacement(f, host);
+        emit(placed.out);
+        return done(placed.code);
+      }
       // ---- the git upkeep around the programs
       if (command.includes("dc-prepare-checkouts-") || command.includes("dc-prepare-regeneration-")) { emit(f.checkoutsOut); return done(f.checkoutsExit); }
       if (command.includes("dc-refresh-checkout-")) { emit(f.refreshOut); return done(f.refreshExit); }
