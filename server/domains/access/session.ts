@@ -25,7 +25,7 @@ export interface OperatorSession {
   jti: string;
   /** WHICH AUTHORITY this session rests on, not who is holding it: "oidc" means an IdP verified an
    *  identity, "emergency" means nothing did and the only thing proved was write permission on the
-   *  0700 admin.sock. A program that takes a session off that socket proved exactly that and no
+   *  admin.sock. A program that takes a session off that socket proved exactly that and no
    *  more, so "emergency" is its word too — which door a caller came through is recorded where it
    *  belongs, in the audit row (domains/access/emergency.ts), and not by a third value here. */
   via: "oidc" | "emergency";

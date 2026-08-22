@@ -10,7 +10,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "./session.ts";
 import { EmergencyStore, createEmergencyApp, createAdminSocketApp, serveAdminSocket } from "./emergency.ts";
 
-const config = parseConfig({
+const baseEnv = {
   PUBLIC_URL: "https://m1.example",
   OIDC_ISSUER: "https://idp.example/",
   OIDC_CLIENT_ID: "c",
@@ -18,7 +18,8 @@ const config = parseConfig({
   CONTROLLER_VERSION: "test",
   DATA_DIR: "/d",
   LOG_LEVEL: "silent",
-} as NodeJS.ProcessEnv);
+};
+const config = parseConfig(baseEnv as NodeJS.ProcessEnv);
 const logger = createLogger(config);
 
 function setCookieValue(res: Response, name: string): string | undefined {
@@ -83,20 +84,27 @@ describe("break-glass", () => {
   // AF_UNIX socket files and their modes are Linux semantics (Windows refuses the bind), so this
   // runs where the check battery runs on Linux — the mode is THE boundary in front of the
   // unauthenticated token mint: connecting to a UNIX socket needs only write permission on the file.
-  it.skipIf(process.platform === "win32")("admin.sock is created 0700 — set explicitly, never umask-inherited", async () => {
-    const { db, session, store } = fresh();
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-sock-"));
-    dirs.push(dir);
-    const sockPath = join(dir, "admin.sock");
-    const server = serveAdminSocket(sockPath, { config, session, store, db: db.db, logger });
-    try {
-      await new Promise<void>((resolve, reject) => {
-        server.on("listening", () => resolve());
-        server.on("error", (err) => reject(err));
-      });
-      expect(statSync(sockPath).mode & 0o777).toBe(0o700);
-    } finally {
-      server.close();
+  //
+  // TWO modes, because one proves nothing. A literal left at the chmod call passes any single-mode
+  // assertion that happens to name the same number, so the second mode is what says the value was
+  // READ from the config and not written into the code.
+  it.skipIf(process.platform === "win32")("admin.sock carries the mode ADMIN_SOCKET_MODE names — set explicitly, never umask-inherited", async () => {
+    for (const [written, expected] of [["0770", 0o770], ["0700", 0o700]] as const) {
+      const { db, session, store } = fresh();
+      const dir = mkdtempSync(join(tmpdir(), "ctrl-sock-"));
+      dirs.push(dir);
+      const sockPath = join(dir, "admin.sock");
+      const modeConfig = parseConfig({ ...baseEnv, ADMIN_SOCKET_MODE: written } as NodeJS.ProcessEnv);
+      const server = serveAdminSocket(sockPath, { config: modeConfig, session, store, db: db.db, logger });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          server.on("listening", () => resolve());
+          server.on("error", (err) => reject(err));
+        });
+        expect(statSync(sockPath).mode & 0o777, `ADMIN_SOCKET_MODE=${written}`).toBe(expected);
+      } finally {
+        server.close();
+      }
     }
   });
 

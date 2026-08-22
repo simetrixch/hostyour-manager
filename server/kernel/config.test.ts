@@ -46,6 +46,33 @@ describe("parseConfig", () => {
     }
   });
 
+  it("defaults adminSocketMode to 0770 when ADMIN_SOCKET_MODE is absent", () => {
+    // The one value that decides who may mint an operator session without a password. Absent means
+    // the product's own boundary — the owning account plus the socket's group — and never a
+    // deployment's mistake read as a choice.
+    expect(parseConfig(validEnv).adminSocketMode).toBe(0o770);
+  });
+
+  it("reads ADMIN_SOCKET_MODE as OCTAL, with or without the leading zero", () => {
+    // A file mode is written octal. Read as decimal, "700" would be 0o1274 — a mode that still
+    // looks plausible in a values file and grants a different set of accounts.
+    expect(parseConfig({ ...validEnv, ADMIN_SOCKET_MODE: "0700" }).adminSocketMode).toBe(0o700);
+    expect(parseConfig({ ...validEnv, ADMIN_SOCKET_MODE: "770" }).adminSocketMode).toBe(0o770);
+    expect(parseConfig({ ...validEnv, ADMIN_SOCKET_MODE: "777" }).adminSocketMode).toBe(0o777);
+    expect(parseConfig({ ...validEnv, ADMIN_SOCKET_MODE: "000" }).adminSocketMode).toBe(0);
+  });
+
+  it("refuses an ADMIN_SOCKET_MODE that is not an octal file mode", () => {
+    for (const bad of ["", "8", "0778", "rwx", "0o770", "70", "07700"]) {
+      expect(() => parseConfig({ ...validEnv, ADMIN_SOCKET_MODE: bad }), `accepted ${JSON.stringify(bad)}`).toThrow(ConfigError);
+    }
+    try {
+      parseConfig({ ...validEnv, ADMIN_SOCKET_MODE: "0778" });
+    } catch (e) {
+      expect((e as ConfigError).issues.join(" ")).toContain("ADMIN_SOCKET_MODE");
+    }
+  });
+
   it("cookieSecure is false behind an http PUBLIC_URL", () => {
     const c = parseConfig({ ...validEnv, PUBLIC_URL: "http://localhost:8484" });
     expect(c.cookieSecure).toBe(false);

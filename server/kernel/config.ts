@@ -16,6 +16,17 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8484),
   EMERGENCY_PORT: z.coerce.number().int().positive().default(8485),
   DATA_DIR: z.string().min(1),
+  // The permission bits serveAdminSocket (domains/access/emergency.ts) puts on
+  // $DATA_DIR/admin.sock. That mode is the WHOLE boundary in front of a session mint that asks for
+  // no password: connect(2) on an AF_UNIX socket needs the WRITE bit on the inode, so which triad
+  // carries it decides whether only the account the process runs as may mint, the socket's group as
+  // well, or every account on the machine. Who that is depends on how a deployment places the
+  // process and who else lives on the box, so it is a value here and not a literal at the chmod.
+  // Written as an octal file mode of three digits, a leading zero allowed, and parsed base 8: a
+  // mode read as decimal is a different mode that still looks right, and this one decides who gets
+  // an admin session. Default 0770 — the owner and the socket's group; the group is whatever the
+  // deployment gives the inode, and no account is in it until one is deliberately put there.
+  ADMIN_SOCKET_MODE: z.string().regex(/^0?[0-7]{3}$/, "ADMIN_SOCKET_MODE must be an octal file mode of three digits, e.g. 0770").default("0770"),
   // OPTIONAL kubeconfig-file override for every kube client (dev/test — point the adapters at a
   // file). Unset/empty ⇒ the clients load the pod ServiceAccount's in-cluster credentials
   // (kube.ts buildKubeConfig → loadFromCluster): the Controller acts on its OWN cluster over RBAC
@@ -201,6 +212,10 @@ export interface Config {
   emergencyPort: number;
   dataDir: string;
   dbFile: string;
+  /** The permission bits serveAdminSocket puts on $DATA_DIR/admin.sock (ADMIN_SOCKET_MODE, parsed
+   *  base 8). Connecting to that socket needs the WRITE bit, and the socket mints an operator
+   *  session with no password — so this number is the boundary, and the deployment sets it. */
+  adminSocketMode: number;
   /** OPTIONAL kubeconfig-file override for the kube clients (dev/test). Absent ⇒ the adapters use
    *  the pod ServiceAccount's in-cluster credentials (loadFromCluster) — the production mode.
    *  Never part of a feature's enable gate: onboarding goes live without it. */
@@ -336,6 +351,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     emergencyPort: e.EMERGENCY_PORT,
     dataDir: e.DATA_DIR,
     dbFile: join(e.DATA_DIR, "controller.db"),
+    // Base 8, guaranteed by the schema's octal-digit regex above.
+    adminSocketMode: Number.parseInt(e.ADMIN_SOCKET_MODE, 8),
     // Empty string counts as unset (deployments often template the var to "") — absent means
     // in-cluster, so the property is omitted rather than carried as a falsy sentinel.
     ...(e.KUBECONFIG_PATH ? { kubeconfigPath: e.KUBECONFIG_PATH } : {}),

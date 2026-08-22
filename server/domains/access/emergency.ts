@@ -16,7 +16,7 @@ const EMERGENCY_OPERATOR = "op_emergency"; // seeded at schema creation; runs.st
 /**
  * Break-glass — closes the chicken-and-egg: recover access even when
  * the IdP is down. NO standing recovery credential exists on the D-1 host. A single-use token
- * is minted only through the 0700 `admin.sock` (host access IS the honest boundary) and
+ * is minted only through `admin.sock` (write permission on that file IS the honest boundary) and
  * redeemed once through the :8485 listener, which is published on 127.0.0.1 only and never
  * Traefik-routed — WAN-unreachability is structural (a port split), not a peer-IP guess.
  *
@@ -50,7 +50,7 @@ export interface EmergencyDeps {
 /**
  * WHICH DOOR a break-glass session came through: a person pasting the redeem URL into a browser,
  * or a program taking the session straight off the socket. Two kinds of caller, ONE act — the
- * sealed session is the same value, minted from the same authority (write permission on the 0700
+ * sealed session is the same value, minted from the same authority (write permission on
  * admin.sock, never an IdP), carrying the same `sub`, `groups` and `via`. So this is a VALUE the
  * one audit shape carries, not a second action name beside `operator.login`: splitting the action
  * would leave `WHERE action = 'operator.login'` showing half the mints and saying nothing about the
@@ -67,7 +67,7 @@ export interface EmergencyDeps {
  * browser: no browser opens an AF_UNIX socket. `browser_redeem` only PRESUMES a person, because a
  * program running on this host can mint a token and redeem the URL itself just as well — needing
  * the redeem path is not the same as being unable to use it. Both spoof directions sit behind the
- * same host-access boundary, so no privilege moves either way; what would move is a reader's
+ * same socket-permission boundary, so no privilege moves either way; what would move is a reader's
  * confidence, and that is why the asymmetry is written here rather than left to be assumed.
  */
 type ArrivedBy = "browser_redeem" | "admin_sock";
@@ -110,9 +110,20 @@ export function createEmergencyApp(deps: EmergencyDeps): Hono {
 
 /**
  * The admin.sock app. Carries no chokepoint and is never mounted on :8484 or :8485: the socket
- * file's 0700 mode IS the boundary in front of both routes, because connecting to a UNIX socket
+ * file's permissions ARE the boundary in front of both routes, because connecting to a UNIX socket
  * needs only write permission on the file. Nothing here is reachable over any network — AF_UNIX
  * has no address a peer off the machine can name, and no browser can open one.
+ *
+ * WHAT THAT BOUNDARY LETS IN, exactly, because "host access on the master" is what it used to be
+ * called and that was never true of the code. Three sets can reach these routes and no fourth: the
+ * account this process runs as, which owns the inode; every account in the inode's GROUP, where the
+ * mode grants the group — which is how an account on the machine outside this container is admitted
+ * at all; and root, which the permission check does not apply to. Anyone else gets EACCES from
+ * connect(2) and never speaks to this app. It is a ceiling and not a guarantee of reach: the caller
+ * also needs search permission on every directory down to the file, and where DATA_DIR is a volume
+ * whose ownership the deployment does not control, that part is the storage's answer and not ours.
+ * The two halves we DO set are the mode (config.ts ADMIN_SOCKET_MODE) and the uid and gid the
+ * process runs as, so widening this is an act somebody performs and never a default drifting.
  */
 export function createAdminSocketApp(deps: EmergencyDeps): Hono {
   const app = new Hono();
@@ -135,9 +146,9 @@ export function createAdminSocketApp(deps: EmergencyDeps): Hono {
   // adds no mechanism. It issues the ordinary operator session and stops; every consumer, the
   // manager included, is then onboarded through the same /api routes, the same chokepoint, the
   // same audit and the same Executor a browser drives. What is unit-specific about a caller is
-  // what it ASKS FOR after this line, and that surface is the shared one. The boundary here is
-  // host access on the master, which is not per-unit either: there is exactly one admin.sock and
-  // everything running as the service user reaches the same one.
+  // what it ASKS FOR after this line, and that surface is the shared one. The boundary here is not
+  // per-unit either: there is exactly one admin.sock, and who reaches it is the socket file's
+  // permissions and nothing else — see serveAdminSocket for what those actually let in.
   //
   // No lifetime is returned, because none could be kept: the session goes idle-stale on the clock
   // in session.ts and a caller learns that from a 401. The socket is always there to mint again.
@@ -147,9 +158,9 @@ export function createAdminSocketApp(deps: EmergencyDeps): Hono {
 }
 
 /**
- * Serves createAdminSocketApp over the 0700 admin.sock. Wired at boot. AF_UNIX socket files and
- * their modes are Linux semantics, so the mode is asserted where the check battery runs on Linux;
- * a dev box without AF_UNIX degrades to the warn below.
+ * Serves createAdminSocketApp over admin.sock, at the mode config.adminSocketMode names. Wired at
+ * boot. AF_UNIX socket files and their modes are Linux semantics, so the mode is asserted where the
+ * check battery runs on Linux; a dev box without AF_UNIX degrades to the warn below.
  *
  * HTTP rather than a raw line so the socket can carry more than one answer and say which one
  * failed. `localhost` is the default authority for a client that sends no Host header; AF_UNIX has
@@ -175,12 +186,15 @@ export function serveAdminSocket(socketPath: string, deps: EmergencyDeps): HttpS
     // connecting to a UNIX socket needs only WRITE permission on the file — so the mode IS the
     // boundary in front of the unauthenticated token mint, and it is set explicitly rather than
     // inherited: a umask or base-image change must never widen who can be handed an admin session.
+    // WHICH mode is the deployment's to say (config.ts ADMIN_SOCKET_MODE), because who has to reach
+    // this socket is a fact of where the process is placed and not of this file.
     // If the mode cannot be set, the listener is torn down — better no break-glass than one whose
     // only boundary is unknown.
+    const mode = deps.config.adminSocketMode;
     try {
-      chmodSync(socketPath, 0o700);
+      chmodSync(socketPath, mode);
     } catch (err) {
-      deps.logger.warn({ err: String(err) }, "admin.sock mode could not be set to 0700 — closing the break-glass mint");
+      deps.logger.warn({ err: String(err), mode: mode.toString(8) }, "admin.sock mode could not be set — closing the break-glass mint");
       server.close();
       try {
         unlinkSync(socketPath);
