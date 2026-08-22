@@ -1,0 +1,110 @@
+# seed-images — the images of this repository on a registry an installation can reach before it can
+# build anything.
+#
+# WHAT PROBLEM THIS ANSWERS. Every other unit of the platform is built in-cluster by the release
+# pipeline, which is rendered from a registration, which the Controller writes. This repository IS
+# the Controller, so on a machine where nothing has been installed yet there is no Controller to
+# write the registration, no pipeline to render, and therefore no image to start the Controller
+# from. The bytes have to come from outside that circle exactly once per release, and this is where
+# they come from.
+#
+# WHAT IT PUBLISHES. ghcr.io/<owner>/<build name> for every build declared in deploy/platform.yaml —
+# today manager, gate-runner and dbtools. The build names are read from that manifest rather than
+# repeated here: the same file is what the release pipeline reads, and a build renamed in one place
+# and not the other would push an image no pin can name.
+#
+# THE TAG IS THE ONE THE PINS CARRY. A release tag names a release; the tag on an IMAGE is
+# `<release-tag>-<sha7>`, the seven-character prefix of the commit the tag points at. That is what
+# hostyour-cloud/apps/manager/values-<stage>.yaml and apps/gate-runner/values-<stage>.yaml hold as
+# builds[].tag, and it is what the release pipeline composes for the same release. Both sources
+# therefore produce the same reference for the same commit, which is what lets an installation stop
+# reaching here the moment it has built the image itself: the platform registry syncs on a local
+# miss only, so a tag it already holds is never fetched again.
+#
+# WHAT IT DOES NOT DO. It writes no pin, promotes nothing and deploys nothing. Which image a stage
+# runs is decided by the pins in hostyour-cloud, and those are written by the release pipeline's
+# bump — inside an installation, where the stage ceiling of the channel is enforced.
+#
+# THE PACKAGES ARE PUBLIC, and that is what makes them usable here: a machine being installed for
+# the first time holds no credential for this organisation, so an image it needs before it holds one
+# has to be pullable without any. Package visibility on GHCR is set per package and is not inherited
+# from this repository; a package pushed for the first time starts out private and has to be turned
+# public once, by hand, in its package settings.
+name: seed-images
+
+on:
+  push:
+    tags:
+      # The release-tag grammar of shared/release.ts: `<major>.<minor>.<patch>-<channel>-<ts14>`,
+      # ts14 the UTC yyyyMMddHHmmss the tag was composed at. One pattern per channel, because a
+      # filter pattern has no alternation and alpha|beta|stable cannot be written in one. `[0-9]`
+      # matches one digit and `+` one or more of what stands before it; a tag matches only as a
+      # whole, so the fourteen spelled-out digit classes admit no fifteenth digit and no suffix.
+      - '[0-9]+.[0-9]+.[0-9]+-alpha-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+      - '[0-9]+.[0-9]+.[0-9]+-beta-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+      - '[0-9]+.[0-9]+.[0-9]+-stable-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: seed-images-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Every build the manifest declares, in the manifest's own grammar: `containerfile` is the
+      # path to the file and `context` the directory the build sees, defaulting to the repository
+      # root because the convention here is a Dockerfile under docker/ whose COPY paths are
+      # root-relative (ConsumerManifestSchema, shared/consumer.ts). Those two fields are the whole
+      # of what a build declares, and they are read from the manifest rather than repeated here.
+      - name: Build and push every declared build
+        env:
+          MANIFEST: deploy/platform.yaml
+        run: |
+          set -euo pipefail
+
+          SHA7="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+          IMAGE_TAG="${GITHUB_REF_NAME}-${SHA7}"
+          echo "seed-images: ${GITHUB_REF_NAME} @ ${GITHUB_SHA} -> image tag ${IMAGE_TAG}"
+
+          # The manifest names the unit, and the unit name must equal the repository name: the
+          # release pipeline refuses a run where the two disagree, and a seed pushed under a name
+          # that pipeline would refuse would be a seed no release could ever replace.
+          UNIT="$(yq eval '.name' "${MANIFEST}")"
+          if [ "${UNIT}" != "${GITHUB_REPOSITORY##*/}" ]; then
+            echo "seed-images: REFUSED — ${MANIFEST} names the unit '${UNIT}', the repository is '${GITHUB_REPOSITORY##*/}'" >&2
+            exit 1
+          fi
+
+          COUNT="$(yq eval '.builds | length' "${MANIFEST}")"
+          if [ "${COUNT}" = "0" ] || [ "${COUNT}" = "null" ]; then
+            echo "seed-images: REFUSED — ${MANIFEST} declares no builds, so this release would publish nothing" >&2
+            exit 1
+          fi
+
+          for name in $(yq eval '.builds[].name' "${MANIFEST}"); do
+            containerfile="$(yq eval ".builds[] | select(.name == \"${name}\") | .containerfile // \"\"" "${MANIFEST}")"
+            context="$(yq eval ".builds[] | select(.name == \"${name}\") | .context // \".\"" "${MANIFEST}")"
+
+            if [ -z "${containerfile}" ]; then
+              echo "seed-images: REFUSED — build '${name}' declares no containerfile" >&2
+              exit 1
+            fi
+
+            ref="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${name}:${IMAGE_TAG}"
+            echo "seed-images: ${name} — containerfile ${containerfile}, context ${context} -> ${ref}"
+            docker build --file "${containerfile}" --tag "${ref}" "${context}"
+            docker push "${ref}"
+          done
