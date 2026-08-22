@@ -23,6 +23,11 @@ export interface OperatorSession {
   email?: string;
   groups: string[];
   jti: string;
+  /** WHICH AUTHORITY this session rests on, not who is holding it: "oidc" means an IdP verified an
+   *  identity, "emergency" means nothing did and the only thing proved was write permission on the
+   *  0700 admin.sock. A program that takes a session off that socket proved exactly that and no
+   *  more, so "emergency" is its word too — which door a caller came through is recorded where it
+   *  belongs, in the audit row (domains/access/emergency.ts), and not by a third value here. */
   via: "oidc" | "emergency";
   /** When this session was FIRST minted (epoch seconds) — the fixed anchor of the absolute
    *  lifetime. refresh() carries it unchanged, so sliding the idle window never extends exp. */
@@ -116,7 +121,13 @@ export class SessionCodec {
       if (typeof payload.aa !== "number") return { kind: "invalid" }; // no absolute anchor — refresh could not cap it
       const groups = Array.isArray(payload.groups) ? payload.groups.filter((g): g is string => typeof g === "string") : [];
       const email = typeof payload.email === "string" ? payload.email : undefined;
-      const via = payload.via === "emergency" ? "emergency" : "oidc";
+      // "oidc" is the PRIVILEGED word — reset/api.ts refuses "emergency" and admits everything else
+      // — so the narrowing names it explicitly and lets every other value fall to "emergency".
+      // mint() always writes one of the two, so no honest session reaches the else; what does is a
+      // word this decoder does not know, and reading that back as "oidc" would hand an unrecognised
+      // session the IdP-verified side of every check. That is the cost of widening this vocabulary,
+      // and this is the direction that fails closed.
+      const via = payload.via === "oidc" ? "oidc" : "emergency";
       return { kind: "ok", session: { sub, jti, groups, via, authAt: payload.aa, ...(email ? { email } : {}) } };
     } catch {
       return { kind: "invalid" }; // expired, tampered, wrong key — all invalid

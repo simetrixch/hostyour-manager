@@ -94,6 +94,11 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
     // ---- validate (all destructive action refused up-front) --------------------------------
     // Break-glass sessions are for local recovery, never remote destruction; typed "RESET" is
     // not an auth factor and a stale cookie's groups stay valid for up to 12h.
+    //
+    // This holds for the programmatic caller too, and holds harder: a session taken off the
+    // admin.sock rests on the same non-IdP authority, and nobody typed the confirmation at all. So
+    // the refusal is on `via` — the authority — and not on which door the caller arrived through,
+    // which is why the audit row records the door and this line does not read it.
     if (operator.via === "emergency") {
       refuse(new AppError("NOT_A_MEMBER", "break-glass sessions cannot reset — sign in via OIDC"));
     }

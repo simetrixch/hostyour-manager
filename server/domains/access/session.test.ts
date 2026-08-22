@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { parseConfig, type Config } from "../../kernel/config.ts";
-import { SessionCodec } from "./session.ts";
+import { EncryptJWT } from "jose";
+import { SessionCodec, loadOrCreateKey } from "./session.ts";
 import { revokeJti, bootEpochMs, __setBootEpochForTest } from "./revocation.ts";
 
 const config = parseConfig({
@@ -45,6 +46,29 @@ describe("SessionCodec — sealed JWE session", () => {
       expect(v.session.groups).toEqual(["admins"]);
       expect(v.session.via).toBe("oidc");
     }
+  });
+
+  // `via` decides one thing outside this file — reset/api.ts refuses "emergency" and admits
+  // everything else — so a word this decoder does not know must land on the refused side. Forged
+  // with the codec's own key, because a token holding an unknown `via` is exactly what a session
+  // sealed by a future mint and read by today's decoder would be.
+  it("an unknown `via` reads back as 'emergency', never as the privileged 'oidc'", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ctrl-via-"));
+    dirs.push(dir);
+    const db = openDb(join(dir, "controller.db"));
+    handles.push(db);
+    const c = new SessionCodec(db.db, config);
+    const now = Math.floor(Date.now() / 1000);
+    const forged = await new EncryptJWT({ groups: ["admins"], via: "socket", be: bootEpochMs(), aa: now })
+      .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+      .setSubject("op_1")
+      .setJti("j")
+      .setIssuedAt(now)
+      .setExpirationTime(now + 3600)
+      .encrypt(loadOrCreateKey(db.db, "session.key"));
+    const v = await c.verify(forged);
+    expect(v.kind).toBe("ok");
+    if (v.kind === "ok") expect(v.session.via).toBe("emergency");
   });
 
   it("rejects a tampered cookie", async () => {

@@ -47,18 +47,47 @@ export interface EmergencyDeps {
   logger: Logger;
 }
 
+/**
+ * WHICH DOOR a break-glass session came through: a person pasting the redeem URL into a browser,
+ * or a program taking the session straight off the socket. Two kinds of caller, ONE act — the
+ * sealed session is the same value, minted from the same authority (write permission on the 0700
+ * admin.sock, never an IdP), carrying the same `sub`, `groups` and `via`. So this is a VALUE the
+ * one audit shape carries, not a second action name beside `operator.login`: splitting the action
+ * would leave `WHERE action = 'operator.login'` showing half the mints and saying nothing about the
+ * half it hid, which is exactly how a trail starts lying. That query is not hypothetical — the
+ * dependency-cruiser rule `only-audit-writer` keeps every module out of schema/audit, so nothing in
+ * this process reads the table and every reader there is asks for an action by name over SQL.
+ * A key added inside `detail_json` is invisible to a query that does not ask for it; a renamed or
+ * split action is not.
+ *
+ * The door is what the mint honestly knows. It does not know that the program is onboarding a
+ * consumer, and it may not learn it from anything the caller says.
+ *
+ * AND THE TWO DOORS ARE NOT EQUALLY STRONG EVIDENCE. `admin_sock` PROVES the caller was not a
+ * browser: no browser opens an AF_UNIX socket. `browser_redeem` only PRESUMES a person, because a
+ * program running on this host can mint a token and redeem the URL itself just as well — needing
+ * the redeem path is not the same as being unable to use it. Both spoof directions sit behind the
+ * same host-access boundary, so no privilege moves either way; what would move is a reader's
+ * confidence, and that is why the asymmetry is written here rather than left to be assumed.
+ */
+type ArrivedBy = "browser_redeem" | "admin_sock";
+
 /** The one place a break-glass session comes into existence, and the one audit row that records
  *  it. Both ways in — the :8485 redeem and the admin.sock session route — call this, so there is a
  *  single minting path and a single audited shape whichever way the operator arrived.
  *
- *  IT ALSO LOGS, and that is why `arrivedBy` exists. The token mint below writes a warn line and
- *  the session route wrote none, so the weaker of the two ways in was the loud one and the one that
- *  hands out a session outright was silent. A session minted here is the highest privilege this
- *  process grants; it says so on its way out, and it says which door it came through — the audit row
- *  cannot, because its shape is fixed. */
-async function mintEmergencySession(deps: EmergencyDeps, arrivedBy: string): Promise<string> {
+ *  The row carries TWO facts, and they are not the same fact. `method` names the AUTHORITY the
+ *  session rests on — the same word `via` carries on the session itself (domains/access/session.ts)
+ *  — and `arrivedBy` names the DOOR. reset/api.ts reads the authority and never the door; an audit
+ *  reader asking which of the two callers this was reads the door. Both belong in the one row
+ *  because the row is what answers "who did this, and how did they get in" when no log is kept.
+ *
+ *  `arrivedBy` reaches the audit row and the log line as the SAME value, so the two records of one
+ *  mint compare equal instead of being an English sentence beside a slug. The log stays because a
+ *  session minted here is the highest privilege this process grants and says so on its way out. */
+async function mintEmergencySession(deps: EmergencyDeps, arrivedBy: ArrivedBy): Promise<string> {
   const session = await deps.session.mint({ sub: EMERGENCY_OPERATOR, groups: [deps.config.oidc.adminsGroup], via: "emergency" });
-  writeAudit(deps.db, { actor: EMERGENCY_OPERATOR, action: "operator.login", detail: { method: "emergency" } });
+  writeAudit(deps.db, { actor: EMERGENCY_OPERATOR, action: "operator.login", detail: { method: "emergency", arrivedBy } });
   deps.logger.warn({ action: "break_glass.session", arrivedBy }, `break-glass session minted via ${arrivedBy}`);
   return session;
 }
@@ -72,7 +101,7 @@ export function createEmergencyApp(deps: EmergencyDeps): Hono {
     if (!deps.store.redeem(token)) {
       return c.json({ code: "UNAUTHENTICATED", message: "Invalid or already-used break-glass token" } satisfies ApiError, 401);
     }
-    const session = await mintEmergencySession(deps, "token redeemed in a browser");
+    const session = await mintEmergencySession(deps, "browser_redeem");
     setCookie(c, sessionCookieName(deps.config), session, { httpOnly: true, secure: deps.config.cookieSecure, sameSite: "Lax", path: "/" });
     return c.redirect("/", 302);
   });
@@ -112,7 +141,7 @@ export function createAdminSocketApp(deps: EmergencyDeps): Hono {
   //
   // No lifetime is returned, because none could be kept: the session goes idle-stale on the clock
   // in session.ts and a caller learns that from a 401. The socket is always there to mint again.
-  app.post("/auth/session", async (c) => c.json({ session: await mintEmergencySession(deps, "admin.sock") }));
+  app.post("/auth/session", async (c) => c.json({ session: await mintEmergencySession(deps, "admin_sock") }));
 
   return app;
 }

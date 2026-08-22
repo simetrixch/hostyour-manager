@@ -157,7 +157,10 @@ describe("admin.sock app", () => {
     expect(await prot.json()).toMatchObject({ sub: "op_emergency", via: "emergency" });
   });
 
-  it("the session route audits the login exactly as the :8485 redeem does", async () => {
+  // ONE action and ONE row shape for both ways in, with the door as a value inside it: a reader
+  // who asks `WHERE action = 'operator.login'` still sees every mint there has ever been, and can
+  // then say which of the two each one was — without the log line.
+  it("both ways in write one audit action and one row shape, differing only in arrivedBy", async () => {
     const { db, session, store } = fresh();
     const sockApp = createAdminSocketApp({ config, session, store, db: db.db, logger });
     const emergencyApp = createEmergencyApp({ config, session, store, db: db.db, logger });
@@ -171,9 +174,35 @@ describe("admin.sock app", () => {
       detail_json: string;
     }[];
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toEqual(rows[1]);
-    expect(rows[0]?.actor).toBe("op_emergency");
-    expect(JSON.parse(rows[0]?.detail_json ?? "null")).toEqual({ method: "emergency" });
+    expect(rows.map((r) => r.actor)).toEqual(["op_emergency", "op_emergency"]);
+    const details = rows.map((r) => JSON.parse(r.detail_json ?? "null") as Record<string, unknown>);
+    expect(details.map((d) => Object.keys(d).sort())).toEqual([
+      ["arrivedBy", "method"],
+      ["arrivedBy", "method"],
+    ]);
+    expect(details[0]).toEqual({ method: "emergency", arrivedBy: "admin_sock" });
+    expect(details[1]).toEqual({ method: "emergency", arrivedBy: "browser_redeem" });
+  });
+
+  // The sealed session is the SAME on both sides of that distinction: the door is recorded, the
+  // authority the session rests on is not re-labelled — so reset/api.ts keeps refusing both.
+  it("neither door changes the session: both are via 'emergency' on op_emergency", async () => {
+    const { db, session, store } = fresh();
+    const sockApp = createAdminSocketApp({ config, session, store, db: db.db, logger });
+    const emergencyApp = createEmergencyApp({ config, session, store, db: db.db, logger });
+
+    const { session: bearer } = (await (await sockApp.request("/auth/session", { method: "POST" })).json()) as { session: string };
+    const redeem = await emergencyApp.request(`/auth/emergency?token=${store.mint()}`);
+    const cookie = setCookieValue(redeem, SESSION_COOKIE) ?? "";
+
+    for (const sealed of [bearer, cookie]) {
+      const verdict = await session.verify(sealed);
+      expect(verdict.kind).toBe("ok");
+      if (verdict.kind === "ok") {
+        expect(verdict.session.via).toBe("emergency");
+        expect(verdict.session.sub).toBe("op_emergency");
+      }
+    }
   });
 
   it("POST /auth/break-glass still hands out a redeem URL, and the token in it redeems once", async () => {

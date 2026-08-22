@@ -10,6 +10,7 @@ import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
+import { EmergencyStore, createAdminSocketApp } from "../access/emergency.ts";
 import { registerResetRoutes } from "./api.ts";
 import { GitHubError, type GitHubClient, type BranchRef } from "../../adapters/github/github.ts";
 import type { AppEnv } from "../../http/app-env.ts";
@@ -162,6 +163,33 @@ describe("reset API (POST /api/reset)", () => {
     const res = await post(app, await cookie(session, "emergency"), { ...req, wipeDb: true });
     expect(res.status).toBe(403);
     expect(auditRefusals(db)).toBe(1);
+  });
+
+  // The same refusal reached the way a PROGRAM reaches it: minted by the real admin.sock route,
+  // carried as a bearer, past the CSRF exemption bearers get. The test above hand-mints `via:
+  // "emergency"` and so only proves the line reads that word; this one proves the word is what the
+  // programmatic door actually hands out, which is the claim `via` being a two-value union rests
+  // on. Without it the chain runs through two assertions in two files and a reader has to join them.
+  it("refuses a session taken off the admin.sock — the programmatic door inherits the same refusal", async () => {
+    const { client } = fakeGitHub();
+    const { app, db, session } = make(client);
+    const sockApp = createAdminSocketApp({
+      config: parseConfig({ ...baseEnv, DATA_DIR: tmpdir() } as NodeJS.ProcessEnv),
+      session, store: new EmergencyStore(), db: db.db, logger,
+    });
+    const { session: bearer } = (await (await sockApp.request("/auth/session", { method: "POST" })).json()) as { session: string };
+
+    const res = await app.request("/api/reset", {
+      method: "POST",
+      headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...req, wipeDb: true }),
+    });
+    expect(res.status).toBe(403);
+    expect(auditRefusals(db)).toBe(1);
+    // The refusal names the authority, which is the only thing the route read.
+    const refusal = db.sqlite.prepare("SELECT actor, detail_json AS d FROM audit WHERE action='controller.reset.refused'").get() as { actor: string; d: unknown };
+    expect(refusal.actor).toBe("op_emergency");
+    expect(JSON.parse(String(refusal.d)) as Record<string, unknown>).toMatchObject({ via: "emergency" });
   });
 
   it("removes cluster maps BEFORE deleting branches, captures the sha, reconciles orphans", async () => {
