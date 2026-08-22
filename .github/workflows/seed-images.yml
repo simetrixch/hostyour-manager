@@ -13,6 +13,12 @@
 # repeated here: the same file is what the release pipeline reads, and a build renamed in one place
 # and not the other would push an image no pin can name.
 #
+# WHAT IT DOES NOT DO, AND NOTHING HERE CAN: it does not make the packages public. GHCR decides
+# visibility per package, a package pushed for the first time is private, and no token this workflow
+# holds changes that. Until a person turns each of the three public, a fresh installation's pull is
+# refused — and it is refused three systems away from the settings page that decides it, as an
+# ImagePullBackOff naming no cause.
+#
 # THE TAG IS THE ONE THE PINS CARRY. A release tag names a release; the tag on an IMAGE is
 # `<release-tag>-<sha7>`, the seven-character prefix of the commit the tag points at. That is what
 # hostyour-cloud/apps/manager/values-<stage>.yaml and apps/gate-runner/values-<stage>.yaml hold as
@@ -35,14 +41,28 @@ name: seed-images
 on:
   push:
     tags:
-      # The release-tag grammar of shared/release.ts: `<major>.<minor>.<patch>-<channel>-<ts14>`,
-      # ts14 the UTC yyyyMMddHHmmss the tag was composed at. One pattern per channel, because a
-      # filter pattern has no alternation and alpha|beta|stable cannot be written in one. `[0-9]`
-      # matches one digit and `+` one or more of what stands before it; a tag matches only as a
-      # whole, so the fourteen spelled-out digit classes admit no fifteenth digit and no suffix.
+      # BOTH REF SHAPES A RELEASE OF THIS PLATFORM PUSHES, because a filter matches the whole ref
+      # name and the two are not the same name. `release.sh` — the script a released unit carries —
+      # pushes the bare release tag first and then `refs/tags/deploy/<stage>/<same tag>`, and the
+      # deploy ref is the one the platform's webhook reacts to. This repository has only ever
+      # carried the second: `git ls-remote --tags origin` answers with
+      # deploy/dev/0.41.0-stable-20260818095821 and nothing else. A filter admitting only the bare
+      # tag would therefore never fire here, and a workflow that does not fire says nothing.
+      #
+      # The release-tag grammar itself is owned by shared/release.ts:22 —
+      # `<major>.<minor>.<patch>-<channel>-<ts14>`, ts14 the UTC yyyyMMddHHmmss the tag was composed
+      # at. Six patterns: one per channel, twice, because a filter pattern has no alternation and
+      # neither alpha|beta|stable nor the optional `deploy/<stage>/` prefix can be written in one.
+      # `[0-9]` matches one digit, `+` one or more of what stands before it, and `*` any run of
+      # characters carrying no `/` — which is what admits exactly one stage segment and not a path.
+      # A ref matches only as a whole, so the fourteen spelled-out digit classes admit no fifteenth
+      # digit and no suffix.
       - '[0-9]+.[0-9]+.[0-9]+-alpha-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
       - '[0-9]+.[0-9]+.[0-9]+-beta-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
       - '[0-9]+.[0-9]+.[0-9]+-stable-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+      - 'deploy/*/[0-9]+.[0-9]+.[0-9]+-alpha-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+      - 'deploy/*/[0-9]+.[0-9]+.[0-9]+-beta-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+      - 'deploy/*/[0-9]+.[0-9]+.[0-9]+-stable-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
 
 permissions:
   contents: read
@@ -75,9 +95,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          # THE RELEASE TAG IS THE LAST SEGMENT OF THE REF, whichever of the two shapes was pushed:
+          # a bare `<version>-<channel>-<ts14>` has no slash and survives this unchanged, and
+          # `deploy/<stage>/<same tag>` yields the same word. The stage the deploy ref names is
+          # deliberately dropped — an image belongs to a RELEASE and is built once, then promoted,
+          # so a per-stage image tag would build the same commit twice under two names.
+          RELEASE_TAG="${GITHUB_REF_NAME##*/}"
           SHA7="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
-          IMAGE_TAG="${GITHUB_REF_NAME}-${SHA7}"
-          echo "seed-images: ${GITHUB_REF_NAME} @ ${GITHUB_SHA} -> image tag ${IMAGE_TAG}"
+          IMAGE_TAG="${RELEASE_TAG}-${SHA7}"
+          echo "seed-images: ${GITHUB_REF_NAME} @ ${GITHUB_SHA} -> release ${RELEASE_TAG}, image tag ${IMAGE_TAG}"
 
           # The manifest names the unit, and the unit name must equal the repository name: the
           # release pipeline refuses a run where the two disagree, and a seed pushed under a name
@@ -104,6 +130,21 @@ jobs:
             fi
 
             ref="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${name}:${IMAGE_TAG}"
+
+            # AN EXISTING TAG IS NEVER REBUILT, and the registry is what decides — the same rule the
+            # in-cluster release pipeline follows, for the same reason. One release can reach this
+            # workflow twice, because a release pushes the bare tag and the deploy ref one after the
+            # other and both are triggers. The build is not reproducible either: the containerfiles
+            # run `npm ci`, `apt-get install` and a download of a pinned archive, so a second build
+            # of one commit carries a different digest. Overwriting would leave one installation
+            # holding the first bytes and the next installation the second, both reporting the same
+            # version, with nothing able to tell them apart — the registry caches on a local miss
+            # only and keeps every tag of ours forever.
+            if docker manifest inspect "${ref}" >/dev/null 2>&1; then
+              echo "seed-images: ${name} — ${ref} is already published, leaving it as it stands"
+              continue
+            fi
+
             echo "seed-images: ${name} — containerfile ${containerfile}, context ${context} -> ${ref}"
             docker build --file "${containerfile}" --tag "${ref}" "${context}"
             docker push "${ref}"
