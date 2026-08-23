@@ -20,14 +20,14 @@ envs: [dev, test, prod]
 builds:
   - name: manager                  # the in-cluster app
     containerfile: Containerfile   # repo root
-  - name: gate-runner              # the rootful onboarding-sandbox Quadlet, deployed host-side
+  - name: gate-runner              # the onboarding-sandbox image, run as a Tekton task in-cluster
     containerfile: gate-runner/Containerfile
   # The client-tools image of the move / backup / restore job — mongodump,
   # mongosh, pg_dumpall, rclone, ssh. It is the tooling THIS manager runs
   # (server/domains/onboarding/relocation.ts), so it builds where its caller
   # lives. Its two database client versions are stamped into the Dockerfile by
-  # hostyour-cloud/tools/ops/sync-versions, because the servers they talk to are
-  # pinned in that repository's platform/versions.yaml.
+  # digita-deploy's sync-versions program, because the servers they talk to are
+  # pinned in hostyour-cloud/platform/versions.yaml.
   - name: dbtools
     containerfile: docker/dbtools.Dockerfile
 
