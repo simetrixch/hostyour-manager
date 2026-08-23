@@ -1,177 +1,178 @@
 import { errValidation } from "../../../kernel/errors.ts";
-import { PRODUCT_BRANCH } from "../../../../shared/branches.ts";
 
-// `place-ansiwise` — what a machine has to carry before anything else can speak to it at all. Every
-// program act goes through `ansiwise serve` over a session (ansiwise-run.kit.ts), and that command
-// is a binary reading a catalogue of program files out of a checkout: a machine that carries neither
-// answers nothing, and the first program dies with a shell error.
+// `place-ansiwise` — the BOOTSTRAP, and the whole of what this repository does to a machine with its
+// own hands. Everything a machine is afterwards given is given by a PROGRAM: a named row in the
+// installation's catalogue, resolved against the registry the binary was compiled with, measured in
+// `test`, shown in `dry` and only then run. This module exists because that apparatus needs an
+// executable to exist before it can measure anything at all, and a machine at its first installation
+// carries none.
 //
-// FOUR PLACEMENTS, ONE MECHANISM, and they belong together because none of them is worth anything
-// alone:
+// WHY THERE IS NO SCRIPT HERE AND WHY THERE MAY NEVER BE ONE AGAIN. The rebuild that produced
+// ansiwise exists because 580 raw mutation sites in bash could never be proven inert in a dry run —
+// a check written in bash is the same defect in the tool meant to catch defects
+// (simetrix-docs/ansiwise-plugins/CLAUDE.md). The first version of this module composed a bash
+// script and shipped it to a machine: it installed packages, downloaded and installed a binary,
+// cloned two repositories and wrote a systemd unit, and not one of those mutations could be proven
+// inert. What replaced it is two protocol operations and two invocations of a binary that judges
+// itself:
 //
-//   the BINARY     /usr/local/bin/ansiwise, at the version platform/versions.yaml pins
-//                  (inventory/ansiwise-pin.ts) — never at whatever the caller happens to hold. It is
-//                  installed under its version (ansiwise-<version>) with the plain name a symlink
-//                  onto it, which is what makes the placed version READABLE afterwards: the binary
-//                  takes no --version flag, so the name of the file the link points at is the only
-//                  statement about which one is there, and it is one this mechanism wrote itself.
-//   the CATALOGUE  the checkout at CATALOG_CHECKOUT, cloned from the catalogue repository — the
-//                  `ansiwise.yaml` and the `ansiwise/programs/` every later step starts a program
-//                  out of by name.
-//   the MATERIAL   the platform checkout at PLATFORM_CHECKOUT, cloned on the machine's install
-//                  branch. Every deployment program ACTS on that tree — their `repository:` rows
-//                  name the path — so a machine without it has nothing for them to work on.
-//   the SERVICE    ANSIWISE_SERVICE_UNIT, enabled and running AND starting the version that was just
-//                  placed on the address the caller stated, so the surface outlives the session that
-//                  installed it and is the surface the caller thinks it is. Placed only where the
-//                  caller states the address it is to stand on, because a machine has none until it
-//                  is on the tailnet — see THE SERVICE IS PLACED LAST below.
+//   THE TRANSFER   `putFile` writes each executable's bytes and sets its mode — SFTP, a file
+//                  transfer and a mode change, with no shell on the machine involved at any point
+//                  (adapters/ssh/port.ts `putFile`). The bytes come from the release address the
+//                  installation states; the manager fetches them and hands them over, so the machine
+//                  needs no `curl`, no `ca-certificates` and no network of its own to be bootstrapped.
+//   THE READING    `<executable> --version` — one word, no arguments of ours in it, and it mutates
+//                  nothing. Both binaries answer their release tag on one line
+//                  (ansiwise-cli lib/installation.dart `answeredVersion`, simetrixch/ansiwise-cli#7),
+//                  which is what makes the placed version READABLE without a naming convention this
+//                  module would have to invent and then be the only reader of.
 //
-// THE CATALOGUE AND THE MATERIAL ARE TWO REPOSITORIES, and the first version of this placement
-// asserted they were one. `hostyour-cloud/platform/versions.yaml:22-24` names the two trees:
-// `platform` is that repository, `deploy` is "the installation repository carrying the ansiwise
-// programs". `ls ansiwise` in a hostyour-cloud checkout answers nothing, so a placement that cloned
-// only the platform repo and then looked for programs in it refused on every real machine.
+// BOTH EXECUTABLES, AND THEY ARE PLACED TOGETHER OR NOT AT ALL. `ansiwise-rest` refuses to start
+// when `ansiwise` is not standing beside it and exits 78 saying so (ansiwise-cli bin/ansiwise_rest.dart
+// `deploymentToolBesideThis`): the serving binary starts every run as a DETACHED CHILD of the
+// deployment tool, so a machine given one of the two answers for programs and runs none of them.
+// The previous version of this module placed one, which is why they are one list here and one loop.
 //
-// WHERE THE CATALOGUE STANDS is CATALOG_CHECKOUT, and that path is the machine's own, not this
-// module's invention: digita-deploy `ansiwise/programs/deploy-gitops.yaml`'s `git_clone` row for
-// /srv/ansiwise-catalog clones that same repository to that same path once the machine has a secret
-// store, and its `THE UNIT AND THE SWITCH ARE NOT ROWS` block states that the resident deployment
-// service is given `--programs /srv/ansiwise-catalog/ansiwise/programs` out of it. This is the FIRST
-// placement, before any of that exists, and it puts the checkout where those rows will find it.
+// WHERE THEY GO, AND WHY IT IS THE OPERATING ACCOUNT'S OWN HOME. `/usr/local/bin` belongs to root,
+// the operating account cannot write it, and `sudo` on these machines wants a password — so a
+// transfer into it would need elevation, and SFTP has none to offer. Raising the transfer to root
+// would mean a command, and a command that moves a file into place is the mutation site this module
+// exists to remove. The home directory is the one place the account the session authenticated as can
+// write by itself, so the bytes land there under their own two names, beside each other, which is
+// exactly what `deploymentToolBesideThis` looks for. What stands in `/usr/local/bin` afterwards is
+// `install_pinned_tool`'s to place and to keep at the pin — one row per binary, in the tool phase
+// where every other tool of this platform is held (digita-deploy ansiwise/programs/deploy-cluster.yaml).
 //
-// PROBE, PLACE, PROBE AGAIN. The mechanism measures the machine first and places only what is
-// missing — which is what makes a second run a no-op rather than a re-installation — and then
-// measures again and reads its verdict off THAT, never off the placing script's own claim. A
-// placement that reported success without looking would report it just as happily when curl wrote an
-// error page into the file it installed.
+// WHAT THIS MODULE NO LONGER DOES, AND WHERE EACH OF THEM WENT. Read this before adding anything
+// back:
 //
-// AND WHAT IS MISSING INCLUDES A UNIT THAT IS STANDING ON THE WRONG THING. The service is measured
-// by FOUR facts and not by two: enabled, running, and the version and address the unit's own
-// `ExecStart` names (`standing`). A unit whose command is right is not a fact that follows from a
-// unit that is up, because ExecStart names the VERSIONED file: place a newer binary on a machine
-// whose service already stands, leave the unit alone, and it goes on starting ansiwise-<the old
-// version> for ever under `Restart=always`, with the old file still on disk and nothing complaining.
-// The same holds for the address — a rejoin hands the host a fresh one and the unit keeps binding
-// the old. Measuring all four is what makes an UPGRADE a re-installation and what makes the line
-// this writes at the end a reading of the machine rather than a repetition of the request.
+//   the PACKAGES   `deploy-host`'s `install_packages` row installs git, openssl, curl, jq and
+//                  apache2-utils. The bootstrap needs none of them now: the manager fetches the
+//                  bytes and SFTP carries them.
+//   the CHECKOUTS  `/srv/ansiwise-catalog` is `git_clone`'s (digita-deploy
+//                  ansiwise/programs/deploy-gitops.yaml). `/srv/hostyour-cloud` is declared by no
+//                  program at all, and THAT IS A GAP THIS MODULE MAY NOT FILL. Cloning a private
+//                  repository needs a credential, and a credential can reach a single command only
+//                  through that command's argument list or its environment — the first stands in
+//                  the machine's process listing for anyone on it to read, and the second needs a
+//                  shell to set. The bash this replaced solved it with a pipeline into a credential
+//                  helper, which is exactly the shape that may not come back. `git_clone` has the
+//                  answer already: it reads its origin and its credential out of files by NAME,
+//                  so neither value passes through a caller. The material belongs on such a row.
 //
-// THE SERVICE COMPOSES NOTHING. What this places is an INVOCATION of `ansiwise install-service`,
-// never a unit file and never the command inside one. deploy-gitops.yaml's `THE UNIT AND THE SWITCH
-// ARE NOT ROWS` block states the rule and it is right: install-service composes the started command
-// out of the option names the binary will itself be started with (ansiwise-cli
-// lib/service_installation.dart, `ServiceInstallation.command`),
-// so a unit written anywhere else is a copy of that binary's interface kept by somebody who cannot
-// see it change. The options below are install-service's OWN — `--listen`, `--service-token-file`,
-// `--programs`, `--answers -` — and every path among them is one this module already states for the
-// other three placements. What it does NOT name is anything the binary already decides: see THE
-// WORKING DIRECTORY IS THE CATALOGUE at the invocation itself.
+//                  AND THE ORDER IS THE REVERSE OF THE ONE THE BASH USED, which is why this is a
+//                  gap and not an oversight: deploy-gitops's catalogue row reads its origin from
+//                  `/srv/hostyour-cloud/configs/config.<stage>` and its credential from
+//                  `secrets.<stage>`, so the MATERIAL has to stand before the CATALOGUE can be
+//                  cloned by a step — while a program can only run once the catalogue is there.
+//                  Until something breaks that circle, a machine reaching the first program step
+//                  with no catalogue is answered by that step, in the words of a binary that finds
+//                  no program of that name.
+//   the UNIT       `ansiwise-rest install-service` writes it — see the block at
+//                  `installAnsiwiseService` for why that invocation is not a mutation site of this
+//                  repository's making, and for the one part of it that still is.
 //
-// THE TOKEN NEVER LEAVES THE MACHINE. install-service is told the service token on standard input,
-// and the value it is told is read on the machine out of SERVICE_TOKEN_FILE — the file
-// deploy-gitops.yaml's `file_from_vault` row writes out of the entry it minted at
-// `<stage>/manager-host/ansiwise`. So the one value the manager and the machine have to agree on is
-// minted once, in one place, and is never carried through a caller that has no business holding it.
-// A machine whose token file is not there is REFUSED by name: it has not been through the run that
-// mints it, and a service enabled without it comes up failed at every boot.
-//
-// THE SERVICE IS PLACED LAST, and by the same mechanism rather than by a person. `--listen` is the
-// machine's tailnet address — ServiceInstallation refuses every address outside 100.64.0.0/10,
-// because the manager presents that token in a plain HTTP header — and a machine has no such
-// address until it has joined the tailnet, which happens long after the binary is placed. So the
-// SERVICE half of the request is optional: a caller placing onto a bare machine states none and the
-// unit is left alone, and the caller that states one is the one that already knows the address it
-// will dial. In this manager those are two steps over one mechanism — `placeAnsiwiseStep` at the
-// head of the machine-side acts and `enableAnsiwiseServiceStep` after the join (deploy-slave.ts).
-//
-// IT TAKES A MACHINE AND VALUES, AND NOTHING ONLY A MANAGER HAS. `placeAnsiwise` takes a
-// PlacementMachine — a name, a way to run a script on it, somewhere to write a line an operator
-// reads — and a PlacementRequest of plain values: the pinned version, the three addresses, the
-// install branch, the account, the elevation password and, where there is one, the address the
-// service is to stand on. It opens no session, reads no database and carries no run context.
-//
-// TWO CALLERS CALL IT, both this manager's and both in deploy-slave.ts, which resolves those values
-// out of the cluster row, the server row, platform/versions.yaml and the installation's settings. A
-// machine at its FIRST installation stands in no such row, so it cannot start either step, and no
-// other FIRST placement exists for it: the machine's own clone of the catalogue (deploy-gitops.yaml,
-// above) runs long afterwards, on a machine that already carries all
-// three. What the two interfaces below are for is the SHAPE such a placement has to satisfy,
-// written down where it can be read: a machine that runs a script and takes a line, and values a
-// caller states without a table to read them out of. It is a demand on whatever places next, not a
-// third caller that is there.
+// WHAT THE MANAGER STILL HAS TO STATE, and it is two values and no shell: WHERE a released
+// executable is fetched from (ANSIWISE_DOWNLOAD_URL, carrying both slots below) and WHICH version
+// (platform/versions.yaml's pin, inventory/ansiwise-pin.ts). Never what the caller happens to hold.
 
-/** The name every caller starts, and the link this mechanism points at the version it placed. */
-export const ANSIWISE_BINARY_LINK = "/usr/local/bin/ansiwise";
+/** The deployment tool: the binary that runs a program, and the one every run is a detached child
+ *  of. Named as a constant because three places say it — the transfer, the reading, and the
+ *  refusal that names what a machine is short of. */
+export const ANSIWISE_TOOL = "ansiwise";
 
-/** Where the versioned binaries stand. The link above names one of them. */
-const ANSIWISE_BINARY_DIR = "/usr/local/bin";
+/** The serving binary: `serve` over a session's own pipes, `service` on an address, and
+ *  `install-service` to place the second one. It is a BINARY OF ITS OWN and not a program of the
+ *  tool above: asking THAT one for `serve` answers "no program is called serve", which is the whole reason
+ *  both names stand here. */
+export const ANSIWISE_REST_TOOL = "ansiwise-rest";
 
-/** WHERE the catalogue stands on the machine: the checkout `ansiwise serve` reads its programs and
- *  its `ansiwise.yaml` from, and the path the machine's own resident service is later written with
- *  (see the header). The command that starts that surface is the caller's — ANSIWISE_SERVE_COMMAND
- *  in this manager (kernel/config.ts) — and an installation whose command reads a different
- *  directory serves different programs than this placed. Nothing here can check that pairing, which
- *  is why the success line names both the setting and the path it wrote. */
-export const CATALOG_CHECKOUT = "/srv/ansiwise-catalog";
-
-/** WHERE the deployment programs read and write the platform tree — the MATERIAL. The programs
- *  (digita-deploy ansiwise/programs/) name this path on every `repository:` row, so the tree this
- *  places and the tree a later refresh feeds them have to be one path stated once. */
-export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
-
-/** The branch the catalogue is taken from: the trunk, for the reason the pin is read off the trunk
- *  (inventory/ansiwise-pin.ts) — the programs are the product, and a machine at its first
- *  installation has no install branch to read them off. The machine's own later clone of the same
- *  repository names the same branch. */
-const CATALOG_BRANCH = PRODUCT_BRANCH;
+/** The two, in the order a refusal names them. A machine carries both or it carries nothing worth
+ *  having: see BOTH EXECUTABLES in the header. */
+export const ANSIWISE_EXECUTABLES = [ANSIWISE_TOOL, ANSIWISE_REST_TOOL] as const;
 
 /** What the download address writes where the pinned version belongs. One placeholder and one
- *  source: the address says WHERE a version is fetched from, the pin says WHICH — so the two can
+ *  source: the address says WHERE a release is fetched from, the pin says WHICH — so the two can
  *  never state different versions. */
 export const VERSION_PLACEHOLDER = "<version>";
 
+/** What the download address writes where the executable's own name belongs. A release carries TWO
+ *  assets and they are told apart by nothing but this: an address that named one of them could
+ *  fetch `ansiwise-rest` only by being configured twice, and an installation with two addresses has
+ *  a way to point them at two different releases. */
+export const NAME_PLACEHOLDER = "<name>";
+
+/** The mode a transferred executable is given: `0755`, a file every account on the machine may run
+ *  and only its owner may write. SFTP sets it in the same call that writes the bytes, so there is no
+ *  window in which the file stands there unrunnable. */
+export const EXECUTABLE_MODE = 0o755;
+
+/** What stands in front of an executable's name when it is NAMED IN A COMMAND rather than written.
+ *  The transfer states a RELATIVE path, which SFTP resolves from the account's own home directory —
+ *  so nothing here has to know where that home is. A command is read by the machine's shell, which
+ *  resolves this the same way for the same account. */
+export const BOOTSTRAP_HOME = "~/";
+
+/** WHERE the catalogue stands on the machine: the checkout the serving binary reads its programs and
+ *  its `ansiwise.yaml` from. The machine's own path and not this module's invention — digita-deploy
+ *  `ansiwise/programs/deploy-gitops.yaml`'s `git_clone` row clones the catalogue repository to
+ *  exactly this path, and the resident service is given `--programs` out of it. */
+export const CATALOG_CHECKOUT = "/srv/ansiwise-catalog";
+
+/** The program files inside that checkout — what `--programs` has to name, because the option's own
+ *  default (`programs`, beside the working directory) is not where a catalogue keeps them. */
+export const CATALOG_PROGRAMS = `${CATALOG_CHECKOUT}/ansiwise/programs`;
+
+/** The file naming which plugins the installation turns on, inside the same checkout. It has to be
+ *  named because the option's default is `ansiwise.yaml` RELATIVE to the directory the process runs
+ *  in, and nothing here runs in the catalogue: see THE WORKING DIRECTORY IS NOT THE CATALOGUE at
+ *  `installServiceArgv`. */
+export const CATALOG_CONFIG = `${CATALOG_CHECKOUT}/ansiwise.yaml`;
+
+/** WHERE the deployment programs read and write the platform tree — the MATERIAL. The programs
+ *  (digita-deploy ansiwise/programs/) name this path on every `repository:` row, so the tree a
+ *  refresh feeds them and the tree they act on are one path stated once. */
+export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
+
 /** The name the service manager knows the resident surface by — the base name of the unit the
- *  binary carries and installs itself under (ansiwise-cli `lib/service_unit.dart` serviceUnitName).
- *  Named here only to ASK the machine about it; what stands in the unit is install-service's. */
+ *  serving binary carries and installs itself under (ansiwise-cli `lib/service_unit.dart`
+ *  serviceUnitName). Named here only to ASK the machine about it and to restart it; what stands
+ *  INSIDE the unit is install-service's alone. */
 export const ANSIWISE_SERVICE_UNIT = "ansiwise.service";
 
 /** The file the resident service reads its token out of, and the file install-service writes it to.
- *  The machine's own, not this module's invention: digita-deploy
- *  `ansiwise/programs/deploy-gitops.yaml`'s `file_from_vault` row writes this path out of the entry
- *  it mints at `<stage>/manager-host/ansiwise`, and the placement reads the value back out of it on
- *  the machine rather than carrying it through a caller. */
+ *  The machine's own: digita-deploy `ansiwise/programs/deploy-gitops.yaml`'s `file_from_vault` row
+ *  writes this path out of the entry it mints at `<stage>/manager-host/ansiwise`. */
 export const SERVICE_TOKEN_FILE = "/etc/ansiwise/service-token";
 
 /** The port the resident surface stands on, on the machine's tailnet address. An installation-wide
  *  constant and not a per-machine value: the manager dials `<tailnet address>:<this>` and the unit
- *  binds it, so a port decided per machine would be a second thing to look up before every dial.
- *  The binary states no default for `--listen` at all (ansiwise-cli `bin/ansiwise.dart`), which is
- *  why a number stands here rather than being left out. */
+ *  binds it, so a port decided per machine would be a second thing to look up before every dial. */
 export const ANSIWISE_SERVICE_PORT = 9953;
 
-/** The commands the placement itself runs on the machine. A machine at its first installation
- *  carries neither by rule — `deploy-host` installs the full set a machine needs, and it cannot run
- *  until this is done. */
-const REQUIRED_COMMANDS = ["curl", "git"] as const;
+/** The word that places the resident service, as the serving binary spells it (ansiwise-cli
+ *  `lib/service_installation.dart` installServiceProgram). */
+export const INSTALL_SERVICE_PROGRAM = "install-service";
 
-/** The packages that carry them on the pinned distribution. */
-const REQUIRED_PACKAGES = "curl ca-certificates git";
+/** How install-service is told the envelope: on standard input and no other way. It refuses every
+ *  other value of the option by name, because a file of raw answers would outlive the call and a
+ *  value on the command line stands in every process listing (ansiwise-cli bin/ansiwise_rest.dart). */
+export const ANSWERS_ON_STDIN = "-";
 
-/** The placement's wall clock. Two clones and one package install over a cold apt cache are the long
- *  acts in it. */
-export const PLACE_ANSIWISE_TIMEOUT_MS = 10 * 60_000;
+/** One command's wall clock. Every command this module runs is either a question or one act of the
+ *  binary's own — none of them is a package install or a clone any more, which is why the ten
+ *  minutes the composed script used to need are gone with it. The long act of a bootstrap is now the
+ *  TRANSFER, and its clock is the session's (adapters/ssh/port.ts). */
+const COMMAND_TIMEOUT_MS = 2 * 60_000;
 
-/** The probe's own, which reads and writes nothing. */
-const PROBE_TIMEOUT_MS = 60_000;
+/** WHAT MAY STAND IN A COMMAND'S ARGUMENT LIST, and the guard is the reason this module can say it
+ *  composes no shell. Every word reaching the machine is held against this before it is sent: no
+ *  whitespace, and none of the characters a shell reads as syntax — `; & | $ \` ( ) < > * ? [ ] { }
+ *  ' " \ # ! ~` except a leading `~`, which is what BOOTSTRAP_HOME is. A value that cannot be
+ *  written as one plain word is REFUSED rather than quoted, because a quoter is a shell composer
+ *  with a nicer name. */
+const WORD_RE = /^~?[A-Za-z0-9@%_+=:,./-]+$/;
 
-/** What a value put into a remote command may look like. Everything a command is composed from
- *  arrives from OUTSIDE this process — a version out of a file on the platform repo, two clone
- *  addresses out of the caller's settings, a branch off the cluster row — so each is held against
- *  its shape before it reaches a shell. */
-const VERSION_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
-const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
-const URL_RE = /^https:\/\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+$/;
-const USER_RE = /^[a-z_][a-z0-9_-]*$/;
 /** `<a.b.c.d>:<port>`, the shape `--listen` takes — and it is the BINARY's shape, not a shell's:
  *  ServiceInstallation reads the host as four numbers and answers false for everything else
  *  (ansiwise-cli lib/service_installation.dart `_isInTailnet`), so a MagicDNS name is a value the
@@ -186,287 +187,417 @@ const LISTEN_RE = /^\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}$/;
 export function isServiceAddress(listen: string): boolean {
   return LISTEN_RE.test(listen);
 }
-/** The credential rides one LINE of the script's standard input, so anything with a line break in it
- *  would leave the rest of that value standing where the script expects the next credential. */
+
+/** A slot nothing filled, in the shape a program file writes one — the same grammar
+ *  `install_pinned_tool` reads its own url with (ansiwise-host lib/src/steps/host/install_pinned_tool.dart). */
+const LEFTOVER_SLOT_RE = /<[a-z][a-z-]*>/;
+
+/** The credential rides one LINE of a command's standard input, so anything with a line break in it
+ *  would leave the rest of that value standing where the command expects the next line. */
 const SECRET_LINE_RE = /^[^\r\n]+$/;
 
-/** What the machine answers about itself. Separate facts, because each is placed separately and a
- *  run that finds three of them standing must not redo the fourth. */
-export interface MachinePlacement {
-  /** The version the link points at, `unversioned` when something else stands under that name, or
-   *  undefined when nothing does. */
-  binary?: string | undefined;
-  /** Whether PLATFORM_CHECKOUT is a git checkout. */
-  platform: boolean;
-  /** Whether CATALOG_CHECKOUT is a git checkout. */
-  catalog: boolean;
-  /** Whether that catalogue checkout carries the program files. */
-  programs: boolean;
-  /** What the service manager says about ANSIWISE_SERVICE_UNIT. Four facts and not one.
-   *
-   *  ENABLED and ACTIVE are two: a unit that is enabled and dead comes back at the next boot and
-   *  answers nothing until then, and a unit that is running and not enabled answers now and is gone
-   *  after a restart.
-   *
-   *  VERSION and LISTEN are the other two, and they are read because the unit's own command is where
-   *  they stand. `ExecStart` names the VERSIONED file — ansiwise-cli `ServiceInstallation.command`
-   *  puts `executable` first and `bin/ansiwise.dart` hands it `Platform.resolvedExecutable`, which is
-   *  ansiwise-<version> and never the link — and it carries the `--listen` the service was installed
-   *  with. A machine whose binary moved under a unit nobody re-installed is enabled and active and
-   *  starts the OLD file for ever under `Restart=always`, and a machine that rejoined the tailnet at
-   *  a fresh address is enabled and active and bound to the address it used to hold. */
-  service: {
-    enabled: boolean;
-    active: boolean;
-    /** The version of the file `ExecStart` names, UNVERSIONED where that file carries none in its
-     *  name, undefined where the service manager knows no such unit. */
-    version?: string | undefined;
-    /** The address on that command's `--listen`, undefined where it names none. */
-    listen?: string | undefined;
-  };
-  /** The commands of REQUIRED_COMMANDS the machine is missing. */
-  missingCommands: string[];
+/** WHERE one released executable is fetched from: the installation's address with both slots filled.
+ *
+ *  BOTH SLOTS, AND NEITHER IS OPTIONAL. `<version>` is the pin, so the address and the placed binary
+ *  can never state two versions; `<name>` is which of the release's two assets, so one address
+ *  reaches both and an installation cannot point the two halves of one engine at two releases. An
+ *  address that carries neither is refused where it is configured (kernel/config.ts), and what is
+ *  left over after both are filled is refused here — a slot nothing fills would be sent as it
+ *  stands. */
+export function downloadAddress(url: string, name: string, version: string): string {
+  return url.split(NAME_PLACEHOLDER).join(name).split(VERSION_PLACEHOLDER).join(version);
 }
 
-/** A binary standing under the plain name that this mechanism did not put there — its version cannot
- *  be read, so it is replaced by the pin rather than trusted. */
-export const UNVERSIONED = "unversioned";
-
-/** The read-only measurement. Runs before anything is placed and again after, so the verdict is a
- *  reading of the machine and not a repetition of what the placing script said it did. */
-export function probeScript(): string {
-  return `#!/usr/bin/env bash
-target=$(readlink -f "${ANSIWISE_BINARY_LINK}" 2>/dev/null || true)
-if [ -n "$target" ] && [ -x "$target" ]; then
-  case "$target" in
-    */ansiwise-*) echo "BINARY \${target##*/ansiwise-}" ;;
-    *) echo "BINARY ${UNVERSIONED}" ;;
-  esac
-else
-  echo "BINARY absent"
-fi
-[ -d "${PLATFORM_CHECKOUT}/.git" ] && echo "PLATFORM present" || echo "PLATFORM absent"
-[ -d "${CATALOG_CHECKOUT}/.git" ] && echo "CATALOG present" || echo "CATALOG absent"
-[ -d "${CATALOG_CHECKOUT}/ansiwise/programs" ] && echo "PROGRAMS present" || echo "PROGRAMS absent"
-systemctl is-enabled --quiet ${ANSIWISE_SERVICE_UNIT} 2>/dev/null && echo "SERVICE enabled" || echo "SERVICE not-enabled"
-systemctl is-active --quiet ${ANSIWISE_SERVICE_UNIT} 2>/dev/null && echo "SERVICE active" || echo "SERVICE not-active"
-exec_start=$(systemctl show -p ExecStart ${ANSIWISE_SERVICE_UNIT} 2>/dev/null | head -n 1)
-echo "SERVICE_EXEC $exec_start"
-for c in ${REQUIRED_COMMANDS.join(" ")}; do
-  command -v "$c" >/dev/null 2>&1 || echo "MISSING $c"
-done
-echo "PROBED"
-`;
+/** The command line that places the resident service, as an argument list and never as a string.
+ *
+ *  THE COMMAND IS THE BINARY'S OWN INTERFACE and every option below is one it declares:
+ *  install-service composes the unit's `ExecStart` out of the very options it was itself invoked
+ *  with (ansiwise-cli `lib/service_installation.dart`), so a unit written anywhere else is a copy of
+ *  that binary's interface kept by somebody who cannot see it change.
+ *
+ *  THE WORKING DIRECTORY IS NOT THE CATALOGUE, and that is what makes two of these options
+ *  compulsory. install-service takes the service's `WorkingDirectory` from the directory the
+ *  installer itself runs in, and resolves every relative option from there. The previous version of
+ *  this module got the catalogue into that slot with `cd <path> && …`, which is a shell composing
+ *  two commands out of one line. Here the installer runs wherever the session put it — the operating
+ *  account's home — so `--programs` and `--config` are stated ABSOLUTELY instead. `--runs` is left
+ *  out because its own default (`/var/lib/ansiwise/runs`, ansiwise-core
+ *  infrastructure/run_directory.dart) is already absolute and already right. */
+export function installServiceArgv(o: { executable: string; listen: string }): string[] {
+  return [
+    o.executable,
+    INSTALL_SERVICE_PROGRAM,
+    "--listen",
+    o.listen,
+    "--service-token-file",
+    SERVICE_TOKEN_FILE,
+    "--programs",
+    CATALOG_PROGRAMS,
+    "--config",
+    CATALOG_CONFIG,
+    "--answers",
+    ANSWERS_ON_STDIN,
+  ];
 }
 
-/** Read the probe's answer. `PROBED` closes it: a truncated read must never be taken for a machine
- *  that carries nothing, which is the shape that would place over a working installation. */
-export function parseProbe(stdout: string): MachinePlacement {
-  const lines = stdout.split("\n").map((l) => l.trim());
-  if (!lines.includes("PROBED")) {
-    throw errValidation("the placement probe did not finish — nothing was read about the machine; see the run log");
+/** WHERE the release assets are read from, as the bootstrap sees it: one address in, its bytes out.
+ *
+ *  A seam of its own and not the adapter port itself (adapters/downloads/port.ts), for the reason
+ *  PlacementMachine is one: the placement takes a machine and values and holds no run, no signal and
+ *  no session. The caller adapts its own port to this in one line, and what that costs is what keeps
+ *  this module drivable by a suite that opens no socket. */
+export interface ReleaseAssets {
+  /** The bytes served at `url`, or a thrown error naming what answered instead. */
+  read(url: string): Promise<Buffer>;
+}
+
+/** THE MACHINE, as the bootstrap sees it: a name to call it by in what an operator reads, a way to
+ *  WRITE a file, a way to run ONE command, and somewhere to put a line. Nothing else — the callers
+ *  there are (deploy-slave.ts `runPlacement`) satisfy these four out of a run's cached session, and
+ *  these four are the whole of what placing from anywhere else would have to supply.
+ *
+ *  `run` TAKES AN ARGUMENT LIST AND NOT A LINE, and that is the type doing the work this module's
+ *  header claims: a list of words cannot carry a pipeline, a redirection, a `&&` or a here-document,
+ *  and every word in it is held against WORD_RE before it is sent. Whoever implements this joins
+ *  those words and hands them to the machine; what they may not do is take a string from here,
+ *  because there is none to take. */
+export interface PlacementMachine {
+  /** What the machine is called in a refusal — the name an operator knows it by. */
+  name: string;
+  /** Write `content` at `remotePath` with `mode`. A RELATIVE path is the account's own home. */
+  putFile(remotePath: string, content: Buffer, mode: number): Promise<void>;
+  /** Run one command and answer its status and its WHOLE standard output. `stdin` is what the
+   *  command reads — it may reach no file and no argument list. */
+  run(argv: readonly string[], o: { timeoutMs: number; stdin?: Buffer }): Promise<CommandOutcome>;
+  /** Where a line an operator reads goes. */
+  log(line: string): void;
+}
+
+/** What one command left behind. */
+export interface CommandOutcome {
+  code: number;
+  stdout: string;
+}
+
+/** What the bootstrap needs said, and every one of these is a value: nothing here is a session, a
+ *  database row or a run. */
+export interface BootstrapRequest {
+  /** The version to place — platform/versions.yaml's pin (inventory/ansiwise-pin.ts), never what the
+   *  caller happens to hold. */
+  version: string;
+  /** WHERE a released executable is fetched from, carrying NAME_PLACEHOLDER and VERSION_PLACEHOLDER.
+   *  Filled in here, so the address, the pin and the placed file can never state three things. */
+  downloadUrl: string;
+}
+
+/** What the bootstrap answers: the version both executables now answer with, read off the machine,
+ *  and whether this run of it had anything to transfer. */
+export interface BootstrapVerdict {
+  version: string;
+  placed: boolean;
+}
+
+/** Give the machine both executables at the version the request pins, and transfer neither of them
+ *  where the file already standing there answers that version.
+ *
+ *  MEASURED, PLACED, MEASURED AGAIN, and the verdict is the second reading. A transfer that wrote an
+ *  error page would set the mode on it and resolve happily; what says the machine carries the pin is
+ *  the machine answering the pin. */
+export async function placeAnsiwise(
+  machine: PlacementMachine,
+  assets: ReleaseAssets,
+  req: BootstrapRequest,
+): Promise<BootstrapVerdict> {
+  const { version } = req;
+  assertWord(version, "version");
+  const standing = await readVersions(machine);
+  const missing = ANSIWISE_EXECUTABLES.filter((name) => standing[name] !== version);
+  if (missing.length === 0) {
+    machine.log(`${machine.name} already carries ${describeExecutables(version)} — nothing to place`);
+    return { version, placed: false };
   }
-  const binary = lines.find((l) => l.startsWith("BINARY "))?.slice("BINARY ".length);
-  const shown = lines.find((l) => l.startsWith("SERVICE_EXEC "))?.slice("SERVICE_EXEC ".length) ?? "";
-  return {
-    binary: binary === undefined || binary === "absent" ? undefined : binary,
-    platform: lines.includes("PLATFORM present"),
-    catalog: lines.includes("CATALOG present"),
-    programs: lines.includes("PROGRAMS present"),
-    service: {
-      enabled: lines.includes("SERVICE enabled"),
-      active: lines.includes("SERVICE active"),
-      ...startedCommand(shown),
-    },
-    missingCommands: lines.filter((l) => l.startsWith("MISSING ")).map((l) => l.slice("MISSING ".length)),
-  };
+  machine.log(
+    `placing on ${machine.name}: ${missing.map((name) => `${name} ${version} (it carries ${standing[name] ?? "none"})`).join(", ")}`,
+  );
+
+  for (const name of missing) {
+    const from = downloadAddress(req.downloadUrl, name, version);
+    // ANY slot and not only the two this fills. Nothing else fills one, so an address still carrying
+    // `<arch>` or `<os>` would be sent to the release host with the angle brackets in it and whatever
+    // came back placed as an executable — which is the reading-off-the-machine case one step later,
+    // and a worse sentence than this one.
+    const left = LEFTOVER_SLOT_RE.exec(from)?.[0];
+    if (left !== undefined) {
+      throw errValidation(
+        `the download address ${req.downloadUrl} still carries ${left} once ${NAME_PLACEHOLDER} and ` +
+        `${VERSION_PLACEHOLDER} were filled in — nothing else fills a slot here, and the address would be fetched as ` +
+        "it stands",
+      );
+    }
+    const bytes = await assets.read(from);
+    if (bytes.length === 0) {
+      throw errValidation(
+        `${from} served nothing — an empty file placed as ${name} on ${machine.name} would be a machine that answers ` +
+        "every command with a shell error. Check the release carries an asset under that name",
+      );
+    }
+    await machine.putFile(name, bytes, EXECUTABLE_MODE);
+    machine.log(`${machine.name}: ${bytes.length} bytes of ${name} ${version} written from ${from}`);
+  }
+
+  // The second reading, and the only thing this reports off. `--version` runs the file that was just
+  // written, so a truncated transfer, a release asset that is an error page and an architecture the
+  // machine cannot execute are all one answer here: not the pin.
+  const after = await readVersions(machine);
+  for (const name of ANSIWISE_EXECUTABLES) {
+    if (after[name] === version) continue;
+    throw errValidation(
+      `${BOOTSTRAP_HOME}${name} on ${machine.name} answers ${after[name] ?? "nothing"} after the transfer, not the pinned ` +
+      `${version} — ${downloadAddress(req.downloadUrl, name, version)} did not serve the executable it was expected to. ` +
+      "Check that the release carries an asset under that name and that it is built for this machine's architecture",
+    );
+  }
+  machine.log(`${machine.name} carries ${describeExecutables(version)}`);
+  return { version, placed: true };
+}
+
+/** The two executables and where they stand, in the words both the log line and the refusal use. */
+function describeExecutables(version: string): string {
+  return `${ANSIWISE_EXECUTABLES.map((name) => `${BOOTSTRAP_HOME}${name}`).join(" and ")} at ${version}`;
+}
+
+/** What each executable answers when it is asked which release it is.
+ *
+ *  ASKED, NEVER DERIVED FROM A FILE NAME. The version used to be read out of the name a symlink
+ *  pointed at, which was a statement this module wrote and this module read back — so it said what
+ *  the placement had INTENDED and never what the file is. Both binaries answer their release tag on
+ *  one line and nothing else on it (ansiwise-cli lib/installation.dart `answeredVersion`), and it is
+ *  answered before a program is looked for, so it works on a machine carrying no catalogue at all. */
+async function readVersions(machine: PlacementMachine): Promise<Record<string, string | undefined>> {
+  const answers: Record<string, string | undefined> = {};
+  for (const name of ANSIWISE_EXECUTABLES) {
+    answers[name] = await readVersion(machine, `${BOOTSTRAP_HOME}${name}`);
+  }
+  return answers;
+}
+
+/** The release the executable at `path` answers with, or undefined where nothing answered — which is
+ *  what a machine carrying no such file, a file that is not executable and a build too old to know
+ *  the flag all look like from here. Every one of those is placed over. */
+async function readVersion(machine: PlacementMachine, path: string): Promise<string | undefined> {
+  const asked = await machine.run([path, "--version"], { timeoutMs: COMMAND_TIMEOUT_MS });
+  if (asked.code !== 0) return undefined;
+  const line = asked.stdout.split("\n")[0]?.trim() ?? "";
+  return WORD_RE.test(line) ? line : undefined;
+}
+
+/** What the service manager says about ANSIWISE_SERVICE_UNIT — four facts, and not one.
+ *
+ *  ENABLED and ACTIVE are two: a unit that is enabled and dead comes back at the next boot and
+ *  answers nothing until then, and a unit that is running and not enabled answers now and is gone
+ *  after a restart. EXECUTABLE and LISTEN are the other two, and they are read because the unit's
+ *  own `ExecStart` is where they stand — a unit whose command names another file, or the address the
+ *  machine held before it rejoined the tailnet, is enabled and running and wrong. */
+export interface ServiceState {
+  enabled: boolean;
+  active: boolean;
+  /** The file `ExecStart` would run, undefined where the service manager knows no such unit. */
+  executable?: string | undefined;
+  /** The address on that command's `--listen`, undefined where it names none. */
+  listen?: string | undefined;
 }
 
 /** The file `ExecStart` names and the `--listen` on its argument list, out of what
  *  `systemctl show -p ExecStart` wrote. The service manager writes that value as
- *  `ExecStart={ path=<file> ; argv[]=<file> serve --listen <address> … ; … }` and as `ExecStart=`
+ *  `ExecStart={ path=<file> ; argv[]=<file> service --listen <address> … ; … }` and as `ExecStart=`
  *  alone for a unit it does not know, so an empty reading is a machine with no unit and not a machine
  *  whose unit says nothing. `path=` is read rather than the first word of `argv[]` because it is the
  *  one field that names the file the service manager would execute. */
 const EXEC_PATH_RE = /(?:^|\s)path=(\S+)/;
 const EXEC_LISTEN_RE = /--listen[ =]([^\s;]+)/;
-function startedCommand(shown: string): { version?: string; listen?: string } {
-  const path = EXEC_PATH_RE.exec(shown)?.[1];
-  if (path === undefined) return {};
-  const file = path.slice(path.lastIndexOf("/") + 1);
-  const listen = EXEC_LISTEN_RE.exec(shown)?.[1];
+
+/** Read the unit off the machine, in three questions that change nothing. */
+export async function readServiceState(machine: PlacementMachine): Promise<ServiceState> {
+  const enabled = await machine.run(["systemctl", "is-enabled", ANSIWISE_SERVICE_UNIT], { timeoutMs: COMMAND_TIMEOUT_MS });
+  const active = await machine.run(["systemctl", "is-active", ANSIWISE_SERVICE_UNIT], { timeoutMs: COMMAND_TIMEOUT_MS });
+  const shown = await machine.run(["systemctl", "show", "-p", "ExecStart", ANSIWISE_SERVICE_UNIT], { timeoutMs: COMMAND_TIMEOUT_MS });
+  const path = EXEC_PATH_RE.exec(shown.stdout)?.[1];
+  const listen = EXEC_LISTEN_RE.exec(shown.stdout)?.[1];
   return {
-    version: file.startsWith("ansiwise-") ? file.slice("ansiwise-".length) : UNVERSIONED,
+    enabled: enabled.stdout.trim() === "enabled",
+    active: active.stdout.trim() === "active",
+    ...(path !== undefined ? { executable: path } : {}),
     ...(listen !== undefined ? { listen } : {}),
   };
 }
 
-export interface PlaceInput {
+/** The unit as the machine just described it, in the words the decision is made in — so a line an
+ *  operator reads and the decision this took are the same four facts. */
+export function describeUnit(state: ServiceState): string {
+  if (state.executable === undefined) return "a unit the service manager does not know";
+  return `${state.enabled ? "enabled" : "NOT enabled"} and ${state.active ? "running" : "NOT running"}, ` +
+    `starting ${state.executable} on ${state.listen ?? "an address its command does not name"}`;
+}
+
+/** What the service placement needs said. */
+export interface ServiceRequest {
+  /** The version the two executables answer with — what this asserts before it writes a unit that
+   *  will start one of them for ever. */
   version: string;
-  downloadUrl: string;
-  repoUrl: string;
-  branch: string;
-  catalogUrl: string;
-  /** The credential the catalogue repository is read with, absent for a public one. */
-  catalogToken?: string | undefined;
-  /** The credential that raises a command to root, validated once at the top of the script. */
+  /** The address the resident surface is to stand on, `<a.b.c.d>:<port>`. */
+  listen: string;
+  /** The credential that raises install-service's own writes to root. */
   elevationPassword: string;
-  /** The account the checkouts are handed to — the one every later step reaches the machine as, and
-   *  the one refresh-checkout fetches into it with, which it cannot do on a root-owned tree. */
-  user: string;
-  /** The address the resident surface is to stand on, `<a.b.c.d>:<port>`. Absent where the caller
-   *  placed no service — see THE SERVICE IS PLACED LAST in the header. */
-  listen?: string | undefined;
-  /** What the probe found missing. Nothing that stands is touched. */
-  place: { commands: boolean; binary: boolean; platform: boolean; catalog: boolean; service: boolean };
+  /** Whether THIS run of the bootstrap replaced the executables. A unit that already names the right
+   *  file and the right address is left alone — unless the file under it changed, in which case the
+   *  running process is still the old inode. See AND THEN THE UNIT IS RESTARTED. */
+  replaced: boolean;
 }
 
-/** The script the machine runs and what its standard input carries, composed together because the
- *  script READS that input line by line: a script whose parts and a buffer whose lines were decided
- *  apart could disagree about how many credentials there are, and the shell would then read the
- *  elevation password into the variable meant for the catalogue's. */
-export interface RemotePlacement {
-  script: string;
-  stdin: Buffer;
-}
-
-/** Whether the placement carries the catalogue credential to the machine: only a run that actually
- *  clones the catalogue needs it, and only an installation that stated one has it. */
-function carriesCatalogToken(o: PlaceInput): boolean {
-  return o.place.catalog && o.catalogToken !== undefined;
-}
-
-/** The placing script, composed of only the parts the probe asked for.
+/** Leave the machine SERVING: the unit written, enabled, running, and starting the executable this
+ *  bootstrap placed on the address the caller stated.
  *
- *  NO CREDENTIAL STANDS IN THE SCRIPT, which is a file on the machine's disk for as long as the
- *  placement runs, and none stands in a command's arguments, which are in the machine's process
- *  listing. Both ride standard input: the script reads the catalogue's credential into a variable of
- *  its own and hands it to git through git's own configuration-by-environment, and `sudo -S` reads
- *  the elevation password off the line after it and everything from there on runs `sudo -n`. */
-export function placement(o: PlaceInput): RemotePlacement {
-  assertShape(o.version, VERSION_RE, "version");
-  assertShape(o.branch, BRANCH_RE, "branch");
-  assertShape(o.user, USER_RE, "operator account");
-  assertShape(o.downloadUrl, URL_RE, "download address");
-  assertShape(o.repoUrl, URL_RE, "clone address");
-  assertShape(o.catalogUrl, URL_RE, "catalogue address");
-  assertSecretLine(o.elevationPassword, "elevation password");
-  if (o.place.service) assertListen(o.listen ?? "");
-  const withToken = carriesCatalogToken(o);
-  if (withToken) assertSecretLine(o.catalogToken ?? "", "catalogue credential");
-  const parts = [`#!/usr/bin/env bash
-set -euo pipefail`];
-  if (withToken) {
-    parts.push(`IFS= read -r ANSIWISE_CATALOG_TOKEN
-export ANSIWISE_CATALOG_TOKEN`);
+ *  THE UNIT IS NOT COMPOSED HERE AND MAY NEVER BE. What is invoked is `ansiwise-rest install-service`,
+ *  which is the one thing that knows the command a unit has to carry — it renders `ExecStart` out of
+ *  the options it was itself given, checks the three lines the unit cannot work without, writes the
+ *  token file and the unit, reloads the service manager and enables the unit (ansiwise-cli
+ *  bin/ansiwise_rest.dart `_installService`). digita-deploy's deploy-gitops states the same rule from
+ *  the other side: "The unit that starts the service and the switch that turns it on are the
+ *  binary's own act."
+ *
+ *  IT IS `ansiwise-rest` AND NOT `ansiwise`, and the previous version of this module had it wrong.
+ *  install-service is a program of the SERVING binary; the deployment tool answers `no program is
+ *  called install-service` and exits 64.
+ *
+ *  THE TOKEN CROSSES THIS PROCESS, AND THAT IS A COST OF NOT HAVING A SHELL. install-service takes
+ *  the value in the envelope on its standard input and nowhere else — it refuses `--answers <path>`
+ *  by name — while the value itself lives at SERVICE_TOKEN_FILE, which only root may read. The bash
+ *  this replaced kept the value on the machine by piping `sudo cat` into the installer; a pipeline is
+ *  a shell. So the manager reads it over the session it already holds, puts it straight into the
+ *  envelope, and never writes it anywhere: it is in this process's memory for the length of one
+ *  command. Nothing here can prove that is safe — it is a judgement, and it is written down so it can
+ *  be argued with.
+ *
+ *  AND THEN THE UNIT IS RESTARTED, when this run replaced the executables. install-service ends at
+ *  `systemctl enable --now`, and `--now` starts a unit that is not running and does nothing to one
+ *  that is — while a service keeps the inode it started from, so a machine whose executable was just
+ *  replaced goes on serving the old code with the new file on disk answering the new version. No step
+ *  of the framework restarts a unit (simetrixch/ansiwise-plugins#141), which is why this one line is
+ *  still the manager's and why the row for `ansiwise-rest` is deliberately absent from
+ *  deploy-cluster's tool phase. It is not a unit composed here: the started command stays
+ *  install-service's, and this only makes the machine run the one it just wrote. `KillMode=process`
+ *  in that unit is what makes it safe — every run is started detached and outlives the restart. */
+export async function installAnsiwiseService(
+  machine: PlacementMachine,
+  req: ServiceRequest,
+): Promise<boolean> {
+  assertListen(req.listen);
+  assertSecretLine(req.elevationPassword, "elevation password");
+  const executable = `${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`;
+
+  // WHAT A STANDING UNIT WOULD HAVE TO SAY for this to leave it alone, and the version is ASKED OF
+  // THE FILE THE UNIT NAMES rather than compared against a path. `ExecStart` carries the absolute
+  // file the installer resolved to, which is not the word a command is written with, and it is the
+  // FILE's answer that decides anyway: a unit naming the right path whose file was replaced under it
+  // is exactly the machine this has to notice.
+  const before = await readServiceState(machine);
+  const startsPinned = before.executable !== undefined
+    && (await readVersion(machine, before.executable)) === req.version;
+  if (!req.replaced && before.enabled && before.active && startsPinned && before.listen === req.listen) {
+    machine.log(`${machine.name}: ${ANSIWISE_SERVICE_UNIT} is ${describeUnit(before)} — nothing to place`);
+    return false;
   }
-  if (o.place.service) {
-    // The service part needs the password a SECOND time — install-service takes it in the envelope
-    // on its own standard input, because the installation says the caller hands it over
-    // (digita-deploy `ansiwise.yaml`: `elevation: {password_from_caller: true}`). So it is read into
-    // a variable here instead of being handed straight to `sudo -S`, and `printf` is the shell's own
-    // builtin: the value reaches sudo down a pipe and stands in no process listing, exactly as it
-    // does when sudo reads it off this script's input.
-    parts.push(`IFS= read -r ANSIWISE_ELEVATION
-printf '%s\\n' "$ANSIWISE_ELEVATION" | sudo -S -p '' -v`);
-  } else {
-    parts.push("sudo -S -p '' -v");
-  }
-  if (o.place.commands) {
-    parts.push(`sudo -n apt-get update
-sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y ${REQUIRED_PACKAGES}`);
-  }
-  if (o.place.binary) {
-    parts.push(`tmp=$(mktemp)
-curl -fsSL "${o.downloadUrl}" -o "$tmp"
-sudo -n install -m0755 "$tmp" "${ANSIWISE_BINARY_DIR}/ansiwise-${o.version}"
-rm -f "$tmp"
-sudo -n ln -sfn "${ANSIWISE_BINARY_DIR}/ansiwise-${o.version}" "${ANSIWISE_BINARY_LINK}"
-echo "PLACED_BINARY ${o.version}"`);
-  }
-  if (o.place.catalog) {
-    // The credential reaches git as an authorization it composes itself, out of the environment: the
-    // helper string is what stands in the argument list and in the checkout's config, the value
-    // never does. GIT_TERMINAL_PROMPT=0 turns a repository this credential cannot read into a
-    // refusal the run log names, instead of a git that waits for a username nobody can type.
-    const credential = withToken
-      ? ` -c credential.helper='!f(){ printf "username=x-access-token\\npassword=%s\\n" "$ANSIWISE_CATALOG_TOKEN"; };f'`
-      : "";
-    parts.push(`export GIT_TERMINAL_PROMPT=0
-sudo -n install -d -o "${o.user}" -g "${o.user}" "${CATALOG_CHECKOUT}"
-git${credential} clone --branch "${CATALOG_BRANCH}" "${o.catalogUrl}" "${CATALOG_CHECKOUT}"
-echo "PLACED_CATALOG $(git -C "${CATALOG_CHECKOUT}" rev-parse --short HEAD)"`);
-  }
-  if (o.place.platform) {
-    parts.push(`export GIT_TERMINAL_PROMPT=0
-sudo -n install -d -o "${o.user}" -g "${o.user}" "${PLATFORM_CHECKOUT}"
-git clone --branch "${o.branch}" "${o.repoUrl}" "${PLATFORM_CHECKOUT}"
-echo "PLACED_PLATFORM $(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)"`);
-  }
-  if (o.place.service) {
-    // THE VERSIONED BINARY AND NOT THE LINK. install-service compares the file this process was
-    // STARTED from against the executable it resolved to and refuses when they differ, because a
-    // unit rendered from a checkout would name the toolchain (ansiwise-cli
-    // `ServiceInstallation.problems`). The link resolves to the versioned file, so starting it
-    // through the link is the one way to make those two names differ on a machine this mechanism
-    // placed — and the version is exactly what the probe just read off the link.
-    //
-    // THE WORKING DIRECTORY IS THE CATALOGUE, because install-service takes the service's working
-    // directory from the directory it is itself run in — and it is what makes the two options NOT
-    // named below land right. `--config` defaults to `Configuration.defaultFileName`
-    // ('ansiwise.yaml', ansiwise-core config/configuration.dart) and `--runs` to
-    // `RunDirectory.defaultRoot` ('/var/lib/ansiwise/runs', ansiwise-core
-    // infrastructure/run_directory.dart), both of which are already the right values here; writing
-    // them out would be two more copies of the binary's own decisions kept where nobody sees them
-    // change. `--programs` IS named, because its default ('programs', beside the working directory)
-    // is not where the catalogue keeps them.
-    //
-    // THE ESCAPED PASSWORD IS ASSIGNED BEFORE IT IS USED, and not written inline as an argument. A
-    // command substitution standing in an argument list does not carry its failure out — `set -e`
-    // never sees it — so an escape that failed there would put an EMPTY password into the envelope
-    // and leave the refusal to install-service. Assigned, the failure ends the script where it
-    // happened.
-    //
-    // AND THEN THE UNIT IS RESTARTED, because install-service ends at `systemctl enable --now`
-    // (ansiwise-cli bin/ansiwise.dart) and `--now` starts a unit that is not running and does nothing
-    // to one that is. A machine being placed at a MOVED pin is running: the unit file it just got
-    // names ansiwise-<the new version> and the process still serving is the old file, which stays on
-    // disk. Without this line the placement would then read a unit that says the new version off a
-    // machine serving the old one. It is not a unit composed here — the started command stays
-    // install-service's, and this only makes the machine run the one it just wrote. `KillMode=process`
-    // in that unit is what makes it safe: every run is started detached and outlives the restart.
-    parts.push(`cd "${CATALOG_CHECKOUT}"
-if ! sudo -n test -r "${SERVICE_TOKEN_FILE}"; then
-  echo "NO_SERVICE_TOKEN"
-  exit 1
-fi
-service_token=$(sudo -n cat "${SERVICE_TOKEN_FILE}")
-case "$service_token" in
-  '' | *[!0-9A-Za-z._-]*) echo "MALFORMED_SERVICE_TOKEN"; exit 1 ;;
-esac
-elevation_json=$(printf '%s' "$ANSIWISE_ELEVATION" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g')
-printf '{"answers":{"service_token":"%s"},"elevation_password":"%s"}' "$service_token" "$elevation_json" \\
-  | "${ANSIWISE_BINARY_DIR}/ansiwise-${o.version}" install-service \\
-      --listen "${o.listen ?? ""}" \\
-      --service-token-file "${SERVICE_TOKEN_FILE}" \\
-      --programs "${CATALOG_CHECKOUT}/ansiwise/programs" \\
-      --answers -
-sudo -n systemctl restart ${ANSIWISE_SERVICE_UNIT}
-echo "PLACED_SERVICE"`);
-  }
-  parts.push('echo "PLACED"');
-  return {
-    script: parts.join("\n") + "\n",
+  machine.log(
+    `placing on ${machine.name}: ${ANSIWISE_SERVICE_UNIT} starting ${ANSIWISE_REST_TOOL} ${req.version} on ${req.listen}, ` +
+    `by running ${INSTALL_SERVICE_PROGRAM} (it is ${describeUnit(before)})`,
+  );
+
+  const token = await readServiceToken(machine, req.elevationPassword);
+  const installed = await machine.run(installServiceArgv({ executable, listen: req.listen }), {
+    timeoutMs: COMMAND_TIMEOUT_MS,
     stdin: Buffer.from(
-      (withToken ? `${o.catalogToken ?? ""}\n` : "") + `${o.elevationPassword}\n`,
+      JSON.stringify({ answers: { service_token: token }, elevation_password: req.elevationPassword }),
       "utf8",
     ),
-  };
+  });
+  if (installed.code !== 0) {
+    throw errValidation(
+      `install-service refused to place ${ANSIWISE_SERVICE_UNIT} on ${machine.name} (exit ${installed.code}) — read what ` +
+      "it wrote in the run log; it names everything that stands in the way at once, and every one of them is either the " +
+      "address, the token file, or the elevation password the run carries",
+    );
+  }
+  if (req.replaced) {
+    const restarted = await machine.run(["sudo", "-S", "systemctl", "restart", ANSIWISE_SERVICE_UNIT], {
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      stdin: Buffer.from(`${req.elevationPassword}\n`, "utf8"),
+    });
+    if (restarted.code !== 0) {
+      throw errValidation(
+        `${ANSIWISE_SERVICE_UNIT} on ${machine.name} was rewritten to start ${ANSIWISE_REST_TOOL} ${req.version} and would ` +
+        `not restart onto it (exit ${restarted.code}) — the process still serving is the one it started before. Read ` +
+        `\`systemctl status ${ANSIWISE_SERVICE_UNIT}\` and \`journalctl -u ${ANSIWISE_SERVICE_UNIT}\` on ${machine.name}`,
+      );
+    }
+  }
+
+  // READ OFF THE MACHINE, never off the installer's own claim: install-service can write the unit,
+  // enable it and exit zero, and the service manager then refuse to start it — a bind to an address
+  // the machine does not hold at this second, a token file it cannot read.
+  const active = await machine.run(["systemctl", "is-active", ANSIWISE_SERVICE_UNIT], { timeoutMs: COMMAND_TIMEOUT_MS });
+  const said = active.stdout.trim();
+  if (said !== "active") {
+    throw errValidation(
+      `${ANSIWISE_SERVICE_UNIT} on ${machine.name} is ${said === "" ? "not known to the service manager" : said} after ` +
+      `install-service was run — the machine is not serving ${ANSIWISE_REST_TOOL} ${req.version} on ${req.listen}. Read ` +
+      `\`systemctl status ${ANSIWISE_SERVICE_UNIT}\` and \`journalctl -u ${ANSIWISE_SERVICE_UNIT}\` on ${machine.name}`,
+    );
+  }
+  machine.log(
+    `${machine.name} serves ${ANSIWISE_REST_TOOL} ${req.version} on ${req.listen}, out of ${CATALOG_PROGRAMS} — ` +
+    `${ANSIWISE_SERVICE_UNIT} is enabled and running`,
+  );
+  return true;
 }
 
-function assertShape(value: string, shape: RegExp, what: string): void {
-  if (!shape.test(value)) {
-    throw errValidation(`the ${what} "${value}" is not a value this placement may put into a command on the machine`);
+/** The value install-service has to be told, read off the machine with the run's own elevation.
+ *
+ *  REFUSED BY NAME rather than left inside "the command failed": a machine that has not been through
+ *  the run that mints the token has no surface to install, and that is a different thing to go and
+ *  fix than a wrong password. */
+async function readServiceToken(machine: PlacementMachine, elevationPassword: string): Promise<string> {
+  const read = await machine.run(["sudo", "-S", "cat", SERVICE_TOKEN_FILE], {
+    timeoutMs: COMMAND_TIMEOUT_MS,
+    stdin: Buffer.from(`${elevationPassword}\n`, "utf8"),
+  });
+  const token = read.stdout.trim();
+  if (read.code !== 0 || token.length === 0) {
+    throw errValidation(
+      `${machine.name} answers nothing readable at ${SERVICE_TOKEN_FILE}, and that value is the whole authentication of ` +
+      "the resident surface — the deploy-gitops program's file_from_vault row writes it out of the entry it mints at " +
+      `<stage>/manager-host/ansiwise. Run deploy-gitops on ${machine.name} first, then enable the service again`,
+    );
+  }
+  if (!WORD_RE.test(token)) {
+    throw errValidation(
+      `${SERVICE_TOKEN_FILE} on ${machine.name} does not hold a token — it carries something that is not one. Delete it ` +
+      "together with the <stage>/manager-host/ansiwise entry and run deploy-gitops again, which mints a fresh one; a " +
+      "service installed with what stands there now would present it to nobody",
+    );
+  }
+  return token;
+}
+
+/** One word of a command, refused rather than quoted. See WHAT MAY STAND IN A COMMAND'S ARGUMENT
+ *  LIST — the guard is what lets this module say it composes no shell, so it is applied to every
+ *  value that arrives from outside this process. */
+export function assertWord(value: string, what: string): void {
+  if (!WORD_RE.test(value)) {
+    throw errValidation(
+      `the ${what} "${value}" is not one plain word, and this places nothing it would have to quote — a value carrying ` +
+      "whitespace or anything a shell reads as syntax is refused here rather than escaped, because an escaper is a shell " +
+      "composer under another name",
+    );
   }
 }
 
@@ -484,210 +615,10 @@ function assertListen(listen: string): void {
   );
 }
 
-/** The same guard for a value that may not be shown: a credential rides ONE line of the placement's
- *  standard input, and a refusal that quoted it would put it in the run log. */
+/** The guard for a value that may not be shown: a credential rides ONE line of a command's standard
+ *  input, and a refusal that quoted it would put it in the run log. */
 function assertSecretLine(value: string, what: string): void {
   if (!SECRET_LINE_RE.test(value)) {
-    throw errValidation(`the ${what} carries a line break or is empty — it rides one line of the placement's standard input`);
+    throw errValidation(`the ${what} carries a line break or is empty — it rides one line of a command's standard input`);
   }
-}
-
-/** THE MACHINE, as the placement sees it: a name to call it by in what an operator reads, a way to
- *  run a script on it and read back everything it wrote, and somewhere to put a line. Nothing else —
- *  the two callers there are (deploy-slave.ts `runPlacement`) satisfy these three out of a run's
- *  cached session and a server row, and these three are the whole of what placing from anywhere else
- *  would have to supply. */
-export interface PlacementMachine {
-  /** What the machine is called in a refusal — the name an operator knows it by. */
-  name: string;
-  /** Put `script` on the machine under a path derived from `name`, run it, and answer its exit code
-   *  and its WHOLE standard output (not a tail: the probe's answer is parsed out of it). `stdin` is
-   *  the credentials the script reads line by line — it may reach no file and no argument list. */
-  runScript(name: string, script: string, o: { timeoutMs: number; stdin?: Buffer }): Promise<{ code: number; stdout: string }>;
-  /** Where a line an operator reads goes. */
-  log(line: string): void;
-}
-
-/** What the placement needs said, and every one of these is a value: nothing here is a session, a
- *  database row or a run. */
-export interface PlacementRequest {
-  /** The version to place — platform/versions.yaml's pin (inventory/ansiwise-pin.ts), never what the
-   *  caller happens to hold. */
-  version: string;
-  /** WHERE a version of the binary is fetched from, with VERSION_PLACEHOLDER standing where the
-   *  version goes. Filled in here, so the address and the pin can never state two versions. */
-  downloadUrl: string;
-  /** The clone address of the installation repository carrying `ansiwise.yaml` and
-   *  `ansiwise/programs/` — the CATALOGUE, which is not the platform repository. */
-  catalogUrl: string;
-  /** The credential that repository is read with, absent for a public one. */
-  catalogToken?: string | undefined;
-  /** The clone address of the platform repository — the MATERIAL the programs act on. */
-  repoUrl: string;
-  /** The branch the platform checkout is stood on: the machine's install branch. */
-  branch: string;
-  /** The account the two checkouts are handed to — the one every later act reaches the machine as. */
-  user: string;
-  /** The credential that raises the placement's commands to root. */
-  elevationPassword: string;
-  /** The address the resident surface is to stand on, `<a.b.c.d>:<port>` — the machine's tailnet
-   *  address and the port the caller will dial it on. Absent says the caller is placing onto a
-   *  machine that has no such address yet, and the unit is then neither written nor asked about;
-   *  stated says the placement leaves ANSIWISE_SERVICE_UNIT enabled, running and starting THIS
-   *  version on THIS address, or refuses. */
-  listen?: string | undefined;
-}
-
-/** What the placement answers: the version the machine now carries, read off the machine, whether
- *  this run of it had anything to place, and — where the request stated an address — that the
- *  service is enabled, running and starting that version on that address, read off the machine the
- *  same way. */
-export interface PlacementVerdict {
-  version: string;
-  placed: boolean;
-  service?: boolean;
-}
-
-/** Give the machine the binary, the catalogue, the tree the programs act on and — where the request
- *  states an address for it — the resident service, at the version the request pins, and place
- *  nothing that already stands. */
-export async function placeAnsiwise(machine: PlacementMachine, req: PlacementRequest): Promise<PlacementVerdict> {
-  const { version } = req;
-  const downloadUrl = req.downloadUrl.split(VERSION_PLACEHOLDER).join(version);
-
-  // WHAT A STANDING UNIT WOULD HAVE TO SAY for this run to leave it alone: the version being placed
-  // and the address being stated. Undefined is a request that states no service at all.
-  const want = req.listen === undefined ? undefined : { version, listen: req.listen };
-  const before = await probe(machine, "place-probe");
-  const place = {
-    commands: before.missingCommands.length > 0,
-    binary: before.binary !== version,
-    catalog: !before.catalog,
-    platform: !before.platform,
-    service: want !== undefined && !standing(before, want),
-  };
-  if (!place.commands && !place.binary && !place.catalog && !place.platform && !place.service) {
-    assertPrograms(before, req.catalogUrl);
-    machine.log(`${machine.name} already carries ansiwise ${version}, the catalogue at ${CATALOG_CHECKOUT}, the checkout at ${PLATFORM_CHECKOUT}${want !== undefined ? ` and ${ANSIWISE_SERVICE_UNIT} ${describeUnit(before)}` : ""} — nothing to place`);
-    return { version, placed: false, ...(want !== undefined ? { service: true } : {}) };
-  }
-  machine.log(
-    `placing on ${machine.name}: ${[
-      place.commands ? `the commands it is missing (${before.missingCommands.join(", ")})` : undefined,
-      place.binary ? `ansiwise ${version} (it carries ${before.binary ?? "none"})` : undefined,
-      place.catalog ? `the catalogue at ${CATALOG_CHECKOUT} from ${req.catalogUrl} on ${CATALOG_BRANCH}` : undefined,
-      place.platform ? `the checkout at ${PLATFORM_CHECKOUT} from ${req.repoUrl} on ${req.branch}` : undefined,
-      place.service ? `${ANSIWISE_SERVICE_UNIT} starting ansiwise ${version} on ${req.listen ?? ""}, by running install-service out of ${CATALOG_CHECKOUT} (it is ${describeUnit(before)})` : undefined,
-    ].filter((s) => s !== undefined).join(", ")}`);
-
-  const composed = placement({
-    version, downloadUrl, repoUrl: req.repoUrl, branch: req.branch, catalogUrl: req.catalogUrl,
-    ...(req.catalogToken !== undefined ? { catalogToken: req.catalogToken } : {}),
-    ...(req.listen !== undefined ? { listen: req.listen } : {}),
-    elevationPassword: req.elevationPassword, user: req.user, place,
-  });
-  const cap = await machine.runScript("place-ansiwise", composed.script, {
-    timeoutMs: PLACE_ANSIWISE_TIMEOUT_MS,
-    stdin: composed.stdin,
-  });
-  // The two the service part refuses on its own, each named where the machine is put right rather
-  // than left inside "the command that failed". The token file is the one thing install-service
-  // cannot invent: a machine that has not been through the run minting it has no surface to install.
-  if (cap.stdout.includes("NO_SERVICE_TOKEN")) {
-    throw errValidation(
-      `${machine.name} carries no ${SERVICE_TOKEN_FILE}, and it is the whole authentication of the resident surface — ` +
-      "the deploy-gitops program's file_from_vault row writes it out of the entry it mints at <stage>/manager-host/ansiwise. " +
-      `Run deploy-gitops on ${machine.name} first, then enable the service again`,
-    );
-  }
-  if (cap.stdout.includes("MALFORMED_SERVICE_TOKEN")) {
-    throw errValidation(
-      `${SERVICE_TOKEN_FILE} on ${machine.name} does not hold a token — it is empty, or it carries something that is not ` +
-      "one. Delete it together with the <stage>/manager-host/ansiwise entry and run deploy-gitops again, which mints a " +
-      "fresh one; a service installed with what stands there now would present it to nobody",
-    );
-  }
-  if (cap.code !== 0 || !cap.stdout.includes("PLACED")) {
-    throw errValidation(
-      `could not place ansiwise ${version}, the catalogue and the checkout on ${machine.name} (exit ${cap.code}) — ` +
-      "read what the machine wrote for the command that failed; a clone it was not allowed to read is what a private " +
-      "catalogue with no credential looks like. Fix the machine or the address, then place again",
-    );
-  }
-
-  // The verdict, read off the machine a second time rather than off the script that just wrote to
-  // it: a download that fetched an error page installs and exits zero.
-  const after = await probe(machine, "place-verify");
-  if (after.binary !== version) {
-    throw errValidation(
-      `${ANSIWISE_BINARY_LINK} on ${machine.name} points at ${after.binary ?? "nothing"} after the placement, not at ` +
-      `the pinned ${version} — the fetched file is not what ${downloadUrl} was expected to serve`,
-    );
-  }
-  if (!after.catalog) {
-    throw errValidation(`${CATALOG_CHECKOUT} on ${machine.name} is still not a checkout after the clone — read what the clone wrote`);
-  }
-  if (!after.platform) {
-    throw errValidation(`${PLATFORM_CHECKOUT} on ${machine.name} is still not a checkout after the clone — read what the clone wrote`);
-  }
-  assertPrograms(after, req.catalogUrl);
-  // The service is read off the machine for the same reason the binary is: install-service can write
-  // the unit, enable it and exit zero, and the service manager then refuse to start it — a bind to
-  // an address the machine does not hold, a token file it cannot read. What a caller is told is what
-  // the service manager says, and never what the installer claimed.
-  if (want !== undefined && !standing(after, want)) {
-    throw errValidation(
-      `${ANSIWISE_SERVICE_UNIT} on ${machine.name} is ${describeUnit(after)} after install-service was run — the machine ` +
-      `is not serving ansiwise ${want.version} on ${want.listen}. Read \`systemctl status ${ANSIWISE_SERVICE_UNIT}\` ` +
-      `and \`journalctl -u ${ANSIWISE_SERVICE_UNIT}\` on ${machine.name}`,
-    );
-  }
-  machine.log(`${machine.name} carries ansiwise ${version} (${ANSIWISE_BINARY_LINK}), the catalogue at ${CATALOG_CHECKOUT} on ${CATALOG_BRANCH} and the checkout at ${PLATFORM_CHECKOUT} on ${req.branch}${want !== undefined ? `, and ${ANSIWISE_SERVICE_UNIT} is ${describeUnit(after)}` : ""} — ANSIWISE_SERVE_COMMAND has to serve its programs out of ${CATALOG_CHECKOUT}`);
-  return { version, placed: true, ...(want !== undefined ? { service: true } : {}) };
-}
-
-/** Whether the machine is left the way a stated service asks for it, in all four of the facts the
- *  probe reads: ENABLED, so a restart brings it back; RUNNING, so it answers now; and STARTING the
- *  version this is placing at the address this was told to stand on, because those two are what the
- *  unit's own command names and neither of them follows from the other two. A machine whose binary
- *  moved under a unit nobody re-installed is enabled and running and starts the file the previous
- *  placement wrote, and a machine that rejoined the tailnet at a fresh address (digita-deploy
- *  ansiwise/programs/tailnet-rejoin.yaml hands the host a new one) is enabled and running and bound
- *  to the address it used to hold. Any of the four short is a re-installation, not a report. */
-function standing(state: MachinePlacement, want: { version: string; listen: string }): boolean {
-  return state.service.enabled && state.service.active
-    && state.service.version === want.version && state.service.listen === want.listen;
-}
-
-/** The unit as the machine just described it, in the words the comparison above is made in — so a
- *  line an operator reads and the decision the placement took are the same four facts. */
-function describeUnit(state: MachinePlacement): string {
-  const { enabled, active, version, listen } = state.service;
-  if (version === undefined) return "a unit the service manager does not know";
-  return `${enabled ? "enabled" : "NOT enabled"} and ${active ? "running" : "NOT running"}, ` +
-    `starting ansiwise ${version} on ${listen ?? "an address its command does not name"}`;
-}
-
-async function probe(machine: PlacementMachine, name: string): Promise<MachinePlacement> {
-  const cap = await machine.runScript(name, probeScript(), { timeoutMs: PROBE_TIMEOUT_MS });
-  return parseProbe(cap.stdout);
-}
-
-/** The catalogue is the program FILES, not the checkout that holds them: a machine carrying none of
- *  them leaves every later step starting a program by a name nothing declares. A checkout that
- *  stands there and carries no `ansiwise/programs` is a checkout of the wrong repository, and it is
- *  refused rather than cloned over — replacing a tree somebody put there is not this act's to do.
- *
- *  THE ADDRESS IN FORCE is what the refusal names, and it names it as the address, not as where the
- *  tree came from: this runs on the no-op path too (the probe found the checkout standing, and this
- *  placement cloned nothing), so a refusal saying the tree WAS CLONED FROM that address would state
- *  a history it cannot know. Which setting carried the address is the caller's own —
- *  ANSIWISE_CATALOG_URL in this manager — and the value is true for every caller. */
-function assertPrograms(state: MachinePlacement, catalogUrl: string): void {
-  if (state.programs) return;
-  throw errValidation(
-    `${CATALOG_CHECKOUT} on the machine carries no ansiwise/programs — the catalogue address in force is ${catalogUrl}, and the ` +
-    "catalogue is the repository holding ansiwise.yaml and ansiwise/programs/. Point the catalogue address at that " +
-    `repository, or take ${CATALOG_CHECKOUT} off the machine so it is cloned again`,
-  );
 }

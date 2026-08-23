@@ -50,7 +50,7 @@ export interface ChannelOptions {
  *  one-shot buffer), which is right for `kubectl get ...` and makes a request/response protocol
  *  impossible: the counterpart reads end-of-input before the first request arrives. This keeps
  *  stdin OPEN — `stream` is the command's stdin and stdout as one byte stream, and whoever holds
- *  it speaks whatever protocol the command speaks (HTTP, for `ansiwise serve`) for as long as
+ *  it speaks whatever protocol the command speaks (HTTP, for `ansiwise-rest serve`) for as long as
  *  the channel lives. */
 export interface SshChannel {
   /** The conversation: writes reach the remote command's stdin, reads are its stdout. */

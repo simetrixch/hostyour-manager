@@ -1,333 +1,240 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
   makeHarness, disposeHarnesses, scriptedHosts, hostsFactory,
-  ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, ANSIWISE_CATALOG_URL, PARAMS, type HostsScript,
+  ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, type HostsScript,
 } from "./deploy-slave.fixture.ts";
+import { assetBytes, ScriptedReleases, SCRIPTED_HOME } from "./deploy-slave.placement.fixture.ts";
+import { ELEVATION, ports, placeCtx, target, transferred, commands } from "./place-ansiwise.fixture.ts";
+import { placeAnsiwiseStep } from "./defs/place-ansiwise.step.ts";
 import {
-  ELEVATION, CATALOG_TOKEN, PORTS_URL, ports, placeCtx, target, placingScripts,
-} from "./place-ansiwise.fixture.ts";
-import { placeAnsiwiseStep } from "./defs/deploy-slave.ts";
-import {
-  placeAnsiwise, parseProbe, placement, probeScript,
-  ANSIWISE_BINARY_LINK, CATALOG_CHECKOUT, PLATFORM_CHECKOUT, UNVERSIONED,
+  placeAnsiwise, downloadAddress, assertWord,
+  ANSIWISE_EXECUTABLES, ANSIWISE_TOOL, ANSIWISE_REST_TOOL, EXECUTABLE_MODE, BOOTSTRAP_HOME,
+  NAME_PLACEHOLDER, VERSION_PLACEHOLDER,
   type PlacementMachine,
 } from "./defs/place-ansiwise.ts";
 
-// place-ansiwise is what every other machine-side step stands on: `ansiwise serve` is a binary
-// reading a catalogue, and until this ran a machine has neither. Five things are held down here.
+// place-ansiwise is the BOOTSTRAP, and what is held down here is that it is a file transfer and
+// nothing else. Everything a machine is given after this is given by a program of its own catalogue;
+// this exists only because that apparatus needs an executable before it can measure anything.
 //
-// IT IS ONE MECHANISM AND IT NEEDS NO MANAGER. `placeAnsiwise` takes a machine and values, so the
-// last suite drives it over an ssh session and nothing else — no database, no run context, no server
-// row. That is the shape a first install of a master would have to reach a machine in; no such
-// caller exists, and holding the mechanism to it here is what keeps one possible. The step above it
-// (deploy-slave.ts) is the manager's half and the only caller there is: it resolves a SlaveTarget
-// into those values.
+// NO SHELL REACHES THE MACHINE. The proof is not a reading of the module — it is a reading of every
+// command the step actually ran: each is a plain argument list, and a bootstrap that went back to
+// composing a script would put a `bash`, a `;`, a `&&` or a `|` into one of them. That is the
+// assertion the whole issue turns on, so it is made against what was SENT and never against what the
+// code looks like.
 //
-// THE PIN DECIDES, never the caller. What is placed is the version platform/versions.yaml states,
-// and a machine already carrying a different one is brought onto it.
+// BOTH EXECUTABLES, OR NEITHER IS WORTH ANYTHING. `ansiwise-rest` refuses to start when `ansiwise` is
+// not standing beside it, so a bootstrap that placed one leaves a machine that answers for programs
+// and runs none of them. Two names, one loop, one address with `<name>` in it.
 //
-// PLACING TWICE PLACES NOTHING. The scripted machine carries the placement as state that the
-// PLACING SCRIPT writes and the PROBE reads, so the second run of the step measures what the first
-// one left. Nothing is adjusted between the two runs — an idempotence test whose test moved the
-// world in between would be a test of the test.
+// THE PIN DECIDES, never the caller, and never a file name. Both binaries answer `--version`, so what
+// says a machine carries the pin is the machine answering the pin — a naming convention this module
+// wrote and then read back would only ever repeat its own intention.
 //
-// THE CATALOGUE AND THE MATERIAL ARE TWO REPOSITORIES, at two paths. The platform checkout is what
-// the deployment programs ACT on; the catalogue at CATALOG_CHECKOUT is what they are READ from, and
-// the first version of this step cloned only the first and then looked for programs inside it — a
-// refusal on every real machine that no test could see.
-//
-// A CHECKOUT IS NOT A CATALOGUE. A tree that carries no ansiwise/programs is refused by name: every
-// later step starts a program BY NAME, and a machine with the tree and none of the files fails on
-// the first of them with nothing said about why.
+// PLACING TWICE PLACES NOTHING. The scripted machine carries its executables as the bytes the
+// TRANSFER wrote, and `--version` reads them back out, so the second run of the step measures what
+// the first one left. Nothing is adjusted in between — an idempotence test whose test moved the world
+// would be a test of the test.
 
 afterEach(() => disposeHarnesses());
 
 describe("place-ansiwise", () => {
-  it("places the pin, the catalogue and the checkout on a machine carrying none of them — and a SECOND run places nothing", async () => {
+  it("places BOTH executables at the pin on a machine carrying neither — and a SECOND run places nothing", async () => {
     const hosts = scriptedHosts();
     const h = await makeHarness({ hosts });
     const first: string[] = [];
     await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place1", first));
 
-    expect(hosts.placedBinary).toBe(ANSIWISE_PIN);
-    expect(hosts.catalogCheckout, "the machine was left with no catalogue — its first program would die by name").toBe(true);
-    expect(hosts.programs).toBe(true);
-    expect(hosts.platformCheckout).toBe(true);
-    expect(hosts.missingCommands).toEqual([]);
-    expect(placingScripts(hosts)).toHaveLength(1);
-    // Two repositories, two paths, in ONE script: the catalogue the programs are read from and the
-    // tree they act on.
-    const placed = placingScripts(hosts)[0] ?? "";
-    expect(placed).toContain(`clone --branch "master" "${ANSIWISE_CATALOG_URL}" "${CATALOG_CHECKOUT}"`);
-    expect(placed).toContain(`clone --branch "${PARAMS.domain}" "${PORTS_URL}" "/srv/hostyour-cloud"`);
-    expect(first.some((l) => l.includes(`carries ansiwise ${ANSIWISE_PIN}`))).toBe(true);
-    // The one pairing nothing in code can check: the command that serves the programs has to read
-    // the path this wrote. The line names the SETTING that states it, because the operator reading
-    // this line is the only one who can hold the two against each other.
-    expect(first.some((l) => l.includes(`ANSIWISE_SERVE_COMMAND has to serve its programs out of ${CATALOG_CHECKOUT}`))).toBe(true);
+    expect(transferred(hosts).map((f) => f.path), "a machine given one of the two answers for programs and runs none")
+      .toEqual([ANSIWISE_TOOL, ANSIWISE_REST_TOOL]);
+    // Read back the way the machine reads them: the bytes say which executable and which version
+    // they are, and that is the whole of what a placed file is here.
+    for (const f of transferred(hosts)) expect(f.content).toBe(assetBytes(f.path, ANSIWISE_PIN).toString("utf8"));
+    expect(h.releases.read).toEqual([
+      `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`,
+      `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_REST_TOOL}-${ANSIWISE_PIN}-linux-x64`,
+    ]);
+    expect(first.some((l) => l.includes(`carries ${BOOTSTRAP_HOME}${ANSIWISE_TOOL} and ${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL} at ${ANSIWISE_PIN}`))).toBe(true);
 
     // The same step again, over the machine the first run left. Nothing about the world is touched
     // in between: the second run reads what the first one wrote.
     const second: string[] = [];
+    const before = hosts.files.length;
     await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place2", second));
-
-    expect(placingScripts(hosts), "the second run put a placing script on a machine that already carried everything").toHaveLength(1);
+    expect(transferred(hosts, before), "the second run transferred onto a machine that already carried the pin").toHaveLength(0);
     expect(second.some((l) => l.includes("nothing to place"))).toBe(true);
-    expect(hosts.placedBinary).toBe(ANSIWISE_PIN);
   });
 
-  it("replaces a binary of another version — the pin decides, not what the machine happens to carry", async () => {
-    const hosts = scriptedHosts({ placedBinary: "0.0.9", platformCheckout: true, catalogCheckout: true, programs: true, missingCommands: [] });
+  it("sends the machine argument lists and never a script — no shell syntax reaches it at all", async () => {
+    // THE ASSERTION THE ISSUE TURNS ON. The bootstrap composed bash and shipped it; what it may send
+    // now is words. A pipeline, a `&&`, a redirection, a `$(…)` or an uploaded `bash <path>` would
+    // each show up in exactly one of these lines, and none of them can be written as one plain word.
+    const hosts = scriptedHosts();
     const h = await makeHarness({ hosts });
-    const log: string[] = [];
-    await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place3", log));
+    await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place_noshell", []));
 
-    expect(hosts.placedBinary).toBe(ANSIWISE_PIN);
-    const script = placingScripts(hosts)[0] ?? "";
-    // The version reaches the machine twice and from one source: in the address it is fetched from
-    // and in the name it is installed under, which is what makes the placed version readable later.
-    expect(script).toContain(`https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/ansiwise-linux-amd64`);
-    expect(script).toContain(`/usr/local/bin/ansiwise-${ANSIWISE_PIN}`);
-    expect(script).toContain(`ln -sfn "/usr/local/bin/ansiwise-${ANSIWISE_PIN}" "${ANSIWISE_BINARY_LINK}"`);
-    // Both checkouts stood already, so nothing cloned either of them a second time.
-    expect(script).not.toContain("clone");
-    expect(log.some((l) => l.includes("it carries 0.0.9"))).toBe(true);
+    expect(commands(hosts).length).toBeGreaterThan(0);
+    for (const command of commands(hosts)) {
+      for (const word of command.split(" ")) expect(() => assertWord(word, "word")).not.toThrow();
+      expect(command).not.toMatch(/bash|sh -c|[;&|<>$`(){}*?[\]'"\\]/);
+    }
+    // And nothing was written to the machine that is not one of the two executables. The composed
+    // script used to be a file on the machine's disk for as long as the placement ran.
+    expect(transferred(hosts).map((f) => f.path).sort()).toEqual([...ANSIWISE_EXECUTABLES].sort());
+  });
+
+  it("writes each executable runnable, in the same act that writes its bytes", async () => {
+    // A file transferred without the execute bit is a machine that carries the pin and cannot start
+    // it, and a mode set by a second command would be a window in which exactly that is true.
+    const hosts = scriptedHosts();
+    const h = await makeHarness({ hosts });
+    await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place_mode", []));
+    expect(hosts.files.every((f) => f.mode === EXECUTABLE_MODE)).toBe(true);
+    expect(EXECUTABLE_MODE).toBe(0o755);
   });
 
   it("takes the pin from the platform repo, so a moved pin moves what is placed", async () => {
     const hosts = scriptedHosts();
     const h = await makeHarness({ hosts, versionsYaml: 'cliTools:\n  ansiwise:\n    version: "9.9.9"\n' });
     await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place4", []));
-    expect(hosts.placedBinary).toBe("9.9.9");
+    for (const f of transferred(hosts)) expect(f.content).toContain("9.9.9");
+    for (const url of h.releases.read) expect(url).toContain("/9.9.9/");
   });
 
-  it("replaces a binary standing under the plain name, whose version nothing can read", async () => {
-    const hosts = scriptedHosts({ placedBinary: UNVERSIONED, platformCheckout: true, catalogCheckout: true, programs: true, missingCommands: [] });
-    const h = await makeHarness({ hosts });
-    await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place5", []));
-    expect(hosts.placedBinary).toBe(ANSIWISE_PIN);
-  });
-
-  it("refuses a catalogue checkout that carries no programs, and names the catalogue address in force", async () => {
-    // ANSIWISE_CATALOG_URL naming a repository that is not the catalogue — the platform repository
-    // is the one an installation reaches for, and `ls ansiwise` in a hostyour-cloud checkout answers
-    // nothing (platform/versions.yaml:22-24 names the two trees apart). The step REFUSES rather than
-    // reporting a machine ready whose first program would die with a shell error.
-    const hosts = scriptedHosts({ programsAfterClone: false });
-    const h = await makeHarness({ hosts });
-    const run = placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place6", []));
-    await expect(run).rejects.toThrow(/carries no ansiwise\/programs/);
-    await expect(run).rejects.toThrow(new RegExp(`address in force is ${ANSIWISE_CATALOG_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-  });
-
-  it("refuses the same tree when it was already standing, and says nothing about where it came from", async () => {
-    // The machine carries everything, so this run places NOTHING — and the catalogue standing on it
-    // carries no programs, which is the case the refusal exists for. A refusal saying the tree was
-    // cloned from the address would be stating a history: this placement cloned nothing here, and
-    // whoever put that tree there may have taken it from somewhere else entirely.
-    const hosts = scriptedHosts({ placedBinary: ANSIWISE_PIN, platformCheckout: true, catalogCheckout: true, programs: false, missingCommands: [] });
-    const h = await makeHarness({ hosts });
-    const run = placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place13", []));
-    await expect(run).rejects.toThrow(/carries no ansiwise\/programs/);
-    await run.catch((err: unknown) => {
-      expect((err as Error).message).toContain(`address in force is ${ANSIWISE_CATALOG_URL}`);
-      expect((err as Error).message).not.toContain("cloned from");
-    });
-    expect(placingScripts(hosts), "it wrote a placing script onto a machine it had nothing to place on").toHaveLength(0);
-  });
-
-  it("refuses when the download the placement fetched did not produce the pin", async () => {
-    // The machine answers the second probe with a version that is not the one asked for — what a
-    // fetch of an error page, a redirect to `latest`, or a wrong asset name leaves behind. The step
-    // reads its verdict off the machine, so this cannot pass as a success.
+  it("replaces an executable of another version — the pin decides, not what the machine happens to carry", async () => {
     const hosts = scriptedHosts();
     const h = await makeHarness({ hosts });
-    const ctx = placeCtx(h, hosts, "run_place7", []);
-    const step = placeAnsiwiseStep(target, ports(h));
-    const session = await ctx.ssh();
-    const exec = session.exec.bind(session);
-    session.exec = async (command, o) => {
-      const r = await exec(command, o);
-      if (command.includes("dc-place-ansiwise-")) hosts.placedBinary = "0.0.1";
-      return r;
-    };
-    await expect(step.run({ ...ctx, ssh: () => Promise.resolve(session) }))
-      .rejects.toThrow(new RegExp(`points at 0\\.0\\.1 after the placement, not at the pinned ${ANSIWISE_PIN}`));
+    // A machine somebody already put an older pair on, by hand or by an earlier pin.
+    const factory = hostsFactory(hosts);
+    const session = await factory({ host: "10.1.1.11", port: 22, username: "ubuntu", auth: { kind: "key", privateKey: Buffer.from("k") } });
+    const signal = new AbortController().signal;
+    for (const name of ANSIWISE_EXECUTABLES) await session.putFile(name, assetBytes(name, "0.0.9"), EXECUTABLE_MODE, { signal });
+    const already = hosts.files.length;
+
+    const log: string[] = [];
+    await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place3", log));
+    expect(transferred(hosts, already).map((f) => f.path)).toEqual([...ANSIWISE_EXECUTABLES]);
+    for (const name of ANSIWISE_EXECUTABLES) {
+      expect(hosts.files.filter((f) => f.path === name).at(-1)?.content).toContain(ANSIWISE_PIN);
+    }
+    expect(log.some((l) => l.includes("it carries 0.0.9"))).toBe(true);
   });
 
-  it("refuses an installation that does not say where a version is fetched from, naming the setting", async () => {
+  it("places only the half that drifted, and leaves the one already at the pin alone", async () => {
+    // The upgrade nobody plans for: a machine whose deployment tool was moved onto the pin by
+    // deploy-cluster's install_pinned_tool row while the serving binary was left where it was —
+    // deliberately, because no step of the framework restarts the unit that runs it
+    // (simetrixch/ansiwise-plugins#141). Read as one fact, that machine looks placed.
+    const hosts = scriptedHosts();
+    const h = await makeHarness({ hosts });
+    const factory = hostsFactory(hosts);
+    const session = await factory({ host: "10.1.1.11", port: 22, username: "ubuntu", auth: { kind: "key", privateKey: Buffer.from("k") } });
+    await session.putFile(ANSIWISE_TOOL, assetBytes(ANSIWISE_TOOL, ANSIWISE_PIN), EXECUTABLE_MODE, { signal: new AbortController().signal });
+    const already = hosts.files.length; // what the machine carried is not what this run transferred
+
+    await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place_half", []));
+    expect(transferred(hosts, already).map((f) => f.path)).toEqual([ANSIWISE_REST_TOOL]);
+    expect(h.releases.read).toEqual([
+      `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_REST_TOOL}-${ANSIWISE_PIN}-linux-x64`,
+    ]);
+  });
+
+  it("reads its verdict off the machine — a release asset that is not the executable is refused", async () => {
+    // What the transfer claimed is never the answer, the second reading is. The address here serves
+    // something that is not the executable it names — an error page, a redirect notice, a build for
+    // another architecture — and only asking the file can see it.
+    const hosts = scriptedHosts();
+    const h = await makeHarness({ hosts });
+    const wrong = `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`;
+    h.releases.serves.set(wrong, Buffer.from("<html>404 Not Found</html>", "utf8"));
+    await expect(placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place7", [])))
+      .rejects.toThrow(new RegExp(`${BOOTSTRAP_HOME}${ANSIWISE_TOOL} on s1 answers nothing after the transfer, not the pinned ${ANSIWISE_PIN}`));
+  });
+
+  it("refuses an installation that does not say where a release is fetched from, naming the setting", async () => {
     const hosts = scriptedHosts();
     const h = await makeHarness({ hosts });
     await expect(placeAnsiwiseStep(target, ports(h, "download-url")).run(placeCtx(h, hosts, "run_place8", [])))
       .rejects.toThrow(/ANSIWISE_DOWNLOAD_URL is not configured/);
-    expect(placingScripts(hosts), "it reached the machine before finding out it had no address to fetch from").toHaveLength(0);
+    expect(transferred(hosts), "it reached the machine before finding out it had no address to fetch from").toHaveLength(0);
   });
 
-  it("refuses an installation that does not name the repository the machine clones, naming the setting", async () => {
+  it("refuses a manager built with no release reader, and says it is a wiring fault", async () => {
     const hosts = scriptedHosts();
     const h = await makeHarness({ hosts });
-    await expect(placeAnsiwiseStep(target, ports(h, "repo-url")).run(placeCtx(h, hosts, "run_place9", [])))
-      .rejects.toThrow(/GITHUB_REPO names that repository/);
+    await expect(placeAnsiwiseStep(target, ports(h, "no-downloads")).run(placeCtx(h, hosts, "run_place_nodl", [])))
+      .rejects.toThrow(/no release reader is wired into this manager/);
+    expect(transferred(hosts)).toHaveLength(0);
   });
 
-  it("refuses an installation that does not name the repository the CATALOGUE comes from, naming the setting", async () => {
-    // The platform repository cannot stand in for it: an installation that left this unset has no
-    // programs to serve, and the refusal says which setting decides that rather than letting the
-    // machine be given a binary with nothing to run.
+  it("refuses an address that serves nothing, and names the address", async () => {
     const hosts = scriptedHosts();
     const h = await makeHarness({ hosts });
-    await expect(placeAnsiwiseStep(target, ports(h, "catalog-url")).run(placeCtx(h, hosts, "run_place11", [])))
-      .rejects.toThrow(/ANSIWISE_CATALOG_URL is not configured/);
-    expect(placingScripts(hosts), "it reached the machine before finding out it had no catalogue to place").toHaveLength(0);
+    const gone = `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_REST_TOOL}-${ANSIWISE_PIN}-linux-x64`;
+    const releases = new ScriptedReleases();
+    releases.get = async (url) => {
+      releases.read.push(url);
+      if (url === gone) throw new Error(`could not read ${url}: it answered HTTP 404`);
+      return assetBytes(url.includes(ANSIWISE_REST_TOOL) ? ANSIWISE_REST_TOOL : ANSIWISE_TOOL, ANSIWISE_PIN);
+    };
+    await expect(placeAnsiwiseStep(target, { ...ports(h), releaseDownloads: releases }).run(placeCtx(h, hosts, "run_place_404", [])))
+      .rejects.toThrow(new RegExp(`could not read ${gone.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  });
+});
+
+describe("the download address", () => {
+  it("fills BOTH slots, so one address reaches both assets of one release", () => {
+    const url = `https://example.invalid/r/${VERSION_PLACEHOLDER}/${NAME_PLACEHOLDER}-${VERSION_PLACEHOLDER}-linux-x64`;
+    expect(downloadAddress(url, ANSIWISE_TOOL, "1.2.3")).toBe("https://example.invalid/r/1.2.3/ansiwise-1.2.3-linux-x64");
+    expect(downloadAddress(url, ANSIWISE_REST_TOOL, "1.2.3")).toBe("https://example.invalid/r/1.2.3/ansiwise-rest-1.2.3-linux-x64");
   });
 
-  it("keeps the elevation password off the machine's disk — it rides standard input, never the script", async () => {
+  it("refuses a slot nothing filled rather than fetching the text as it stands", async () => {
+    // An address carrying a placeholder this does not know. Nothing else fills a slot, so a fetch
+    // would send `<arch>` to the release host and place whatever came back.
     const hosts = scriptedHosts();
     const h = await makeHarness({ hosts });
-    await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place10", []));
-    for (const f of hosts.files) expect(f.content).not.toContain(ELEVATION);
-    expect(placingScripts(hosts)[0]).toContain("sudo -S -p '' -v");
+    const leftover = `https://downloads.example.invalid/ansiwise/${VERSION_PLACEHOLDER}/${NAME_PLACEHOLDER}-<arch>`;
+    await expect(placeAnsiwiseStep(target, { ...ports(h), ansiwiseDownloadUrl: leftover }).run(placeCtx(h, hosts, "run_place_slot", [])))
+      .rejects.toThrow(/still carries <arch> once <name> and <version> were filled in/);
+    expect(h.releases.read, "it fetched an address with a slot still standing in it").toHaveLength(0);
   });
 
-  it("keeps the CATALOGUE credential off the machine's disk the same way, and hands it to git through the environment", async () => {
-    // A private catalogue is the case this installation actually has. The credential may stand in no
-    // file the step writes and in no command's arguments — the machine's process listing is readable
-    // by anyone on it — so it rides standard input into a variable git reads out of the environment.
-    const hosts = scriptedHosts();
-    const h = await makeHarness({ hosts });
-    await placeAnsiwiseStep(target, ports(h, "with-token")).run(placeCtx(h, hosts, "run_place12", []));
-    for (const f of hosts.files) expect(f.content).not.toContain(CATALOG_TOKEN);
-    const script = placingScripts(hosts)[0] ?? "";
-    expect(script).toContain("IFS= read -r ANSIWISE_CATALOG_TOKEN");
-    expect(script).toContain('"$ANSIWISE_CATALOG_TOKEN"');
-    expect(hosts.catalogCheckout).toBe(true);
+  it("is refused by the installation's own settings when either slot is missing", async () => {
+    const { parseConfig } = await import("../../kernel/config.ts");
+    const base = {
+      PUBLIC_URL: "https://c.example.invalid", OIDC_ISSUER: "https://i.example.invalid/",
+      OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", CONTROLLER_VERSION: "0.0.0",
+    } as unknown as NodeJS.ProcessEnv;
+    expect(() => parseConfig({ ...base, ANSIWISE_DOWNLOAD_URL: "https://e.invalid/ansiwise-<version>" }))
+      .toThrow(/must carry <name>/);
+    expect(() => parseConfig({ ...base, ANSIWISE_DOWNLOAD_URL: "https://e.invalid/<name>-linux" }))
+      .toThrow(/must carry <version>/);
+    expect(() => parseConfig({ ...base, ANSIWISE_DOWNLOAD_URL: ANSIWISE_DOWNLOAD_URL })).not.toThrow();
   });
+});
 
-  it("hands the composed standard input through to the machine — the credentials the script reads", async () => {
-    // The step's own half of the placement's machine (deploy-slave.ts) is a closure around
-    // remoteScriptCapture, and the whole of what the composed buffer has to survive is that closure.
-    // A closure that forwarded only the timeout would leave every assertion above standing: the
-    // script is unchanged, no credential is in any file, and the scripted machine answers anyway —
-    // while on a real one `sudo -S -p '' -v` reads EOF and a private catalogue clone has no
-    // credential at all. So the buffer is read back off the exec the step actually made.
-    const hosts = scriptedHosts();
-    const h = await makeHarness({ hosts });
-    await placeAnsiwiseStep(target, ports(h, "with-token")).run(placeCtx(h, hosts, "run_place14", []));
-    const placing = hosts.log.filter((l) => l.command.includes("dc-place-ansiwise-") && l.command.startsWith("bash "));
-    expect(placing).toHaveLength(1);
-    expect(placing[0]?.stdin?.toString("utf8")).toBe(`${CATALOG_TOKEN}\n${ELEVATION}\n`);
-    // The two probes read nothing and write nothing, so neither carries a credential.
-    for (const l of hosts.log.filter((x) => x.command.includes("dc-place-probe-") || x.command.includes("dc-place-verify-"))) {
-      expect(l.stdin).toBeUndefined();
+describe("what may stand in a command on the machine", () => {
+  it("refuses a value that is not one plain word rather than quoting it", () => {
+    // The guard is what lets the module say it composes no shell: there is no quoter here, so a value
+    // carrying shell syntax has to be refused or it would reach the machine as syntax.
+    for (const bad of ['1.0"; rm -rf /', "$(id)", "a b", "x|y", "a&&b", "back`tick", "glob*", "new\nline", ""]) {
+      expect(() => assertWord(bad, "version"), bad).toThrow(/is not one plain word/);
+    }
+    for (const good of ["0.1.0-alpha-20260823000709", "~/ansiwise-rest", "/etc/ansiwise/service-token", "--listen", "100.64.0.11:9953"]) {
+      expect(() => assertWord(good, "word"), good).not.toThrow();
     }
   });
 });
 
-describe("the placement scripts", () => {
-  it("reads the six facts a placement decides on, and closes with PROBED", () => {
-    const state = parseProbe([
-      "BINARY 0.4.2", "PLATFORM present", "CATALOG present", "PROGRAMS absent",
-      "SERVICE enabled", "SERVICE not-active", "MISSING git", "MISSING curl", "PROBED",
-    ].join("\n"));
-    expect(state).toEqual({
-      binary: "0.4.2", platform: true, catalog: true, programs: false,
-      service: { enabled: true, active: false }, missingCommands: ["git", "curl"],
-    });
-    expect(parseProbe("BINARY absent\nPLATFORM absent\nCATALOG absent\nPROGRAMS absent\nPROBED").binary).toBeUndefined();
-  });
-
-  it("tells the two checkouts apart — the material and the catalogue are separate facts", () => {
-    // The shape that produced the first version's refusal on every real machine: a platform checkout
-    // standing, and the catalogue absent. Read as one fact, that machine looks placed.
-    const state = parseProbe("BINARY 0.4.2\nPLATFORM present\nCATALOG absent\nPROGRAMS absent\nPROBED");
-    expect(state.platform).toBe(true);
-    expect(state.catalog).toBe(false);
-    expect(probeScript()).toContain(`[ -d "${CATALOG_CHECKOUT}/ansiwise/programs" ]`);
-  });
-
-  it("refuses a probe that did not finish — a read cut short must never look like a machine carrying nothing", () => {
-    // Without the closing line this reads as BINARY absent / CATALOG absent, and the step would
-    // install over a working machine on the strength of output that stopped mid-write.
-    expect(() => parseProbe("BINARY 0.4.2\nCATALOG present")).toThrow(/probe did not finish/);
-    expect(probeScript()).toContain('echo "PROBED"');
-  });
-
-  it("composes only the parts the probe asked for", () => {
-    const base = {
-      version: "0.4.2", downloadUrl: "https://x.example.invalid/0.4.2/ansiwise", repoUrl: PORTS_URL,
-      branch: "s1.example.com", catalogUrl: ANSIWISE_CATALOG_URL, elevationPassword: ELEVATION, user: "ubuntu",
-    };
-    const all = placement({ ...base, place: { commands: true, binary: true, platform: true, catalog: true, service: false } }).script;
-    expect(all).toContain("apt-get install -y curl ca-certificates git");
-    expect(all).toContain(`clone --branch "s1.example.com" "${PORTS_URL}"`);
-    expect(all).toContain(`clone --branch "master" "${ANSIWISE_CATALOG_URL}"`);
-    expect(all).toContain('echo "PLACED_BINARY 0.4.2"');
-
-    const none = placement({ ...base, place: { commands: false, binary: false, platform: false, catalog: false, service: false } }).script;
-    expect(none).not.toContain("apt-get");
-    expect(none).not.toContain("curl -fsSL");
-    expect(none).not.toContain("clone");
-    expect(none).not.toContain("install-service");
-    expect(none).toContain('echo "PLACED"');
-  });
-
-  it("puts the credentials on standard input in the order the script reads them, and never in the script", () => {
-    // The two halves are composed together for this reason: the script READS its input line by line,
-    // so a buffer that carried one credential where the script expects two would hand the elevation
-    // password to git and leave sudo waiting.
-    const base = {
-      version: "0.4.2", downloadUrl: "https://x.example.invalid/0.4.2/ansiwise", repoUrl: PORTS_URL,
-      branch: "s1.example.com", catalogUrl: ANSIWISE_CATALOG_URL, elevationPassword: ELEVATION, user: "ubuntu",
-    };
-    const withToken = placement({ ...base, catalogToken: CATALOG_TOKEN, place: { commands: false, binary: false, platform: false, catalog: true, service: false } });
-    expect(withToken.stdin.toString("utf8")).toBe(`${CATALOG_TOKEN}\n${ELEVATION}\n`);
-    expect(withToken.script).not.toContain(CATALOG_TOKEN);
-    expect(withToken.script).not.toContain(ELEVATION);
-
-    // A public catalogue, and a run that clones nothing: no credential is read, so none is sent.
-    const noToken = placement({ ...base, place: { commands: false, binary: false, platform: false, catalog: true, service: false } });
-    expect(noToken.stdin.toString("utf8")).toBe(`${ELEVATION}\n`);
-    expect(noToken.script).not.toContain("read -r ANSIWISE_CATALOG_TOKEN");
-    const nothingToClone = placement({ ...base, catalogToken: CATALOG_TOKEN, place: { commands: false, binary: true, platform: false, catalog: false, service: false } });
-    expect(nothingToClone.stdin.toString("utf8")).toBe(`${ELEVATION}\n`);
-    expect(nothingToClone.script).not.toContain("read -r ANSIWISE_CATALOG_TOKEN");
-  });
-
-  it("refuses to put a value into a command on the machine that is not one it may put there", () => {
-    const base = {
-      version: "0.4.2", downloadUrl: "https://x.example.invalid/0.4.2/ansiwise", repoUrl: PORTS_URL,
-      branch: "s1.example.com", catalogUrl: ANSIWISE_CATALOG_URL, elevationPassword: ELEVATION, user: "ubuntu",
-      place: { commands: false, binary: true, platform: true, catalog: true, service: false },
-    };
-    expect(() => placement({ ...base, version: '1.0"; rm -rf /' })).toThrow(/is not a value this placement may put into a command/);
-    expect(() => placement({ ...base, branch: "$(id)" })).toThrow(/is not a value this placement may put into a command/);
-    expect(() => placement({ ...base, repoUrl: "http://insecure.example.invalid/x.git" })).toThrow(/is not a value this placement may put into a command/);
-    expect(() => placement({ ...base, catalogUrl: "http://insecure.example.invalid/x.git" })).toThrow(/is not a value this placement may put into a command/);
-    expect(() => placement({ ...base, user: "root; id" })).toThrow(/is not a value this placement may put into a command/);
-    // A credential with a line break in it would leave its tail standing where the next credential is
-    // read. The refusal may not quote it — it would then be in the run log.
-    const broken = "first\nsecond";
-    expect(() => placement({ ...base, catalogToken: broken })).toThrow(/catalogue credential carries a line break/);
-    try {
-      placement({ ...base, elevationPassword: broken });
-      expect.unreachable("a password carrying a line break was accepted");
-    } catch (err) {
-      expect((err as Error).message).toContain("elevation password carries a line break");
-      expect((err as Error).message).not.toContain("second");
-    }
-  });
-});
-
-// THE SAME MECHANISM, REACHED BY SOMETHING THAT IS NOT THIS MANAGER. hm#14's first done-when line
-// asks for ONE placement shared by the client's first install of a master and the manager's install
-// of a slave. What holds that down is a suite that has no manager in it: no harness, no database, no
-// StepCtx, no server row and no ports record — only an ssh session, a path the caller chose, and the
-// values a caller states. A `placeAnsiwise` that reached for any of the rest could not compile here.
+// THE SAME MECHANISM, REACHED BY SOMETHING THAT IS NOT THIS MANAGER. What holds that down is a suite
+// with no manager in it: no harness, no database, no StepCtx, no server row and no ports record —
+// only a session, two names and an address. A `placeAnsiwise` that reached for any of the rest could
+// not compile here.
 const FIRST_INSTALL_FQDN = "apps1.digitacloud.app";
 
-/** The machine as a caller holding nothing but a session sees it: it puts the script somewhere of
- *  its own choosing, runs it, and collects what it wrote. This is the whole of what a Dart client
- *  has to supply — everything else the placement says itself. */
+/** The machine as a caller holding nothing but a session sees it. This is the whole of what a Dart
+ *  client has to supply — everything else the bootstrap says itself. */
 async function sessionMachine(hosts: HostsScript, log: string[]): Promise<PlacementMachine> {
   const session = await hostsFactory(hosts)({
     host: "10.1.1.11", port: 22, username: "ubuntu",
@@ -336,14 +243,11 @@ async function sessionMachine(hosts: HostsScript, log: string[]): Promise<Placem
   const signal = new AbortController().signal;
   return {
     name: FIRST_INSTALL_FQDN,
-    runScript: async (name, script, o) => {
-      const path = `/tmp/dc-${name}-first-install.sh`;
-      await session.putFile(path, Buffer.from(script, "utf8"), 0o700, { signal });
+    putFile: (path, content, mode) => session.putFile(path, content, mode, { signal }),
+    run: async (argv, o) => {
       const out: string[] = [];
-      const result = await session.exec(`bash ${path}`, {
-        signal,
-        timeoutMs: o.timeoutMs,
-        onStdout: (line) => out.push(line),
+      const result = await session.exec(argv.join(" "), {
+        signal, timeoutMs: o.timeoutMs, onStdout: (line) => out.push(line),
         ...(o.stdin !== undefined ? { stdin: o.stdin } : {}),
       });
       return { code: result.code, stdout: out.join("\n") };
@@ -352,56 +256,53 @@ async function sessionMachine(hosts: HostsScript, log: string[]): Promise<Placem
   };
 }
 
-/** What a first install states, all of it a value: the client holds no cluster row to read a branch
- *  off and no platform repo to read the pin off — it is handed both. */
-const FIRST_INSTALL_REQUEST = {
-  version: ANSIWISE_PIN,
-  downloadUrl: ANSIWISE_DOWNLOAD_URL,
-  catalogUrl: ANSIWISE_CATALOG_URL,
-  repoUrl: PORTS_URL,
-  branch: FIRST_INSTALL_FQDN,
-  user: "ubuntu",
-  elevationPassword: ELEVATION,
-};
-
-describe("the placement with no manager behind it", () => {
-  it("places all three on a machine no inventory carries, and places nothing the second time", async () => {
+describe("the bootstrap with no manager behind it", () => {
+  it("places both on a machine no inventory carries, and places nothing the second time", async () => {
     const hosts = scriptedHosts();
-    const first: string[] = [];
-    const verdict = await placeAnsiwise(await sessionMachine(hosts, first), FIRST_INSTALL_REQUEST);
+    const releases = new ScriptedReleases();
+    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL };
+    const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
 
+    const first: string[] = [];
+    const verdict = await placeAnsiwise(await sessionMachine(hosts, first), read, request);
     expect(verdict).toEqual({ version: ANSIWISE_PIN, placed: true });
-    expect(hosts.placedBinary).toBe(ANSIWISE_PIN);
-    expect(hosts.catalogCheckout).toBe(true);
-    expect(hosts.programs).toBe(true);
-    expect(hosts.platformCheckout).toBe(true);
-    const placed = placingScripts(hosts)[0] ?? "";
-    // The branch is the one the CALLER stated — a master's own FQDN, which no cluster row here holds.
-    expect(placed).toContain(`clone --branch "${FIRST_INSTALL_FQDN}" "${PORTS_URL}" "${PLATFORM_CHECKOUT}"`);
-    expect(placed).toContain(`clone --branch "master" "${ANSIWISE_CATALOG_URL}" "${CATALOG_CHECKOUT}"`);
+    expect(transferred(hosts).map((f) => f.path)).toEqual([ANSIWISE_TOOL, ANSIWISE_REST_TOOL]);
 
     const second: string[] = [];
-    const again = await placeAnsiwise(await sessionMachine(hosts, second), FIRST_INSTALL_REQUEST);
+    const before = hosts.files.length;
+    const again = await placeAnsiwise(await sessionMachine(hosts, second), read, request);
     expect(again).toEqual({ version: ANSIWISE_PIN, placed: false });
-    expect(placingScripts(hosts), "the second placement wrote a placing script onto a machine that carried everything").toHaveLength(1);
+    expect(transferred(hosts, before), "the second bootstrap transferred onto a machine that carried the pin").toHaveLength(0);
     expect(second.some((l) => l.includes("nothing to place"))).toBe(true);
+    expect(second.some((l) => l.includes(FIRST_INSTALL_FQDN))).toBe(true);
   });
 
-  it("fills the version into the download address itself, so a caller states one address and never a version twice", async () => {
+  it("names the file by the account's own home, so nothing has to know where that is", async () => {
+    // The transfer states a RELATIVE path — SFTP resolves it from the home of whoever the session
+    // authenticated as — and a command names the same file with `~/` in front of it. A bootstrap that
+    // wrote an absolute path would be one that had to be told the account's home, which it is not.
     const hosts = scriptedHosts();
-    await placeAnsiwise(await sessionMachine(hosts, []), FIRST_INSTALL_REQUEST);
-    const placed = placingScripts(hosts)[0] ?? "";
-    expect(ANSIWISE_DOWNLOAD_URL).toContain("<version>");
-    expect(placed).toContain(`curl -fsSL "https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/ansiwise-linux-amd64"`);
-    expect(placed).not.toContain("<version>");
+    const releases = new ScriptedReleases();
+    await placeAnsiwise(
+      await sessionMachine(hosts, []),
+      { read: (url) => releases.get(url, { signal: new AbortController().signal }) },
+      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL },
+    );
+    for (const f of transferred(hosts)) expect(f.path.startsWith("/")).toBe(false);
+    expect(commands(hosts)).toContain(`${BOOTSTRAP_HOME}${ANSIWISE_TOOL} --version`);
+    expect(SCRIPTED_HOME.startsWith("/")).toBe(true);
+    expect(ELEVATION).not.toBe(""); // the bootstrap needs no credential at all — see the suite below
   });
 
-  it("reads its verdict off the machine — a clone that left no programs behind is refused", async () => {
-    // The same proof the step suite holds, made against the mechanism alone: what the placing script
-    // claimed is never the answer, the second probe is. The clone here succeeds and the tree it left
-    // carries no ansiwise/programs, which only a reading of the machine can see.
-    const hosts = scriptedHosts({ programsAfterClone: false });
-    await expect(placeAnsiwise(await sessionMachine(hosts, []), FIRST_INSTALL_REQUEST))
-      .rejects.toThrow(/carries no ansiwise\/programs/);
+  it("hands over no credential of any kind — a transfer into the account's own home needs none", async () => {
+    const hosts = scriptedHosts();
+    const releases = new ScriptedReleases();
+    await placeAnsiwise(
+      await sessionMachine(hosts, []),
+      { read: (url) => releases.get(url, { signal: new AbortController().signal }) },
+      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL },
+    );
+    for (const act of hosts.log) expect(act.stdin, `${act.command} carried a credential`).toBeUndefined();
+    for (const act of hosts.log) expect(act.command).not.toContain("sudo");
   });
 });

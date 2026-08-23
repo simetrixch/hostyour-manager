@@ -1,11 +1,10 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
-import type { Step, StepCtx, Cleanup, RunDefinition } from "../../../executor/types.ts";
+import type { Step, Cleanup, RunDefinition } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { STAGE, CLUSTER_TIER } from "../../../../shared/enums.ts";
-import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
+import { errValidation } from "../../../kernel/errors.ts";
 import { remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
-import { readAnsiwisePin } from "../../inventory/ansiwise-pin.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
 import { PREFLIGHT_SCRIPT, parsePreflightOutput, makeCheck, hardenPreflightForSlave, podCidrOverlapCheck, formatNicsLine } from "../preflight.ts";
 import { hasHardFailure, type PreflightReport } from "../../../../shared/preflight.ts";
@@ -16,10 +15,10 @@ import {
   type DeploySlavePorts, type SlaveInstallInput, type SlaveTarget,
 } from "./deploy-slave.kit.ts";
 import {
-  ansiwiseProgramStep, requireElevationPassword, ANSIWISE_ELEVATION_SECRET,
+  ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET,
   type AnsiwisePorts, type ExtraAnswers,
 } from "./ansiwise-run.kit.ts";
-import { placeAnsiwise, isServiceAddress, VERSION_PLACEHOLDER, ANSIWISE_SERVICE_PORT } from "./place-ansiwise.ts";
+import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
 import { masterCheckoutsScript, SLAVE_API_PORT } from "./deploy-slave.remote.ts";
 import { refreshCheckoutStep } from "./cluster-release.kit.ts";
 import { rejoinStep, readMembershipStep } from "./tailnet.kit.ts";
@@ -33,7 +32,7 @@ import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
 
 // "deploy-slave" — the Run that turns a READY (adopted) server into a live slave, over the
 // deployment PROGRAMS of the machine's own catalogue (digita-deploy ansiwise/programs/), each
-// driven over `ansiwise serve` and proven by a dry run the machine's gate then admits the real run
+// driven over `ansiwise-rest serve` and proven by a dry run the machine's gate then admits the real run
 // against. Two hosts: the MASTER cuts the slave's install branch (deploy-slave-branch) and takes
 // its registration (register-slave); the SLAVE is built by the same three machine-layer programs
 // every cluster is (deploy-host, deploy-cluster, deploy-gitops), joins the private network with a
@@ -135,164 +134,6 @@ function operatorKeyAnswer(serverId: string): ExtraAnswers {
     const key = (await ctx.creds.list({ serverId, kind: "ssh_key" })).at(-1);
     return key?.publicKey !== undefined ? { operator_public_key: key.publicKey } : {};
   };
-}
-
-/** WHERE the machine fetches the pinned binary from. Which release surface an installation takes its
- *  binary from is the installation's decision, exactly as the command that serves the programs is;
- *  the VERSION never is — the placement fills `<version>` in from the pin. */
-function requireDownloadUrl(ports: AnsiwisePorts): string {
-  if (!ports.ansiwiseDownloadUrl) {
-    throw errNotConfigured(
-      "ANSIWISE_DOWNLOAD_URL is not configured — this step places the ansiwise binary on the machine, and where a " +
-      `version of it is fetched from is the installation's decision. Set ANSIWISE_DOWNLOAD_URL to that address with ` +
-      `${VERSION_PLACEHOLDER} standing where the version goes, e.g. ` +
-      `https://example.invalid/ansiwise/${VERSION_PLACEHOLDER}/ansiwise-linux-amd64`,
-    );
-  }
-  return ports.ansiwiseDownloadUrl;
-}
-
-/** WHICH REPOSITORY the programs come from. It is not the platform repository and cannot be derived
- *  from it — the two trees are named apart in the file that pins this platform's versions — so an
- *  installation states it, the way it states where the binary is fetched from. */
-function requireCatalogUrl(ports: AnsiwisePorts): string {
-  if (!ports.ansiwiseCatalogUrl) {
-    throw errNotConfigured(
-      "ANSIWISE_CATALOG_URL is not configured — this step places the program catalogue on the machine, and which " +
-      "repository carries it is the installation's decision. It is NOT the platform repository: that one is the " +
-      "material the programs act on and carries no ansiwise/ tree. Set ANSIWISE_CATALOG_URL to the clone address of " +
-      "the installation repository holding ansiwise.yaml and ansiwise/programs/, e.g. " +
-      "https://github.com/example/example-deploy.git",
-    );
-  }
-  return ports.ansiwiseCatalogUrl;
-}
-
-/** The address the machine clones the platform checkout from. Built where the platform repo port is
- *  built, from the same two settings, so the tree the manager writes and the tree the machine reads
- *  are one repository stated once. */
-function requirePlatformRepoUrl(ports: DeploySlavePorts): string {
-  if (!ports.platformRepoUrl) {
-    throw errNotConfigured(
-      "the platform repo is not configured — this step clones the platform checkout onto the machine, and without it " +
-      "the deployment programs have nothing to act on. GITHUB_REPO names that repository",
-    );
-  }
-  return ports.platformRepoUrl;
-}
-
-/** `place-ansiwise` — the binary, the catalogue and the platform checkout on a machine reached by
- *  THIS MANAGER. The placement itself (place-ansiwise.ts) takes a machine and values and is the same
- *  act wherever a machine is reached from; what stands here is the half only a manager can do —
- *  resolving a SlaveTarget into those values. The install branch comes off the cluster the target
- *  names, the account off the server row (`loadServer` refuses a server id this manager does not
- *  carry), the version off platform/versions.yaml on the trunk, and the three addresses off the
- *  installation's settings, each refused BY NAME while nothing has been asked of the machine yet.
- *
- *  A machine at its FIRST installation stands in no server row, so it cannot start THIS step, and
- *  nothing else places the CATALOGUE or the platform checkout on it: this and
- *  `enableAnsiwiseServiceStep` below are the only callers of `placeAnsiwise` there are.
- *  ansiwise-client places the BINARY on a bare machine of its own
- *  (session_transport.dart:63-71) and places neither of the other two.
- *  Keeping the resolution out here is what makes the placement itself demand nothing such a machine
- *  cannot state — the shape a first-install placement would have to satisfy, not one that runs. */
-export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): Step {
-  return {
-    name: "place-ansiwise",
-    title: "Place the ansiwise binary and the program catalogue on the machine",
-    run: async (ctx) => {
-      const server = loadServer(ctx.db, target.serverId);
-      await runPlacement(ctx, target, ports, server);
-    },
-  };
-}
-
-/** `enable-ansiwise-service` — the SAME placement, run again once the machine has the two facts a
- *  bare one has not got: an address in the tailnet to stand on, and the token file deploy-gitops
- *  wrote. It composes nothing: `placeAnsiwise` invokes `ansiwise install-service`, which is the one
- *  thing that knows the command the unit starts (place-ansiwise.ts, THE SERVICE COMPOSES NOTHING).
- *
- *  WHY IT IS A SECOND STEP AND NOT THE FIRST ONE, and the reason is about the MACHINE and not about
- *  the row. A machine cannot bind an address it does not hold, and it holds no tailnet address until
- *  the rejoin above put it on the network; the binary refuses every other one (`--listen` outside
- *  100.64.0.0/10). Nothing about the ROW changes in between: `tailnetHost` is typed on the inventory
- *  row when the server is created and is never probed (inventory/write.ts, "Stated here, never
- *  probed"), and `read-membership` writes `tailnetState` and `tailnetJson` and nothing else
- *  (runs/tailnet-probe.ts `recordTailnetReading`). The placement is measured, so everything the first
- *  step left standing is found standing and only the service is placed.
- *
- *  THE ADDRESS IS THE ONE THE MANAGER WILL DIAL, stated here and bound there: the server row's
- *  tailnetHost with ANSIWISE_SERVICE_PORT after it, which is exactly what an `{ kind: "address" }`
- *  wire (adapters/ansiwise/port.ts) is opened on. Reading it off the machine instead would make the
- *  address the service stands on and the address the manager dials two readings of one value. What
- *  the placement DOES read off the machine is the address the standing unit already starts on, and it
- *  reads it to find out whether it has to install again — never to decide where the surface goes. */
-export function enableAnsiwiseServiceStep(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): Step {
-  return {
-    name: "enable-ansiwise-service",
-    title: "Enable the machine's own ansiwise service, so the surface outlives the session",
-    run: async (ctx) => {
-      const server = loadServer(ctx.db, target.serverId);
-      if (!server.tailnetHost) {
-        throw errValidation(
-          `server ${server.name} carries no tailnet address, and the resident ansiwise service may stand on no other ` +
-          "one — the manager presents its token in a plain HTTP header. tailnetHost is TYPED on the inventory row when " +
-          "the server is created and no run ever writes it, so re-running the join or the membership reading cannot " +
-          `fill it: put ${server.name}'s address in 100.64.0.0/10 on its row, then start this again`,
-        );
-      }
-      // The shape, refused HERE because this is where the field is, and the field carries none of its
-      // own: tailnetHost is `z.string().min(1)` (inventory/write.ts) and its other reader takes a
-      // name (`mark-slave` below, an apiHost). The binary reads this one as four numbers, so a
-      // MagicDNS name is legal on the row and refused on the machine — and the operator is told which
-      // of the two he wrote.
-      const listen = `${server.tailnetHost}:${ANSIWISE_SERVICE_PORT}`;
-      if (!isServiceAddress(listen)) {
-        throw errValidation(
-          `server ${server.name} carries the tailnet address "${server.tailnetHost}", and the resident ansiwise service ` +
-          "stands on four numbers or on nothing: ServiceInstallation reads the host as four numbers and refuses " +
-          "everything outside 100.64.0.0/10 (ansiwise-cli lib/service_installation.dart), so a MagicDNS name is refused " +
-          `on the machine after this has reached it. Put ${server.name}'s ADDRESS on its row — the cluster map's ` +
-          "apiHost, which reads the same column, takes a name and is why one was accepted there",
-        );
-      }
-      await runPlacement(ctx, target, ports, server, listen);
-    },
-  };
-}
-
-/** The manager's half of both steps: a SlaveTarget resolved into the values the placement takes, and
- *  the run's cached session made into the machine it reaches. `listen` is what tells the two apart —
- *  absent is a placement that leaves the unit alone, stated is one that leaves it running. */
-async function runPlacement(
-  ctx: StepCtx,
-  target: SlaveTarget,
-  ports: DeploySlavePorts & AnsiwisePorts,
-  server: typeof servers.$inferSelect,
-  listen?: string,
-): Promise<void> {
-  const { domain } = target.resolve(ctx.db);
-  const request = {
-    version: await readAnsiwisePin(requirePlatformRepo(ports)),
-    downloadUrl: requireDownloadUrl(ports),
-    catalogUrl: requireCatalogUrl(ports),
-    ...(ports.ansiwiseCatalogToken !== undefined ? { catalogToken: ports.ansiwiseCatalogToken } : {}),
-    repoUrl: requirePlatformRepoUrl(ports),
-    branch: domain,
-    user: server.sshUser,
-    elevationPassword: requireElevationPassword(ctx),
-    ...(listen !== undefined ? { listen } : {}),
-  };
-  const session = await ctx.ssh();
-  const verdict = await placeAnsiwise({
-    name: server.name,
-    runScript: async (name, script, o) => {
-      const cap = await remoteScriptCapture(ctx, session, name, script, o);
-      return { code: cap.result.code, stdout: cap.stdout };
-    },
-    log: (line) => ctx.log("meta", line),
-  }, request);
-  ctx.checkpoint(verdict);
 }
 
 /** The install step list BOTH cluster run kinds run: deploy-slave takes a READY server through it, and
@@ -464,7 +305,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     },
     // The binary every program act below is spoken to through, the catalogue those programs are read
     // from, and the platform checkout they act on. It stands FIRST among the machine-side acts
-    // because none of them can run without all three: `ansiwise serve` is a binary reading a
+    // because none of them can run without all three: `ansiwise-rest serve` is a binary reading a
     // catalogue, and a machine at its first installation carries none of them. Idempotent by
     // measurement, which is what lets a redeploy run the same step against a machine that carries them.
     placeAnsiwiseStep(target, ports),

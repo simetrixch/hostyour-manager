@@ -26,7 +26,7 @@ import {
 // program conversation, and the local steps driven directly (mark-slave's map write, the verify
 // gates under fake timers, register's idempotence). Everything that starts a machine run — the
 // journeys over the deployment programs, the credential handshake, the cleanups drill — lives in
-// redeploy.ansiwise.test.ts, the ONE file that talks to a real `ansiwise serve` (the engine's run
+// redeploy.ansiwise.test.ts, the ONE file that talks to a real `ansiwise-rest serve` (the engine's run
 // root is per-drive, so two serve fixtures in parallel would share records and collide).
 
 describe("deploy-slave run — plan, guards, failure modes", () => {

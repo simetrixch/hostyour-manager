@@ -18,12 +18,12 @@ import { servers } from "../../db/schema/inventory.ts";
 import { meta } from "../../db/schema/meta.ts";
 import { ExecFailedError } from "../../adapters/ssh/port.ts";
 import type { SshFactory, SshSession, SshTarget, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
-import { placementProbeOut, applyPlacement } from "./deploy-slave.placement.fixture.ts";
+import { answerPlacementCommand, ScriptedReleases } from "./deploy-slave.placement.fixture.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { VERIFY_SLAVE_TIMEOUT_MS } from "./defs/deploy-slave.verify.ts";
 
 // The deploy-slave test fixture (shared by deploy-slave.test.ts — plan/guards/failure modes —
-// and redeploy.ansiwise.test.ts — the journeys over the REAL `ansiwise serve`): a scripted
+// and redeploy.ansiwise.test.ts — the journeys over the REAL `ansiwise-rest serve`): a scripted
 // two-host setup, the harness wiring, and the fake-timer helper that expires verify-slave's
 // bounded retry window without ever waiting real minutes. The deployment programs themselves are
 // NOT scripted here: every program act goes over a serve conversation (openConversation), which
@@ -132,55 +132,42 @@ export interface HostsScript {
   secretStoresOut: string; // verify HARD gate 2 (slave): `ns/name|Ready` rows
   promOut: string;         // verify SOFT (master): PROM_CHECK data|empty|skipped
   certsOut: string;        // verify SOFT (slave): `ns/name|Ready` rows
-  // ---- what the machine carries of the placement (place-ansiwise). The probe READS these five and
-  // the placing script WRITES them, exactly as the real script's own contract says it does — so a
-  // second run of that step measures what the first one left, and a double-run assertion is about
-  // idempotence rather than about a value the test changed in between.
-  /** The version /usr/local/bin/ansiwise points at; undefined = the machine carries no binary. */
-  placedBinary: string | undefined;
-  /** Whether /srv/hostyour-cloud — the tree the programs ACT on — is a checkout. */
-  platformCheckout: boolean;
-  /** Whether /srv/ansiwise-catalog — the tree the programs are READ from — is a checkout. */
-  catalogCheckout: boolean;
-  /** Whether that catalogue checkout carries ansiwise/programs. */
-  programs: boolean;
-  /** What the service manager on the machine says about ansiwise.service — the two facts the probe
-   *  asks for separately, written by the install-service invocation the placing script carries. */
+  // ---- what the machine carries of the BOOTSTRAP (place-ansiwise). Every one of these is written
+  // by a file transfer or by the serving binary's own install-service and read back by asking the
+  // file — so a second run of a step measures what the first one left, and a double-run assertion is
+  // about idempotence rather than about a value the test changed in between.
+  /** What the service manager on the machine says about ansiwise.service: the two facts asked
+   *  separately, because a unit that is enabled and dead and one that runs and is not enabled are two
+   *  different machines and neither is the one a caller asked for. */
   serviceEnabled: boolean;
   serviceActive: boolean;
-  /** What the unit STARTS, which is what `systemctl show -p ExecStart` answers: the version of the
-   *  file its command names, and the address on that command's `--listen`. install-service composes
-   *  that command out of the binary it was run as and the options it was given, so both are read off
-   *  the placing script the step uploaded. undefined is a machine whose service manager knows no
-   *  such unit. */
+  /** What the unit STARTS, which is what `systemctl show -p ExecStart` answers: the absolute file its
+   *  command names and the address on that command's `--listen`. install-service composes that
+   *  command out of the binary it was run as and the options it was given, so both are written by the
+   *  invocation the step made. undefined is a machine whose service manager knows no such unit. */
+  serviceExecPath: string | undefined;
   serviceExecVersion: string | undefined;
   serviceExecListen: string | undefined;
-  /** The version of the binary the RUNNING process is, which is NOT what the unit says while a unit
-   *  was rewritten and the process kept going: install-service ends at `systemctl enable --now`
-   *  (ansiwise-cli bin/ansiwise.dart), and `--now` starts a unit that is not active and does nothing
-   *  to one that is. Only a restart moves this. Nothing the probe asks reads it — it is the machine
-   *  the report is about, and a test asserts it off the machine directly. */
+  /** The version of the executable the RUNNING process is, which is NOT what the unit says while a
+   *  unit was rewritten and the process kept going: install-service ends at `systemctl enable --now`,
+   *  and `--now` starts a unit that is not active and does nothing to one that is. Only a restart
+   *  moves this. Nothing the manager asks reads it — it is the machine the report is about, and a
+   *  test asserts it off the machine directly. */
   serviceRunningVersion: string | undefined;
-  /** Whether /etc/ansiwise/service-token stands on the machine. deploy-gitops's file_from_vault row
-   *  writes it, so a machine that has been through that program carries it — and one that has not
-   *  is the machine the service placement has to refuse rather than enable a unit that cannot read
-   *  its own credential. */
-  serviceTokenFile: boolean;
+  /** The value at /etc/ansiwise/service-token, or undefined for a machine that has not been through
+   *  the run that mints it — the machine the service placement has to refuse rather than enable a
+   *  unit that cannot read its own credential. */
+  serviceToken: string | undefined;
   /** Whether the service the install-service invocation enabled actually COMES UP. False is what a
-   *  unit that installs cleanly and then fails to bind looks like: install-service exits zero and
-   *  the service manager says the machine is not serving. */
+   *  unit that installs cleanly and then fails to bind looks like: install-service exits zero and the
+   *  service manager says the machine is not serving. */
   serviceStartsAfterInstall: boolean;
-  /** What the catalogue checkout carries once the placing script clones it — the repository's own
-   *  content. `false` is a ANSIWISE_CATALOG_URL naming a repository that is not the catalogue. */
-  programsAfterClone: boolean;
-  /** The commands of the placement's own two the machine is missing (curl, git). */
-  missingCommands: string[];
   /** One-shot exec fault injections: the FIRST exec whose command contains `match` REJECTS
    *  with Error(`message`) and the entry is consumed — e.g. a transport-level
    *  "(SSH) Channel open failure" mid-verify (the MaxSessions incident). */
   execFaults: { match: string; message: string }[];
   /** What answers an openChannel CONVERSATION (SshSession.openChannel) — a test that drives the
-   *  ansiwise program steps hands back a Duplex carrying the REAL `ansiwise serve` (a socket to
+   *  ansiwise program steps hands back a Duplex carrying the REAL `ansiwise-rest serve` (a socket to
    *  its listener). The default refuses: the scripted hosts hold no conversations. */
   openConversation: (command: string) => Promise<Duplex>;
   /** Every exec and every conversation, with what the caller put on the command's STANDARD INPUT
@@ -188,7 +175,7 @@ export interface HostsScript {
    *  reach no file and no argument list — so a caller that composed them and then did not hand them
    *  through is invisible in `files` and in `command`, and this is where it shows. */
   log: { host: string; command: string; stdin?: Buffer }[];
-  files: { host: string; path: string; content: string }[];
+  files: { host: string; path: string; content: string; mode: number }[];
 }
 
 export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript {
@@ -214,22 +201,17 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     secretStoresOut: "external-secrets/vault-backend|True\nredis/vault-backend|True",
     promOut: "PROM_CHECK data",
     certsOut: "redis/redis-tls|True",
-    // A slave as deploy-slave meets it: adopted, and carrying nothing of the placement yet.
-    placedBinary: undefined,
-    platformCheckout: false,
-    catalogCheckout: false,
-    programs: false,
-    programsAfterClone: true,
-    // No surface of its own yet, and the token file already there: enable-ansiwise-service stands
-    // AFTER run-deploy-gitops in the list, and that program's file_from_vault row is what writes it.
+    // A slave as deploy-slave meets it: adopted, and carrying neither executable yet. No surface of
+    // its own, and the token file already there — enable-ansiwise-service stands AFTER
+    // run-deploy-gitops in the list, and that program's file_from_vault row is what writes it.
     serviceEnabled: false,
     serviceActive: false,
+    serviceExecPath: undefined,
     serviceExecVersion: undefined,
     serviceExecListen: undefined,
     serviceRunningVersion: undefined,
-    serviceTokenFile: true,
+    serviceToken: "scripted-service-token",
     serviceStartsAfterInstall: true,
-    missingCommands: ["git"],
     execFaults: [],
     openConversation: (command) => Promise.reject(new Error(`no conversation scripted for "${command}"`)),
     log: [],
@@ -256,18 +238,13 @@ export function hostsFactory(f: HostsScript): SshFactory {
       if (command.includes("dc-dns-probe-")) { emit(f.dnsOut); return done(); }
       if (command.includes("dc-slave-preflight-")) { emit(f.preflightOut); return done(); }
       if (command.startsWith("curl") && command.includes("/v1/sys/health")) { emit(f.vaultCode); return done(f.vaultExit); }
-      // ---- the placement every program act stands on: the probe is answered off the probe script
-      // the step UPLOADED — every `[ -d "<path>" ]` line of it decided against machineDirs — and the
-      // placing script's effect is applied off the placing script the step uploaded. So what the
-      // second probe of a step reports is what the placing script in between actually left.
-      if (command.includes("dc-place-probe-") || command.includes("dc-place-verify-")) {
-        emit(placementProbeOut(f, host, command.replace(/^bash /, "")));
-        return done();
-      }
-      if (command.includes("dc-place-ansiwise-")) {
-        const placed = applyPlacement(f, host);
-        emit(placed.out);
-        return done(placed.code);
+      // ---- the bootstrap every program act stands on, and the machine's own resident surface. Every
+      // answer is read off what the file transfer actually wrote (deploy-slave.placement.fixture.ts),
+      // so a step that transferred nothing is answered by a machine carrying nothing.
+      const placement = answerPlacementCommand(f, host, command);
+      if (placement !== undefined) {
+        emit(placement.out);
+        return done(placement.code);
       }
       // ---- the git upkeep around the programs
       if (command.includes("dc-prepare-checkouts-") || command.includes("dc-prepare-regeneration-")) { emit(f.checkoutsOut); return done(f.checkoutsExit); }
@@ -296,8 +273,8 @@ export function hostsFactory(f: HostsScript): SshFactory {
       hostKeyFingerprint: () => "SHA256:fixture",
       isClosed: () => false, // a fake transport never dies under a step
       close: () => undefined,
-      putFile: async (path, content) => {
-        f.files.push({ host, path, content: content.toString("utf8") });
+      putFile: async (path, content, mode) => {
+        f.files.push({ host, path, content: content.toString("utf8"), mode });
       },
       forwardLocalPort: async () => ({ localPort: 0, close: () => undefined }),
       openChannel: async (command) => {
@@ -323,6 +300,9 @@ export interface Harness {
   hosts: HostsScript;
   /** The platform repo the run reads the master's map from and writes the slave's onto (mark-slave). */
   platformRepo: FakePlatformRepo;
+  /** The release surface the bootstrap reads both executables off — every address it was asked for,
+   *  and where a test puts something other than the asset an address names. */
+  releases: ScriptedReleases;
 }
 
 /** A slave's cluster map as mark-slave leaves it on the books branch — identity plus the slave
@@ -368,7 +348,7 @@ export const VERSIONS_YAML = [
 
 /** Where the scripted installation fetches that version from. `<version>` is what the step fills in,
  *  so the address in the placing script names the pin above and nothing else. */
-export const ANSIWISE_DOWNLOAD_URL = "https://downloads.example.invalid/ansiwise/<version>/ansiwise-linux-amd64";
+export const ANSIWISE_DOWNLOAD_URL = "https://downloads.example.invalid/ansiwise/<version>/<name>-<version>-linux-x64";
 
 /** WHICH repository the scripted installation reads its programs from — a second repository beside
  *  the platform one, which is the whole point: the platform checkout is the material the programs
@@ -400,16 +380,16 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   // master that installed itself carries one by construction, and mark-slave composes the slave's
   // map from it. A test about a master map without a field seeds over this.
   platformRepo.seed(platformRepo.booksBranch, clusterMarkingPath("m1.example.com"), MASTER_MARKING_YAML);
-  // The binary's pin, on the trunk where place-ansiwise reads it. A test about a pin that is missing
-  // or malformed seeds over this.
+  // The pin both executables are placed at, on the trunk where the bootstrap reads it. A test about a
+  // pin that is missing or malformed seeds over this.
   platformRepo.seed(PRODUCT_BRANCH, ANSIWISE_PIN_PATH, opts.versionsYaml ?? VERSIONS_YAML);
+  const releases = new ScriptedReleases();
   const executor = new Executor({
     db: db.db, creds: store, bus: new RunEventBus(), logger,
     registry: buildRegistry({
       db: db.db, platformRepo,
-      platformRepoUrl: "https://github.com/acme/hostyour-cloud.git",
       ansiwiseDownloadUrl: ANSIWISE_DOWNLOAD_URL,
-      ansiwiseCatalogUrl: ANSIWISE_CATALOG_URL,
+      releaseDownloads: releases,
       ...(opts.ansiwiseServeCommand !== undefined ? { ansiwiseServeCommand: opts.ansiwiseServeCommand } : {}),
     }),
     sshFactory: hostsFactory(hosts), actor: () => "op_system",
@@ -437,7 +417,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
     }).run();
     await store.seal({ kind: "ssh_key", label: "master key", plaintext: Buffer.from("fake-master-key"), fingerprint: "SHA256:master", serverId: MASTER_ID });
   }
-  return { db, executor, store, hosts, platformRepo };
+  return { db, executor, store, hosts, platformRepo, releases };
 }
 
 export function stepColumn(db: DbHandle, runId: string, name: string, column: "error" | "checkpoint_json"): string | null {

@@ -213,7 +213,7 @@ describe("domains/onboarding/cluster-kube over the plane the deploy-slave run wr
   // the schema never declared and silently took its fallback on every row. So the document is
   // produced by the REAL writer: the register step itself, driven over the state create-mgmt leaves
   // behind (the sealed pair through the run's own sealTokenOnce, the kube facts on the cluster row
-  // in create-mgmt's exact write shape). The full journey needs a live `ansiwise serve` and lives in
+  // in create-mgmt's exact write shape). The full journey needs a live `ansiwise-rest serve` and lives in
   // redeploy.ansiwise.test.ts, which parses the same plane after a whole run.
   it("resolves a slave from the document register actually wrote, with the values it wrote", async () => {
     const { db, store } = await makeHarness();

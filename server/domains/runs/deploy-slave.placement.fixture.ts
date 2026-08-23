@@ -1,106 +1,161 @@
+import { DownloadFailed, type ReleaseDownloads } from "../../adapters/downloads/port.ts";
 import type { HostsScript } from "./deploy-slave.fixture.ts";
 
-// THE SCRIPTED MACHINE'S PLACEMENT HALF: what it answers the place-ansiwise probe, and what the
-// placing script does to it. It reads and writes the SAME HostsScript the rest of the scripted
-// machine does — a machine with two states would let a placement leave one of them behind — and it
-// lives here because place-ansiwise is four placements over one machine and the fixture for it is
-// as long as they are.
+// THE SCRIPTED MACHINE'S BOOTSTRAP HALF: what it answers when it is asked which release each of its
+// two executables is, what a file transfer does to it, and what the serving binary's install-service
+// leaves behind. It reads and writes the SAME HostsScript the rest of the scripted machine does — a
+// machine with two states would let a placement leave one of them behind.
 //
-// EVERY EFFECT IS READ OFF THE SCRIPT THE STEP UPLOADED, never off what the step meant to do. A
-// placement that composed its script without a section changes nothing here either, which is what
-// makes an idempotence assertion about the mechanism rather than about the fixture.
+// EVERY ANSWER COMES OFF WHAT WAS ACTUALLY WRITTEN, never off what the step meant to write. The
+// bytes a release address serves SAY which executable and which version they are, the transfer puts
+// those bytes on the machine, and `--version` reads them back out — so a bootstrap that fetched the
+// wrong asset, wrote it under the wrong name or skipped the write is answered by a machine that says
+// so. A fixture that recorded the step's intention instead would agree with every one of those.
 
-/** The DIRECTORIES the scripted machine carries. The probe asks about paths, so the machine answers
- *  about paths: a probe that looked for the programs in the platform checkout — the shape that made
- *  the first version of place-ansiwise refuse on every real machine — finds nothing there, instead of
- *  being handed the field it meant to read. */
-function machineDirs(f: HostsScript): string[] {
-  return [
-    ...(f.platformCheckout ? ["/srv/hostyour-cloud/.git"] : []),
-    ...(f.catalogCheckout ? ["/srv/ansiwise-catalog/.git"] : []),
-    ...(f.programs ? ["/srv/ansiwise-catalog/ansiwise/programs"] : []),
-  ];
+/** WHERE the scripted operating account's home is, spelled out. The manager writes a RELATIVE SFTP
+ *  path and names the file in a command with `~/` in front of it; the machine resolves both to this,
+ *  and install-service writes the RESOLVED path into the unit — so a unit's `ExecStart` and the word
+ *  a command was composed with are deliberately two different strings here, which is what makes the
+ *  bootstrap's "ask the file the unit names" real rather than a string comparison in disguise. */
+export const SCRIPTED_HOME = "/home/ubuntu";
+
+/** The bytes a release serves for one asset. They carry the name and the version because that is the
+ *  whole of what the scripted machine can answer afterwards — an executable is a thing that says what
+ *  it is when asked, and nothing else about it matters here. */
+export function assetBytes(name: string, version: string): Buffer {
+  return Buffer.from(`#!ansiwise\n${name} ${version}\n`, "utf8");
+}
+
+/** What an executable standing on the machine answers `--version` with: the version its own bytes
+ *  carry, or undefined where nothing was ever written under that name. */
+export function versionOf(content: string | undefined): string | undefined {
+  return content === undefined ? undefined : /^[a-z-]+ (\S+)$/m.exec(content)?.[1];
+}
+
+/** The release surface the scripted installation fetches from.
+ *
+ *  IT ANSWERS THE ADDRESS SHAPE AND REFUSES EVERY OTHER, which is what makes the two placeholders
+ *  testable: a bootstrap that filled `<name>` with the wrong word, left a slot standing or fetched
+ *  one asset twice asks for an address nothing serves, and this refuses it by name instead of handing
+ *  back plausible bytes. `serves` is where a test puts something ELSE at an address — the shape of a
+ *  release whose asset is an error page, which only a reading of the machine can catch. */
+export class ScriptedReleases implements ReleaseDownloads {
+  /** Every address this was asked for, in order. */
+  readonly read: string[] = [];
+
+  /** Addresses answered with something other than the asset they name. */
+  readonly serves = new Map<string, Buffer>();
+
+  async get(url: string, _opts: { signal: AbortSignal }): Promise<Buffer> {
+    this.read.push(url);
+    const scripted = this.serves.get(url);
+    if (scripted !== undefined) return scripted;
+    const named = /^https:\/\/downloads\.example\.invalid\/ansiwise\/([^/]+)\/([a-z-]+)-([^/]+)-linux-x64$/.exec(url);
+    const version = named?.[1];
+    const name = named?.[2];
+    if (version === undefined || name === undefined || named?.[3] !== version) {
+      throw new DownloadFailed(url, "nothing is served there");
+    }
+    return assetBytes(name, version);
+  }
+}
+
+/** What the file transfer left at `path` on the scripted machine, whole. The manager writes a
+ *  relative path, so this is keyed exactly as it was written. */
+function fileAt(f: HostsScript, host: string, path: string): string | undefined {
+  return f.files.filter((x) => x.host === host && x.path === path).at(-1)?.content;
+}
+
+/** The executable a command NAMES, as this machine resolves it: `~/x` and `<home>/x` are one file.
+ *  Answered as the relative path the transfer wrote, or undefined for a path this machine keeps
+ *  nothing under. */
+function executableNamed(word: string): string | undefined {
+  for (const prefix of ["~/", `${SCRIPTED_HOME}/`]) {
+    if (word.startsWith(prefix)) return word.slice(prefix.length);
+  }
+  return undefined;
+}
+
+/** The scripted machine's answer to one bootstrap or service command, or undefined where the command
+ *  is not one this half of the fixture knows — the exec table then goes on to the rest. */
+export function answerPlacementCommand(
+  f: HostsScript,
+  host: string,
+  command: string,
+): { out: string; code: number } | undefined {
+  const words = command.split(" ");
+
+  // `<executable> --version`, the one reading the bootstrap makes. A file nothing wrote answers
+  // nothing and exits 127, exactly as a shell answers a command it cannot find.
+  if (words.length === 2 && words[1] === "--version") {
+    const named = executableNamed(words[0] ?? "");
+    if (named === undefined) return undefined;
+    const version = versionOf(fileAt(f, host, named));
+    return version === undefined ? { out: "", code: 127 } : { out: version, code: 0 };
+  }
+
+  if (command === "systemctl is-enabled ansiwise.service") {
+    return { out: f.serviceEnabled ? "enabled" : "disabled", code: f.serviceEnabled ? 0 : 1 };
+  }
+  if (command === "systemctl is-active ansiwise.service") {
+    return { out: f.serviceActive ? "active" : "inactive", code: f.serviceActive ? 0 : 3 };
+  }
+  if (command === "systemctl show -p ExecStart ansiwise.service") {
+    return { out: execStartLine(f), code: 0 };
+  }
+
+  // The token, read with the run's own elevation. A machine that has not been through the program
+  // that mints it answers nothing and fails — which is the refusal the caller names by name.
+  if (command === "sudo -S cat /etc/ansiwise/service-token") {
+    return f.serviceToken === undefined
+      ? { out: "", code: 1 }
+      : { out: f.serviceToken, code: 0 };
+  }
+
+  if (command === "sudo -S systemctl restart ansiwise.service") {
+    f.serviceRunningVersion = f.serviceActive ? f.serviceExecVersion : undefined;
+    return { out: "", code: 0 };
+  }
+
+  if (words[1] === "install-service") {
+    return installService(f, host, words);
+  }
+  return undefined;
 }
 
 /** What `systemctl show -p ExecStart ansiwise.service` writes on the scripted machine. The whole
- *  line, not the two fields the manager reads out of it: a probe that took a shortcut through this
+ *  line, not the two fields the manager reads out of it: a reading that took a shortcut through this
  *  would be answered in its own words instead of the service manager's. */
 function execStartLine(f: HostsScript): string {
-  if (f.serviceExecVersion === undefined) return "ExecStart=";
-  const file = `/usr/local/bin/ansiwise-${f.serviceExecVersion}`;
+  if (f.serviceExecPath === undefined) return "ExecStart=";
   const listen = f.serviceExecListen === undefined ? "" : `--listen ${f.serviceExecListen} `;
-  return `ExecStart={ path=${file} ; argv[]=${file} serve ${listen}` +
+  return `ExecStart={ path=${f.serviceExecPath} ; argv[]=${f.serviceExecPath} service ${listen}` +
     "--service-token-file /etc/ansiwise/service-token --programs /srv/ansiwise-catalog/ansiwise/programs " +
-    "--config ansiwise.yaml --runs /var/lib/ansiwise/runs ; ignore_errors=no ; pid=0 }";
+    "--config /srv/ansiwise-catalog/ansiwise.yaml ; ignore_errors=no ; pid=0 }";
 }
 
-/** What the placement probe reads off the scripted machine, answered off the probe script the step
- *  UPLOADED: every `[ -d "<path>" ]` line of it is decided against the directories above, under the
- *  name that line echoes. A probe naming no directory at all is refused rather than answered with a
- *  machine that carries nothing — that answer would place over a working installation. */
-export function placementProbeOut(f: HostsScript, host: string, path: string): string {
-  const script = f.files.filter((x) => x.host === host && x.path === path).at(-1)?.content ?? "";
-  const dirs = machineDirs(f);
-  const asked = [...script.matchAll(/^\[ -d "([^"]+)" \] && echo "([A-Z]+) present"/gm)];
-  if (asked.length === 0) throw new Error(`the probe script at ${path} asks about no directory — the fixture cannot answer it`);
-  return [
-    `BINARY ${f.placedBinary ?? "absent"}`,
-    ...asked.map((m) => `${m[2]} ${dirs.includes(m[1] ?? "") ? "present" : "absent"}`),
-    // The two facts the service manager answers, and they are answered separately for the reason
-    // the probe asks separately: a unit that is enabled and dead and one that runs and is not
-    // enabled are two different machines, and neither is the one the placement is asked to leave.
-    f.serviceEnabled ? "SERVICE enabled" : "SERVICE not-enabled",
-    f.serviceActive ? "SERVICE active" : "SERVICE not-active",
-    // The unit's own command, in the shape the service manager writes it: `path=` is the file it
-    // would execute and `argv[]=` the whole line, `ExecStart=` alone for a unit it does not know.
-    `SERVICE_EXEC ${execStartLine(f)}`,
-    ...f.missingCommands.map((c) => `MISSING ${c}`),
-    "PROBED",
-  ].join("\n");
-}
-
-/** The placing script's effect on the scripted machine, applied from the script the step UPLOADED —
- *  which is the only place that says what this run of it places. A script the step composed without
- *  a section therefore changes nothing here either, the way the real one does not. */
-export function applyPlacement(f: HostsScript, host: string): { out: string; code: number } {
-  const script = f.files.filter((x) => x.host === host && x.path.includes("dc-place-ansiwise-")).at(-1)?.content ?? "";
-  const out: string[] = [];
-  if (script.includes("apt-get install")) f.missingCommands = [];
-  const version = /^echo "PLACED_BINARY (\S+)"$/m.exec(script)?.[1];
-  if (version !== undefined) {
-    f.placedBinary = version;
-    out.push(`PLACED_BINARY ${version}`);
+/** The serving binary placing its own unit, modelled on what the real one does: it refuses a caller
+ *  that is not the serving binary, refuses an invocation with no token in the envelope, writes a unit
+ *  whose `ExecStart` names THE FILE IT WAS RUN AS resolved to an absolute path, and ends at
+ *  `systemctl enable --now` — which starts a unit that is not running and does NOTHING to one that
+ *  is. That last one is why the caller restarts, and why this fixture keeps the running version apart
+ *  from the unit's. */
+function installService(f: HostsScript, host: string, words: string[]): { out: string; code: number } {
+  const named = executableNamed(words[0] ?? "");
+  if (named !== "ansiwise-rest") {
+    return {
+      out: `ansiwise has no program called "install-service"`,
+      code: 64,
+    };
   }
-  if (script.includes("PLACED_CATALOG")) {
-    f.catalogCheckout = true;
-    f.programs = f.programsAfterClone;
-    out.push("PLACED_CATALOG abc1234");
-  }
-  if (script.includes("PLACED_PLATFORM")) {
-    f.platformCheckout = true;
-    out.push("PLACED_PLATFORM abc1234");
-  }
-  // The service part, and it can end the script: the machine refuses BEFORE running install-service
-  // when the file the token is read out of is not there, exactly as the real script does — its
-  // `sudo -n test -r` is what those two lines are. So nothing after it runs and PLACED is never
-  // written, which is the shape a caller reads its refusal off.
-  if (script.includes("PLACED_SERVICE")) {
-    if (!f.serviceTokenFile) return { out: "NO_SERVICE_TOKEN", code: 1 };
-    // The unit install-service writes, composed out of the invocation the script carries: the
-    // VERSIONED file it is run as, and the address on its own --listen.
-    const wasActive = f.serviceActive;
-    f.serviceExecVersion = /"\/usr\/local\/bin\/ansiwise-(\S+)" install-service/.exec(script)?.[1];
-    f.serviceExecListen = /--listen "([^"]*)"/.exec(script)?.[1];
-    f.serviceEnabled = true;
-    f.serviceActive = f.serviceStartsAfterInstall;
-    // `systemctl enable --now` starts a unit that is not running and does NOTHING to one that is, so
-    // a rewritten command reaches the running process only through a restart. Both are read off the
-    // uploaded script, the way every other effect here is.
-    if (!wasActive || script.includes("systemctl restart ansiwise.service")) {
-      f.serviceRunningVersion = f.serviceActive ? f.serviceExecVersion : undefined;
-    }
-    out.push("PLACED_SERVICE");
-  }
-  out.push("PLACED");
-  return { out: out.join("\n"), code: 0 };
+  const version = versionOf(fileAt(f, host, named));
+  if (version === undefined) return { out: "", code: 127 };
+  const wasActive = f.serviceActive;
+  f.serviceExecPath = `${SCRIPTED_HOME}/${named}`;
+  f.serviceExecVersion = version;
+  f.serviceExecListen = words[words.indexOf("--listen") + 1];
+  f.serviceEnabled = true;
+  f.serviceActive = f.serviceStartsAfterInstall;
+  if (!wasActive) f.serviceRunningVersion = f.serviceActive ? version : undefined;
+  return { out: `${f.serviceExecPath} is written and ansiwise.service comes back after a restart`, code: 0 };
 }

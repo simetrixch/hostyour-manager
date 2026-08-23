@@ -32,7 +32,7 @@ import { loadServer, loadMaster, masterFqdnOf, sleepUnlessAborted, type SlaveTar
 // The machine layer itself is delivered by the deployment PROGRAMS (deploy-cluster, deploy-gitops,
 // and for a release the regeneration before them — regenerate-branch on a master's own host,
 // regenerate-slave-branch on the master for a slave), each driven over the machine's own
-// `ansiwise serve` surface by ansiwiseProgramStep — ArgoCD cannot deliver this, because the
+// `ansiwise-rest serve` surface by ansiwiseProgramStep — ArgoCD cannot deliver this, because the
 // operating system and the Kubernetes install are what ArgoCD RUNS ON. A cluster RELEASE moves the
 // pin first and regenerates the branch from it; a REDEPLOY moves no pin — the machine layer is
 // restorable without a version change. That is the whole difference between the two run kinds.

@@ -19,7 +19,7 @@ import type { Harness } from "./deploy-slave.fixture.ts";
 // The cluster release, at the fake-repo level: what each of the two arms PLANS, what set-pin writes,
 // which answers the manager reads off the cluster map, and the two refusals that stop a release
 // before it touches a machine — the channel ceiling and a catalogue that cannot be read. What the run
-// kind does ON the machine — the three programs over the real `ansiwise serve` — is proven in
+// kind does ON the machine — the three programs over the real `ansiwise-rest serve` — is proven in
 // redeploy.ansiwise.test.ts, the one file every machine-run suite shares (the engine's run root is
 // per-drive).
 //
@@ -74,7 +74,7 @@ async function liveSlave(): Promise<Harness> {
  *  MASTER_MARKING_YAML names the master as its own build plane, exactly like a real one-master
  *  installation; a test about the other case seeds a different marking over it. */
 async function liveMaster(over: { marking?: string } = {}): Promise<Harness> {
-  const h = await makeHarness({ keystore: "keyfile", ansiwiseServeCommand: "ansiwise serve" });
+  const h = await makeHarness({ keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   h.platformRepo.seed(CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH, CHANNEL_TABLE);
   if (over.marking) h.platformRepo.seed(h.platformRepo.booksBranch, clusterMarkingPath("m1.example.com"), over.marking);
   h.db.db.insert(clusters).values({
@@ -197,7 +197,7 @@ describe("release — set-pin and the map-sourced answers", () => {
   });
 
   it("PLANTED DEFECT: the machine's catalogue cannot be read at all, and the run dies at require-programs — BEFORE the tag and BEFORE the pin", async () => {
-    // THE ORDER IS WHAT IS UNDER PROOF. The scripted hosts hold no `ansiwise serve` conversation, so
+    // THE ORDER IS WHAT IS UNDER PROOF. The scripted hosts hold no `ansiwise-rest serve` conversation, so
     // asking the machine what it carries fails — the same shape as a machine whose catalogue is older
     // than this manager and does not carry the regeneration program. Because that question is asked
     // BEFORE set-pin, the map is left saying nothing about a release the cluster never received; ask

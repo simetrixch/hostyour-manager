@@ -42,7 +42,7 @@ export function buildRegistry(ports: RegistryPorts, extra: AnyRunDefinition[] = 
   register(registry, makeReleaseDef(ports));
   // The tailnet repair run kinds, on a host that is already deployed: leave the private network, come
   // back with the credential the host holds, or be logged out and joined again with one the master
-  // mints. Every act is a program of the machine's own catalogue driven over `ansiwise serve`, so
+  // mints. Every act is a program of the machine's own catalogue driven over `ansiwise-rest serve`, so
   // they take the serve command, and a rejoin additionally reads the coordinator's address off the
   // platform repo — both fail loud in the step when unconfigured, like redeploy's.
   register(registry, makeTailnetDisconnectDef(ports));

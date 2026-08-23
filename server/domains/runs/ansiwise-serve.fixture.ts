@@ -13,7 +13,7 @@ import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeHarness, scriptedHosts, logger, MASTER_ID, SLAVE_ID, type Harness } from "./deploy-slave.fixture.ts";
 
-// The fixture half of the ONE suite that talks to a real `ansiwise serve`
+// The fixture half of the ONE suite that talks to a real `ansiwise-rest serve`
 // (redeploy.ansiwise.test.ts): the measuring programs the serve installation carries, the worlds
 // the run kinds run in, and the observer/step plumbing. Split out of the test file (the file-size
 // doctrine); nothing here asserts — the suite does.
@@ -112,7 +112,7 @@ export function fixturePrograms(): Record<string, string> {
     // the filled password into its fingerprint while the door computes one without it, so the
     // gate never admits the run that follows its own green dry. Both are the machine side's to
     // repair (see the handover); until then a program declaring that answer cannot be driven
-    // over `ansiwise serve`, and this fixture measures what CAN be.
+    // over `ansiwise-rest serve`, and this fixture measures what CAN be.
     "deploy-gitops": programYaml("deploy-gitops", [
       { answer: "fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
       { answer: "stage", pattern: "^prod$" },
@@ -189,7 +189,7 @@ export function fixturePrograms(): Record<string, string> {
   };
 }
 
-/** A real sshd whose "ansiwise serve" exec spawns the binary so its own standard input and output
+/** A real sshd whose "ansiwise-rest serve" exec spawns the binary so its own standard input and output
  *  ARE the connection — exactly what an SSH exec channel hands a process. No token on this door: a
  *  session is authenticated by sshd, and a machine at its first installation has no token yet. */
 export function serveConversation(serve: ServeFixture): (stream: ServerChannel) => void {
@@ -224,7 +224,7 @@ function seedChannelTable(h: Harness): void {
  *  The channel table rides along because a release's attest checks the ceiling against it. */
 export async function liveMaster(serve: ServeFixture): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
-  const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise serve" });
+  const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   seedChannelTable(h);
   h.db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, MASTER_ID)).run();
   h.db.db.insert(clusters).values({
@@ -239,7 +239,7 @@ export async function liveMaster(serve: ServeFixture): Promise<Harness> {
  *  — the host that needs them most is exactly the one whose deploy went wrong. */
 export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean; tailnetUrl?: string | false } = {}): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
-  const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise serve" });
+  const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   if (opts.cluster ?? true) {
     h.db.db.insert(clusters).values({
       id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1,
@@ -254,18 +254,18 @@ export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean
   return h;
 }
 
-/** A fresh, adopted slave and its master, wired to reach the real `ansiwise serve` on BOTH hosts.
+/** A fresh, adopted slave and its master, wired to reach the real `ansiwise-rest serve` on BOTH hosts.
  *  ONE serve installation stands in for the two machines, and that is honest for what is under
  *  proof: the fixture's programs are pure measurements, so what the engine judges — the gate, the
  *  answers validation, the detached records — is host-independent, while WHICH surface each
  *  conversation went over is still real per host (the scripted sessions are keyed by host and
- *  every `ansiwise serve` open is logged against the host it was opened on). What the programs
+ *  every `ansiwise-rest serve` open is logged against the host it was opened on). What the programs
  *  would WRITE on a real machine is stood in by the scripted side: the slave-branch profile the
  *  join reads its coordinator address from (seeded on the fake platform repo) and the two
  *  credential files the manager `cat`s over the session. */
 export async function deployWorld(serve: ServeFixture): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
-  const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise serve", marking: false });
+  const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve", marking: false });
   h.platformRepo.seed("s1.example.com", "platform/values-common.yaml", "global: {}\n");
   h.platformRepo.seed("s1.example.com", "installation/profile.yaml", "global:\n  tailnetUrl: https://tale.m1.example.com\n");
   return h;
@@ -275,7 +275,7 @@ export async function deployWorld(serve: ServeFixture): Promise<Harness> {
  *  along (makeHarness seeds SLAVE_MARKING_YAML), which is exactly what a live slave's books say. */
 export async function liveSlaveWorld(serve: ServeFixture): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
-  const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise serve" });
+  const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   h.db.db.insert(clusters).values({
     id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1, planeState: "ready",
   }).run();

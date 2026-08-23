@@ -7,7 +7,7 @@ import { generateServerKeypair } from "../../adapters/ssh/keygen.ts";
 import { startFakeSshServer, type FakeSshServer } from "../../adapters/ssh/testing/fake-server.ts";
 import { AnsiwiseClient } from "../../adapters/ansiwise/client.ts";
 import { AnsiwiseRefused } from "../../adapters/ansiwise/port.ts";
-import { ansiwiseBinary, NO_BINARY, startServe, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
+import { ansiwiseBinaries, NO_BINARY, startServe, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
 import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
@@ -26,7 +26,7 @@ import {
 } from "./ansiwise-serve.fixture.ts";
 import { releaseSuite } from "./release.ansiwise.suite.ts";
 
-// EVERY run kind that drives the machine's deployment programs, on the REAL `ansiwise serve`:
+// EVERY run kind that drives the machine's deployment programs, on the REAL `ansiwise-rest serve`:
 // redeploy (both arms), release, the tailnet repair run kinds, deploy-slave, and the transport
 // underneath them all. Nothing here mocks the machine's surface: the serve fixture starts the
 // actual binary on a minimal installation whose programs are pure measurements
@@ -45,10 +45,10 @@ import { releaseSuite } from "./release.ansiwise.suite.ts";
 // runs back to back at all — the fixture's programs take milliseconds where a real one takes
 // minutes, so this suite is where that defect showed.
 
-const bin = ansiwiseBinary();
+const bin = ansiwiseBinaries();
 const key = generateServerKeypair("test@manager");
 
-describe.skipIf(bin === undefined)("the manager's run kinds over the machine's own deployment programs (REAL ansiwise serve)", () => {
+describe.skipIf(bin === undefined)("the manager's run kinds over the machine's own deployment programs (REAL ansiwise-rest serve)", () => {
   if (bin === undefined) {
     // eslint-disable-next-line no-console -- the skip must be loud, not silent (see NO_BINARY)
     console.warn(NO_BINARY);
@@ -60,12 +60,12 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   let observer: AnsiwiseClient;
 
   beforeAll(async () => {
-    serve = await startServe(bin as string, fixturePrograms());
+    serve = await startServe(bin as { tool: string; rest: string }, fixturePrograms());
     // The channel form of the surface, and it is the real one (serveConversation): the binary's
     // own stdio is the connection, exactly what an SSH exec channel hands a process.
     ssh = await startFakeSshServer({
       authorizedKeys: [key.publicLine],
-      conversations: { "ansiwise serve": serveConversation(serve) },
+      conversations: { "ansiwise-rest serve": serveConversation(serve) },
     });
     observer = new AnsiwiseClient({ kind: "address", host: "127.0.0.1", port: serve.port, token: serve.token });
   }, 60_000);
@@ -84,7 +84,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       host: "127.0.0.1", port: ssh.port, username: "m1",
       auth: { kind: "key", privateKey: key.privateOpenSsh },
     });
-    const channel = await session.openChannel("ansiwise serve", { signal: new AbortController().signal });
+    const channel = await session.openChannel("ansiwise-rest serve", { signal: new AbortController().signal });
     const client = new AnsiwiseClient({ kind: "channel", stream: channel.stream });
     try {
       const programs = await client.programs();
@@ -167,7 +167,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(events).toContain("machine run finished: exit 0");
     // The conversation went over the machine's serve surface, and the follow still read ArgoCD.
     const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
-    expect(onMaster.filter((c) => c === "ansiwise serve")).toHaveLength(2); // one conversation per program step
+    expect(onMaster.filter((c) => c === "ansiwise-rest serve")).toHaveLength(2); // one conversation per program step
     expect(onMaster.some((c) => c.includes("-n argocd get applications.argoproj.io"))).toBe(true);
 
     // The machine's OWN records: dry + run per program, every one green. This is the record an
@@ -228,7 +228,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       checkpoint: (data) => (checkpoint = data),
     });
 
-    const step = ansiwiseProgramStep(activeClusterTarget(MASTER_ID), "deploy-cluster", { ansiwiseServeCommand: "ansiwise serve" });
+    const step = ansiwiseProgramStep(activeClusterTarget(MASTER_ID), "deploy-cluster", { ansiwiseServeCommand: "ansiwise-rest serve" });
     await step.run(ctx);
 
     expect(
@@ -259,7 +259,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       checkpoint: (data) => (checkpoint = data),
     });
 
-    const step = ansiwiseProgramStep(activeClusterTarget(MASTER_ID), "deploy-cluster", { ansiwiseServeCommand: "ansiwise serve" });
+    const step = ansiwiseProgramStep(activeClusterTarget(MASTER_ID), "deploy-cluster", { ansiwiseServeCommand: "ansiwise-rest serve" });
     await step.run(ctx);
 
     expect(logs.some((l) => l.includes(`re-attaching to machine run ${dry.run} from event 0`))).toBe(true);
@@ -326,7 +326,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // Two surfaces: the mint conversation on the MASTER (its usual address), the rejoin on the
     // host's PUBLIC one; the key file was read and removed on the master.
-    const serves = h.hosts.log.filter((l) => l.command === "ansiwise serve").map((l) => l.host).sort();
+    const serves = h.hosts.log.filter((l) => l.command === "ansiwise-rest serve").map((l) => l.host).sort();
     expect(serves).toEqual(["m1.example.com", "s1.example.com"]);
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "cat /tmp/ansiwise-tailnet-join-key-s1")).toBe(true);
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "rm -f /tmp/ansiwise-tailnet-join-key-s1")).toBe(true);
@@ -368,7 +368,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // Not one machine run started, on either surface — no serve conversation was even opened.
     expect(await observer.runs()).toHaveLength(before.length);
-    expect(h.hosts.log.filter((l) => l.command === "ansiwise serve")).toHaveLength(0);
+    expect(h.hosts.log.filter((l) => l.command === "ansiwise-rest serve")).toHaveLength(0);
   });
 
   // ================================ deploy-slave, end to end ================================
@@ -405,9 +405,9 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // checkouts were stood up BEFORE its first conversation.
     const master = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
     const slave = h.hosts.log.filter((l) => l.host === "10.1.1.11").map((l) => l.command);
-    expect(master.filter((c) => c === "ansiwise serve")).toHaveLength(3);
-    expect(slave.filter((c) => c === "ansiwise serve")).toHaveLength(5);
-    expect(master.findIndex((c) => c.includes("dc-prepare-checkouts-"))).toBeLessThan(master.indexOf("ansiwise serve"));
+    expect(master.filter((c) => c === "ansiwise-rest serve")).toHaveLength(3);
+    expect(slave.filter((c) => c === "ansiwise-rest serve")).toHaveLength(5);
+    expect(master.findIndex((c) => c.includes("dc-prepare-checkouts-"))).toBeLessThan(master.indexOf("ansiwise-rest serve"));
 
     // THE ONE-ADDRESS LAW, on the record: the map the run committed carries the same spelling the
     // emit and the register were given as their answer — the fixture's api_server_url/ca_data rows

@@ -11,10 +11,10 @@ import { z } from "zod";
 
 /** Where the bytes come from — one client, two ways of getting them.
  *
- *  `channel` is an ALREADY-OPEN conversation with `ansiwise serve` — an SSH exec channel whose
+ *  `channel` is an ALREADY-OPEN conversation with `ansiwise-rest serve` — an SSH exec channel whose
  *  stdin/stdout are the connection (SshSession.openChannel). Opening it is the SSH layer's job;
  *  this client only speaks HTTP over it. `address` dials a listening resident service
- *  (`ansiwise serve --listen`); `token` is the service token the resident surface is secured
+ *  (`ansiwise-rest service --listen`); `token` is the service token the resident surface is secured
  *  with, sent as `Authorization: Bearer`. REQUIRED on an address and absent on a channel: an
  *  address is authenticated by nothing until this says otherwise, and the SSH session already
  *  authenticated. */

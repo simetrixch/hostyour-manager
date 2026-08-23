@@ -1,5 +1,6 @@
 import type { Step, StepCtx } from "../../../executor/types.ts";
 import type { SshSession } from "../../../adapters/ssh/port.ts";
+import type { ReleaseDownloads } from "../../../adapters/downloads/port.ts";
 import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { AnsiwiseClient } from "../../../adapters/ansiwise/client.ts";
 import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../../../adapters/ansiwise/port.ts";
@@ -35,31 +36,35 @@ export const ANSIWISE_ELEVATION_SECRET = "ansiwise-elevation";
 export const ANSIWISE_PROGRAM_TIMEOUT_MS = 45 * 60_000;
 
 /** How the manager starts the conversation: the command run over the target's SSH session whose
- *  stdio then speaks HTTP (`ansiwise serve` out of the machine's catalogue checkout). WHICH
- *  checkout the service reads its programs from is that command's to say — configuration, never
- *  an assumption baked in here. */
+ *  stdio then speaks HTTP. WHICH checkout the service reads its programs from is that command's to
+ *  say — configuration, never an assumption baked in here.
+ *
+ *  IT IS `ansiwise-rest serve` AND NOT `ansiwise-rest serve`. `serve` is the SESSION door of the serving
+ *  binary — the surface over one session's own standard input and output, standing on no address and
+ *  demanding no token because sshd authenticated the caller before the process existed (ansiwise-cli
+ *  lib/src/rest/resident_service.dart `sessionProgram`). The deployment tool answers `no program is
+ *  called serve`, because it runs programs of a catalogue and `serve` is not one. */
 export interface AnsiwisePorts {
   ansiwiseServeCommand?: string;
-  /** WHERE a machine fetches the binary that answers that command, with `<version>` standing for the
-   *  version the platform repo pins (place-ansiwise). Which release surface an installation takes its
-   *  binary from is its own decision; WHICH version is placed never is. */
+  /** WHERE a machine's two executables are fetched from, with `<name>` standing for which of the
+   *  release's assets and `<version>` for the version the platform repo pins (place-ansiwise). Which
+   *  release surface an installation takes them from is its own decision; WHICH version is placed
+   *  never is, and neither is which pair of names an engine is made of. */
   ansiwiseDownloadUrl?: string;
-  /** WHICH REPOSITORY the programs that command serves are read from: the clone address of the
-   *  installation repository carrying `ansiwise.yaml` and `ansiwise/programs/`. place-ansiwise puts
-   *  a checkout of it at CATALOG_CHECKOUT, which is the checkout the serve command has to read. */
-  ansiwiseCatalogUrl?: string;
-  /** The credential that repository is read with, for a private one. It reaches the machine over the
-   *  run's session and is written to no file there. */
-  ansiwiseCatalogToken?: string;
+  /** WHERE those release assets are READ, which is over the manager's own network: the bootstrap
+   *  hands a machine bytes rather than a download command, so a machine with no route out and no
+   *  `curl` is still placeable (place-ansiwise.ts, THE TRANSFER). */
+  releaseDownloads?: ReleaseDownloads;
 }
 
 export function requireServeCommand(ports: AnsiwisePorts): string {
   if (!ports.ansiwiseServeCommand) {
     throw errNotConfigured(
-      "ANSIWISE_SERVE_COMMAND is not configured — this step reaches the machine's deployment programs through " +
-      "`ansiwise serve` on the machine, and which command starts it (and so which catalogue checkout it reads) " +
-      "is the installation's decision. Set ANSIWISE_SERVE_COMMAND to the command that serves the surface on the " +
-      "session's stdio, e.g. `cd /srv/digita-deploy && ansiwise serve`",
+      "ANSIWISE_SERVE_COMMAND is not configured — this step reaches the machine's deployment programs through the " +
+      "serving binary's SESSION door on the machine, and which command starts it (and so which catalogue checkout it " +
+      "reads) is the installation's decision. It is a program of `ansiwise-rest` and not of `ansiwise`, which answers " +
+      "`no program is called serve`. Set ANSIWISE_SERVE_COMMAND to the command that serves the surface on the session's " +
+      "stdio, e.g. `cd /srv/ansiwise-catalog && ~/ansiwise-rest serve --programs /srv/ansiwise-catalog/ansiwise/programs`",
     );
   }
   return ports.ansiwiseServeCommand;
@@ -92,7 +97,7 @@ export function requireElevationPassword(ctx: StepCtx): string {
   return password;
 }
 
-/** One conversation with a machine's surface: `ansiwise serve` on the session's stdio, spoken to
+/** One conversation with a machine's surface: `ansiwise-rest serve` on the session's stdio, spoken to
  *  by the typed client. The caller owns the session; close() ends the conversation only. */
 export interface ServeConversation {
   client: AnsiwiseClient;

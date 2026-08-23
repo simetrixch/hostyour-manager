@@ -14,7 +14,7 @@ import { makeTailnetDisconnectDef, makeTailnetReconnectDef, makeTailnetRejoinDef
 // The PLAN of the three repair run kinds — everything the operator approves before a machine is asked
 // anything: which address the run is aimed at, what it locks, whose hosts it names, and what it
 // demands at approve. The acts themselves are ansiwise programs now, and driving them takes a real
-// `ansiwise serve`; the executed proofs — the program runs, the address every session actually
+// `ansiwise-rest serve`; the executed proofs — the program runs, the address every session actually
 // dialled, the membership write-back — live in redeploy.ansiwise.test.ts, the ONE file that starts
 // machine runs (the engine's run root is per-drive, so two serve fixtures in parallel would share
 // records and collide).

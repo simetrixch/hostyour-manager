@@ -30,7 +30,7 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } fr
 //   master, master+   the machine layer as the deployment PROGRAMS deliver it, plus the ArgoCD
 //     slave           follow. deploy-cluster rebuilds the node below GitOps and deploy-gitops raises
 //                     what hands the cluster to the reconciler; both run on the machine's own
-//                     `ansiwise serve` surface, each proven by a dry run the machine's gate then
+//                     `ansiwise-rest serve` surface, each proven by a dry run the machine's gate then
 //                     admits the real run against (ansiwise-run.kit.ts). A master has no master-side
 //                     registration to redo — it IS the master — so those two programs and the follow
 //                     are the whole machine layer here, minus the pin.

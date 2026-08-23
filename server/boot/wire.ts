@@ -16,6 +16,7 @@ import { Executor } from "../executor/executor.ts";
 import { buildRegistry, type Registry } from "../domains/runs/registry.ts";
 import { buildOnboarding } from "./wire-onboarding.ts";
 import { createSshSession } from "../adapters/ssh/ssh2-session.ts";
+import { HttpReleaseDownloads } from "../adapters/downloads/downloads.ts";
 import { SessionCodec } from "../domains/access/session.ts";
 import { LoginTxCodec } from "../domains/access/login-tx.ts";
 import { registerAuthRoutes } from "../domains/access/routes.ts";
@@ -75,13 +76,13 @@ export async function wire(): Promise<Wired> {
   const registry = buildRegistry({
     db: db.db,
     ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}),
-    // The same repository that port writes, as the address a MACHINE clones it from (place-ansiwise),
-    // composed from the same two settings.
-    ...(config.github ? { platformRepoUrl: `https://github.com/${config.github.owner}/${config.github.repo}.git` } : {}),
     ...(config.ansiwiseServeCommand ? { ansiwiseServeCommand: config.ansiwiseServeCommand } : {}),
     ...(config.ansiwiseDownloadUrl ? { ansiwiseDownloadUrl: config.ansiwiseDownloadUrl } : {}),
-    ...(config.ansiwiseCatalogUrl ? { ansiwiseCatalogUrl: config.ansiwiseCatalogUrl } : {}),
-    ...(config.ansiwiseCatalogToken ? { ansiwiseCatalogToken: config.ansiwiseCatalogToken } : {}),
+    // WHERE the bootstrap reads the two ansiwise executables. Unconditional and not behind a setting:
+    // the address they are read FROM is the installation's (ANSIWISE_DOWNLOAD_URL above), while
+    // reading bytes off it is a capability of this process that nothing can turn off and nothing
+    // should.
+    releaseDownloads: new HttpReleaseDownloads(),
   }, onboarding.defs);
   const executor = new Executor({
     db: db.db,

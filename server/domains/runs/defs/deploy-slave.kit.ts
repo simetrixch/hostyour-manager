@@ -14,17 +14,21 @@ import { removeSlaveMarkingPart, clusterMarkingPath } from "../../inventory/clus
 // timing helpers and compensating actions the steps share. Split out of deploy-slave.ts
 // (files ≤400 lines) — the def composes these; nothing here is a step.
 
-/** The platform repo, in the two shapes deploy-slave reaches it: as the WRITER through which the run
- *  marks the slave reachable in clusters/active/<fqdn>.yaml on the books branch — the install branch
- *  of the cluster holding the master role, which is where install.sh put the map — and as the ADDRESS
- *  the machine itself clones that same repository from (place-ansiwise). Both are built where the
- *  ports are built, out of the same two settings, so the tree this manager writes and the tree the
- *  machine reads are one repository stated once. Optional because the run is registered
- *  unconditionally while the platform repo needs GITHUB_REPO + GITHUB_WRITE_PAT — absent, the map
- *  step fails LOUD with what to configure rather than deploying a slave the master can never reach. */
+/** The platform repo: the WRITER through which the run marks the slave reachable in
+ *  clusters/active/<fqdn>.yaml on the books branch — the install branch of the cluster holding the
+ *  master role, which is where install.sh put the map — and the reader the pinned ansiwise version is
+ *  taken off. Optional because the run is registered unconditionally while the platform repo needs
+ *  GITHUB_REPO + GITHUB_WRITE_PAT — absent, the map step fails LOUD with what to configure rather
+ *  than deploying a slave the master can never reach.
+ *
+ *  THE CLONE ADDRESS IS GONE FROM HERE, and it is worth saying why rather than leaving a hole. This
+ *  port used to carry the address a MACHINE clones the platform tree from, because place-ansiwise
+ *  cloned it with composed bash. Nothing in this manager clones a tree onto a machine any more — a
+ *  clone is a `git_clone` row of a program, which reads its origin and its credential out of the
+ *  machine's own settings files by NAME (digita-deploy ansiwise/programs/deploy-gitops.yaml) rather
+ *  than taking either through a caller. */
 export interface DeploySlavePorts {
   platformRepo?: PlatformRepo;
-  platformRepoUrl?: string;
 }
 
 /** WHICH run kind is driving the shared slave step list. The steps are the same either way — what

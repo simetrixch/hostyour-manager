@@ -11,7 +11,7 @@ import {
   liveMaster, releaseSlaveWorld, freshRuns, expectProven, settled, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
 
-// THE RELEASE, END TO END, over the REAL `ansiwise serve` — both arms, and the step that stands in
+// THE RELEASE, END TO END, over the REAL `ansiwise-rest serve` — both arms, and the step that stands in
 // front of the pin.
 //
 // IT IS NOT A TEST FILE OF ITS OWN, and the reason is the one redeploy.ansiwise.test.ts states for
@@ -60,7 +60,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       expect(onMaster.some((c) => c.includes("dc-refresh-checkout-"))).toBe(true);
       // Four, not three: one per program step, plus the ONE require-programs opens to ask the
       // catalogue what it carries before anything is written.
-      expect(onMaster.filter((c) => c === "ansiwise serve")).toHaveLength(4);
+      expect(onMaster.filter((c) => c === "ansiwise-rest serve")).toHaveLength(4);
       expect(onMaster.some((c) => c.includes("-n argocd get applications.argoproj.io"))).toBe(true);
     });
 
@@ -94,10 +94,10 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
       const onSlave = h.hosts.log.filter((l) => l.host === "10.1.1.11").map((l) => l.command);
       expect(onMaster.some((c) => c.includes("dc-prepare-regeneration-"))).toBe(true);
-      expect(onMaster.filter((c) => c === "ansiwise serve")).toHaveLength(2);
+      expect(onMaster.filter((c) => c === "ansiwise-rest serve")).toHaveLength(2);
       expect(onMaster.some((c) => c.includes("dc-refresh-checkout-"))).toBe(false);
       expect(onSlave.some((c) => c.includes("dc-refresh-checkout-"))).toBe(true);
-      expect(onSlave.filter((c) => c === "ansiwise serve")).toHaveLength(3);
+      expect(onSlave.filter((c) => c === "ansiwise-rest serve")).toHaveLength(3);
       // A slave's Applications live in its own ArgoCD instance ON THE MASTER, in namespace s1.
       expect(onMaster.some((c) => c.includes("-n s1 get applications.argoproj.io"))).toBe(true);
     });
@@ -123,7 +123,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
     });
 
     it("require-programs refuses a name the machine's catalogue does not carry, and names what it DOES offer", { timeout: 60_000 }, async () => {
-      // The step a release takes BEFORE set-pin, asked over a real `ansiwise serve` about a name no
+      // The step a release takes BEFORE set-pin, asked over a real `ansiwise-rest serve` about a name no
       // catalogue will ever carry. The engine and the GET /programs read are real; the programs that
       // installation carries are fixturePrograms(), not digita-deploy's, so what goes red here is the
       // step's reading of the LIST — which is the part that has to hold. This is the failure the
@@ -136,7 +136,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
         secrets: elevationOnly(), log: (l) => logs.push(l),
         readCheckpoint: () => undefined, checkpoint: () => undefined,
       });
-      const step = requireProgramsStep({ ansiwiseServeCommand: "ansiwise serve" }, [{ program: "regenerate-nothing" }]);
+      const step = requireProgramsStep({ ansiwiseServeCommand: "ansiwise-rest serve" }, [{ program: "regenerate-nothing" }]);
       const err = await step.run(ctx).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(AppError);
       const message = (err as AppError).message;
@@ -146,7 +146,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
 
       // Counter-probe: the same catalogue, over the same surface, admits the name it does carry — so
       // the refusal is a reading of the LIST and not a step that refuses everything.
-      const ok = requireProgramsStep({ ansiwiseServeCommand: "ansiwise serve" }, [{ program: "regenerate-slave-branch" }]);
+      const ok = requireProgramsStep({ ansiwiseServeCommand: "ansiwise-rest serve" }, [{ program: "regenerate-slave-branch" }]);
       await expect(ok.run(ctx)).resolves.toBeUndefined();
       expect(logs.some((l) => l.includes("carries regenerate-slave-branch"))).toBe(true);
     });
