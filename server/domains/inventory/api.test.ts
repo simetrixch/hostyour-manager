@@ -106,7 +106,7 @@ describe("clusters + locks API", () => {
     const MASTER = "m1.example.com";
     const SLAVE = "s1.example.com";
     const map = (fqdn: string, role: string, release?: string): string =>
-      `fqdn: ${fqdn}\nstage: prod\nrole: ${role}\nbuild-plane: ${MASTER}\n${release ? `release: ${release}\n` : ""}`;
+      `stage: prod\nrole: ${role}\n\nglobal:\n  domain: ${fqdn}\n  buildPlane: ${MASTER}\n${release ? `release: ${release}\n` : ""}`;
 
     /** A master and a slave, both registered as clusters, read through /api/clusters. */
     async function twoClusters(repo?: FakePlatformRepo): Promise<ClustersView> {

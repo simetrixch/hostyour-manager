@@ -121,7 +121,7 @@ describe("server inventory API", () => {
   /** One cluster map as the platform repo carries it (clusters/active/<fqdn>.yaml). `release` is
    *  absent on a cluster no release run has pinned yet. */
   const map = (fqdn: string, role: string, release?: string): string =>
-    `fqdn: ${fqdn}\nstage: prod\nrole: ${role}\nbuild-plane: ${MASTER}\n${release ? `release: ${release}\n` : ""}`;
+    `stage: prod\nrole: ${role}\n\nglobal:\n  domain: ${fqdn}\n  buildPlane: ${MASTER}\n${release ? `release: ${release}\n` : ""}`;
 
   /** The master pinned, the slave never released — the two states standing side by side. */
   function bothMaps(): FakePlatformRepo {

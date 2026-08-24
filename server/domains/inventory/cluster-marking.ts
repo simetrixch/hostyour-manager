@@ -103,29 +103,38 @@ export function clusterMarkingPath(fqdn: string): string {
  *  slave. One unreadable map fails every read, because indexMarkings folds them all — the same blast
  *  radius the slaves ApplicationSet has under missingkey=error, and for the same reason. */
 const ClusterMarkingFileSchema = z.object({
-  fqdn: z.string().min(1),
   stage: z.enum(STAGE),
   role: z.enum(SERVER_ROLE),
   // Optional because maps predating the key are still valid markings; every map the deployment
   // programs write (cluster-map.tpl) and every slave map mark-slave writes carries it.
-  "books-cluster": z.string().min(1).optional(),
-  "build-plane": z.string().min(1),
+  booksCluster: z.string().min(1).optional(),
   // Checked against the release grammar rather than accepted as free text: the field IS the pin, and
   // a value the grammar does not recognise names no state anything can be regenerated from.
   release: z.string().regex(RELEASE_TAG_RE, "must be a release tag <x.y.z>-<channel>-<ts14>").optional(),
-  master: z.string().min(1).optional(),
-  apiHost: z.string().min(1).optional(),
-  apiPort: z.number().int().positive().optional(),
-  // Nothing in this process decides anything with these four. They are declared and carried so a
-  // write does not drop them; optional rather than required because the maps that predate them are
-  // still valid markings. `alert-recipients` is the comma-separated mailbox list the branch render puts
-  // into installation/profile.yaml as global.alertRecipients — the trunk carries an empty list, because a
-  // mailbox names one installation.
-  "unit-apex": z.string().min(1).optional(),
-  "platform-domain": z.string().min(1).optional(),
-  "alert-recipients": z.string().min(1).optional(),
-  "post-url": z.string().min(1).optional(),
-  "catalog-repo": z.string().min(1).optional(),
+  // THE TOP LEVEL IS WHAT THE GENERATORS SELECT ON, and it is strict for that reason: a key that
+  // does not belong there is a key nothing selects on, and a selector matching nothing produces no
+  // Applications and reports no error at all. Everything a CHART reads lives under `global` instead,
+  // where the same file is also a Helm values file — one file, two readers, which is what ended an
+  // installation's answers being written down twice in two spellings.
+  global: z.object({
+    domain: z.string().min(1),
+    buildPlane: z.string().min(1),
+    master: z.string().min(1).optional(),
+    apiHost: z.string().min(1).optional(),
+    apiPort: z.number().int().positive().optional(),
+    // Nothing in this process decides anything with these five. They are declared and carried so a
+    // write does not drop them; optional rather than required because the maps that predate them
+    // are still valid markings.
+    unitApex: z.string().min(1).optional(),
+    platformDomain: z.string().min(1).optional(),
+    alertRecipients: z.union([z.string(), z.array(z.string())]).optional(),
+    catalogUrl: z.string().min(1).optional(),
+    endpoints: z.object({}).passthrough().optional(),
+  // PASSTHROUGH, and only here. The global block carries every value the charts of this platform
+  // read, and this process has no business refusing a key a chart added — it would fail every map
+  // read on the next release that introduces one. What it does refuse is an unknown key at the TOP,
+  // which is the surface it actually decides on.
+  }).passthrough(),
 }).strict();
 
 /** Every key the strict schema accepts — its whole surface. The deployment programs' map template
@@ -187,25 +196,33 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
     );
   }
   const m = parsed.data;
+  const g = m.global;
   const header = text === undefined ? undefined : headerOf(text);
+  // THE OWNER/NAME OF THE CATALOGUE, derived from the URL the map carries rather than written a
+  // second time beside it. The map states one thing about the catalogue — where a build clones it
+  // from — and every other spelling of it follows from that one.
+  const catalogRepo = g.catalogUrl?.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
+  const mailUrl = (g.endpoints as { mail?: { url?: string } } | undefined)?.mail?.url;
   return {
     ...(header !== undefined ? { header } : {}),
-    fqdn: m.fqdn,
-    name: clusterShortName(m.fqdn),
+    fqdn: g.domain,
+    name: clusterShortName(g.domain),
     role: m.role,
     stage: m.stage,
-    ...(m["books-cluster"] !== undefined ? { booksCluster: m["books-cluster"] } : {}),
-    buildPlane: m["build-plane"] === m.fqdn,
-    buildPlaneFqdn: m["build-plane"],
+    ...(m.booksCluster !== undefined ? { booksCluster: m.booksCluster } : {}),
+    buildPlane: g.buildPlane === g.domain,
+    buildPlaneFqdn: g.buildPlane,
     ...(m.release !== undefined ? { release: m.release } : {}),
-    ...(m.master !== undefined ? { master: m.master } : {}),
-    ...(m.apiHost !== undefined ? { apiHost: m.apiHost } : {}),
-    ...(m.apiPort !== undefined ? { apiPort: m.apiPort } : {}),
-    ...(m["unit-apex"] !== undefined ? { unitApex: m["unit-apex"] } : {}),
-    ...(m["platform-domain"] !== undefined ? { platformDomain: m["platform-domain"] } : {}),
-    ...(m["alert-recipients"] !== undefined ? { alertRecipients: m["alert-recipients"] } : {}),
-    ...(m["post-url"] !== undefined ? { postUrl: m["post-url"] } : {}),
-    ...(m["catalog-repo"] !== undefined ? { catalogRepo: m["catalog-repo"] } : {}),
+    ...(g.master !== undefined ? { master: g.master } : {}),
+    ...(g.apiHost !== undefined ? { apiHost: g.apiHost } : {}),
+    ...(g.apiPort !== undefined ? { apiPort: g.apiPort } : {}),
+    ...(g.unitApex !== undefined ? { unitApex: g.unitApex } : {}),
+    ...(g.platformDomain !== undefined ? { platformDomain: g.platformDomain } : {}),
+    ...(g.alertRecipients !== undefined
+      ? { alertRecipients: Array.isArray(g.alertRecipients) ? g.alertRecipients.join(",") : g.alertRecipients }
+      : {}),
+    ...(mailUrl !== undefined ? { postUrl: mailUrl } : {}),
+    ...(catalogRepo ? { catalogRepo } : {}),
   };
 }
 
@@ -369,21 +386,29 @@ const SLAVE_PART_KEYS = ["master", "apiHost", "apiPort", "booksCluster"] as cons
  *  from is never committed. The file's comments are NOT preserved: the map is generated, and the
  *  contract it obeys is documented at the top of this module, not in each copy of the file. */
 function serializeMarking(m: ClusterMarking): string {
+  // TWO BLOCKS, THE SHAPE THE MAP TEMPLATE EMITS — the other writer of this file. The top level is
+  // what the generators select on and cannot be nested; everything a chart reads stands under
+  // `global`, where the same file is a Helm values file. A field written into the wrong block is a
+  // selector that matches nothing or a value no chart can see, and neither says so.
   const fields: [string, string | number][] = [
-    ["fqdn", m.fqdn],
     ["stage", m.stage],
     ["role", m.role],
-    ...(m.booksCluster !== undefined ? ([["books-cluster", m.booksCluster]] as [string, string][]) : []),
-    ["build-plane", m.buildPlaneFqdn],
+    ...(m.booksCluster !== undefined ? ([["booksCluster", m.booksCluster]] as [string, string][]) : []),
     ...(m.release !== undefined ? ([["release", m.release]] as [string, string][]) : []),
+  ];
+  const globals: [string, string | number][] = [
+    ["domain", m.fqdn],
+    ["buildPlane", m.buildPlaneFqdn],
+    ...(m.booksCluster !== undefined ? ([["booksCluster", m.booksCluster]] as [string, string][]) : []),
     ...(m.master !== undefined ? ([["master", m.master]] as [string, string][]) : []),
     ...(m.apiHost !== undefined ? ([["apiHost", m.apiHost]] as [string, string][]) : []),
     ...(m.apiPort !== undefined ? ([["apiPort", m.apiPort]] as [string, number][]) : []),
-    ...(m.unitApex !== undefined ? ([["unit-apex", m.unitApex]] as [string, string][]) : []),
-    ...(m.platformDomain !== undefined ? ([["platform-domain", m.platformDomain]] as [string, string][]) : []),
-    ...(m.alertRecipients !== undefined ? ([["alert-recipients", m.alertRecipients]] as [string, string][]) : []),
-    ...(m.postUrl !== undefined ? ([["post-url", m.postUrl]] as [string, string][]) : []),
-    ...(m.catalogRepo !== undefined ? ([["catalog-repo", m.catalogRepo]] as [string, string][]) : []),
+    ...(m.unitApex !== undefined ? ([["unitApex", m.unitApex]] as [string, string][]) : []),
+    ...(m.platformDomain !== undefined ? ([["platformDomain", m.platformDomain]] as [string, string][]) : []),
+    ...(m.alertRecipients !== undefined ? ([["alertRecipients", m.alertRecipients]] as [string, string][]) : []),
+    ...(m.catalogRepo !== undefined
+      ? ([["catalogUrl", `https://github.com/${m.catalogRepo}.git`]] as [string, string][])
+      : []),
   ];
   // PLAIN scalars, the shape the map template emits — the other writer of this file. Quoting
   // parses identically but shows every line as changed in the diff of a map's first release, which
@@ -394,7 +419,19 @@ function serializeMarking(m: ClusterMarking): string {
   // value not starting alphanumeric, is quoted rather than reasoned about.
   const scalar = (v: string | number): string =>
     typeof v === "number" || (/^[A-Za-z0-9]/.test(v) && !/: | #/.test(v)) ? String(v) : JSON.stringify(v);
-  const body = fields.map(([k, v]) => `${k}: ${scalar(v)}`).join("\n") + "\n";
+  // THE ONE NESTED VALUE, written as a block because that is the shape the charts read it in.
+  // Left out, the round-trip below catches it: the file reads back as a marking without the
+  // mail address, which is not the marking it was built from.
+  const nested =
+    m.postUrl === undefined
+      ? ""
+      : "  endpoints:" + "\n" + "    mail:" + "\n" + `      url: ${scalar(m.postUrl)}` + "\n";
+  const body =
+    fields.map(([k, v]) => `${k}: ${scalar(v)}`).join("\n") +
+    "\n\nglobal:\n" +
+    globals.map(([k, v]) => `  ${k}: ${scalar(v)}`).join("\n") +
+    "\n" +
+    nested;
   // The file's own explanation, given back — the map template writes a header above the fields and
   // the file is hand-editable; without this the first release pin deletes the only thing that says
   // how to edit it.

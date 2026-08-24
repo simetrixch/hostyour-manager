@@ -19,8 +19,8 @@ import {
 const MASTER = "m1.example.com";
 const SLAVE = "s1.example.com";
 
-const masterMap = `fqdn: ${MASTER}\nstage: prod\nrole: master\nbuild-plane: ${MASTER}\n`;
-const slaveMap = `fqdn: ${SLAVE}\nstage: prod\nrole: slave\nbuild-plane: ${MASTER}\nmaster: ${MASTER}\n`;
+const masterMap = `stage: prod\nrole: master\n\nglobal:\n  domain: ${MASTER}\n  buildPlane: ${MASTER}\n`;
+const slaveMap = `stage: prod\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n  buildPlane: ${MASTER}\n  master: ${MASTER}\n`;
 
 function repoWith(maps: Record<string, string>): FakePlatformRepo {
   const repo = new FakePlatformRepo();
@@ -54,7 +54,7 @@ describe("resolveClusterMarking", () => {
     expect((await resolveClusterMarking(repo, "m1")).buildPlane).toBe(true);
     expect((await resolveClusterMarking(repo, "s1")).buildPlane).toBe(false);
     // ...and a master that builds ELSEWHERE names that cluster in the same one field.
-    const consumer = repoWith({ [MASTER]: `fqdn: ${MASTER}\nstage: prod\nrole: master\nbuild-plane: build1.example.com\n` });
+    const consumer = repoWith({ [MASTER]: `stage: prod\nrole: master\n\nglobal:\n  domain: ${MASTER}\n  buildPlane: build1.example.com\n` });
     const m = await resolveClusterMarking(consumer, "m1");
     expect([m.buildPlane, m.buildPlaneFqdn]).toEqual([false, "build1.example.com"]);
   });
@@ -73,7 +73,7 @@ describe("resolveClusterMarking", () => {
   });
 
   it("carries the union role master+slave", async () => {
-    const repo = repoWith({ [MASTER]: `fqdn: ${MASTER}\nstage: prod\nrole: master+slave\nbuild-plane: ${MASTER}\n` });
+    const repo = repoWith({ [MASTER]: `stage: prod\nrole: master+slave\n\nglobal:\n  domain: ${MASTER}\n  buildPlane: ${MASTER}\n` });
     expect((await resolveClusterMarking(repo, "m1")).role).toBe("master+slave");
   });
 
@@ -84,8 +84,8 @@ describe("resolveClusterMarking", () => {
   });
 
   it("a map missing build-plane is a typed error naming the file and the field", async () => {
-    const repo = repoWith({ [SLAVE]: `fqdn: ${SLAVE}\nstage: prod\nrole: slave\n` });
-    await expect(resolveClusterMarking(repo, "s1")).rejects.toThrow(/clusters\/active\/s1\.example\.com\.yaml.*build-plane/s);
+    const repo = repoWith({ [SLAVE]: `stage: prod\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n` });
+    await expect(resolveClusterMarking(repo, "s1")).rejects.toThrow(/clusters\/active\/s1\.example\.com\.yaml.*buildPlane/s);
   });
 
   it("refuses a map carrying a key it does not know, naming the file and the key", async () => {
@@ -102,10 +102,10 @@ describe("resolveClusterMarking", () => {
   // fields. The strict schema refuses any key it does not declare, and indexMarkings folds every
   // map on every read — so ONE map in the current format failing to parse kills resolution for
   // every cluster on a fresh installation, which is exactly what these two tests pin down.
-  const installerTail = `unit-apex: example.com\nplatform-domain: example.com\n`;
+  const installerTail = `  unitApex: example.com\n  platformDomain: example.com\n`;
 
   it("resolves a map exactly as today's writers leave it, carrying platform-domain", async () => {
-    const installerSlave = `${slaveMap}${installerTail}post-url: https://post.example.com\napiHost: 100.64.0.11\napiPort: 16443\n`;
+    const installerSlave = `${slaveMap}${installerTail}  endpoints:\n    mail:\n      url: https://post.example.com\n  apiHost: 100.64.0.11\n  apiPort: 16443\n`;
     const repo = repoWith({ [MASTER]: `${masterMap}${installerTail}`, [SLAVE]: installerSlave });
     expect(await resolveClusterMarking(repo, "m1")).toMatchObject({ fqdn: MASTER, platformDomain: "example.com" });
     expect(await resolveClusterMarking(repo, "s1")).toMatchObject({
@@ -121,7 +121,7 @@ describe("resolveClusterMarking", () => {
 
   it("two clusters sharing a first fqdn label are a typed error, not a last-one-wins silent pick", async () => {
     const other = "s1.example";
-    const repo = repoWith({ [SLAVE]: slaveMap, [other]: `fqdn: ${other}\nstage: dev\nrole: slave\nbuild-plane: ${MASTER}\n` });
+    const repo = repoWith({ [SLAVE]: slaveMap, [other]: `stage: dev\nrole: slave\n\nglobal:\n  domain: ${other}\n  buildPlane: ${MASTER}\n` });
     await expect(resolveClusterMarking(repo, "s1")).rejects.toThrow(/both derive the short name "s1"/);
   });
 });
@@ -136,7 +136,7 @@ describe("projectClusterMarking", () => {
   afterEach(() => { db.sqlite.close(); });
 
   it("moves servers.role + clusters.stage onto what the map says, and audits the move", async () => {
-    const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `fqdn: ${SLAVE}\nstage: prod\nrole: master+slave\nbuild-plane: ${MASTER}\n` }), SLAVE);
+    const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `stage: prod\nrole: master+slave\n\nglobal:\n  domain: ${SLAVE}\n  buildPlane: ${MASTER}\n` }), SLAVE);
     expect(projectClusterMarking(db.db, marking, { actor: "op_test", runId: "run_1" })).toEqual({
       stage: { from: "dev", to: "prod" },
       role: { from: "slave", to: "master+slave" },
@@ -149,7 +149,7 @@ describe("projectClusterMarking", () => {
   });
 
   it("is a silent no-op — and writes NO audit row — when the two already agree", async () => {
-    const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `fqdn: ${SLAVE}\nstage: dev\nrole: slave\nbuild-plane: ${MASTER}\n` }), SLAVE);
+    const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `stage: dev\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n  buildPlane: ${MASTER}\n` }), SLAVE);
     expect(projectClusterMarking(db.db, marking, { actor: "op_test" })).toEqual({});
     expect(db.sqlite.prepare("SELECT count(*) AS n FROM audit").get()).toEqual({ n: 0 });
   });
@@ -161,7 +161,7 @@ describe("projectClusterMarking", () => {
 });
 
 describe("removeSlaveMarkingPart", () => {
-  const reachable = `${slaveMap}apiHost: 100.64.0.11\napiPort: 16443\n`;
+  const reachable = `${slaveMap}  apiHost: 100.64.0.11\n  apiPort: 16443\n`;
 
   it("drops ONLY the slave part — the cluster stays marked with its role, stage and build plane", async () => {
     const repo = repoWith({ [SLAVE]: reachable });
@@ -191,7 +191,7 @@ describe("setClusterRelease", () => {
   const TAG = "1.2.0-stable-20260728120000";
 
   it("states the pin without disturbing anything else the map says", async () => {
-    const repo = repoWith({ [SLAVE]: `${slaveMap}apiHost: 100.64.0.11\napiPort: 16443\n` });
+    const repo = repoWith({ [SLAVE]: `${slaveMap}  apiHost: 100.64.0.11\n  apiPort: 16443\n` });
     expect((await resolveClusterMarking(repo, "s1")).release).toBeUndefined();
 
     const { marking, changed } = await setClusterRelease(repo, SLAVE, TAG, "run_1");
@@ -208,15 +208,15 @@ describe("setClusterRelease", () => {
     // A pin regenerates the WHOLE file, so anything the schema does not carry is gone from git.
     // set-role.sh refuses to stamp a cluster whose map has no unit-apex, so losing it here would
     // break the very branch regeneration the pin exists to drive.
-    const repo = repoWith({ [SLAVE]: `${slaveMap}unit-apex: example.com\nplatform-domain: example.com\npost-url: https://post.example.com\n` });
+    const repo = repoWith({ [SLAVE]: `${slaveMap}  unitApex: example.com\n  platformDomain: example.com\n  endpoints:\n    mail:\n      url: https://post.example.com\n` });
     await setClusterRelease(repo, SLAVE, TAG, "run_1");
 
     const after = await resolveClusterMarking(repo, "s1");
     expect(after).toMatchObject({ release: TAG, unitApex: "example.com", platformDomain: "example.com", postUrl: "https://post.example.com" });
     const bytes = repo.read(repo.booksBranch, clusterMarkingPath(SLAVE));
-    expect(bytes).toContain('unit-apex: example.com');
-    expect(bytes).toContain('platform-domain: example.com');
-    expect(bytes).toContain('post-url: https://post.example.com');
+    expect(bytes).toContain('unitApex: example.com');
+    expect(bytes).toContain('platformDomain: example.com');
+    expect(bytes).toContain('url: https://post.example.com');
   });
 
   it("re-pinning the SAME tag commits nothing — a resumed run reads its own pin back", async () => {
@@ -302,7 +302,12 @@ describe("map-writer contract", () => {
     const keys = new Set<string>();
     for (const m of text.matchAll(/^([A-Za-z][A-Za-z0-9-]*):/gm)) keys.add(m[1] ?? "");
     keys.delete("");
-    expect([...keys], "the extraction found no map keys — the template moved or changed shape").toContain("fqdn");
+    // `stage` and not `fqdn`: the template writes two blocks, and what this guard covers is the TOP
+    // one — the surface the schema is strict about, because it is what the reconciler's generators
+    // select on and a selector matching nothing produces no Applications and no error. Everything a
+    // chart reads stands under `global`, which the schema lets through on purpose: refusing a key a
+    // chart added would fail every map read on the release that adds one.
+    expect([...keys], "the extraction found no map keys — the template moved or changed shape").toContain("stage");
 
     const undeclared = [...keys].filter((k) => !CLUSTER_MARKING_FILE_KEYS.includes(k));
     expect(
