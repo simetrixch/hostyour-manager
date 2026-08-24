@@ -32,7 +32,7 @@ import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-mem
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
 const HOST = "zot.m1.example"; // what the ports fixture resolves for the target cluster
-const DEPLOY_URL = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const APPS = [{ name: "erp" }];
 const NEW_APP = "crm";

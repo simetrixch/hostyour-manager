@@ -60,7 +60,7 @@ async function sealBootstrapPassword(creds: CredentialStore, serverId: string, n
 export async function openBootstrapPassword(creds: CredentialStore, serverId: string, runId: string): Promise<Buffer | undefined> {
   const c = (await creds.list({ serverId, kind: "other" })).find((x) => x.fingerprint === BOOTSTRAP_FP);
   if (!c) return undefined;
-  return creds.open(c.id, { purpose: "adopt:bootstrap-password", runId });
+  return creds.open(c.id, { purpose: "cluster-adopt:bootstrap-password", runId });
 }
 
 /**

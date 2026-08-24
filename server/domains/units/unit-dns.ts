@@ -98,7 +98,10 @@ export async function provisionUnitDns(
     unit: string;
     recordName: string;
     clusterFqdn: string;
-    runKind?: string;
+    /** The run kind the refusal message names. REQUIRED and never defaulted: this step is shared by
+     *  consumer-onboard, tenant-create and the two relocation run kinds, so a default would put one
+     *  of their names on the other three's refusal. */
+    runKind: string;
     /** The MOVE alone. switch-dns repoints a record the unit already owns onto the target cluster,
      *  so overwriting an address that is not the target's IS the step. Every other caller is putting
      *  a unit onto a cluster for the first time and must not take a live address off whatever answers
@@ -106,7 +109,7 @@ export async function provisionUnitDns(
     overwriteAddress?: boolean;
   },
 ): Promise<void> {
-  const dns = requireDns(opts.dns, opts.unit, opts.runKind ?? "onboard");
+  const dns = requireDns(opts.dns, opts.unit, opts.runKind);
   const address = await resolveClusterAddress(dns, opts.clusterFqdn, ctx.signal);
   if (!opts.overwriteAddress) {
     // Read before write, because upsertRecord overwrites the first match in place and reports it as

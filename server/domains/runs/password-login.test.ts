@@ -19,6 +19,7 @@ import { serverCredFlags } from "../inventory/write.ts";
 import { readServerPasswordLogin } from "../../../shared/password-login.ts";
 import type { SshFactory, SshSession, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
 import { passwordLoginDisableDef, passwordLoginEnableDef, type PasswordLoginParams } from "./defs/password-login.ts";
+import type { PasswordLoginKind } from "./defs/password-login.kit.ts";
 
 // What a test can and cannot prove about this ticket, stated plainly because the difference is the
 // whole point of it.
@@ -56,9 +57,11 @@ const SLAVE_ID = "srv_s1";
 const MASTER_ID = "srv_m1";
 const BOOTSTRAP_FP = "bootstrap-password";
 
-const DEFS: Record<string, RunDefinition<PasswordLoginParams>> = {
-  "password-login-disable": passwordLoginDisableDef,
-  "password-login-enable": passwordLoginEnableDef,
+// Keyed on PasswordLoginKind, not on string: a run kind renamed in shared/enums.ts must break THIS
+// file rather than leave the table testing two keys the enum no longer has.
+const DEFS: Record<PasswordLoginKind, RunDefinition<PasswordLoginParams>> = {
+  "cluster-password-login-disable": passwordLoginDisableDef,
+  "cluster-password-login-enable": passwordLoginEnableDef,
 };
 
 /** What `sshd -T` says on a host that still takes a password — the state of the one host measured
@@ -149,7 +152,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
   /** Plan the run kind, then run every one of its steps against the plan's own targets, collecting the
    *  scripts it shipped and the cleanups it registered. */
   async function runOfKind(
-    kind: string,
+    kind: PasswordLoginKind,
     db: DbHandle,
     store: CredentialStore,
     probe: () => string = () => TAKES_PASSWORD,
@@ -181,8 +184,8 @@ describe("the password-login run kinds — the shape of an act that cannot be te
 
   it("writes ONE drop-in and it sorts FIRST — a 99- file is the bug, not the fix", async () => {
     const { db, store } = await setup();
-    const { rec } = await runOfKind("password-login-disable", db, store);
-    const script = rec.scripts.get("password-login-disable") ?? "";
+    const { rec } = await runOfKind("cluster-password-login-disable", db, store);
+    const script = rec.scripts.get("cluster-password-login-disable") ?? "";
     expect(script).toContain("/etc/ssh/sshd_config.d/00-hostyour-passwords.conf");
     // Nothing this run writes may sort after cloud-init's file, which states the keyword `yes`.
     expect(script).not.toMatch(/sshd_config\.d\/[1-9]\d?-/);
@@ -192,16 +195,16 @@ describe("the password-login run kinds — the shape of an act that cannot be te
 
   it("states BOTH keywords, because keyboard-interactive is the same door through PAM", async () => {
     const { db, store } = await setup();
-    const { rec } = await runOfKind("password-login-disable", db, store);
-    const script = rec.scripts.get("password-login-disable") ?? "";
+    const { rec } = await runOfKind("cluster-password-login-disable", db, store);
+    const script = rec.scripts.get("cluster-password-login-disable") ?? "";
     expect(script).toContain("PasswordAuthentication no");
     expect(script).toContain("KbdInteractiveAuthentication no");
   });
 
   it("validates BEFORE it reloads, and reloads rather than restarts", async () => {
     const { db, store } = await setup();
-    const { rec } = await runOfKind("password-login-disable", db, store);
-    const script = rec.scripts.get("password-login-disable") ?? "";
+    const { rec } = await runOfKind("cluster-password-login-disable", db, store);
+    const script = rec.scripts.get("cluster-password-login-disable") ?? "";
     // `sshd -t` refuses a configuration the daemon could not start on; the reload is the moment a
     // bad drop-in would otherwise take sshd down.
     expectInOrder(script, ['-t; then', "if ! reload_sshd"]);
@@ -213,8 +216,8 @@ describe("the password-login run kinds — the shape of an act that cannot be te
 
   it("puts the drop-in back when the daemon could not be told to re-read it", async () => {
     const { db, store } = await setup();
-    const { rec } = await runOfKind("password-login-disable", db, store);
-    const script = rec.scripts.get("password-login-disable") ?? "";
+    const { rec } = await runOfKind("cluster-password-login-disable", db, store);
+    const script = rec.scripts.get("cluster-password-login-disable") ?? "";
     // `sshd -T` parses the FILES and has no channel to the running process, so a valid drop-in the
     // daemon never read would be reported by the very next reading as a shut door. Both failure
     // paths therefore end in put_back, and neither leaves the file stating more than the daemon
@@ -228,8 +231,8 @@ describe("the password-login run kinds — the shape of an act that cannot be te
 
   it("refuses a host whose AuthenticationMethods still names a password method, before writing", async () => {
     const { db, store } = await setup();
-    const { rec } = await runOfKind("password-login-disable", db, store);
-    const script = rec.scripts.get("password-login-disable") ?? "";
+    const { rec } = await runOfKind("cluster-password-login-disable", db, store);
+    const script = rec.scripts.get("cluster-password-login-disable") ?? "";
     // A host with `publickey,keyboard-interactive` — the usual PAM two-factor setup — has one
     // method list, and turning both keywords off leaves sshd nothing it can complete. `sshd -t`
     // accepts the file and the read-back agrees with it: the contradiction only shows at the next
@@ -244,8 +247,8 @@ describe("the password-login run kinds — the shape of an act that cannot be te
 
   it("reads keyboard-interactive under BOTH names sshd prints it by", async () => {
     const { db, store } = await setup();
-    const { rec } = await runOfKind("password-login-disable", db, store);
-    const script = rec.scripts.get("password-login-disable") ?? "";
+    const { rec } = await runOfKind("cluster-password-login-disable", db, store);
+    const script = rec.scripts.get("cluster-password-login-disable") ?? "";
     // OpenSSH 8.7 renamed the dumped keyword. On 8.6 and earlier — Ubuntu 20.04 is 8.2, which the
     // preflight only warns about — only `challengeresponseauthentication` is printed, and reading
     // the new name alone would call a door that did shut still open.
@@ -254,10 +257,10 @@ describe("the password-login run kinds — the shape of an act that cannot be te
 
   it("proves the KEY door is open before it shuts the password door", async () => {
     const { db, store } = await setup();
-    const { rec, stepNames } = await runOfKind("password-login-disable", db, store);
+    const { rec, stepNames } = await runOfKind("cluster-password-login-disable", db, store);
     // Its own step in the plan, so the operator sees the order before approving.
     expect(stepNames.indexOf("verify-key-login")).toBeLessThan(stepNames.indexOf("disable-password-login"));
-    const script = rec.scripts.get("password-login-disable") ?? "";
+    const script = rec.scripts.get("cluster-password-login-disable") ?? "";
     // And again inside the act, against the daemon: reading the row's `hasKey` would prove only
     // that a key was once installed, not that sshd still accepts one.
     expectInOrder(script, ['[ "$pubkey" = "yes" ]', "| apply no"]);
@@ -268,8 +271,8 @@ describe("the password-login run kinds — the shape of an act that cannot be te
 
   it("takes its verdict from the DAEMON after the reload, never from the file it just wrote", async () => {
     const { db, store } = await setup();
-    const { rec } = await runOfKind("password-login-disable", db, store);
-    const script = rec.scripts.get("password-login-disable") ?? "";
+    const { rec } = await runOfKind("cluster-password-login-disable", db, store);
+    const script = rec.scripts.get("cluster-password-login-disable") ?? "";
     // read_effective is `sshd -T` and nothing else (password-login-probe.ts SSHD_HELPERS), and the
     // assertion on the result comes after the write. A grep of the drop-in would have passed on the
     // one host that carried a `99-` file for three weeks.
@@ -287,7 +290,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
       [KEY_ONLY, []],
     ] as const) {
       const { db, store } = await setup();
-      const { cleanups } = await runOfKind("password-login-disable", db, store, () => probe);
+      const { cleanups } = await runOfKind("cluster-password-login-disable", db, store, () => probe);
       expect(cleanups).toEqual(expected);
     }
   });
@@ -303,7 +306,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
   it("destroys the SECOND door — the bootstrap password sealed beside the server row", async () => {
     const { db, store } = await setup();
     expect((await serverCredFlags(store)).get(SLAVE_ID)?.hasPassword).toBe(true);
-    await runOfKind("password-login-disable", db, store);
+    await runOfKind("cluster-password-login-disable", db, store);
     // Purged, not revoked: a revoked row keeps the encrypted blob, and the blob IS the password.
     expect((await serverCredFlags(store)).get(SLAVE_ID)?.hasPassword).toBe(false);
     expect((await store.list({ serverId: SLAVE_ID, kind: "other" }))).toHaveLength(0);
@@ -315,13 +318,13 @@ describe("the password-login run kinds — the shape of an act that cannot be te
     const { db, store } = await setup();
     let call = 0;
     // Before the act the daemon takes a password; after it, it does not.
-    await runOfKind("password-login-disable", db, store, () => (call++ === 0 ? TAKES_PASSWORD : KEY_ONLY));
+    await runOfKind("cluster-password-login-disable", db, store, () => (call++ === 0 ? TAKES_PASSWORD : KEY_ONLY));
     const row = db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
     expect(row?.passwordLoginState).toBe("off");
     const read = readServerPasswordLogin(row?.passwordLoginJson);
     expect(read.kind).toBe("v0");
     if (read.kind === "v0") {
-      expect(read.facts.runId).toBe("run_password-login-disable");
+      expect(read.facts.runId).toBe("run_cluster-password-login-disable");
       expect(read.facts.passwordAuthentication).toBe("no");
       expect(read.facts.kbdInteractiveAuthentication).toBe("no");
       expect(read.facts.pubkeyAuthentication).toBe("yes");
@@ -330,8 +333,8 @@ describe("the password-login run kinds — the shape of an act that cannot be te
 
   it("the enable run kind opens the same one file, validates the same way, and arms nothing", async () => {
     const { db, store } = await setup();
-    const { rec, cleanups, stepNames } = await runOfKind("password-login-enable", db, store, () => KEY_ONLY);
-    const script = rec.scripts.get("password-login-enable") ?? "";
+    const { rec, cleanups, stepNames } = await runOfKind("cluster-password-login-enable", db, store, () => KEY_ONLY);
+    const script = rec.scripts.get("cluster-password-login-enable") ?? "";
     expect(script).toContain("/etc/ssh/sshd_config.d/00-hostyour-passwords.conf");
     expect(script).toContain("PasswordAuthentication yes");
     expectInOrder(script, ['-t; then', "if ! reload_sshd", "cannot be read after the reload", '[ "$pw" = "yes" ]']);
@@ -340,7 +343,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
     expect(stepNames).toEqual([ATTEST_TARGET_STEP, "enable-password-login"]);
   });
 
-  for (const kind of Object.keys(DEFS)) {
+  for (const kind of Object.keys(DEFS) as PasswordLoginKind[]) {
     it(`${kind} starts with ${ATTEST_TARGET_STEP} and owns its host`, async () => {
       const { db, store } = await setup();
       const { stepNames } = await runOfKind(kind, db, store);
@@ -348,7 +351,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
       // mutating ⇒ the executor refuses to let an operator skip that first step: a run that
       // changes which credentials a machine accepts proves first which machine it is talking to.
       expect((DEFS[kind] as AnyRunDefinition).mutating).toBe(true);
-      const plan = await DEFS[kind]!.plan({ serverId: SLAVE_ID }, { db: db.db });
+      const plan = await DEFS[kind].plan({ serverId: SLAVE_ID }, { db: db.db });
       // Without the lock this could shut the password door on a machine an adopt in flight is
       // still using a password on.
       expect(deriveServerLocks(plan.targets ?? [])).toEqual([{ resource: "server", key: SLAVE_ID }]);
@@ -359,7 +362,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
       const { db } = await setup();
       for (const status of ["bare", "adopting"] as const) {
         db.db.update(servers).set({ status }).where(eq(servers.id, SLAVE_ID)).run();
-        await expect(DEFS[kind]!.plan({ serverId: SLAVE_ID }, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
+        await expect(DEFS[kind].plan({ serverId: SLAVE_ID }, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
       }
     });
 
@@ -369,7 +372,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
       // (server/boot/seed-master.ts). Keying the refusal on that column would have locked these
       // run kinds out of the one host whose password door was actually measured.
       expect(db.db.select().from(servers).where(eq(servers.id, MASTER_ID)).get()?.adoptedAt).toBeNull();
-      await expect(DEFS[kind]!.plan({ serverId: MASTER_ID }, { db: db.db })).resolves.toBeTruthy();
+      await expect(DEFS[kind].plan({ serverId: MASTER_ID }, { db: db.db })).resolves.toBeTruthy();
       const { stepNames } = await runOfKind(kind, db, store, () => TAKES_PASSWORD, MASTER_ID);
       expect(stepNames[0]).toBe(ATTEST_TARGET_STEP);
     });

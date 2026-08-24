@@ -138,7 +138,12 @@ const EnvSchema = z.object({
   // unset ⇒ the tenant mutating routes answer 501. The tenant format is INDEPENDENT of the consumer
   // gate-runner
   // (tenant charts are trusted first-party, validated manager-side — no consumer gate-runner).
-  CATALOG_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'CATALOG_REPO must be "owner/repo"').default("simetrixch/catalog"),
+  // NO DEFAULT, deliberately. The catalogue is the INSTALLATION's own repository - the answer that
+  // supplies it says so in as many words, and no rule composes its name out of anything else. A
+  // default here is a second name nobody chose: an installation that sets the write credential and
+  // forgets the repository would bind its whole tenant family to somebody else's repository, and
+  // the first sign of it would be a clone that either fails or, worse, succeeds.
+  CATALOG_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'CATALOG_REPO must be "owner/repo"').optional(),
   CATALOG_WRITE_PAT: z.string().min(1).optional(),
   // The Hetzner Storage Box behind move, backup and restore: the staging area every dump
   // lands on and every restore reads from, reachable over SSH. The three values come from
@@ -189,6 +194,9 @@ const EnvSchema = z.object({
 }).refine((e) => Boolean(e.GITHUB_REPO) === Boolean(e.GITHUB_WRITE_PAT), {
   message: "GITHUB_REPO and GITHUB_WRITE_PAT must be set together (both enable the Branches/Reset feature, or neither)",
   path: ["GITHUB_REPO"],
+}).refine((e) => Boolean(e.CATALOG_REPO) === Boolean(e.CATALOG_WRITE_PAT), {
+  message: "CATALOG_REPO and CATALOG_WRITE_PAT must be set together (both enable the tenant Run family, or neither)",
+  path: ["CATALOG_REPO"],
 }).refine((e) => {
   const set = [e.STORAGE_BOX_HOST, e.STORAGE_BOX_USER, e.STORAGE_BOX_PASSWORD].filter(Boolean).length;
   return set === 0 || set === 3;

@@ -38,7 +38,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 // were: api.test.ts already sits at the 400-line budget.
 
 const GUID = "e2e8ymj86dk8"; // a live-shaped throwaway guid — minted by the plan, never typed
-const DEPLOY_URL = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));

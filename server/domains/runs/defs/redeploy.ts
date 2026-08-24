@@ -63,10 +63,10 @@ const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-platform-services"] as co
 const MASTER_ARM_INPUTS = [
   { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to before a certificate expires" },
   { field: "letsencrypt_server", label: "The ACME directory this installation registers with — the authority's production one; a staging directory is refused, because its root is in no machine's trust store" },
-  { field: "build_plane", label: "The cluster the image registry stands on — blank when this cluster hosts it itself" },
+  { field: "build_plane_fqdn", label: "The cluster the image registry stands on — blank when this cluster hosts it itself" },
   { field: "lan_cidr", label: "The IPv4 range this machine shares with the other clusters — blank when it shares none" },
-  { field: "storage_path", label: "Where the machine's separate storage is mounted — blank when it has none" },
-  { field: "storage_directory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default" },
+  { field: "storage_mount", label: "Where the machine's separate storage is mounted — blank when it has none" },
+  { field: "storage_subdirectory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default" },
 ];
 
 function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
@@ -89,7 +89,7 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
 
 export function makeRedeployDef(ports: RedeployPorts): RunDefinition<RedeployParams> {
   return {
-    kind: "redeploy",
+    kind: "cluster-redeploy",
     paramsSchema: RedeployParams,
     mutating: true,
     plan: async (params, { db }) => {
@@ -98,7 +98,7 @@ export function makeRedeployDef(ports: RedeployPorts): RunDefinition<RedeployPar
       const onMaster = isMasterRole(server.role);
       const stepDefs = redeploySteps(params, ports);
       return {
-        kind: "redeploy",
+        kind: "cluster-redeploy",
         targetKind: "server",
         targetId: params.serverId,
         summary:

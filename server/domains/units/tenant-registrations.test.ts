@@ -158,7 +158,7 @@ describe("TenantRegistrations", () => {
     const t = await reg.readTenant("dev", GUID);
     expect(t?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false }, { name: "web", seedReference: false, seedDemo: false }]);
     expect(repo.commits[1]!.write?.map((w) => w.path)).toEqual([`${DIR}/dev.yaml`]);
-    expect(repo.commits[1]!.message).toBe(`add-app(${GUID}): +web [run_2]`);
+    expect(repo.commits[1]!.message).toBe(`tenant-add-app(${GUID}): +web [run_2]`);
     await expect(reg.updateTenantApps("dev", GUID, { op: "append", app: "erp", member: testMembers(["erp"])[3]!, runId: "r" })).rejects.toMatchObject({ code: "VALIDATION" });
     await expect(reg.updateTenantApps("dev", GUID, { op: "append", app: "auth", member: testMembers(["auth"])[3]!, runId: "r" })).rejects.toMatchObject({ code: "VALIDATION" }); // reserved
   });
@@ -198,7 +198,7 @@ describe("TenantRegistrations", () => {
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration({ apps: [{ name: "erp", seedReference: false, seedDemo: false }, { name: "web", seedReference: false, seedDemo: false }], members: testMembers(["erp", "web"]) }), runId: "run_1" });
     await reg.updateTenantApps("dev", GUID, { op: "drop", app: "erp", runId: "run_2" });
     expect((await reg.readTenant("dev", GUID))?.entry.apps).toEqual([{ name: "web", seedReference: false, seedDemo: false }]);
-    expect(repo.commits[1]!.message).toBe(`remove-app(${GUID}): -erp [run_2]`);
+    expect(repo.commits[1]!.message).toBe(`tenant-remove-app(${GUID}): -erp [run_2]`);
     await expect(reg.updateTenantApps("dev", GUID, { op: "drop", app: "nope", runId: "r" })).rejects.toMatchObject({ code: "VALIDATION" });
   });
 

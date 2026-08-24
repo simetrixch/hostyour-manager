@@ -92,15 +92,16 @@ describe("parseConfig", () => {
 });
 
 describe("tenant onboarding config (catalog)", () => {
-  it("leaves catalog absent when CATALOG_WRITE_PAT is unset (the write PAT is the discriminator)", () => {
+  it("leaves catalog absent when neither half is set", () => {
     expect(parseConfig(validEnv).catalog).toBeUndefined();
-    // The repo default alone does NOT enable it — without the PAT there is nothing to wire.
-    expect(parseConfig({ ...validEnv, CATALOG_REPO: "simetrixch/catalog" }).catalog).toBeUndefined();
   });
 
-  it("builds the catalog repoURL from the default repo when only the PAT is set", () => {
-    const c = parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant" });
-    expect(c.catalog).toEqual({ repoURL: "https://github.com/simetrixch/catalog.git", token: "ghp_tenant" });
+  it("refuses each half without the other, because a catalogue nobody named is not a catalogue", () => {
+    // The repository is the INSTALLATION's own and has no default: one that binds a whole tenant
+    // family to a repository nobody chose is worse than a refusal, because a clone that SUCCEEDS
+    // against the wrong repository says nothing at all.
+    expect(() => parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant" })).toThrow(ConfigError);
+    expect(() => parseConfig({ ...validEnv, CATALOG_REPO: "acme/acme-catalog" })).toThrow(ConfigError);
   });
 
   it("honors a custom CATALOG_REPO", () => {
@@ -113,7 +114,7 @@ describe("tenant onboarding config (catalog)", () => {
   });
 
   it("is independent of the consumer gate-runner (tenant charts validate manager-side)", () => {
-    const c = parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant" });
+    const c = parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant", CATALOG_REPO: "acme/acme-catalog" });
     expect(c.catalog).toBeDefined();
     expect(c.onboarding).toBeUndefined(); // no ONBOARD_GATE_MANAGER_ADDR, yet tenant config still resolves
   });

@@ -26,7 +26,7 @@ import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./t
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0"; // a live guid (matches the registrations/** path guard)
-const DEPLOY_REPO = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_REPO = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_REPO = "https://github.com/simetrixch/hostyour-cloud.git";
 
 let db: DbHandle;
@@ -270,10 +270,10 @@ describe("remove-app run", () => {
     expect(logs.some((l) => l.includes("every sibling member is untouched"))).toBe(true);
   });
 
-  it("plans with the four steps + remove-app kind", async () => {
+  it("plans with the four steps + tenant-remove-app kind", async () => {
     seedTenant({ apps: ["erp", "web"] });
     const plan = await makeRemoveAppDef(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS))).plan({ tenantId: "tnt_1", app: "web" }, { db: db.db });
-    expect(plan.kind).toBe("remove-app");
+    expect(plan.kind).toBe("tenant-remove-app");
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-app-pointer", "watch-prune", "record-app-removed"]);
   });
 });

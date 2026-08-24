@@ -121,7 +121,7 @@ echo "no line for '${label}' is in $ak ($hits removed, $(count "$ak") line(s) le
  *  family rather than listed, so a third one cannot be added to the enum without the maps below
  *  refusing to compile. The read run kind is NOT one of them: it is named for the file because it
  *  reports every key in it, including the ones this platform never placed. */
-export type OperatorKeyKind = Extract<RunKind, `operator-key-${string}`>;
+export type OperatorKeyKind = Extract<RunKind, `cluster-operator-key-${string}`>;
 
 export interface OperatorKeyTarget {
   serverId: string;
@@ -164,7 +164,7 @@ function managerKeyCount(result: AuthorizedKeysReadingResult | null): number | u
  * an unreadable file is not a measurement.
  */
 function actStep(kind: OperatorKeyKind, target: OperatorKeyTarget): Step {
-  const place = kind === "operator-key-place";
+  const place = kind === "cluster-operator-key-place";
   return {
     name: place ? "place-operator-key" : "remove-operator-key",
     title: place ? "Put the operator's key in authorized_keys" : "Take the operator's key out of authorized_keys",
@@ -175,7 +175,7 @@ function actStep(kind: OperatorKeyKind, target: OperatorKeyTarget): Step {
       const held = before !== null && authorizedKeysHold(before.read, key.fingerprint);
       if (place && !held) ctx.registerCleanup(removeOperatorKeyCleanup);
       const script = place ? placeScript(key.publicKey, key.label) : removeScript(key.label);
-      const r = await remoteScript(ctx, session, place ? "operator-key-place" : "operator-key-remove", script, { timeoutMs: 60_000 });
+      const r = await remoteScript(ctx, session, place ? "cluster-operator-key-place" : "cluster-operator-key-remove", script, { timeoutMs: 60_000 });
       const after = await recordAuthorizedKeysReading(ctx, session, target.serverId);
 
       // The one failure this whole run kind is shaped around: an edit that took this manager's own
@@ -213,7 +213,7 @@ export const removeOperatorKeyCleanup: Cleanup = {
     const serverId = String(ctx.params.serverId);
     const key = loadOperatorKey(ctx.db, String(ctx.params.operatorKeyId));
     const session = await ctx.ssh();
-    const r = await remoteScript(ctx, session, "operator-key-remove", removeScript(key.label), { timeoutMs: 60_000 });
+    const r = await remoteScript(ctx, session, "cluster-operator-key-remove", removeScript(key.label), { timeoutMs: 60_000 });
     await recordAuthorizedKeysReading(ctx, session, serverId);
     if (r.code !== 0) throw errValidation(`the operator key could not be taken back off (exit ${r.code}) — see the run log`);
   },
@@ -243,21 +243,21 @@ export function authorizedKeysReadSteps(serverId: string): Step[] {
 }
 
 const SUMMARY: Record<OperatorKeyKind, (o: { label: string; fp: string; name: string; host: string; steps: number }) => string> = {
-  "operator-key-place": (o) =>
+  "cluster-operator-key-place": (o) =>
     `Put the operator key "${o.label}" (${o.fp}) in ~/.ssh/authorized_keys on "${o.name}" (${o.host}): ${o.steps} steps. ` +
     `The run reads the file, appends ONE line carrying that operator's own marker, and reads the file back to prove the key ` +
     `is there and that this manager's own key still is. Every other line is passed through untouched.`,
-  "operator-key-remove": (o) =>
+  "cluster-operator-key-remove": (o) =>
     `Take the operator key "${o.label}" (${o.fp}) out of ~/.ssh/authorized_keys on "${o.name}" (${o.host}): ${o.steps} steps, ` +
     `deleting only lines carrying that operator's marker. A host that never carried it is left alone and the run still succeeds; ` +
     `a host where the key sits under some other comment FAILS, because removing by marker did not reach it.`,
 };
 
 const WARNINGS: Record<OperatorKeyKind, string[]> = {
-  "operator-key-place": [
+  "cluster-operator-key-place": [
     "Afterwards this person can log in to the host as the same user this manager uses, with the passwordless sudo the adoption configured.",
   ],
-  "operator-key-remove": [
+  "cluster-operator-key-remove": [
     "Only the line this platform wrote for that label goes. A copy of the same key placed by hand, under another comment, stays — and the run fails saying so rather than reporting a removal that did not happen.",
   ],
 };
@@ -317,7 +317,7 @@ export function authorizedKeysReadPlan(serverId: string, db: Db): Plan {
   const steps = authorizedKeysReadSteps(serverId);
   const dialled = resolveTransport(server, "default");
   return {
-    kind: "authorized-keys-read",
+    kind: "cluster-authorized-keys-read",
     targetKind: "server",
     targetId: serverId,
     summary:

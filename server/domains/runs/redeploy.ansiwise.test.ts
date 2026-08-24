@@ -143,11 +143,11 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   it("plan: the master arm composes attest → run-deploy-cluster → run-deploy-platform-services → argocd-follow and asks for the password + the missing answers", async () => {
     const h = await liveMaster(serve);
-    const { plan } = await h.executor.plan("redeploy", { serverId: MASTER_ID });
+    const { plan } = await h.executor.plan("cluster-redeploy", { serverId: MASTER_ID });
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow"]);
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
-      ["letsencrypt_email", "letsencrypt_server", "build_plane", "lan_cidr", "storage_path", "storage_directory"],
+      ["letsencrypt_email", "letsencrypt_server", "build_plane_fqdn", "lan_cidr", "storage_mount", "storage_subdirectory"],
     );
   });
 
@@ -156,7 +156,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const email = uniqueEmail();
     const before = await observer.runs();
 
-    const runId = await settled(h, "redeploy", { serverId: MASTER_ID }, approveSecrets(email));
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(email));
     expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
 
     // The run log carries the machine runs: both programs admitted by their own dry, both green.
@@ -190,7 +190,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // "not-an-email" fails the program's own ^[^@]+@[^@]+$ row — the defect is ON THE MACHINE'S
     // SIDE of the wire, and the machine's dry run is what catches it.
-    const runId = await settled(h, "redeploy", { serverId: MASTER_ID }, approveSecrets("not-an-email"));
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets("not-an-email"));
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
     expect(stepColumn(h.db, runId, "run-deploy-cluster", "error")).toMatch(/DRY run of deploy-cluster on the machine is not green/);
     // The proof failed, so the act never started: not one new run-mode record on the machine.
@@ -282,20 +282,25 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   // ================================ the tailnet run kinds, end to end ================================
 
-  for (const kind of ["tailnet-disconnect", "tailnet-reconnect"] as const) {
+  // The run kind carries its family and the catalogue program does not, so the pair is stated here —
+  // the same two spellings tailnet.kit.ts's PROGRAM map holds apart.
+  for (const { kind, program } of [
+    { kind: "cluster-tailnet-disconnect", program: "tailnet-disconnect" },
+    { kind: "cluster-tailnet-reconnect", program: "tailnet-reconnect" },
+  ] as const) {
     it(`INNOCENT CASE (${kind}): the program runs on the host's own surface over the PUBLIC address — no cluster row needed — and the membership is re-read`, { timeout: 120_000 }, async () => {
       const h = await tailnetHost(serve, { cluster: false });
       const before = await observer.runs();
 
       const r = await h.executor.plan(kind, { serverId: SLAVE_ID });
-      expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", `run-${kind}`, "read-membership"]);
+      expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", `run-${program}`, "read-membership"]);
       expect(r.plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
       await h.executor.approve(r.runId, elevationOnly());
       await h.executor.settle(r.runId);
       expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
 
       // The machine's OWN records: dry + run, both green — the proof, then the act.
-      expectProven(freshRuns(before, await observer.runs()), [kind]);
+      expectProven(freshRuns(before, await observer.runs()), [program]);
 
       // EVERY session went to the host's PUBLIC address (servers.host) — never the LAN one every
       // other run kind would use — and the master was not touched at all.
@@ -313,7 +318,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const h = await tailnetHost(serve);
     const before = await observer.runs();
 
-    const r = await h.executor.plan("tailnet-rejoin", { serverId: SLAVE_ID });
+    const r = await h.executor.plan("cluster-tailnet-rejoin", { serverId: SLAVE_ID });
     expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", "rejoin", "read-membership"]);
     await h.executor.approve(r.runId, elevationOnly());
     await h.executor.settle(r.runId);
@@ -343,7 +348,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const h = await tailnetHost(serve, { tailnetUrl: "https://tale.wrong.example.com" });
     const before = await observer.runs();
 
-    const runId = await settled(h, "tailnet-rejoin", { serverId: SLAVE_ID }, elevationOnly());
+    const runId = await settled(h, "cluster-tailnet-rejoin", { serverId: SLAVE_ID }, elevationOnly());
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
     expect(stepColumn(h.db, runId, "rejoin", "error")).toMatch(/DRY run of tailnet-rejoin on the host is not green/);
 
@@ -362,7 +367,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const h = await tailnetHost(serve, { tailnetUrl: false });
     const before = await observer.runs();
 
-    const runId = await settled(h, "tailnet-rejoin", { serverId: SLAVE_ID }, elevationOnly());
+    const runId = await settled(h, "cluster-tailnet-rejoin", { serverId: SLAVE_ID }, elevationOnly());
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
     expect(stepColumn(h.db, runId, "rejoin", "error")).toMatch(/no readable global\.endpoints\.tailnet\.url/);
 
@@ -378,7 +383,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const email = uniqueEmail();
     const before = await observer.runs();
 
-    const r = await h.executor.plan("deploy-slave", PARAMS);
+    const r = await h.executor.plan("cluster-deploy-slave", PARAMS);
     expect(r.plan.steps.map((s) => s.name)).toEqual(STEP_NAMES);
     await h.executor.approve(r.runId, deploySecrets(email));
     await h.executor.settle(r.runId);
@@ -456,7 +461,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     h.hosts.credsOut = EMIT_CREDS_JSON.replace("TFMtQ0EtREFUQQ==", "VEFNUEVSRUQ=");
     const before = await observer.runs();
 
-    const runId = await settled(h, "deploy-slave", PARAMS, deploySecrets(uniqueEmail()));
+    const runId = await settled(h, "cluster-deploy-slave", PARAMS, deploySecrets(uniqueEmail()));
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
     expect(stepColumn(h.db, runId, "create-mgmt", "error")).toMatch(/DRY run of register-slave on the master is not green/);
     // The emit itself is green — the defect is in what it handed over — and the registration
@@ -473,7 +478,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   it("abort-with-cleanup (deploy-slave): the map's slave part goes FIRST, then the remove-slave program on the master's record, then the snap purge — and the marking cleanup finds nothing left", { timeout: 300_000 }, async () => {
     const h = await deployWorld(serve);
     h.hosts.credsOut = EMIT_CREDS_JSON.replace("TFMtQ0EtREFUQQ==", "VEFNUEVSRUQ="); // park at create-mgmt with all three cleanups armed
-    const runId = await settled(h, "deploy-slave", PARAMS, deploySecrets(uniqueEmail()));
+    const runId = await settled(h, "cluster-deploy-slave", PARAMS, deploySecrets(uniqueEmail()));
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
 
     // Each arming step persisted exactly its own cleanup name (__cleanups)...
@@ -523,7 +528,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const email = uniqueEmail();
     const before = await observer.runs();
 
-    const r = await h.executor.plan("redeploy", { serverId: SLAVE_ID });
+    const r = await h.executor.plan("cluster-redeploy", { serverId: SLAVE_ID });
     expect(r.plan.steps.map((s) => s.name)).toEqual(REDEPLOY_STEP_NAMES);
     expect(r.plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(r.plan.requiredInputs?.map((i) => i.field)).toEqual(SLAVE_MACHINE_INPUTS.map((i) => i.field));

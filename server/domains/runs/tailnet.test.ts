@@ -10,6 +10,7 @@ import type { AnyRunDefinition, RunDefinition } from "../../executor/types.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { makeTailnetDisconnectDef, makeTailnetReconnectDef, makeTailnetRejoinDef, type TailnetParams } from "./defs/tailnet.ts";
+import type { TailnetKind } from "./defs/tailnet.kit.ts";
 
 // The PLAN of the three repair run kinds — everything the operator approves before a machine is asked
 // anything: which address the run is aimed at, what it locks, whose hosts it names, and what it
@@ -32,19 +33,21 @@ const LAN_HOST = "10.1.1.11";
  *  column any target builder reads — so no plan may ever aim a session at it. */
 const TAILNET_ADDRESS = "100.71.4.9";
 
-const DEFS: Record<string, RunDefinition<TailnetParams>> = {
-  "tailnet-disconnect": makeTailnetDisconnectDef({}),
-  "tailnet-reconnect": makeTailnetReconnectDef({}),
-  "tailnet-rejoin": makeTailnetRejoinDef({}),
+// Keyed on TailnetKind, not on string: a run kind renamed in shared/enums.ts must break THIS file
+// rather than leave the table testing three keys the enum no longer has.
+const DEFS: Record<TailnetKind, RunDefinition<TailnetParams>> = {
+  "cluster-tailnet-disconnect": makeTailnetDisconnectDef({}),
+  "cluster-tailnet-reconnect": makeTailnetReconnectDef({}),
+  "cluster-tailnet-rejoin": makeTailnetRejoinDef({}),
 };
 
 /** The one manager-side step of each run kind beside the shared attest/read pair: the program step for
- *  the two single-host run kinds (named run-<program>, and the program is named like the kind), and the
- *  mint-carry-rejoin choreography for the third. */
-const MIDDLE_STEP: Record<string, string> = {
-  "tailnet-disconnect": "run-tailnet-disconnect",
-  "tailnet-reconnect": "run-tailnet-reconnect",
-  "tailnet-rejoin": "rejoin",
+ *  the two single-host run kinds (named run-<program>, after the CATALOGUE program the kit maps the
+ *  kind to), and the mint-carry-rejoin choreography for the third. */
+const MIDDLE_STEP: Record<TailnetKind, string> = {
+  "cluster-tailnet-disconnect": "run-tailnet-disconnect",
+  "cluster-tailnet-reconnect": "run-tailnet-reconnect",
+  "cluster-tailnet-rejoin": "rejoin",
 };
 
 describe("the tailnet repair run kinds — the plan they are approved on", () => {
@@ -81,7 +84,7 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
     return db;
   }
 
-  for (const [kind, def] of Object.entries(DEFS)) {
+  for (const [kind, def] of Object.entries(DEFS) as [TailnetKind, RunDefinition<TailnetParams>][]) {
     it(`${kind} states the public address on its own plan target, so the frozen plan records it`, async () => {
       const db = setup();
       const plan = await def.plan({ serverId: SLAVE_ID }, { db: db.db });
@@ -121,10 +124,10 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
 
   it("only a rejoin declares the master at all, and on its usual address — the other two touch one host", async () => {
     const db = setup();
-    const rejoin = await DEFS["tailnet-rejoin"]!.plan({ serverId: SLAVE_ID }, { db: db.db });
+    const rejoin = await DEFS["cluster-tailnet-rejoin"].plan({ serverId: SLAVE_ID }, { db: db.db });
     expect(rejoin.targets?.find((t) => t.serverId === MASTER_ID)?.transport).toBeUndefined();
-    for (const kind of ["tailnet-disconnect", "tailnet-reconnect"]) {
-      const plan = await DEFS[kind]!.plan({ serverId: SLAVE_ID }, { db: db.db });
+    for (const kind of ["cluster-tailnet-disconnect", "cluster-tailnet-reconnect"] as const) {
+      const plan = await DEFS[kind].plan({ serverId: SLAVE_ID }, { db: db.db });
       expect(plan.targets?.map((t) => t.serverId)).toEqual([SLAVE_ID]);
     }
   });
@@ -139,10 +142,10 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
   it("refuses a rejoin on a host with no live cluster — the credential is minted per slave", async () => {
     const db = setup();
     db.db.update(clusters).set({ status: "planned" }).where(eq(clusters.id, "cls_1")).run();
-    await expect(DEFS["tailnet-rejoin"]!.plan({ serverId: SLAVE_ID }, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
+    await expect(DEFS["cluster-tailnet-rejoin"].plan({ serverId: SLAVE_ID }, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
     // The other two need no cluster at all: their programs declare no answer a cluster row would
     // state, and they drive the client on the host and nothing else.
-    await expect(DEFS["tailnet-disconnect"]!.plan({ serverId: SLAVE_ID }, { db: db.db })).resolves.toBeTruthy();
-    await expect(DEFS["tailnet-reconnect"]!.plan({ serverId: SLAVE_ID }, { db: db.db })).resolves.toBeTruthy();
+    await expect(DEFS["cluster-tailnet-disconnect"].plan({ serverId: SLAVE_ID }, { db: db.db })).resolves.toBeTruthy();
+    await expect(DEFS["cluster-tailnet-reconnect"].plan({ serverId: SLAVE_ID }, { db: db.db })).resolves.toBeTruthy();
   });
 });

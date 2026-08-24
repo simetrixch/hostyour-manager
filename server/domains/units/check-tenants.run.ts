@@ -197,7 +197,7 @@ function checkStep(ports: CheckTenantsPorts): Step {
 
 export function makeCheckTenantsDef(ports: CheckTenantsPorts): RunDefinition<CheckTenantsParams> {
   return {
-    kind: "check-tenants",
+    kind: "tenant-check",
     paramsSchema,
     // It changes no cluster: it reads a Secret, makes one GET per tenant, and writes the answer onto
     // the local inventory row. `mutating` is about what a run puts on a MACHINE, and this puts
@@ -206,7 +206,7 @@ export function makeCheckTenantsDef(ports: CheckTenantsPorts): RunDefinition<Che
     plan: async (_params, deps) => {
       const total = deps.db.select({ id: tenants.id }).from(tenants).all().length;
       return {
-        kind: "check-tenants",
+        kind: "tenant-check",
         targetKind: "self",
         targetId: "manager",
         summary: `Ask each of ${total} tenant(s) whether anybody can still administer it, and record the answer.`,

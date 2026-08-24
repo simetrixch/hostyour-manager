@@ -66,7 +66,7 @@ function tenantPorts(reg: TenantRegistrations): TenantLifecyclePorts {
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    catalogRepoUrl: "https://github.com/simetrixch/catalog.git",
+    catalogRepoUrl: "https://github.com/acme/acme-catalog.git",
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),

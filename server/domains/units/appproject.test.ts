@@ -61,7 +61,7 @@ describe("renderConsumerAppProject", () => {
 });
 
 describe("renderTenantAppProject", () => {
-  const CATALOG = "https://github.com/simetrixch/catalog.git";
+  const CATALOG = "https://github.com/acme/acme-catalog.git";
   const PLATFORM = "https://github.com/simetrixch/hostyour-cloud.git";
   const GUID = "e2e8ymj86dk8";
   const render = (member: string) =>

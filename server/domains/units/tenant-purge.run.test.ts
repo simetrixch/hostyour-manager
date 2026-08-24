@@ -30,7 +30,7 @@ import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./t
 
 const GUID = "zsjs023ctne0";
 const SUB = "acme.example";
-const DEPLOY_REPO = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_REPO = "https://github.com/acme/acme-catalog.git";
 const APPS = [{ name: "erp" }];
 const WATCH = tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod");
 // The tenant's members — the trio plus its one app. Every one has a namespace and an AppProject of

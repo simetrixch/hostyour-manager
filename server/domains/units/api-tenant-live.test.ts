@@ -35,7 +35,7 @@ const TGUID = "zsjs023ctne0"; // a live-shaped throwaway guid (matches the tenan
 // The ONE repo every tenant's charts live in — the platform constant the route resolves the fan-out's
 // pin against. Byte-identical to what the appsets render their source repoURL from (hostyour-cloud
 // apps/slave/values-common.yaml `repo.deployUrl`), which is what makes the per-repo lookup match.
-const DEPLOY_REPO = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_REPO = "https://github.com/acme/acme-catalog.git";
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));

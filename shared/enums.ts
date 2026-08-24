@@ -342,31 +342,36 @@ export type CredentialKind = (typeof CREDENTIAL_KIND)[number];
 // cannot serve, via the RUN_FAMILY grouping below.
 export const RUN_KIND = [
   "noop",                                                       // permanent resume-proof fixture
-  // The cluster run kinds. `adopt` takes a bare machine into service, `deploy-slave` turns an adopted
-  // server into a live slave, `redeploy` rebuilds the machine layer of a cluster that is already
-  // live, and `release` raises the platform version the cluster stands on. Distinct on purpose:
-  // each answers a different question, and a boolean on another run kind hides that.
-  "adopt", "deploy-slave", "redeploy", "release",
+  // The cluster run kinds. `cluster-adopt` takes a bare machine into service, `cluster-deploy-slave`
+  // turns an adopted server into a live slave, `cluster-redeploy` rebuilds the machine layer of a
+  // cluster that is already live, and `cluster-release` raises the platform version the cluster stands
+  // on. Distinct on purpose: each answers a different question, and a boolean on another run kind
+  // hides that.
+  "cluster-adopt", "cluster-deploy-slave", "cluster-redeploy", "cluster-release",
   // The tailnet repair run kinds, on a host that is already deployed. Three acts, not one with a
-  // switch: `tailnet-disconnect` takes the host off the private network and leaves it there,
-  // `tailnet-reconnect` puts it back with the credential the host still holds, and
-  // `tailnet-rejoin` is for when it holds none — the master mints a fresh one, which only the
+  // switch: `cluster-tailnet-disconnect` takes the host off the private network and leaves it there,
+  // `cluster-tailnet-reconnect` puts it back with the credential the host still holds, and
+  // `cluster-tailnet-rejoin` is for when it holds none — the master mints a fresh one, which only the
   // coordinator can do. Each reaches its host on the PUBLIC address, because a run kind cannot
   // travel over the network it is repairing.
-  "tailnet-disconnect", "tailnet-reconnect", "tailnet-rejoin",
-  // The password-login run kinds, on a host this manager already holds a key for. `password-login-
-  // disable` shuts the sshd password door and destroys the bootstrap password sealed beside the
+  "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin",
+  // The password-login run kinds, on a host this manager already holds a key for. `cluster-password-
+  // login-disable` shuts the sshd password door and destroys the bootstrap password sealed beside the
   // server row — two doors, and only the second one outlives the machine's configuration.
-  // `password-login-enable` opens the sshd door again for a repair, which is the only reason it
-  // exists: adoption already leaves the door shut.
-  "password-login-disable", "password-login-enable",
+  // `cluster-password-login-enable` opens the sshd door again for a repair, which is the only reason
+  // it exists: adoption already leaves the door shut.
+  "cluster-password-login-disable", "cluster-password-login-enable",
   // The operator-key run kinds, on a host this manager already holds a key for. The two acts are
   // named for what they place — one human's key, under its own label and its own marker, so a
   // removal can never reach the manager's own line. The read is named for the FILE, because it
   // reports every key in it and not only the ones this platform put there: a key nobody here placed
   // is exactly what it exists to surface.
-  "operator-key-place", "operator-key-remove", "authorized-keys-read",
-  "onboard", "suspend", "resume", "offboard", "purge",          // ONB; purge = force-offboard by name (orphan removal)
+  "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
+  // The consumer lifecycle. `consumer-purge` is force-offboard BY NAME (orphan removal), not a mode
+  // on `consumer-offboard`.
+  "consumer-onboard", "consumer-suspend", "consumer-resume", "consumer-offboard", "consumer-purge",
+  // Reconstruct the apps row from the GitOps pointer, for a consumer this Manager did not onboard.
+  "consumer-adopt",
   // The last step of putting a NEW secret value in front of a unit, and only that: a unit reads its
   // secrets as env vars, which are materialized once at container start, so a changed Vault value
   // reaches a RUNNING pod only when something rolls it. Named for what it does rather than for what
@@ -374,23 +379,23 @@ export const RUN_KIND = [
   // Secret are the operator's two steps before it.
   // consumer + tenant, because the gap is the same on both sides and a tenant owns one namespace
   // PER MEMBER — so the tenant run kind walks them, it is not the consumer run kind with another id.
-  "restart-workloads", "tenant-restart-workloads",
+  "consumer-restart-workloads", "tenant-restart-workloads",
   // The ONLY way a size-table change reaches something already deployed: it writes the table's
   // CURRENT figures into the unit's registration. Asking for the size a unit already has is therefore
   // not a no-op but the re-apply — which is why the run kind is named for the act (set a size) and not for
   // a change (resize), and why editing the table alone moves nothing.
-  "set-size", "tenant-set-size",
-  "adopt-consumer",                                             // ONB — reconstruct the apps row from the GitOps pointer; NOT "adopt" (taken by the server-adopt above)
+  "consumer-set-size", "tenant-set-size",
   // The relocation run kinds — ONE mechanism over the Hetzner Storage Box, three slices of it:
   // backup = close access, dump every store, verify, reopen (the box folder stays); restore = provide
   // the target and rebuild the unit from a folder; migrate = both halves plus the repoint and the
   // one-record DNS switch. Never three code paths — the defs compose shared step builders.
-  "backup", "restore", "migrate",                               // ONB — consumer relocation
-  "create-tenant", "add-app", "remove-app",                     // TNT — tenant (multi-app) onboarding
-  "tenant-suspend", "tenant-resume", "tenant-offboard",         // TNT lifecycle
-  "tenant-purge",                                               // TNT — force-offboard by guid (orphan removal)
-  "tenant-backup", "tenant-restore", "tenant-migrate",          // TNT relocation — the same mechanism over the whole member bracket
-  "check-tenants",                                              // TNT — asks every tenant whether anybody can still administer it
+  // The tenant three are the same mechanism over the whole member bracket.
+  "consumer-backup", "consumer-restore", "consumer-migrate",
+  "tenant-backup", "tenant-restore", "tenant-migrate",
+  "tenant-create", "tenant-add-app", "tenant-remove-app",       // tenant (multi-app) onboarding
+  "tenant-suspend", "tenant-resume", "tenant-offboard",         // tenant lifecycle
+  "tenant-purge",                                               // force-offboard by guid (orphan removal)
+  "tenant-check",                                               // asks every tenant whether anybody can still administer it
 ] as const;
 export type RunKind = (typeof RUN_KIND)[number];
 
@@ -403,17 +408,21 @@ export type RunKind = (typeof RUN_KIND)[number];
  *
  * Every RUN_KIND literal belongs to exactly one family, and a family is registered whole or not at
  * all. The run-definitions.total boot check asserts both against the run definitions the process assembled.
+ *
+ * Every literal but `noop` carries its family as its first word, so a run kind read off a run row, a
+ * log line or a filter names whose act it is without this table being opened. `noop` belongs to no
+ * family of the product and is spelled bare for that reason.
  */
 export const RUN_FAMILY = {
   fixture: ["noop"],
   cluster: [
-    "adopt", "deploy-slave", "redeploy", "release",
-    "tailnet-disconnect", "tailnet-reconnect", "tailnet-rejoin",
-    "password-login-disable", "password-login-enable",
-    "operator-key-place", "operator-key-remove", "authorized-keys-read",
+    "cluster-adopt", "cluster-deploy-slave", "cluster-redeploy", "cluster-release",
+    "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin",
+    "cluster-password-login-disable", "cluster-password-login-enable",
+    "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
   ],
-  consumer: ["onboard", "offboard", "purge", "adopt-consumer", "suspend", "resume", "restart-workloads", "set-size", "backup", "restore", "migrate"],
-  tenant: ["create-tenant", "add-app", "remove-app", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-backup", "tenant-restore", "tenant-migrate", "check-tenants"],
+  consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-backup", "consumer-restore", "consumer-migrate"],
+  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;
 

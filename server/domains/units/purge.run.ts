@@ -36,7 +36,7 @@ import { assertNoOrphans } from "./offboard-orphans.ts";
 // reaches it for ONE STAGE, exactly as offboard does (see SCOPE below): "more" means it needs no
 // inventory row and does not stall on a prune that never completes, never that it takes a whole unit.
 //
-// DESIGN — a distinct RUN_KIND "purge", NOT a force-mode on offboard, because the two address a
+// DESIGN — a distinct RUN_KIND "consumer-purge", NOT a force-mode on consumer-offboard, because the two address a
 // target DIFFERENTLY and that difference is the whole point:
 //   - offboard is ROW-driven: params { appId }, loadAppCluster(appId) resolves name/domain/stage/
 //     cluster, targetKind "app". An orphan has NO row → no appId → offboard structurally cannot
@@ -469,7 +469,7 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         // looking would let the backstop record exactly what the stricter run kind declined to record.
         // What counts as an orphan, and what the platform keeps on purpose, is stated in
         // offboard-orphans.ts; both answers depend on whether the unit still stands at another stage.
-        await assertNoOrphans(ctx, ports, loadPurgeTarget(ctx.db, p), "purge");
+        await assertNoOrphans(ctx, ports, loadPurgeTarget(ctx.db, p), "consumer-purge");
       },
     },
     {
@@ -497,7 +497,7 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
 
 export function makePurgeDef(ports: PurgePorts): RunDefinition<PurgeParams> {
   return {
-    kind: "purge",
+    kind: "consumer-purge",
     paramsSchema: PurgeParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: async (params, { db }) => {
@@ -505,7 +505,7 @@ export function makePurgeDef(ports: PurgePorts): RunDefinition<PurgeParams> {
       const row = findAppRow(db, t);
       const stepDefs = purgeSteps(ports, params);
       return {
-        kind: "purge",
+        kind: "consumer-purge",
         // The app row may not exist (orphan), so purge targets the CLUSTER — like onboard's plan,
         // whose app row does not exist yet either. offboard targets the app; purge cannot assume one.
         targetKind: "cluster",

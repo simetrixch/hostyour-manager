@@ -31,13 +31,13 @@ describe("runOnScreen", () => {
   // object is still the previous run's. Everything on the screen (header, steps, action bar) would then
   // describe the create-tenant while Abort/Retry/Delete act on the tenant-purge.
   it("refuses a loaded run that is not the run the address bar names", () => {
-    expect(runOnScreen(run("run_A", "create-tenant", "failed"), "run_B")).toBeNull();
+    expect(runOnScreen(run("run_A", "tenant-create", "failed"), "run_B")).toBeNull();
   });
 
   // The same guard, for the race a reset-on-id-change does NOT close: the GET of the OLD run was already
   // in flight when the id changed and resolves afterwards, writing run A back into state under id B.
   it("keeps refusing it when the previous run's in-flight GET resolves after the hop", () => {
-    const stale = run("run_A", "create-tenant", "failed");
+    const stale = run("run_A", "tenant-create", "failed");
     expect(runOnScreen(stale, "run_B")).toBeNull();
     expect(runOnScreen(null, "run_B")).toBeNull(); // and nothing is shown until the right run lands
   });
@@ -92,18 +92,18 @@ describe("abortOffer", () => {
   // failed, and an abort would git-rm the live pointer and let ArgoCD prune the whole fan-out.
   it("refuses the abort when the run's tenant is LIVE", () => {
     const live: RunTenantStateView = { state: "live", target, row: { ...row, status: "active" } };
-    const offer = abortOffer("create-tenant", live, null);
+    const offer = abortOffer("tenant-create", live, null);
     expect(offer.offered).toBe(false);
     expect(offer.offered === false && offer.why).toContain(target.guid);
   });
 
   // Fail-closed: no answer yet is not "the tenant is not live".
   it("refuses the abort while the tenant state is still being resolved", () => {
-    expect(abortOffer("create-tenant", null, null).offered).toBe(false);
+    expect(abortOffer("tenant-create", null, null).offered).toBe(false);
   });
 
   it("refuses the abort when the tenant state could not be read at all", () => {
-    const offer = abortOffer("create-tenant", null, "run rn_1 not found");
+    const offer = abortOffer("tenant-create", null, "run rn_1 not found");
     expect(offer.offered).toBe(false);
     expect(offer.offered === false && offer.why).toContain("run rn_1 not found");
   });
@@ -113,8 +113,8 @@ describe("abortOffer", () => {
   it("offers the abort for an orphan and for an unfinished tenant, naming the tenant it un-deploys", () => {
     const orphan: RunTenantStateView = { state: "orphan", target };
     const unfinished: RunTenantStateView = { state: "unfinished", target, row: { ...row, status: "provisioning" } };
-    expect(abortOffer("create-tenant", orphan, null)).toEqual({ offered: true, tenant: target });
-    expect(abortOffer("create-tenant", unfinished, null)).toEqual({ offered: true, tenant: target });
+    expect(abortOffer("tenant-create", orphan, null)).toEqual({ offered: true, tenant: target });
+    expect(abortOffer("tenant-create", unfinished, null)).toEqual({ offered: true, tenant: target });
   });
 
   // Refused before it deployed, or no guid was ever frozen: nothing was created, so the abort is pure run
@@ -124,8 +124,8 @@ describe("abortOffer", () => {
   it("offers the abort with no tenant named for the two states that never deployed anything", () => {
     const notDeployed: RunTenantStateView = { state: "not-deployed", target };
     const none: RunTenantStateView = { state: "none", reason: "it created nothing to purge" };
-    expect(abortOffer("create-tenant", notDeployed, null)).toEqual({ offered: true, tenant: null });
-    expect(abortOffer("create-tenant", none, null)).toEqual({ offered: true, tenant: null });
+    expect(abortOffer("tenant-create", notDeployed, null)).toEqual({ offered: true, tenant: null });
+    expect(abortOffer("tenant-create", none, null)).toEqual({ offered: true, tenant: null });
   });
 
   // THE defect an operator hit end to end on this screen: a
@@ -148,12 +148,12 @@ describe("abortOffer", () => {
     const offboarded: RunTenantStateView = { state: "offboarded", target, row: { ...row, status: "offboarded" } };
     const purged: RunTenantStateView = { state: "purged", target, row: { ...row, status: "purged" } };
 
-    const afterPurge = abortOffer("create-tenant", purged, null);
+    const afterPurge = abortOffer("tenant-create", purged, null);
     expect(afterPurge.offered).toBe(false);
     expect(afterPurge.offered === false && afterPurge.why).toContain(target.guid);
     expect(afterPurge.offered === false && afterPurge.why).toContain("already been purged");
 
-    const afterOffboard = abortOffer("create-tenant", offboarded, null);
+    const afterOffboard = abortOffer("tenant-create", offboarded, null);
     expect(afterOffboard.offered).toBe(false);
     expect(afterOffboard.offered === false && afterOffboard.why).toContain("already been offboarded");
     // ...and it points at the run kind that DOES still have work on such a tenant, on the page that offers it
@@ -173,14 +173,14 @@ describe("abortOffer", () => {
     ];
     for (const tenant of settled) {
       expect(runTenantPurgeTarget(tenant)).toBeNull();
-      expect(abortOffer("create-tenant", tenant, null).offered).toBe(false);
+      expect(abortOffer("tenant-create", tenant, null).offered).toBe(false);
     }
   });
 
   // Only create-tenant mints a tenant of its own; the tenant-state route refuses every other kind (400),
   // so no state is ever fetched for them and the gate must not stall on the absence of one.
   it("offers the abort unconditionally for every other run kind", () => {
-    for (const kind of ["onboard", "tenant-offboard", "tenant-purge", "add-app", "deploy-slave", "adopt"] as const) {
+    for (const kind of ["consumer-onboard", "tenant-offboard", "tenant-purge", "tenant-add-app", "cluster-deploy-slave", "cluster-adopt"] as const) {
       expect(abortOffer(kind, null, null)).toEqual({ offered: true, tenant: null });
     }
   });

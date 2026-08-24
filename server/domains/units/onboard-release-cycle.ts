@@ -66,7 +66,7 @@ export function triggerReleaseStep(ports: OnboardPorts, p: OnboardParams, runtim
       }
       const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
       const retry = ports.dispatchRetry ?? { budgetMs: 60_000, intervalMs: 5_000 };
-      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "onboard:trigger-release", runId: ctx.runId });
+      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:trigger-release", runId: ctx.runId });
       try {
         const token = pat.toString("utf8");
         const ref = await ports.github.getDefaultBranch({ owner, repo, token, signal: ctx.signal });
@@ -116,7 +116,7 @@ export function watchReleaseWorkflowStep(ports: OnboardPorts, p: OnboardParams, 
       const title = releaseRunTitle(p.version, p.channel);
       const pollMs = ports.releasePollIntervalMs ?? 2_000;
       const deadline = Date.now() + ports.releaseWorkflowTimeoutMs;
-      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "onboard:watch-release-workflow", runId: ctx.runId });
+      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:watch-release-workflow", runId: ctx.runId });
       try {
         const token = pat.toString("utf8");
         // Phase 1 — correlate: the runs created inside the window whose display title is this

@@ -21,7 +21,7 @@ export function seedRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
     name: "seed-repo-pat",
     title: "Seed the unit's repo PAT into the local build Vault",
     run: async (ctx) => {
-      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "onboard:seed-repo-pat", runId: ctx.runId });
+      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:seed-repo-pat", runId: ctx.runId });
       let created: boolean;
       try {
         ({ created } = await ports.seeder.seedBuildRepoPat({ consumerName: p.consumerName, pat: pat.toString("utf8") }));

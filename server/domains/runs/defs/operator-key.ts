@@ -47,24 +47,24 @@ export const AuthorizedKeysReadParams = z.object({
 export type AuthorizedKeysReadParams = z.infer<typeof AuthorizedKeysReadParams>;
 
 export const operatorKeyPlaceDef: RunDefinition<OperatorKeyParams> = {
-  kind: "operator-key-place",
+  kind: "cluster-operator-key-place",
   paramsSchema: OperatorKeyParams,
   mutating: true,
-  plan: async (params, { db }) => operatorKeyPlan("operator-key-place", params, db),
-  steps: (params) => operatorKeySteps("operator-key-place", params),
+  plan: async (params, { db }) => operatorKeyPlan("cluster-operator-key-place", params, db),
+  steps: (params) => operatorKeySteps("cluster-operator-key-place", params),
   cleanups: () => [removeOperatorKeyCleanup],
 };
 
 export const operatorKeyRemoveDef: RunDefinition<OperatorKeyParams> = {
-  kind: "operator-key-remove",
+  kind: "cluster-operator-key-remove",
   paramsSchema: OperatorKeyParams,
   mutating: true,
-  plan: async (params, { db }) => operatorKeyPlan("operator-key-remove", params, db),
-  steps: (params) => operatorKeySteps("operator-key-remove", params),
+  plan: async (params, { db }) => operatorKeyPlan("cluster-operator-key-remove", params, db),
+  steps: (params) => operatorKeySteps("cluster-operator-key-remove", params),
 };
 
 export const authorizedKeysReadDef: RunDefinition<AuthorizedKeysReadParams> = {
-  kind: "authorized-keys-read",
+  kind: "cluster-authorized-keys-read",
   paramsSchema: AuthorizedKeysReadParams,
   mutating: true,
   plan: async (params, { db }) => authorizedKeysReadPlan(params.serverId, db),

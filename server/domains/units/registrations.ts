@@ -420,7 +420,7 @@ export class Registrations {
    *  the charts render ServiceClaims whose deprovision finalizer runs on EVERY claim deletion — an
    *  ArgoCD prune included — and drops the user AND the databases. suspend / resume. */
   async setSuspended(stage: Stage, name: string, suspended: boolean, runId: string): Promise<{ commit: string }> {
-    return this.flip(stage, name, { suspended }, `${suspended ? "suspend" : "resume"}(${name}) ${trailer(runId)}`);
+    return this.flip(stage, name, { suspended }, `${suspended ? "consumer-suspend" : "consumer-resume"}(${name}) ${trailer(runId)}`);
   }
 
   /** Flip the stage registration's `quiesced` field — the deeper pause, held while a removal is in

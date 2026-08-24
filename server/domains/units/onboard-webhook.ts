@@ -86,7 +86,7 @@ export function setupWebhookStep(ports: OnboardPorts, p: OnboardParams): Step {
       // (onboard-abort.ts) before the first mutation, removeWebhookCleanup included — so an aborted
       // run never leaves an ORPHAN hook firing spurious dispatch/guard builds on a not-fully-onboarded
       // consumer, and a hook that was never created is the fail-soft no-op of the removal.
-      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "onboard:setup-webhook", runId: ctx.runId });
+      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:setup-webhook", runId: ctx.runId });
       try {
         const { created, id, staleRemoved } = await ports.github.ensureHook({
           owner, repo, token: pat.toString("utf8"), targetUrl, secret, events: ["push"], contentType: "json", signal: ctx.signal,
@@ -181,7 +181,7 @@ export async function removeConsumerWebhook(
   const { owner, repo } = parsed;
   let pat: Buffer;
   try {
-    pat = await ctx.creds.open(opts.repoCredentialId, { purpose: "offboard:remove-webhook", runId: ctx.runId });
+    pat = await ctx.creds.open(opts.repoCredentialId, { purpose: "consumer-offboard:remove-webhook", runId: ctx.runId });
   } catch (err) {
     // The sealed credential may already be revoked (a re-run after remove-repo-pat) or purged — not a
     // teardown blocker. The LIVE build trigger is the hook itself; if we cannot authenticate to remove

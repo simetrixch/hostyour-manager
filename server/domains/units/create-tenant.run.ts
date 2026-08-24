@@ -38,7 +38,7 @@ import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tena
 import { ensureSubdomainFreeStep, resolveReplaceTargets, ReplaceTargetSchema } from "./tenant-replace.ts";
 import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
 
-// The "create-tenant" Run — the tenant analogue of
+// The "tenant-create" Run — the tenant analogue of
 // onboard.run.ts. Instead of pinning one consumer chart it fans a single registration out to one
 // SELF-CONTAINED member per trio service and per app: each with its own namespace <guid>-<member>, its
 // own AppProject and its own Application. Everything not per-member — the tenant's Vault path, its
@@ -436,7 +436,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // changes one record. The idempotent-by-subdomain replace needs no removal of its own: the
         // replacing tenant carries the SAME subdomain, so this upsert re-points the standing record.
         const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
-        await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantWildcardHost(p.subdomain, unitApex), clusterFqdn: p.domain });
+        await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantWildcardHost(p.subdomain, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
       },
     },
     {
@@ -578,7 +578,7 @@ async function mintFreeGuid(ports: TenantOnboardPorts, stage: Stage): Promise<st
 
 export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<CreateTenantParams> {
   return {
-    kind: "create-tenant",
+    kind: "tenant-create",
     paramsSchema: CreateTenantParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target, asserted at registrations boot
     plan: () => {
@@ -653,7 +653,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       };
       const stepDefs = createTenantSteps(ports, params);
       const plan: Plan = {
-        kind: "create-tenant",
+        kind: "tenant-create",
         targetKind: "cluster",
         targetId: rc.clusterId,
         // The replace sentence carries the SAME data warning tenant-offboard's summary gives, because

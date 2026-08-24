@@ -65,7 +65,7 @@ const testSteps: Step[] = [
     },
   },
 ];
-// A MUTATING definition alongside it, registered under the valid kind "purge" (whose KIND_GUARDS entry
+// A MUTATING definition alongside it, registered under the valid kind "consumer-purge" (whose KIND_GUARDS entry
 // is empty, so plan() needs no crypto-gate fixture). guards.assertGuardsArmed pins step 0 of every
 // mutating def to attest-target; this one exercises what that step MEANS at run time — a fail-closed
 // gate that refuses on the world as it is now (tenant-purge's attest-target re-asks the live-tenant
@@ -93,11 +93,11 @@ const gatedSteps: Step[] = [
   },
 ];
 const gatedDef: RunDefinition = {
-  kind: "purge",
+  kind: "consumer-purge",
   paramsSchema: z.record(z.string(), z.unknown()),
   mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
   plan: async () => ({
-    kind: "purge",
+    kind: "consumer-purge",
     targetKind: "cluster",
     targetId: "cls_1",
     summary: "gated recovery test",
@@ -148,7 +148,7 @@ describe("Executor recovery — retry / skip / abort-with-cleanup", () => {
     const store = new CredentialStore({ db: db.db, logger });
     const runDefinitions: Map<RunKind, AnyRunDefinition> = new Map([
       ["noop", testDef],
-      ["purge", gatedDef],
+      ["consumer-purge", gatedDef],
     ]);
     const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
     return { db, executor };
@@ -204,7 +204,7 @@ describe("Executor recovery — retry / skip / abort-with-cleanup", () => {
     /** Plan + approve the gated def and let it settle — the gate refuses, so the run fails at step 0. */
     async function refusedAtGate(executor: Executor, why = "the tenant is live — the purge would deprovision it"): Promise<string> {
       refuseAttest = why;
-      const { runId } = await executor.plan("purge", {});
+      const { runId } = await executor.plan("consumer-purge", {});
       await executor.approve(runId);
       await executor.settle(runId);
       return runId;
@@ -253,7 +253,7 @@ describe("Executor recovery — retry / skip / abort-with-cleanup", () => {
       // held is still the operator's to skip, with its mandatory reason, exactly as before.
       const { db, executor } = make();
       failMutate = true;
-      const { runId } = await executor.plan("purge", {});
+      const { runId } = await executor.plan("consumer-purge", {});
       await executor.approve(runId);
       await executor.settle(runId);
       expect(getRun(db.db, runId)?.steps.find((s) => s.name === "mutate")?.status).toBe("failed");

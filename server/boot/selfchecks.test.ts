@@ -36,6 +36,7 @@ const wiredConfig = parseConfig({
   ONBOARD_GATE_MANAGER_ADDR: "10.152.183.5:8484",
   GITHUB_REPO: "simetrixch/hostyour-cloud",
   GITHUB_WRITE_PAT: "ghp_platform",
+  CATALOG_REPO: "acme/acme-catalog",
   CATALOG_WRITE_PAT: "ghp_deploy",
   // Both onboarding families write onto the branch this installation keeps its books on, which is
   // named after the cluster holding the master role — so a fully configured manager states it.
@@ -97,18 +98,47 @@ describe("boot self-checks", () => {
     expect([...runDefinitions.keys()].sort()).toEqual([...RUN_FAMILY.fixture, ...RUN_FAMILY.cluster].sort());
   });
 
+  // runs.kinds_known measures the DATABASE, not the code: what it catches is a row left standing
+  // under a spelling RUN_KIND has dropped, which is what a data migration over runs.kind leaves
+  // behind when it misses one. Both probes plant real rows, because a row is the only thing this
+  // check reads.
+  it("runs.kinds_known passes on a database whose rows all stand under kinds this build names", () => {
+    const { db, store, bus, runDefinitions } = fresh();
+    // The INNOCENT CASE, planted rather than assumed: an empty table would pass a check that had
+    // stopped looking at the column altogether.
+    db.sqlite
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
+      .run("run_ok", "consumer-backup", "app", "app_1", "{}", "{}", "succeeded", "op_system");
+    const check = runSelfChecks({ db, config, store, bus, runDefinitions }).find((r) => r.name === "runs.kinds_known");
+    expect(check?.kind).toBe("degrading");
+    expect(check?.ok).toBe(true);
+  });
+
+  it("runs.kinds_known is RED — and names the spelling — when a row stands under a kind this build dropped, without blocking boot", () => {
+    const { db, store, bus, runDefinitions } = fresh();
+    db.sqlite
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
+      .run("run_old", "backup", "app", "app_1", "{}", "{}", "succeeded", "op_system");
+    const results = runSelfChecks({ db, config, store, bus, runDefinitions });
+    const check = results.find((r) => r.name === "runs.kinds_known");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("backup");
+    // Degrading: it is reported, and boot goes on — the operator keeps every screen.
+    expect(() => assertBlockingChecksPass(results)).not.toThrow();
+  });
+
   // The counter-probe of run-definitions.total: HALF a family — some of its run kinds wired, some missing — is
   // the partial-wiring bug the check exists to catch, and it must ABORT boot rather than be noted.
   // Removing one definition from an otherwise wired family is that state exactly.
   it("run-definitions.total is RED when a wired family is missing one of its kinds, and that fails boot", () => {
     const { db, store, bus, runDefinitions } = fresh();
-    runDefinitions.delete("create-tenant");
+    runDefinitions.delete("tenant-create");
     const results = runSelfChecks({ db, config, store, bus, runDefinitions });
     const check = results.find((r) => r.name === "run-definitions.total");
     expect(check?.kind).toBe("blocking");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain("tenant");
-    expect(check?.detail).toContain("create-tenant");
+    expect(check?.detail).toContain("tenant-create");
     expect(() => assertBlockingChecksPass(results)).toThrow(/run-definitions\.total/);
   });
 

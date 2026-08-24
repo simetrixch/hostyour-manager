@@ -30,7 +30,7 @@ import {
 import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
 
-// "deploy-slave" — the Run that turns a READY (adopted) server into a live slave, over the
+// "cluster-deploy-slave" — the Run that turns a READY (adopted) server into a live slave, over the
 // deployment PROGRAMS of the machine's own catalogue (digita-deploy ansiwise/programs/), each
 // driven over `ansiwise-rest serve` and proven by a dry run the machine's gate then admits the real run
 // against. Two hosts: the MASTER cuts the slave's install branch (deploy-slave-branch) and takes
@@ -79,8 +79,8 @@ export const SLAVE_MACHINE_INPUTS = [
   { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to before a certificate expires" },
   { field: "letsencrypt_server", label: "The ACME directory this installation registers with — the authority's production one; a staging directory is refused, because its root is in no machine's trust store" },
   { field: "lan_cidr", label: "The IPv4 range this machine shares with the other clusters — blank when it shares none" },
-  { field: "storage_path", label: "Where the machine's separate storage is mounted — blank when it has none" },
-  { field: "storage_directory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default" },
+  { field: "storage_mount", label: "Where the machine's separate storage is mounted — blank when it has none" },
+  { field: "storage_subdirectory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default" },
 ];
 
 /** deploy-slave's own inputs: the machine-layer set plus the one answer only the branch cut takes. */
@@ -106,8 +106,8 @@ function armed(cleanup: Cleanup | undefined, step: Step): Step {
 
 /** Answers the DEF is authoritative for on the machine-layer programs, read off the slave's OWN
  *  cluster map — the record mark-slave wrote earlier in the same run (and re-reads on a redeploy).
- *  books_cluster is the master's domain (deploy-cluster/-gitops default it to the machine's own,
- *  which for a slave would install a second books keeper); build_plane is the map's, whose
+ *  books_fqdn is the master's domain (deploy-cluster/-gitops default it to the machine's own,
+ *  which for a slave would install a second books keeper); build_plane_fqdn is the map's, whose
  *  self-naming form the programs read the same way as "this machine".
  *
  *  Shared with release's slave arm, which drives the same two machine-layer programs against the same
@@ -119,8 +119,8 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
     const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
     const books = marking.booksCluster ?? marking.master;
     return {
-      ...(books !== undefined ? { books_cluster: books } : {}),
-      build_plane: marking.buildPlaneFqdn,
+      ...(books !== undefined ? { books_fqdn: books } : {}),
+      build_plane_fqdn: marking.buildPlaneFqdn,
     };
   };
 }
@@ -401,7 +401,7 @@ function installInput(params: DeploySlaveParams): SlaveInstallInput {
 
 export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): RunDefinition<DeploySlaveParams> {
   return {
-  kind: "deploy-slave",
+  kind: "cluster-deploy-slave",
   paramsSchema: DeploySlaveParams,
   mutating: true, // mutating ⇒ steps()[0] MUST be attest-target, asserted where the run definitions are assembled at boot
   plan: async (params, { db }) => {
@@ -414,7 +414,7 @@ export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): Run
     // line in the log names, or an operator approves one address and gets the other.
     const dialled = resolveTransport(slave, "default");
     return {
-      kind: "deploy-slave",
+      kind: "cluster-deploy-slave",
       targetKind: "server",
       targetId: params.serverId,
       summary:

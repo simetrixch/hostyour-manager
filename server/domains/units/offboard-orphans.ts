@@ -72,7 +72,7 @@ const grantRef = (o: BuildRbacObject): string => `${o.kind} ${o.namespace}/${o.n
 
 /** Read back everything this removal was supposed to take and refuse to let the row be recorded while
  *  any of it stands. `unit` is the stage being removed; the tree decides what belongs to it. `runKind`
- *  names the run in the refusal ("offboard" / "purge") so an operator reads which removal left the
+ *  names the run in the refusal ("consumer-offboard" / "consumer-purge") so an operator reads which removal left the
  *  leftover, not which module found it. */
 export async function assertNoOrphans(ctx: StepCtx, ports: OrphanScanPorts, unit: AppCluster, runKind: string): Promise<void> {
   const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(unit.clusterId);

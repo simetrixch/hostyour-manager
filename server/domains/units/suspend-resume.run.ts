@@ -124,14 +124,14 @@ function resumeSteps(ports: LifecyclePorts, params: SuspendResumeParams): Step[]
 
 export function makeSuspendDef(ports: LifecyclePorts): RunDefinition<SuspendResumeParams> {
   return {
-    kind: "suspend",
+    kind: "consumer-suspend",
     paramsSchema: SuspendResumeParams,
     mutating: true,
     plan: async (params, { db }) => {
       const ac = loadAppCluster(db, params.appId);
       const stepDefs = suspendSteps(ports, params);
       return {
-        kind: "suspend",
+        kind: "consumer-suspend",
         targetKind: "app",
         targetId: params.appId,
         summary: `Suspend consumer "${ac.name}" on ${ac.domain} (${ac.stage}): flip the registration's suspended field, wait for ArgoCD to converge on the off render, mark suspended. The row is kept.`,
@@ -148,14 +148,14 @@ export function makeSuspendDef(ports: LifecyclePorts): RunDefinition<SuspendResu
 
 export function makeResumeDef(ports: LifecyclePorts): RunDefinition<SuspendResumeParams> {
   return {
-    kind: "resume",
+    kind: "consumer-resume",
     paramsSchema: SuspendResumeParams,
     mutating: true,
     plan: async (params, { db }) => {
       const ac = loadAppCluster(db, params.appId);
       const stepDefs = resumeSteps(ports, params);
       return {
-        kind: "resume",
+        kind: "consumer-resume",
         targetKind: "app",
         targetId: params.appId,
         summary: `Resume consumer "${ac.name}" on ${ac.domain} (${ac.stage}): flip the registration's suspended field back, wait for ArgoCD to converge on the running render, mark active.`,

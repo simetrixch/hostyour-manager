@@ -5,7 +5,7 @@ import { relevantRun, runLine } from "./serverRuns.ts";
 
 const run = (over: { id?: string; kind?: RunKind; status?: RunStatus; targetId?: string }): RunView => ({
   id: over.id ?? "run_1",
-  kind: over.kind ?? "adopt",
+  kind: over.kind ?? "cluster-adopt",
   targetKind: "server",
   targetId: over.targetId ?? "srv_1",
   status: over.status ?? "planned",
@@ -37,17 +37,17 @@ describe("relevantRun — the ONE run a server's card surfaces", () => {
 
 describe("runLine — what the card calls the run", () => {
   it("names the three tailnet repair run kinds in words, not in kind literals", () => {
-    expect(runLine(run({ kind: "tailnet-disconnect", status: "planned" }))).toBe("A tailnet disconnect is planned — approve it");
-    expect(runLine(run({ kind: "tailnet-reconnect", status: "running" }))).toBe("A tailnet reconnect is running — watch it");
-    expect(runLine(run({ kind: "tailnet-rejoin", status: "failed" }))).toBe("The last tailnet rejoin failed — open it to retry");
+    expect(runLine(run({ kind: "cluster-tailnet-disconnect", status: "planned" }))).toBe("A tailnet disconnect is planned — approve it");
+    expect(runLine(run({ kind: "cluster-tailnet-reconnect", status: "running" }))).toBe("A tailnet reconnect is running — watch it");
+    expect(runLine(run({ kind: "cluster-tailnet-rejoin", status: "failed" }))).toBe("The last tailnet rejoin failed — open it to retry");
   });
 
   it("falls back to '<kind> run' for a run kind whose name is already a noun phrase", () => {
-    expect(runLine(run({ kind: "release", status: "planned" }))).toBe("A release run is planned — approve it");
+    expect(runLine(run({ kind: "cluster-release", status: "planned" }))).toBe("A cluster-release run is planned — approve it");
   });
 
   it("picks the article from the noun, so a vowel does not read as 'A adoption'", () => {
-    expect(runLine(run({ kind: "adopt", status: "running" }))).toBe("An adoption is running — watch it");
-    expect(runLine(run({ kind: "deploy-slave", status: "planned" }))).toBe("A deployment is planned — approve it");
+    expect(runLine(run({ kind: "cluster-adopt", status: "running" }))).toBe("An adoption is running — watch it");
+    expect(runLine(run({ kind: "cluster-deploy-slave", status: "planned" }))).toBe("A deployment is planned — approve it");
   });
 });

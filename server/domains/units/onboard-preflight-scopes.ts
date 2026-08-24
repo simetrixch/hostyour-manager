@@ -37,7 +37,7 @@ export function preflightScopesStep(ports: OnboardPorts, p: OnboardParams): Step
         throw errValidation(`onboard "${p.consumerName}" requires the GitHub client to pre-flight the consumer PAT scopes but none is wired on this manager — refusing to onboard without verifying ${REQUIRED_CONSUMER_PAT_SCOPES.join(" + ")} up front`);
       }
       const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
-      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "onboard:preflight-scopes", runId: ctx.runId });
+      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:preflight-scopes", runId: ctx.runId });
       let token;
       try {
         token = await ports.github.readTokenScopes({ owner, repo, token: pat.toString("utf8"), signal: ctx.signal });

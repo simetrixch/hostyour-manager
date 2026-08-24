@@ -89,7 +89,7 @@ function setSizeSteps(ports: LifecyclePorts, p: SetSizeParams): Step[] {
 
 export function makeSetSizeDef(ports: LifecyclePorts): RunDefinition<SetSizeParams> {
   return {
-    kind: "set-size",
+    kind: "consumer-set-size",
     paramsSchema: SetSizeParams,
     mutating: true,
     plan: async (params, { db }) => {
@@ -97,7 +97,7 @@ export function makeSetSizeDef(ports: LifecyclePorts): RunDefinition<SetSizePara
       const quota = resolveUnitQuota(db, params.size, await consumerComposition(ports.registrations, ac));
       const stepDefs = setSizeSteps(ports, params);
       return {
-        kind: "set-size",
+        kind: "consumer-set-size",
         targetKind: "app",
         targetId: params.appId,
         summary: summary(`consumer "${ac.name}"`, `${ac.domain} (${ac.stage})`, params.size, "its namespace", quota),

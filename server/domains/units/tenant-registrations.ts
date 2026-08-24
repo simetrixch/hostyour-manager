@@ -269,7 +269,7 @@ export class TenantRegistrations {
     // MEMBER into members[] — the two lists move together, which the schema then holds them to.
     const apps = op === "append" ? [...current.entry.apps, { name: app, seedReference, seedDemo }] : current.entry.apps.filter((a) => a.name !== app);
     const members = op === "append" ? [...current.entry.members, member!] : current.entry.members.filter((m) => m.name !== app);
-    const runKind = op === "append" ? "add-app" : "remove-app";
+    const runKind = op === "append" ? "tenant-add-app" : "tenant-remove-app";
     const sign = op === "append" ? "+" : "-";
     return this.write(stage, guid, { ...current.entry, apps, members }, `${runKind}(${guid}): ${sign}${app} ${trailer(runId)}`);
   }

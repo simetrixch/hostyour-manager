@@ -128,7 +128,7 @@ export function FailedRunActions(props: {
             step, to retry or skip like any other. &ldquo;Retry from failed step&rdquo; and &ldquo;Skip…&rdquo; are the paths that KEEP
             what it built.
           </p>
-          {run.kind === "create-tenant" && (
+          {run.kind === "tenant-create" && (
             <>
               {abort.tenant && (
                 <p>

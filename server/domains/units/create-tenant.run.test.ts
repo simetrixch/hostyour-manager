@@ -28,7 +28,7 @@ import { TENANT_CRYPTO_PROPERTIES, TENANT_STORAGE_PROPERTIES } from "./tenant-cr
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0"; // a live-shaped throwaway guid
-const DEPLOY_URL = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 // The registry host the ports fixture resolves for the target cluster — in the default topology the
 // build plane is the master, so the fixture answers zot on m1.example.

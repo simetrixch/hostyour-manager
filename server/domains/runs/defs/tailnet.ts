@@ -40,30 +40,30 @@ export type TailnetParams = z.infer<typeof TailnetParams>;
 
 export function makeTailnetDisconnectDef(ports: TailnetPorts): RunDefinition<TailnetParams> {
   return {
-    kind: "tailnet-disconnect",
+    kind: "cluster-tailnet-disconnect",
     paramsSchema: TailnetParams,
     mutating: true,
-    plan: async (params, { db }) => tailnetPlan("tailnet-disconnect", params.serverId, db, ports),
-    steps: (params) => tailnetSteps("tailnet-disconnect", params.serverId, ports),
+    plan: async (params, { db }) => tailnetPlan("cluster-tailnet-disconnect", params.serverId, db, ports),
+    steps: (params) => tailnetSteps("cluster-tailnet-disconnect", params.serverId, ports),
   };
 }
 
 export function makeTailnetReconnectDef(ports: TailnetPorts): RunDefinition<TailnetParams> {
   return {
-    kind: "tailnet-reconnect",
+    kind: "cluster-tailnet-reconnect",
     paramsSchema: TailnetParams,
     mutating: true,
-    plan: async (params, { db }) => tailnetPlan("tailnet-reconnect", params.serverId, db, ports),
-    steps: (params) => tailnetSteps("tailnet-reconnect", params.serverId, ports),
+    plan: async (params, { db }) => tailnetPlan("cluster-tailnet-reconnect", params.serverId, db, ports),
+    steps: (params) => tailnetSteps("cluster-tailnet-reconnect", params.serverId, ports),
   };
 }
 
 export function makeTailnetRejoinDef(ports: TailnetPorts): RunDefinition<TailnetParams> {
   return {
-    kind: "tailnet-rejoin",
+    kind: "cluster-tailnet-rejoin",
     paramsSchema: TailnetParams,
     mutating: true,
-    plan: async (params, { db }) => tailnetPlan("tailnet-rejoin", params.serverId, db, ports),
-    steps: (params) => tailnetSteps("tailnet-rejoin", params.serverId, ports),
+    plan: async (params, { db }) => tailnetPlan("cluster-tailnet-rejoin", params.serverId, db, ports),
+    steps: (params) => tailnetSteps("cluster-tailnet-rejoin", params.serverId, ports),
   };
 }

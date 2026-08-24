@@ -189,7 +189,7 @@ function seedClusters(): void {
 
 /** Plan + approve + settle — hands back the runId of the (usually failed) run under test. */
 async function runOnboard(h: Harness): Promise<string> {
-  const { runId } = await h.executor.planStreamed("onboard", REQUEST);
+  const { runId } = await h.executor.planStreamed("consumer-onboard", REQUEST);
   await h.executor.settle(runId);
   expect(getRun(db.db, runId)?.status).toBe("planned");
   await h.executor.approve(runId);

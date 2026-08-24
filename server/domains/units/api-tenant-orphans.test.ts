@@ -47,7 +47,7 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 const SHA = "a".repeat(40);
 const ORPHAN_GUID = "e2e8ymj86dk8"; // a live-shaped throwaway guid (matches the tenants/** path guard)
 const BROKEN_GUID = "kx4v7n2q9r3s"; // a pointer DIRECTORY whose tenant.yaml the scan cannot read
-const DEPLOY_URL = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));

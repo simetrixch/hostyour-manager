@@ -77,14 +77,14 @@ function restartSteps(ports: LifecyclePorts, p: RestartWorkloadsParams): Step[] 
 
 export function makeRestartWorkloadsDef(ports: LifecyclePorts): RunDefinition<RestartWorkloadsParams> {
   return {
-    kind: "restart-workloads",
+    kind: "consumer-restart-workloads",
     paramsSchema: RestartWorkloadsParams,
     mutating: true,
     plan: async (params, { db }) => {
       const ac = loadAppCluster(db, params.appId);
       const stepDefs = restartSteps(ports, params);
       return {
-        kind: "restart-workloads",
+        kind: "consumer-restart-workloads",
         targetKind: "app",
         targetId: params.appId,
         // States what it is NOT, because an operator can read "restart" as "replace the secrets":

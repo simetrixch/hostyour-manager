@@ -37,7 +37,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   /** One step out of the def's own list, for driving it directly. */
   function stepOf(h: Harness, name: string): Step {
-    const def = buildRunDefinitions({ db: h.db.db, platformRepo: h.platformRepo }).get("deploy-slave") as AnyRunDefinition;
+    const def = buildRunDefinitions({ db: h.db.db, platformRepo: h.platformRepo }).get("cluster-deploy-slave") as AnyRunDefinition;
     const step = def.steps({ ...PARAMS, tier: "rehearsal" }).find((s) => s.name === name);
     if (!step) throw new Error(`no step ${name}`);
     return step;
@@ -45,7 +45,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   it("plans the program-driven step list over two declared targets with the declared locks, and asks for the elevation password + the answers nobody records", async () => {
     const { executor } = await makeHarness();
-    const { plan } = await executor.plan("deploy-slave", PARAMS);
+    const { plan } = await executor.plan("cluster-deploy-slave", PARAMS);
     expect(plan.steps.map((s) => s.name)).toEqual(STEP_NAMES);
     expect(plan.targets).toEqual([
       { serverId: SLAVE_ID, ownsHost: true, label: "s1 (slave)" },
@@ -63,7 +63,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.requiredInputs).toEqual(SLAVE_INSTALL_INPUTS);
     expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
-      ["committer_email", "letsencrypt_email", "letsencrypt_server", "lan_cidr", "storage_path", "storage_directory"],
+      ["committer_email", "letsencrypt_email", "letsencrypt_server", "lan_cidr", "storage_mount", "storage_subdirectory"],
     );
     expect(plan.summary).toContain("s1.example.com");
     expect(plan.summary).toContain("m1");
@@ -74,7 +74,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   it("refuses to plan without a master server (the management plane has nowhere to live)", async () => {
     const { executor } = await makeHarness({ master: false });
-    const err = await executor.plan("deploy-slave", PARAMS).catch((e: unknown) => e);
+    const err = await executor.plan("cluster-deploy-slave", PARAMS).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppError);
     expect((err as AppError).message).toMatch(/master/);
   });
@@ -82,7 +82,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   it("keeps steps({}) pure, program-step-shaped, starts with attest-target; guards.armed passes", async () => {
     const { db } = await makeHarness();
     const runDefinitions = buildRunDefinitions({ db: db.db });
-    const def = runDefinitions.get("deploy-slave") as AnyRunDefinition;
+    const def = runDefinitions.get("cluster-deploy-slave") as AnyRunDefinition;
     expect(def.mutating).toBe(true);
     const a = def.steps({});
     const b = def.steps({});
@@ -95,7 +95,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   it("resolves every cleanup name the steps can register (abortWithCleanup's lookup path)", async () => {
     const { db } = await makeHarness();
-    const def = buildRunDefinitions({ db: db.db }).get("deploy-slave") as AnyRunDefinition;
+    const def = buildRunDefinitions({ db: db.db }).get("cluster-deploy-slave") as AnyRunDefinition;
     const names = (def.cleanups?.({ ...PARAMS, tier: "rehearsal" }) ?? []).map((c) => c.name);
     expect(names.sort()).toEqual(["microk8s-reset-slave", "remove-slave", "remove-slave-marking"]);
   });
@@ -105,7 +105,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     // them on server.name — a disagreement used to split the resources across two names and only
     // die minutes in. The guard fails BEFORE anything is allocated or mutated.
     const { db, executor, hosts } = await makeHarness();
-    const { runId } = await executor.plan("deploy-slave", { ...PARAMS, domain: "s9.example.com" });
+    const { runId } = await executor.plan("cluster-deploy-slave", { ...PARAMS, domain: "s9.example.com" });
     await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
@@ -123,7 +123,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   it("hard-fails attest-target when the DNS wildcard does not resolve", async () => {
     const hosts = scriptedHosts({ dnsOut: "DNS_WILDCARD none" });
     const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
+    const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
     await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
@@ -137,7 +137,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const { db, executor } = await makeHarness({ hosts, keystore: "keyfile" });
     // The row remembers the machine adopt saw; the box now answering reports another one.
     db.db.update(servers).set({ machineId: "abc123def4567890abc123def4567890" }).where(eq(servers.id, SLAVE_ID)).run();
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
+    const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
     await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
@@ -150,7 +150,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
       id: "cls_live", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "active", slaveId: 1,
     }).run();
     db.db.update(servers).set({ status: "healthy" }).where(eq(servers.id, SLAVE_ID)).run();
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
+    const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
     await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
@@ -164,7 +164,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   it("redeploy refuses a server whose cluster is not live — that state is deploy-slave's to finish", async () => {
     const { db, executor } = await makeHarness({ keystore: "keyfile" });
     // No cluster row at all: nothing has a machine layer to rebuild yet.
-    const err = await executor.plan("redeploy", { serverId: PARAMS.serverId }).catch((e: unknown) => e);
+    const err = await executor.plan("cluster-redeploy", { serverId: PARAMS.serverId }).catch((e: unknown) => e);
     expect((err as Error).message).toMatch(/carries no cluster/);
     expect(db.db.select().from(clusters).all()).toHaveLength(0);
   });
@@ -174,7 +174,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
       preflightOut: HEALTHY_SLAVE_PREFLIGHT.replace("CHECK port.80 PASS port 80 free", "CHECK port.80 WARN port 80 already bound"),
     });
     const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
+    const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
     await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
 
@@ -192,7 +192,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   it("slave-preflight blocks when the master's Vault is unreachable from the slave", async () => {
     const hosts = scriptedHosts({ vaultCode: "000", vaultExit: 7 });
     const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
+    const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
     await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
@@ -202,7 +202,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   it("prepare-checkouts fails NAMED when the master's checkouts cannot be stood where the branch cut reads — no program starts, no map is written", async () => {
     const hosts = scriptedHosts({ checkoutsOut: "", checkoutsExit: 3 });
     const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("deploy-slave", PARAMS);
+    const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
     await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
 
@@ -290,7 +290,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   it("slaveCryptoGate: a real-tier slave is refused under the plaintext keystore", async () => {
     const { executor } = await makeHarness(); // no meta row ⇒ keystore.mode defaults plaintext
-    const err = await executor.plan("deploy-slave", { ...PARAMS, tier: "real" }).catch((e: unknown) => e);
+    const err = await executor.plan("cluster-deploy-slave", { ...PARAMS, tier: "real" }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppError);
     expect((err as AppError).code).toBe("PLAN_REFUSED");
   });
@@ -299,7 +299,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const { db, executor } = await makeHarness();
     db.db.insert(servers).values({ id: "srv_other", name: "s2", host: "s2.example.com", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_other", serverId: "srv_other", stage: "prod", domain: "s2.example.com", status: "active", slaveId: 7 }).run();
-    const err = await executor.plan("deploy-slave", PARAMS).catch((e: unknown) => e);
+    const err = await executor.plan("cluster-deploy-slave", PARAMS).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppError);
     expect((err as AppError).code).toBe("PLAN_REFUSED");
   });

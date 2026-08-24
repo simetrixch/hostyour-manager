@@ -188,7 +188,7 @@ describe("purge run definition", () => {
     projects.deleteAppProject = async () => ({ deleted: false });
 
     const logs: string[] = [];
-    await expect(runAll(ports(reg, { projects }), logs)).rejects.toThrow(/the purge of acme \(prod\) left 1 object\(s\) standing/);
+    await expect(runAll(ports(reg, { projects }), logs)).rejects.toThrow(/the consumer-purge of acme \(prod\) left 1 object\(s\) standing/);
     // The row stays active: a row saying the consumer left is what makes the leftover unfindable.
     expect(db.db.select().from(apps).get()?.status).toBe("active");
   });

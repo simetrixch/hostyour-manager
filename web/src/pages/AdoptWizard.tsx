@@ -24,7 +24,7 @@ export function AdoptWizard() {
         sshUser: form.sshUser.trim(),
         sshPort: Number(form.sshPort) || 22,
       });
-      const { runId } = await planRun("adopt", {
+      const { runId } = await planRun("cluster-adopt", {
         serverId: server.id,
         ...(form.intendedDomain.trim() ? { intendedDomain: form.intendedDomain.trim() } : {}),
       });

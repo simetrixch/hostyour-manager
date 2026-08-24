@@ -141,7 +141,7 @@ describe("adopt run — end to end through the executor", () => {
 
   it("plans 12 steps with the password ceremony summary + required secret", async () => {
     const { executor } = make();
-    const { plan } = await executor.plan("adopt", { serverId: "srv_adopt1" });
+    const { plan } = await executor.plan("cluster-adopt", { serverId: "srv_adopt1" });
     // The two irreversible steps come after verify-key-login — never before it, since shutting the
     // password door is the change that can make a machine unreachable — and after every step that
     // can still fail on the host. A run that fails resets the row to `bare`, and a `bare` row offers
@@ -169,7 +169,7 @@ describe("adopt run — end to end through the executor", () => {
 
   it("adopts a healthy server to ready, seals a key, and never leaks the password", async () => {
     const { db, executor, store, serverId } = make();
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
 
@@ -203,7 +203,7 @@ describe("adopt run — end to end through the executor", () => {
     // Before any run: the column default. "unknown" says nothing was measured, which is the truth.
     expect(db.db.select().from(servers).where(eq(servers.id, serverId)).get()?.passwordLoginState).toBe("unknown");
 
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("succeeded");
@@ -230,7 +230,7 @@ describe("adopt run — end to end through the executor", () => {
     expect(before?.authorizedKeysState).toBe("unknown");
     expect(before?.authorizedKeysJson).toBeNull();
 
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
 
@@ -257,7 +257,7 @@ describe("adopt run — end to end through the executor", () => {
     expect(before?.tailnetState).toBe("unknown");
     expect(before?.tailnetJson).toBeNull();
 
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
 
@@ -282,7 +282,7 @@ describe("adopt run — end to end through the executor", () => {
       "TAILNET coordinator https://tailnet.example.com",
     ].join("\n");
     const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, joined));
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
 
@@ -297,7 +297,7 @@ describe("adopt run — end to end through the executor", () => {
   it("a client that is installed but not logged in reads 'not-joined', never 'no-client'", async () => {
     const notJoined = ["TAILNET client present", "TAILNET version 1.80.2", "TAILNET backend NeedsLogin"].join("\n");
     const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, notJoined));
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
 
@@ -311,7 +311,7 @@ describe("adopt run — end to end through the executor", () => {
     // run failed to measure.
     const silent = ["TAILNET client present", "TAILNET version 1.80.2", "TAILNET backend ", "TAILNET address "].join("\n");
     const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, silent));
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
 
@@ -321,7 +321,7 @@ describe("adopt run — end to end through the executor", () => {
 
   it("fails on a wrong password and resets the server adopting → bare", async () => {
     const { db, executor, serverId } = make();
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from("wrong-password") });
     await executor.settle(runId);
 
@@ -347,7 +347,7 @@ describe("adopt run — end to end through the executor", () => {
   it("grants the blanket right on a non-root account, arms its removal, and says in the log that it STAYS", async () => {
     const commands: string[] = [];
     const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, { commands }), "digi1");
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("succeeded");
@@ -369,7 +369,7 @@ describe("adopt run — end to end through the executor", () => {
     const commands: string[] = [];
     const { db, executor, serverId } = make(
       fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, { commands, alreadyBlanket: true }), "digi1");
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("succeeded");
@@ -385,7 +385,7 @@ describe("adopt run — end to end through the executor", () => {
   it("asks the machine before writing, and asks it in a form whose EXIT CODE is the answer", async () => {
     const commands: string[] = [];
     const { executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, { commands }), "digi1");
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
 
@@ -402,7 +402,7 @@ describe("adopt run — end to end through the executor", () => {
     // Plan.warnings reaches no screen (server/executor/read.ts toRunView projects none, and RunView
     // has no such member), so the summary is the only record the approve card shows.
     const nonRoot = make(fakeFactory(), "digi1");
-    const { plan } = await nonRoot.executor.plan("adopt", { serverId: nonRoot.serverId });
+    const { plan } = await nonRoot.executor.plan("cluster-adopt", { serverId: nonRoot.serverId });
     expect(plan.summary).toContain('digi1 ALL=(ALL) NOPASSWD:ALL');
     expect(plan.summary).toContain("/etc/sudoers.d/90-hostyour");
     expect(plan.summary).toContain("LEAVES IT THERE");
@@ -413,7 +413,7 @@ describe("adopt run — end to end through the executor", () => {
     expect(plan.summary).toContain("Where this machine does not already grant passwordless sudo");
 
     const asRoot = make();
-    const rootPlan = (await asRoot.executor.plan("adopt", { serverId: asRoot.serverId })).plan;
+    const rootPlan = (await asRoot.executor.plan("cluster-adopt", { serverId: asRoot.serverId })).plan;
     expect(rootPlan.summary).toContain("The password you enter is used once to install an SSH key");
     expect(rootPlan.summary).not.toContain("NOPASSWD");
   });
@@ -421,7 +421,7 @@ describe("adopt run — end to end through the executor", () => {
   it("blocks on a hard preflight failure (non-Ubuntu arch)", async () => {
     const bad = HEALTHY_PREFLIGHT.replace("CHECK os.arch PASS x86_64", "CHECK os.arch FAIL riscv64 (need x86_64 or aarch64)");
     const { db, executor, serverId } = make(fakeFactory(bad));
-    const { runId } = await executor.plan("adopt", { serverId });
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
 

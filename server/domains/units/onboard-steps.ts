@@ -258,7 +258,7 @@ export function seedSecretsStep(ports: OnboardPorts, p: DeployableOnboardParams,
       const { data, minted } = await buildConsumerSecretDataWithDerivations(
         p.secretSpecs,
         (key) => ctx.secrets.get(`consumer-secret:${key}`)?.toString("utf8"),
-        () => ctx.creds.open(p.repoCredentialId, { purpose: "onboard:seed-secrets:deploy-git-credentials", runId: ctx.runId }),
+        () => ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:seed-secrets:deploy-git-credentials", runId: ctx.runId }),
       );
       const keys = Object.keys(data);
       if (keys.length === 0) {
@@ -314,7 +314,7 @@ export function provisionRepoCredentialStep(ports: OnboardPorts, p: DeployableOn
       // The delete inverse is already armed: write-registration registered the WHOLE ordered rollback
       // (onboard-abort.ts) before the first mutation, so no step here arms its own piece any more.
       const { argoNamespace } = await ports.resolver.resolve(p.clusterId);
-      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "onboard:provision-repo-credential", runId: ctx.runId });
+      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:provision-repo-credential", runId: ctx.runId });
       let created: boolean;
       try {
         ({ created } = await ports.repoCredential.applyRepoCredential(
@@ -436,6 +436,7 @@ export function provisionDnsStep(ports: OnboardPorts, p: DeployableOnboardParams
         unit: p.consumerName,
         recordName: consumerUnitHost(p.consumerName, p.unitApex),
         clusterFqdn: p.domain,
+        runKind: "consumer-onboard",
       });
     },
   };

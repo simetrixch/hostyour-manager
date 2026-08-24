@@ -21,16 +21,16 @@ export function relevantRun(serverId: string, runs: RunView[]): RunView | undefi
  *  with no entry reads as "<kind> run", which is right for every run kind whose own name already is a
  *  noun phrase. */
 const RUN_NOUN: Partial<Record<RunKind, string>> = {
-  adopt: "adoption",
-  "deploy-slave": "deployment",
-  "tailnet-disconnect": "tailnet disconnect",
-  "tailnet-reconnect": "tailnet reconnect",
-  "tailnet-rejoin": "tailnet rejoin",
-  "password-login-disable": "password login disable",
-  "password-login-enable": "password login enable",
-  "operator-key-place": "operator key placement",
-  "operator-key-remove": "operator key removal",
-  "authorized-keys-read": "authorized-keys reading",
+  "cluster-adopt": "adoption",
+  "cluster-deploy-slave": "deployment",
+  "cluster-tailnet-disconnect": "tailnet disconnect",
+  "cluster-tailnet-reconnect": "tailnet reconnect",
+  "cluster-tailnet-rejoin": "tailnet rejoin",
+  "cluster-password-login-disable": "password login disable",
+  "cluster-password-login-enable": "password login enable",
+  "cluster-operator-key-place": "operator key placement",
+  "cluster-operator-key-remove": "operator key removal",
+  "cluster-authorized-keys-read": "authorized-keys reading",
 };
 
 export function runLine(run: RunView): string {

@@ -36,7 +36,7 @@ describe("Registrations suspend / quiesce", () => {
     const reg = new Registrations(repo, CLUSTERS);
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy(), runId: "run_1" });
     await reg.setSuspended("prod", "acme", true, "run_2");
-    expect(repo.commits.at(-1)!.message).toBe("suspend(acme) [run_2]");
+    expect(repo.commits.at(-1)!.message).toBe("consumer-suspend(acme) [run_2]");
     // The stage file is REWRITTEN where it stands — never moved to another directory. build.yaml
     // rides along because this unit stands at prod only, so pausing prod pauses the unit (below).
     expect(repo.commits.at(-1)!.write?.map((w) => w.path)).toContain("registrations/acme/prod.yaml");

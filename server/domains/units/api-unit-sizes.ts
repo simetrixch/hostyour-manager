@@ -147,7 +147,7 @@ export function registerUnitSizeRoutes(app: Hono<AppEnv>, deps: UnitSizeApiDeps)
     const body = (await c.req.json().catch(() => ({}))) as { size?: unknown };
     const parsed = SetSizeParams.safeParse({ appId: c.req.param("appId"), size: body.size });
     if (!parsed.success) throw errValidation(`invalid size request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    return c.json(await executor.plan("set-size", parsed.data), 201);
+    return c.json(await executor.plan("consumer-set-size", parsed.data), 201);
   });
 
   // A provisioning tenant is refused for the same reason tenant-suspend is: its registration may never

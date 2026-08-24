@@ -33,7 +33,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       const email = uniqueEmail();
       const before = await observer().runs();
 
-      const r = await h.executor.plan("release", releaseParams);
+      const r = await h.executor.plan("cluster-release", releaseParams);
       expect(r.plan.steps.map((s) => s.name)).toEqual([
         "attest-target", "require-programs", "set-pin", "refresh-checkout",
         "run-regenerate-branch", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow",
@@ -69,7 +69,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       const email = uniqueEmail();
       const before = await observer().runs();
 
-      const r = await h.executor.plan("release", { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" });
+      const r = await h.executor.plan("cluster-release", { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" });
       expect(r.plan.steps.map((s) => s.name)).toEqual([
         "attest-target", "require-programs", "set-pin", "prepare-regeneration",
         "run-regenerate-slave-branch", "refresh-checkout",
@@ -109,7 +109,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       // "not-an-email" fails the program's own ^[^@]+@[^@]+$ row — the defect is ON THE MACHINE'S
       // SIDE of the wire, and the machine's dry run is what catches it. (releaseSecrets seeds a VALID
       // letsencrypt mailbox, so only the committer identity is wrong.)
-      const runId = await settled(h, "release", releaseParams, { ...releaseSecrets(uniqueEmail()), "activation-input:committer_email": Buffer.from("not-an-email") });
+      const runId = await settled(h, "cluster-release", releaseParams, { ...releaseSecrets(uniqueEmail()), "activation-input:committer_email": Buffer.from("not-an-email") });
       expect(getRun(h.db.db, runId)?.status).toBe("failed");
       expect(stepColumn(h.db, runId, "run-regenerate-branch", "error")).toMatch(/DRY run of regenerate-branch on the machine is not green/);
 

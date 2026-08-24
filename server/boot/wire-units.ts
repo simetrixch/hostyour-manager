@@ -311,7 +311,7 @@ function buildConsumerOnboarding(
   if (!config.onboarding || !config.github || !platformRepo || !clusterStage) return { defs: [], enabled: false };
 
   // Opens a SEALED credential (a private-repo read credential, a slave's cluster bearer) by id.
-  const openCredential = (id: string): Promise<Buffer> => store.open(id, { purpose: "onboard" });
+  const openCredential = (id: string): Promise<Buffer> => store.open(id, { purpose: "consumer-onboard" });
 
   const repo = new GitRepoReader({ openCredential });
   const registrations = new Registrations(platformRepo, clusterStage);
@@ -583,7 +583,7 @@ function buildTenantOnboarding(
   const resolver = makeClusterKubeResolver({
     db,
     master: { clusterReader: cluster, argoReader: argo, projectWriter: projects },
-    openCredential: (id) => store.open(id, { purpose: "onboard" }),
+    openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
     buildClusterReader: (input) => new KubeClusterReader(input),
   });
 

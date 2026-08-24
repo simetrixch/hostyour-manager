@@ -37,16 +37,14 @@ import {
  *  is read off. */
 export interface TailnetPorts extends DeploySlavePorts, AnsiwisePorts {}
 
-/** The two programs a rejoin drives, by the catalogue's own names. The two single-host run kinds need
- *  no constant: their programs are named exactly like the RUN KINDS, and tailnetSteps hands the
- *  kind through. */
+/** The two programs a rejoin drives, by the catalogue's own names. */
 const MINT_PROGRAM = "tailnet-mint-join-key";
 const REJOIN_PROGRAM = "tailnet-rejoin";
 
 /** The run kinds this kit builds — every RUN_KIND literal in the tailnet family, named by the family
- *  rather than listed, so a fourth one cannot be added to the enum without the map below refusing
+ *  rather than listed, so a fourth one cannot be added to the enum without the maps below refusing
  *  to compile. */
-export type TailnetKind = Extract<RunKind, `tailnet-${string}`>;
+export type TailnetKind = Extract<RunKind, `cluster-tailnet-${string}`>;
 
 /** WHICH repair a run is. Three acts, not one with a switch — see the def file for what each one
  *  honestly means and where the line between reconnect and rejoin runs. Derived from the kind and
@@ -55,9 +53,18 @@ export type TailnetKind = Extract<RunKind, `tailnet-${string}`>;
 type TailnetMode = "disconnect" | "reconnect" | "rejoin";
 
 const MODE: Record<TailnetKind, TailnetMode> = {
-  "tailnet-disconnect": "disconnect",
-  "tailnet-reconnect": "reconnect",
-  "tailnet-rejoin": "rejoin",
+  "cluster-tailnet-disconnect": "disconnect",
+  "cluster-tailnet-reconnect": "reconnect",
+  "cluster-tailnet-rejoin": "rejoin",
+};
+
+/** The catalogue program each single-host run kind drives, by the catalogue's OWN name. The run kind
+ *  carries its family (`cluster-`) and the program does not, so the two spellings are stated here
+ *  rather than derived: a program name is the machine's, and this manager does not get to rename it.
+ *  A rejoin has no entry — it drives two programs and composes them itself. */
+const PROGRAM: Record<Exclude<TailnetKind, "cluster-tailnet-rejoin">, string> = {
+  "cluster-tailnet-disconnect": "tailnet-disconnect",
+  "cluster-tailnet-reconnect": "tailnet-reconnect",
 };
 
 /** Step 0 of all three, and the reason they are declared mutating: the public address is the one
@@ -304,12 +311,11 @@ export function readMembershipStep(serverId: string): Step {
  *  all — the machine that needs them most is exactly the one whose deploy went wrong. */
 export function tailnetSteps(kind: TailnetKind, serverId: string, ports: TailnetPorts): Step[] {
   const target = activeClusterTarget(serverId);
-  if (MODE[kind] === "rejoin") {
+  if (kind === "cluster-tailnet-rejoin") {
     return [attestTargetStep(serverId), rejoinStep(target, serverId, ports), readMembershipStep(serverId)];
   }
-  // The kind IS the program's name for the two single-host run kinds — the catalogue names its
-  // programs after the run kinds, and both declare no answers, so the generic program step fits whole.
-  return [attestTargetStep(serverId), ansiwiseProgramStep(target, kind, ports), readMembershipStep(serverId)];
+  // One catalogue program each, declaring no answers, so the generic program step fits whole.
+  return [attestTargetStep(serverId), ansiwiseProgramStep(target, PROGRAM[kind], ports), readMembershipStep(serverId)];
 }
 
 const SUMMARY: Record<TailnetMode, (o: { name: string; steps: number; host: string; master: string }) => string> = {

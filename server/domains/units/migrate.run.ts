@@ -40,7 +40,7 @@ function migrateSteps(ports: RelocationPorts, worldOf: WorldOf, targetClusterId:
     verifySourceReleasedStep(ports, worldOf),
     restoreStep(ports, worldOf, targetClusterId),
     verifyCompletenessStep(ports, worldOf, targetClusterId),
-    switchDnsStep(ports, worldOf, targetClusterId, "migrate"),
+    switchDnsStep(ports, worldOf, targetClusterId, "consumer-migrate"),
     targetSmokeStep(ports, worldOf, targetClusterId),
     openAccessStep(worldOf, "target", targetClusterId),
     clearSourceStep(ports, worldOf),
@@ -53,7 +53,7 @@ const summaryTail =
 
 export function makeMigrateDef(ports: ConsumerRelocationPorts): RunDefinition<MigrateParams> {
   return {
-    kind: "migrate",
+    kind: "consumer-migrate",
     paramsSchema: MigrateParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: async (params, { db }) => {
@@ -61,7 +61,7 @@ export function makeMigrateDef(ports: ConsumerRelocationPorts): RunDefinition<Mi
       const target = assertMovableTo(db, ac.clusterId, params.targetClusterId, ac.stage);
       const stepDefs = migrateSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, attestTargetStep(ports, params.appId), "moved consumer");
       return {
-        kind: "migrate",
+        kind: "consumer-migrate",
         targetKind: "app",
         targetId: params.appId,
         summary: `Move consumer "${ac.name}" (${ac.stage}) from ${ac.domain} to ${target.domain} through the Storage Box folder /${ac.name}/: quiesce and verify closed, dump every store, provision the target, repoint the registration, verify the source released the unit, restore, verify completeness, switch the one DNS record, smoke, reopen, clear the source. ${summaryTail}`,

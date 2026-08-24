@@ -104,7 +104,7 @@ export type AbortOffer =
 export function abortOffer(kind: RunKind, tenant: RunTenantStateView | null, tenantError: string | null): AbortOffer {
   // Only create-tenant mints a tenant of its own — every other kind's compensations undo that run's own
   // work, and the tenant-state route refuses them (400), so there is nothing to gate on.
-  if (kind !== "create-tenant") return { offered: true, tenant: null };
+  if (kind !== "tenant-create") return { offered: true, tenant: null };
   if (tenantError !== null) {
     return {
       offered: false,

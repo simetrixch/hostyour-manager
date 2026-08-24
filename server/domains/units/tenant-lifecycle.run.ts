@@ -333,14 +333,14 @@ export function makeResumeTenantDef(ports: TenantLifecyclePorts): RunDefinition<
 
 export function makeRemoveAppDef(ports: TenantLifecyclePorts): RunDefinition<RemoveAppParams> {
   return {
-    kind: "remove-app",
+    kind: "tenant-remove-app",
     paramsSchema: RemoveAppParams,
     mutating: true,
     plan: async (params, { db }) => {
       const tc = loadTenantCluster(db, params.tenantId);
       const stepDefs = removeAppSteps(ports, params);
       return {
-        kind: "remove-app",
+        kind: "tenant-remove-app",
         targetKind: "tenant",
         targetId: params.tenantId,
         summary: `Remove app "${params.app}" from tenant ${tc.guid} on ${tc.domain} (${tc.stage}): drop it from the registration, wait for ArgoCD to prune only that member's Application, mark it offboarded. Every sibling member + the row are kept.`,

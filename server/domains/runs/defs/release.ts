@@ -110,7 +110,7 @@ const SLAVE_RELEASE_PROGRAMS: readonly ProgramOnSurface[] = [
  *  `activation-input:<answer>`. committer_email is regenerate-branch's (a forge shows it beside
  *  every commit and some refuse a push without one); the letsencrypt pair is deploy-cluster's; the
  *  three optional ones may stay blank — a blank input is dropped at approve and the program's own
- *  default (or its refusal, by name) decides. build_plane is deliberately NOT here: the cluster map
+ *  default (or its refusal, by name) decides. build_plane_fqdn is deliberately NOT here: the cluster map
  *  states it, and markingAnswers below is where the manager reads it.
  *
  *  The SLAVE arm asks deploy-slave's own list instead (SLAVE_INSTALL_INPUTS): the same machine-layer
@@ -121,8 +121,8 @@ const RELEASE_INPUTS = [
   { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to before a certificate expires" },
   { field: "letsencrypt_server", label: "The ACME directory this installation registers with — the authority's production one; a staging directory is refused, because its root is in no machine's trust store" },
   { field: "lan_cidr", label: "The IPv4 range this machine shares with the other clusters — blank when it shares none" },
-  { field: "storage_path", label: "Where the machine's separate storage is mounted — blank when it has none" },
-  { field: "storage_directory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default" },
+  { field: "storage_mount", label: "Where the machine's separate storage is mounted — blank when it has none" },
+  { field: "storage_subdirectory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default" },
 ];
 
 /** The three credentials regenerate-branch demands exactly where the machine IS the build plane
@@ -198,7 +198,7 @@ function setPinStep(target: SlaveTarget, params: ReleaseParams, ports: ReleasePo
 /** The answers the manager holds in the CLUSTER MAP and the programs declare — read per run off the
  *  books branch, never asked of the operator: an operator re-typing what stands written is how the
  *  record and the run come to disagree. regenerate-branch takes all of them; deploy-cluster takes
- *  build_plane, whose "empty means this machine" reading treats the map's self-naming form the same
+ *  build_plane_fqdn, whose "empty means this machine" reading treats the map's self-naming form the same
  *  way (the mirror steps compare it against the fqdn answer — registry_mirror.dart hostsTheMirror).
  *  alert-recipients is the map's comma-separated mailbox list, handed on as the LIST the program
  *  declares (kind text_list) — splitting it here is the one translation, made once. The optional map
@@ -209,7 +209,7 @@ export function markingAnswers(target: SlaveTarget, ports: DeploySlavePorts): Ex
     const { domain } = target.resolve(ctx.db);
     const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
     return {
-      build_plane: marking.buildPlaneFqdn,
+      build_plane_fqdn: marking.buildPlaneFqdn,
       ...(marking.unitApex !== undefined ? { unit_apex: marking.unitApex } : {}),
       ...(marking.platformDomain !== undefined ? { platform_domain: marking.platformDomain } : {}),
       ...(marking.alertRecipients !== undefined
@@ -269,7 +269,7 @@ function releaseSteps(params: ReleaseParams, ports: ReleasePorts): Step[] {
 
 export function makeReleaseDef(ports: ReleasePorts): RunDefinition<ReleaseParams> {
   return {
-    kind: "release",
+    kind: "cluster-release",
     paramsSchema: ReleaseParams,
     mutating: true,
     plan: async (params, { db }) => {
@@ -279,13 +279,13 @@ export function makeReleaseDef(ports: ReleasePorts): RunDefinition<ReleaseParams
       const booksBranch = masterFqdnOf(db, master);
       // The build-plane PATs are demanded exactly where the machine will demand them: the map says
       // whether this cluster carries the build plane, and regenerate-branch's stated_when answers
-      // hold or lapse on the same fact (build_plane == fqdn), so plan and machine can never disagree.
+      // hold or lapse on the same fact (build_plane_fqdn == fqdn), so plan and machine can never disagree.
       // The slave arm asks for none: regenerate-slave-branch declares no credential answer at all —
       // a slave's secrets file is nothing a branch program of the master's writes.
       const marking = await resolveClusterMarking(requirePlatformRepo(ports), cluster.domain);
       const stepDefs = releaseSteps(params, ports);
       return {
-        kind: "release",
+        kind: "cluster-release",
         targetKind: "cluster",
         targetId: cluster.id,
         summary:

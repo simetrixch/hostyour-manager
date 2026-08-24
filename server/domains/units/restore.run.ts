@@ -38,7 +38,7 @@ function restoreSteps(ports: RelocationPorts, worldOf: WorldOf, targetClusterId:
     watchTargetStep(worldOf, targetClusterId),
     restoreStep(ports, worldOf, targetClusterId),
     verifyCompletenessStep(ports, worldOf, targetClusterId),
-    switchDnsStep(ports, worldOf, targetClusterId, "restore"),
+    switchDnsStep(ports, worldOf, targetClusterId, "consumer-restore"),
     targetSmokeStep(ports, worldOf, targetClusterId),
     openAccessStep(worldOf, "target", targetClusterId),
     recordStep(worldOf, targetClusterId, what),
@@ -50,7 +50,7 @@ const summaryTail =
 
 export function makeRestoreDef(ports: ConsumerRelocationPorts): RunDefinition<RestoreParams> {
   return {
-    kind: "restore",
+    kind: "consumer-restore",
     paramsSchema: RestoreParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: async (params, { db }) => {
@@ -58,7 +58,7 @@ export function makeRestoreDef(ports: ConsumerRelocationPorts): RunDefinition<Re
       const target = loadActiveTargetCluster(db, params.targetClusterId, ac.stage);
       const stepDefs = restoreSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, "restored consumer");
       return {
-        kind: "restore",
+        kind: "consumer-restore",
         targetKind: "app",
         targetId: params.appId,
         summary: `Restore consumer "${ac.name}" (${ac.stage}) from the Storage Box folder /${ac.name}/ onto ${target.domain}: provision the target from the dumped registration, re-commit it quiesced, replay every store, verify completeness, switch the one DNS record, smoke, open access, mark active. ${summaryTail}`,

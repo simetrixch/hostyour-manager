@@ -21,7 +21,7 @@ import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
 
-// The "add-app" Run. The subset sibling of
+// The "tenant-add-app" Run. The subset sibling of
 // create-tenant: it fans ONE new app into a LIVE tenant. It shares create-tenant's streaming-plan
 // skeleton (planStream — validation streams gate-by-gate to the approve card) and its
 // TenantOnboardPorts, but three things differ from create-tenant:
@@ -291,7 +291,7 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
 
 export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppParams> {
   return {
-    kind: "add-app",
+    kind: "tenant-add-app",
     paramsSchema: AddAppParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: () => {
@@ -370,7 +370,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       };
       const stepDefs = addAppSteps(ports, params);
       const plan: Plan = {
-        kind: "add-app",
+        kind: "tenant-add-app",
         targetKind: "tenant",
         targetId: tc.tenantId,
         summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at catalog ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.`,

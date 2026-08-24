@@ -20,7 +20,7 @@ describe("the tenant administrator check's schedule", () => {
 
     return startTenantCheck(executor, silent).then((started) => {
       expect(started).toBe(true);
-      expect(plan).toHaveBeenCalledWith("check-tenants", {});
+      expect(plan).toHaveBeenCalledWith("tenant-check", {});
       // approve() is what the operator's button does. There is nothing to read and nothing to
       // decide — the check changes no cluster — so it is approved immediately.
       expect(approve).toHaveBeenCalledWith("run_1");
@@ -31,7 +31,7 @@ describe("the tenant administrator check's schedule", () => {
     // A run kind that is not registered is a normal state — the tenant family is built only when its
     // adapters are configured — and a timer tick must never crash the server.
     const executor = {
-      plan: vi.fn().mockRejectedValue(new Error("unknown run kind: check-tenants")),
+      plan: vi.fn().mockRejectedValue(new Error("unknown run kind: tenant-check")),
       approve: vi.fn(),
     } as unknown as Executor;
 

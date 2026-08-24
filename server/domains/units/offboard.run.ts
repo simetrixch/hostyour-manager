@@ -407,7 +407,7 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
         // having reported success while a build grant or a repository Secret is still standing.
         // What counts as an orphan, and what the platform keeps on purpose, is stated in
         // offboard-orphans.ts; both answers depend on whether the unit still stands at another stage.
-        await assertNoOrphans(ctx, ports, loadAppCluster(ctx.db, appId), "offboard");
+        await assertNoOrphans(ctx, ports, loadAppCluster(ctx.db, appId), "consumer-offboard");
       },
     },
     {
@@ -426,14 +426,14 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
 
 export function makeOffboardDef(ports: OffboardPorts): RunDefinition<OffboardParams> {
   return {
-    kind: "offboard",
+    kind: "consumer-offboard",
     paramsSchema: OffboardParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: async (params, { db }) => {
       const ac = loadAppCluster(db, params.appId);
       const stepDefs = offboardSteps(ports, params);
       return {
-        kind: "offboard",
+        kind: "consumer-offboard",
         targetKind: "app",
         targetId: params.appId,
         // States the Vault destruction plainly: the seeder is write-only, so nothing can read those

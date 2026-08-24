@@ -281,7 +281,7 @@ describe("consumer API", () => {
 // ---- Tenant (multi-app) API ----
 
 const TGUID = "zsjs023ctne0"; // a live-shaped throwaway guid (matches the tenants/** path guard)
-const DEPLOY_URL = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 
 // A schema-valid catalog fan-out manifest + a clean render (Namespace + Tenant CR only at
 // cluster scope) — the same shape create-tenant.run.test.ts validates green against the fakes.

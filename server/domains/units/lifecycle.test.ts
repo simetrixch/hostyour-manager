@@ -33,7 +33,7 @@ function tenantPorts(deployState: DeployState | null): TenantLifecyclePorts {
       argoNamespace: "argocd",
     }),
     argoWatchTimeoutMs: 1000,
-    catalogRepoUrl: "https://github.com/simetrixch/catalog.git",
+    catalogRepoUrl: "https://github.com/acme/acme-catalog.git",
   } as unknown as TenantLifecyclePorts;
 }
 

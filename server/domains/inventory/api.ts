@@ -121,7 +121,7 @@ export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): vo
       throw errNotFound(`server ${id}`);
     }
     const body = (await c.req.json().catch(() => ({}))) as { password?: string; intendedDomain?: string };
-    const { runId } = await executor.plan("adopt", {
+    const { runId } = await executor.plan("cluster-adopt", {
       serverId: id,
       ...(body.intendedDomain ? { intendedDomain: body.intendedDomain } : {}),
     });

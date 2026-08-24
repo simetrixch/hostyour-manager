@@ -49,7 +49,7 @@ export function stopTenantCheckSchedule(): void {
  * stopped being started is indistinguishable from a check that keeps finding nothing wrong. */
 export async function startTenantCheck(executor: Executor, logger: Logger): Promise<boolean> {
   try {
-    const { runId } = await executor.plan("check-tenants", {});
+    const { runId } = await executor.plan("tenant-check", {});
     // approve() is what the operator's button does after reading a plan. There is nothing to read
     // and nothing to decide here — the check reads and records, and changes no cluster.
     await executor.approve(runId);

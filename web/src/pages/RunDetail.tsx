@@ -53,7 +53,7 @@ export function RunDetail() {
   const run = runOnScreen(loaded, runId);
   // Whether the tenant question is worth asking at all. ONE flag for both the GET below and the callout
   // that renders its answer, so the fetch condition and the render condition can never drift apart.
-  const asksTenantState = run !== null && run.deletedAt === null && run.status === "failed" && run.kind === "create-tenant";
+  const asksTenantState = run !== null && run.deletedAt === null && run.status === "failed" && run.kind === "tenant-create";
 
   function refresh() {
     getRun(runId)
@@ -216,7 +216,7 @@ export function RunDetail() {
         </div>
       )}
 
-      {run.deletedAt === null && run.status === "planned" && run.kind === "deploy-slave" && (
+      {run.deletedAt === null && run.status === "planned" && run.kind === "cluster-deploy-slave" && (
         <form
           className="ceremony"
           onSubmit={(e) => {
@@ -252,8 +252,8 @@ export function RunDetail() {
 
       {run.deletedAt === null &&
         run.status === "planned" &&
-        run.kind !== "deploy-slave" &&
-        (run.kind === "adopt" ? (
+        run.kind !== "cluster-deploy-slave" &&
+        (run.kind === "cluster-adopt" ? (
           <form
             className="ceremony"
             onSubmit={(e) => {

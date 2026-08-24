@@ -24,7 +24,7 @@ import { testMembers } from "./tenant-members.fixture.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
-const DEPLOY_URL = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const NEW_APP = "crm";
 const EXPECTED = [memberApplication(GUID, NEW_APP, "prod")];

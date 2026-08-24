@@ -20,6 +20,7 @@ import { managerKeyMarker, operatorKeyMarker, readServerAuthorizedKeys } from ".
 import { fingerprintPublicKey } from "../../security/fingerprint.ts";
 import type { SshFactory, SshSession, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
 import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from "./defs/operator-key.ts";
+import type { OperatorKeyKind } from "./defs/operator-key.kit.ts";
 
 // What a test can and cannot prove about these run kinds, stated plainly because the difference is the
 // whole point of them.
@@ -117,10 +118,12 @@ function expectInOrder(script: string, markers: readonly string[]): void {
   }
 }
 
-const DEFS: Record<string, AnyRunDefinition> = {
-  "operator-key-place": operatorKeyPlaceDef as unknown as AnyRunDefinition,
-  "operator-key-remove": operatorKeyRemoveDef as unknown as AnyRunDefinition,
-  "authorized-keys-read": authorizedKeysReadDef as unknown as AnyRunDefinition,
+// Keyed on the run kinds themselves, not on string: a run kind renamed in shared/enums.ts must break
+// THIS file rather than leave the table testing three keys the enum no longer has.
+const DEFS: Record<OperatorKeyKind | "cluster-authorized-keys-read", AnyRunDefinition> = {
+  "cluster-operator-key-place": operatorKeyPlaceDef as unknown as AnyRunDefinition,
+  "cluster-operator-key-remove": operatorKeyRemoveDef as unknown as AnyRunDefinition,
+  "cluster-authorized-keys-read": authorizedKeysReadDef as unknown as AnyRunDefinition,
 };
 
 describe("the operator-key run kinds — one line of one file, and never this manager's own", () => {
@@ -161,7 +164,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
   /** Plan the run kind, then run every one of its steps against the plan's own targets. `file` is asked
    *  on every probe, so a test can hand back one file before the act and another after it. */
   async function runOfKind(
-    kind: string,
+    kind: OperatorKeyKind | "cluster-authorized-keys-read",
     db: DbHandle,
     store: CredentialStore,
     opts: { keyId?: string; serverId?: string; file?: () => string[] | null; probeFails?: boolean } = {},
@@ -169,7 +172,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
     const def = DEFS[kind];
     if (!def) throw new Error(`no definition for ${kind}`);
     const serverId = opts.serverId ?? SLAVE_ID;
-    const params = kind === "authorized-keys-read"
+    const params = kind === "cluster-authorized-keys-read"
       ? { serverId }
       : { serverId, operatorKeyId: opts.keyId ?? "" };
     const plan = await def.plan(params, { db: db.db });
@@ -206,10 +209,10 @@ describe("the operator-key run kinds — one line of one file, and never this ma
 
   it("deletes by a marker this manager's own line cannot carry", async () => {
     const { db, store, keyId } = await setup();
-    const { rec } = await runOfKind("operator-key-remove", db, store, {
+    const { rec } = await runOfKind("cluster-operator-key-remove", db, store, {
       keyId, file: twoStage([MANAGER_LINE, PAT_LINE], [MANAGER_LINE]),
     });
-    const script = rec.scripts.get("operator-key-remove") ?? "";
+    const script = rec.scripts.get("cluster-operator-key-remove") ?? "";
     expect(script).toContain("hostyour-operator:pat");
     // The manager's own marker is `hostyour` and then a colon. It appears nowhere in an act,
     // so no pattern here can reach the line adopt wrote.
@@ -220,10 +223,10 @@ describe("the operator-key run kinds — one line of one file, and never this ma
 
   it("filters with grep -v, so every other line survives byte for byte", async () => {
     const { db, store, keyId } = await setup();
-    const { rec } = await runOfKind("operator-key-place", db, store, {
+    const { rec } = await runOfKind("cluster-operator-key-place", db, store, {
       keyId, file: twoStage([MANAGER_LINE, FOREIGN_LINE], [MANAGER_LINE, FOREIGN_LINE, PAT_LINE]),
     });
-    const script = rec.scripts.get("operator-key-place") ?? "";
+    const script = rec.scripts.get("cluster-operator-key-place") ?? "";
     expect(script).toContain('grep -v -e "$pattern" "$ak"');
     // An in-place editor would rewrite every line it passed; the copy-and-install shape means the
     // lines that stay were never touched at all.
@@ -233,10 +236,10 @@ describe("the operator-key run kinds — one line of one file, and never this ma
 
   it("tells a grep that FAILED apart from one that selected nothing, before it writes", async () => {
     const { db, store, keyId } = await setup();
-    const { rec } = await runOfKind("operator-key-place", db, store, {
+    const { rec } = await runOfKind("cluster-operator-key-place", db, store, {
       keyId, file: twoStage([MANAGER_LINE], [MANAGER_LINE, PAT_LINE]),
     });
-    const script = rec.scripts.get("operator-key-place") ?? "";
+    const script = rec.scripts.get("cluster-operator-key-place") ?? "";
     // grep exits 1 for "nothing selected", which for an inverted match is a legitimate empty result,
     // and 2 or more when it could not read. Installing the empty output of the second would delete
     // every key on the machine.
@@ -246,10 +249,10 @@ describe("the operator-key run kinds — one line of one file, and never this ma
 
   it("re-reads the file and checks the arithmetic BEFORE the install, so a human's key is not lost", async () => {
     const { db, store, keyId } = await setup();
-    const { rec } = await runOfKind("operator-key-remove", db, store, {
+    const { rec } = await runOfKind("cluster-operator-key-remove", db, store, {
       keyId, file: twoStage([MANAGER_LINE, PAT_LINE], [MANAGER_LINE]),
     });
-    const script = rec.scripts.get("operator-key-remove") ?? "";
+    const script = rec.scripts.get("cluster-operator-key-remove") ?? "";
     // The host lock keeps other RUNS out and nobody's shell: a key appended by an ssh-copy-id in
     // the window between the copy and the install would be dropped by the install. The counts are
     // read from the file AFTER the copy was made, so such a write makes them disagree and the
@@ -264,10 +267,10 @@ describe("the operator-key run kinds — one line of one file, and never this ma
 
   it("places ONE line and replaces its own predecessor, so a rotated key leaves nothing working", async () => {
     const { db, store, keyId } = await setup();
-    const { rec } = await runOfKind("operator-key-place", db, store, {
+    const { rec } = await runOfKind("cluster-operator-key-place", db, store, {
       keyId, file: twoStage([MANAGER_LINE], [MANAGER_LINE, PAT_LINE]),
     });
-    const script = rec.scripts.get("operator-key-place") ?? "";
+    const script = rec.scripts.get("cluster-operator-key-place") ?? "";
     // The filter runs first and the append second: placing the same label twice leaves one line.
     expectInOrder(script, ['grep -v -e "$pattern"', `printf '%s\\n' '${PAT_LINE}' >> "$tmp"`, 'install -m 600']);
     expect([...script.matchAll(/>> "\$tmp"/g)]).toHaveLength(1);
@@ -278,13 +281,13 @@ describe("the operator-key run kinds — one line of one file, and never this ma
     // The removal deletes by marker; this key sits under a comment nothing here wrote, so the line
     // survives — and the run must say so instead of reporting a removal that did not happen.
     const stillThere = [MANAGER_LINE, `${PAT_KEY} pat@his-own-laptop`];
-    await expect(runOfKind("operator-key-remove", db, store, { keyId, file: () => stillThere }))
+    await expect(runOfKind("cluster-operator-key-remove", db, store, { keyId, file: () => stillThere }))
       .rejects.toThrow(/STILL in the file/);
   });
 
   it("fails a placement the read-back cannot confirm", async () => {
     const { db, store, keyId } = await setup();
-    await expect(runOfKind("operator-key-place", db, store, { keyId, file: () => [MANAGER_LINE] }))
+    await expect(runOfKind("cluster-operator-key-place", db, store, { keyId, file: () => [MANAGER_LINE] }))
       .rejects.toThrow(/is not in the file after the write/);
   });
 
@@ -292,7 +295,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
     const { db, store, keyId } = await setup();
     // The one catastrophic outcome: the platform's own way into the machine is gone. It is checked
     // before the script's exit code, because it is the more serious answer.
-    await expect(runOfKind("operator-key-place", db, store, {
+    await expect(runOfKind("cluster-operator-key-place", db, store, {
       keyId, file: twoStage([MANAGER_LINE], [PAT_LINE]),
     })).rejects.toThrow(/this manager's own key is no longer in the file/);
   });
@@ -304,7 +307,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
       [[MANAGER_LINE, PAT_LINE], []],
     ] as const) {
       const { db, store, keyId } = await setup();
-      const { cleanups } = await runOfKind("operator-key-place", db, store, {
+      const { cleanups } = await runOfKind("cluster-operator-key-place", db, store, {
         keyId, file: twoStage(before as string[] | null, [MANAGER_LINE, PAT_LINE]),
       });
       expect(cleanups).toEqual(expected);
@@ -324,7 +327,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
 
   it("writes the reading back on the row, naming every line and who it belongs to", async () => {
     const { db, store, keyId } = await setup();
-    await runOfKind("operator-key-place", db, store, {
+    await runOfKind("cluster-operator-key-place", db, store, {
       keyId, file: twoStage([MANAGER_LINE, FOREIGN_LINE], [MANAGER_LINE, FOREIGN_LINE, PAT_LINE]),
     });
     const row = db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
@@ -333,7 +336,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
     const read = readServerAuthorizedKeys(row?.authorizedKeysJson);
     expect(read.kind).toBe("v0");
     if (read.kind === "v0") {
-      expect(read.facts.runId).toBe("run_operator-key-place");
+      expect(read.facts.runId).toBe("run_cluster-operator-key-place");
       expect(read.facts.keys.map((k) => k.kind)).toEqual(["manager", "foreign", "operator"]);
       expect(read.facts.keys.find((k) => k.kind === "operator")).toMatchObject({ fingerprint: PAT_FP, label: "pat" });
     }
@@ -341,7 +344,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
 
   it("the read run kind changes nothing and records what it found", async () => {
     const { db, store } = await setup();
-    const { rec, stepNames, cleanups } = await runOfKind("authorized-keys-read", db, store, {
+    const { rec, stepNames, cleanups } = await runOfKind("cluster-authorized-keys-read", db, store, {
       file: () => [MANAGER_LINE, PAT_LINE],
     });
     expect(stepNames).toEqual([ATTEST_TARGET_STEP, "read-authorized-keys"]);
@@ -355,22 +358,22 @@ describe("the operator-key run kinds — one line of one file, and never this ma
     const { db, store } = await setup();
     // The host answered and said the file cannot be opened. That is a reading, and it is written —
     // reporting it as "no keys found" would state as fact the exact thing the run failed to measure.
-    await runOfKind("authorized-keys-read", db, store, { file: () => null });
+    await runOfKind("cluster-authorized-keys-read", db, store, { file: () => null });
     expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.authorizedKeysState).toBe("unreadable");
   });
 
   it("fails the read run kind when the PROBE did not run — a reading IS the run", async () => {
     const { db, store } = await setup();
-    await expect(runOfKind("authorized-keys-read", db, store, { probeFails: true }))
+    await expect(runOfKind("cluster-authorized-keys-read", db, store, { probeFails: true }))
       .rejects.toThrow(/could not be read/);
     // Nothing is written when the probe never ran: the row keeps what it had, rather than a guess.
     expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.authorizedKeysState).toBe("unknown");
   });
 
-  for (const kind of Object.keys(DEFS)) {
+  for (const kind of Object.keys(DEFS) as (OperatorKeyKind | "cluster-authorized-keys-read")[]) {
     it(`${kind} starts with ${ATTEST_TARGET_STEP} and owns its host`, async () => {
       const { db, keyId } = await setup();
-      const params = kind === "authorized-keys-read" ? { serverId: SLAVE_ID } : { serverId: SLAVE_ID, operatorKeyId: keyId };
+      const params = kind === "cluster-authorized-keys-read" ? { serverId: SLAVE_ID } : { serverId: SLAVE_ID, operatorKeyId: keyId };
       const def = DEFS[kind] as AnyRunDefinition;
       expect(def.steps(params)[0]?.name).toBe(ATTEST_TARGET_STEP);
       // mutating ⇒ the executor refuses to let an operator skip that first step: a run that changes
@@ -385,10 +388,10 @@ describe("the operator-key run kinds — one line of one file, and never this ma
 
     it(`${kind} refuses a host this manager holds no key for — there is no session to edit over`, async () => {
       const { db, keyId } = await setup();
-      const params = kind === "authorized-keys-read" ? { serverId: SLAVE_ID } : { serverId: SLAVE_ID, operatorKeyId: keyId };
+      const params = kind === "cluster-authorized-keys-read" ? { serverId: SLAVE_ID } : { serverId: SLAVE_ID, operatorKeyId: keyId };
       for (const status of ["bare", "adopting"] as const) {
         db.db.update(servers).set({ status }).where(eq(servers.id, SLAVE_ID)).run();
-        await expect(DEFS[kind]!.plan(params, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
+        await expect(DEFS[kind].plan(params, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
       }
     });
 
@@ -396,8 +399,8 @@ describe("the operator-key run kinds — one line of one file, and never this ma
       const { db, keyId } = await setup();
       // The master carries no adoptedAt at all: it self-registers at boot and is never adopted.
       expect(db.db.select().from(servers).where(eq(servers.id, MASTER_ID)).get()?.adoptedAt).toBeNull();
-      const params = kind === "authorized-keys-read" ? { serverId: MASTER_ID } : { serverId: MASTER_ID, operatorKeyId: keyId };
-      await expect(DEFS[kind]!.plan(params, { db: db.db })).resolves.toBeTruthy();
+      const params = kind === "cluster-authorized-keys-read" ? { serverId: MASTER_ID } : { serverId: MASTER_ID, operatorKeyId: keyId };
+      await expect(DEFS[kind].plan(params, { db: db.db })).resolves.toBeTruthy();
     });
   }
 

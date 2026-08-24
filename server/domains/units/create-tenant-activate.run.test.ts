@@ -35,7 +35,7 @@ import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-mem
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0"; // a live-shaped throwaway guid
-const DEPLOY_URL = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const REGISTRY_HOST = "zot.m1.example";
 const APPS = [{ name: "erp" }];

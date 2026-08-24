@@ -26,7 +26,7 @@ import type {
 // runKinds.ts follows for RunKind. TenantStatus carries the tenant-only "provisioning" state.
 // AppProvenance is ONE list for both unit kinds, so ConsumerView and TenantView print the same word
 // for the same fact — a hand-written union here is what let the two cards disagree about it.
-import type { AppProvenance, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
+import type { AppProvenance, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
 
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
  *  e.g. the Reset wizard renders a DB-only form on NOT_CONFIGURED instead of a dead end. */
@@ -78,7 +78,10 @@ export const getReleases = (): Promise<ReleasesView> => req<ReleasesView>("/api/
 export const listRuns = (): Promise<RunView[]> => req<RunView[]>("/api/runs");
 export const getRun = (id: string): Promise<RunView> => req<RunView>(`/api/runs/${id}`);
 
-export const planRun = (kind: string, params: Record<string, unknown> = {}): Promise<{ runId: string }> =>
+// Typed on RunKind rather than on string: the plan route answers "unknown run kind" for anything
+// else, and a front end that could still spell a kind the way it was spelled before a rename would
+// find that out from a failed run instead of from this build.
+export const planRun = (kind: RunKind, params: Record<string, unknown> = {}): Promise<{ runId: string }> =>
   post<{ runId: string }>("/api/runs", { kind, params });
 
 // The API carries one-time secrets base64-encoded (server decodes; the value is memory-only,
@@ -127,33 +130,33 @@ export const deleteServerById = (id: string): Promise<unknown> => req(`/api/serv
  *  returned run is planned and the Run screen prompts for the password. */
 export const adoptServer = (id: string, opts?: { password?: string; intendedDomain?: string }): Promise<{ runId: string; approved: boolean }> =>
   post(`/api/servers/${id}/adopt`, opts ?? {});
-/** Plan a deploy-slave Run for a READY (adopted) server. The run comes back planned;
+/** Plan a cluster-deploy-slave Run for a READY (adopted) server. The run comes back planned;
  *  approval on the Run screen needs no secret — the read-only repo PAT is always
  *  auto-sourced from the platform Vault (GITOPS_REPO_PAT); there is no manual override. */
 export const deploySlave = (serverId: string, opts: { stage: string; domain: string }): Promise<{ runId: string }> =>
-  planRun("deploy-slave", { serverId, stage: opts.stage, domain: opts.domain });
+  planRun("cluster-deploy-slave", { serverId, stage: opts.stage, domain: opts.domain });
 /** Rebuild the machine layer of a cluster that is already live, in place. It takes ONLY the server:
  *  the FQDN and the stage are what that server's active cluster row already says, so there is nothing
  *  for the operator to re-state and nothing to get wrong. */
-export const redeploySlave = (serverId: string): Promise<{ runId: string }> => planRun("redeploy", { serverId });
+export const redeploySlave = (serverId: string): Promise<{ runId: string }> => planRun("cluster-redeploy", { serverId });
 /** Raise the platform version a live cluster stands on: pin the cluster map, re-run the installer over
  *  SSH, then wait for ArgoCD. The operator names version + channel; the run stamps the timestamp and
  *  mints the tag. The channel ceiling is checked against the cluster's marked stage before the pin. */
 export const releaseCluster = (serverId: string, opts: { version: string; channel: string }): Promise<{ runId: string }> =>
-  planRun("release", { serverId, version: opts.version, channel: opts.channel });
+  planRun("cluster-release", { serverId, version: opts.version, channel: opts.channel });
 
 // The three tailnet repair run kinds. Each takes ONLY the server: the address they reach it on is the
 // public one and the plan states it, and a rejoin reads the FQDN and the stage off the server's own
 // cluster row — so there is nothing here for the operator to re-state and nothing to get wrong.
 /** Take the host off the private network. It keeps answering on its public address, which is how
  *  the two run kinds below reach it afterwards. */
-export const disconnectTailnet = (serverId: string): Promise<{ runId: string }> => planRun("tailnet-disconnect", { serverId });
+export const disconnectTailnet = (serverId: string): Promise<{ runId: string }> => planRun("cluster-tailnet-disconnect", { serverId });
 /** Put the host back on with the credential it already holds — nothing is minted, and the master is
  *  not touched. */
-export const reconnectTailnet = (serverId: string): Promise<{ runId: string }> => planRun("tailnet-reconnect", { serverId });
+export const reconnectTailnet = (serverId: string): Promise<{ runId: string }> => planRun("cluster-tailnet-reconnect", { serverId });
 /** Log the host out and join it again with a credential minted on the master — for the case
  *  reconnect cannot answer, where the host holds none. */
-export const rejoinTailnet = (serverId: string): Promise<{ runId: string }> => planRun("tailnet-rejoin", { serverId });
+export const rejoinTailnet = (serverId: string): Promise<{ runId: string }> => planRun("cluster-tailnet-rejoin", { serverId });
 
 // The password-login switch. A run kind and not a PATCH field: nothing this manager stores changes
 // what a daemon answers on port 22, so the switch has to be a run that writes the drop-in,
@@ -161,11 +164,11 @@ export const rejoinTailnet = (serverId: string): Promise<{ runId: string }> => p
 /** Stop this host's sshd taking passwords, and destroy the bootstrap password sealed for it — two
  *  doors. The run proves key login works before it shuts either. */
 export const disablePasswordLogin = (serverId: string): Promise<{ runId: string }> =>
-  planRun("password-login-disable", { serverId });
+  planRun("cluster-password-login-disable", { serverId });
 /** Let this host's sshd take passwords again, for a repair. Nothing re-seals a bootstrap password:
  *  this run has none, and adoption is what shuts the door in the first place. */
 export const enablePasswordLogin = (serverId: string): Promise<{ runId: string }> =>
-  planRun("password-login-enable", { serverId });
+  planRun("cluster-password-login-enable", { serverId });
 
 // A human operator's own key on the machines. The ROWS are plain CRUD — a public key and a label,
 // no secret anywhere — while everything that touches a host is a run, because putting a key on a
@@ -180,15 +183,15 @@ export const deleteOperatorKey = (id: string): Promise<unknown> => req(`/api/ope
  *  is a per-server state, so five that took it and a sixth that refused are five runs that succeeded
  *  and one that failed, each with its own log. */
 export const placeOperatorKey = (serverId: string, operatorKeyId: string): Promise<{ runId: string }> =>
-  planRun("operator-key-place", { serverId, operatorKeyId });
+  planRun("cluster-operator-key-place", { serverId, operatorKeyId });
 /** Take that one line back out. A host that never carried the key is left alone and the run still
  *  succeeds; a host where the key sits under some other comment fails, saying so. */
 export const removeOperatorKey = (serverId: string, operatorKeyId: string): Promise<{ runId: string }> =>
-  planRun("operator-key-remove", { serverId, operatorKeyId });
+  planRun("cluster-operator-key-remove", { serverId, operatorKeyId });
 /** Read a host's authorized_keys and change nothing. The only way a key that appeared while nobody
  *  was placing anything becomes visible. */
 export const readAuthorizedKeys = (serverId: string): Promise<{ runId: string }> =>
-  planRun("authorized-keys-read", { serverId });
+  planRun("cluster-authorized-keys-read", { serverId });
 
 // GitOps repo — the Branches view (read-only) and the Reset wizard (destructive). Both need
 // config.github on the server (GITHUB_REPO + GITHUB_WRITE_PAT); without it the endpoints refuse

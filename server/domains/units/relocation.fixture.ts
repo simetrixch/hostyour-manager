@@ -163,7 +163,7 @@ export function tenantPorts(f: RelocationFakes): TenantRelocationPorts & { regis
     dns: f.dns,
     storageBox: { ...BOX },
     dbtoolsImage: DBTOOLS_IMAGE,
-    catalogRepoUrl: "https://github.com/simetrixch/catalog.git",
+    catalogRepoUrl: "https://github.com/acme/acme-catalog.git",
     platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
     buildRbac: f.buildRbac,
     resolveUnitApex: async () => "example.com",

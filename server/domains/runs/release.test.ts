@@ -93,13 +93,13 @@ const SLAVE_RELEASE = { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" 
 describe("release — plan", () => {
   it("composes attest → require-programs → set-pin → refresh-checkout → the three programs → argocd-follow, and asks for the password, the build-plane PATs and the answers nobody records", async () => {
     const h = await liveMaster();
-    const { plan } = await h.executor.plan("release", MASTER_RELEASE);
+    const { plan } = await h.executor.plan("cluster-release", MASTER_RELEASE);
     expect(plan.steps.map((s) => s.name)).toEqual(RELEASE_STEPS);
     // The master's own map names it as its build plane, so the three stated_when credentials of
     // regenerate-branch are demanded at approve — the same demand the machine's validation makes.
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET, ...BUILD_PLANE_PATS]);
     expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
-      ["committer_email", "letsencrypt_email", "letsencrypt_server", "lan_cidr", "storage_path", "storage_directory"],
+      ["committer_email", "letsencrypt_email", "letsencrypt_server", "lan_cidr", "storage_mount", "storage_subdirectory"],
     );
     // The trunk (the tag), the master's install branch (pin commit + regeneration — for a master
     // that branch IS the books branch), and the master's ArgoCD (the follow).
@@ -114,13 +114,13 @@ describe("release — plan", () => {
     const h = await liveMaster({
       marking: MASTER_MARKING_YAML.replace("  buildPlane: m1.example.com", "  buildPlane: b1.example.com"),
     });
-    const { plan } = await h.executor.plan("release", MASTER_RELEASE);
+    const { plan } = await h.executor.plan("cluster-release", MASTER_RELEASE);
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
   });
 
   it("PLANS a slave over TWO hosts: the regeneration on the master (where the pin and the books stand), the machine layer on the slave, and no build-plane PATs", async () => {
     const h = await liveSlave();
-    const { plan } = await h.executor.plan("release", SLAVE_RELEASE);
+    const { plan } = await h.executor.plan("cluster-release", SLAVE_RELEASE);
 
     expect(plan.steps.map((s) => s.name)).toEqual(SLAVE_RELEASE_STEPS);
     // The master is a declared AUX target — run-regenerate-slave-branch and prepare-regeneration both
@@ -142,7 +142,7 @@ describe("release — plan", () => {
     // nothing a branch program run on the master writes — so the elevation password is the whole ask.
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
-      ["committer_email", "letsencrypt_email", "letsencrypt_server", "lan_cidr", "storage_path", "storage_directory"],
+      ["committer_email", "letsencrypt_email", "letsencrypt_server", "lan_cidr", "storage_mount", "storage_subdirectory"],
     );
     // Planning writes nothing: the tag and the pin are set-pin's, three steps later.
     expect(h.platformRepo.tags.size).toBe(0);
@@ -150,14 +150,14 @@ describe("release — plan", () => {
 
     // Counter-probe: the same live slave still plans a REDEPLOY, whose step list is a different one.
     // So the list above is this run kind's own reading of the role, not one shape for every plan.
-    const ok = await h.executor.plan("redeploy", { serverId: SLAVE_ID });
+    const ok = await h.executor.plan("cluster-redeploy", { serverId: SLAVE_ID });
     expect(ok.plan.steps.map((s) => s.name)).toEqual(REDEPLOY_STEP_NAMES);
   });
 });
 
 describe("release — set-pin and the map-sourced answers", () => {
   const setPinOf = (h: Harness): ReturnType<AnyRunDefinition["steps"]>[number] | undefined => {
-    const def = buildRunDefinitions({ db: h.db.db, platformRepo: h.platformRepo }).get("release") as AnyRunDefinition;
+    const def = buildRunDefinitions({ db: h.db.db, platformRepo: h.platformRepo }).get("cluster-release") as AnyRunDefinition;
     return def.steps(MASTER_RELEASE).find((s) => s.name === "set-pin");
   };
 
@@ -184,7 +184,7 @@ describe("release — set-pin and the map-sourced answers", () => {
 
   it("PLANTED DEFECT: a channel that may not reach the cluster's stage fails at attest-target — no tag is minted, no pin is written", async () => {
     const h = await liveMaster();
-    const r = await h.executor.plan("release", { serverId: MASTER_ID, version: "1.0.0", channel: "alpha" });
+    const r = await h.executor.plan("cluster-release", { serverId: MASTER_ID, version: "1.0.0", channel: "alpha" });
     await h.executor.approve(r.runId, {
       [ANSIWISE_ELEVATION_SECRET]: Buffer.from("root-pw"),
       ...Object.fromEntries(BUILD_PLANE_PATS.map((name) => [name, Buffer.from("github_pat_x")])),
@@ -203,7 +203,7 @@ describe("release — set-pin and the map-sourced answers", () => {
     // BEFORE set-pin, the map is left saying nothing about a release the cluster never received; ask
     // it after, and the record contradicts the branch and only a person can repair it.
     const h = await liveMaster();
-    const r = await h.executor.plan("release", MASTER_RELEASE);
+    const r = await h.executor.plan("cluster-release", MASTER_RELEASE);
     expect(r.plan.steps.map((s) => s.name).indexOf("require-programs"))
       .toBeLessThan(r.plan.steps.map((s) => s.name).indexOf("set-pin"));
     await h.executor.approve(r.runId, {
@@ -226,7 +226,7 @@ describe("release — set-pin and the map-sourced answers", () => {
     const h = await liveMaster();
     const answers = await markingAnswers(activeClusterTarget(MASTER_ID), { platformRepo: h.platformRepo })(bareStepCtx(h.db, h.store));
     expect(answers).toEqual({
-      build_plane: "m1.example.com",
+      build_plane_fqdn: "m1.example.com",
       unit_apex: "example.com",
       platform_domain: "example.com",
       alert_recipients: ["ops@example.com"],

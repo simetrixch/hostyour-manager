@@ -39,7 +39,7 @@ const filesFor = (names: string[]): Record<string, string> => ({
   ...Object.fromEntries(names.map((n) => [`${ENGINE_CHART}/${n}`, "x"])),
 });
 
-const REPO_URL = "https://github.com/simetrixch/catalog.git";
+const REPO_URL = "https://github.com/acme/acme-catalog.git";
 
 describe("parseAppCatalog (pure filtering)", () => {
   it("keeps values-<app>.yaml overlays, de-duped + sorted", () => {

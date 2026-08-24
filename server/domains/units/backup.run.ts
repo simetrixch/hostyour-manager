@@ -29,14 +29,14 @@ const summaryTail =
 
 export function makeBackupDef(ports: ConsumerRelocationPorts): RunDefinition<BackupParams> {
   return {
-    kind: "backup",
+    kind: "consumer-backup",
     paramsSchema: BackupParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: async (params, { db }) => {
       const ac = loadAppCluster(db, params.appId);
       const stepDefs = backupSteps(ports, consumerWorld(ports, params.appId), attestTargetStep(ports, params.appId));
       return {
-        kind: "backup",
+        kind: "consumer-backup",
         targetKind: "app",
         targetId: params.appId,
         summary: `Back up consumer "${ac.name}" on ${ac.domain} (${ac.stage}) into the Storage Box folder /${ac.name}/: quiesce, verify access is closed, dump the registration + its databases + the per-consumer PostgreSQL + the claim bucket + every PVC, verify the folder, reopen. ${summaryTail}`,

@@ -372,7 +372,7 @@ describe("server inventory API", () => {
       // connect-password. A run still `planned` would mean the route had only planned it.
       await h.executor.settle(runId);
       expect(getRun(h.db.db, runId)?.status).toBe("failed");
-      expect(getRun(h.db.db, runId)?.kind).toBe("adopt");
+      expect(getRun(h.db.db, runId)?.kind).toBe("cluster-adopt");
       // onTerminal put the machine back (defs/adopt.ts:462).
       expect((await listServersOverHttp(h)).find((s) => s.id === server.id)?.status).toBe("bare");
     });

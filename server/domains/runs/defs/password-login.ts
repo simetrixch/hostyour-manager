@@ -34,18 +34,18 @@ export const PasswordLoginParams = z.object({
 export type PasswordLoginParams = z.infer<typeof PasswordLoginParams>;
 
 export const passwordLoginDisableDef: RunDefinition<PasswordLoginParams> = {
-  kind: "password-login-disable",
+  kind: "cluster-password-login-disable",
   paramsSchema: PasswordLoginParams,
   mutating: true,
-  plan: async (params, { db }) => passwordLoginPlan("password-login-disable", params.serverId, db),
-  steps: (params) => passwordLoginSteps("password-login-disable", params.serverId),
+  plan: async (params, { db }) => passwordLoginPlan("cluster-password-login-disable", params.serverId, db),
+  steps: (params) => passwordLoginSteps("cluster-password-login-disable", params.serverId),
   cleanups: () => [restorePasswordLoginCleanup],
 };
 
 export const passwordLoginEnableDef: RunDefinition<PasswordLoginParams> = {
-  kind: "password-login-enable",
+  kind: "cluster-password-login-enable",
   paramsSchema: PasswordLoginParams,
   mutating: true,
-  plan: async (params, { db }) => passwordLoginPlan("password-login-enable", params.serverId, db),
-  steps: (params) => passwordLoginSteps("password-login-enable", params.serverId),
+  plan: async (params, { db }) => passwordLoginPlan("cluster-password-login-enable", params.serverId, db),
+  steps: (params) => passwordLoginSteps("cluster-password-login-enable", params.serverId),
 };

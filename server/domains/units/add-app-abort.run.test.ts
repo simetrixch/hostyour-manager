@@ -39,7 +39,7 @@ const GUID = "zsjs023ctne0";
 const NEW_APP = "crm";
 const EXPECTED = [memberApplication(GUID, NEW_APP, "prod")];
 const REGISTRY_HOST = "zot.m1.example";
-const DEPLOY_URL = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 
 const logger = pino({ level: "silent" });
@@ -133,7 +133,7 @@ function seedClusters(): void {
  *  member statuses, so the new member's Application reads Missing and the set-watch refuses — the
  *  append is committed, the row is not. */
 async function runFailingAddApp(h: Harness): Promise<string> {
-  const { runId } = await h.executor.planStreamed("add-app", { tenantId: "tnt_1", app: NEW_APP });
+  const { runId } = await h.executor.planStreamed("tenant-add-app", { tenantId: "tnt_1", app: NEW_APP });
   await h.executor.settle(runId);
   expect(getRun(db.db, runId)?.status).toBe("planned");
   await h.executor.approve(runId);

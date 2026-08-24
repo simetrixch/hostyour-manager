@@ -219,7 +219,7 @@ export const restorePasswordLoginCleanup: Cleanup = {
   title: "Put password login back on",
   run: async (ctx: StepCtx) => {
     const session = await ctx.ssh();
-    const r = await remoteScript(ctx, session, "password-login-enable", ENABLE_SCRIPT, { timeoutMs: 2 * 60_000 });
+    const r = await remoteScript(ctx, session, "cluster-password-login-enable", ENABLE_SCRIPT, { timeoutMs: 2 * 60_000 });
     await recordPasswordLoginReading(ctx, session, String(ctx.params.serverId));
     if (r.code !== 0) throw errValidation(`password login could not be put back (exit ${r.code}) — see the run log`);
   },
@@ -286,7 +286,7 @@ export function disablePasswordLoginStep(serverId: string): Step {
       const session = await ctx.ssh();
       const before = await recordPasswordLoginReading(ctx, session, serverId);
       if (before !== "off") ctx.registerCleanup(restorePasswordLoginCleanup);
-      const r = await remoteScript(ctx, session, "password-login-disable", DISABLE_SCRIPT, { timeoutMs: 2 * 60_000 });
+      const r = await remoteScript(ctx, session, "cluster-password-login-disable", DISABLE_SCRIPT, { timeoutMs: 2 * 60_000 });
       const after = await recordPasswordLoginReading(ctx, session, serverId);
       if (r.code !== 0) throw errValidation(`password login could not be turned off (exit ${r.code}) — see the run log`);
       ctx.checkpoint({ passwordLoginBefore: before, passwordLoginAfter: after });
@@ -303,7 +303,7 @@ function enablePasswordLoginStep(serverId: string): Step {
     title: "Turn password login on at the daemon",
     run: async (ctx) => {
       const session = await ctx.ssh();
-      const r = await remoteScript(ctx, session, "password-login-enable", ENABLE_SCRIPT, { timeoutMs: 2 * 60_000 });
+      const r = await remoteScript(ctx, session, "cluster-password-login-enable", ENABLE_SCRIPT, { timeoutMs: 2 * 60_000 });
       const after = await recordPasswordLoginReading(ctx, session, serverId);
       if (r.code !== 0) throw errValidation(`password login could not be turned on (exit ${r.code}) — see the run log`);
       ctx.checkpoint({ passwordLoginAfter: after });
@@ -341,32 +341,32 @@ export function purgeBootstrapPasswordStep(serverId: string): Step {
 /** The run kinds this kit builds — every RUN_KIND literal in the family, named by the family rather
  *  than listed, so a third one cannot be added to the enum without the maps below refusing to
  *  compile. */
-export type PasswordLoginKind = Extract<RunKind, `password-login-${string}`>;
+export type PasswordLoginKind = Extract<RunKind, `cluster-password-login-${string}`>;
 
 export function passwordLoginSteps(kind: PasswordLoginKind, serverId: string): Step[] {
-  if (kind === "password-login-disable") {
+  if (kind === "cluster-password-login-disable") {
     return [attestTargetStep(serverId), verifyKeyLoginStep(), disablePasswordLoginStep(serverId), purgeBootstrapPasswordStep(serverId)];
   }
   return [attestTargetStep(serverId), enablePasswordLoginStep(serverId)];
 }
 
 const SUMMARY: Record<PasswordLoginKind, (o: { name: string; steps: number; host: string }) => string> = {
-  "password-login-disable": (o) =>
+  "cluster-password-login-disable": (o) =>
     `Turn password login off on "${o.name}" (${o.host}): ${o.steps} steps. The run proves key login works first, ` +
     `writes one drop-in that sorts before every other, validates the configuration, reloads the daemon without ` +
     `dropping a session, and reads the result back out of sshd -T. It also destroys the bootstrap password stored ` +
     `for this server, which is the second way in.`,
-  "password-login-enable": (o) =>
+  "cluster-password-login-enable": (o) =>
     `Turn password login back on for "${o.name}" (${o.host}): ${o.steps} steps, through the same drop-in and the ` +
     `same read-back. For a repair — an adopted server needs no password login.`,
 };
 
 const WARNINGS: Record<PasswordLoginKind, string[]> = {
-  "password-login-disable": [
+  "cluster-password-login-disable": [
     "Afterwards this host takes key logins only. Anyone who reaches it by password today — a console session that is not this manager, a script, a colleague — will not afterwards.",
     "The stored bootstrap password is destroyed, so one-click adopt asks for a password again.",
   ],
-  "password-login-enable": [
+  "cluster-password-login-enable": [
     "Afterwards this host takes a password from anyone who can reach its SSH port, which on an internet-facing machine means every scanner that finds it.",
   ],
 };

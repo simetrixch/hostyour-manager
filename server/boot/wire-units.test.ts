@@ -36,6 +36,7 @@ const enabledEnv = {
   ONBOARD_GATE_MANAGER_ADDR: "10.152.183.5:8484",
   GITHUB_REPO: "simetrixch/hostyour-cloud",
   GITHUB_WRITE_PAT: "ghp_platform",
+  CATALOG_REPO: "acme/acme-catalog",
   CATALOG_WRITE_PAT: "ghp_deploy",
   MASTER_FQDN: "m1.example.com",
   MASTER_SSH_USER: "m1",
@@ -143,7 +144,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
   });
 
   it("tenant stays off without the catalog write PAT; the consumer family is independent", () => {
-    const wiring = buildUnits(...setup({ CATALOG_WRITE_PAT: undefined }));
+    const wiring = buildUnits(...setup({ CATALOG_WRITE_PAT: undefined, CATALOG_REPO: undefined }));
     expect(wiring.enabled).toBe(true);
     expect(wiring.tenantEnabled).toBe(false);
     expect(wiring.defs.map((d) => d.kind).sort()).toEqual([...CONSUMER_KINDS].sort());
@@ -153,7 +154,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
   });
 
   it("returns the empty wiring when neither family is configured (routes answer 501)", () => {
-    const wiring = buildUnits(...setup({ ONBOARD_GATE_MANAGER_ADDR: undefined, CATALOG_WRITE_PAT: undefined }));
+    const wiring = buildUnits(...setup({ ONBOARD_GATE_MANAGER_ADDR: undefined, CATALOG_WRITE_PAT: undefined, CATALOG_REPO: undefined }));
     expect(wiring.enabled).toBe(false);
     expect(wiring.tenantEnabled).toBe(false);
     expect(wiring.defs).toHaveLength(0);
@@ -165,7 +166,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     // https-only, so running inject-release-kit against a file:// repoURL is rejected by the ADAPTER
     // ("must use https"), NOT by the step's own "none is wired" fail-loud guard.
     const wiring = buildUnits(...setup());
-    const onboard = wiring.defs.find((d) => d.kind === "onboard")!;
+    const onboard = wiring.defs.find((d) => d.kind === "consumer-onboard")!;
     const step = onboard
       .steps({ consumerName: "acme", repoURL: "file:///tmp/x.git", repoCredentialId: "cred_pat" })
       .find((s) => s.name === "inject-release-kit")!;
@@ -173,9 +174,9 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     await expect(step.run(ctx)).rejects.toThrow(/must use https/);
   });
 
-  it("carries the remove-release-kit teardown step in the offboard + purge defs", () => {
+  it("carries the remove-release-kit teardown step in the consumer-offboard + consumer-purge defs", () => {
     const wiring = buildUnits(...setup());
-    for (const kind of ["offboard", "purge"]) {
+    for (const kind of ["consumer-offboard", "consumer-purge"]) {
       const def = wiring.defs.find((d) => d.kind === kind)!;
       const names = def.steps({ appId: "app_x", consumerName: "acme", stage: "prod", clusterId: "cls_1" }).map((s) => s.name);
       expect(names).toContain("remove-release-kit");

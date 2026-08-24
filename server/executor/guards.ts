@@ -68,70 +68,71 @@ const createTenantCryptoGate: PlanGuard = async (params, deps) => {
  */
 export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   noop: [],
-  adopt: [],
-  "deploy-slave": [slaveCryptoGate],
-  // redeploy and release both act on a cluster that is ALREADY live, and neither harvests a new
+  "cluster-adopt": [],
+  "cluster-deploy-slave": [slaveCryptoGate],
+  // cluster-redeploy and cluster-release both act on a cluster that is ALREADY live, and neither harvests a new
   // cluster access key — so the crypto gate has nothing to protect. Gating them would strand exactly the
   // running cluster they exist to reconcile on a plaintext-keystore install (purge's reasoning).
-  // release also carried an unconditional gate while nothing regenerated an install branch; the
+  // cluster-release also carried an unconditional gate while nothing regenerated an install branch; the
   // regenerate-branch and regenerate-slave-branch programs do now, one per arm, so every cluster a
   // release can name has a regeneration behind it (release.ts).
-  redeploy: [],
-  release: [],
+  "cluster-redeploy": [],
+  "cluster-release": [],
   // The tailnet repair run kinds act on a host that is ALREADY deployed and harvest no cluster access
   // key, so the crypto gate has nothing to protect — and arming it would strand exactly the host they
   // exist to put back on the private network (purge's reasoning).
-  "tailnet-disconnect": [],
-  "tailnet-reconnect": [],
-  "tailnet-rejoin": [],
+  "cluster-tailnet-disconnect": [],
+  "cluster-tailnet-reconnect": [],
+  "cluster-tailnet-rejoin": [],
   // The password-login run kinds change one daemon's configuration and one stored credential on a host
   // that is ALREADY adopted, and harvest no cluster access key — so the crypto gate has nothing to
   // protect. Gating the disable run kind would additionally block, on exactly the plaintext-keystore
   // install the gate exists for, the one act that takes a way into that host away.
-  "password-login-disable": [],
-  "password-login-enable": [],
+  "cluster-password-login-disable": [],
+  "cluster-password-login-enable": [],
   // The operator-key run kinds edit one line of one file on a host that is ALREADY adopted, and harvest
   // no cluster access key — so the crypto gate has nothing to protect. Gating the removal would additionally
   // block, on exactly the plaintext-keystore install the gate exists for, the one act that takes a
   // human's standing access to a machine away.
-  "operator-key-place": [],
-  "operator-key-remove": [],
-  "authorized-keys-read": [],
-  onboard: [onboardCryptoGate],
-  suspend: [],
-  resume: [],
-  offboard: [],
-  // purge is a force-offboard (teardown) — no crypto gate: blocking an ORPHAN removal behind the crypto gate
+  "cluster-operator-key-place": [],
+  "cluster-operator-key-remove": [],
+  "cluster-authorized-keys-read": [],
+  "consumer-onboard": [onboardCryptoGate],
+  "consumer-suspend": [],
+  "consumer-resume": [],
+  "consumer-offboard": [],
+  // consumer-purge is a force-offboard (teardown) — no crypto gate: blocking an ORPHAN removal behind the crypto gate
   // would strand exactly the leftover artifacts purge exists to reap on a plaintext-keystore cluster.
-  purge: [],
-  // restart-workloads rolls the pods of a unit that is ALREADY deployed and harvests no cluster access
+  "consumer-purge": [],
+  // consumer-restart-workloads rolls the pods of a unit that is ALREADY deployed and harvests no cluster access
   // key — so the crypto gate has nothing to protect. Gating it would additionally strand, on exactly the
   // plaintext-keystore install the gate exists for, the last step of putting a new secret value in
   // front of a unit: the operator would have written it into Vault and be unable to make the pods read it.
-  "restart-workloads": [],
-  // set-size writes one field of a registration that already stands and harvests no cluster access
+  "consumer-restart-workloads": [],
+  // consumer-set-size writes one field of a registration that already stands and harvests no cluster access
   // key — so the crypto gate has nothing to protect, and gating it would strand, on exactly the
   // plaintext-keystore install the gate exists for, the only way to move a running unit onto a
   // corrected ceiling.
-  "set-size": [],
-  // adopt-consumer RECORDS an existing deployment: its only mutation is the
+  "consumer-set-size": [],
+  // consumer-adopt RECORDS an existing deployment: its only mutation is the
   // local inventory row, it places no bytes on any cluster — so the crypto gate has nothing to protect, and
   // gating it would strand exactly the invisible consumer the run kind exists to recover (purge's reasoning).
-  "adopt-consumer": [],
+  "consumer-adopt": [],
   // The relocation run kinds act on a unit that is ALREADY deployed and harvest no new cluster access
-  // key — backup/restore are recovery run kinds (purge's reasoning: gating them would strand exactly the
-  // data they exist to save), and migrate moves between clusters whose keys the keystore already holds.
-  backup: [],
-  restore: [],
-  migrate: [],
-  // check-tenants only READS: it asks each tenant whether anybody can still administer it and
+  // key — consumer-backup/consumer-restore are recovery run kinds (consumer-purge's reasoning: gating them
+  // would strand exactly the data they exist to save), and consumer-migrate moves between clusters whose
+  // keys the keystore already holds.
+  "consumer-backup": [],
+  "consumer-restore": [],
+  "consumer-migrate": [],
+  // tenant-check only READS: it asks each tenant whether anybody can still administer it and
   // writes the answer onto the local inventory row. It places no bytes on any cluster and
   // harvests no key, so the crypto gate has nothing to protect — and gating it would blind
   // exactly the plaintext-keystore install to a tenant nobody can get into.
-  "check-tenants": [],
-  "create-tenant": [createTenantCryptoGate],
-  "add-app": [createTenantCryptoGate],
-  "remove-app": [],
+  "tenant-check": [],
+  "tenant-create": [createTenantCryptoGate],
+  "tenant-add-app": [createTenantCryptoGate],
+  "tenant-remove-app": [],
   "tenant-suspend": [],
   "tenant-resume": [],
   // Ungated like its consumer twin above — same reasoning.
@@ -139,9 +140,9 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   // Ungated like its consumer twin above — same reasoning.
   "tenant-set-size": [],
   "tenant-offboard": [],
-  // tenant-purge is a force-offboard (teardown) — no crypto gate, for the SAME reason the consumer
-  // purge carries none: blocking an ORPHAN removal behind the crypto gate would strand exactly the leftover
-  // artifacts purge exists to reap on a plaintext-keystore cluster.
+  // tenant-purge is a force-offboard (teardown) — no crypto gate, for the SAME reason consumer-purge
+  // carries none: blocking an ORPHAN removal behind the crypto gate would strand exactly the leftover
+  // artifacts a purge exists to reap on a plaintext-keystore cluster.
   "tenant-purge": [],
   // Ungated like their consumer twins above — same reasoning.
   "tenant-backup": [],
@@ -169,13 +170,13 @@ export function isMutatingPrecondition(def: AnyRunDefinition | undefined, stepNa
 }
 
 /**
- * Backs the guards.armed self-check: the gate is armed on the crypto-gated kinds (deploy-slave,
- * onboard, create-tenant, add-app), and every registered mutating def starts with attest-target
- *. add-app is crypto-gated too (it fans a new app into a live tenant), so it belongs in the
- * armed set — omitting it would let a future edit silently disarm its gate.
+ * Backs the guards.armed self-check: the gate is armed on the crypto-gated kinds (cluster-deploy-slave,
+ * consumer-onboard, tenant-create, tenant-add-app), and every registered mutating def starts with
+ * attest-target. tenant-add-app is crypto-gated too (it fans a new app into a live tenant), so it belongs
+ * in the armed set — omitting it would let a future edit silently disarm its gate.
  */
 export function assertGuardsArmed(runDefinitions: Map<RunKind, AnyRunDefinition>): void {
-  for (const kind of ["deploy-slave", "onboard", "create-tenant", "add-app"] as const) {
+  for (const kind of ["cluster-deploy-slave", "consumer-onboard", "tenant-create", "tenant-add-app"] as const) {
     if (KIND_GUARDS[kind].length === 0) throw new Error(`no crypto gate armed on ${kind}`);
   }
   for (const def of runDefinitions.values()) {

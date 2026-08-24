@@ -18,7 +18,7 @@ import { upsertAppRow } from "./onboard-steps.ts";
 // row-keyed run kinds again (offboard reads repoURL + the sealed PAT off the row it writes). swissbookai is
 // the founding case: healthy in the cluster, invisible in the Manager.
 //
-// DESIGN — a distinct RUN_KIND "adopt-consumer" (NOT "adopt", which adopts a SERVER), NOT a
+// DESIGN — a distinct RUN_KIND "consumer-adopt" (NOT "cluster-adopt", which adopts a SERVER), NOT a
 // repair mode on onboard, for the same reason purge is not a force-mode on offboard: onboard is
 // gate-validated end to end (it deploys), while adopt deploys NOTHING — its only mutation is the ONE
 // local DB upsert, shared byte-for-byte with onboard's record-inventory (upsertAppRow,
@@ -258,7 +258,7 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
 
 export function makeAdoptConsumerDef(ports: AdoptConsumerPorts): RunDefinition<AdoptConsumerParams> {
   return {
-    kind: "adopt-consumer",
+    kind: "consumer-adopt",
     paramsSchema: AdoptConsumerParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: async (params, { db }) => {
@@ -274,7 +274,7 @@ export function makeAdoptConsumerDef(ports: AdoptConsumerPorts): RunDefinition<A
       }
       const stepDefs = adoptSteps(ports, params);
       return {
-        kind: "adopt-consumer",
+        kind: "consumer-adopt",
         // No app row exists yet (that is the point), so adopt targets the CLUSTER — exactly like
         // onboard's plan and purge's.
         targetKind: "cluster",

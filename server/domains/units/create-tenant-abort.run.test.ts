@@ -63,7 +63,7 @@ const TEST_MEMBERS = ["auth", "jobs", "report"];
 
 const SHA = "a".repeat(40);
 const SUB = "acme.example";
-const DEPLOY_URL = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const REQUEST = { clusterId: "cls_1", subdomain: SUB, owner: "team-acme", apps: [{ name: "erp" }] };
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
@@ -194,7 +194,7 @@ function fakeTenantSeeder(): VaultSeeder {
 /** Plan through the streaming planner and hand back the runId + the params it FROZE (the minted guid and
  *  the expected fan-out set are only knowable from there — nothing else in the product mints a guid). */
 async function planTenant(h: Harness, body: Record<string, unknown> = REQUEST): Promise<{ runId: string; params: CreateTenantParams }> {
-  const { runId } = await h.executor.planStreamed("create-tenant", body);
+  const { runId } = await h.executor.planStreamed("tenant-create", body);
   await h.executor.settle(runId);
   return { runId, params: CreateTenantParams.parse(getRunParams(db.db, runId)?.params) };
 }
@@ -299,7 +299,7 @@ describe("aborting a create-tenant run that never got a usable plan", () => {
     // a ZodError out of the route, so the operator got a red banner instead of a settled run.
     seedClusters();
     const h = await harness();
-    const { runId } = await h.executor.planStreamed("create-tenant", { ...REQUEST, clusterId: "cls_nope" });
+    const { runId } = await h.executor.planStreamed("tenant-create", { ...REQUEST, clusterId: "cls_nope" });
     await h.executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
     expect(getRun(db.db, runId)?.steps).toEqual([]); // no plan ⇒ no step rows were ever written

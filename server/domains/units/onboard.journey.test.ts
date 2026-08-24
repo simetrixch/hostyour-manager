@@ -163,7 +163,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const { executor, store } = makeExecutor(ports);
     const credId = await sealPat(store);
 
-    const { runId } = await executor.planStreamed("onboard", { ...REQUEST, repoCredentialId: credId });
+    const { runId } = await executor.planStreamed("consumer-onboard", { ...REQUEST, repoCredentialId: credId });
     await executor.settle(runId);
     const planned = getRun(db.db, runId);
     expect(planned?.status).toBe("planned");
@@ -198,7 +198,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const { executor, store } = makeExecutor(fakePorts({ runner: new FakeGateRunner({ report: report(g1Fail, "fail") }) }));
     const credId = await sealPat(store);
 
-    const { runId } = await executor.planStreamed("onboard", { ...REQUEST, repoCredentialId: credId });
+    const { runId } = await executor.planStreamed("consumer-onboard", { ...REQUEST, repoCredentialId: credId });
     await executor.settle(runId);
     const rejected = getRun(db.db, runId);
     expect(rejected?.status).toBe("failed");
@@ -209,7 +209,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
   it("an unknown target cluster fails planning cleanly (no run left stuck in planning)", async () => {
     // no seedCluster() — cls_1 does not exist
     const { executor } = makeExecutor(fakePorts());
-    const { runId } = await executor.planStreamed("onboard", { ...REQUEST, repoCredentialId: "cred_x" });
+    const { runId } = await executor.planStreamed("consumer-onboard", { ...REQUEST, repoCredentialId: "cred_x" });
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
   });
@@ -243,7 +243,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const { executor, store, bus } = makeExecutor(ports);
     const credId = await sealPat(store);
 
-    const { runId } = await executor.planStreamed("onboard", { ...REQUEST, repoCredentialId: credId });
+    const { runId } = await executor.planStreamed("consumer-onboard", { ...REQUEST, repoCredentialId: credId });
     await executor.settle(runId);
     const planned = getRun(db.db, runId);
     expect(planned?.status).toBe("planned");

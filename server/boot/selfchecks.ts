@@ -144,6 +144,29 @@ function checkRunDefinitionsTotal(runDefinitions: RunDefinitions): void {
   }
 }
 
+/**
+ * Every run kind this database STORES is one this process can name. `runs.kind` is a plain text
+ * column with no CHECK (server/db/schema/runs.ts), so nothing in SQLite stops a row standing under a
+ * spelling RUN_KIND has since dropped — which is exactly what a data migration over that column
+ * leaves behind when it misses one. Such a row reads back on the runs list under a kind no filter,
+ * no label and no definition knows, and nothing else in this process would ever say so.
+ *
+ * Degrading, not blocking: a row spelled the old way is a fact about history that no boot can undo,
+ * and aborting over it would take away the very screens an operator would inspect it from. It is
+ * named on /readyz instead, with every unknown spelling listed rather than counted.
+ */
+function checkStoredRunKinds(sqlite: DbHandle["sqlite"]): void {
+  const members = new Set<string>(RUN_KIND);
+  const stored = (sqlite.prepare("SELECT DISTINCT kind FROM runs").all() as { kind: string }[]).map((r) => r.kind);
+  const unknown = stored.filter((kind) => !members.has(kind)).sort();
+  if (unknown.length > 0) {
+    throw new Error(
+      `runs rows stand under ${unknown.length} run kind(s) this build cannot name: ${unknown.join(", ")} — ` +
+      "a migration over runs.kind did not reach them, so those runs answer to no filter, label or definition",
+    );
+  }
+}
+
 function checkForbiddenBytes(config: Config): void {
   const html = renderForbidden({ group: config.oidc.adminsGroup, signoutUrl: "/auth/logout" });
   if (html.length < 100 || !html.includes(config.oidc.adminsGroup)) {
@@ -190,6 +213,7 @@ export function runSelfChecks(deps: {
   blocking("guards.armed", () => checkGuardsArmed(deps.runDefinitions));
   blocking("run-definitions.total", () => checkRunDefinitionsTotal(deps.runDefinitions));
   blocking("forbidden.bytes", () => checkForbiddenBytes(deps.config));
+  degrading("runs.kinds_known", () => checkStoredRunKinds(deps.db.sqlite));
   degrading("oidc.config_present", () => {
     // Presence only — discovery stays lazy (LAW 0: a down IdP must never block boot).
     if (!deps.config.oidc.issuer || !deps.config.oidc.clientId) throw new Error("OIDC issuer/clientId not configured");

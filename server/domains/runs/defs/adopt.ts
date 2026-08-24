@@ -428,7 +428,7 @@ function sudoGrant(sshUser: string): string {
 }
 
 export const adoptDef: RunDefinition<AdoptParams> = {
-  kind: "adopt",
+  kind: "cluster-adopt",
   paramsSchema: AdoptParams,
   mutating: false, // first-contact; the attest-target law is for known targets
   plan: async (params, { db }) => {
@@ -441,7 +441,7 @@ export const adoptDef: RunDefinition<AdoptParams> = {
     // one, exactly as the session does.
     const dialled = resolveTransport(server, "default");
     return {
-      kind: "adopt",
+      kind: "cluster-adopt",
       targetKind: "server",
       targetId: params.serverId,
       summary:

@@ -72,7 +72,7 @@ const CHAIN = [
 ];
 
 function req(over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest {
-  return { repoURL: "https://github.com/simetrixch/catalog.git", ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, clusterValueFiles: CHAIN, ...over };
+  return { repoURL: "https://github.com/acme/acme-catalog.git", ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, clusterValueFiles: CHAIN, ...over };
 }
 
 function deps(repo: RepoReader, helm: FakeHelmRenderer, log: (l: string) => void = () => {}): ValidateTenantDeps {

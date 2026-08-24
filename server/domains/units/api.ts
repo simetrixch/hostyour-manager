@@ -77,10 +77,19 @@ export interface ConsumerOnboardApiDeps extends ConsumerApiDeps {
   registrations?: Registrations;
 }
 
+// The path segment and the run kind are stated apart, exactly as TENANT_LIFECYCLE states them: the
+// route is the URL an operator's browser calls and the kind is what the runs table records, and only
+// the kind carries the family word.
 // backup rides the same no-body shape: the run resolves everything off the appId, and the folder it
 // leaves on the storage box is named after the unit.
 // restart-workloads rides it too: no body either, and the run resolves the namespace off the appId.
-const LIFECYCLE = ["offboard", "suspend", "resume", "restart-workloads", "backup"] as const;
+const LIFECYCLE = [
+  { path: "offboard", kind: "consumer-offboard" },
+  { path: "suspend", kind: "consumer-suspend" },
+  { path: "resume", kind: "consumer-resume" },
+  { path: "restart-workloads", kind: "consumer-restart-workloads" },
+  { path: "backup", kind: "consumer-backup" },
+] as const;
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -254,25 +263,28 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     const plaintext = Buffer.from(repoPat, "utf8");
     const fingerprint = fingerprintSecret(plaintext); // before seal() zeroes the buffer
     const ref = await store.seal({ kind: "pat", label: `consumer repo PAT (${req.consumerName})`, plaintext, fingerprint });
-    return c.json(await executor.planStreamed("onboard", { ...req, repoCredentialId: ref.id }), 201);
+    return c.json(await executor.planStreamed("consumer-onboard", { ...req, repoCredentialId: ref.id }), 201);
   });
 
   // Lifecycle: offboard/suspend/resume plan synchronously (no gate-runner) — approve via the Runs API.
-  for (const action of LIFECYCLE) {
-    app.post(`/api/consumers/:appId/${action}`, async (c) => {
+  for (const { path, kind } of LIFECYCLE) {
+    app.post(`/api/consumers/:appId/${path}`, async (c) => {
       if (!onboardingEnabled) throw errNotConfigured("onboarding is not configured on this manager");
-      return c.json(await executor.plan(action, { appId: c.req.param("appId") }), 201);
+      return c.json(await executor.plan(kind, { appId: c.req.param("appId") }), 201);
     });
   }
 
   // Relocation with a target: restore rebuilds the unit from its Storage Box folder onto
   // the named cluster, migrate moves it there through the same folder. Both need the target, which no
   // row can answer, so they take a body — validated through the run's OWN params schema, one contract.
-  for (const kind of ["restore", "migrate"] as const) {
-    app.post(`/api/consumers/:appId/${kind}`, async (c) => {
+  for (const { path, kind } of [
+    { path: "restore", kind: "consumer-restore" },
+    { path: "migrate", kind: "consumer-migrate" },
+  ] as const) {
+    app.post(`/api/consumers/:appId/${path}`, async (c) => {
       if (!onboardingEnabled) throw errNotConfigured("onboarding is not configured on this manager");
       const body = (await c.req.json().catch(() => ({}))) as { targetClusterId?: unknown };
-      const schema = kind === "restore" ? RestoreParams : MigrateParams;
+      const schema = kind === "consumer-restore" ? RestoreParams : MigrateParams;
       const parsed = schema.safeParse({ appId: c.req.param("appId"), targetClusterId: body.targetClusterId });
       if (!parsed.success) throw errValidation(`invalid ${kind} request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
       return c.json(await executor.plan(kind, parsed.data), 201);
@@ -288,7 +300,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     if (!onboardingEnabled) throw errNotConfigured("onboarding is not configured on this manager");
     const parsed = PurgeParams.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) throw errValidation(`invalid purge request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    return c.json(await executor.plan("purge", parsed.data), 201);
+    return c.json(await executor.plan("consumer-purge", parsed.data), 201);
   });
 
   // Adopt: reconstruct a DETECTED consumer's missing apps row FROM its GitOps
@@ -300,7 +312,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     if (!onboardingEnabled) throw errNotConfigured("onboarding is not configured on this manager");
     const parsed = AdoptConsumerParams.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) throw errValidation(`invalid adopt request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    return c.json(await executor.plan("adopt-consumer", parsed.data), 201);
+    return c.json(await executor.plan("consumer-adopt", parsed.data), 201);
   });
 }
 
@@ -608,8 +620,8 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     const runId = c.req.param("runId");
     const run = getRunParams(db, runId);
     if (!run) throw errNotFound(`run ${runId}`);
-    if (run.kind !== "create-tenant") {
-      throw errValidation(`run ${runId} is a ${run.kind} run — only a create-tenant run mints a tenant of its own`);
+    if (run.kind !== "tenant-create") {
+      throw errValidation(`run ${runId} is a ${run.kind} run — only a tenant-create run mints a tenant of its own`);
     }
     return c.json(resolveRunTenantState(db, runId, run.params));
   });
@@ -633,8 +645,8 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   app.post("/api/tenants", async (c) => {
     if (!onboardingEnabled) throw errNotConfigured("tenant onboarding is not configured on this manager — the catalog write PAT must be wired first");
     const parsed = CreateTenantRequest.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) invalid("create-tenant", parsed.error);
-    return c.json(await executor.planStreamed("create-tenant", parsed.data), 201);
+    if (!parsed.success) invalid("tenant-create", parsed.error);
+    return c.json(await executor.planStreamed("tenant-create", parsed.data), 201);
   });
 
   // Add app: fan ONE new app into a LIVE tenant — also streaming (a subset validation at the tenant's
@@ -643,14 +655,14 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     if (!onboardingEnabled) throw errNotConfigured("tenant onboarding is not configured on this manager");
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     const parsed = AddAppRequest.safeParse({ ...body, tenantId: c.req.param("id") });
-    if (!parsed.success) invalid("add-app", parsed.error);
+    if (!parsed.success) invalid("tenant-add-app", parsed.error);
     // A tenant that is still provisioning has no finished fan-out to add an app TO: add-app's planner
     // reads the tenant's LIVE registration and its watch waits on the new Application, so on a
     // half-created tenant it would either 404 on the absent pointer or burn the argo timeout. Refuse
     // here, before a Run is even planned. (The suspended case is refused by add-app's own planner,
     // which reads that fact off the pointer; "provisioning" is a ROW fact, so it is refused here.)
     assertTenantProvisioned(loadTenantStatus(db, parsed.data.tenantId), "adding an app");
-    return c.json(await executor.planStreamed("add-app", parsed.data), 201);
+    return c.json(await executor.planStreamed("tenant-add-app", parsed.data), 201);
   });
 
   // Remove app: drop ONE app of the guid × apps[] matrix — synchronous plan() (no gate-runner). The
@@ -661,7 +673,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     if (!onboardingEnabled) throw errNotConfigured("tenant onboarding is not configured on this manager");
     const id = c.req.param("id");
     assertTenantProvisioned(loadTenantStatus(db, id), `removing the app "${c.req.param("app")}"`);
-    return c.json(await executor.plan("remove-app", { tenantId: id, app: c.req.param("app") }), 201);
+    return c.json(await executor.plan("tenant-remove-app", { tenantId: id, app: c.req.param("app") }), 201);
   });
 
   // (Re)send the tenant's first-admin invite — the operator-driven Tenants-page action. Unlike the

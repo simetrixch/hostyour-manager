@@ -42,7 +42,7 @@ import type { RepoReader, ConsumerRepo } from "../../adapters/git/port.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";
 import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 
-// The "onboard" Run: check → registration → provision → inject → trigger → watch. The run kind
+// The "consumer-onboard" Run: check → registration → provision → inject → trigger → watch. The run kind
 // knows TWO forms of ONE step chain:
 //
 //  - DEPLOYABLE (the manifest declares a chart): the full chain, ending in the deployment the
@@ -445,7 +445,7 @@ function formMismatch(outcome: ValidationOutcome, wantsChart: boolean, consumerN
 
 export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams> {
   return {
-    kind: "onboard",
+    kind: "consumer-onboard",
     paramsSchema: OnboardParams,
     mutating: true, // mutating ⇒ steps({}) builds the deployable chain, whose step 0 is attest-target
     plan: () => {
@@ -506,7 +506,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         };
         const stepDefs = onboardSteps(ports, params);
         const plan: Plan = {
-          kind: "onboard",
+          kind: "consumer-onboard",
           targetKind: "cluster",
           targetId: master.clusterId, // the build plane — the one cluster this form touches
           summary: `Onboard build-only unit "${req.consumerName}" (version ${req.version}, channel ${req.channel}, release run on ${stage}): ${stepDefs.length} steps — attest the registration, inject the release kit, trigger the cycle once and watch its build.`,
@@ -595,7 +595,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
       };
       const stepDefs = onboardSteps(ports, params);
       const plan: Plan = {
-        kind: "onboard",
+        kind: "consumer-onboard",
         targetKind: "cluster",
         targetId: r.clusterId,
         summary:

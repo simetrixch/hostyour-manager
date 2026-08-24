@@ -30,7 +30,7 @@ import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, TEST_QUOTA
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
 const SUB = "acme.example";
-const DEPLOY_REPO = "https://github.com/simetrixch/catalog.git";
+const DEPLOY_REPO = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_REPO = "https://github.com/simetrixch/hostyour-cloud.git";
 const APPS = [{ name: "erp" }];
 const WATCH = tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod");

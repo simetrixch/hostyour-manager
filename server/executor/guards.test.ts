@@ -42,19 +42,19 @@ describe("crypto gate", () => {
 
   it("deploy-slave allowed under plaintext for a rehearsal slave with zero live slaves", async () => {
     const { db } = fresh();
-    await expect(runGuards("deploy-slave", { tier: "rehearsal" }, { db })).resolves.toBeUndefined();
+    await expect(runGuards("cluster-deploy-slave", { tier: "rehearsal" }, { db })).resolves.toBeUndefined();
   });
 
   it("deploy-slave refused under plaintext when tier is real", async () => {
     const { db } = fresh();
-    expect(await refused(() => runGuards("deploy-slave", { tier: "real" }, { db }))).toBe("PLAN_REFUSED");
+    expect(await refused(() => runGuards("cluster-deploy-slave", { tier: "real" }, { db }))).toBe("PLAN_REFUSED");
   });
 
   it("deploy-slave refused under plaintext when a live slave already exists", async () => {
     const { db, sqlite } = fresh();
     sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_e','s5','2.2.2.2','root','slave')").run();
     sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, status) VALUES ('cls_e','srv_e','prod','s5.example','active')").run();
-    expect(await refused(() => runGuards("deploy-slave", { tier: "rehearsal" }, { db }))).toBe("PLAN_REFUSED");
+    expect(await refused(() => runGuards("cluster-deploy-slave", { tier: "rehearsal" }, { db }))).toBe("PLAN_REFUSED");
   });
 
   it("the gate is open once the store is no longer plaintext", async () => {
@@ -62,7 +62,7 @@ describe("crypto gate", () => {
     sqlite.prepare("UPDATE meta SET value='passphrase' WHERE key='keystore.mode'").run();
     sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_e','s5','2.2.2.2','root','slave')").run();
     sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, status) VALUES ('cls_e','srv_e','prod','s5.example','active')").run();
-    await expect(runGuards("deploy-slave", { tier: "real" }, { db })).resolves.toBeUndefined();
+    await expect(runGuards("cluster-deploy-slave", { tier: "real" }, { db })).resolves.toBeUndefined();
   });
 
   it("onboard refused onto a real cluster under plaintext, allowed onto rehearsal", async () => {
@@ -71,8 +71,8 @@ describe("crypto gate", () => {
     sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, tier) VALUES ('cls_r','srv_e','prod','a.example','real')").run();
     sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_f','slave-h','3.3.3.3','root','slave')").run();
     sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, tier) VALUES ('cls_h','srv_f','prod','b.example','rehearsal')").run();
-    expect(await refused(() => runGuards("onboard", { clusterId: "cls_r" }, { db }))).toBe("PLAN_REFUSED");
-    await expect(runGuards("onboard", { clusterId: "cls_h" }, { db })).resolves.toBeUndefined();
+    expect(await refused(() => runGuards("consumer-onboard", { clusterId: "cls_r" }, { db }))).toBe("PLAN_REFUSED");
+    await expect(runGuards("consumer-onboard", { clusterId: "cls_h" }, { db })).resolves.toBeUndefined();
   });
 
   it("create-tenant / add-app are crypto-gated like onboard: refused onto a real cluster, allowed onto rehearsal", async () => {
@@ -81,11 +81,11 @@ describe("crypto gate", () => {
     sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, tier) VALUES ('cls_r','srv_e','prod','a.example','real')").run();
     sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_f','slave-h','3.3.3.3','root','slave')").run();
     sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, tier) VALUES ('cls_h','srv_f','prod','b.example','rehearsal')").run();
-    expect(await refused(() => runGuards("create-tenant", { clusterId: "cls_r" }, { db }))).toBe("PLAN_REFUSED");
-    await expect(runGuards("create-tenant", { clusterId: "cls_h" }, { db })).resolves.toBeUndefined();
+    expect(await refused(() => runGuards("tenant-create", { clusterId: "cls_r" }, { db }))).toBe("PLAN_REFUSED");
+    await expect(runGuards("tenant-create", { clusterId: "cls_h" }, { db })).resolves.toBeUndefined();
     // add-app resolves clusterId from its tenant during the plan; the same gate applies to that resolved id.
-    expect(await refused(() => runGuards("add-app", { clusterId: "cls_r" }, { db }))).toBe("PLAN_REFUSED");
-    await expect(runGuards("add-app", { clusterId: "cls_h" }, { db })).resolves.toBeUndefined();
+    expect(await refused(() => runGuards("tenant-add-app", { clusterId: "cls_r" }, { db }))).toBe("PLAN_REFUSED");
+    await expect(runGuards("tenant-add-app", { clusterId: "cls_h" }, { db })).resolves.toBeUndefined();
   });
 
   it("create-tenant / add-app gates are open once the store is no longer plaintext", async () => {
@@ -93,41 +93,41 @@ describe("crypto gate", () => {
     sqlite.prepare("UPDATE meta SET value='passphrase' WHERE key='keystore.mode'").run();
     sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_e','slave-r','2.2.2.2','root','slave')").run();
     sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, tier) VALUES ('cls_r','srv_e','prod','a.example','real')").run();
-    await expect(runGuards("create-tenant", { clusterId: "cls_r" }, { db })).resolves.toBeUndefined();
-    await expect(runGuards("add-app", { clusterId: "cls_r" }, { db })).resolves.toBeUndefined();
+    await expect(runGuards("tenant-create", { clusterId: "cls_r" }, { db })).resolves.toBeUndefined();
+    await expect(runGuards("tenant-add-app", { clusterId: "cls_r" }, { db })).resolves.toBeUndefined();
   });
 
-  it("create-tenant + add-app are armed and the four tenant-lifecycle kinds carry no guards", async () => {
+  it("tenant-create + tenant-add-app are armed and the four tenant-lifecycle kinds carry no guards", async () => {
     const { db } = fresh();
-    expect(KIND_GUARDS["create-tenant"]).not.toHaveLength(0);
-    expect(KIND_GUARDS["add-app"]).not.toHaveLength(0);
-    for (const kind of ["remove-app", "tenant-suspend", "tenant-resume", "tenant-offboard"] as const) {
+    expect(KIND_GUARDS["tenant-create"]).not.toHaveLength(0);
+    expect(KIND_GUARDS["tenant-add-app"]).not.toHaveLength(0);
+    for (const kind of ["tenant-remove-app", "tenant-suspend", "tenant-resume", "tenant-offboard"] as const) {
       expect(KIND_GUARDS[kind]).toHaveLength(0);
       await expect(runGuards(kind, { clusterId: "cls_r" }, { db })).resolves.toBeUndefined();
     }
   });
 
-  it("redeploy carries no crypto gate: it acts on a cluster that is already live", async () => {
+  it("cluster-redeploy carries no crypto gate: it acts on a cluster that is already live", async () => {
     const { db } = fresh();
-    expect(KIND_GUARDS.redeploy).toHaveLength(0);
-    await expect(runGuards("redeploy", { serverId: "srv_x" }, { db })).resolves.toBeUndefined();
+    expect(KIND_GUARDS["cluster-redeploy"]).toHaveLength(0);
+    await expect(runGuards("cluster-redeploy", { serverId: "srv_x" }, { db })).resolves.toBeUndefined();
   });
 
-  it("release carries no crypto gate either — the regenerate-branch program exists, and the one shape still without a regeneration (a slave) is the def's own plan-time refusal", async () => {
+  it("cluster-release carries no crypto gate either — the regenerate-branch program exists, and the one shape still without a regeneration (a slave) is the def's own plan-time refusal", async () => {
     const { db } = fresh("keyfile");
-    expect(KIND_GUARDS.release).toHaveLength(0);
-    await expect(runGuards("release", { serverId: "srv_x" }, { db })).resolves.toBeUndefined();
+    expect(KIND_GUARDS["cluster-release"]).toHaveLength(0);
+    await expect(runGuards("cluster-release", { serverId: "srv_x" }, { db })).resolves.toBeUndefined();
   });
 
-  it("assertGuardsArmed rejects a runDefinitions once create-tenant's gate is disarmed", () => {
-    // Guard against a future edit silently emptying KIND_GUARDS["create-tenant"]: temporarily blank
-    // it and confirm the boot self-check now fails on create-tenant (it is in the armed set).
-    const original = KIND_GUARDS["create-tenant"];
-    (KIND_GUARDS as Record<RunKind, readonly unknown[]>)["create-tenant"] = [];
+  it("assertGuardsArmed rejects a runDefinitions once tenant-create's gate is disarmed", () => {
+    // Guard against a future edit silently emptying KIND_GUARDS["tenant-create"]: temporarily blank
+    // it and confirm the boot self-check now fails on tenant-create (it is in the armed set).
+    const original = KIND_GUARDS["tenant-create"];
+    (KIND_GUARDS as Record<RunKind, readonly unknown[]>)["tenant-create"] = [];
     try {
-      expect(() => assertGuardsArmed(new Map())).toThrow(/create-tenant/);
+      expect(() => assertGuardsArmed(new Map())).toThrow(/tenant-create/);
     } finally {
-      (KIND_GUARDS as Record<RunKind, readonly unknown[]>)["create-tenant"] = original;
+      (KIND_GUARDS as Record<RunKind, readonly unknown[]>)["tenant-create"] = original;
     }
   });
 
@@ -141,22 +141,22 @@ describe("crypto gate", () => {
     const empty = new Map<RunKind, AnyRunDefinition>();
     expect(() => assertGuardsArmed(empty)).not.toThrow();
     const bad = new Map<RunKind, AnyRunDefinition>([
-      ["adopt", { kind: "adopt", mutating: true, steps: () => [{ name: "not-attest", title: "x", run: async () => undefined }] } as unknown as AnyRunDefinition],
+      ["cluster-adopt", { kind: "cluster-adopt", mutating: true, steps: () => [{ name: "not-attest", title: "x", run: async () => undefined }] } as unknown as AnyRunDefinition],
     ]);
     expect(() => assertGuardsArmed(bad)).toThrow(/attest-target/);
   });
 });
 
-// A minimal streaming-planned create-tenant def: its planStream resolves params carrying the target
-// clusterId (as the real create-tenant slice will), and its plan is a single attest-target step so
+// A minimal streaming-planned tenant-create def: its planStream resolves params carrying the target
+// clusterId (as the real tenant-create slice will), and its plan is a single attest-target step so
 // the planned/steps invariant holds. It exercises the runStreamingPlan → runGuards wiring only.
 function streamingCreateTenantDef(): AnyRunDefinition {
   return {
-    kind: "create-tenant",
+    kind: "tenant-create",
     paramsSchema: z.record(z.string(), z.unknown()),
     mutating: true,
     plan: async () => {
-      throw new AppError("INTERNAL", "create-tenant is planned via planStream, not plan()");
+      throw new AppError("INTERNAL", "tenant-create is planned via planStream, not plan()");
     },
     planStream: async (rawParams) => {
       const clusterId = (rawParams as { clusterId?: unknown }).clusterId;
@@ -164,10 +164,10 @@ function streamingCreateTenantDef(): AnyRunDefinition {
         outcome: "planned",
         params: { clusterId },
         plan: {
-          kind: "create-tenant",
+          kind: "tenant-create",
           targetKind: "tenant",
           targetId: typeof clusterId === "string" ? clusterId : "unknown",
-          summary: "test create-tenant plan",
+          summary: "test tenant-create plan",
           steps: [{ name: "attest-target", title: "Attest the target cluster" }],
           warnings: [],
           requiredSecrets: [],
@@ -196,7 +196,7 @@ describe("streaming plan path runs the crypto gate (runGuards fix)", () => {
     const store = new CredentialStore({ db: db.db, logger });
     // CredentialStore's constructor upserts keystore.mode=plaintext, so set the desired mode AFTER it.
     db.sqlite.prepare("UPDATE meta SET value=? WHERE key='keystore.mode'").run(mode);
-    const runDefinitions = new Map<RunKind, AnyRunDefinition>([["create-tenant", streamingCreateTenantDef()]]);
+    const runDefinitions = new Map<RunKind, AnyRunDefinition>([["tenant-create", streamingCreateTenantDef()]]);
     const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
     return { db, executor };
   }
@@ -210,7 +210,7 @@ describe("streaming plan path runs the crypto gate (runGuards fix)", () => {
 
   it("refuses a streamed create-tenant onto a real cluster under plaintext — the gate now fires on the streaming path", async () => {
     const { db, executor } = make();
-    const { runId } = await executor.planStreamed("create-tenant", { clusterId: "cls_real" });
+    const { runId } = await executor.planStreamed("tenant-create", { clusterId: "cls_real" });
     await executor.settle(runId);
     const run = getRun(db.db, runId);
     expect(run?.status).toBe("failed");
@@ -220,7 +220,7 @@ describe("streaming plan path runs the crypto gate (runGuards fix)", () => {
 
   it("plans a streamed create-tenant onto a rehearsal cluster (gate open)", async () => {
     const { db, executor } = make();
-    const { runId } = await executor.planStreamed("create-tenant", { clusterId: "cls_reh" });
+    const { runId } = await executor.planStreamed("tenant-create", { clusterId: "cls_reh" });
     await executor.settle(runId);
     const run = getRun(db.db, runId);
     expect(run?.status).toBe("planned");
@@ -230,7 +230,7 @@ describe("streaming plan path runs the crypto gate (runGuards fix)", () => {
 
   it("plans a streamed create-tenant onto a real cluster once the store is no longer plaintext", async () => {
     const { db, executor } = make("passphrase");
-    const { runId } = await executor.planStreamed("create-tenant", { clusterId: "cls_real" });
+    const { runId } = await executor.planStreamed("tenant-create", { clusterId: "cls_real" });
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("planned");
   });

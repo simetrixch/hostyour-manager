@@ -91,7 +91,7 @@ const clientRunKindYaml = (name: string, word: string): string => [
 export function fixturePrograms(): Record<string, string> {
   return {
     // TWO run kinds run deploy-cluster — redeploy's master arm (m1/master) and deploy-slave's machine
-    // layer (s1/slave) — so the identity rows take either spelling; books_cluster and build_plane
+    // layer (s1/slave) — so the identity rows take either spelling; books_fqdn and build_plane_fqdn
     // carry the master's domain as their fallback, because the master arm legitimately sends
     // neither (the real program defaults them to the machine's own domain) while a slave that
     // sent its OWN domain goes red.
@@ -102,8 +102,8 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "operator_user", pattern: "^(m1|ubuntu)$" },
       { answer: "letsencrypt_email", pattern: "^[^@]+@[^@]+$" },
       { answer: "letsencrypt_server", pattern: "^https://" },
-      { answer: "books_cluster", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
-      { answer: "build_plane", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
+      { answer: "books_fqdn", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
+      { answer: "build_plane_fqdn", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
     ]),
     // elevation_password is deliberately NOT declared, although the real deploy-platform-services declares
     // it: the ENGINE fills that answer from the password the POST carries beside the answers
@@ -117,7 +117,7 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
       { answer: "stage", pattern: "^prod$" },
       { answer: "role", pattern: "^(master|slave)$" },
-      { answer: "books_cluster", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
+      { answer: "books_fqdn", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
     ]),
     // The deploy-slave family. The branch cut takes the slave's two facts and the committer
     // identity from approve; the machine handshake takes ONE address spelling on both sides
@@ -156,7 +156,7 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "fqdn", pattern: "^m1\\.example\\.com$" },
       { answer: "stage", pattern: "^prod$" },
       { answer: "role", pattern: "^master$" },
-      { answer: "build_plane", pattern: "^m1\\.example\\.com$" },
+      { answer: "build_plane_fqdn", pattern: "^m1\\.example\\.com$" },
       { answer: "unit_apex", pattern: "^example\\.com$" },
       { answer: "platform_domain", pattern: "^example\\.com$" },
       { answer: "catalog_repo", pattern: "^acme/acme-catalog$" },
@@ -165,7 +165,7 @@ export function fixturePrograms(): Record<string, string> {
     // The SLAVE release's regeneration, which runs on the MASTER's surface and is handed nothing out
     // of any cluster map: the real program reads the master's map off the machine itself, so what
     // the manager owes it is the slave's two facts, the pinned role, and the committer identity from
-    // approve. A row for build_plane or unit_apex here would measure a composition this program
+    // approve. A row for build_plane_fqdn or unit_apex here would measure a composition this program
     // deliberately does not take.
     "regenerate-slave-branch": programYaml("regenerate-slave-branch", [
       { answer: "fqdn", pattern: "^s1\\.example\\.com$" },
