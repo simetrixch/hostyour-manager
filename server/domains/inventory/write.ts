@@ -131,7 +131,7 @@ export async function createServer(db: Db, creds: CredentialStore, actor: string
 export async function deleteServer(db: Db, creds: CredentialStore, actor: string, id: string): Promise<void> {
   const row = db.select().from(servers).where(eq(servers.id, id)).get();
   if (!row) throw errValidation(`server ${id} not found`);
-  if (isMasterRole(row.role)) throw errValidation("The master (this controller) cannot be deleted.");
+  if (isMasterRole(row.role)) throw errValidation("The master (this manager) cannot be deleted.");
   const cluster = db.select().from(clusters).where(eq(clusters.serverId, id)).get();
   if (cluster) throw errValidation("This server has a cluster — remove the cluster first (a rebuild/remove Run), not delete.");
   for (const c of await creds.list({ serverId: id })) await creds.purge(c.id);

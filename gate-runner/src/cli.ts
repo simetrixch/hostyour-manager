@@ -5,9 +5,9 @@
 // from inside (fence.ts self-probe, fail-closed — the same SANDBOX_DEGRADED refusal the HTTP path
 // made, only the fence is now a Calico NetworkPolicy instead of host nftables), runs the gates
 // over the cloned tree, and writes the frozen GateReport to a file the pipeline's publish step turns
-// into the ConfigMap the Controller reads. Exit 0 iff a report was written (a gate FAIL is a report
+// into the ConfigMap the Manager reads. Exit 0 iff a report was written (a gate FAIL is a report
 // verdict, not a crash); exit non-zero only on an internal error that produced NO report, which the
-// pipeline's `finally` publish step then surfaces as a synthetic fail so the Controller never hangs.
+// pipeline's `finally` publish step then surfaces as a synthetic fail so the Manager never hangs.
 import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { GateReport, SandboxAttestation } from "../../shared/gates.ts";
@@ -67,9 +67,9 @@ export function parseEnv(env: NodeJS.ProcessEnv): CliInputs {
     },
     fence: {
       mustFailTargets: csv(env.MUST_FAIL_TARGETS),
-      controllerAddr: req(env, "CONTROLLER_ADDR"),
+      managerAddr: req(env, "MANAGER_ADDR"),
       mustPassTarget: req(env, "MUST_PASS_TARGET"),
-      // The Controller attests it confirmed the must-fail targets are listening before dispatch;
+      // The Manager attests it confirmed the must-fail targets are listening before dispatch;
       // fail-closed default false so an unset flag never masquerades as a proven precondition.
       confirmedListening: env.CONFIRMED_LISTENING === "true",
       timeoutMs: intEnv(env, "FENCE_TIMEOUT_MS", 3000),
@@ -79,14 +79,14 @@ export function parseEnv(env: NodeJS.ProcessEnv): CliInputs {
 }
 
 /** Prove the fence, then run the gates over the cloned workspace, returning the frozen report. If the
- *  fence self-probe is not green OR the Controller did not attest confirmed-listening, it REFUSES to
+ *  fence self-probe is not green OR the Manager did not attest confirmed-listening, it REFUSES to
  *  render untrusted code and returns a gate-less report carrying the degraded sandbox — the
- *  Controller's own sandbox re-check (sandboxGreen) then fails the plan. `connect`/`now` are injectable
+ *  Manager's own sandbox re-check (sandboxGreen) then fails the plan. `connect`/`now` are injectable
  *  for tests. */
 export async function runGateCli(inputs: CliInputs, connect?: ConnectFn, now: () => number = Date.now): Promise<GateReport> {
-  // Probe with the Controller's REAL confirmed-listening attestation: sandboxGreen requires it AND the
+  // Probe with the Manager's REAL confirmed-listening attestation: sandboxGreen requires it AND the
   // three egress probes, so a missing attestation OR a fence that is not holding both fail closed below,
-  // and the degraded report carries the truthful (not-green) sandbox the Controller re-checks.
+  // and the degraded report carries the truthful (not-green) sandbox the Manager re-checks.
   const sandbox: SandboxAttestation = await selfProbe(inputs.fence, connect);
   const degraded = (): GateReport =>
     assembleReport({
@@ -118,7 +118,7 @@ export async function runGateCli(inputs: CliInputs, connect?: ConnectFn, now: ()
 
 /** Thin process wrapper: parse env, run, write REPORT_OUT, exit 0. Any throw (bad wiring, an
  *  unreadable workspace) exits 1 with NO report — the pipeline's publish step then writes a synthetic
- *  fail so the Controller's plan is rejected rather than hung. */
+ *  fail so the Manager's plan is rejected rather than hung. */
 export async function main(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const reportOut = req(env, "REPORT_OUT");
   const inputs = parseEnv(env);

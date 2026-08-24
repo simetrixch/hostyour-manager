@@ -50,7 +50,7 @@ import { errValidation } from "../../../kernel/errors.ts";
 //                  apache2-utils. The bootstrap needs none of them now: the manager fetches the
 //                  bytes and SFTP carries them.
 //   the CHECKOUTS  `/srv/ansiwise-catalog` is `git_clone`'s (digita-deploy
-//                  ansiwise/programs/deploy-gitops.yaml). `/srv/hostyour-cloud` is declared by no
+//                  ansiwise/programs/deploy-platform-services.yaml). `/srv/hostyour-cloud` is declared by no
 //                  program at all, and THAT IS A GAP THIS MODULE MAY NOT FILL. Cloning a private
 //                  repository needs a credential, and a credential can reach a single command only
 //                  through that command's argument list or its environment — the first stands in
@@ -61,7 +61,7 @@ import { errValidation } from "../../../kernel/errors.ts";
 //                  so neither value passes through a caller. The material belongs on such a row.
 //
 //                  AND THE ORDER IS THE REVERSE OF THE ONE THE BASH USED, which is why this is a
-//                  gap and not an oversight: deploy-gitops's catalogue row reads its origin from
+//                  gap and not an oversight: deploy-platform-services's catalogue row reads its origin from
 //                  `/srv/hostyour-cloud/configs/config.<stage>` and its credential from
 //                  `secrets.<stage>`, so the MATERIAL has to stand before the CATALOGUE can be
 //                  cloned by a step — while a program can only run once the catalogue is there.
@@ -115,7 +115,7 @@ export const BOOTSTRAP_HOME = "~/";
 
 /** WHERE the catalogue stands on the machine: the checkout the serving binary reads its programs and
  *  its `ansiwise.yaml` from. The machine's own path and not this module's invention — digita-deploy
- *  `ansiwise/programs/deploy-gitops.yaml`'s `git_clone` row clones the catalogue repository to
+ *  `ansiwise/programs/deploy-platform-services.yaml`'s `git_clone` row clones the catalogue repository to
  *  exactly this path, and the resident service is given `--programs` out of it. */
 export const CATALOG_CHECKOUT = "/srv/ansiwise-catalog";
 
@@ -141,7 +141,7 @@ export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
 export const ANSIWISE_SERVICE_UNIT = "ansiwise.service";
 
 /** The file the resident service reads its token out of, and the file install-service writes it to.
- *  The machine's own: digita-deploy `ansiwise/programs/deploy-gitops.yaml`'s `file_from_vault` row
+ *  The machine's own: digita-deploy `ansiwise/programs/deploy-platform-services.yaml`'s `file_from_vault` row
  *  writes this path out of the entry it mints at `<stage>/manager-host/ansiwise`. */
 export const SERVICE_TOKEN_FILE = "/etc/ansiwise/service-token";
 
@@ -461,7 +461,7 @@ export interface ServiceRequest {
  *  which is the one thing that knows the command a unit has to carry — it renders `ExecStart` out of
  *  the options it was itself given, checks the three lines the unit cannot work without, writes the
  *  token file and the unit, reloads the service manager and enables the unit (ansiwise-cli
- *  bin/ansiwise_rest.dart `_installService`). digita-deploy's deploy-gitops states the same rule from
+ *  bin/ansiwise_rest.dart `_installService`). digita-deploy's deploy-platform-services states the same rule from
  *  the other side: "The unit that starts the service and the switch that turns it on are the
  *  binary's own act."
  *
@@ -574,14 +574,14 @@ async function readServiceToken(machine: PlacementMachine, elevationPassword: st
   if (read.code !== 0 || token.length === 0) {
     throw errValidation(
       `${machine.name} answers nothing readable at ${SERVICE_TOKEN_FILE}, and that value is the whole authentication of ` +
-      "the resident surface — the deploy-gitops program's file_from_vault row writes it out of the entry it mints at " +
-      `<stage>/manager-host/ansiwise. Run deploy-gitops on ${machine.name} first, then enable the service again`,
+      "the resident surface — the deploy-platform-services program's file_from_vault row writes it out of the entry it mints at " +
+      `<stage>/manager-host/ansiwise. Run deploy-platform-services on ${machine.name} first, then enable the service again`,
     );
   }
   if (!WORD_RE.test(token)) {
     throw errValidation(
       `${SERVICE_TOKEN_FILE} on ${machine.name} does not hold a token — it carries something that is not one. Delete it ` +
-      "together with the <stage>/manager-host/ansiwise entry and run deploy-gitops again, which mints a fresh one; a " +
+      "together with the <stage>/manager-host/ansiwise entry and run deploy-platform-services again, which mints a fresh one; a " +
       "service installed with what stands there now would present it to nobody",
     );
   }

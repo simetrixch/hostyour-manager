@@ -1,7 +1,7 @@
 // Reading WHO a host lets in, and recording it on the server row.
 //
-// WHAT IS READ. `~/.ssh/authorized_keys` of the login user this controller connects as — the same
-// file the adopt run appends the controller's own key to, and the same file the two operator-key
+// WHAT IS READ. `~/.ssh/authorized_keys` of the login user this manager connects as — the same
+// file the adopt run appends the manager's own key to, and the same file the two operator-key
 // acts edit. It is sshd's default and every host this platform installs uses it.
 //
 // WHAT IS THEREFORE NOT READ, and it is a real limit rather than an oversight: sshd can be told to
@@ -12,9 +12,9 @@
 //
 // THE HOST SENDS LINES, THE CONSOLE DECIDES WHAT THEY ARE. The script prints the file verbatim and
 // makes no judgement at all: fingerprints are taken here with node's own crypto (the same function
-// that produced every fingerprint this controller has ever stored), and each line is classified
+// that produced every fingerprint this manager has ever stored), and each line is classified
 // against two things only this side knows — the fingerprints of the ssh_key credentials sealed for
-// this server, and the operator keys this controller holds. A host-side classification would have
+// this server, and the operator keys this manager holds. A host-side classification would have
 // to be handed both, which is how a script ends up carrying the answer it was supposed to measure.
 //
 // No line is classified by its comment: a comment is text on the machine, and anyone who can
@@ -64,16 +64,16 @@ exit 0
  * Turn the probe's stdout into the facts: fingerprint every key line, classify each one, and count
  * the lines that are neither blank, nor a `#` comment, nor parsable as a key.
  *
- * `controllerFingerprints` are the fingerprints of the ssh_key credentials sealed for THIS server —
+ * `managerFingerprints` are the fingerprints of the ssh_key credentials sealed for THIS server —
  * rotated ones included, because a superseded key can still be sitting in the file and reporting it
- * as a stranger's would be false. They are the ONLY thing that makes a line "controller": the
+ * as a stranger's would be false. They are the ONLY thing that makes a line "manager": the
  * marker comment adopt writes is not consulted (anyone with a shell can type it into the file).
- * `operatorKeys` is every operator key this controller holds, which is what makes an operator line
+ * `operatorKeys` is every operator key this manager holds, which is what makes an operator line
  * a fact rather than a comment somebody typed.
  */
 export function parseAuthorizedKeysProbe(
   stdout: string,
-  ctx: { controllerFingerprints: readonly string[]; operatorKeys: readonly OperatorKeyIdentity[] },
+  ctx: { managerFingerprints: readonly string[]; operatorKeys: readonly OperatorKeyIdentity[] },
 ): AuthorizedKeysProbe {
   const lines = stdout.split("\n").map((l) => l.trimEnd());
   const keys: AuthorizedKeyFact[] = [];
@@ -125,7 +125,7 @@ export async function recordAuthorizedKeysReading(
     return null;
   }
   const probe = parseAuthorizedKeysProbe(cap.stdout, {
-    controllerFingerprints: sealed.map((c) => c.fingerprint),
+    managerFingerprints: sealed.map((c) => c.fingerprint),
     operatorKeys: listOperatorKeyIdentities(ctx.db),
   });
   const reading = authorizedKeysReading(probe, { runId: ctx.runId, observedAt: Date.now() });
@@ -136,8 +136,8 @@ export async function recordAuthorizedKeysReading(
   ctx.log(
     "meta",
     `Authorized keys: ${reading.state} — ${reading.doc.keys.length} key(s) in ~/.ssh/authorized_keys ` +
-    `(${byKind("controller")} this controller's, ${byKind("operator")} operator, ${byKind("foreign")} placed by nothing here` +
-    `${reading.doc.unparsed > 0 ? `, ${reading.doc.unparsed} line(s) this controller could not read as a key` : ""}); only a run takes a new reading.`,
+    `(${byKind("manager")} this manager's, ${byKind("operator")} operator, ${byKind("foreign")} placed by nothing here` +
+    `${reading.doc.unparsed > 0 ? `, ${reading.doc.unparsed} line(s) this manager could not read as a key` : ""}); only a run takes a new reading.`,
   );
   for (const k of reading.doc.keys.filter((x) => x.kind === "foreign")) {
     ctx.log("meta", `  foreign key ${k.fingerprint} (${k.type})${k.comment ? ` — comment: ${k.comment}` : " — no comment"}`);

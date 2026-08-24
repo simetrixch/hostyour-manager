@@ -7,12 +7,12 @@ import { addCpu, addMemory, timesCpu, timesMemory } from "./quantity.ts";
 // that drift.
 //
 // WHERE THE NUMBERS LIVE, and why not here. The three presets below are the SEED — what a fresh
-// installation starts with. The table an installation actually runs on lives in the Controller's own
+// installation starts with. The table an installation actually runs on lives in the Manager's own
 // inventory (server/db/schema/inventory.ts, unitSizes), because it has to be editable while the
 // platform runs: a size is a commercial fact, and it changes without a release.
 //
 // HOW A CHANGE REACHES A CLUSTER. Not by a chart reading this table — no cluster can read the
-// Controller's database. The Controller RESOLVES the size when it writes a unit's registration, so the
+// Manager's database. The Manager RESOLVES the size when it writes a unit's registration, so the
 // registration carries the four figures literally, and ArgoCD delivers them like every other value in
 // it. A registration therefore states what its unit gets, with nothing to look up; the cost is that
 // changing the table means rewriting the registrations that name that size, which is a git commit per

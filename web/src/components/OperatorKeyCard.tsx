@@ -2,7 +2,7 @@ import type { OperatorKeyView, ServerView } from "../../../shared/api-types.ts";
 import { operatorKeyMarker } from "../../../shared/operator-keys.ts";
 import { operatorKeyPlacement } from "../authorizedKeysState.ts";
 
-// ONE operator key, and where it stands on every server this controller knows. Props-only, like
+// ONE operator key, and where it stands on every server this manager knows. Props-only, like
 // TailnetActions and PasswordLoginActions: which acts a row may offer is decided by
 // operatorKeyPlacement (authorizedKeysState.ts, a pure module a test can reach), and what each one
 // does is decided by the run it plans — this renders rows and buttons.
@@ -29,7 +29,7 @@ export function OperatorKeyCard(props: {
       <div className="servercard__target">{entry.fingerprint}</div>
       <p className="servercard__reading">
         Placed as a line ending <code>{operatorKeyMarker(entry.label)}</code> — the marker a removal matches, and one this
-        controller&apos;s own key can never carry. On {entry.onServerIds.length} of {servers.length} server(s) as they were last read.
+        manager&apos;s own key can never carry. On {entry.onServerIds.length} of {servers.length} server(s) as they were last read.
       </p>
       <ul className="cards cards--nested">
         {servers.map((s) => {

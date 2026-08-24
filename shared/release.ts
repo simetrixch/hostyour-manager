@@ -3,7 +3,7 @@
 // `global.releaseTagFilter` in the platform repo's platform/values-common.yaml, the inner pattern
 // without anchors. No test can compare them: the two literals live in two repositories and this one
 // cannot see the other. What compares them is the `release.grammar_mirror` boot self-check
-// (server/boot/selfchecks.ts), on a running Controller, where both sides are present.
+// (server/boot/selfchecks.ts), on a running Manager, where both sides are present.
 //
 // The channel CEILING (alpha->dev, beta->test, stable->prod) is deliberately NOT here: it is read
 // from the tag and enforced in the release pipeline, at the point that writes, and nowhere else.
@@ -50,9 +50,9 @@ export const RELEASE_VERSION_RE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0
 /** Compose a tag from its parts, stamping `at` as the UTC ts14.
  *
  *  A UNIT release does NOT come through here: its own repo carries the release script, which mints (or
- *  reuses) the tag repo-side, and the controller only reads back what that script minted. A CLUSTER
+ *  reuses) the tag repo-side, and the manager only reads back what that script minted. A CLUSTER
  *  release has no such script to call — the platform GitOps repo is configuration, there is nothing in
- *  it to build — so the controller's set-pin step is the minting point, and this is where it composes
+ *  it to build — so the manager's set-pin step is the minting point, and this is where it composes
  *  the tag it is about to mint. */
 export function composeReleaseTag(version: string, channel: ReleaseChannel, at: Date): string {
   const ts14 = at.toISOString().replace(/[-:T]/g, "").slice(0, 14);

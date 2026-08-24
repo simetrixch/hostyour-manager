@@ -145,7 +145,7 @@ export function TenantDetail() {
           {/* This page reads pure SQL and runs NO live checks of its own, so it prints no revision — it
               holds none, and neither does the tenant's registration. The live targeted-vs-deployed answer
               lives one click back on the Tenants card, where the live route reads both off the base
-              Application and gives them a verdict (server/domains/onboarding/api.ts driftOf). */}
+              Application and gives them a verdict (server/domains/units/api.ts driftOf). */}
           <p className="page__desc">
             {t.domain} · {t.stage}
             {t.owner ? ` · ${t.owner}` : ""}

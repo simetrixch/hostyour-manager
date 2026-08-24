@@ -5,7 +5,7 @@ import type { TenantAdminState } from "../../shared/enums.ts";
 // families. The Tenants list and the tenant detail page both show it, so stating it once is what
 // stops one screen from calling a tenant fine that the other calls unreachable.
 //
-// The check itself is `check-tenants` (server/domains/onboarding/check-tenants.run.ts), started
+// The check itself is `check-tenants` (server/domains/units/check-tenants.run.ts), started
 // every six hours by boot/check-tenants-schedule.ts. It writes three columns and nothing here
 // re-derives its verdict: the THRESHOLD that turns a count into a state belongs to the check, and a
 // second opinion computed on this side would be a second place that has to agree about what "no

@@ -32,7 +32,7 @@
 export const TENANT_GUID_PLACEHOLDER = "<guid>";
 
 /** The three members every tenant always has, in the order the server lists them
- *  (server/domains/onboarding/tenant-fanout.ts `TENANT_TRIO`). Restated here because shared/ is the
+ *  (server/domains/units/tenant-fanout.ts `TENANT_TRIO`). Restated here because shared/ is the
  *  only code the browser bundle may import and this list lives in the server domain layer; the
  *  read-out would otherwise have nothing to show for the members no operator chooses. */
 const TENANT_TRIO = ["auth", "jobs", "report"] as const;
@@ -53,12 +53,12 @@ export interface TenantPlacement {
   /** The cluster's public domain, likewise read off that row. */
   domain: string;
   /** The GitOps registration FILE in catalog, `registrations/<guid>/<stage>.yaml` — the exact
-   *  path the tenant registry writes and guards (server/domains/onboarding/tenant-registry.ts
+   *  path the tenant registrations writer writes and guards (server/domains/units/tenant-registrations.ts
    *  `registrationPath` + TENANT_REGISTRATION_GUARD). ONE file: the guid is the directory, the stage is
    *  the file name, and the body carries neither. */
   registrationPath: string;
   /** The Kubernetes namespaces on that cluster — ONE PER MEMBER, each `<guid>-<member>`
-   *  (server/domains/onboarding/tenant-fanout.ts `memberNamespace`). A tenant is not one namespace: the
+   *  (server/domains/units/tenant-fanout.ts `memberNamespace`). A tenant is not one namespace: the
    *  trio auth/jobs/report is there for every tenant and each app the operator picks adds its own, so
    *  what the wizard shows is the whole set it is about to create. Each namespace is also the name of
    *  that member's AppProject. */

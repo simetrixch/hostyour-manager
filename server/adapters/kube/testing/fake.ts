@@ -1,7 +1,7 @@
 // In-memory kube fakes for the onboarding domain tests — no cluster, no network. Script the
 // Application status the master watch observes, and the smoke/deploy-state a cluster read returns.
 import type { MasterArgoReader, ArgoAppStatus, ArgoAppStatusMap, ClusterReader, SmokeResult, DeployState, MasterProjectWriter, AppProjectManifest, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, ClusterKubeResolver, ResolvedClusterKube, BuildRbacWriter, BuildRbacGrant, BuildRbacObject, RoleManifest, RoleBindingManifest, RepoCredentialWriter, RepoCredentialManifest, JobSpec, JobResult } from "../port.ts";
-import { assertWritableProjectName, isControllerOwned, MISSING_APP_STATUS } from "../kube-map.ts";
+import { assertWritableProjectName, isManagerOwned, MISSING_APP_STATUS } from "../kube-map.ts";
 import { AppError, errValidation } from "../../../kernel/errors.ts";
 
 export class FakeMasterArgoReader implements MasterArgoReader {
@@ -92,7 +92,7 @@ export class FakeClusterReader implements ClusterReader {
        *  gets. A run that could not roll the pods must FAIL rather than report a delivery that only
        *  got as far as the Secret. */
       throwOnRestart?: Error;
-      /** Makes listNamespaces THROW, modelling the cluster this Controller cannot read at all: a slave
+      /** Makes listNamespaces THROW, modelling the cluster this Manager cannot read at all: a slave
        *  that is down, a harvested bearer that expired, a kube API refusing the list. The
        *  cluster-orphan scan has to carry that OUT as an unscanned cluster rather than report the
        *  cluster as holding no orphans. */
@@ -288,8 +288,8 @@ export class FakeMasterProjectWriter implements MasterProjectWriter {
     assertWritableProjectName(project.metadata.name);
     const key = `${namespace}/${project.metadata.name}`;
     const existing = this.store.get(key);
-    if (existing && !isControllerOwned(existing)) {
-      throw errValidation(`refusing to overwrite AppProject "${project.metadata.name}" — it is not Controller-managed`);
+    if (existing && !isManagerOwned(existing)) {
+      throw errValidation(`refusing to overwrite AppProject "${project.metadata.name}" — it is not Manager-managed`);
     }
     this.store.set(key, project);
     return { created: existing === undefined };
@@ -300,8 +300,8 @@ export class FakeMasterProjectWriter implements MasterProjectWriter {
     const key = `${namespace}/${name}`;
     const existing = this.store.get(key);
     if (!existing) return { deleted: false };
-    if (!isControllerOwned(existing)) {
-      throw errValidation(`refusing to delete AppProject "${name}" — it is not Controller-managed`);
+    if (!isManagerOwned(existing)) {
+      throw errValidation(`refusing to delete AppProject "${name}" — it is not Manager-managed`);
     }
     this.store.delete(key);
     return { deleted: true };

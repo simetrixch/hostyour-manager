@@ -26,7 +26,7 @@ const planned = (): PlanStreamResult<Record<string, unknown>> => ({
   plan: {
     kind: "noop",
     targetKind: "self",
-    targetId: "controller",
+    targetId: "manager",
     summary: "validated, ready for approval",
     steps: [{ name: "do-it", title: "Do it" }],
     warnings: [],
@@ -90,7 +90,7 @@ function makeWith(def: AnyRunDefinition): { db: DbHandle; executor: Executor; li
   const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });
   const executor = new Executor({
     db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(),
-    logger: capturing, registry: new Map<RunKind, AnyRunDefinition>([["noop", def]]),
+    logger: capturing, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]),
     sshFactory: noSsh, actor: () => "op_system",
   });
   return { db, executor, lines };
@@ -104,10 +104,10 @@ const metaLines = (db: DbHandle, runId: string): string[] =>
 
 describe("streaming plan — a plan whose outcome the database cannot take", () => {
   // What a validation does when the database it must settle into has gone away. In a test that is a
-  // closed handle; in the controller it is a shutdown that closed it, a full disk, or SQLITE_BUSY.
+  // closed handle; in the manager it is a shutdown that closed it, a full disk, or SQLITE_BUSY.
   // Nothing holds this promise — POST /api/runs/:id/plan answers as soon as the run row exists and
   // SSE takes over — so a throw while settling reaches the process as an unhandled rejection, and
-  // Node's answer to that is to terminate the controller with every other run in flight.
+  // Node's answer to that is to terminate the manager with every other run in flight.
 
   it("a validation that PASSED and cannot be written down says so in the log and settles instead of rejecting", async () => {
     const g = gates();
@@ -197,7 +197,7 @@ describe("streaming plan — a prologue the database cannot take", () => {
   // run — but they are reachable per STATEMENT: SQLITE_FULL, SQLITE_BUSY and a table the schema no
   // longer offers are all decided one statement at a time, so the `runs` insert lands and the two
   // `events` statements do not. Nothing holds this promise, so a throw there reaches the process as
-  // an unhandled rejection, and Node's answer to that is to terminate the controller with every
+  // an unhandled rejection, and Node's answer to that is to terminate the manager with every
   // other run in flight.
   //
   // `DROP TABLE events` is how the test makes exactly those two statements fail while `runs` stays

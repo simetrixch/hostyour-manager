@@ -99,7 +99,7 @@ describe("inventory tenants + tenant_apps", () => {
 // holds — the drizzle declaration narrows the TypeScript type and nothing more, so the insert is made
 // in raw SQL here, the shape a hand-fixed database takes. What a null would cost: SQLite treats NULLs
 // in a unique index as DISTINCT, so such a row sits outside apps_cluster_name_stage_uq entirely, while
-// the table's one writer (upsertAppRow, domains/onboarding/onboard-steps.ts) looks the existing row up
+// the table's one writer (upsertAppRow, domains/units/onboard-steps.ts) looks the existing row up
 // with `stage = ?`, which never matches a NULL — every run would insert a second row beside the first
 // instead of updating it.
 describe("apps.stage", () => {

@@ -13,10 +13,10 @@ function keystoreMode(db: Db): string {
   return db.select().from(meta).where(eq(meta.key, "keystore.mode")).get()?.value ?? "plaintext";
 }
 
-// What the gate below counts is clusters whose ACCESS KEY the controller stores: a slave is reached
+// What the gate below counts is clusters whose ACCESS KEY the manager stores: a slave is reached
 // over a harvested cluster-admin bearer sealed in the keystore. A cluster carrying the master part is
-// reached over the controller pod's own ServiceAccount and no bearer is harvested for it
-// (domains/onboarding/cluster-kube.ts), so it holds nothing the plaintext keystore could expose and
+// reached over the manager pod's own ServiceAccount and no bearer is harvested for it
+// (domains/units/cluster-kube.ts), so it holds nothing the plaintext keystore could expose and
 // is excluded — including a master+slave, whose slave part is its own host.
 function countLiveSlaves(db: Db): number {
   return db
@@ -38,7 +38,7 @@ const slaveCryptoGate: PlanGuard = async (params, deps) => {
 
 // onboard under plaintext: allowed only onto a rehearsal cluster. The BUILD-ONLY form names
 // no cluster at all — it deploys nothing and touches only git, the local Vault and the build plane's
-// own namespaces (the controller's cluster, whose access rides the pod SA, not a stored bearer), so
+// own namespaces (the manager's cluster, whose access rides the pod SA, not a stored bearer), so
 // there is nothing the plaintext keystore could expose and the gate passes it through.
 const onboardCryptoGate: PlanGuard = async (params, deps) => {
   if (keystoreMode(deps.db) !== "plaintext") return;
@@ -155,7 +155,7 @@ export async function runGuards(kind: RunKind, params: unknown, deps: PlannerDep
 
 /** The step name pinned as step 0 of every MUTATING run: its fail-closed precondition. Named once,
  *  here, because two places must key on the SAME string — the boot assertion below, which MAKES the
- *  invariant true for the whole registry, and Executor.skipStep, which RELIES on it to refuse the one
+ *  invariant true for the whole run-definitions map, and Executor.skipStep, which RELIES on it to refuse the one
  *  step an operator may never wave through. */
 export const ATTEST_TARGET_STEP = "attest-target";
 
@@ -174,11 +174,11 @@ export function isMutatingPrecondition(def: AnyRunDefinition | undefined, stepNa
  *. add-app is crypto-gated too (it fans a new app into a live tenant), so it belongs in the
  * armed set — omitting it would let a future edit silently disarm its gate.
  */
-export function assertGuardsArmed(registry: Map<RunKind, AnyRunDefinition>): void {
+export function assertGuardsArmed(runDefinitions: Map<RunKind, AnyRunDefinition>): void {
   for (const kind of ["deploy-slave", "onboard", "create-tenant", "add-app"] as const) {
     if (KIND_GUARDS[kind].length === 0) throw new Error(`no crypto gate armed on ${kind}`);
   }
-  for (const def of registry.values()) {
+  for (const def of runDefinitions.values()) {
     if (!def.mutating) continue;
     if (def.steps({})[0]?.name !== ATTEST_TARGET_STEP) {
       throw new Error(`mutating run ${def.kind} must start with ${ATTEST_TARGET_STEP}`);

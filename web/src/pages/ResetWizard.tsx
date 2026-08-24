@@ -1,18 +1,18 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { BranchView, ResetResult } from "../../../shared/api-types.ts";
-import { getBranches, resetController, ApiRequestError } from "../api.ts";
+import { getBranches, resetManager, ApiRequestError } from "../api.ts";
 import { IconLock } from "../components/icons.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-const KIND_ORDER: Record<BranchView["kind"], number> = { master: 0, controller: 1, slave: 2, other: 3 };
+const KIND_ORDER: Record<BranchView["kind"], number> = { master: 0, manager: 1, slave: 2, other: 3 };
 
 /** The full platform reset: strip the selected install branches' pointer files, delete those
- *  branches on GitHub, and (optionally) wipe the cluster state out of the Controller DB. Safeguards,
- *  in order: master is LOCKED (never deletable, also refused server-side); the controller's own
+ *  branches on GitHub, and (optionally) wipe the cluster state out of the Manager DB. Safeguards,
+ *  in order: master is LOCKED (never deletable, also refused server-side); the manager's own
  *  branch needs an explicit OFF-by-default opt-in; nothing fires until the operator types RESET.
  *  The VMs themselves are restored separately via Hyper-V — this wizard touches ONLY GitHub and
- *  the Controller DB. */
+ *  the Manager DB. */
 export function ResetWizard() {
   const [branches, setBranches] = useState<BranchView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,12 +30,12 @@ export function ResetWizard() {
       .then((d) => {
         if (!alive) return;
         setBranches(d.branches);
-        // Slaves are what a reset normally removes — pre-checked. master/controller/other never are.
+        // Slaves are what a reset normally removes — pre-checked. master/manager/other never are.
         setSelected(new Set(d.branches.filter((b) => b.kind === "slave").map((b) => b.name)));
       })
       .catch((e: unknown) => {
         if (!alive) return;
-        // GitHub not configured on this Controller: a DB-only reset must still be possible.
+        // GitHub not configured on this Manager: a DB-only reset must still be possible.
         if (e instanceof ApiRequestError && e.code === "NOT_CONFIGURED") {
           setGithubUnavailable(true);
           setBranches([]);
@@ -48,7 +48,7 @@ export function ResetWizard() {
     };
   }, []);
 
-  const controller = branches?.find((b) => b.kind === "controller");
+  const manager = branches?.find((b) => b.kind === "manager");
   const armed = confirm === "RESET" && (selected.size > 0 || wipeDb) && !busy;
 
   function toggle(name: string): void {
@@ -65,7 +65,7 @@ export function ResetWizard() {
     setIncludeMaster(next);
     // Withdrawing the opt-in also unselects the branch — a disabled-but-checked box would
     // silently keep it in the payload, and the UI must mirror the request 1:1.
-    if (!next && controller && selected.has(controller.name)) toggle(controller.name);
+    if (!next && manager && selected.has(manager.name)) toggle(manager.name);
   }
 
   async function submit(e: FormEvent): Promise<void> {
@@ -74,7 +74,7 @@ export function ResetWizard() {
     setBusy(true);
     setError(null);
     try {
-      setResult(await resetController({ confirm, wipeDb, deleteBranches: [...selected].sort(), includeMaster }));
+      setResult(await resetManager({ confirm, wipeDb, deleteBranches: [...selected].sort(), includeMaster }));
     } catch (err) {
       setError(msg(err));
     }
@@ -145,7 +145,7 @@ export function ResetWizard() {
 
         {result.db.wiped && (
           <div className="card">
-            <h3 className="dangercard__title">Controller database wiped</h3>
+            <h3 className="dangercard__title">Manager database wiped</h3>
             <ul className="resetsummary">
               {Object.entries(result.db.rows).map(([table, n]) => (
                 <li key={table}>
@@ -169,7 +169,7 @@ export function ResetWizard() {
 
         {dbError !== null && (
           <div className="card">
-            <h3 className="dangercard__title">Controller database NOT wiped</h3>
+            <h3 className="dangercard__title">Manager database NOT wiped</h3>
             <p role="alert" className="alert alert--danger">{dbError}</p>
             <p className="field__hint">
               The wipe is one transaction, so the database is exactly the one it was before this reset — but whatever is
@@ -189,7 +189,7 @@ export function ResetWizard() {
         )}
         <div className="actions">
           <button type="button" className="btn" onClick={() => window.location.assign("/")}>
-            Reload the Controller
+            Reload the Manager
           </button>
         </div>
       </section>
@@ -205,13 +205,13 @@ export function ResetWizard() {
         <div>
           <span className="page__eyebrow">Danger zone</span>
           <h2 className="page__title">Reset</h2>
-          <p className="page__desc">Wind the platform back to zero: delete install branches on GitHub and wipe this Controller&apos;s database.</p>
+          <p className="page__desc">Wind the platform back to zero: delete install branches on GitHub and wipe this Manager&apos;s database.</p>
         </div>
       </header>
 
       <p role="alert" className="alert alert--danger">
-        This is destructive and immediate. Run it while the Controller is still alive — GitHub cleanup must happen
-        BEFORE any VM restore. It touches ONLY GitHub and the Controller database; the per-slave Vault mounts, ArgoCD
+        This is destructive and immediate. Run it while the Manager is still alive — GitHub cleanup must happen
+        BEFORE any VM restore. It touches ONLY GitHub and the Manager database; the per-slave Vault mounts, ArgoCD
         instances and Headlamp contexts on the master disappear only when you restore the master VM — if you do NOT
         restore the master, run the <span className="mono">remove-slave</span> program on the master per slave afterwards.
       </p>
@@ -226,7 +226,7 @@ export function ResetWizard() {
         <h3 className="dangercard__title">1 · Branches to delete</h3>
         {githubUnavailable ? (
           <p className="field__hint">
-            GitHub is not configured on this Controller (GITHUB_REPO + GITHUB_WRITE_PAT) — only the database can be reset
+            GitHub is not configured on this Manager (GITHUB_REPO + GITHUB_WRITE_PAT) — only the database can be reset
             here.
           </p>
         ) : (
@@ -245,14 +245,14 @@ export function ResetWizard() {
                     </label>
                   </li>
                 );
-              const disabled = b.kind === "controller" && !includeMaster;
+              const disabled = b.kind === "manager" && !includeMaster;
               return (
                 <li key={b.name}>
                   <label className={disabled ? "checkrow checkrow--locked" : "checkrow"}>
                     <input type="checkbox" checked={selected.has(b.name)} disabled={disabled} onChange={() => toggle(b.name)} />
                     <span className="checkrow__name">{b.name}</span>
                     <span className="checkrow__meta">
-                      {b.kind === "controller" ? "the controller's own branch · " : ""}
+                      {b.kind === "manager" ? "the manager's own branch · " : ""}
                       {b.compare ? `${b.compare.aheadBy} ahead · ${b.compare.changedFiles} ${b.compare.changedFiles === 1 ? "file" : "files"} changed` : "not compared"}
                     </span>
                   </label>
@@ -262,34 +262,34 @@ export function ResetWizard() {
           </ul>
         )}
 
-        {controller && (
+        {manager && (
           <div className="optin">
             <label className="checkrow">
               <input type="checkbox" checked={includeMaster} onChange={toggleIncludeMaster} />
               <span>
-                Also allow deleting <span className="mono">{controller.name}</span> — the controller&apos;s own install branch
+                Also allow deleting <span className="mono">{manager.name}</span> — the manager&apos;s own install branch
               </span>
             </label>
             <p className="optin__warn">
-              Keep this OFF to re-bootstrap by checking out the existing <span className="mono">{controller.name}</span>{" "}
+              Keep this OFF to re-bootstrap by checking out the existing <span className="mono">{manager.name}</span>{" "}
               branch — your install overrides survive. Turn it ON only for a true from-zero re-bootstrap off master, and
-              save this branch&apos;s diff from the Branches page first: it lists the overrides (controller deploy flag,
+              save this branch&apos;s diff from the Branches page first: it lists the overrides (manager deploy flag,
               sshUser, …) you must re-apply by hand.
             </p>
           </div>
         )}
 
-        <h3 className="dangercard__title">2 · Controller database</h3>
+        <h3 className="dangercard__title">2 · Manager database</h3>
         <label className="checkrow">
           <input type="checkbox" checked={wipeDb} onChange={() => setWipeDb((v) => !v)} />
           <span>
-            Wipe the platform state from the Controller database — servers, clusters, apps, credentials, the operator SSH
+            Wipe the platform state from the Manager database — servers, clusters, apps, credentials, the operator SSH
             keys held for placing, runs and audit. Your operator account and this session survive; the keys do not, and
             every one of them has to be pasted in again.
           </span>
         </label>
         <p className="field__hint">
-          A fresh Controller re-registers the master&apos;s own server row on boot — nothing here is needed to start over.
+          A fresh Manager re-registers the master&apos;s own server row on boot — nothing here is needed to start over.
         </p>
         {wipeDb && (
           <p className="field__hint">
@@ -311,8 +311,8 @@ export function ResetWizard() {
           )}
           <li>
             {wipeDb
-              ? "Wipe the Controller database (cluster state and the stored operator SSH keys; operators/session kept)"
-              : "Leave the Controller database untouched"}
+              ? "Wipe the Manager database (cluster state and the stored operator SSH keys; operators/session kept)"
+              : "Leave the Manager database untouched"}
           </li>
           <li>
             Never touch <span className="mono">master</span> — it stays, always

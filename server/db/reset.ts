@@ -18,7 +18,7 @@ const WIPE_ORDER = [
   "events", "steps", "run_locks", "runs",
   "credentials", "tenant_apps", "tenants", "apps", "clusters", "servers",
   // operator_keys references nothing and nothing references it, so its place in the order is free.
-  // It is WIPED and not kept: a reset takes the controller back to a fresh install, and a list of
+  // It is WIPED and not kept: a reset takes the manager back to a fresh install, and a list of
   // human public keys it would go on offering to place on machines it no longer knows is exactly the
   // kind of standing access a reset exists to end. Re-adding one is a paste.
   "operator_keys",
@@ -32,13 +32,13 @@ const WIPE_ORDER = [
 //     executor's slaveCryptoGate reads; wiping either signs the operator out mid-reset and makes the
 //     gate read "plaintext" whatever mode the keystore is really in.
 //   __drizzle_migrations — the migrator's own ledger. Emptied, the next openDb replays the baseline
-//     against tables that already exist and the Controller stops booting.
+//     against tables that already exist and the Manager stops booting.
 //   unit_sizes — EDITED data, not derived data. The boot seed would refill it, which is exactly the
 //     problem: the three rows would come back carrying the SHIPPED figures, silently replacing the
 //     ones this installation sells. Nothing could restore them — the registrations in git carry
 //     resolved numbers, not the table they came from, so after a wipe the table and the units
 //     standing on it would disagree with no record of which was right. A reset ends what the
-//     controller KNOWS (its servers, clusters and units); what it SELLS outlives that.
+//     manager KNOWS (its servers, clusters and units); what it SELLS outlives that.
 // This list and WIPE_ORDER together must name EVERY table in the database. reset.test.ts checks both
 // against sqlite_master, so a table a later migration adds falls into neither list and goes red
 // instead of quietly surviving every wipe.
@@ -58,7 +58,7 @@ export function countLiveRuns(sqlite: Database.Database): number {
  *  the last 5 backups. Makes wipeDb on a surviving master fully reversible — which holds only while
  *  nothing is awaited between this call and the wipe: a row that lands in that gap is destroyed by a
  *  wipe the snapshot cannot undo. Returns the backup path. */
-export function backupControllerDb(sqlite: Database.Database, dataDir: string): string {
+export function backupManagerDb(sqlite: Database.Database, dataDir: string): string {
   const dir = join(dataDir, "backups");
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `pre-reset-${new Date().toISOString().replaceAll(/[:.]/g, "-")}.db`);
@@ -84,7 +84,7 @@ function wipeInFkOrder(sqlite: Database.Database): Record<string, number> {
 /** ONE immediate transaction: drop the two append-only DELETE triggers, wipe in FK order, recreate
  *  the triggers with text identical to the baseline migration's. DDL is transactional in SQLite, so
  *  a failure anywhere rolls back the triggers too. Returns rows deleted per table. */
-export function wipeControllerDb(sqlite: Database.Database): Record<string, number> {
+export function wipeManagerDb(sqlite: Database.Database): Record<string, number> {
   let rows: Record<string, number> = {};
   sqlite.transaction(() => {
     rows = wipeInFkOrder(sqlite);
@@ -100,7 +100,7 @@ export function wipeControllerDb(sqlite: Database.Database): Record<string, numb
  *  BEGIN/ROLLBACK by hand rather than better-sqlite3's transaction(): that helper COMMITS when its
  *  function returns and rolls back only by throwing, so discarding a SUCCESSFUL rehearsal through it
  *  means throwing an error the caller then has to tell apart from a real one. */
-export function rehearseControllerDbWipe(sqlite: Database.Database): void {
+export function rehearseManagerDbWipe(sqlite: Database.Database): void {
   sqlite.exec("BEGIN IMMEDIATE");
   try {
     wipeInFkOrder(sqlite);

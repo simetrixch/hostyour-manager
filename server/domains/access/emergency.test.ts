@@ -15,7 +15,7 @@ const baseEnv = {
   OIDC_ISSUER: "https://idp.example/",
   OIDC_CLIENT_ID: "c",
   OIDC_CLIENT_SECRET: "s",
-  CONTROLLER_VERSION: "test",
+  MANAGER_VERSION: "test",
   DATA_DIR: "/d",
   LOG_LEVEL: "silent",
 };

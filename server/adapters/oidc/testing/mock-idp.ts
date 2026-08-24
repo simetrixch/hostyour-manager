@@ -40,7 +40,7 @@ export async function startMockIdp(opts?: { subject?: string; email?: string; gr
   const kid = "mock-key-1";
   const jwk = { ...(await exportJWK(publicKey)), kid, alg: "ES256", use: "sig" };
   const subject = opts?.subject ?? "idp-user-abc";
-  const clientId = "controller";
+  const clientId = "manager";
   const clientSecret = "test-secret";
   const codes = new Set<string>();
   let email = opts?.email ?? "user@example.com";

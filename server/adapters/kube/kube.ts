@@ -1,7 +1,7 @@
 // The concrete kube adapter behind port.ts — the ONLY module that speaks @kubernetes/client-node
 // (dep-cruiser: adapters own IO libs). Two readers, matching the two access paths:
-//  - KubeMasterArgoReader: the Controller's own cluster over the pod ServiceAccount (the
-//    Controller pod runs ON the master, so the generated Argo Application CRs are local; no SSH
+//  - KubeMasterArgoReader: the Manager's own cluster over the pod ServiceAccount (the
+//    Manager pod runs ON the master, so the generated Argo Application CRs are local; no SSH
 //    tunnel, no mounted kubeconfig — RBAC for the SA is provisioned GitOps-side).
 //  - KubeClusterReader: a target cluster via the slave's CLUSTER-ADMIN bearer from the plane's
 //    credentialIds, or the pod SA's in-cluster access for the master.
@@ -42,7 +42,7 @@ const MISSING_APP = MISSING_APP_STATUS;
 // ---- Construction inputs --------------------------------------------------------------------
 
 /** Master access: the pod ServiceAccount's in-cluster credentials (the production deployment — the
- *  Controller acts on its OWN cluster over SA RBAC), a kubeconfig file path (dev/test override), or
+ *  Manager acts on its OWN cluster over SA RBAC), a kubeconfig file path (dev/test override), or
  *  an already-built KubeConfig (tests/special wiring). */
 export type MasterKubeInput = { inCluster: true } | { kubeconfigPath: string } | { kubeConfig: KubeConfig };
 
@@ -53,7 +53,7 @@ export type MasterKubeInput = { inCluster: true } | { kubeconfigPath: string } |
  *  skip-TLS-verify escape hatch.
  *
  *  The bearer variant is NOT read-only, and nothing on this side narrows it.
- *  Its ONE producer is the resolver (domains/onboarding/cluster-kube.ts), which unseals
+ *  Its ONE producer is the resolver (domains/units/cluster-kube.ts), which unseals
  *  plane.credentialIds.clusterBearer — the token deploy-slave harvested as the mgmt-creds blob's
  *  `argocdToken`, whose contract states plainly that it is CLUSTER-ADMIN on the slave and that "a
  *  leaked blob is RCE across the clusters" (runs/defs/deploy-slave.remote.ts, MgmtCredsBlob). So
@@ -71,7 +71,7 @@ export type ClusterKubeInput = { inCluster: true } | { kubeconfigPath: string } 
  *  cover both access paths. The two master variants let the client library
  *  name themselves (loadFromCluster's fixed inCluster user, or the file's own `users[]`), and the pod
  *  SA behind them really IS narrow: it holds exactly the Roles/ClusterRoles that hostyour-cloud
- *  apps/controller/templates/rbac.yaml binds to the `controller` ServiceAccount. The bearer variant is
+ *  apps/manager/templates/rbac.yaml binds to the `manager` ServiceAccount. The bearer variant is
  *  the slave's cluster-admin token, and is named for THAT. */
 export function buildKubeConfig(input: MasterKubeInput | ClusterKubeInput): KubeConfig {
   if ("kubeConfig" in input) return input.kubeConfig;
@@ -86,7 +86,7 @@ export function buildKubeConfig(input: MasterKubeInput | ClusterKubeInput): Kube
   }
   // The user name never leaves this in-memory KubeConfig (the API server authenticates the TOKEN, and
   // never sees the name), so it exists for exactly one purpose: telling a reader what this client is
-  // holding. It therefore MUST NOT understate it. It once read "controller-readonly",
+  // holding. It therefore MUST NOT understate it. It once read "manager-readonly",
   // and two independent readers reasoned from that name that a cluster-scoped
   // delete (deleteTenantCr) could not be permitted on a slave — one step from a wrong conclusion, and from
   // designing around a constraint that does not exist. Understating a credential is the dangerous
@@ -322,7 +322,7 @@ export class KubeClusterReader implements ClusterReader {
    *  Secret name repeats — and it keeps the grant at `create` + `delete` with no read verb, unlike a
    *  read-then-replace. Secrets carry no finalizers and no propagation, so the delete is complete when
    *  it returns and the create cannot race it. `stringData` hands the API server plain UTF-8 and lets
-   *  it do the base64, so no credential is ever encoded in the Controller. NEEDS a live cluster —
+   *  it do the base64, so no credential is ever encoded in the Manager. NEEDS a live cluster —
    *  integration-tested on the live clusters. */
   async applySecret(namespace: string, name: string, data: Record<string, string>): Promise<void> {
     await this.deleteSecret(namespace, name);

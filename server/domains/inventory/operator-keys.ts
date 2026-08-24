@@ -23,7 +23,7 @@ import type { AuthorizedKeyKind } from "../../../shared/enums.ts";
 // grants access to a machine — beside the credential-store's own entries. The two never blur: an
 // operator key's id is prefixed `opk_` and a store row's `cred_`.
 
-/** The one key type this controller refuses to store. OpenSSH has disabled `ssh-dss` by default
+/** The one key type this manager refuses to store. OpenSSH has disabled `ssh-dss` by default
  *  since 7.0, so a host would accept the line into the file and then never authenticate anyone with
  *  it — a key that looks placed and grants nothing. */
 const REFUSED_TYPE = "ssh-dss";
@@ -50,7 +50,7 @@ export function loadOperatorKey(db: Db, id: string): typeof operatorKeys.$inferS
  *                  different words: a line under this platform's own marker is one the removal run kind
  *                  can take off, and a line under any other comment is one only a hand edit can.
  *   - `undecided` — a reading EXISTS on the row and this build cannot decode it (a document written by
- *                  a newer controller, or one that fails its own schema). Whether the key is on that
+ *                  a newer manager, or one that fails its own schema). Whether the key is on that
  *                  host is unknown, which is not the same as no.
  *   - neither    — a readable reading that did not find the key, or no reading at all. A server
  *                  nothing has read contributes nothing; its card already says the reading is missing.
@@ -95,7 +95,7 @@ export function listOperatorKeys(db: Db): OperatorKeyView[] {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-/** Every operator key this controller holds, as the pair a reading classifies lines against: the
+/** Every operator key this manager holds, as the pair a reading classifies lines against: the
  *  label a placed line carries in its comment, and the fingerprint that label stands for. The
  *  authorized-keys reading takes it on every run, so a key added or forgotten since the last one is
  *  already accounted for. */
@@ -175,7 +175,7 @@ export function deleteOperatorKey(db: Db, actor: string, id: string): void {
            `line has to be deleted on the host itself, and the server read again.`]
         : []),
       ...(undecided.length > 0
-        ? [`The stored authorized-keys reading of ${undecided.join(", ")} is one this controller cannot read, so it can neither ` +
+        ? [`The stored authorized-keys reading of ${undecided.join(", ")} is one this manager cannot read, so it can neither ` +
            `find this key nor rule it out — read ${undecided.length === 1 ? "that server" : "those servers"} again first.`]
         : []),
     ].join(" "));

@@ -32,7 +32,7 @@ describe("parseBuildPins", () => {
 
   it("REFUSES a host-qualified image — it would key the floor on a name the catalog never returns", () => {
     expect(() =>
-      parseBuildPins("apps/controller/values-prod.yaml", 'builds:\n  - name: controller\n    image: zot.example.com/controller\n    tag: "0.2.0"\n'),
+      parseBuildPins("apps/manager/values-prod.yaml", 'builds:\n  - name: manager\n    image: zot.example.com/manager\n    tag: "0.2.0"\n'),
     ).toThrow(/builds\[0\] does not match the pin grammar/);
   });
 
@@ -44,8 +44,8 @@ describe("parseBuildPins", () => {
   });
 
   it("names the file in every refusal so the message points at the one to fix", () => {
-    expect(() => parseBuildPins("hostyour-cloud@m1.example.com:apps/controller/values-prod.yaml", "builds: 7\n")).toThrow(
-      /hostyour-cloud@m1\.example\.com:apps\/controller\/values-prod\.yaml/,
+    expect(() => parseBuildPins("hostyour-cloud@m1.example.com:apps/manager/values-prod.yaml", "builds: 7\n")).toThrow(
+      /hostyour-cloud@m1\.example\.com:apps\/manager\/values-prod\.yaml/,
     );
   });
 });

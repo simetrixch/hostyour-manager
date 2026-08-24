@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  authorizedKeysHold, authorizedKeysReading, classifyAuthorizedKey, controllerKeyMarker, isAuthorizedKeysEntry,
+  authorizedKeysHold, authorizedKeysReading, classifyAuthorizedKey, managerKeyMarker, isAuthorizedKeysEntry,
   isOperatorKeyLabel, normalizeOperatorPublicKey, operatorKeyLine, operatorKeyMarker, OPERATOR_MARKER_PREFIX,
   parseAuthorizedKeysLine, readServerAuthorizedKeys,
 } from "./operator-keys.ts";
@@ -9,7 +9,7 @@ import type { AuthorizedKeyFact } from "./api-types.ts";
 // The two properties this file exists for.
 //
 //   THE MARKERS CANNOT REACH EACH OTHER. Removing an operator's key must never strip the line this
-//   controller logs in with, and the adoption's own cleanup must never strip a human's key. Both
+//   manager logs in with, and the adoption's own cleanup must never strip a human's key. Both
 //   directions are asserted, and the pattern anchoring is asserted with them — an unanchored match
 //   on "pat" would take "pat-laptop" off the host too.
 //
@@ -29,17 +29,17 @@ function removalRegex(label: string): RegExp {
 
 describe("the two markers", () => {
   it("cannot match one another, in either direction", () => {
-    const controller = controllerKeyMarker("s1");
+    const manager = managerKeyMarker("s1");
     const operator = operatorKeyMarker("s1");
-    // The controller marker is `hostyour` and then a colon; the operator marker puts
+    // The manager marker is `hostyour` and then a colon; the operator marker puts
     // `-operator` in between, so that substring never occurs in it.
     expect(operator.includes("hostyour:")).toBe(false);
-    expect(controller.includes(OPERATOR_MARKER_PREFIX)).toBe(false);
-    // The pattern adopt's cleanup deletes by is the controller marker as a plain substring.
-    const controllerLine = `ssh-ed25519 ${BLOB_A} ${controller}`;
+    expect(manager.includes(OPERATOR_MARKER_PREFIX)).toBe(false);
+    // The pattern adopt's cleanup deletes by is the manager marker as a plain substring.
+    const managerLine = `ssh-ed25519 ${BLOB_A} ${manager}`;
     const operatorLine = operatorKeyLine(`ssh-ed25519 ${BLOB_B}`, "s1");
-    expect(operatorLine.includes(controller)).toBe(false);
-    expect(removalRegex("s1").test(controllerLine)).toBe(false);
+    expect(operatorLine.includes(manager)).toBe(false);
+    expect(removalRegex("s1").test(managerLine)).toBe(false);
     expect(removalRegex("s1").test(operatorLine)).toBe(true);
   });
 
@@ -111,30 +111,30 @@ describe("normalizing a pasted operator key", () => {
 
 describe("classifying a key line", () => {
   const ctx = {
-    controllerFingerprints: ["SHA256:mine"],
+    managerFingerprints: ["SHA256:mine"],
     operatorKeys: [{ label: "pat", fingerprint: "SHA256:pat" }],
     // classifyAuthorizedKey does not read this field, and that is the point of stating it: the
     // classification USED to vouch for any line whose comment equalled the marker, and a fixture
     // without the field would let that branch come back — by a merge, a revert, an edit — with the
     // stranger case below still green, because `comment === undefined` is false for every real
     // comment. With the marker present, restoring the branch fails that case loudly.
-    controllerMarker: controllerKeyMarker("s1"),
+    managerMarker: managerKeyMarker("s1"),
   };
 
-  it("knows this controller's own key by its FINGERPRINT alone — the comment is not consulted", () => {
-    // The sealed fingerprint covers both roads a controller key takes onto a host: adopt seals the
+  it("knows this manager's own key by its FINGERPRINT alone — the comment is not consulted", () => {
+    // The sealed fingerprint covers both roads a manager key takes onto a host: adopt seals the
     // key it generates before installing the line (which then carries the marker), and the boot
     // seed seals the master's, whose line carries whatever comment it was generated with.
-    expect(classifyAuthorizedKey({ fingerprint: "SHA256:mine", comment: controllerKeyMarker("s1") }, ctx).kind).toBe("controller");
-    expect(classifyAuthorizedKey({ fingerprint: "SHA256:mine", comment: "root@buildbox" }, ctx).kind).toBe("controller");
+    expect(classifyAuthorizedKey({ fingerprint: "SHA256:mine", comment: managerKeyMarker("s1") }, ctx).kind).toBe("manager");
+    expect(classifyAuthorizedKey({ fingerprint: "SHA256:mine", comment: "root@buildbox" }, ctx).kind).toBe("manager");
   });
 
-  it("calls a stranger's key that only WEARS the controller marker foreign", () => {
+  it("calls a stranger's key that only WEARS the manager marker foreign", () => {
     // Anyone with a shell can append `ssh-ed25519 <their key> hostyour:s1` to the file. If the
-    // marker comment could vouch for a line, that key would read "controller", the file would fold
+    // marker comment could vouch for a line, that key would read "manager", the file would fold
     // to "accounted", and a working way into the machine would hide behind the card built to
     // surface it.
-    expect(classifyAuthorizedKey({ fingerprint: "SHA256:theirs", comment: controllerKeyMarker("s1") }, ctx).kind).toBe("foreign");
+    expect(classifyAuthorizedKey({ fingerprint: "SHA256:theirs", comment: managerKeyMarker("s1") }, ctx).kind).toBe("foreign");
   });
 
   it("names the label an operator line was placed under", () => {
@@ -144,11 +144,11 @@ describe("classifying a key line", () => {
 
   it("takes the marker AND the stored key, so nobody appoints themselves an operator by comment", () => {
     // The comment is text on the machine and anyone who can append to authorized_keys can type it.
-    // A stranger's key under a marker naming a label this controller does not hold, and one under a
+    // A stranger's key under a marker naming a label this manager does not hold, and one under a
     // label it does hold but with a different key, are both keys nothing here placed.
     expect(classifyAuthorizedKey({ fingerprint: "SHA256:theirs", comment: operatorKeyMarker("ops") }, ctx).kind).toBe("foreign");
     expect(classifyAuthorizedKey({ fingerprint: "SHA256:theirs", comment: operatorKeyMarker("pat") }, ctx).kind).toBe("foreign");
-    // And a controller holding no operator key at all reads every marker line as foreign, which is
+    // And a manager holding no operator key at all reads every marker line as foreign, which is
     // the truth about such a host.
     expect(classifyAuthorizedKey({ fingerprint: "SHA256:pat", comment: operatorKeyMarker("pat") }, { ...ctx, operatorKeys: [] }).kind)
       .toBe("foreign");
@@ -173,7 +173,7 @@ describe("folding a probe into the stored pair", () => {
   const meta = { runId: "run_1", observedAt: 1_700_000_000_000 };
 
   it("claims accounted only when the file was READ and every line is one we can name", () => {
-    expect(authorizedKeysReading({ readable: true, keys: [key("controller"), key("operator")], unparsed: 0 }, meta).state)
+    expect(authorizedKeysReading({ readable: true, keys: [key("manager"), key("operator")], unparsed: 0 }, meta).state)
       .toBe("accounted");
     expect(authorizedKeysReading({ readable: true, keys: [], unparsed: 0 }, meta).state).toBe("accounted");
   });
@@ -184,14 +184,14 @@ describe("folding a probe into the stored pair", () => {
   });
 
   it("says unaccounted the moment ONE line was placed by nothing here", () => {
-    expect(authorizedKeysReading({ readable: true, keys: [key("controller"), key("foreign")], unparsed: 0 }, meta).state)
+    expect(authorizedKeysReading({ readable: true, keys: [key("manager"), key("foreign")], unparsed: 0 }, meta).state)
       .toBe("unaccounted");
   });
 
   it("says unaccounted for a line it could not read either — the two parsers are not the same one", () => {
     // sshd may well authenticate somebody with a line this build cannot read (a certificate, a key
     // type it never heard of), so a line nobody here can name is the opposite of accounted.
-    const out = authorizedKeysReading({ readable: true, keys: [key("controller")], unparsed: 2 }, meta);
+    const out = authorizedKeysReading({ readable: true, keys: [key("manager")], unparsed: 2 }, meta);
     expect(out.state).toBe("unaccounted");
     expect(out.doc).toMatchObject({ v: 0, runId: "run_1", observedAt: meta.observedAt, unparsed: 2 });
   });
@@ -207,7 +207,7 @@ describe("folding a probe into the stored pair", () => {
 describe("the version-narrowing reader", () => {
   const v0 = {
     v: 0, observedAt: 1_700_000_000_000, runId: "run_1", unparsed: 0,
-    keys: [{ fingerprint: "SHA256:k", type: "ssh-ed25519", comment: "", kind: "controller", label: null }],
+    keys: [{ fingerprint: "SHA256:k", type: "ssh-ed25519", comment: "", kind: "manager", label: null }],
   };
 
   it("names all four outcomes instead of collapsing three of them to null", () => {

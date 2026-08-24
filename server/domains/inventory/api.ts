@@ -19,7 +19,7 @@ export interface ClustersApiDeps {
   db: Db;
   storeMode: () => StoreMode; // already mapped in wire so inventory stays decoupled from security
   logger: Logger;
-  /** The books branch the cluster maps stand on. Absent on a Controller whose platform repo is not
+  /** The books branch the cluster maps stand on. Absent on a Manager whose platform repo is not
    *  configured — every server's release then reads "unknown" with that as its reason, which is the
    *  same degrade-loud contract the mutating onboarding routes follow. */
   platformRepo?: PlatformRepo;
@@ -39,7 +39,7 @@ export interface ServerApiDeps {
  * live runs — the two action queues the UI leads with. sources report per-collector wiring;
  * only inventory (the DB) is wired, the rest are honestly "unwired".
  *
- * `servers` = the MANAGED servers only (the slaves). The master — this controller itself —
+ * `servers` = the MANAGED servers only (the slaves). The master — this manager itself —
  * is not something it manages, so it must never inflate the managed count (UI mirrors reality
  * 1:1); it rides the dedicated `master` field instead.
  *

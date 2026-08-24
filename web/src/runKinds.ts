@@ -2,7 +2,7 @@ import { RUN_FAMILY, type RunKind } from "../../shared/enums.ts";
 
 /** The CONSUMER lifecycle run family (the ONB block of shared/enums.ts). The Consumers section's
  *  runs tab filters the ONE shared runs list to exactly these kinds. Read from RUN_FAMILY, the ONE
- *  declaration of the grouping — the same one the registry.total boot check asserts the registry
+ *  declaration of the grouping — the same one the run-definitions.total boot check asserts the run definitions
  *  against, so the tab and the boot check can never disagree about what the family is.
  *
  *  Filter by KIND, never by targetId: an `onboard` run freezes targetKind "cluster" + targetId a

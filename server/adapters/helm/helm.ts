@@ -105,7 +105,7 @@ export function parseHelmDocs(yamlStream: string): RenderedDoc[] {
  *  a source's valueFiles resolve against its `path`), so each is JOINED onto chartPath here — the
  *  execFile cwd is the REPO root (the cloned catalog workdir), and a bare `-f values.yaml`
  *  would resolve there and fail with helm's "open values.yaml: no such file or directory" for every
- *  fan-out member (confirmed live against the deployed controller: T1 pass, every render FAILED).
+ *  fan-out member (confirmed live against the deployed manager: T1 pass, every render FAILED).
  *  `overrideFile` is the staged valuesObject temp file, layered LAST (highest precedence).
  *  --include-crds so the validator renders EXACTLY what ArgoCD deploys: ArgoCD renders Helm sources
  *  with CRDs included (helm.skipCrds=false by default), but plain `helm template` omits crds/, so

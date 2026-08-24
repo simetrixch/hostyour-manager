@@ -5,7 +5,7 @@ import type { ServerChannel } from "ssh2";
 import type { SshSession } from "../../adapters/ssh/port.ts";
 import type { RunKind } from "../../../shared/enums.ts";
 import type { StepCtx } from "../../executor/types.ts";
-import { AnsiwiseClient } from "../../adapters/ansiwise/client.ts";
+import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseRunRecord } from "../../adapters/ansiwise/port.ts";
 import { openChannel, programYaml, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
@@ -105,7 +105,7 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "books_cluster", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
       { answer: "build_plane", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
     ]),
-    // elevation_password is deliberately NOT declared, although the real deploy-gitops declares
+    // elevation_password is deliberately NOT declared, although the real deploy-platform-services declares
     // it: the ENGINE fills that answer from the password the POST carries beside the answers
     // (sending it AS an answer is refused), but the REST door validates the raw answers map
     // BEFORE the run's fill-in — a required one is refused at the door — and the run child folds
@@ -113,7 +113,7 @@ export function fixturePrograms(): Record<string, string> {
     // gate never admits the run that follows its own green dry. Both are the machine side's to
     // repair (see the handover); until then a program declaring that answer cannot be driven
     // over `ansiwise-rest serve`, and this fixture measures what CAN be.
-    "deploy-gitops": programYaml("deploy-gitops", [
+    "deploy-platform-services": programYaml("deploy-platform-services", [
       { answer: "fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
       { answer: "stage", pattern: "^prod$" },
       { answer: "role", pattern: "^(master|slave)$" },

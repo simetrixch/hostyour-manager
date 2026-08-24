@@ -7,7 +7,7 @@ import {
 // A human operator's own key on the machines, as three run kinds. Each is a run like every other: a
 // plan, an approval, steps and a log. The shared scripts, steps and plans live in
 // operator-key.kit.ts; what stands here is the one thing that must be written out per run kind, its own
-// `kind` literal (the source census in registry-census.test.ts reads exactly that field).
+// `kind` literal (the source census in run-definitions-census.test.ts reads exactly that field).
 //
 // THREE ACTS, AND WHY THE THIRD IS NOT A DETAIL OF THE OTHER TWO.
 //
@@ -16,7 +16,7 @@ import {
 //                         replaces its line, so a rotated key does not leave its predecessor
 //                         working.
 //   operator-key-remove   The same filter without the append. It deletes by marker and by nothing
-//                         else, so it can never reach the line adopt wrote for this controller —
+//                         else, so it can never reach the line adopt wrote for this manager —
 //                         and it FAILS rather than reporting success when the read-back still finds
 //                         the key, which is what happens when somebody placed a copy by hand under
 //                         a different comment.
@@ -25,7 +25,7 @@ import {
 //                         key on it — and the one thing worth watching for is a key that appeared
 //                         when nobody was placing anything.
 //
-// THIS CONTROLLER'S OWN KEY IS NEVER A TARGET. It lives in the same file under a different marker
+// THIS MANAGER'S OWN KEY IS NEVER A TARGET. It lives in the same file under a different marker
 // (`hostyour:<server name>`), it is what every one of these runs travels over, and the acts
 // prove it survived by reading the file on both sides of the edit. It is removed by exactly one
 // thing in this codebase: the adopt run's own compensation.

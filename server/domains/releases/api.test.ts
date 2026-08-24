@@ -24,7 +24,7 @@ const config = parseConfig({
   OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c",
   OIDC_CLIENT_SECRET: "s",
-  CONTROLLER_VERSION: "test",
+  MANAGER_VERSION: "test",
   DATA_DIR: "/d",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv);
@@ -36,7 +36,7 @@ const LONELY = "s2.example.com"; // registered, install branch never cut
 const MASTER_TAG = "1.2.0-stable-20260728120000";
 
 const map = (fqdn: string, stage: string, role: string, release?: string): string =>
-  `fqdn: ${fqdn}\nstage: ${stage}\nrole: ${role}\nbuild-plane: ${MASTER}\n${release ? `release: ${release}\n` : ""}`;
+  `stage: ${stage}\nrole: ${role}\n${release ? `release: ${release}\n` : ""}\nglobal:\n  domain: ${fqdn}\n  buildPlane: ${MASTER}\n`;
 
 /** The platform repo of an installation whose master is pinned and whose slave is not. Both branches
  *  carry app pins at BOTH stages, which is what a real install branch looks like — the trunk renders
@@ -46,10 +46,10 @@ function seededCloud(): FakeCarrierRepo {
   cloud.seed(MASTER, clusterMarkingPath(MASTER), map(MASTER, "prod", "master", MASTER_TAG));
   cloud.seed(MASTER, clusterMarkingPath(SLAVE), map(SLAVE, "dev", "slave"));
   cloud.seed(MASTER, clusterMarkingPath(LONELY), map(LONELY, "dev", "slave"));
-  cloud.seed(MASTER, "apps/controller/values-prod.yaml", pinFile([["controller", "1.2.0-stable-20260728120000-abc1234"]]));
-  cloud.seed(MASTER, "apps/controller/values-dev.yaml", pinFile([["controller", "9.9.9-alpha-20260101000000-dddddd1"]]));
+  cloud.seed(MASTER, "apps/manager/values-prod.yaml", pinFile([["manager", "1.2.0-stable-20260728120000-abc1234"]]));
+  cloud.seed(MASTER, "apps/manager/values-dev.yaml", pinFile([["manager", "9.9.9-alpha-20260101000000-dddddd1"]]));
   cloud.seed(MASTER, "apps/auth/values-prod.yaml", pinFile([["auth", "1.1.0-stable-20260701000000-bbb2222"]]));
-  cloud.seed(SLAVE, "apps/controller/values-dev.yaml", pinFile([["controller", "1.3.0-alpha-20260801000000-ccc3333"]]));
+  cloud.seed(SLAVE, "apps/manager/values-dev.yaml", pinFile([["manager", "1.3.0-alpha-20260801000000-ccc3333"]]));
   return cloud;
 }
 
@@ -124,11 +124,11 @@ describe("GET /api/releases — which release an installation stands on, and whi
     // The master is prod: the two prod pins, and never the dev file standing beside them.
     expect(view(answer, MASTER).apps).toEqual([
       { app: "auth", build: "auth", image: "auth", tag: "1.1.0-stable-20260701000000-bbb2222" },
-      { app: "controller", build: "controller", image: "controller", tag: "1.2.0-stable-20260728120000-abc1234" },
+      { app: "manager", build: "manager", image: "manager", tag: "1.2.0-stable-20260728120000-abc1234" },
     ]);
-    // The slave is dev, and its own branch pins a different controller than the master's dev file.
+    // The slave is dev, and its own branch pins a different manager than the master's dev file.
     expect(view(answer, SLAVE).apps).toEqual([
-      { app: "controller", build: "controller", image: "controller", tag: "1.3.0-alpha-20260801000000-ccc3333" },
+      { app: "manager", build: "manager", image: "manager", tag: "1.3.0-alpha-20260801000000-ccc3333" },
     ]);
   });
 
@@ -191,7 +191,7 @@ describe("GET /api/releases — which release an installation stands on, and whi
     }
     expect(view(answer, MASTER).release).toEqual({
       kind: "unknown",
-      reason: expect.stringContaining("wire-onboarding.ts:204"),
+      reason: expect.stringContaining("wire-units.ts:204"),
     });
   });
 

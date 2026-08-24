@@ -1,7 +1,7 @@
 // The cluster's Helm values chain. Every unit's Application layers the same three files through the
 // `$values` source — platform/values-common.yaml, then platform/values-<stage>.yaml, then
 // installation/profile.yaml, later wins — and that chain is where a cluster's own values (Vault URL and
-// auth mount, registry host, unit apex) live. The Controller reads the three files off the target
+// auth mount, registry host, unit apex) live. The Manager reads the three files off the target
 // cluster's install branch and hands them to the gate sandbox VERBATIM: the gate renders the chart
 // with the same bytes ArgoCD layers at deploy, so an approved render and a deployed render cannot
 // diverge. A derived summary would reintroduce exactly that second source of truth.

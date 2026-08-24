@@ -78,7 +78,7 @@ export function NavIcon({ name, size = 18 }: { name: NavIconName; size?: number 
   );
 }
 
-/** Brand mark: a master node fanned out to two slave nodes — the controller's star topology. */
+/** Brand mark: a master node fanned out to two slave nodes — the manager's star topology. */
 export function LogoMark({ size = 22 }: { size?: number }): JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">

@@ -5,13 +5,13 @@ import { IconChevronRight } from "../components/icons.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** Fixed presentation order: the baseline first, then the controller, then the slaves, then the rest. */
-const KIND_ORDER: Record<BranchView["kind"], number> = { master: 0, controller: 1, slave: 2, other: 3 };
+/** Fixed presentation order: the baseline first, then the manager, then the slaves, then the rest. */
+const KIND_ORDER: Record<BranchView["kind"], number> = { master: 0, manager: 1, slave: 2, other: 3 };
 
 /** The kind chip: what this branch IS to the platform (derived server-side, never guessed here). */
 const KIND_CHIP: Record<BranchView["kind"], { label: string; className: string }> = {
   master: { label: "master · baseline", className: "chip" },
-  controller: { label: "controller", className: "chip chip--warn" },
+  manager: { label: "manager", className: "chip chip--warn" },
   slave: { label: "slave", className: "chip chip--ok" },
   other: { label: "branch", className: "chip" },
 };

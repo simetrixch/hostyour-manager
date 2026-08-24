@@ -2,7 +2,7 @@
 // consumer.ts:ConsumerRegistrationSchema. A tenant is a "meta consumer": its repo is always
 // catalog, its registration fans out to one ArgoCD Application per MEMBER (the trio
 // auth/jobs/report plus one per app), and its "chart" is a package. The fan-out this registration
-// expands to is server/domains/onboarding/tenant-fanout.ts.
+// expands to is server/domains/units/tenant-fanout.ts.
 //
 // Import boundary: shared/ is isomorphic (the web bundle imports it), so this file imports ONLY
 import { UnitQuotaSchema } from "./unit-size.ts";
@@ -46,7 +46,7 @@ export type TenantSourceRecord = z.infer<typeof TenantSourceRecordSchema>;
 /** ONE member of a tenant, RESOLVED — everything the ApplicationSet needs to render it, because the
  *  generator reads `registrations/<guid>/<stage>.yaml` and nothing else. The product's manifest
  *  declares how a member is built (TenantSpecSchema.members for the standing ones, TenantSpecSchema
- *  .perApp for the selected apps); the Controller resolves that against THIS tenant and writes the
+ *  .perApp for the selected apps); the Manager resolves that against THIS tenant and writes the
  *  result here.
  *
  *  Standing members and app members are the same thing in this list, which is what let twelve
@@ -108,7 +108,7 @@ const subdomain = z
  *  The guid is the DIRECTORY and the stage is the FILE NAME, so neither appears in the body: the path
  *  is the identity, and a body field mirroring it would be a second writer of the same datum.
  *  Structural mirror of ConsumerRegistrationSchema, but repoURL/repoCredentialId are DELIBERATELY
- *  ABSENT: a tenant's repo is always catalog and the credential is the controller's first-party
+ *  ABSENT: a tenant's repo is always catalog and the credential is the manager's first-party
  *  write credential, both constants of the one-time catalog registration.
  *
  *  `seedUsers`, `resetNonce`, `suspended` and `quiesced` are MANDATORY with a default and are written
@@ -143,14 +143,14 @@ export const TenantRegistrationSchema = z
     // re-reading the product manifest would answer for the manifest as it stands today. One of
     // `members`, enforced below.
     identityProvider: memberName,
-    // The ceiling EVERY member namespace of this tenant is bounded by, resolved by the Controller from
+    // The ceiling EVERY member namespace of this tenant is bounded by, resolved by the Manager from
     // its size table when it writes the registration and passed to hostyour-cloud/apps/unit-quota by the
     // tenant ApplicationSet. Per MEMBER and not per tenant, because a tenant owns one namespace per
     // member: a tenant of four members with a `small` size gets four small ceilings, and one member
     // filling its own cannot take another member's room.
     //
     // The FIGURES and not a size name, for the reason shared/unit-size.ts states: the table lives in
-    // the Controller's database, which no cluster can read, so the registration carries what the unit
+    // the Manager's database, which no cluster can read, so the registration carries what the unit
     // gets rather than a word to look up.
     quota: UnitQuotaSchema,
     seedUsers: z.boolean().default(false), // flips the IdP's user boot-seed

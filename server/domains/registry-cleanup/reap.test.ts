@@ -20,8 +20,8 @@ const agedTag = (n: number): string => tagOf("0.9.0", `202608010000${String(n).p
 /** The four pins the three carrier classes contribute. */
 const AUTH_PIN = tagOf("0.4.0", "20260701000000");
 const ENGINE_PIN = tagOf("0.3.0", "20260701000000");
-const CONTROLLER_PIN_MASTER = tagOf("0.2.0", "20260701000000");
-const CONTROLLER_PIN_BRANCH = tagOf("0.1.0", "20260601000000");
+const MANAGER_PIN_MASTER = tagOf("0.2.0", "20260701000000");
+const MANAGER_PIN_BRANCH = tagOf("0.1.0", "20260601000000");
 
 function makeLogger(): ReapLogger & { calls: { level: "info" | "warn" | "error"; obj: unknown; msg?: string }[] } {
   const calls: { level: "info" | "warn" | "error"; obj: unknown; msg?: string }[] = [];
@@ -43,8 +43,8 @@ function catalogRepo(repo: string, aged: number, pins: readonly string[]): Recor
  * The three carrier classes, together, as the floor sees them:
  *   (a) registration example-auth with a chartPath -> its repo's deploy/prod pins example-auth-backend
  *   (b) catalog books br. charts/example-engine/pins-dev.yaml    pins example-engine
- *   (c) hostyour-cloud master      apps/controller/values-prod.yaml      pins controller (newer)
- *       hostyour-cloud m1 branch apps/controller/values-prod.yaml     pins controller (OLDER)
+ *   (c) hostyour-cloud master      apps/manager/values-prod.yaml      pins manager (newer)
+ *       hostyour-cloud m1 branch apps/manager/values-prod.yaml     pins manager (OLDER)
  * Each of the three repositories additionally carries twelve aged, unpinned tags, all NEWER than the
  * pins, so every pin is outside the newest-ten and survives only because the floor holds it.
  *
@@ -56,8 +56,8 @@ function threeClassFixture(opts: { withDeployCarrier?: boolean } = {}): {
 } {
   const cloud = new FakeCarrierRepo();
   cloud.seed(cloud.booksBranch, "registrations/example-auth/prod.yaml", stageRegistration({ name: "example-auth", repoURL: AUTH_REPO, repoCredentialId: "cred_auth", chartPath: "deploy/chart", cluster: "m1" }));
-  cloud.seed("master", "apps/controller/values-prod.yaml", pinFile([["controller", CONTROLLER_PIN_MASTER]]));
-  cloud.seed("m1.example.com", "apps/controller/values-prod.yaml", pinFile([["controller", CONTROLLER_PIN_BRANCH]]));
+  cloud.seed("master", "apps/manager/values-prod.yaml", pinFile([["manager", MANAGER_PIN_MASTER]]));
+  cloud.seed("m1.example.com", "apps/manager/values-prod.yaml", pinFile([["manager", MANAGER_PIN_BRANCH]]));
 
   const deploy = new FakeCarrierRepo();
   // With the carrier: the chart states its pin. Without it: the same chart on the same branch, stating
@@ -76,7 +76,7 @@ function threeClassFixture(opts: { withDeployCarrier?: boolean } = {}): {
   const registry = new FakeRegistryMaintenance({
     "example-auth-backend": catalogRepo("example-auth-backend", 12, [AUTH_PIN]),
     "example-engine": catalogRepo("example-engine", 12, [ENGINE_PIN]),
-    controller: catalogRepo("controller", 12, [CONTROLLER_PIN_MASTER, CONTROLLER_PIN_BRANCH]),
+    manager: catalogRepo("manager", 12, [MANAGER_PIN_MASTER, MANAGER_PIN_BRANCH]),
     // A pull-through cache repo (multi-segment) with an ancient tag — never ours, never touched.
     "library/redis": { "7.0": "sha256:redis-old" },
   });
@@ -96,23 +96,23 @@ describe("reap — the floor IS the pin search, over all three carrier classes",
     // them is older than all twelve aged tags of its own repository.
     expect(planFor("example-auth-backend").keep).toContain(AUTH_PIN);
     expect(planFor("example-engine").keep).toContain(ENGINE_PIN);
-    expect(planFor("controller").keep).toContain(CONTROLLER_PIN_MASTER);
-    expect(planFor("controller").keep).toContain(CONTROLLER_PIN_BRANCH); // the OLDER install-branch pin
+    expect(planFor("manager").keep).toContain(MANAGER_PIN_MASTER);
+    expect(planFor("manager").keep).toContain(MANAGER_PIN_BRANCH); // the OLDER install-branch pin
     expect(planFor("example-auth-backend").delete).not.toContain(AUTH_PIN);
     expect(planFor("example-engine").delete).not.toContain(ENGINE_PIN);
-    expect(planFor("controller").delete).not.toContain(CONTROLLER_PIN_MASTER);
-    expect(planFor("controller").delete).not.toContain(CONTROLLER_PIN_BRANCH);
+    expect(planFor("manager").delete).not.toContain(MANAGER_PIN_MASTER);
+    expect(planFor("manager").delete).not.toContain(MANAGER_PIN_BRANCH);
     expect(result.referencedCount).toBe(4);
 
     // ...and the aged, unpinned tags of the SAME repositories still age out: twelve stable tags, ten
     // kept by count, so the two oldest fall. The floor protects what is pinned, not everything.
     expect(planFor("example-auth-backend").delete).toEqual([agedTag(0), agedTag(1)]);
     expect(planFor("example-engine").delete).toEqual([agedTag(0), agedTag(1)]);
-    expect(planFor("controller").delete).toEqual([agedTag(0), agedTag(1)]);
+    expect(planFor("manager").delete).toEqual([agedTag(0), agedTag(1)]);
     expect(registry.deleted.map((d) => d.digest).sort()).toEqual(
       [
-        "sha256:controller-aged0",
-        "sha256:controller-aged1",
+        "sha256:manager-aged0",
+        "sha256:manager-aged1",
         "sha256:example-auth-backend-aged0",
         "sha256:example-auth-backend-aged1",
         "sha256:example-engine-aged0",
@@ -133,7 +133,7 @@ describe("reap — the floor IS the pin search, over all three carrier classes",
     expect(registry.deleted.some((d) => d.digest === "sha256:example-engine-pin0")).toBe(true);
     expect(result.referencedCount).toBe(3);
     // The other two classes are untouched by the switch — the probe discriminates exactly (b).
-    expect(result.repos.find((r) => r.repo === "controller")!.delete).not.toContain(CONTROLLER_PIN_MASTER);
+    expect(result.repos.find((r) => r.repo === "manager")!.delete).not.toContain(MANAGER_PIN_MASTER);
     expect(result.repos.find((r) => r.repo === "example-auth-backend")!.delete).not.toContain(AUTH_PIN);
   });
 
@@ -153,21 +153,21 @@ describe("reap — the floor IS the pin search, over all three carrier classes",
 
     expect(registry.deleted).toEqual([]);
     expect(result.deleted).toEqual([]);
-    expect(result.repos.find((r) => r.repo === "controller")!.delete).toEqual([agedTag(0), agedTag(1)]);
+    expect(result.repos.find((r) => r.repo === "manager")!.delete).toEqual([agedTag(0), agedTag(1)]);
   });
 
   it("digest-sharing guard: a delete candidate whose digest a KEPT tag shares is skipped", async () => {
     const { deps } = threeClassFixture();
     // Eleven aged tags: exactly one (the oldest) falls out by count. Give it the SAME digest as a tag
     // that is kept, and the delete would strip the kept tag too — so it must be skipped.
-    const tags = catalogRepo("controller", 11, [CONTROLLER_PIN_MASTER, CONTROLLER_PIN_BRANCH]);
-    tags[agedTag(0)] = "sha256:controller-aged5";
-    const registry = new FakeRegistryMaintenance({ controller: tags });
+    const tags = catalogRepo("manager", 11, [MANAGER_PIN_MASTER, MANAGER_PIN_BRANCH]);
+    tags[agedTag(0)] = "sha256:manager-aged5";
+    const registry = new FakeRegistryMaintenance({ manager: tags });
     const logger = makeLogger();
 
     const result = await reap({ ...deps, registry, logger, dryRun: false });
 
-    expect(result.repos.find((r) => r.repo === "controller")!.delete).toEqual([agedTag(0)]);
+    expect(result.repos.find((r) => r.repo === "manager")!.delete).toEqual([agedTag(0)]);
     expect(registry.deleted).toEqual([]); // ...but the shared-digest delete was skipped
     expect(result.deleted).toEqual([]);
     expect(logger.calls.some((c) => c.level === "warn" && String(c.msg).includes("digest is shared"))).toBe(true);
@@ -179,7 +179,7 @@ describe("reap — an empty floor can never reach a delete plan", () => {
     // Every carrier is readable and every one of them is simply empty. This is what the floor looked
     // like the moment the tree it used to walk was gone: absent-is-empty, and every aged tag of every
     // repository on the delete plan.
-    const registry = new FakeRegistryMaintenance({ controller: catalogRepo("controller", 12, []) });
+    const registry = new FakeRegistryMaintenance({ manager: catalogRepo("manager", 12, []) });
     const logger = makeLogger();
 
     await expect(
@@ -192,7 +192,7 @@ describe("reap — an empty floor can never reach a delete plan", () => {
   });
 
   it("REFUSES a DRY_RUN on an empty floor too — a plan nobody can trust must not be published either", async () => {
-    const registry = new FakeRegistryMaintenance({ controller: catalogRepo("controller", 12, []) });
+    const registry = new FakeRegistryMaintenance({ manager: catalogRepo("manager", 12, []) });
 
     await expect(
       reap({ cloud: new FakeCarrierRepo(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), registry, logger: makeLogger(), dryRun: true }),
@@ -211,7 +211,7 @@ describe("reap — FAIL-CLOSED (a bug here destroys a deployment, so a bad read 
 
   it("a tags read that fails aborts with nothing deleted", async () => {
     const { deps } = threeClassFixture();
-    const registry = new FakeRegistryMaintenance({ controller: catalogRepo("controller", 12, [CONTROLLER_PIN_MASTER]) }, { throwListTags: ["controller"] });
+    const registry = new FakeRegistryMaintenance({ manager: catalogRepo("manager", 12, [MANAGER_PIN_MASTER]) }, { throwListTags: ["manager"] });
 
     await expect(reap({ ...deps, registry, logger: makeLogger(), dryRun: false })).rejects.toThrow(/scripted listTags failure/);
     expect(registry.deleted).toEqual([]);
@@ -220,8 +220,8 @@ describe("reap — FAIL-CLOSED (a bug here destroys a deployment, so a bad read 
   it("a digest that cannot be resolved aborts BEFORE the first delete, not halfway through", async () => {
     const { deps } = threeClassFixture();
     const registry = new FakeRegistryMaintenance(
-      { controller: catalogRepo("controller", 12, [CONTROLLER_PIN_MASTER, CONTROLLER_PIN_BRANCH]) },
-      { throwDigest: [`controller:${agedTag(1)}`] },
+      { manager: catalogRepo("manager", 12, [MANAGER_PIN_MASTER, MANAGER_PIN_BRANCH]) },
+      { throwDigest: [`manager:${agedTag(1)}`] },
     );
 
     await expect(reap({ ...deps, registry, logger: makeLogger(), dryRun: false })).rejects.toThrow(/scripted resolveDigest failure/);

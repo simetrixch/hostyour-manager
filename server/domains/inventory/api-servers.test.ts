@@ -10,7 +10,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
-import { buildRegistry } from "../runs/registry.ts";
+import { buildRunDefinitions } from "../runs/run-definitions.ts";
 import { runActor } from "../../kernel/actor.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerServerRoutes } from "./api.ts";
@@ -33,7 +33,7 @@ const config = parseConfig({
   OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c",
   OIDC_CLIENT_SECRET: "s",
-  CONTROLLER_VERSION: "test",
+  MANAGER_VERSION: "test",
   DATA_DIR: "/d",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv);
@@ -77,7 +77,7 @@ describe("server inventory API", () => {
       creds: store,
       bus: new RunEventBus(),
       logger,
-      registry: buildRegistry({ db: db.db }),
+      runDefinitions: buildRunDefinitions({ db: db.db }),
       sshFactory: noSsh,
       actor: runActor,
     });
@@ -151,7 +151,7 @@ describe("server inventory API", () => {
 
     it("carries the MASTER row, which /api/clusters withholds from its servers array", async () => {
       // buildClustersView (api.ts:59) filters the master out of ClustersView.servers because the
-      // controller does not manage itself. This route is the inventory and lists every row, so the
+      // manager does not manage itself. This route is the inventory and lists every row, so the
       // master is here — sorted first (read.ts:85).
       const h = await make();
       seedThree(h.db);

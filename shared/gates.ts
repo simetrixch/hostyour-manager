@@ -1,6 +1,6 @@
 // The gate-runner report contract. Kept in shared/ so the
-// runner (which authors the sandbox gates G1/G2/G3/G6/G7/G8/G22), the Controller (which authors the
-// controller-side gates G16/G17/G18/G19/G23 and composes the report), and the web card all
+// runner (which authors the sandbox gates G1/G2/G3/G6/G7/G8/G22), the Manager (which authors the
+// manager-side gates G16/G17/G18/G19/G23 and composes the report), and the web card all
 // agree on one shape. zod-backed; the inferred types are the single source of truth.
 //
 // every gate states, in full sentences, what was EXPECTED, what was FOUND, and — on a
@@ -13,7 +13,7 @@ export type GateSeverity = "hard" | "soft";
 
 /** One concrete observation behind `found` — a place the operator can jump to. */
 export const GateEvidenceSchema = z.object({
-  source: z.enum(["repo", "rendered", "runner", "controller"]),
+  source: z.enum(["repo", "rendered", "runner", "manager"]),
   file: z.string().optional(), // path inside the clone, e.g. "deploy/chart/templates/svc.yaml"
   docIndex: z.number().int().optional(), // rendered YAML document index (source == "rendered")
   kind: z.string().optional(), // e.g. "Service"
@@ -25,7 +25,7 @@ export type GateEvidence = z.infer<typeof GateEvidenceSchema>;
 
 // Caps are part of the triple lock's "report schema-validates" leg: a failing gate
 // physically cannot omit its reason, and a hostile chart cannot push a report over the caps
-// (the runner truncates at collection time; these are the controller-side belt).
+// (the runner truncates at collection time; these are the manager-side belt).
 const TEXT_MAX = 2000;
 
 /** One gate's result. The collapsed subset {id,title,severity,status,detail,hint} matches
@@ -58,9 +58,9 @@ export type GateResult = z.infer<typeof GateResultSchema>;
  *  the fence was proven live against confirmed-listening targets before the job ran. */
 export const SandboxAttestationSchema = z.object({
   mustFailTargets: z.array(z.string()), // rendered from config, never guessed
-  mustFailTargetsConfirmedListening: z.boolean(), // the Controller's attestation, echoed
+  mustFailTargetsConfirmedListening: z.boolean(), // the Manager's attestation, echoed
   mustFailDenied: z.boolean(), // the runner observed its own connects blocked
-  controllerAddrDenied: z.boolean(), // the second must-fail probe (the Controller's own address)
+  controllerAddrDenied: z.boolean(), // the second must-fail probe (the Manager's own address)
   mustPassReached: z.boolean(),
 });
 export type SandboxAttestation = z.infer<typeof SandboxAttestationSchema>;
@@ -114,7 +114,7 @@ function canonicalize(value: unknown): unknown {
 
 /** The exact string the reportHash digests: the canonical JSON of a report body — the report WITHOUT
  *  its reportHash field. Lives beside the schema so the author (the runner's assembleReport, the
- *  tenant composeTenantReport) and the verifier (the Controller's gate-runner adapter, on receipt)
+ *  tenant composeTenantReport) and the verifier (the Manager's gate-runner adapter, on receipt)
  *  serialize identically and cannot drift. The sha256 itself stays out of shared/ — this module is
  *  isomorphic (the web bundle imports it), so no node:crypto; each side digests this string. */
 export function reportHashPayload(body: unknown): string {

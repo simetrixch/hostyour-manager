@@ -16,7 +16,7 @@ import type {
   // the row-less live probe its rows are verified with. One declaration, both ends — as above.
   DetectedScanView, ConsumerLiveProbeView,
   // The channel table the onboard wizard reads — served literally from the platform repo's
-  // platform/values-common.yaml (global.channelStages); the controller keeps no copy.
+  // platform/values-common.yaml (global.channelStages); the manager keeps no copy.
   ChannelStagesView,
   // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
   OperatorKeyView,
@@ -155,7 +155,7 @@ export const reconnectTailnet = (serverId: string): Promise<{ runId: string }> =
  *  reconnect cannot answer, where the host holds none. */
 export const rejoinTailnet = (serverId: string): Promise<{ runId: string }> => planRun("tailnet-rejoin", { serverId });
 
-// The password-login switch. A run kind and not a PATCH field: nothing this controller stores changes
+// The password-login switch. A run kind and not a PATCH field: nothing this manager stores changes
 // what a daemon answers on port 22, so the switch has to be a run that writes the drop-in,
 // validates it, reloads the daemon and reads back what the daemon resolved.
 /** Stop this host's sshd taking passwords, and destroy the bootstrap password sealed for it — two
@@ -197,9 +197,9 @@ export const getBranches = (): Promise<BranchesView> => req<BranchesView>("/api/
 export const getBranchDiff = (name: string): Promise<BranchDiffView> =>
   req<BranchDiffView>(`/api/branches/${encodeURIComponent(name)}/diff`);
 /** DESTRUCTIVE: strips the selected install branches' pointer files, deletes the branches on
- *  GitHub and (optionally) wipes the Controller DB. Every safety rule is re-validated
+ *  GitHub and (optionally) wipes the Manager DB. Every safety rule is re-validated
  *  server-side — the wizard is UX, not the boundary. */
-export const resetController = (input: ResetRequest): Promise<ResetResult> =>
+export const resetManager = (input: ResetRequest): Promise<ResetResult> =>
   post<ResetResult>("/api/reset", input as unknown as Record<string, unknown>);
 
 // Consumer onboarding. The onboard POST returns a runId whose run sits in
@@ -220,8 +220,8 @@ export interface ConsumerView {
   stage: string;
   repoUrl: string | null;
   chartPath: string | null;
-  /** The server enum verbatim (shared/enums.ts APP_PROVENANCE): "controller" marks a consumer this
-   *  Controller onboarded and gate-validated, "adopted" one whose row was RECONSTRUCTED from the
+  /** The server enum verbatim (shared/enums.ts APP_PROVENANCE): "manager" marks a consumer this
+   *  Manager onboarded and gate-validated, "adopted" one whose row was RECONSTRUCTED from the
    *  GitOps registration by an adopt-consumer run and never gate-validated by it. */
   provenance: AppProvenance;
   status: "active" | "suspended" | "offboarded";
@@ -232,7 +232,7 @@ export interface OnboardInput {
   consumerName: string;
   repoURL: string;
   /** The release the onboarding TRIGGERS: version x.y.z + channel. The release script in the repo
-   *  mints (or reuses) the full tag from them — the controller never composes a tag. */
+   *  mints (or reuses) the full tag from them — the manager never composes a tag. */
   version: string;
   channel: "alpha" | "beta" | "stable";
   /** Deployable form: the target cluster (its stage is the cluster's own). Exactly one of clusterId
@@ -243,7 +243,7 @@ export interface OnboardInput {
   owner: string;
   chartPath?: string;
   /** The ONE per-consumer GitHub PAT (required — every consumer repo is private). Sent once over
-   *  TLS; the Controller seals it server-side and it never appears in any run/params/log. */
+   *  TLS; the Manager seals it server-side and it never appears in any run/params/log. */
   repoPat: string;
 }
 export const listConsumers = (): Promise<ConsumerView[]> => req<ConsumerView[]>("/api/consumers");
@@ -392,7 +392,7 @@ export interface TenantView {
   owner: string | null;
   /** The same server enum ConsumerView carries, taken from shared/enums.ts rather than restated as a
    *  union here: a literal that leaves that list must break THIS build, not survive as a word the
-   *  server never sends. A tenant is only ever "controller" — there is no adopt run kind for one. */
+   *  server never sends. A tenant is only ever "manager" — there is no adopt run kind for one. */
   provenance: AppProvenance;
   /** "provisioning" ⇒ create-tenant recorded this row BEFORE deploying and its run never finished
    * — the tenant may be half-deployed or not deployed at all. */

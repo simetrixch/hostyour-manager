@@ -2,14 +2,14 @@
 // does not live here — it is `global.channelStages` in the platform repo's platform/values-common.yaml,
 // enforced in the release pipeline at the point that writes a pin. This module is a READER of that
 // file and nothing else, which is what makes two things true at once: a table change reaches the
-// controller without a controller release, and every caller in this process answers the same question
-// the same way. A second table in controller code would be a copy, and a copy is the defect.
+// manager without a manager release, and every caller in this process answers the same question
+// the same way. A second table in manager code would be a copy, and a copy is the defect.
 //
 // Read off the TRUNK, and that is a decision rather than a leftover: the channel policy is the
 // platform's, not any installation's, so it is product and lives where the product lives. Every
 // install branch carries a copy of the same file, but reading it there would make the ceiling depend
 // on which cluster is asked and on how old that cluster's pin is. This is the one branch reference in
-// the Controller that stays on the trunk while the books moved off it.
+// the Manager that stays on the trunk while the books moved off it.
 //
 // Boundary: domain layer — shared/ and the git PlatformRepo port only, like cluster-marking beside it.
 import { parse as parseYaml } from "yaml";

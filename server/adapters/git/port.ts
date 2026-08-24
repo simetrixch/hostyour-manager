@@ -1,11 +1,11 @@
-// The Controller's git ports. Two roles, one boundary:
+// The Manager's git ports. Two roles, one boundary:
 //
-//  - RepoReader  — clones a (possibly private) CONSUMER repo Controller-side to resolve + pin the
+//  - RepoReader  — clones a (possibly private) CONSUMER repo Manager-side to resolve + pin the
 //    requested ref to a 40-char SHA (the gate PipelineRun clones the repo itself at that pin).
 //    credentialId opens a read credential from the store per use (it never rides a URL).
-//  - PlatformRepo — the Controller's ONLY writer of the platform repo's consumers/** (the
-//    Registry backend): fetch/reset a branch worktree, then commit + push. The path
-//    guard + serializer law live in the domain (registry.ts), not here.
+//  - PlatformRepo — the Manager's ONLY writer of the platform repo's consumers/** (the
+//    Registrations backend): fetch/reset a branch worktree, then commit + push. The path
+//    guard + serializer law live in the domain (registrations.ts), not here.
 //
 // The concrete impl shells out to git (an adapter may import IO libs); the fakes are in-memory.
 
@@ -69,7 +69,7 @@ export interface BranchScope {
 export interface PlatformRepo {
   /** The branch THIS installation keeps its books on IN THIS REPOSITORY (shared/branches.ts): the
    *  cluster maps and consumer registrations in hostyour-cloud, the tenant registrations in
-   *  catalog. Resolved ONCE where the ports are built (boot/wire-onboarding.ts) from the FQDN of
+   *  catalog. Resolved ONCE where the ports are built (boot/wire-units.ts) from the FQDN of
    *  the cluster holding the master role, and bound to the instance rather than passed per call, so
    *  the branch a domain writes to and the branch this adapter may CREATE are the same one statement.
    *  Never `master`: the trunk carries the product, and a registration on it belongs to no
@@ -97,7 +97,7 @@ export interface ConsumerRepoSession {
   branch: string; // the resolved default branch (main/master/…) — the ref commitPush pushes to
 }
 
-/** The Controller's writer of a CONSUMER's OWN repo: the release-kit lifecycle
+/** The Manager's writer of a CONSUMER's OWN repo: the release-kit lifecycle
  *  (onboard commits release/ + the workflow into the consumer repo, offboard/purge git-rm's them).
  *  Distinct from PlatformRepo — that owns the ONE platform repo (a persistent per-branch worktree);
  *  this clones an arbitrary consumer repo fresh per call (RepoReader's disposable-clone model) and

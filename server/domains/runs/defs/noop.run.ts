@@ -56,7 +56,7 @@ export const noopDef: RunDefinition = {
   plan: async () => ({
     kind: "noop",
     targetKind: "self",
-    targetId: "controller",
+    targetId: "manager",
     summary: "No-op demo run: 3 steps, ~0.1 s.",
     steps: steps.map((s) => ({ name: s.name, title: s.title })),
     warnings: [],

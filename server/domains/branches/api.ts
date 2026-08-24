@@ -2,8 +2,8 @@ import type { Hono } from "hono";
 import type { Db } from "../../db/client.ts";
 import type { Config } from "../../kernel/config.ts";
 import type { AppEnv } from "../../http/app-env.ts";
-import type { GitHubClient, BranchComparison } from "../../adapters/github/github.ts";
-import { GitHubError } from "../../adapters/github/github.ts";
+import type { GitHubPlatform, BranchComparison } from "../../adapters/github-platform/github-platform-http.ts";
+import { GitHubPlatformError } from "../../adapters/github-platform/github-platform-http.ts";
 import { errNotFound, errNotConfigured, errUpstream } from "../../kernel/errors.ts";
 import { masterFqdn } from "../inventory/read.ts";
 import type { BranchKind, BranchView, BranchesView, BranchDiffView, BranchDiffFileView, BranchCompareSummary } from "../../../shared/api-types.ts";
@@ -12,7 +12,7 @@ export interface BranchApiDeps {
   db: Db;
   config: Config;
   /** Absent ⇒ GITHUB_REPO/GITHUB_WRITE_PAT are unset — every route answers 501 (honest, loud). */
-  github?: GitHubClient;
+  github?: GitHubPlatform;
 }
 
 /** How many compares run at once against GitHub (list endpoint). Small enough to be a polite
@@ -30,7 +30,7 @@ const MAX_PATCH_BYTES = 100_000;
  *  (s1.example.com for master m1.example.com). */
 export function classifyBranch(name: string, masterHost: string): BranchKind {
   if (name === "master") return "master";
-  if (name === masterHost) return "controller";
+  if (name === masterHost) return "manager";
   const dot = masterHost.indexOf(".");
   if (dot === -1) return "other"; // no base domain derivable (bare-hostname dev setups)
   const suffix = masterHost.slice(dot); // ".example.com"
@@ -43,7 +43,7 @@ export function classifyBranch(name: string, masterHost: string): BranchKind {
 
 /** The GitHub client + the "owner/repo" it targets, or 501 if the feature is unconfigured.
  *  config.github is the single source for the repo string (no `?? ""` guess). */
-function requireGitHub(deps: BranchApiDeps): { gh: GitHubClient; repo: string } {
+function requireGitHub(deps: BranchApiDeps): { gh: GitHubPlatform; repo: string } {
   if (!deps.github || !deps.config.github) {
     throw errNotConfigured("GitHub access is not configured — set GITHUB_REPO and GITHUB_WRITE_PAT to enable the Branches view");
   }
@@ -61,7 +61,7 @@ function requireMasterFqdn(deps: BranchApiDeps): string {
 /** GitHub failures must surface with GitHub's own reason (the global error shape redacts
  *  non-AppErrors to a blank 500) — 404 stays 404, everything else becomes UPSTREAM 502. */
 function rethrowGitHub(e: unknown, notFoundMessage: string): never {
-  if (e instanceof GitHubError) {
+  if (e instanceof GitHubPlatformError) {
     if (e.status === 404) throw errNotFound(notFoundMessage);
     throw errUpstream(e.message);
   }
@@ -124,7 +124,7 @@ export function registerBranchRoutes(app: Hono<AppEnv>, deps: BranchApiDeps): vo
           cmp = await gh.compare("master", ref.name);
         } catch (e) {
           // Deleted between list and compare — it no longer exists; drop it from the view.
-          if (e instanceof GitHubError && e.status === 404) return null;
+          if (e instanceof GitHubPlatformError && e.status === 404) return null;
           rethrowGitHub(e, ref.name);
         }
         summary = { aheadBy: cmp.aheadBy, behindBy: cmp.behindBy, changedFiles: cmp.files.length, truncated: cmp.truncated };

@@ -50,7 +50,7 @@ export function registerSpa(app: Hono<AppEnv>, distDir: string): void {
 
   app.get("*", (c) => {
     if (c.req.path.startsWith("/api/")) return c.notFound();
-    if (!existsSync(indexPath)) return c.text("The Controller UI is not built yet (run `npm run build:web`).", 503);
+    if (!existsSync(indexPath)) return c.text("The Manager UI is not built yet (run `npm run build:web`).", 503);
     return c.html(readFileSync(indexPath, "utf8"));
   });
 }

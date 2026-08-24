@@ -95,7 +95,7 @@ function TenantLive({ tenantId }: { tenantId: string }) {
       </div>
     );
   if (live.reason === "onboarding-not-configured")
-    return <div className="recon recon--muted">Live checks unavailable — tenant onboarding is not configured on this controller.</div>;
+    return <div className="recon recon--muted">Live checks unavailable — tenant onboarding is not configured on this manager.</div>;
 
   return (
     <div className="recon">
@@ -139,7 +139,7 @@ function TenantLive({ tenantId }: { tenantId: string }) {
 }
 
 /** The onboarded tenants as a two-tab section, the tenant analogue of the Consumers page.
- *  LEFT ("Reconciliation") is the combined view: each SQL row (what the Controller BELIEVES) beside the
+ *  LEFT ("Reconciliation") is the combined view: each SQL row (what the Manager BELIEVES) beside the
  *  live cluster + ArgoCD facts (what actually RUNS), drift highlighted. RIGHT ("Runs") is this section's
  *  runs — the ONE shared runs component filtered to tenant kinds. Each guid whose one pointer fans out
  *  to a multi-app package links into the per-tenant detail, where the apps matrix + the tenant-wide
@@ -225,7 +225,7 @@ export function Tenants() {
       <header className="page__head">
         <div>
           <h2 className="page__title">Tenants</h2>
-          <p className="page__desc">Multi-app packages this controller has fanned out onto the clusters.</p>
+          <p className="page__desc">Multi-app packages this manager has fanned out onto the clusters.</p>
         </div>
         <div className="page__actions">
           {/* Find ORPHANS: tenants that exist in GitOps but have no inventory row, so they appear in no
@@ -280,7 +280,7 @@ export function Tenants() {
       {lists && neverChecked(lists.onboarded) > 0 && (
         <p className="muted">
           {neverChecked(lists.onboarded)} tenant(s) have not been checked for an administrator yet —
-          the check runs a few minutes after this controller starts, and every six hours after that.
+          the check runs a few minutes after this manager starts, and every six hours after that.
         </p>
       )}
 

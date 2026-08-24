@@ -16,7 +16,7 @@ import { openDb, type DbHandle } from "./client.ts";
 // Writers are found TABLE-SCOPED: only the payload of a `.insert(<table>)` / `.update(<table>)` call
 // counts, with `...spread` and bare-identifier payloads resolved against the const they name in the
 // same file. Scoping is what gives the census its teeth — `resetNonce` is a live field on the tenant
-// POINTER file (domains/onboarding/tenant-registry.ts) while the same-named tenants column has no
+// POINTER file (domains/units/tenant-registrations.ts) while the same-named tenants column has no
 // writer at all, and an unscoped grep would call that green.
 //
 // One payload shape cannot be resolved statically: a helper that takes the row as a PARAMETER

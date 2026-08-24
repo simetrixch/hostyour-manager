@@ -9,11 +9,11 @@ const now = sql`(unixepoch('subsec') * 1000)`;
 // WHY THIS IS NOT A CREDENTIAL ROW. The credential store (server/security/store.ts) is an
 // ENCRYPTING secret store: every row carries an encrypted blob, seal/open/rotate exist to keep a
 // value nobody may read, and the audit trail is about uses of that value. An operator's public key
-// has no secret half at all — this controller never holds the private one — so a row there would
+// has no secret half at all — this manager never holds the private one — so a row there would
 // carry a blob to encrypt that is not a secret. The second reason is the one that decides it: a
 // credential of kind `ssh_key` is looked up BY SERVER, newest wins (server/executor/context.ts
 // getSsh, and the adopt run's install-key), so a human key filed against a server would become the
-// identity this controller tries to log in with — a different key, the same lookup.
+// identity this manager tries to log in with — a different key, the same lookup.
 //
 // NO LINK TO `operators`. That table is an IdP identity written at first OIDC login; a key is
 // normally added for someone who has not signed in yet, and often by somebody else. The `label` is

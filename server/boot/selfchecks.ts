@@ -3,7 +3,7 @@ import type { Config } from "../kernel/config.ts";
 import type { CredentialStore, KeystoreMode } from "../security/store.ts";
 import { registerSecret, unregisterScope, redact } from "../security/redact.ts";
 import type { RunEventBus } from "../executor/bus.ts";
-import type { Registry } from "../domains/runs/registry.ts";
+import type { RunDefinitions } from "../domains/runs/run-definitions.ts";
 import { assertGuardsArmed } from "../executor/guards.ts";
 import { RUN_FAMILY, RUN_KIND, type RunFamily, type RunKind } from "../../shared/enums.ts";
 import { reconcileLocks } from "../executor/locks.ts";
@@ -104,8 +104,8 @@ function checkLocksRebuilt(db: DbHandle): void {
   reconcileLocks(db.db); // repairs orphaned locks; only a DB error throws
 }
 
-function checkGuardsArmed(registry: Registry): void {
-  assertGuardsArmed(registry);
+function checkGuardsArmed(runDefinitions: RunDefinitions): void {
+  assertGuardsArmed(runDefinitions);
 }
 
 /**
@@ -114,16 +114,16 @@ function checkGuardsArmed(registry: Registry): void {
  * because half a family is a run kind the UI offers, the plan route accepts and nothing can execute — the
  * operator finds it, asks for it, and only then learns the plan route answers "unknown run kind".
  *
- * A WHOLLY absent family is a configuration, not a fault: buildOnboarding returns no defs for a family
- * whose adapters are unset (wire-onboarding.ts), and its routes answer 501 NOT_CONFIGURED, so the boot
+ * A WHOLLY absent family is a configuration, not a fault: buildUnits returns no defs for a family
+ * whose adapters are unset (wire-units.ts), and its routes answer 501 NOT_CONFIGURED, so the boot
  * is honest about what it does not offer. Asserting a definition for every literal instead would abort
- * a controller running with onboarding off.
+ * a manager running with onboarding off.
  *
  * The grouping is NOT a list of kinds that may be missing: a run kind added to a family with no definition
  * behind it leaves that family half-registered and fails this check, and a run kind in no family fails it
  * outright. What may vary per boot is which families are wired, never which run kinds a family has.
  */
-function checkRegistryTotal(registry: Registry): void {
+function checkRunDefinitionsTotal(runDefinitions: RunDefinitions): void {
   const claimedBy = new Map<RunKind, RunFamily>();
   for (const family of Object.keys(RUN_FAMILY) as RunFamily[]) {
     const kinds: readonly RunKind[] = RUN_FAMILY[family];
@@ -137,7 +137,7 @@ function checkRegistryTotal(registry: Registry): void {
   if (unclaimed.length > 0) throw new Error(`RUN_KIND literals in no run family: ${unclaimed.join(", ")}`);
   for (const family of Object.keys(RUN_FAMILY) as RunFamily[]) {
     const kinds: readonly RunKind[] = RUN_FAMILY[family];
-    const missing = kinds.filter((kind) => !registry.has(kind));
+    const missing = kinds.filter((kind) => !runDefinitions.has(kind));
     if (missing.length > 0 && missing.length < kinds.length) {
       throw new Error(`run family ${family} is half-registered, missing: ${missing.join(", ")}`);
     }
@@ -161,7 +161,7 @@ export function runSelfChecks(deps: {
   config: Config;
   store: CredentialStore;
   bus: RunEventBus;
-  registry: Registry;
+  runDefinitions: RunDefinitions;
 }): CheckResult[] {
   const results: CheckResult[] = [];
   const blocking = (name: string, fn: () => void): void => {
@@ -187,8 +187,8 @@ export function runSelfChecks(deps: {
   blocking("redact.canary", () => checkRedactCanary());
   blocking("sse.echo", () => checkSseEcho(deps.bus));
   blocking("locks.rebuilt", () => checkLocksRebuilt(deps.db));
-  blocking("guards.armed", () => checkGuardsArmed(deps.registry));
-  blocking("registry.total", () => checkRegistryTotal(deps.registry));
+  blocking("guards.armed", () => checkGuardsArmed(deps.runDefinitions));
+  blocking("run-definitions.total", () => checkRunDefinitionsTotal(deps.runDefinitions));
   blocking("forbidden.bytes", () => checkForbiddenBytes(deps.config));
   degrading("oidc.config_present", () => {
     // Presence only — discovery stays lazy (LAW 0: a down IdP must never block boot).
@@ -205,21 +205,21 @@ export function runSelfChecks(deps: {
 }
 
 /**
- * The release grammar the Controller enforces against the build plane's copy of it: RELEASE_TAG_RE
+ * The release grammar the Manager enforces against the build plane's copy of it: RELEASE_TAG_RE
  * (shared/release.ts), which validates the `release:` pin of every cluster map, against
  * global.releaseTagFilter in the platform repo's platform/values-common.yaml, which the image-builder
  * Trigger fires on and the release pipeline re-verifies. Two literals in two repositories, neither
  * derived from the other — see domains/inventory/release-grammar.ts for what a byte between them costs.
- * A running Controller with the platform repo configured is the only place both sides are present, so
+ * A running Manager with the platform repo configured is the only place both sides are present, so
  * it is the only place the question can be answered, which is why the check is here and not in a test.
  *
  * DEGRADING rather than blocking, for the reason LAW 0 states at the OIDC check: this one reaches a
  * REMOTE. A git that is unreachable, slow or momentarily inconsistent would otherwise abort the boot of
- * a Controller whose only fault is that it cannot read a file right now, and a Controller image older
+ * a Manager whose only fault is that it cannot read a file right now, and a Manager image older
  * than the platform trunk would refuse to start on a grammar change instead of serving the clusters,
  * consumers and tenants that have nothing to do with release tags. What a drift costs is a class of TAG
  * the two sides disagree about — worth a red line on /readyz and a boot warning naming both literals,
- * not a Controller that is down.
+ * not a Manager that is down.
  *
  * Without a platform repo there is no second side, so the check SKIPS and says so. Reporting `ok` there
  * would be a green light for a comparison that never ran — the one outcome a drift check must not have.
@@ -231,7 +231,7 @@ async function checkReleaseGrammarMirror(platformRepo: PlatformRepo | undefined)
       name,
       kind: "skipped",
       ok: false,
-      detail: "the platform repo is not configured on this controller — the build plane's copy of the release grammar cannot be read, so nothing was compared",
+      detail: "the platform repo is not configured on this manager — the build plane's copy of the release grammar cannot be read, so nothing was compared",
     };
   }
   try {
@@ -244,7 +244,7 @@ async function checkReleaseGrammarMirror(platformRepo: PlatformRepo | undefined)
 
 /** Async checks (jose is Promise-based, the platform-repo read is a git fetch). Run after
  *  runSelfChecks; results concat. `platformRepo` is optional exactly as the wiring has it —
- *  wire-onboarding.ts builds the port only with config.github and a books branch behind it. */
+ *  wire-units.ts builds the port only with config.github and a books branch behind it. */
 export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; platformRepo?: PlatformRepo }): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   try {

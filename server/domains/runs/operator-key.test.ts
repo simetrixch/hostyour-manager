@@ -16,7 +16,7 @@ import { seedRunRows } from "../../executor/run-rows.fixture.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import { servers } from "../../db/schema/inventory.ts";
 import { createOperatorKey } from "../inventory/operator-keys.ts";
-import { controllerKeyMarker, operatorKeyMarker, readServerAuthorizedKeys } from "../../../shared/operator-keys.ts";
+import { managerKeyMarker, operatorKeyMarker, readServerAuthorizedKeys } from "../../../shared/operator-keys.ts";
 import { fingerprintPublicKey } from "../../security/fingerprint.ts";
 import type { SshFactory, SshSession, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
 import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from "./defs/operator-key.ts";
@@ -28,9 +28,9 @@ import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from
 // host, an sshd and a second login attempt from outside.
 //
 // It CAN prove the SHAPE of the act, and the shape is the entire safety property. The one failure
-// that would matter is an edit that takes THIS CONTROLLER's own key out of the file it is editing —
+// that would matter is an edit that takes THIS MANAGER's own key out of the file it is editing —
 // the platform would lose its way into the machine and nothing could put it back. So what is
-// asserted below is exactly that: the filter deletes by a marker the controller's own line cannot
+// asserted below is exactly that: the filter deletes by a marker the manager's own line cannot
 // carry, the pattern is anchored so one operator's label cannot reach another's, a grep that FAILED
 // to read is never treated as a file with nothing in it, the arithmetic is checked before anything
 // is written, and every verdict is taken from reading the file back rather than from the exit code
@@ -45,7 +45,7 @@ const logger = createLogger(
     OIDC_ISSUER: "https://i.example/",
     OIDC_CLIENT_ID: "c",
     OIDC_CLIENT_SECRET: "s",
-    CONTROLLER_VERSION: "test",
+    MANAGER_VERSION: "test",
     DATA_DIR: "/data",
     LOG_LEVEL: "silent",
   } as NodeJS.ProcessEnv),
@@ -54,7 +54,7 @@ const logger = createLogger(
 const SLAVE_ID = "srv_s1";
 const MASTER_ID = "srv_m1";
 
-const BLOB_MINE = "AAAAC3NzaC1lZDI1NTE5AAAAIControllerOwnKeyAAAAAAAAAAAAAAAAAAAAAAAA";
+const BLOB_MINE = "AAAAC3NzaC1lZDI1NTE5AAAAIManagerOwnKeyAAAAAAAAAAAAAAAAAAAAAAAA";
 const BLOB_PAT = "AAAAC3NzaC1lZDI1NTE5AAAAIOperatorPatKeyAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const BLOB_HETZ = "AAAAC3NzaC1lZDI1NTE5AAAAICloudImageKeyAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const PAT_KEY = `ssh-ed25519 ${BLOB_PAT}`;
@@ -62,7 +62,7 @@ const PAT_FP = fingerprintPublicKey(PAT_KEY);
 const MINE_FP = fingerprintPublicKey(`ssh-ed25519 ${BLOB_MINE}`);
 
 /** The line adopt leaves on a host — the one no act here may ever touch. */
-const CONTROLLER_LINE = `ssh-ed25519 ${BLOB_MINE} ${controllerKeyMarker("s1")}`;
+const MANAGER_LINE = `ssh-ed25519 ${BLOB_MINE} ${managerKeyMarker("s1")}`;
 /** A key the cloud image shipped with: nothing here placed it, and nothing here can remove it. */
 const FOREIGN_LINE = `ssh-ed25519 ${BLOB_HETZ} someone@example.com`;
 const PAT_LINE = `${PAT_KEY} ${operatorKeyMarker("pat")}`;
@@ -123,7 +123,7 @@ const DEFS: Record<string, AnyRunDefinition> = {
   "authorized-keys-read": authorizedKeysReadDef as unknown as AnyRunDefinition,
 };
 
-describe("the operator-key run kinds — one line of one file, and never this controller's own", () => {
+describe("the operator-key run kinds — one line of one file, and never this manager's own", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   afterEach(() => {
@@ -131,7 +131,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  /** An adopted slave and the master, both with the controller's own key sealed, plus one operator
+  /** An adopted slave and the master, both with the manager's own key sealed, plus one operator
    *  key on file. The master is here because it is the machine an operator most needs to reach by
    *  hand — and it is never adopted, so it carries no adoptedAt at all. */
   async function setup(): Promise<{ db: DbHandle; store: CredentialStore; keyId: string }> {
@@ -180,7 +180,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
       steps: stepDefs.map((s, ordinal) => ({ id: `step_${kind}_${ordinal}`, name: s.name })),
     });
     const rec: Recorded = { scripts: new Map(), commands: [] };
-    const file = opts.file ?? (() => [CONTROLLER_LINE]);
+    const file = opts.file ?? (() => [MANAGER_LINE]);
     const sshFactory: SshFactory = () => Promise.resolve(fakeSession(rec, file, opts.probeFails ?? false));
     const rc = new RunContext({
       runId, db: db.db, creds: store, bus: new RunEventBus(), logger, params, secrets: new RunSecretsMap(runId),
@@ -204,14 +204,14 @@ describe("the operator-key run kinds — one line of one file, and never this co
     return () => (call++ === 0 ? before : after);
   }
 
-  it("deletes by a marker this controller's own line cannot carry", async () => {
+  it("deletes by a marker this manager's own line cannot carry", async () => {
     const { db, store, keyId } = await setup();
     const { rec } = await runOfKind("operator-key-remove", db, store, {
-      keyId, file: twoStage([CONTROLLER_LINE, PAT_LINE], [CONTROLLER_LINE]),
+      keyId, file: twoStage([MANAGER_LINE, PAT_LINE], [MANAGER_LINE]),
     });
     const script = rec.scripts.get("operator-key-remove") ?? "";
     expect(script).toContain("hostyour-operator:pat");
-    // The controller's own marker is `hostyour` and then a colon. It appears nowhere in an act,
+    // The manager's own marker is `hostyour` and then a colon. It appears nowhere in an act,
     // so no pattern here can reach the line adopt wrote.
     expect(script).not.toContain("hostyour:");
     // Anchored at the end of the line, or removing "pat" would also take "pat-laptop" off.
@@ -221,7 +221,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
   it("filters with grep -v, so every other line survives byte for byte", async () => {
     const { db, store, keyId } = await setup();
     const { rec } = await runOfKind("operator-key-place", db, store, {
-      keyId, file: twoStage([CONTROLLER_LINE, FOREIGN_LINE], [CONTROLLER_LINE, FOREIGN_LINE, PAT_LINE]),
+      keyId, file: twoStage([MANAGER_LINE, FOREIGN_LINE], [MANAGER_LINE, FOREIGN_LINE, PAT_LINE]),
     });
     const script = rec.scripts.get("operator-key-place") ?? "";
     expect(script).toContain('grep -v -e "$pattern" "$ak"');
@@ -234,7 +234,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
   it("tells a grep that FAILED apart from one that selected nothing, before it writes", async () => {
     const { db, store, keyId } = await setup();
     const { rec } = await runOfKind("operator-key-place", db, store, {
-      keyId, file: twoStage([CONTROLLER_LINE], [CONTROLLER_LINE, PAT_LINE]),
+      keyId, file: twoStage([MANAGER_LINE], [MANAGER_LINE, PAT_LINE]),
     });
     const script = rec.scripts.get("operator-key-place") ?? "";
     // grep exits 1 for "nothing selected", which for an inverted match is a legitimate empty result,
@@ -247,7 +247,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
   it("re-reads the file and checks the arithmetic BEFORE the install, so a human's key is not lost", async () => {
     const { db, store, keyId } = await setup();
     const { rec } = await runOfKind("operator-key-remove", db, store, {
-      keyId, file: twoStage([CONTROLLER_LINE, PAT_LINE], [CONTROLLER_LINE]),
+      keyId, file: twoStage([MANAGER_LINE, PAT_LINE], [MANAGER_LINE]),
     });
     const script = rec.scripts.get("operator-key-remove") ?? "";
     // The host lock keeps other RUNS out and nobody's shell: a key appended by an ssh-copy-id in
@@ -265,7 +265,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
   it("places ONE line and replaces its own predecessor, so a rotated key leaves nothing working", async () => {
     const { db, store, keyId } = await setup();
     const { rec } = await runOfKind("operator-key-place", db, store, {
-      keyId, file: twoStage([CONTROLLER_LINE], [CONTROLLER_LINE, PAT_LINE]),
+      keyId, file: twoStage([MANAGER_LINE], [MANAGER_LINE, PAT_LINE]),
     });
     const script = rec.scripts.get("operator-key-place") ?? "";
     // The filter runs first and the append second: placing the same label twice leaves one line.
@@ -277,35 +277,35 @@ describe("the operator-key run kinds — one line of one file, and never this co
     const { db, store, keyId } = await setup();
     // The removal deletes by marker; this key sits under a comment nothing here wrote, so the line
     // survives — and the run must say so instead of reporting a removal that did not happen.
-    const stillThere = [CONTROLLER_LINE, `${PAT_KEY} pat@his-own-laptop`];
+    const stillThere = [MANAGER_LINE, `${PAT_KEY} pat@his-own-laptop`];
     await expect(runOfKind("operator-key-remove", db, store, { keyId, file: () => stillThere }))
       .rejects.toThrow(/STILL in the file/);
   });
 
   it("fails a placement the read-back cannot confirm", async () => {
     const { db, store, keyId } = await setup();
-    await expect(runOfKind("operator-key-place", db, store, { keyId, file: () => [CONTROLLER_LINE] }))
+    await expect(runOfKind("operator-key-place", db, store, { keyId, file: () => [MANAGER_LINE] }))
       .rejects.toThrow(/is not in the file after the write/);
   });
 
-  it("refuses to report success when this controller's own key has gone from the file", async () => {
+  it("refuses to report success when this manager's own key has gone from the file", async () => {
     const { db, store, keyId } = await setup();
     // The one catastrophic outcome: the platform's own way into the machine is gone. It is checked
     // before the script's exit code, because it is the more serious answer.
     await expect(runOfKind("operator-key-place", db, store, {
-      keyId, file: twoStage([CONTROLLER_LINE], [PAT_LINE]),
-    })).rejects.toThrow(/this controller's own key is no longer in the file/);
+      keyId, file: twoStage([MANAGER_LINE], [PAT_LINE]),
+    })).rejects.toThrow(/this manager's own key is no longer in the file/);
   });
 
   it("arms the compensation unless it MEASURED the key already there", async () => {
     for (const [before, expected] of [
-      [[CONTROLLER_LINE], ["remove-operator-key"]],
+      [[MANAGER_LINE], ["remove-operator-key"]],
       [null, ["remove-operator-key"]], // an unreadable file is not a file we know the key is in
-      [[CONTROLLER_LINE, PAT_LINE], []],
+      [[MANAGER_LINE, PAT_LINE], []],
     ] as const) {
       const { db, store, keyId } = await setup();
       const { cleanups } = await runOfKind("operator-key-place", db, store, {
-        keyId, file: twoStage(before as string[] | null, [CONTROLLER_LINE, PAT_LINE]),
+        keyId, file: twoStage(before as string[] | null, [MANAGER_LINE, PAT_LINE]),
       });
       expect(cleanups).toEqual(expected);
     }
@@ -325,7 +325,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
   it("writes the reading back on the row, naming every line and who it belongs to", async () => {
     const { db, store, keyId } = await setup();
     await runOfKind("operator-key-place", db, store, {
-      keyId, file: twoStage([CONTROLLER_LINE, FOREIGN_LINE], [CONTROLLER_LINE, FOREIGN_LINE, PAT_LINE]),
+      keyId, file: twoStage([MANAGER_LINE, FOREIGN_LINE], [MANAGER_LINE, FOREIGN_LINE, PAT_LINE]),
     });
     const row = db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
     // A key nothing here placed is still on the host, so the row must NOT read as clean.
@@ -334,7 +334,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
     expect(read.kind).toBe("v0");
     if (read.kind === "v0") {
       expect(read.facts.runId).toBe("run_operator-key-place");
-      expect(read.facts.keys.map((k) => k.kind)).toEqual(["controller", "foreign", "operator"]);
+      expect(read.facts.keys.map((k) => k.kind)).toEqual(["manager", "foreign", "operator"]);
       expect(read.facts.keys.find((k) => k.kind === "operator")).toMatchObject({ fingerprint: PAT_FP, label: "pat" });
     }
   });
@@ -342,7 +342,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
   it("the read run kind changes nothing and records what it found", async () => {
     const { db, store } = await setup();
     const { rec, stepNames, cleanups } = await runOfKind("authorized-keys-read", db, store, {
-      file: () => [CONTROLLER_LINE, PAT_LINE],
+      file: () => [MANAGER_LINE, PAT_LINE],
     });
     expect(stepNames).toEqual([ATTEST_TARGET_STEP, "read-authorized-keys"]);
     // The only script it ships is the probe — no filter, no install, nothing written.
@@ -383,7 +383,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
       expect(plan.requiredSecrets).toEqual([]);
     });
 
-    it(`${kind} refuses a host this controller holds no key for — there is no session to edit over`, async () => {
+    it(`${kind} refuses a host this manager holds no key for — there is no session to edit over`, async () => {
       const { db, keyId } = await setup();
       const params = kind === "authorized-keys-read" ? { serverId: SLAVE_ID } : { serverId: SLAVE_ID, operatorKeyId: keyId };
       for (const status of ["bare", "adopting"] as const) {
@@ -405,7 +405,7 @@ describe("the operator-key run kinds — one line of one file, and never this co
     const { db, store } = await setup();
     // The finding this design is built on: a credential of kind ssh_key is looked up BY SERVER,
     // newest wins (executor/context.ts getSsh, and adopt's install-key). A human's key filed there
-    // would become the identity this controller tries to log in with — a different key, the same
+    // would become the identity this manager tries to log in with — a different key, the same
     // lookup. It lives in its own table instead, so the collision cannot be reached at all.
     const all = await store.list();
     expect(all.map((c) => c.fingerprint)).not.toContain(PAT_FP);

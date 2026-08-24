@@ -65,7 +65,7 @@ export interface ServerTailnetFacts {
   /** The coordinator the client is logged in to. Carried because an address alone cannot say WHOSE
    *  network it is on: a host brought up against a different coordinator holds an address out of
    *  the same range and reports Running exactly like ours. The card names it rather than judging
-   *  it — the controller is told no coordinator URL of its own to compare against. */
+   *  it — the manager is told no coordinator URL of its own to compare against. */
   coordinator: string | null;
 }
 
@@ -160,7 +160,7 @@ export type ServerAuthorizedKeysRead =
   | { kind: "unsupported"; v: number }
   | { kind: "unreadable"; reason: string };
 
-/** An operator's own SSH public key, as this controller holds it. There is no private half here and
+/** An operator's own SSH public key, as this manager holds it. There is no private half here and
  *  never will be: the operator keeps that, and this row is the public line plus the label the key is
  *  placed and removed under. `label` is free text the operator chooses, not a link to an operators
  *  row — an operator row only exists after that human's first OIDC login, and a key is usually added
@@ -229,7 +229,7 @@ export interface ServerView {
   passwordLogin: ServerPasswordLoginRead;
   /** What this host's ~/.ssh/authorized_keys held, as the last run to read it found — a FOURTH axis
    *  beside `status`, `tailnetState` and `passwordLoginState`. It answers a different question from
-   *  `hasKey` below: that one says this controller HAS a key for the server, this one says who else
+   *  `hasKey` below: that one says this manager HAS a key for the server, this one says who else
    *  the machine lets in. */
   authorizedKeysState: ServerAuthorizedKeysState;
   /** The reading behind `authorizedKeysState`: when it was taken, by which run, and every key line
@@ -317,12 +317,12 @@ export interface ClustersView {
   verdict: ClustersVerdict;
   needsYou: RunView[];
   running: RunView[];
-  /** The MANAGED servers only (role !== master) — what this controller actually runs.
-   *  The master (this controller itself) is never in this list; it rides `master` below,
+  /** The MANAGED servers only (role !== master) — what this manager actually runs.
+   *  The master (this manager itself) is never in this list; it rides `master` below,
    *  so the managed count mirrors reality 1:1. */
   servers: ServerView[];
   /** The control host itself (the one role=master row), surfaced separately — labeled,
-   *  never counted as managed. Null until the controller has adopted itself. */
+   *  never counted as managed. Null until the manager has adopted itself. */
   master: ServerView | null;
   sources: {
     inventory: ClustersSourceState;
@@ -394,7 +394,7 @@ export interface ReadyzView {
 }
 
 /** Public /healthz payload. `version` is the running image tag (the Deployment's
- *  CONTROLLER_VERSION = apps/controller values imageTag) — always present, never defaulted. */
+ *  MANAGER_VERSION = apps/manager values imageTag) — always present, never defaulted. */
 export interface HealthView {
   status: "ok";
   version: string;
@@ -403,9 +403,9 @@ export interface HealthView {
 /* ---- GitOps repo: Branches (read-only) + Reset (destructive) ---- */
 
 /** Branch classification, DERIVED server-side (derive-dont-type): master = the generic source;
- *  controller = the control host's install branch (name === the master FQDN);
+ *  manager = the control host's install branch (name === the master FQDN);
  *  slave = <single-label>.<base-domain of the master FQDN>; other = the rest of the repo. */
-export type BranchKind = "master" | "controller" | "slave" | "other";
+export type BranchKind = "master" | "manager" | "slave" | "other";
 
 /** Merge-base (three-dot) semantics: aheadBy/changedFiles = the branch's OWN work since it
  *  diverged from master; behindBy = master commits the branch lacks. truncated ⇒ GitHub's
@@ -422,7 +422,7 @@ export interface BranchView {
   /** HEAD commit sha. */
   sha: string;
   kind: BranchKind;
-  /** Present for installer branches only (kind controller|slave). master is the base of every
+  /** Present for installer branches only (kind manager|slave). master is the base of every
    *  compare and "other" branches are not installer state — neither is compared. */
   compare?: BranchCompareSummary;
 }
@@ -497,7 +497,7 @@ export interface ResetResult {
 
 /* ---- The LIVE RECONCILIATION reads: GET /api/consumers/:appId/live and GET /api/tenants/:id/live ----
  *
- * The SQL row is a TRACE of what the Controller BELIEVES; these two routes read the FACTS beside it —
+ * The SQL row is a TRACE of what the Manager BELIEVES; these two routes read the FACTS beside it —
  * a live cluster smoke (source 2) and the ArgoCD status (source 3) — and compare them. Both answer in
  * the SAME four-part envelope (row / cluster / argo / drift + the ArgoCD deep-link), so the three parts
  * that are IDENTICAL between them are declared ONCE below and shared by both, and by both ends.
@@ -545,7 +545,7 @@ export type LiveArgoView =
  *
  *  On a unit whose pointer deliberately generates NO Application — a SUSPENDED or offboarded consumer,
  *  a settled tenant — `pinned` is null, so the pair reads "pinned none · deployed none". There is no
- *  Controller-side record to fall back on and there must not be one: calling that absence drift reported
+ *  Manager-side record to fall back on and there must not be one: calling that absence drift reported
  *  the success condition of an approved action as a defect. A tenant SUSPEND is
  *  not such a case at all — its base Application survives by design, so it keeps both revisions and goes
  *  on being compared. What a unit with neither revision reads is not "converged" but the fourth verdict,
@@ -569,7 +569,7 @@ export interface LiveDriftView {
  *  the inventory row, because one consumer surface has no row to echo: GET /api/consumers/live, the
  *  NAME-keyed probe (clusterId + name + stage) the Detected panel renders for a consumer the inventory
  *  does not know. Both routes answer through the server's ONE probe
- *  implementation (probeConsumerLive, server/domains/onboarding/api.ts), so the two cards can never
+ *  implementation (probeConsumerLive, server/domains/units/api.ts), so the two cards can never
  *  answer the same situation differently. `cluster`/`argo`/`drift` are null TOGETHER when onboarding is
  *  not configured (`reason` set) — the same degrade-loud contract the 501 mutating routes follow. */
 export interface ConsumerLiveProbeView {
@@ -595,7 +595,7 @@ export interface ConsumerLiveView extends ConsumerLiveProbeView {
    *  chain could not be read; the card then shows no address rather than a name that resolves
    *  nowhere. */
   unitHost: string | null;
-  /** Source (1): the SQL row — what the Controller BELIEVES, echoed beside the live facts so the
+  /** Source (1): the SQL row — what the Manager BELIEVES, echoed beside the live facts so the
    *  payload is self-contained. The private repoUrl is deliberately NOT part of it: it is read
    *  server-side to resolve the drift comparison per repo, and never leaves the server. */
   row: {
@@ -633,7 +633,7 @@ export interface TenantLiveView {
 /* ---- Tenants: what a tenant-purge is AIMED at, and the two reads that can NAME one ----
  *
  * THE ONE DECLARATION of each shape below, consumed by BOTH ends: the server domain module returns these
- * exact types (server/domains/onboarding/tenant-orphans.ts and tenant-registry.ts) and the web client
+ * exact types (server/domains/units/tenant-orphans.ts and tenant-registrations.ts) and the web client
  * reads them (web/src/api.ts and the tenant/run screens). They live here — a pure, zod-free module, the
  * same reason ACTIVATION_RESULT_MARKER does — because the alternative was tried and failed: each of them
  * was declared once in the domain module and hand-mirrored again in the browser, and when the server's
@@ -679,7 +679,7 @@ export interface OrphanTenantView {
   stage: Stage;
   /** The pointer's `cluster` field: the ArgoCD-REGISTERED slave name the fan-out is destined for. */
   cluster: string;
-  /** That slave resolved to the controller's own clusters row id (resolveClusterIdByName), or null
+  /** That slave resolved to the manager's own clusters row id (resolveClusterIdByName), or null
    *  when NO registered cluster carries the name. Null is honest and load-bearing: a purge is keyed on a
    *  clusterId, so an unresolvable orphan cannot be purged through the product at all — the UI must show
    *  it and say why rather than offer an action that would 400. */
@@ -724,7 +724,7 @@ export interface OrphanScanView extends OrphanScan {
  * vocabulary. A DETECTED consumer is one whose GitOps registration (registrations/<name>/<stage>.yaml)
  * names an active cluster while NO unsettled apps row carries it —
  * its onboard died before record-inventory (the LAST onboard step), or the pointer was written by
- * hand. Such a consumer is INVISIBLE in the Controller: the Consumers list is a projection of the apps
+ * hand. Such a consumer is INVISIBLE in the Manager: the Consumers list is a projection of the apps
  * rows, and offboard resolves its target BY that row. Unlike a tenant orphan (whose remedy is purge,
  * removal), a detected consumer is usually HEALTHY — swissbookai is the founding case — so the remedy
  * is ADOPT: reconstruct the row from the pointer, via a Run with a live cluster attest. */
@@ -924,7 +924,7 @@ export type RunTenantStateView =
 /** GET /api/consumers/channels — the channel table the onboard wizard reads: WHICH stages a release
  *  channel may reach. Served LITERALLY from the platform repo's platform/values-common.yaml
  *  (global.channelStages) — the ONE table, enforced in the release pipeline at the point that
- *  writes; the controller keeps no copy. Keys are the channels the file states (normally all
+ *  writes; the manager keeps no copy. Keys are the channels the file states (normally all
  *  three), each value the stages that channel admits, in the file's own order. */
 export interface ChannelStagesView {
   channelStages: Partial<Record<ReleaseChannel, Stage[]>>;

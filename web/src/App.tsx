@@ -31,7 +31,7 @@ export function App() {
           <header className="topbar">
             <span className="topbar__brand">
               <LogoMark size={20} />
-              <strong>Controller</strong>
+              <strong>Manager</strong>
             </span>
             <a className="topbar__signout" href="/auth/logout">
               Sign out

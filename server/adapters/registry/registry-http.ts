@@ -1,7 +1,7 @@
 // The concrete RegistryProbe (tenant ensure-images): a plain fetch of the OCI distribution
 // manifest endpoint https://<registryHost>/v2/<repo>/manifests/<tag> — the SAME probe the
-// image-guard PreSync hook curls (apps/controller/templates/imageguard-job.yaml), reimplemented
-// controller-side. Auth is the basic-auth `auth` value out of the mounted controller-registry-pull
+// image-guard PreSync hook curls (apps/manager/templates/imageguard-job.yaml), reimplemented
+// manager-side. Auth is the basic-auth `auth` value out of the mounted manager-registry-pull
 // dockerconfigjson (the pull credential the Deployment's imagePullSecrets already reference); the
 // file is read FRESH per probe because kubelet refreshes secret-volume files in a running pod, so
 // an ESO resync lands without a restart. An adapter, so the IO (fetch + fs) lives here — the
@@ -28,7 +28,7 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  * (zot.<build-plane>), so it can name a registry the mounted credential does not cover; presenting
  * some other entry's value would turn that misconfiguration into a misleading 401 from a foreign
  * registry, so a missing entry fails naming the host and the entries the file does carry.
- * Unreadable file / invalid JSON / no matching entry ⇒ UPSTREAM (fail closed): the controller-side
+ * Unreadable file / invalid JSON / no matching entry ⇒ UPSTREAM (fail closed): the manager-side
  * registry clients never degrade to a guess. `credentialLabel` names the credential in the error so
  * a missing pull vs push secret is told apart. Read FRESH per call because kubelet refreshes
  * secret-volume files in a running pod (an ESO resync lands without a restart).
@@ -95,7 +95,7 @@ function nextLink(header: string | null): string | null {
 }
 
 export interface HttpRegistryProbeConfig {
-  /** Where the Deployment mounts the controller-registry-pull dockerconfigjson (a plain directory
+  /** Where the Deployment mounts the manager-registry-pull dockerconfigjson (a plain directory
    *  mount, so the file refreshes in the running pod after an ESO resync). */
   dockerConfigPath: string;
   /** Per-probe fetch budget; defaults to 15s (the image-guard probe's --max-time). */
@@ -140,11 +140,11 @@ export class HttpRegistryProbe implements RegistryProbe {
     }
   }
 
-  /** The base64 basic-auth value for the registry host out of the mounted controller-registry-pull
+  /** The base64 basic-auth value for the registry host out of the mounted manager-registry-pull
    *  dockerconfigjson (the pull credential). Delegates to the shared reader; fail-closed on an
    *  unreadable file or no usable entry. */
   private async readBasicAuth(registryHost: string): Promise<string> {
-    return readDockerConfigAuth(this.cfg.dockerConfigPath, registryHost, "the mounted controller-registry-pull dockerconfigjson (the pull credential)");
+    return readDockerConfigAuth(this.cfg.dockerConfigPath, registryHost, "the mounted manager-registry-pull dockerconfigjson (the pull credential)");
   }
 }
 

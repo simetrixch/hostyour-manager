@@ -116,7 +116,7 @@ export class FakePlatformRepo implements PlatformRepo {
       // unit's ONE host to <name>.<unitApex>, so a chain without it fails the plan on a branch the
       // test never meant to be incomplete. Each branch gets its OWN apex, which is what a unit
       // standing at two stages requires — provision-dns refuses a second stage whose host another
-      // cluster's address already answers (domains/onboarding/unit-dns.ts). A real install may well
+      // cluster's address already answers (domains/units/unit-dns.ts). A real install may well
       // give two clusters one apex, so a test that wants THAT world seeds installation/profile.yaml itself.
       this.seed(branch, "installation/profile.yaml", `global:\n  unitApex: ${branch}\n  endpoints:\n    vault:\n      url: https://vault.${branch}:8200\n`);
     }

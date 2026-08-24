@@ -26,7 +26,7 @@ afterEach(() => disposeHarnesses());
 // what is sent is words, and the envelope rides standard input where it always did.
 
 /** A machine that has been through everything before this step in the list: both executables at the
- *  pin, and the token file run-deploy-gitops writes. */
+ *  pin, and the token file run-deploy-platform-services writes. */
 async function placedMachine(hosts: HostsScript, version = ANSIWISE_PIN): Promise<number> {
   const session = await hostsFactory(hosts)({
     host: "10.1.1.11", port: 22, username: "ubuntu", auth: { kind: "key", privateKey: Buffer.from("k") },
@@ -184,7 +184,7 @@ describe("enable-ansiwise-service", () => {
   });
 
   it("refuses a machine that carries no token file, naming the run that mints it", async () => {
-    // The one thing install-service cannot invent. A machine that has not been through deploy-gitops
+    // The one thing install-service cannot invent. A machine that has not been through deploy-platform-services
     // has no minted token, and a unit enabled without one comes up failed at every boot with nothing
     // but a journal saying so — so the refusal comes BEFORE install-service is run at all.
     const hosts = scriptedHosts({ serviceToken: undefined });
@@ -192,7 +192,7 @@ describe("enable-ansiwise-service", () => {
     await placedMachine(hosts);
     const run = enableAnsiwiseServiceStep(target, ports(h)).run(placeCtx(h, hosts, "run_svc5", []));
     await expect(run).rejects.toThrow(new RegExp(`answers nothing readable at ${SERVICE_TOKEN_FILE}`));
-    await expect(run).rejects.toThrow(/deploy-gitops/);
+    await expect(run).rejects.toThrow(/deploy-platform-services/);
     expect(hosts.serviceEnabled, "it enabled a unit that cannot read its own credential").toBe(false);
     expect(commands(hosts).some((c) => c.includes(INSTALL_SERVICE_PROGRAM))).toBe(false);
   });

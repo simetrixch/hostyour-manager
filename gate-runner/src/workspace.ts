@@ -1,7 +1,7 @@
 // gate-runner/src/workspace.ts
 // The workspace (clone) file source. The gate runs as a one-shot Tekton task, so the repo is already
 // on disk (a git clone at the pinned SHA in the `source` workspace): git's own content-addressing at
-// the resolved 40-char SHA IS the integrity proof (the Controller resolved + pinned that SHA before
+// the resolved 40-char SHA IS the integrity proof (the Manager resolved + pinned that SHA before
 // dispatching the run). This module walks that cloned tree into the gates' read-only ctx.files
 // (repo-relative forward-slash path -> UTF-8 contents; binary files omitted), with a fail-closed
 // binary/UTF-8 rule, a total-read cap, and a workspace-escape guard on every entry.

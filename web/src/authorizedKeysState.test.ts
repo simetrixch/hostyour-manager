@@ -27,7 +27,7 @@ function server(
 }
 
 const key = (over: Partial<AuthorizedKeyFact> = {}): AuthorizedKeyFact => ({
-  fingerprint: "SHA256:k", type: "ssh-ed25519", comment: "", kind: "controller", label: null, ...over,
+  fingerprint: "SHA256:k", type: "ssh-ed25519", comment: "", kind: "manager", label: null, ...over,
 });
 
 const read = (keys: AuthorizedKeyFact[], over: { observedAt?: number; unparsed?: number } = {}): ServerAuthorizedKeysRead => ({
@@ -86,12 +86,12 @@ describe("the authorized-keys chip", () => {
   });
 
   it("counts the lines it could not read as a key, beside the foreign ones and never instead", () => {
-    // A line this controller cannot read may still be one sshd authenticates with, so the chip has
+    // A line this manager cannot read may still be one sshd authenticates with, so the chip has
     // to name it — and a chip that counted only foreign keys would say "0 foreign" here.
     const chip = authorizedKeysChip(server("unaccounted", read([key()], { unparsed: 2 })), NOW);
     expect(chip.label).toBe("authorized keys: 2 unreadable");
     expect(chip.className).toBe("chip chip--warn");
-    expect(chip.detail).toMatch(/2 line\(s\) in the file are not a key this controller can read/);
+    expect(chip.detail).toMatch(/2 line\(s\) in the file are not a key this manager can read/);
     const both = authorizedKeysChip(
       server("unaccounted", read([key(), key({ fingerprint: "SHA256:hetz", kind: "foreign" })], { unparsed: 1 })),
       NOW,
@@ -110,7 +110,7 @@ describe("the authorized-keys chip", () => {
 });
 
 describe("what the card may offer", () => {
-  it("offers the read run kind exactly where this controller holds a key, and never on the reading", () => {
+  it("offers the read run kind exactly where this manager holds a key, and never on the reading", () => {
     for (const status of ["ready", "healthy", "degraded", "provisioning", "draining", "undeployed"] as const) {
       expect(authorizedKeysRunKindOffer(server("unknown", { kind: "none" }, { status })).read, status).toBe(true);
     }

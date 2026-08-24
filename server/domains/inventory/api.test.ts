@@ -20,7 +20,7 @@ const config = parseConfig({
   OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c",
   OIDC_CLIENT_SECRET: "s",
-  CONTROLLER_VERSION: "test",
+  MANAGER_VERSION: "test",
   DATA_DIR: "/d",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv);
@@ -68,7 +68,7 @@ describe("clusters + locks API", () => {
     expect(clusters.sources.argo).toBe("unwired");
   });
 
-  it("the master (this controller) is NOT a managed server — never in clusters.servers, rides clusters.master", async () => {
+  it("the master (this manager) is NOT a managed server — never in clusters.servers, rides clusters.master", async () => {
     const { app, db, cookie } = await make();
     db.sqlite
       .prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, notes) VALUES ('srv_m','m1','1.2.3.4','root','master','ready','secret-notes')")
@@ -144,7 +144,7 @@ describe("clusters + locks API", () => {
 
     it("with no platform repo wired, every server says WHY the release is unknown", async () => {
       for (const s of (await twoClusters()).servers) {
-        expect(s.release).toEqual({ kind: "unknown", reason: expect.stringContaining("wire-onboarding.ts:204") });
+        expect(s.release).toEqual({ kind: "unknown", reason: expect.stringContaining("wire-units.ts:204") });
       }
     });
 
@@ -160,7 +160,7 @@ describe("clusters + locks API", () => {
   it("a planned run lands in needsYou and flips the verdict to warn", async () => {
     const { app, db, cookie } = await make();
     db.sqlite
-      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES ('run_p','noop','self','controller','{}','{\"summary\":\"x\"}','planned','op_system')")
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES ('run_p','noop','self','manager','{}','{\"summary\":\"x\"}','planned','op_system')")
       .run();
     const clusters = (await (await app.request("/api/clusters", authed(cookie))).json()) as ClustersView;
     expect(clusters.needsYou.map((r) => r.id)).toContain("run_p");

@@ -26,7 +26,7 @@ export interface ExecutorDeps {
   creds: CredentialStore;
   bus: RunEventBus;
   logger: Logger;
-  registry: Map<RunKind, AnyRunDefinition>;
+  runDefinitions: Map<RunKind, AnyRunDefinition>;
   sshFactory: SshFactory;
   actor: () => string; // current operator id (from request ctx) or "op_system"
 }
@@ -55,7 +55,7 @@ export class Executor {
   constructor(private readonly deps: ExecutorDeps) {}
 
   async plan(kind: RunKind, rawParams: unknown): Promise<{ runId: string; plan: PlanSnapshot }> {
-    const def = this.deps.registry.get(kind);
+    const def = this.deps.runDefinitions.get(kind);
     if (!def) throw errValidation(`unknown run kind: ${kind}`);
     const params = def.paramsSchema.parse(rawParams);
     await runGuards(kind, params, { db: this.deps.db });
@@ -114,7 +114,7 @@ export class Executor {
     assertRunTransition(run.status, "cancelled");
     this.deps.db.transaction((tx) => tx.update(runs).set({ status: "cancelled", finishedAt: new Date() }).where(eq(runs.id, runId)).run());
     writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.cancelled", runId, detail: { discarded: true } });
-    this.safeOnTerminal(this.deps.registry.get(run.kind), runId, run.params, "cancelled");
+    this.safeOnTerminal(this.deps.runDefinitions.get(run.kind), runId, run.params, "cancelled");
   }
 
   /** Soft-delete a run — gated purely on status (isDeletableRun): any SETTLED run
@@ -144,7 +144,7 @@ export class Executor {
     // cancelled run onTerminal("cancelled") at cancel/discard time, and a succeeded run
     // onTerminal("succeeded") on completion — so only planned needs a nudge here.
     if (r.status === "planned") {
-      this.safeOnTerminal(this.deps.registry.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "cancelled");
+      this.safeOnTerminal(this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "cancelled");
     }
     this.deps.db.transaction((tx) => {
       tx.delete(runLocks).where(eq(runLocks.runId, runId)).run(); // planned/failed normally hold none — defensive, a hidden run must never keep a lock
@@ -171,7 +171,7 @@ export class Executor {
    *  CONCURRENTLY through the same inflight bookkeeping approve uses. execute() registers the
    *  run's AbortController synchronously (before its first await), so by the time the fire
    *  loop below has run, every resumed run is in `active`/`inflight`: a cancel on any of them
-   *  aborts a real controller and settle() awaits a real promise — with a serial loop, a run
+   *  aborts a real manager and settle() awaits a real promise — with a serial loop, a run
    *  still queued behind a slow resume was invisible to both, so its cancel was acknowledged
    *  and then every remaining step still executed. Resolves once every resumed run settled.
    *
@@ -205,7 +205,7 @@ export class Executor {
       // process. Fail it (with the report absent) so it becomes a soft-deletable settled run instead
       // of a stuck "planning" ghost the operator can neither approve nor delete.
       const orphanedPlanning = this.deps.db.select({ id: runs.id }).from(runs).where(eq(runs.status, "planning")).all();
-      for (const run of orphanedPlanning) this.failRun(run.id, "validation was interrupted by a controller restart — re-submit the onboarding");
+      for (const run of orphanedPlanning) this.failRun(run.id, "validation was interrupted by a manager restart — re-submit the onboarding");
       const pending = this.deps.db.select({ id: runs.id }).from(runs).where(inArray(runs.status, ["running", "approved"])).all();
       // Only the steps left RUNNING by the crash: pending ones are already where they belong, and
       // an ok one must never be reset. The state list IS the WHERE, so that holds in the statement.
@@ -290,7 +290,7 @@ export class Executor {
     if (step.status !== "failed") throw errValidation(`step ${stepName} is not the failed step`);
     // Asked on the DEFINITION's mutating flag + the step name (guards.isMutatingPrecondition), never on
     // the kind: the executor stays domain-agnostic and learns nothing about tenants, consumers or slaves.
-    if (isMutatingPrecondition(this.deps.registry.get(run.kind), step.name)) {
+    if (isMutatingPrecondition(this.deps.runDefinitions.get(run.kind), step.name)) {
       throw errValidation(
         `step ${stepName} is the fail-closed precondition of this ${run.kind} run — it cannot be skipped. ` +
           "It refused because of what it found in the world, not because of anything this run did, and every step after it mutates. " +
@@ -335,7 +335,7 @@ export class Executor {
   async abortWithCleanup(runId: string, secrets?: Record<string, Buffer>): Promise<void> {
     const run = this.loadRun(runId);
     if (run.status !== "failed" && run.status !== "cancelled") throw errValidation(`run ${runId} is not failed/cancelled`);
-    const def = this.deps.registry.get(run.kind);
+    const def = this.deps.runDefinitions.get(run.kind);
     const all = this.allStepRows(runId);
     const names = registeredCleanupNames(all);
     if (names.length === 0) {
@@ -356,7 +356,7 @@ export class Executor {
   private async execute(runId: string): Promise<void> {
     try {
       const run = this.loadRun(runId);
-      const def = this.deps.registry.get(run.kind);
+      const def = this.deps.runDefinitions.get(run.kind);
       if (!def) {
         this.failRun(runId, `unknown run kind ${run.kind}`);
         return;
@@ -377,8 +377,8 @@ export class Executor {
         implByName.set(`cleanup:${c.name}`, { name: `cleanup:${c.name}`, title: `Cleanup: ${c.title}`, run: c.run });
       }
 
-      const controller = new AbortController();
-      this.active.set(runId, controller);
+      const manager = new AbortController();
+      this.active.set(runId, manager);
       const resuming = run.startedAt !== null;
       this.deps.db.transaction((tx) => tx.update(runs).set({ status: "running", startedAt: run.startedAt ?? new Date() }).where(eq(runs.id, runId)).run());
       const secrets = this.runSecrets.get(runId) ?? new RunSecretsMap(runId);
@@ -390,7 +390,7 @@ export class Executor {
         logger: this.deps.logger,
         params,
         secrets,
-        signal: controller.signal,
+        signal: manager.signal,
         sshFactory: this.deps.sshFactory,
         targetServerId: this.targetServerId(run),
         declaredTargets: this.declaredTargets(run),
@@ -410,7 +410,7 @@ export class Executor {
         // walking — every remaining, often destructive, step would still run and the run would
         // settle "succeeded" after the operator was told it was cancelled. A step that never
         // started stays pending.
-        if (controller.signal.aborted) {
+        if (manager.signal.aborted) {
           this.deps.db.transaction((tx) => tx.update(runs).set({ status: "cancelled", finishedAt: new Date() }).where(eq(runs.id, runId)).run());
           ctx.emitMeta(`✕ cancelled before: ${row.title}`);
           writeAudit(this.deps.db, { actor: "system", action: "run.cancelled", runId, detail: { beforeStep: row.name } });
@@ -439,7 +439,7 @@ export class Executor {
           this.deps.db.transaction((tx) => setStepStatus(tx, row.id, "running", "ok", { finishedAt: new Date() }));
           ctx.emitMeta(`✓ ${impl.title}`);
         } catch (err) {
-          const aborted = controller.signal.aborted || (err instanceof Error && err.name === "AbortError");
+          const aborted = manager.signal.aborted || (err instanceof Error && err.name === "AbortError");
           const message = redact(err instanceof Error ? err.message : String(err));
           this.deps.db.transaction((tx) => {
             setStepStatus(tx, row.id, "running", "failed", { error: message, finishedAt: new Date() });
@@ -517,7 +517,7 @@ export class Executor {
       this.appendMeta(runId, `✗ run failed: ${message}`);
       writeAudit(this.deps.db, { actor: "system", action: "run.failed", runId, detail: { error: message } });
       const r = this.deps.db.select().from(runs).where(eq(runs.id, runId)).get();
-      if (r) this.safeOnTerminal(this.deps.registry.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "failed");
+      if (r) this.safeOnTerminal(this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "failed");
       releaseLocks(this.deps.db, runId);
     } catch (err) {
       this.deps.logger.error({ err, runId, runError: message }, "could not record the run's failure — the run row still reads whatever it read before, and the reason it failed now exists only in this line");

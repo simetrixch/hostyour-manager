@@ -1,7 +1,7 @@
-// The Controller's HelmRenderer port — the tenant validation engine.
+// The Manager's HelmRenderer port — the tenant validation engine.
 // Unlike the consumer path, which renders UNTRUSTED charts inside the credential-free
 // gate-runner sandbox, the tenant fan-out charts are trusted first-party charts living in
-// catalog, so the Controller renders them itself: the concrete adapter (helm.ts) shells
+// catalog, so the Manager renders them itself: the concrete adapter (helm.ts) shells
 // `helm template` over a cloned catalog workdir, flattens List/aggregates the same way the
 // sandbox does (gate-runner/src/render-docs.ts parseRenderedDocs), and hands back the rendered docs
 // for the tenant gates (gateT2Render/gateT3Isolation) to inspect. The fake
@@ -9,7 +9,7 @@
 //
 // Boundary: the concrete impl owns the node:child_process IO (an adapter may import IO libs); the
 // domain (validate-tenant.ts) depends only on this port. The impl needs the helm binary plus the
-// charts' vendored subchart deps present in the Controller pod.
+// charts' vendored subchart deps present in the Manager pod.
 
 /** One flattened document out of `helm template` — every List/aggregate member emitted on its own,
  *  so nothing can hide inside a wrapper past gateT3Isolation. `raw` is the parsed object; a gate

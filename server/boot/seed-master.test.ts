@@ -14,7 +14,7 @@ import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
 const BASE_ENV = {
   PUBLIC_URL: "https://x.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c",
   OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", LOG_LEVEL: "silent",
-  CONTROLLER_VERSION: "test",
+  MANAGER_VERSION: "test",
   // MASTER_STAGE is REQUIRED whenever MASTER_FQDN is set (config.ts refine); default it here so the
   // many MASTER_FQDN tests below stay terse. Ignored when MASTER_FQDN is unset (the no-op case).
   MASTER_STAGE: "prod",

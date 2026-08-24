@@ -8,7 +8,7 @@ import { getHealth } from "../api.ts";
  *  On desktop the rail owns the brand and sign-out (the mobile topbar is hidden there). */
 export function NavRail() {
   const { pathname } = useLocation();
-  // The running controller version (image tag), from the public /healthz probe. Shown so the
+  // The running manager version (image tag), from the public /healthz probe. Shown so the
   // operator can see which version is live. Stays hidden only until the first probe resolves
   // (or if it's unreachable) — never a fabricated placeholder.
   const [version, setVersion] = useState<string | null>(null);
@@ -23,7 +23,7 @@ export function NavRail() {
     <nav className="navrail" aria-label="Primary">
       <div className="navrail__brand">
         <LogoMark />
-        <span>Controller</span>
+        <span>Manager</span>
       </div>
       <div className="navrail__items">
         {NAV.map((item) => (
@@ -47,7 +47,7 @@ export function NavRail() {
           <span>Sign out</span>
         </a>
         {version !== null && (
-          <div className="navrail__version" title="Running controller version (image tag)">v{version}</div>
+          <div className="navrail__version" title="Running manager version (image tag)">v{version}</div>
         )}
       </div>
     </nav>

@@ -170,7 +170,7 @@ export function serveAdminSocket(socketPath: string, deps: EmergencyDeps): HttpS
   const server = createHttpServer(getRequestListener(createAdminSocketApp(deps).fetch, { hostname: "localhost" }));
   // A stale socket file left by a previous unclean shutdown makes listen() fail with
   // EADDRINUSE — the inode exists but nothing is bound to it, so the socket answers nothing and is
-  // silently dead every boot until the file is removed. The controller is single-replica (RWO
+  // silently dead every boot until the file is removed. The manager is single-replica (RWO
   // /data), so any pre-existing admin.sock is OURS-but-dead; unlink it before binding. Guarded to a
   // real socket so a mis-set DATA_DIR can never make us delete an arbitrary file.
   try {
@@ -178,7 +178,7 @@ export function serveAdminSocket(socketPath: string, deps: EmergencyDeps): HttpS
   } catch {
     // ENOENT (clean boot) or un-stat-able — nothing to clear; listen() proceeds.
   }
-  // A listen failure (e.g. no AF_UNIX on the dev box) must never crash the controller — the
+  // A listen failure (e.g. no AF_UNIX on the dev box) must never crash the manager — the
   // :8485 HTTP listener is the reachable half; only the socket's two routes are unavailable.
   server.on("error", (err: unknown) => deps.logger.warn({ err: String(err) }, "admin.sock unavailable"));
   server.listen(socketPath, () => {

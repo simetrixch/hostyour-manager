@@ -34,9 +34,9 @@ export const PREFLIGHT_CATALOG: Record<string, CatalogEntry> = {
   // the per-slave KV mount lives there and slave-ESO authenticates against it.
   "vault.reachable": { title: "Master Vault reachable", severity: "hard", hint: "The slave must reach https://vault.<master-fqdn>:8200 — check DNS, routing, and the firewall." },
   // deploy-slave extra: the slave's pod (Calico) CIDR
-  // must not overlap the cluster LAN, or controller pods can't route to the slave's LAN IP —
+  // must not overlap the cluster LAN, or manager pods can't route to the slave's LAN IP —
   // the `dial …:16443 i/o timeout` blocker. Mirrors hostyour-cloud base/lib/preflight.sh;
-  // computed LOCALLY by the Controller (podCidrOverlapCheck), not the remote checks.
+  // computed LOCALLY by the Manager (podCidrOverlapCheck), not the remote checks.
   "net.podcidr": { title: "Pod CIDR vs cluster LAN", severity: "hard", hint: "POD_CIDR (default 10.244.0.0/16) must be disjoint from the cluster LAN /24 (MicroK8s' stock 10.1.0.0/16 overlaps a 10.1.1.0/24 LAN)." },
 };
 
@@ -74,16 +74,16 @@ export function hardenPreflightForSlave(checks: PreflightCheck[]): PreflightChec
 }
 
 // ---- deploy-slave CIDR guard ----------------------
-// The whole per-slave trio is "controller pods reach INTO the slave over the LAN". If the pod
+// The whole per-slave trio is "manager pods reach INTO the slave over the LAN". If the pod
 // (Calico IPAM) network overlaps the cluster LAN, that traffic is swallowed by the CNI and the
 // slave's API answers with `i/o timeout` — the failure this guard exists to catch. hostyour-cloud's installer now
 // stamps a non-overlapping POD_CIDR and base/lib/preflight.sh hard-checks it; this is the
-// Controller's LOCAL mirror — NOT a remote preflight check (no probe): the Controller already
+// Manager's LOCAL mirror — NOT a remote preflight check (no probe): the Manager already
 // knows the cluster LAN (the /24 around the inventory lanHost) and the installer's default pod CIDR.
 
 /** The pod (Calico) CIDR hostyour-cloud's installer now stamps: the
  *  conventional Kubernetes range, disjoint from the cluster LAN, the services CIDR and the WAN.
- *  Used as the assumed slave pod CIDR when the Controller can't know the box's actual value. */
+ *  Used as the assumed slave pod CIDR when the Manager can't know the box's actual value. */
 export const DEFAULT_POD_CIDR = "10.244.0.0/16";
 
 /** Parse a dotted-quad IPv4 into a 32-bit unsigned int; undefined if malformed. Pure. */
@@ -119,7 +119,7 @@ function cidrsOverlap(a: { base: number; prefix: number }, b: { base: number; pr
 }
 
 /** Increment-0 CIDR guard: the slave's pod CIDR must be disjoint from the cluster LAN, or
- *  controller pods cannot route to the slave's LAN IP. The cluster LAN is
+ *  manager pods cannot route to the slave's LAN IP. The cluster LAN is
  *  the /24 around the inventory lanHost; the pod CIDR defaults to what the installer stamps.
  *  Returns undefined — the check is SKIPPED, never pushed — when lanHost is unknown or not an
  *  IPv4 (a NAT/FQDN inventory row yields no cluster LAN, and a skipped check must never read as a
@@ -134,7 +134,7 @@ export function podCidrOverlapCheck(lanHost: string | null | undefined, podCidr:
   const overlaps = cidrsOverlap(pod, lan);
   return makeCheck("net.podcidr", overlaps ? "fail" : "pass",
     overlaps
-      ? `pod CIDR ${podCidr} overlaps the cluster LAN ${lanCidr} (from lanHost ${lanHost}) — controller pods would not route to the slave`
+      ? `pod CIDR ${podCidr} overlaps the cluster LAN ${lanCidr} (from lanHost ${lanHost}) — manager pods would not route to the slave`
       : `pod CIDR ${podCidr} is disjoint from the cluster LAN ${lanCidr} (from lanHost ${lanHost})`);
 }
 

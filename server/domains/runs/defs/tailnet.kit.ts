@@ -28,9 +28,9 @@ import {
 // back, cannot travel over that network. Nothing else about them is special: a plan, an approval,
 // steps and a log, like every run kind.
 //
-// A run in flight is not cut by a disconnect. Nothing in this controller dials a tailnet address:
+// A run in flight is not cut by a disconnect. Nothing in this manager dials a tailnet address:
 // every SSH session goes to servers.lan_host or servers.host, so what a disconnect takes away is
-// the host's membership of the private network, not this controller's way to it.
+// the host's membership of the private network, not this manager's way to it.
 
 /** What the three run kinds need beyond the inventory: the command that serves the machine's programs
  *  (every act is a program run), and — for a rejoin — the platform repo the coordinator's address

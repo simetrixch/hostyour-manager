@@ -39,7 +39,7 @@ describe("TENANT_RUN_KINDS", () => {
 
   it("keeps check-tenants — it targets no tenant row, so only a kind filter surfaces it", () => {
     // Same reason create-tenant and tenant-purge are here: the run is over EVERY tenant and
-    // therefore targets the controller, so a targetId filter would drop it off the page entirely.
+    // therefore targets the manager, so a targetId filter would drop it off the page entirely.
     expect(TENANT_RUN_KINDS.has("check-tenants")).toBe(true);
   });
 

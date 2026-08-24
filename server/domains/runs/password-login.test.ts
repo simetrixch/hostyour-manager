@@ -46,7 +46,7 @@ const logger = createLogger(
     OIDC_ISSUER: "https://i.example/",
     OIDC_CLIENT_ID: "c",
     OIDC_CLIENT_SECRET: "s",
-    CONTROLLER_VERSION: "test",
+    MANAGER_VERSION: "test",
     DATA_DIR: "/data",
     LOG_LEVEL: "silent",
   } as NodeJS.ProcessEnv),
@@ -355,7 +355,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
       expect(plan.requiredSecrets).toEqual([]);
     });
 
-    it(`${kind} refuses a host this controller holds no key for — there would be nothing to fall back on`, async () => {
+    it(`${kind} refuses a host this manager holds no key for — there would be nothing to fall back on`, async () => {
       const { db } = await setup();
       for (const status of ["bare", "adopting"] as const) {
         db.db.update(servers).set({ status }).where(eq(servers.id, SLAVE_ID)).run();

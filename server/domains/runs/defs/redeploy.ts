@@ -28,7 +28,7 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } fr
 //                     is armed: every one of them (purge MicroK8s, the remove-slave program, drop
 //                     the slave part of the cluster map) undoes a WORKING slave.
 //   master, master+   the machine layer as the deployment PROGRAMS deliver it, plus the ArgoCD
-//     slave           follow. deploy-cluster rebuilds the node below GitOps and deploy-gitops raises
+//     slave           follow. deploy-cluster rebuilds the node below GitOps and deploy-platform-services raises
 //                     what hands the cluster to the reconciler; both run on the machine's own
 //                     `ansiwise-rest serve` surface, each proven by a dry run the machine's gate then
 //                     admits the real run against (ansiwise-run.kit.ts). A master has no master-side
@@ -55,7 +55,7 @@ export interface RedeployPorts extends DeploySlavePorts, AnsiwisePorts {
  *  below GitOps first, then what hands it over. The names are the catalogue's own
  *  (digita-deploy ansiwise/programs/); each step reads the program's declared answers off the
  *  machine, so nothing about their INSIDES is repeated here. */
-const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-gitops"] as const;
+const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-platform-services"] as const;
 
 /** The answers the inventory cannot state, asked for at approve and carried to the step as
  *  `activation-input:<answer>`. The four optional ones may stay blank — a blank input is

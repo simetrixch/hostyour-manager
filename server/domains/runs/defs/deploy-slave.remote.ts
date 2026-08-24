@@ -215,7 +215,7 @@ echo "-- argocd credential secrets (the repository/cluster labels MUST both appe
 ${k} get secrets -l argocd.argoproj.io/secret-type --show-labels --no-headers 2>&1 || true
 echo "-- appprojects (root-applications references 'default' — created by the instance's argocd-server on boot)"
 ${k} get appprojects.argoproj.io -o name 2>&1 || true
-echo "-- instance pods (controller/repo-server/redis must be Running for any comparison to succeed)"
+echo "-- instance pods (manager/repo-server/redis must be Running for any comparison to succeed)"
 ${k} get pods --no-headers 2>&1 || true
 echo "==== end diagnostics ===="
 `;

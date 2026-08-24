@@ -7,8 +7,8 @@ import { parseConfig, type Config } from "../kernel/config.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { CredentialStore } from "../security/store.ts";
 import { RunEventBus } from "../executor/bus.ts";
-import { buildRegistry } from "../domains/runs/registry.ts";
-import { buildOnboarding } from "./wire-onboarding.ts";
+import { buildRunDefinitions } from "../domains/runs/run-definitions.ts";
+import { buildUnits } from "./wire-units.ts";
 import { RUN_FAMILY, RUN_KIND, type RunFamily, type RunKind } from "../../shared/enums.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
 import { FakePlatformRepo } from "../adapters/git/testing/fake.ts";
@@ -18,27 +18,27 @@ import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessO
 
 const BASE_ENV = {
   PUBLIC_URL: "https://m1.example.com",
-  OIDC_ISSUER: "https://idp.example/o/controller/",
-  OIDC_CLIENT_ID: "controller",
+  OIDC_ISSUER: "https://idp.example/o/manager/",
+  OIDC_CLIENT_ID: "manager",
   OIDC_CLIENT_SECRET: "secret",
-  CONTROLLER_VERSION: "test",
+  MANAGER_VERSION: "test",
   DATA_DIR: "/data",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv;
 // The bare config wires NEITHER onboarding family (no gate-runner addr, no github, no catalog
-// PAT) — the boot a controller with onboarding off actually runs.
+// PAT) — the boot a manager with onboarding off actually runs.
 const config = parseConfig(BASE_ENV);
-// registry.total reasons about the run families, and the two onboarding families are the opt-in ones
-// (wire-onboarding.ts builds them only with their adapters) — so the check is exercised against the
-// registry a FULLY configured controller builds as well, which is the one every deployment runs.
+// run-definitions.total reasons about the run families, and the two onboarding families are the opt-in ones
+// (wire-units.ts builds them only with their adapters) — so the check is exercised against the
+// runDefinitions a FULLY configured manager builds as well, which is the one every deployment runs.
 const wiredConfig = parseConfig({
   ...BASE_ENV,
-  ONBOARD_GATE_CONTROLLER_ADDR: "10.152.183.5:8484",
+  ONBOARD_GATE_MANAGER_ADDR: "10.152.183.5:8484",
   GITHUB_REPO: "simetrixch/hostyour-cloud",
   GITHUB_WRITE_PAT: "ghp_platform",
   CATALOG_WRITE_PAT: "ghp_deploy",
   // Both onboarding families write onto the branch this installation keeps its books on, which is
-  // named after the cluster holding the master role — so a fully configured controller states it.
+  // named after the cluster holding the master role — so a fully configured manager states it.
   MASTER_FQDN: "m1.example.com",
   MASTER_SSH_USER: "m1",
   MASTER_STAGE: "prod",
@@ -54,9 +54,9 @@ describe("boot self-checks", () => {
     const db = openDb(join(dir, "controller.db"));
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
-    const onboarding = buildOnboarding(onboardingConfig, store, db.db, logger);
-    const registry = buildRegistry({ db: db.db, ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}) }, onboarding.defs);
-    return { db, store, bus: new RunEventBus(), registry };
+    const onboarding = buildUnits(onboardingConfig, store, db.db, logger);
+    const runDefinitions = buildRunDefinitions({ db: db.db, ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}) }, onboarding.defs);
+    return { db, store, bus: new RunEventBus(), runDefinitions };
   }
   afterEach(() => {
     for (const h of handles.splice(0)) h.sqlite.close();
@@ -64,8 +64,8 @@ describe("boot self-checks", () => {
   });
 
   it("passes every registered blocking check on a fresh DB", async () => {
-    const { db, store, bus, registry } = fresh();
-    const results = [...runSelfChecks({ db, config, store, bus, registry }), ...(await runAsyncSelfChecks({ db, config }))];
+    const { db, store, bus, runDefinitions } = fresh();
+    const results = [...runSelfChecks({ db, config, store, bus, runDefinitions }), ...(await runAsyncSelfChecks({ db, config }))];
     const byName = new Map(results.map((r) => [r.name, r]));
     for (const name of [
       "db.integrity",
@@ -76,7 +76,7 @@ describe("boot self-checks", () => {
       "sse.echo",
       "locks.rebuilt",
       "guards.armed",
-      "registry.total",
+      "run-definitions.total",
       "forbidden.bytes",
       "session.roundtrip",
     ]) {
@@ -85,47 +85,47 @@ describe("boot self-checks", () => {
     expect(() => assertBlockingChecksPass(results)).not.toThrow();
   });
 
-  // The boot of a controller with onboarding off: buildOnboarding contributes no defs, so the consumer
+  // The boot of a manager with onboarding off: buildUnits contributes no defs, so the consumer
   // and tenant families are absent WHOLE and their routes answer 501 NOT_CONFIGURED. Such a boot must
   // serve the run kinds it does hold, so every blocking check has to pass.
   it("passes every blocking check with NEITHER onboarding family wired", async () => {
-    const { db, store, bus, registry } = fresh(config);
-    const results = [...runSelfChecks({ db, config, store, bus, registry }), ...(await runAsyncSelfChecks({ db, config }))];
-    expect(results.find((r) => r.name === "registry.total")?.ok).toBe(true);
+    const { db, store, bus, runDefinitions } = fresh(config);
+    const results = [...runSelfChecks({ db, config, store, bus, runDefinitions }), ...(await runAsyncSelfChecks({ db, config }))];
+    expect(results.find((r) => r.name === "run-definitions.total")?.ok).toBe(true);
     expect(() => assertBlockingChecksPass(results)).not.toThrow();
-    // What that boot serves is exactly the families buildRegistry registers unconditionally.
-    expect([...registry.keys()].sort()).toEqual([...RUN_FAMILY.fixture, ...RUN_FAMILY.cluster].sort());
+    // What that boot serves is exactly the families buildRunDefinitions registers unconditionally.
+    expect([...runDefinitions.keys()].sort()).toEqual([...RUN_FAMILY.fixture, ...RUN_FAMILY.cluster].sort());
   });
 
-  // The counter-probe of registry.total: HALF a family — some of its run kinds wired, some missing — is
+  // The counter-probe of run-definitions.total: HALF a family — some of its run kinds wired, some missing — is
   // the partial-wiring bug the check exists to catch, and it must ABORT boot rather than be noted.
   // Removing one definition from an otherwise wired family is that state exactly.
-  it("registry.total is RED when a wired family is missing one of its kinds, and that fails boot", () => {
-    const { db, store, bus, registry } = fresh();
-    registry.delete("create-tenant");
-    const results = runSelfChecks({ db, config, store, bus, registry });
-    const check = results.find((r) => r.name === "registry.total");
+  it("run-definitions.total is RED when a wired family is missing one of its kinds, and that fails boot", () => {
+    const { db, store, bus, runDefinitions } = fresh();
+    runDefinitions.delete("create-tenant");
+    const results = runSelfChecks({ db, config, store, bus, runDefinitions });
+    const check = results.find((r) => r.name === "run-definitions.total");
     expect(check?.kind).toBe("blocking");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain("tenant");
     expect(check?.detail).toContain("create-tenant");
-    expect(() => assertBlockingChecksPass(results)).toThrow(/registry\.total/);
+    expect(() => assertBlockingChecksPass(results)).toThrow(/run-definitions\.total/);
   });
 
   // The second counter-probe: a literal belonging to NO family — the definition-less run kind that has no
   // family to be half of. RUN_KIND is `as const`, so such a literal cannot be added in TypeScript; the
   // probe appends to the runtime array and restores it, which is the state that build would ship.
-  it("registry.total is RED when a RUN_KIND literal belongs to no family, and that fails boot", () => {
-    const { db, store, bus, registry } = fresh();
+  it("run-definitions.total is RED when a RUN_KIND literal belongs to no family, and that fails boot", () => {
+    const { db, store, bus, runDefinitions } = fresh();
     const kinds = RUN_KIND as unknown as string[];
     kinds.push("ghost-kind");
     try {
-      const results = runSelfChecks({ db, config, store, bus, registry });
-      const check = results.find((r) => r.name === "registry.total");
+      const results = runSelfChecks({ db, config, store, bus, runDefinitions });
+      const check = results.find((r) => r.name === "run-definitions.total");
       expect(check?.kind).toBe("blocking");
       expect(check?.ok).toBe(false);
       expect(check?.detail).toContain("ghost-kind");
-      expect(() => assertBlockingChecksPass(results)).toThrow(/registry\.total/);
+      expect(() => assertBlockingChecksPass(results)).toThrow(/run-definitions\.total/);
     } finally {
       kinds.pop();
     }
@@ -136,14 +136,14 @@ describe("boot self-checks", () => {
     for (const family of Object.keys(RUN_FAMILY) as RunFamily[]) claimed.push(...RUN_FAMILY[family]);
     // Equal as MULTISETS: every literal is claimed, and none is claimed twice.
     expect(claimed.sort()).toEqual([...RUN_KIND].sort());
-    const { registry } = fresh();
-    expect([...RUN_KIND].filter((kind) => !registry.has(kind))).toEqual([]);
+    const { runDefinitions } = fresh();
+    expect([...RUN_KIND].filter((kind) => !runDefinitions.has(kind))).toEqual([]);
     // ...and every registered definition answers to the kind it is filed under, so a def registered
     // twice under the wrong key could not make the check pass on a run kind nothing implements.
-    for (const kind of RUN_KIND) expect((registry.get(kind) as AnyRunDefinition).kind).toBe(kind);
+    for (const kind of RUN_KIND) expect((runDefinitions.get(kind) as AnyRunDefinition).kind).toBe(kind);
   });
 
-  // The release grammar this Controller enforces (shared/release.ts RELEASE_TAG_RE) against the build
+  // The release grammar this Manager enforces (shared/release.ts RELEASE_TAG_RE) against the build
   // plane's copy of it (global.releaseTagFilter, platform/values-common.yaml on the platform repo's
   // trunk). A boot with the platform repo wired is the only place both sides are present.
   //
@@ -166,7 +166,7 @@ describe("boot self-checks", () => {
   });
 
   // The counter-probe: one segment of the grammar changed on the platform side is the drift the check
-  // exists to find, and the decision it embodies is that boot goes ON — a Controller with a stale or
+  // exists to find, and the decision it embodies is that boot goes ON — a Manager with a stale or
   // unreadable platform checkout still serves everything that has nothing to do with release tags.
   it("release.grammar_mirror is RED on a drifted copy, names both literals, and does NOT fail boot", async () => {
     const { db } = fresh();
@@ -195,7 +195,7 @@ describe("boot self-checks", () => {
   });
 
   // The third counter-probe, and the one that decides whether the check proves anything at all: with no
-  // platform repo (the wiring's own optional — a Controller with onboarding off) there is no second
+  // platform repo (the wiring's own optional — a Manager with onboarding off) there is no second
   // side. It must SKIP and say so, never report a pass, and never be listed on /readyz as measured.
   it("release.grammar_mirror SKIPS without a platform repo instead of reporting a pass", async () => {
     const { db } = fresh();
@@ -210,8 +210,8 @@ describe("boot self-checks", () => {
   });
 
   it("the append-only probe leaves no sentinel row behind (rolled back)", () => {
-    const { db, store, bus, registry } = fresh();
-    runSelfChecks({ db, config, store, bus, registry });
+    const { db, store, bus, runDefinitions } = fresh();
+    runSelfChecks({ db, config, store, bus, runDefinitions });
     const count = db.sqlite.prepare("SELECT count(*) AS n FROM audit").get() as { n: number };
     expect(count.n).toBe(0);
   });

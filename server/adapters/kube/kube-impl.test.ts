@@ -12,7 +12,7 @@ import {
   externalSecretsAllReady,
   mapDeployState,
   assertWritableProjectName,
-  isControllerOwned,
+  isManagerOwned,
 } from "./kube-map.ts";
 import { CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL, RESERVED_PROJECT_NAMES, syncedRevisionFor, singleSourceRevision, targetedRevisionFor } from "./port.ts";
 import type { ArgoAppStatus } from "./port.ts";
@@ -413,14 +413,14 @@ describe("AppProject writer guards", () => {
     expect(() => assertWritableProjectName("acme")).not.toThrow();
   });
 
-  it("isControllerOwned accepts EITHER the consumer or the tenant ownership label (exact match)", () => {
-    expect(isControllerOwned({ metadata: { labels: { [CONSUMER_PROJECT_LABEL.key]: CONSUMER_PROJECT_LABEL.value } } })).toBe(true);
-    expect(isControllerOwned({ metadata: { labels: { [TENANT_PROJECT_LABEL.key]: TENANT_PROJECT_LABEL.value } } })).toBe(true);
-    expect(isControllerOwned({ metadata: { labels: { [CONSUMER_PROJECT_LABEL.key]: "false" } } })).toBe(false);
-    expect(isControllerOwned({ metadata: { labels: { [TENANT_PROJECT_LABEL.key]: "false" } } })).toBe(false);
-    expect(isControllerOwned({ metadata: { labels: { other: "true" } } })).toBe(false);
-    expect(isControllerOwned({ metadata: {} })).toBe(false);
-    expect(isControllerOwned({})).toBe(false);
-    expect(isControllerOwned(null)).toBe(false);
+  it("isManagerOwned accepts EITHER the consumer or the tenant ownership label (exact match)", () => {
+    expect(isManagerOwned({ metadata: { labels: { [CONSUMER_PROJECT_LABEL.key]: CONSUMER_PROJECT_LABEL.value } } })).toBe(true);
+    expect(isManagerOwned({ metadata: { labels: { [TENANT_PROJECT_LABEL.key]: TENANT_PROJECT_LABEL.value } } })).toBe(true);
+    expect(isManagerOwned({ metadata: { labels: { [CONSUMER_PROJECT_LABEL.key]: "false" } } })).toBe(false);
+    expect(isManagerOwned({ metadata: { labels: { [TENANT_PROJECT_LABEL.key]: "false" } } })).toBe(false);
+    expect(isManagerOwned({ metadata: { labels: { other: "true" } } })).toBe(false);
+    expect(isManagerOwned({ metadata: {} })).toBe(false);
+    expect(isManagerOwned({})).toBe(false);
+    expect(isManagerOwned(null)).toBe(false);
   });
 });

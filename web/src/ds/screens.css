@@ -958,7 +958,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The explicit controller-branch opt-in — visually a warning zone of its own. */
+/* The explicit manager-branch opt-in — visually a warning zone of its own. */
 .optin {
   display: flex;
   flex-direction: column;

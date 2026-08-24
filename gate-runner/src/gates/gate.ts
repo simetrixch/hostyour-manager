@@ -1,6 +1,6 @@
 // gate-runner/src/gates/gate.ts
 // The contract every sandbox gate implements. G1, G2, G3, G6, G7, G8 and G22
-// run INSIDE the runner over untrusted content; G16/G17/G18 are Controller-side (domains/onboarding/
+// run INSIDE the runner over untrusted content; G16/G17/G18 are Manager-side (domains/units/
 // gates/compose.ts) and are NOT here. The pipeline (../pipeline.ts) does ALL the IO — unpack + verify the
 // bundle tree, parse the manifest (G1), `helm dependency build` + `helm template` per env
 // (G3) — and hands each CHECK gate a fully assembled, read-only GateContext. Check gates are
@@ -34,7 +34,7 @@ export interface GateContext {
   readonly chartPath: string;
   /** The target cluster's values chain, VERBATIM and in layering order — the same bytes G3 rendered
    *  with, so a gate that needs a cluster value (G7's Vault server) reads it from the chain rather
-   *  than from a value the Controller pre-computed. */
+   *  than from a value the Manager pre-computed. */
   readonly clusterValueFiles: readonly ClusterValueFile[];
   /** repo-relative path (forward slashes) -> UTF-8 contents, for the static gates (G2 over
    *  templates/**, image-reference scans). Binary files are omitted. */

@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// A census over the WORD, beside the census over the run kind list in registry-census.test.ts.
+// A census over the WORD, beside the census over the run kind list in run-definitions-census.test.ts.
 // shared/enums.ts:343 names the type RunKind and every literal in RUN_KIND; "verb" is borrowed from
 // grammar and names nothing in this codebase. Under the two patterns below it stood 562 times across
 // 128 files before #15, which removed 379 of them across 91 — measured with this census, because the
@@ -43,8 +43,8 @@ const SELF = "server/domains/runs/run-kind-word-census.test.ts";
 const KUBE_RBAC_FILES = [
   "server/adapters/kube/kube.ts",
   "server/adapters/kube/port.ts",
-  "server/domains/onboarding/build-rbac.ts",
-  "server/domains/onboarding/build-rbac.test.ts",
+  "server/domains/units/build-rbac.ts",
+  "server/domains/units/build-rbac.test.ts",
 ];
 
 /** The English word standing on its own — prose, and a prop declared `verb: "move" | "restore"`. */

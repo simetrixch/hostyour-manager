@@ -24,7 +24,7 @@ function OrphanRows({ orphans, onPurge }: { orphans: OrphanTenantView[]; onPurge
                 {clusterId === null ? (
                   <span
                     className="chip chip--warn"
-                    title={`No registered cluster is named "${o.cluster}", so this controller cannot aim a purge at it. Register that slave first.`}
+                    title={`No registered cluster is named "${o.cluster}", so this manager cannot aim a purge at it. Register that slave first.`}
                   >
                     cluster &ldquo;{o.cluster}&rdquo; not registered
                   </span>
@@ -87,13 +87,13 @@ export function TenantOrphanPanel(props: {
           The scan could not read the GitOps repo: {scan.error}. Nothing was checked — this is not &ldquo;no orphans found&rdquo;.
         </p>
       ) : scan.reason === "onboarding-not-configured" ? (
-        <p className="alert alert--warn">Tenant onboarding is not configured on this controller — there are no tenant pointers to scan.</p>
+        <p className="alert alert--warn">Tenant onboarding is not configured on this manager — there are no tenant pointers to scan.</p>
       ) : (
         <>
           {scan.orphans.length === 0 ? (
             <div className="empty">
               {/* The all-clear sentence is only TRUE when every pointer could be read. With skipped
-                  pointers it would claim the controller accounted for tenants it never even parsed. */}
+                  pointers it would claim the manager accounted for tenants it never even parsed. */}
               <p>
                 {scan.skipped.length === 0
                   ? "No orphaned tenants — every deployed tenant pointer has a matching inventory row."

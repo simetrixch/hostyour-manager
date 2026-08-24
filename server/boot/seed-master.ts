@@ -17,8 +17,8 @@ import { MASTER_ROLES } from "../../shared/enums.ts";
 // the per-slave management plane ON THE MASTER (this control host). loadMaster()
 // (defs/deploy-slave.kit.ts) demands exactly one role=master server row, and ctx.ssh(master)
 // (executor/context.ts) needs a sealed ssh_key credential + a pinned host key for it, because
-// the Controller SSHes to its OWN host over the LAN. createServer ALWAYS makes role=slave and
-// nothing else ever sets role=master, so a freshly re-provisioned Controller has no master and
+// the Manager SSHes to its OWN host over the LAN. createServer ALWAYS makes role=slave and
+// nothing else ever sets role=master, so a freshly re-provisioned Manager has no master and
 // no path to one. This seed closes that gap from config the installer supplies (MASTER_* env +
 // an ESO-materialized private key + the host-key fingerprint), so a fresh DB self-heals with
 // zero manual SQL.
@@ -109,7 +109,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
       if (err instanceof Error && /UNIQUE constraint/i.test(err.message)) {
         logger.error(
           { name, host: m.fqdn },
-          "cannot seed the role=master row — a server with this name or host:port already exists (a stray slave?); resolve the inventory conflict, then restart the Controller",
+          "cannot seed the role=master row — a server with this name or host:port already exists (a stray slave?); resolve the inventory conflict, then restart the Manager",
         );
         return;
       }
@@ -135,7 +135,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
   }
 
   // ---- 1b. Upsert the master self-cluster row. The control host is ALSO a cluster in the
-  // inventory (the master hosts the controller pod + a master ArgoCD): consumers may onboard to it, so
+  // inventory (the master hosts the manager pod + a master ArgoCD): consumers may onboard to it, so
   // it must appear in the clusters table like the slaves, with slaveId=NULL (the schema comment marks
   // NULL as the master) and the default planeState. Keyed by serverId (clusters_server_uq: one VM =
   // one cluster) so it is idempotent across boots. Degrade-friendly: a UNIQUE clash on the domain
@@ -159,7 +159,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
       if (err instanceof Error && /UNIQUE constraint/i.test(err.message)) {
         logger.error(
           { serverId: master.id, domain: m.fqdn },
-          "cannot seed the master self-cluster row — a cluster with this domain already exists; resolve the inventory conflict, then restart the Controller",
+          "cannot seed the master self-cluster row — a cluster with this domain already exists; resolve the inventory conflict, then restart the Manager",
         );
       } else {
         throw err;
@@ -279,7 +279,7 @@ async function convergeMaster(db: Db, creds: CredentialStore, masterId: string, 
       serverId: master.id,
       publicKey: pub.publicLine,
     });
-    logger.info({ id: master.id, fingerprint: pub.fingerprint }, "sealed the master self-SSH key — the Controller can now SSH to its own host for deploy-slave");
+    logger.info({ id: master.id, fingerprint: pub.fingerprint }, "sealed the master self-SSH key — the Manager can now SSH to its own host for deploy-slave");
     return true;
   } catch (err) {
     // seal()/rotate() failed (credential store / Vault) — Vault may still be warming up on a
@@ -311,7 +311,7 @@ function scheduleMasterReconcile(db: Db, creds: CredentialStore, masterId: strin
     // itself — a slow or hung attempt must not keep it alive past the bound.
     if (Date.now() >= deadline) {
       stopMasterReconcile();
-      logger.error({ id: masterId }, "master did NOT converge within the reconcile window — deploy-slave to the master stays broken; check the controller-master-key ExternalSecret (ESO) and Vault, then restart the Controller pod");
+      logger.error({ id: masterId }, "master did NOT converge within the reconcile window — deploy-slave to the master stays broken; check the manager-master-key ExternalSecret (ESO) and Vault, then restart the Manager pod");
       return;
     }
     if (inFlight) return; // never overlap a slow attempt (e.g. a hanging Vault call) with the next tick

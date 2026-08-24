@@ -13,7 +13,7 @@
 // into the machine that no run kind on this surface can take off, and this chip is where an operator
 // finds out it exists.
 import type { AuthorizedKeyFact, ServerView } from "../../shared/api-types.ts";
-import { hasControllerKey } from "../../shared/enums.ts";
+import { hasManagerKey } from "../../shared/enums.ts";
 
 /** How long an "accounted" reading keeps its green chip. Past this the chip goes neutral and the
  *  sentence's age carries the whole claim: nothing re-reads a host on its own, and authorized_keys
@@ -69,7 +69,7 @@ export function authorizedKeysChip(server: ServerView, now: number): AuthorizedK
     return {
       label: "authorized keys: reading unreadable",
       className: "chip chip--warn",
-      detail: `The stored reading is version ${read.v}; this controller reads version 0 only, so ${RE_READ}.`,
+      detail: `The stored reading is version ${read.v}; this manager reads version 0 only, so ${RE_READ}.`,
       runId: null,
     };
   }
@@ -88,9 +88,9 @@ export function authorizedKeysChip(server: ServerView, now: number): AuthorizedK
   const runId = facts.runId;
   const foreign = facts.keys.filter((k) => k.kind === "foreign");
   const labels = operatorLabels(facts.keys);
-  const mine = facts.keys.filter((k) => k.kind === "controller").length;
+  const mine = facts.keys.filter((k) => k.kind === "manager").length;
   const who =
-    `${mine} key of this controller's own and ` +
+    `${mine} key of this manager's own and ` +
     (labels.length === 0 ? "no operator key" : `the operator key(s) ${labels.join(", ")}`) + ".";
 
   switch (state) {
@@ -98,12 +98,12 @@ export function authorizedKeysChip(server: ServerView, now: number): AuthorizedK
       return {
         label: "authorized keys: all known",
         className: stale ? "chip" : "chip chip--ok",
-        detail: `Every one of the ${facts.keys.length} key(s) on this host is one this controller can also take off — ${who} ${taken}`,
+        detail: `Every one of the ${facts.keys.length} key(s) on this host is one this manager can also take off — ${who} ${taken}`,
         runId,
       };
     case "unaccounted": {
       // TWO different things land here and the chip says which: a key line nobody on this platform
-      // placed, and a line this controller could not read as a key at all. The second is not
+      // placed, and a line this manager could not read as a key at all. The second is not
       // harmless — sshd's parser is not this one, so such a line may well be authenticating
       // somebody — and a chip that named only the first would count it as zero.
       const counts = [
@@ -115,7 +115,7 @@ export function authorizedKeysChip(server: ServerView, now: number): AuthorizedK
           `${foreign.map((k) => `${k.fingerprint}${k.comment ? ` (${k.comment})` : ""}`).join(", ")}. `
         : "";
       const unread = facts.unparsed > 0
-        ? `${facts.unparsed} line(s) in the file are not a key this controller can read, and sshd may still take one of ` +
+        ? `${facts.unparsed} line(s) in the file are not a key this manager can read, and sshd may still take one of ` +
           `them — they have to be looked at on the host. `
         : "";
       return {
@@ -140,15 +140,15 @@ export interface AuthorizedKeysRunKindOffer {
   read: boolean;
 }
 
-/** Every one of these run kinds drives one host over this controller's own key, so the one thing they
- *  share is that the controller HAS one — hasControllerKey (shared/enums.ts), the same predicate the
+/** Every one of these run kinds drives one host over this manager's own key, so the one thing they
+ *  share is that the manager HAS one — hasManagerKey (shared/enums.ts), the same predicate the
  *  plans refuse on, so a card can never offer a run the server then rejects.
  *
  *  Deliberately NOT keyed on the reading. A reading is a snapshot, so hiding the read button from a
  *  host that looked clean an hour ago would let a stale value decide what the operator may look at —
  *  on the one surface where being wrong means a key nobody is watching. */
 export function authorizedKeysRunKindOffer(server: ServerView): AuthorizedKeysRunKindOffer {
-  return { read: hasControllerKey(server.status) };
+  return { read: hasManagerKey(server.status) };
 }
 
 /** What ONE operator key's row says about ONE server, on the operator-keys page. */
@@ -165,7 +165,7 @@ export interface OperatorKeyPlacement {
 }
 
 export function operatorKeyPlacement(server: ServerView, fingerprint: string): OperatorKeyPlacement {
-  const reachable = hasControllerKey(server.status);
+  const reachable = hasManagerKey(server.status);
   const acts = { place: reachable, remove: reachable };
   const read = server.authorizedKeys;
   if (read.kind !== "v0") {

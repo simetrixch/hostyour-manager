@@ -31,7 +31,7 @@ import {
 // It ALWAYS does all of it, in order: prove the catalogue carries every program it will drive, mint
 // the tag and commit the pin, bring the checkout the regeneration reads onto that commit, regenerate
 // the install branch AT the pin, rebuild the machine layer from the regenerated revision
-// (deploy-cluster, deploy-gitops — the exact two programs redeploy's master arm runs), then let
+// (deploy-cluster, deploy-platform-services — the exact two programs redeploy's master arm runs), then let
 // ArgoCD follow. There is no "did the machine layer change" switch — every program is idempotent by
 // design, and a conditional would be a case distinction someone has to maintain and that would
 // eventually be wrong. It would also make the state unprovable: a run that sometimes skips the
@@ -54,7 +54,7 @@ import {
 //   pure slave        regenerate-slave-branch, ON THE MASTER. A slave's install branch deliberately
 //                     carries no cluster map and no books at all (deploy-slave-branch cuts it that
 //                     way: the books live on the master's branch, and a second copy goes stale the
-//                     moment the Controller writes to that one), so the slave's pin stands on the
+//                     moment the Manager writes to that one), so the slave's pin stands on the
 //                     MASTER's branch under the SLAVE's name — two names that come apart, which is
 //                     what measure_value_in_branch_file's run_answer slot fills. The program reads
 //                     that map out of the master's live checkout and merges into a second checkout
@@ -98,12 +98,12 @@ export interface ReleasePorts extends DeploySlavePorts, AnsiwisePorts {
 const MASTER_RELEASE_PROGRAMS: readonly ProgramOnSurface[] = [
   { program: "regenerate-branch" },
   { program: "deploy-cluster" },
-  { program: "deploy-gitops" },
+  { program: "deploy-platform-services" },
 ];
 const SLAVE_RELEASE_PROGRAMS: readonly ProgramOnSurface[] = [
   { program: "regenerate-slave-branch", onMaster: true },
   { program: "deploy-cluster" },
-  { program: "deploy-gitops" },
+  { program: "deploy-platform-services" },
 ];
 
 /** The answers the inventory cannot state, asked for at approve and carried to the steps as
@@ -216,7 +216,7 @@ export function markingAnswers(target: SlaveTarget, ports: DeploySlavePorts): Ex
         ? { alert_recipients: marking.alertRecipients.split(",").map((m) => m.trim()).filter((m) => m.length > 0) }
         : {}),
       ...(marking.catalogRepo !== undefined ? { catalog_repo: marking.catalogRepo } : {}),
-      ...(marking.postUrl !== undefined ? { post_url: marking.postUrl } : {}),
+      ...(marking.mailUrl !== undefined ? { mail_url: marking.mailUrl } : {}),
     };
   };
 }
@@ -291,7 +291,7 @@ export function makeReleaseDef(ports: ReleasePorts): RunDefinition<ReleaseParams
         summary:
           `Release platform ${params.version}-${params.channel} onto "${server.name}" (${cluster.domain}, ${cluster.stage}, role ${server.role}): ` +
           `pin the cluster map, regenerate the install branch at the pin, rebuild the machine layer from it ` +
-          `(the ${onMaster ? "regenerate-branch" : "regenerate-slave-branch"}, deploy-cluster and deploy-gitops programs over the ansiwise surface), ` +
+          `(the ${onMaster ? "regenerate-branch" : "regenerate-slave-branch"}, deploy-cluster and deploy-platform-services programs over the ansiwise surface), ` +
           `then wait for ArgoCD to converge. ${stepDefs.length} steps ` +
           `${onMaster ? "on the host itself" : `over two hosts — the slave and the master "${master.name}", whose branch carries this slave's pin and books`}.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),

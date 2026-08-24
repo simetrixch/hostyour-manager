@@ -3,8 +3,8 @@
 // in a chart's `values-<stage>.yaml`:
 //
 //   builds:
-//     - name: controller
-//       image: controller
+//     - name: manager
+//       image: manager
 //       tag: 0.1.0-stable-20260728000000-abc1234
 //
 // `image` is the FLAT build name: no registry host, no unit segment, nothing to compose. That is

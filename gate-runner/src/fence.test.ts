@@ -9,7 +9,7 @@ import { SandboxAttestationSchema } from "../../shared/gates.ts";
 
 const BASE: FenceConfig = {
   mustFailTargets: ["10.1.1.1:443", "traefik.lan:80"],
-  controllerAddr: "controller.internal:8443",
+  managerAddr: "manager.internal:8443",
   mustPassTarget: "github.com",
   confirmedListening: true,
 };
@@ -25,7 +25,7 @@ function fakeConnect(reachable: (host: string) => boolean): { fn: ConnectFn; cal
 }
 
 describe("fence.selfProbe", () => {
-  // (1) must-fail + controllerAddr blocked, must-pass reachable => attestation all-green.
+  // (1) must-fail + managerAddr blocked, must-pass reachable => attestation all-green.
   it("attests all-green when the fence blocks the must-fail targets and the must-pass is reachable", async () => {
     const { fn } = fakeConnect((host) => host === "github.com");
     const att = await selfProbe(BASE, fn);
@@ -64,7 +64,7 @@ describe("fence.selfProbe", () => {
     const { fn, calls } = fakeConnect((host) => host === "github.com");
     const cfg: FenceConfig = {
       mustFailTargets: ["https://10.1.1.1:443/"],
-      controllerAddr: "host:8443",
+      managerAddr: "host:8443",
       mustPassTarget: "github.com",
       confirmedListening: false,
     };
@@ -100,7 +100,7 @@ describe("fence.selfProbe", () => {
     await selfProbe(
       {
         mustFailTargets: ["http://10.1.1.1", "http://traefik.lan:80"],
-        controllerAddr: "https://c.internal",
+        managerAddr: "https://c.internal",
         mustPassTarget: "https://github.com",
         confirmedListening: false,
       },

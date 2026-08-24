@@ -70,7 +70,7 @@ export function SetSizeDialog(props: {
       {brings !== null && <p className="muted">These figures are composed for a unit that runs {brings}.</p>}
       {options?.composed === false && (
         <p className="muted">
-          Consumer onboarding is not wired on this controller, so what this unit brings could not be read: the figures
+          Consumer onboarding is not wired on this manager, so what this unit brings could not be read: the figures
           below are the base rows only.
         </p>
       )}

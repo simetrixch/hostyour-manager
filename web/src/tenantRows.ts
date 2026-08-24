@@ -84,7 +84,7 @@ export function tenantRowOffer(status: TenantStatus): TenantRowOffer {
   return TENANT_ROW_OFFER[status];
 }
 
-/** The Tenants page's three lists. `onboarded` is every tenant the controller still carries — active,
+/** The Tenants page's three lists. `onboarded` is every tenant the manager still carries — active,
  *  suspended, and the unfinished "provisioning" rows create-tenant records before it deploys — and it is
  *  what the Reconciliation cards render. `settled` is the offboarded rows, which get their own compact
  *  list so they stay reachable for the one run kind they still have without crowding the tenants that run.

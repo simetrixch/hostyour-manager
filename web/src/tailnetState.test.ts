@@ -55,7 +55,7 @@ describe("tailnetChip — a reading is never dressed up as a status", () => {
     expect(chip.runId).toBeNull();
   });
 
-  it("a document from a newer controller is named as unreadable, never read as v0", () => {
+  it("a document from a newer manager is named as unreadable, never read as v0", () => {
     const chip = tailnetChip(server("joined", { kind: "unsupported", v: 1 }), NOW);
     expect(chip.className).toBe("chip chip--warn");
     expect(chip.label).toBe("tailnet: reading unreadable");

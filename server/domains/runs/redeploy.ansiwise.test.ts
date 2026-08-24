@@ -5,7 +5,7 @@ import { getRun, readEvents } from "../../executor/read.ts";
 import { createSshSession } from "../../adapters/ssh/ssh2-session.ts";
 import { generateServerKeypair } from "../../adapters/ssh/keygen.ts";
 import { startFakeSshServer, type FakeSshServer } from "../../adapters/ssh/testing/fake-server.ts";
-import { AnsiwiseClient } from "../../adapters/ansiwise/client.ts";
+import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused } from "../../adapters/ansiwise/port.ts";
 import { ansiwiseBinaries, NO_BINARY, startServe, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
@@ -89,7 +89,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     try {
       const programs = await client.programs();
       expect(programs.map((p) => p.name).sort()).toEqual([
-        "deploy-cluster", "deploy-gitops", "deploy-host", "deploy-slave-branch",
+        "deploy-cluster", "deploy-host", "deploy-platform-services", "deploy-slave-branch",
         "emit-cluster-credentials", "regenerate-branch", "regenerate-slave-branch", "register-slave",
         "remove-slave", "tailnet-disconnect", "tailnet-mint-join-key", "tailnet-reconnect",
         "tailnet-rejoin",
@@ -141,10 +141,10 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   // ================================ redeploy (master arm), end to end ================================
 
-  it("plan: the master arm composes attest → run-deploy-cluster → run-deploy-gitops → argocd-follow and asks for the password + the missing answers", async () => {
+  it("plan: the master arm composes attest → run-deploy-cluster → run-deploy-platform-services → argocd-follow and asks for the password + the missing answers", async () => {
     const h = await liveMaster(serve);
     const { plan } = await h.executor.plan("redeploy", { serverId: MASTER_ID });
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "run-deploy-cluster", "run-deploy-gitops", "argocd-follow"]);
+    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow"]);
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
       ["letsencrypt_email", "letsencrypt_server", "build_plane", "lan_cidr", "storage_path", "storage_directory"],
@@ -163,7 +163,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const events = JSON.stringify(readEvents(h.db.db, runId));
     expect(events).toContain("admitted by dry");
     expect(events).toContain("deploy-cluster: dry ");
-    expect(events).toContain("deploy-gitops: dry ");
+    expect(events).toContain("deploy-platform-services: dry ");
     expect(events).toContain("machine run finished: exit 0");
     // The conversation went over the machine's serve surface, and the follow still read ArgoCD.
     const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
@@ -172,7 +172,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // The machine's OWN records: dry + run per program, every one green. This is the record an
     // operator on the machine reads — the manager reported nothing the machine does not stand behind.
-    expectProven(freshRuns(before, await observer.runs()), ["deploy-cluster", "deploy-gitops"]);
+    expectProven(freshRuns(before, await observer.runs()), ["deploy-cluster", "deploy-platform-services"]);
 
     // The step's checkpoint carries both machine runs green — what a re-entry would skip on.
     const checkpoint = stepColumn(h.db, runId, "run-deploy-cluster", "checkpoint_json") ?? "";
@@ -396,7 +396,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The machines' OWN records: dry + run per program, every one green — the branch cut and the
     // registration on the master's surface, the machine layer, the join and the emit on the slave's.
     expectProven(freshRuns(before, await observer.runs()), [
-      "deploy-slave-branch", "deploy-host", "deploy-cluster", "deploy-gitops",
+      "deploy-slave-branch", "deploy-host", "deploy-cluster", "deploy-platform-services",
       "tailnet-mint-join-key", "tailnet-rejoin", "emit-cluster-credentials", "register-slave",
     ]);
 
@@ -413,7 +413,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // emit and the register were given as their answer — the fixture's api_server_url/ca_data rows
     // are what judged those, so the green register run above IS the proof the answers matched.
     const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath("s1.example.com")) ?? "";
-    for (const want of ["master: m1.example.com", "books-cluster: m1.example.com", "apiHost: 100.64.0.11", "apiPort: 16443", "role: slave", "catalog-repo: acme/acme-catalog"]) {
+    for (const want of ["  master: m1.example.com", "booksCluster: m1.example.com", "  apiHost: 100.64.0.11", "  apiPort: 16443", "role: slave", "  catalogUrl: https://github.com/acme/acme-catalog.git"]) {
       expect(map).toContain(want);
     }
 
@@ -506,10 +506,10 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // afterwards found nothing left to drop.
     const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath("s1.example.com")) ?? "";
     expect(map).toContain("role: slave");
-    expect(map).toContain("build-plane: m1.example.com");
-    // books-cluster goes WITH the slave part: a map still carrying the selector key without the
+    expect(map).toContain("  buildPlane: m1.example.com");
+    // booksCluster goes WITH the slave part: a map still carrying the selector key without the
     // endpoint would make the generated Application error instead of disappear.
-    for (const gone of ["master:", "books-cluster:", "apiHost:", "apiPort:"]) expect(map).not.toContain(gone);
+    for (const gone of ["master:", "booksCluster:", "apiHost:", "apiPort:"]) expect(map).not.toContain(gone);
 
     // The removal itself is a machine act, dry-proven then run on the master's own record...
     expectProven(freshRuns(before, await observer.runs()), ["remove-slave"]);
@@ -534,7 +534,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The machine layer and the handshake re-ran, each dry-proven; the two BIRTH acts did not —
     // no branch cut, no mint, no rejoin, on either machine's records.
     const fresh = freshRuns(before, await observer.runs());
-    expectProven(fresh, ["deploy-host", "deploy-cluster", "deploy-gitops", "emit-cluster-credentials", "register-slave"]);
+    expectProven(fresh, ["deploy-host", "deploy-cluster", "deploy-platform-services", "emit-cluster-credentials", "register-slave"]);
     expectAbsent(fresh, ["deploy-slave-branch", "tailnet-mint-join-key", "tailnet-rejoin"]);
 
     // Not one compensating action was armed: every one of them undoes a WORKING slave.

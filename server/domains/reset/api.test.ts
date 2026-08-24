@@ -12,16 +12,16 @@ import { CredentialStore } from "../../security/store.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { EmergencyStore, createAdminSocketApp } from "../access/emergency.ts";
 import { registerResetRoutes } from "./api.ts";
-import { GitHubError, type GitHubClient, type BranchRef } from "../../adapters/github/github.ts";
+import { GitHubPlatformError, type GitHubPlatform, type BranchRef } from "../../adapters/github-platform/github-platform-http.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { ResetResult } from "../../../shared/api-types.ts";
 
-// DATA_DIR is set PER-TEST to the temp dir below — wipeDb calls backupControllerDb (VACUUM INTO
+// DATA_DIR is set PER-TEST to the temp dir below — wipeDb calls backupManagerDb (VACUUM INTO
 // $DATA_DIR/backups), so it must be a real writable path on every OS (a fake "/d" happens to work
 // on Windows but not on Linux CI). This module-level parse is only for the logger.
 const baseEnv = {
   PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/",
-  OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", CONTROLLER_VERSION: "test",
+  OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test",
   DATA_DIR: tmpdir(), LOG_LEVEL: "silent",
   MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1", MASTER_STAGE: "prod",
   GITHUB_REPO: "simetrixch/hostyour-cloud", GITHUB_WRITE_PAT: "pat",
@@ -46,20 +46,20 @@ function fakeGitHub(opts: FakeOpts = {}) {
     opts.onCall?.(label);
   };
   const branches = opts.branches ?? [{ name: "master", sha: "m1" }, { name: "m1.example.com", sha: "c1" }, { name: "s1.example.com", sha: "f1" }];
-  const client: GitHubClient = {
+  const client: GitHubPlatform = {
     listBranches: async () => {
       call("list");
-      if (opts.failList) throw new GitHubError("list boom", 500);
+      if (opts.failList) throw new GitHubPlatformError("list boom", 500);
       return branches;
     },
     compare: async () => ({ aheadBy: 0, behindBy: 0, files: [], truncated: false }),
     deleteBranch: async (name: string) => {
       call(`del:${name}`);
-      if (opts.failDelete?.includes(name)) throw new GitHubError("delete boom", 500);
+      if (opts.failDelete?.includes(name)) throw new GitHubPlatformError("delete boom", 500);
     },
     deletePaths: async (_branch: string, paths: string[]) => {
       call(`paths:${paths.join(",")}`);
-      if (opts.failPaths) throw new GitHubError("paths boom", 500);
+      if (opts.failPaths) throw new GitHubPlatformError("paths boom", 500);
       return { removed: paths, commitSha: "PC1" };
     },
     listBlobs: async () => {
@@ -80,7 +80,7 @@ function addUnwipedChildRow(db: DbHandle): void {
 describe("reset API (POST /api/reset)", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
-  function make(github: GitHubClient | undefined, over: { reseed?: () => Promise<void> } = {}) {
+  function make(github: GitHubPlatform | undefined, over: { reseed?: () => Promise<void> } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-reset-api-"));
     dirs.push(dir);
     const config = parseConfig({ ...baseEnv, DATA_DIR: dir } as NodeJS.ProcessEnv);
@@ -93,7 +93,7 @@ describe("reset API (POST /api/reset)", () => {
     const session = new SessionCodec(db.db, config);
     let reseedCalledWithAuditCount = -1;
     const reseedMaster = over.reseed ?? (async () => {
-      reseedCalledWithAuditCount = (db.sqlite.prepare("SELECT count(*) AS c FROM audit WHERE action='controller.reset'").get() as { c: number }).c;
+      reseedCalledWithAuditCount = (db.sqlite.prepare("SELECT count(*) AS c FROM audit WHERE action='manager.reset'").get() as { c: number }).c;
     });
     const app = createApp({
       config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
@@ -113,11 +113,11 @@ describe("reset API (POST /api/reset)", () => {
   const post = async (app: Hono<AppEnv>, ck: string, body: unknown): Promise<Response> =>
     app.request("/api/reset", { method: "POST", headers: { cookie: `${SESSION_COOKIE}=${ck}`, "content-type": "application/json", origin: "https://m1.example" }, body: JSON.stringify(body) });
   const auditRefusals = (db: DbHandle): number =>
-    (db.sqlite.prepare("SELECT count(*) AS c FROM audit WHERE action='controller.reset.refused'").get() as { c: number }).c;
+    (db.sqlite.prepare("SELECT count(*) AS c FROM audit WHERE action='manager.reset.refused'").get() as { c: number }).c;
   const rowCount = (db: DbHandle, table: string): number =>
     (db.sqlite.prepare(`SELECT count(*) AS c FROM ${table}`).get() as { c: number }).c;
   const resetAuditDetail = (db: DbHandle): string =>
-    JSON.stringify((db.sqlite.prepare("SELECT detail_json AS d FROM audit WHERE action='controller.reset'").get() as { d: unknown } | undefined)?.d ?? null);
+    JSON.stringify((db.sqlite.prepare("SELECT detail_json AS d FROM audit WHERE action='manager.reset'").get() as { d: unknown } | undefined)?.d ?? null);
   /** The wipe's failure, which lives on the `wiped: false` arm only. */
   const dbError = (r: ResetResult): string | undefined => (r.db.wiped ? undefined : r.db.error);
   /** The pre-wipe snapshot's path, which lives on the `wiped: true` arm only. */
@@ -187,7 +187,7 @@ describe("reset API (POST /api/reset)", () => {
     expect(res.status).toBe(403);
     expect(auditRefusals(db)).toBe(1);
     // The refusal names the authority, which is the only thing the route read.
-    const refusal = db.sqlite.prepare("SELECT actor, detail_json AS d FROM audit WHERE action='controller.reset.refused'").get() as { actor: string; d: unknown };
+    const refusal = db.sqlite.prepare("SELECT actor, detail_json AS d FROM audit WHERE action='manager.reset.refused'").get() as { actor: string; d: unknown };
     expect(refusal.actor).toBe("op_emergency");
     expect(JSON.parse(String(refusal.d)) as Record<string, unknown>).toMatchObject({ via: "emergency" });
   });
@@ -228,7 +228,7 @@ describe("reset API (POST /api/reset)", () => {
     expect(body.db.wiped).toBe(true);
     expect((db.sqlite.prepare("SELECT count(*) AS c FROM servers").get() as { c: number }).c).toBe(0);
     expect(body.reseeded).toBe(true);
-    expect(reseededAt()).toBe(1); // audit 'controller.reset' existed BEFORE reseedMaster ran
+    expect(reseededAt()).toBe(1); // audit 'manager.reset' existed BEFORE reseedMaster ran
   });
 
   // The order IS the safety property: the branch deletes are the one act that cannot be taken back,

@@ -17,7 +17,7 @@ export async function boot(): Promise<void> {
       origin: config.origin,
       port: config.port,
     },
-    "controller starting",
+    "manager starting",
   );
 
   // Resume interrupted runs immediately (no locked boot while the store is plaintext).

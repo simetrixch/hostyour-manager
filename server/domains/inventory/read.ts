@@ -118,7 +118,7 @@ export function masterFqdn(db: Db): string | undefined {
  * configured value first makes the two agree at every moment, before and after the seed. The row
  * still answers where nothing is configured.
  *
- * A Controller-side job with no database of its own (the registry reaper, on an emptyDir) has only
+ * A Manager-side job with no database of its own (the registry reaper, on an emptyDir) has only
  * the configured value in the first place.
  *
  * Undefined when neither exists: there is then no answer to "where do this installation's books

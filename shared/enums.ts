@@ -6,7 +6,7 @@ export const SERVER_STATUS = ["bare", "adopting", "ready", "provisioning",
   "healthy", "degraded", "draining", "undeployed"] as const;
 export type ServerStatus = (typeof SERVER_STATUS)[number];
 
-/** Does this controller hold its OWN SSH key for a server in this status — i.e. can it reach the
+/** Does this manager hold its OWN SSH key for a server in this status — i.e. can it reach the
  *  host without a password?
  *
  *  Only two statuses say no. "bare" is a machine adopt has never touched, and "adopting" is one
@@ -19,7 +19,7 @@ export type ServerStatus = (typeof SERVER_STATUS)[number];
  *  shut a host's password door unless something else can still reach it, and the card that offers
  *  that run kind. `adoptedAt` is NOT that set — the master's row carries none and it is the one host
  *  most in need of the run kind. */
-export function hasControllerKey(status: ServerStatus): boolean {
+export function hasManagerKey(status: ServerStatus): boolean {
   return status !== "bare" && status !== "adopting";
 }
 
@@ -37,7 +37,7 @@ export type ServerRole = (typeof SERVER_ROLE)[number];
  *  domains/inventory/read.ts) finds nothing, the host-key pin stops being required
  *  (server/executor/context.ts, which refuses to SSH the master unpinned), and redeploy plans its
  *  two-host shape — a second target plus a lock on the master's own branch — for a cluster that is in
- *  fact this controller's own.
+ *  fact this manager's own.
  *
  *  READONLY, so Drizzle call sites spread it (`inArray(servers.role, [...MASTER_ROLES])`, which
  *  takes a mutable array) — the copy is the price of a shared constant nothing can mutate. */
@@ -81,7 +81,7 @@ export const APP_PRESENT_STATUS = ["provisioning", "active", "suspended"] as con
 // states no consumer app can ever be in, and widening APP_STATUS would leak both into the consumer apps
 // domain, where nothing could ever produce them and every consumer reader would still have to handle them.
 //   - "provisioning" — written by create-tenant's record-provisional step BEFORE the run mutates git or
-//     the cluster: "the Controller has started creating this tenant and the run has
+//     the cluster: "the Manager has started creating this tenant and the run has
 //     not finished".
 //   - "purged" — written by the tenant-purge teardown's record step: the tenant was
 //     DEPROVISIONED, not merely un-deployed. It exists because "offboarded" and "purged" state OPPOSITE
@@ -185,7 +185,7 @@ export type ArgoHealth = (typeof ARGO_HEALTH)[number];
 
 // The answers the live reconciliation read may give to its ONE deployment question — does what the
 // cluster RUNS match what the unit's GitOps pointer PINS? Computed server-side once for both unit kinds
-// (server/domains/onboarding/api.ts driftOf -> LiveDriftView.verdict) and named for the operator once in
+// (server/domains/units/api.ts driftOf -> LiveDriftView.verdict) and named for the operator once in
 // the browser (web/src/reconVocabulary.ts), so the Consumers card and the Tenants card can never answer
 // the same situation differently.
 //
@@ -208,10 +208,10 @@ export type DriftVerdict = (typeof DRIFT_VERDICT)[number];
 
 // How an inventory row came to exist. ONE list for BOTH unit kinds — apps.provenance and
 // tenants.provenance are the same question asked of a consumer and of a tenant, and the answer has to
-// read the same either way, because the query it exists for ("which units did this Controller onboard,
+// read the same either way, because the query it exists for ("which units did this Manager onboard,
 // and which did it only write down") spans both tables:
-//   - "controller" — a Run of this Controller onboarded the unit and gate-validated what it deployed.
-//                    Written by the consumer onboard's record-inventory step (domains/onboarding/
+//   - "controller" — a Run of this Manager onboarded the unit and gate-validated what it deployed.
+//                    Written by the consumer onboard's record-inventory step (domains/units/
 //                    onboard-steps.ts) and by create-tenant's upsertTenantInventory (create-tenant.
 //                    run.ts), and it is the DEFAULT of both columns.
 //   - "adopted"    — RECONSTRUCTED FROM THE GITOPS REGISTRATION by an adopt-consumer run: the consumer
@@ -292,12 +292,12 @@ export type ServerPasswordLoginState = (typeof SERVER_PASSWORD_LOGIN_STATE)[numb
 // WHO a key line in a host's ~/.ssh/authorized_keys belongs to, as the reading found it. Three
 // answers, because the file mixes three origins and a surface that folded any two of them together
 // would hide the one that matters.
-//   - "controller" — this controller's OWN login identity for the host: the line whose fingerprint
+//   - "manager" — this manager's OWN login identity for the host: the line whose fingerprint
 //                    matches the ssh_key credential sealed for this server, or whose comment is the
 //                    marker adopt wrote. Both are checked, because the master's key is not written
 //                    by adopt at all (it arrives as a file the boot seed seals) and carries whatever
 //                    comment its generator gave it.
-//   - "operator"   — a human's key this controller placed: the line carries the operator marker AND
+//   - "operator"   — a human's key this manager placed: the line carries the operator marker AND
 //                    its fingerprint is the one stored under the label that marker names. Both,
 //                    because the comment is text on the machine and anyone who can append to the
 //                    file can type it. The label is what the removal keys on.
@@ -305,7 +305,7 @@ export type ServerPasswordLoginState = (typeof SERVER_PASSWORD_LOGIN_STATE)[numb
 //                    added by hand, a key left behind by someone who is gone, a stranger's key under
 //                    a marker naming a label no row carries. Its own answer and never folded into
 //                    "operator", because this is the whole thing the reading exists to make visible.
-export const AUTHORIZED_KEY_KIND = ["controller", "operator", "foreign"] as const;
+export const AUTHORIZED_KEY_KIND = ["manager", "operator", "foreign"] as const;
 export type AuthorizedKeyKind = (typeof AUTHORIZED_KEY_KIND)[number];
 
 // What a SERVER's ~/.ssh/authorized_keys held, as the last run to read it found. A FOURTH axis
@@ -314,9 +314,9 @@ export type AuthorizedKeyKind = (typeof AUTHORIZED_KEY_KIND)[number];
 //   - "unknown"     — no run has read this host's file. The column default, and the only literal no
 //                     step writes.
 //   - "unreadable"  — a run looked and the file could not be read.
-//   - "accounted"   — every line in the file is one this platform can name: the controller's own
+//   - "accounted"   — every line in the file is one this platform can name: the manager's own
 //                     key, or an operator key placed under a label. A host in this state has nobody
-//                     on it that the Controller cannot also take off.
+//                     on it that the Manager cannot also take off.
 //   - "unaccounted" — at least one line is FOREIGN, or at least one did not read as a key here. The
 //                     point of the axis: a departed operator's hand-placed key, or an image's
 //                     provisioning key, is a working way in that no run kind here can remove, and it
@@ -333,12 +333,12 @@ export type ServerAuthorizedKeysState = (typeof SERVER_AUTHORIZED_KEYS_STATE)[nu
 export const CREDENTIAL_KIND = ["ssh_key", "pat", "kubeconfig", "other"] as const;
 export type CredentialKind = (typeof CREDENTIAL_KIND)[number];
 
-// Every run kind the Controller can run. A literal with no definition behind it is a run kind the UI offers,
+// Every run kind the Manager can run. A literal with no definition behind it is a run kind the UI offers,
 // the API accepts and nothing can execute — the plan route answers "unknown run kind" only after the
 // operator has already asked for it. A run kind therefore enters this list WITH its implementation and
 // leaves it WITH its implementation, never before either. Two checks keep that true: the source census
-// (server/domains/runs/registry-census.test.ts) proves every literal is implemented SOMEWHERE, and the
-// registry.total boot check (server/boot/selfchecks.ts) proves the running process offers no run kind it
+// (server/domains/runs/run-definitions-census.test.ts) proves every literal is implemented SOMEWHERE, and the
+// run-definitions.total boot check (server/boot/selfchecks.ts) proves the running process offers no run kind it
 // cannot serve, via the RUN_FAMILY grouping below.
 export const RUN_KIND = [
   "noop",                                                       // permanent resume-proof fixture
@@ -354,15 +354,15 @@ export const RUN_KIND = [
   // coordinator can do. Each reaches its host on the PUBLIC address, because a run kind cannot
   // travel over the network it is repairing.
   "tailnet-disconnect", "tailnet-reconnect", "tailnet-rejoin",
-  // The password-login run kinds, on a host this controller already holds a key for. `password-login-
+  // The password-login run kinds, on a host this manager already holds a key for. `password-login-
   // disable` shuts the sshd password door and destroys the bootstrap password sealed beside the
   // server row — two doors, and only the second one outlives the machine's configuration.
   // `password-login-enable` opens the sshd door again for a repair, which is the only reason it
   // exists: adoption already leaves the door shut.
   "password-login-disable", "password-login-enable",
-  // The operator-key run kinds, on a host this controller already holds a key for. The two acts are
+  // The operator-key run kinds, on a host this manager already holds a key for. The two acts are
   // named for what they place — one human's key, under its own label and its own marker, so a
-  // removal can never reach the controller's own line. The read is named for the FILE, because it
+  // removal can never reach the manager's own line. The read is named for the FILE, because it
   // reports every key in it and not only the ones this platform put there: a key nobody here placed
   // is exactly what it exists to surface.
   "operator-key-place", "operator-key-remove", "authorized-keys-read",
@@ -395,14 +395,14 @@ export const RUN_KIND = [
 export type RunKind = (typeof RUN_KIND)[number];
 
 /**
- * The run families — the units a registry is assembled in, and the units the UI filters runs by.
- * `fixture` and `cluster` are registered unconditionally by buildRegistry (server/domains/runs/
- * registry.ts). `consumer` and `tenant` are the two opt-in families of buildOnboarding (server/boot/
- * wire-onboarding.ts): each is built only when its own adapters are configured, and a family that is
+ * The run families — the units the run definitions are assembled in, and the units the UI filters runs by.
+ * `fixture` and `cluster` are registered unconditionally by buildRunDefinitions (server/domains/runs/
+ * run-definitions.ts). `consumer` and `tenant` are the two opt-in families of buildUnits (server/boot/
+ * wire-units.ts): each is built only when its own adapters are configured, and a family that is
  * not built has no defs at all — its routes then answer 501 NOT_CONFIGURED.
  *
  * Every RUN_KIND literal belongs to exactly one family, and a family is registered whole or not at
- * all. The registry.total boot check asserts both against the registry the process assembled.
+ * all. The run-definitions.total boot check asserts both against the run definitions the process assembled.
  */
 export const RUN_FAMILY = {
   fixture: ["noop"],
@@ -456,10 +456,10 @@ export type TargetKind = (typeof TARGET_KIND)[number];
 // deriveServerLocks keeps the ownsHost ones), while `git-branch`, `master-kube` and `master-vault` are
 // named by a run definition's `locks` — and `master-vault` is the platform's ONE Vault, which lives on
 // the master, so every cluster's Vault writes serialize on that single member instead of on a key per
-// cluster. `controller` and `all` are the two GLOBAL claims, implemented by acquireLocks rather than
+// cluster. `manager` and `all` are the two GLOBAL claims, implemented by acquireLocks rather than
 // named by a def: either is admitted only against an empty lock table, and while one is held every
 // other claim is refused. A member nothing implements and no def names serializes nothing while
 // reading as protection.
 export const LOCK_RESOURCE = ["server", "git-branch", "master-kube",
-  "master-vault", "controller", "all"] as const;
+  "master-vault", "manager", "all"] as const;
 export type LockResource = (typeof LOCK_RESOURCE)[number];

@@ -10,9 +10,9 @@ import type { GateResult, SandboxAttestation, GateReport } from "../../shared/ga
 import type { ConsumerManifest } from "../../shared/consumer.ts";
 import type { Stage } from "../../shared/enums.ts";
 import type { ClusterValueFile } from "../../shared/cluster-values.ts";
-import { checkStructure } from "./g1.ts";
-import { runRender } from "./g3.ts";
-import { PRE_RENDER_GATES, POST_RENDER_GATES } from "./registry.ts";
+import { checkStructure } from "./gates/structure.gate.ts";
+import { runRender } from "./gates/render-pinned-deps.gate.ts";
+import { PRE_RENDER_GATES, POST_RENDER_GATES } from "./gate-list.ts";
 import { assembleReport } from "./report.ts";
 
 export interface PipelineConfig {
@@ -75,16 +75,16 @@ export async function runGates(
   };
 
   // G1 structure — produces the manifest.
-  const g1 = checkStructure({ files, chartPath: meta.chartPath, targetName: meta.targetName, stage: meta.stage });
-  emit(g1.result);
-  manifest = g1.manifest;
+  const structure = checkStructure({ files, chartPath: meta.chartPath, targetName: meta.targetName, stage: meta.stage });
+  emit(structure.result);
+  manifest = structure.manifest;
 
   // G2 determinism — over ctx.files, independent of the render.
   const filesCtx: GateContext = { ...baseCtx, manifest };
   for (const gate of PRE_RENDER_GATES) emit(gate.check(filesCtx));
 
   // G3 render — only when the structure is valid (an invalid chart cannot render meaningfully).
-  if (g1.result.status === "pass" && manifest !== null) {
+  if (structure.result.status === "pass" && manifest !== null) {
     const render = await runRender({
       workspace,
       chartPath: meta.chartPath,

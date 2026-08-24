@@ -9,7 +9,7 @@ import { parseConfig } from "../../kernel/config.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
-import { buildRegistry } from "./registry.ts";
+import { buildRunDefinitions } from "./run-definitions.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
 import { ANSIWISE_PIN_PATH } from "../inventory/ansiwise-pin.ts";
@@ -33,7 +33,7 @@ export const logger = createLogger(
   parseConfig({
     PUBLIC_URL: "https://x.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c",
     OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", LOG_LEVEL: "silent",
-    CONTROLLER_VERSION: "test",
+    MANAGER_VERSION: "test",
   } as NodeJS.ProcessEnv),
 );
 
@@ -42,7 +42,7 @@ export const MASTER_ID = "srv_master1";
 export const PARAMS = { serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com" };
 export const STEP_NAMES = [
   "attest-target", "slave-preflight", "prepare-checkouts", "run-deploy-slave-branch", "mark-slave",
-  "place-ansiwise", "run-deploy-host", "refresh-checkout", "run-deploy-cluster", "run-deploy-gitops",
+  "place-ansiwise", "run-deploy-host", "refresh-checkout", "run-deploy-cluster", "run-deploy-platform-services",
   "rejoin", "read-membership", "enable-ansiwise-service", "create-mgmt", "gitops-handoff",
   "verify-slave", "register",
 ];
@@ -203,7 +203,7 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     certsOut: "redis/redis-tls|True",
     // A slave as deploy-slave meets it: adopted, and carrying neither executable yet. No surface of
     // its own, and the token file already there — enable-ansiwise-service stands AFTER
-    // run-deploy-gitops in the list, and that program's file_from_vault row is what writes it.
+    // run-deploy-platform-services in the list, and that program's file_from_vault row is what writes it.
     serviceEnabled: false,
     serviceActive: false,
     serviceExecPath: undefined,
@@ -309,29 +309,33 @@ export interface Harness {
  *  part that makes the master's slaves ApplicationSet able to dial it. Seeded by tests that start
  *  from a slave that ALREADY IS one (redeploy, release's slave arm); a fresh deploy writes its own. */
 export const SLAVE_MARKING_YAML = [
-  `fqdn: ${PARAMS.domain}`,
   `stage: ${PARAMS.stage}`,
   "role: slave",
-  "books-cluster: m1.example.com",
-  "build-plane: m1.example.com",
-  "master: m1.example.com",
-  "apiHost: 100.64.0.11",
-  "apiPort: 16443",
+  "booksCluster: m1.example.com",
+  "",
+  "global:",
+  `  domain: ${PARAMS.domain}`,
+  "  buildPlane: m1.example.com",
+  "  master: m1.example.com",
+  "  apiHost: 100.64.0.11",
+  "  apiPort: 16443",
 ].join("\n") + "\n";
 
 /** The MASTER's own cluster map: written when the master installed itself. mark-slave reads it to
  *  compose the SLAVE's map — a slave belongs to the same installation, so its build plane, unit
  *  apex, platform domain, alert recipients and catalog repository are the master's. */
 export const MASTER_MARKING_YAML = [
-  "fqdn: m1.example.com",
   "stage: prod",
   "role: master",
-  "books-cluster: m1.example.com",
-  "build-plane: m1.example.com",
-  "unit-apex: example.com",
-  "platform-domain: example.com",
-  "alert-recipients: ops@example.com",
-  "catalog-repo: acme/acme-catalog",
+  "booksCluster: m1.example.com",
+  "",
+  "global:",
+  "  domain: m1.example.com",
+  "  buildPlane: m1.example.com",
+  "  unitApex: example.com",
+  "  platformDomain: example.com",
+  "  alertRecipients: ops@example.com",
+  "  catalogUrl: https://github.com/acme/acme-catalog.git",
 ].join("\n") + "\n";
 
 /** The version platform/versions.yaml pins for the binary, and the file that carries it — the ONE
@@ -386,7 +390,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   const releases = new ScriptedReleases();
   const executor = new Executor({
     db: db.db, creds: store, bus: new RunEventBus(), logger,
-    registry: buildRegistry({
+    runDefinitions: buildRunDefinitions({
       db: db.db, platformRepo,
       ansiwiseDownloadUrl: ANSIWISE_DOWNLOAD_URL,
       releaseDownloads: releases,

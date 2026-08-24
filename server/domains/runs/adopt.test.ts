@@ -9,7 +9,7 @@ import { parseConfig } from "../../kernel/config.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
-import { buildRegistry } from "./registry.ts";
+import { buildRunDefinitions } from "./run-definitions.ts";
 import { adoptDef } from "./defs/adopt.ts";
 import { serverCredFlags } from "../inventory/write.ts";
 import { readServerPasswordLogin } from "../../../shared/password-login.ts";
@@ -25,7 +25,7 @@ const logger = createLogger(
   parseConfig({
     PUBLIC_URL: "https://x.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c",
     OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", LOG_LEVEL: "silent",
-    CONTROLLER_VERSION: "test",
+    MANAGER_VERSION: "test",
   } as NodeJS.ProcessEnv),
 );
 
@@ -132,7 +132,7 @@ describe("adopt run — end to end through the executor", () => {
     const store = new CredentialStore({ db: db.db, logger });
     const executor = new Executor({
       db: db.db, creds: store, bus: new RunEventBus(), logger,
-      registry: buildRegistry({ db: db.db }), sshFactory: factory, actor: () => "op_system",
+      runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: factory, actor: () => "op_system",
     });
     const serverId = "srv_adopt1";
     db.db.insert(servers).values({ id: serverId, name: "s5", host: "203.0.113.7", sshPort: 22, sshUser }).run();
@@ -244,7 +244,7 @@ describe("adopt run — end to end through the executor", () => {
       expect(keys.facts.runId).toBe(runId); // the reading names the run that took it
       // The line adopt itself wrote is known by its SEALED FINGERPRINT (the marker comment is
       // never consulted — anyone on the box can type it); the image's is known by nothing.
-      expect(keys.facts.keys.map((k) => k.kind)).toEqual(["controller", "foreign"]);
+      expect(keys.facts.keys.map((k) => k.kind)).toEqual(["manager", "foreign"]);
       expect(keys.facts.keys[1]?.comment).toBe("someone@example.com");
     }
   });

@@ -29,7 +29,7 @@ import { loadServer, loadMaster, masterFqdnOf, sleepUnlessAborted, type SlaveTar
 //                     branch the host now stands on. Without it a run reports success while the
 //                     cluster is still mid-sync, and the state it claims is unproven.
 //
-// The machine layer itself is delivered by the deployment PROGRAMS (deploy-cluster, deploy-gitops,
+// The machine layer itself is delivered by the deployment PROGRAMS (deploy-cluster, deploy-platform-services,
 // and for a release the regeneration before them — regenerate-branch on a master's own host,
 // regenerate-slave-branch on the master for a slave), each driven over the machine's own
 // `ansiwise-rest serve` surface by ansiwiseProgramStep — ArgoCD cannot deliver this, because the

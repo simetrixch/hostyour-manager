@@ -1,9 +1,9 @@
 // gate-runner/src/fence.ts
 // SECURITY-CRITICAL — the sandbox self-probe. Before the runner trusts a job it
 // PROVES its own egress fence from the inside: the must-fail targets (the mother's LAN Traefik) and
-// the Controller's own address MUST be UNreachable (a blocked TCP connect is the fence working), and
+// the Manager's own address MUST be UNreachable (a blocked TCP connect is the fence working), and
 // the must-pass target (github.com, the one egress the job legitimately needs) MUST be reachable. The
-// result is frozen into the report as a SandboxAttestation the Controller re-checks. Fail closed: any
+// result is frozen into the report as a SandboxAttestation the Manager re-checks. Fail closed: any
 // target we cannot AFFIRMATIVELY prove blocked counts as not-denied, and any target we cannot prove
 // reachable counts as not-reached, so an error or a misconfigured target never masquerades as a
 // proven fence. TCP probing is injected (ConnectFn) so this is unit-testable without touching the net.
@@ -14,11 +14,11 @@ import type { SandboxAttestation } from "../../shared/gates.ts";
 export interface FenceConfig {
   /** LAN targets that MUST be blocked (the mother's Traefik). Echoed verbatim into the report. */
   mustFailTargets: string[];
-  /** The Controller's own address — a second must-fail probe (the runner must not reach home). */
-  controllerAddr: string;
+  /** The Manager's own address — a second must-fail probe (the runner must not reach home). */
+  managerAddr: string;
   /** The one egress the job legitimately needs (github.com) — must be reachable. */
   mustPassTarget: string;
-  /** The Controller's attestation that the must-fail targets were confirmed listening; echoed. */
+  /** The Manager's attestation that the must-fail targets were confirmed listening; echoed. */
   confirmedListening: boolean;
   /** Per-connect budget; defaults to DEFAULT_TIMEOUT_MS when unset or non-positive. */
   timeoutMs?: number;
@@ -148,7 +148,7 @@ export async function selfProbe(cfg: FenceConfig, connect: ConnectFn = defaultCo
   );
 
   const denied = await Promise.all(mustFailTargets.map((t) => probeDenied(connect, parseTarget(t), timeoutMs)));
-  const controllerAddrDenied = await probeDenied(connect, parseTarget(cfg.controllerAddr), timeoutMs);
+  const controllerAddrDenied = await probeDenied(connect, parseTarget(cfg.managerAddr), timeoutMs);
   const mustPassReached = await probeReached(connect, parseTarget(cfg.mustPassTarget), timeoutMs);
 
   return {

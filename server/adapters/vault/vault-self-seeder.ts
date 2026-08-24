@@ -9,22 +9,22 @@ import { KV_MOUNT, VaultError } from "./port.ts";
 // holds. The only place this Vault HTTP lives (dep-cruiser: adapters own IO); mirrors vault-kv.ts's
 // fetch style.
 //
-// ONE identity for every call: the Controller's own kubernetes-auth login (login() below) against
+// ONE identity for every call: the Manager's own kubernetes-auth login (login() below) against
 // the one Vault on the master, which is where a slave's secrets live too — under the master's
 // per-slave KV mount. No call takes an address from its input, and none could usefully: the pod's
-// ServiceAccount JWT is only valid for the Vault the Controller is configured against.
-//    NOTE: the `controller` Vault policy must be granted create/update on
+// ServiceAccount JWT is only valid for the Vault the Manager is configured against.
+//    NOTE: the `manager` Vault policy must be granted create/update on
 //    secret/data/build/+/repo-pat (and delete on the matching metadata path) for the build
 //    repo-pat write, create/update on secret/data/<stage>/consumer/+/app for the ceremony
 //    seed, delete on secret/metadata/<stage>/consumer/+/app for the offboard delete, and the
 //    same pair on secret/{data,metadata}/<stage>/tenants/+ for the tenant crypto entry,
 //    — the calls here fail closed (403) until they are. That policy is IMPERATIVE (the
-//    deploy-gitops program's vault seed, digita-deploy ansiwise/programs/), not ArgoCD-owned, so
-//    merging hostyour-cloud does not ship it: re-run deploy-gitops on the master to widen it.
+//    deploy-platform-services program's vault seed, digita-deploy ansiwise/programs/), not ArgoCD-owned, so
+//    merging hostyour-cloud does not ship it: re-run deploy-platform-services on the master to widen it.
 
-/** The Controller's own Vault login facts (kubernetes-auth) — config.vault, the same surface the
+/** The Manager's own Vault login facts (kubernetes-auth) — config.vault, the same surface the
  *  credential store's VaultKvClient authenticates with. Optional rather than required because a
- *  Controller without Vault is a real state (a dev process, the checks); absent ⇒ every write fails
+ *  Manager without Vault is a real state (a dev process, the checks); absent ⇒ every write fails
  *  closed with a clear error instead of inventing an identity. */
 export interface VaultSelfAuth {
   addr: string;
@@ -34,7 +34,7 @@ export interface VaultSelfAuth {
 }
 
 export interface VaultSeederDeps {
-  /** The Controller's own kubernetes-auth identity — the identity of every write in this adapter. */
+  /** The Manager's own kubernetes-auth identity — the identity of every write in this adapter. */
   self?: VaultSelfAuth;
 }
 
@@ -195,20 +195,20 @@ export class VaultSelfSeeder implements VaultSeeder {
     }
   }
 
-  /** The Controller's OWN kubernetes-auth login against ITS Vault — the identity of every write
-   *  here. Fail-closed when the Controller carries no Vault login. */
+  /** The Manager's OWN kubernetes-auth login against ITS Vault — the identity of every write
+   *  here. Fail-closed when the Manager carries no Vault login. */
   private async login(): Promise<{ addr: string; token: string }> {
     const self = this.deps.self;
     if (!self) {
       throw new VaultError(
-        "no Vault identity for this write: the Controller has no own Vault login (VAULT_ADDR unset) — refusing to continue",
+        "no Vault identity for this write: the Manager has no own Vault login (VAULT_ADDR unset) — refusing to continue",
       );
     }
     let jwt: string;
     try {
       jwt = readFileSync(self.saTokenPath, "utf8").trim();
     } catch (err) {
-      throw new VaultError(`controller ServiceAccount token not readable at ${self.saTokenPath}: ${err instanceof Error ? err.message : String(err)}`);
+      throw new VaultError(`manager ServiceAccount token not readable at ${self.saTokenPath}: ${err instanceof Error ? err.message : String(err)}`);
     }
     const res = await fetch(`${self.addr}/v1/auth/${self.k8sAuthMount}/login`, {
       method: "POST",

@@ -4,7 +4,7 @@ import { clusters, servers } from "../../db/schema/inventory.ts";
 import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
-import { buildRegistry } from "./registry.ts";
+import { buildRunDefinitions } from "./run-definitions.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import { markingAnswers } from "./defs/release.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
@@ -24,7 +24,7 @@ import type { Harness } from "./deploy-slave.fixture.ts";
 // per-drive).
 //
 // The channel ceiling is read from the platform repo's ONE table, so the fake repo carries that file
-// verbatim: a test that seeded a controller-side copy instead would prove the opposite of the rule.
+// verbatim: a test that seeded a manager-side copy instead would prove the opposite of the rule.
 
 const CHANNEL_TABLE = [
   "global:",
@@ -36,7 +36,7 @@ const CHANNEL_TABLE = [
 
 const RELEASE_STEPS = [
   "attest-target", "require-programs", "set-pin", "refresh-checkout",
-  "run-regenerate-branch", "run-deploy-cluster", "run-deploy-gitops", "argocd-follow",
+  "run-regenerate-branch", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow",
 ];
 
 /** The slave arm's list, and the three places it differs from the master's are the whole ticket: the
@@ -47,7 +47,7 @@ const RELEASE_STEPS = [
 const SLAVE_RELEASE_STEPS = [
   "attest-target", "require-programs", "set-pin", "prepare-regeneration",
   "run-regenerate-slave-branch", "refresh-checkout",
-  "run-deploy-cluster", "run-deploy-gitops", "argocd-follow",
+  "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow",
 ];
 
 const BUILD_PLANE_PATS = [
@@ -112,7 +112,7 @@ describe("release — plan", () => {
 
   it("a master whose map names ANOTHER cluster as build plane is not asked for the build PATs", async () => {
     const h = await liveMaster({
-      marking: MASTER_MARKING_YAML.replace("build-plane: m1.example.com", "build-plane: b1.example.com"),
+      marking: MASTER_MARKING_YAML.replace("  buildPlane: m1.example.com", "  buildPlane: b1.example.com"),
     });
     const { plan } = await h.executor.plan("release", MASTER_RELEASE);
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
@@ -157,7 +157,7 @@ describe("release — plan", () => {
 
 describe("release — set-pin and the map-sourced answers", () => {
   const setPinOf = (h: Harness): ReturnType<AnyRunDefinition["steps"]>[number] | undefined => {
-    const def = buildRegistry({ db: h.db.db, platformRepo: h.platformRepo }).get("release") as AnyRunDefinition;
+    const def = buildRunDefinitions({ db: h.db.db, platformRepo: h.platformRepo }).get("release") as AnyRunDefinition;
     return def.steps(MASTER_RELEASE).find((s) => s.name === "set-pin");
   };
 
@@ -231,14 +231,14 @@ describe("release — set-pin and the map-sourced answers", () => {
       platform_domain: "example.com",
       alert_recipients: ["ops@example.com"],
       catalog_repo: "acme/acme-catalog",
-      // no post_url: the map states none, and an absent optional field rides nowhere — the machine's
+      // no mail_url: the map states none, and an absent optional field rides nowhere — the machine's
       // own default (or refusal, by name) decides, never a value invented here.
     });
   });
 
   it("markingAnswers splits a multi-mailbox recipients list on the map's own comma grammar", async () => {
     const h = await liveMaster({
-      marking: MASTER_MARKING_YAML.replace("alert-recipients: ops@example.com", "alert-recipients: ops@example.com, oncall@example.com"),
+      marking: MASTER_MARKING_YAML.replace("  alertRecipients: ops@example.com", "  alertRecipients: ops@example.com, oncall@example.com"),
     });
     const answers = await markingAnswers(activeClusterTarget(MASTER_ID), { platformRepo: h.platformRepo })(bareStepCtx(h.db, h.store));
     expect(answers.alert_recipients).toEqual(["ops@example.com", "oncall@example.com"]);

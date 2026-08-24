@@ -3,10 +3,10 @@ import { parseConfig, ConfigError } from "./config.ts";
 
 const validEnv = {
   PUBLIC_URL: "https://m1.example.com",
-  OIDC_ISSUER: "https://idp.m1.example.com/application/o/controller/",
-  OIDC_CLIENT_ID: "controller",
+  OIDC_ISSUER: "https://idp.m1.example.com/application/o/manager/",
+  OIDC_CLIENT_ID: "manager",
   OIDC_CLIENT_SECRET: "secret",
-  CONTROLLER_VERSION: "test",
+  MANAGER_VERSION: "test",
   DATA_DIR: "/data",
 } as NodeJS.ProcessEnv;
 
@@ -34,15 +34,15 @@ describe("parseConfig", () => {
     }
   });
 
-  it("surfaces CONTROLLER_VERSION as version, and REQUIRES it (no silent default)", () => {
-    expect(parseConfig({ ...validEnv, CONTROLLER_VERSION: "0.14.0" }).version).toBe("0.14.0");
+  it("surfaces MANAGER_VERSION as version, and REQUIRES it (no silent default)", () => {
+    expect(parseConfig({ ...validEnv, MANAGER_VERSION: "0.14.0" }).version).toBe("0.14.0");
     const noVer: NodeJS.ProcessEnv = { ...validEnv };
-    delete noVer.CONTROLLER_VERSION;
+    delete noVer.MANAGER_VERSION;
     expect(() => parseConfig(noVer)).toThrow(ConfigError);
     try {
       parseConfig(noVer);
     } catch (e) {
-      expect((e as ConfigError).issues.join(" ")).toContain("CONTROLLER_VERSION");
+      expect((e as ConfigError).issues.join(" ")).toContain("MANAGER_VERSION");
     }
   });
 
@@ -112,10 +112,10 @@ describe("tenant onboarding config (catalog)", () => {
     expect(() => parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant", CATALOG_REPO: "not-a-repo" })).toThrow(ConfigError);
   });
 
-  it("is independent of the consumer gate-runner (tenant charts validate controller-side)", () => {
+  it("is independent of the consumer gate-runner (tenant charts validate manager-side)", () => {
     const c = parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant" });
     expect(c.catalog).toBeDefined();
-    expect(c.onboarding).toBeUndefined(); // no ONBOARD_GATE_CONTROLLER_ADDR, yet tenant config still resolves
+    expect(c.onboarding).toBeUndefined(); // no ONBOARD_GATE_MANAGER_ADDR, yet tenant config still resolves
   });
 });
 
@@ -156,7 +156,7 @@ describe("Vault backend config", () => {
     const c = parseConfig({ ...validEnv, VAULT_ADDR: "https://vault.m1.example:8200", VAULT_K8S_AUTH_MOUNT: "kubernetes-m1" });
     expect(c.vault).toEqual({
       addr: "https://vault.m1.example:8200",
-      k8sRole: "controller",
+      k8sRole: "manager",
       kvPrefix: "controller/cred",
       k8sAuthMount: "kubernetes-m1",
       saTokenPath: "/var/run/secrets/kubernetes.io/serviceaccount/token",

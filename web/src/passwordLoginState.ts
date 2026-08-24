@@ -13,11 +13,11 @@
 // A host that takes a password takes it from everyone who can reach its SSH port, and this chip is
 // where an operator finds that out.
 import type { ServerView } from "../../shared/api-types.ts";
-import { hasControllerKey } from "../../shared/enums.ts";
+import { hasManagerKey } from "../../shared/enums.ts";
 
 /** How long an "off" reading keeps its green chip. Past this the chip goes neutral and the
  *  sentence's age carries the whole claim: nothing re-reads the daemon on its own, and a host's
- *  sshd configuration is rewritten by things this controller does not drive — cloud-init writes its
+ *  sshd configuration is rewritten by things this manager does not drive — cloud-init writes its
  *  own drop-in again on every boot. Nothing else keys on this; age does not make "on" any less
  *  true, and the other states are already warn. */
 export const PASSWORD_LOGIN_READING_FRESH_MS = 60 * 60 * 1000;
@@ -69,7 +69,7 @@ export function passwordLoginChip(server: ServerView, now: number): PasswordLogi
     return {
       label: "password login: reading unreadable",
       className: "chip chip--warn",
-      detail: `The stored reading is version ${read.v}; this controller reads version 0 only, so ${RE_READ}.`,
+      detail: `The stored reading is version ${read.v}; this manager reads version 0 only, so ${RE_READ}.`,
       runId: null,
     };
   }
@@ -130,8 +130,8 @@ export interface PasswordLoginRunKindOffer {
 /**
  * Which run kinds this card may offer, and on what.
  *
- * Both drive one host's sshd over this controller's own key, so the one thing they share is that
- * the controller HAS one — hasControllerKey (shared/enums.ts), which is the same predicate the plan
+ * Both drive one host's sshd over this manager's own key, so the one thing they share is that
+ * the manager HAS one — hasManagerKey (shared/enums.ts), which is the same predicate the plan
  * refuses on, so this card can never offer a run the server then rejects.
  *
  * They are deliberately NOT keyed on the reading. A reading is a snapshot, so "off" an hour ago
@@ -143,6 +143,6 @@ export interface PasswordLoginRunKindOffer {
  * sshd like any other, and its own card is the only place its password door is visible.
  */
 export function passwordLoginRunKindOffer(server: ServerView): PasswordLoginRunKindOffer {
-  const reachable = hasControllerKey(server.status);
+  const reachable = hasManagerKey(server.status);
   return { disable: reachable, enable: reachable };
 }

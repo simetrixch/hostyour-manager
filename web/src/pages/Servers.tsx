@@ -32,8 +32,8 @@ const EMPTY = { name: "", host: "", tailnetHost: "", sshUser: "", sshPort: "22",
 const LIFECYCLE_STAGES = ["Added", "Adopted", "Deployed", "Live"] as const;
 type StageState = "done" | "active" | "todo";
 const LIFECYCLE: Record<ServerStatus, { stages: readonly StageState[]; state: string; next: "adopt" | "deploy" | "clusters" | null }> = {
-  bare: { stages: ["done", "active", "todo", "todo"], state: "Not adopted yet — the Controller has no SSH key on this box.", next: "adopt" },
-  adopting: { stages: ["done", "active", "todo", "todo"], state: "Adoption in progress — the Controller is installing its SSH key.", next: null },
+  bare: { stages: ["done", "active", "todo", "todo"], state: "Not adopted yet — the Manager has no SSH key on this box.", next: "adopt" },
+  adopting: { stages: ["done", "active", "todo", "todo"], state: "Adoption in progress — the Manager is installing its SSH key.", next: null },
   ready: { stages: ["done", "done", "active", "todo"], state: "Adopted — ready to deploy as a slave.", next: "deploy" },
   provisioning: { stages: ["done", "done", "active", "todo"], state: "Deployment in progress — this server is becoming a slave.", next: null },
   healthy: { stages: ["done", "done", "done", "done"], state: "Live slave — deployed and healthy.", next: "clusters" },
@@ -181,7 +181,7 @@ export function Servers() {
       <header className="page__head">
         <div>
           <h2 className="page__title">Servers</h2>
-          <p className="page__desc">The inventory this controller can reach over SSH.</p>
+          <p className="page__desc">The inventory this manager can reach over SSH.</p>
         </div>
         <div className="page__actions">
           <Link className="btn" to="/servers/keys">
@@ -264,7 +264,7 @@ export function Servers() {
                   <strong className="servercard__name">{s.name}</strong>
                   <span className={`badge badge--${s.status}`}>{s.status}</span>
                 </div>
-                {/* Two addresses, two jobs, said apart: where THIS controller opens its SSH
+                {/* Two addresses, two jobs, said apart: where THIS manager opens its SSH
                     session, and where the master's ArgoCD, Vault, dashboard and kube client dial
                     the slave's kube-apiserver. Printing only the first is what made a wrong second
                     address read as a network fault; the second is absent on a master, which is the
@@ -401,7 +401,7 @@ export function Servers() {
       <p className="note">
         <IconShield />
         <span>
-          A stored password is used once to install a dedicated SSH key, then the Controller uses the key. Passwords are
+          A stored password is used once to install a dedicated SSH key, then the Manager uses the key. Passwords are
           sealed AES-256-GCM at rest (keyfile mode) — a DB dump alone won&apos;t reveal them, and a successful adoption
           destroys the stored copy and turns the server&apos;s own password login off.
         </span>

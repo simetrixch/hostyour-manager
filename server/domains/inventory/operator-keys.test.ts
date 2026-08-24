@@ -156,7 +156,7 @@ describe("operator keys — the rows", () => {
     });
   }
 
-  it("places under the marker the removal matches, and never under the controller's", () => {
+  it("places under the marker the removal matches, and never under the manager's", () => {
     const db = setup();
     const view = createOperatorKey(db.db, "op_me", { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
     expect(operatorKeyMarker(view.label)).toBe("hostyour-operator:pat");

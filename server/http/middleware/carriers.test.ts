@@ -11,10 +11,10 @@ import type { ApiError } from "../../../shared/api-types.ts";
 
 const config = parseConfig({
   PUBLIC_URL: "https://m1.example.com",
-  OIDC_ISSUER: "https://idp.example/o/controller/",
-  OIDC_CLIENT_ID: "controller",
+  OIDC_ISSUER: "https://idp.example/o/manager/",
+  OIDC_CLIENT_ID: "manager",
   OIDC_CLIENT_SECRET: "secret",
-  CONTROLLER_VERSION: "test",
+  MANAGER_VERSION: "test",
   DATA_DIR: "/data",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv);

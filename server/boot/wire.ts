@@ -6,15 +6,15 @@ import { openDb, type DbHandle } from "../db/client.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf, type CheckResult } from "./selfchecks.ts";
 import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
 import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
-import { seedUnitSizes } from "../domains/onboarding/unit-size.ts";
+import { seedUnitSizes } from "../domains/units/unit-size.ts";
 import { createApp } from "../http/app.ts";
 import { CredentialStore } from "../security/store.ts";
 import { loadOrCreateDataKey } from "../kernel/datakey.ts";
 import { VaultKvClient } from "../adapters/vault/vault-kv.ts";
 import { RunEventBus } from "../executor/bus.ts";
 import { Executor } from "../executor/executor.ts";
-import { buildRegistry, type Registry } from "../domains/runs/registry.ts";
-import { buildOnboarding } from "./wire-onboarding.ts";
+import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-definitions.ts";
+import { buildUnits } from "./wire-units.ts";
 import { createSshSession } from "../adapters/ssh/ssh2-session.ts";
 import { HttpReleaseDownloads } from "../adapters/downloads/downloads.ts";
 import { SessionCodec } from "../domains/access/session.ts";
@@ -24,12 +24,12 @@ import { createOidcAdapter } from "../adapters/oidc/authentik.ts";
 import { EmergencyStore, createEmergencyApp, serveAdminSocket } from "../domains/access/emergency.ts";
 import { registerRunRoutes } from "../domains/runs/api.ts";
 import { registerClustersRoutes, registerServerRoutes } from "../domains/inventory/api.ts";
-import { createGitHubClient } from "../adapters/github/github.ts";
+import { createGitHubPlatform } from "../adapters/github-platform/github-platform-http.ts";
 import { registerBranchRoutes } from "../domains/branches/api.ts";
 import { registerReleaseRoutes } from "../domains/releases/api.ts";
 import { searchPlatformApps } from "../domains/registry-cleanup/search.ts";
-import { registerConsumerRoutes, registerTenantRoutes } from "../domains/onboarding/api.ts";
-import { registerUnitSizeRoutes } from "../domains/onboarding/api-unit-sizes.ts";
+import { registerConsumerRoutes, registerTenantRoutes } from "../domains/units/api.ts";
+import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
 import { join } from "node:path";
@@ -42,7 +42,7 @@ export interface Wired {
   db: DbHandle;
   store: CredentialStore;
   bus: RunEventBus;
-  registry: Registry;
+  runDefinitions: RunDefinitions;
   executor: Executor;
   app: Hono<AppEnv>;
   emergencyApp: Hono;
@@ -70,12 +70,12 @@ export async function wire(): Promise<Wired> {
   });
   const bus = new RunEventBus();
   // Consumer onboarding: construct the real adapters and register the Run family — but only when the
-  // Tekton gate-runner config (ONBOARD_GATE_CONTROLLER_ADDR) + platform repo are both configured
-  // (else defs=[] and the mutating consumer routes answer 501). See wire-onboarding.ts.
-  const onboarding = buildOnboarding(config, store, db.db, logger);
-  const registry = buildRegistry({
+  // Tekton gate-runner config (ONBOARD_GATE_MANAGER_ADDR) + platform repo are both configured
+  // (else defs=[] and the mutating consumer routes answer 501). See wire-units.ts.
+  const units = buildUnits(config, store, db.db, logger);
+  const runDefinitions = buildRunDefinitions({
     db: db.db,
-    ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}),
+    ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}),
     ...(config.ansiwiseServeCommand ? { ansiwiseServeCommand: config.ansiwiseServeCommand } : {}),
     ...(config.ansiwiseDownloadUrl ? { ansiwiseDownloadUrl: config.ansiwiseDownloadUrl } : {}),
     // WHERE the bootstrap reads the two ansiwise executables. Unconditional and not behind a setting:
@@ -83,13 +83,13 @@ export async function wire(): Promise<Wired> {
     // reading bytes off it is a capability of this process that nothing can turn off and nothing
     // should.
     releaseDownloads: new HttpReleaseDownloads(),
-  }, onboarding.defs);
+  }, units.defs);
   const executor = new Executor({
     db: db.db,
     creds: store,
     bus,
     logger,
-    registry,
+    runDefinitions,
     sshFactory: createSshSession,
     actor: runActor,
   });
@@ -104,20 +104,20 @@ export async function wire(): Promise<Wired> {
   // single replica — the same dependency seed-master.ts states for its own reconcile.
   scheduleTenantCheck(executor, logger);
   await seedMaster(db.db, store, config, logger);
-  // The size table (domains/onboarding/unit-size.ts): fill in any of the three sizes this database
+  // The size table (domains/units/unit-size.ts): fill in any of the three sizes this database
   // does not carry yet, and touch none that it does. Create-only, so an installation that edited a
   // size keeps its figures across every restart — the same rule the Vault seeder follows, and for the
   // same reason: a re-run must never silently re-price a unit that is already running on a value.
   const seededSizes = seedUnitSizes(db.db);
   if (seededSizes.length > 0) logger.info({ sizes: seededSizes }, "unit size table seeded");
   // The platform repo rides into the async checks because one of them reads it: the release grammar
-  // the Controller enforces against the build plane's copy of it (selfchecks.ts,
+  // the Manager enforces against the build plane's copy of it (selfchecks.ts,
   // checkReleaseGrammarMirror). It is the same port every registration write goes through, so the
-  // check reads what the runs read, and it is absent on a Controller without onboarding — the check
+  // check reads what the runs read, and it is absent on a Manager without onboarding — the check
   // then skips instead of reporting a comparison it never made.
   const checks = [
-    ...runSelfChecks({ db, config, store, bus, registry }),
-    ...(await runAsyncSelfChecks({ db, config, ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}) })),
+    ...runSelfChecks({ db, config, store, bus, runDefinitions }),
+    ...(await runAsyncSelfChecks({ db, config, ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}) })),
   ];
   assertBlockingChecksPass(checks);
   // A blocking failure has thrown by now, so what is left is what boot goes on WITH. /readyz carries
@@ -132,13 +132,13 @@ export async function wire(): Promise<Wired> {
   const oidc = createOidcAdapter(config, logger);
   // GitHub adapter — ONE instance for Branches + Reset. Absent when GITHUB_REPO/GITHUB_WRITE_PAT
   // are unset — the routes then answer 501 NOT_CONFIGURED, never a quiet no-op.
-  const github = config.github ? createGitHubClient(config.github) : undefined;
+  const github = config.github ? createGitHubPlatform(config.github) : undefined;
   // hostyour-cloud as ONE carrier of the pin search: its branch list over the REST API, its files
   // over the platform repo's per-branch worktree — the same two adapters the registrations already
   // ride, composed here so the release surface reads the branches the reaper reads. Both halves have
   // to be present: without either there is no walk to make, and the surface says so rather than
   // answering with an empty pin set.
-  const platformRepo = onboarding.platformRepo;
+  const platformRepo = units.platformRepo;
   const readPlatformAppPins =
     github && platformRepo
       ? () =>
@@ -168,18 +168,18 @@ export async function wire(): Promise<Wired> {
       // same platform repo port every registration write goes through.
       registerReleaseRoutes(a, { db: db.db, ...(platformRepo ? { platformRepo } : {}), ...(readPlatformAppPins ? { readPlatformAppPins } : {}) });
       // Consumer onboarding routes. The read path (the consumer list) is always live; the mutating
-      // triggers answer 501 NOT_CONFIGURED unless the onboarding Run family is wired (buildOnboarding
+      // triggers answer 501 NOT_CONFIGURED unless the onboarding Run family is wired (buildUnits
       // above registered it with its real git/kube/vault/gate-runner adapters).
       // store: the onboard POST seals the operator's raw repo PAT into the credential store BEFORE
       // the run exists — only the sealed reference enters the executor.
       // The size table: a read and one write, both unconditional — they need no adapter, and what
       // this installation sells is a fact whether or not onboarding is currently configured.
-      registerUnitSizeRoutes(a, { db: db.db, executor, ...(onboarding.registry ? { registry: onboarding.registry } : {}), onboardingEnabled: onboarding.enabled, tenantEnabled: onboarding.tenantEnabled });
-      registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: onboarding.enabled, ...(onboarding.resolver ? { resolver: onboarding.resolver } : {}), ...(onboarding.registry ? { registry: onboarding.registry } : {}), ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}) });
+      registerUnitSizeRoutes(a, { db: db.db, executor, ...(units.registrations ? { registrations: units.registrations } : {}), onboardingEnabled: units.enabled, tenantEnabled: units.tenantEnabled });
+      registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}) });
       // Tenant (multi-app) onboarding routes — the SAME thin shape, gated on the tenant family's own
       // flag (the catalog PAT). Registered right after the consumer routes; the read
       // path (tenant list/detail) stays live, the mutating triggers answer 501 until tenantEnabled.
-      registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: onboarding.tenantEnabled, ...(onboarding.tenantResolver ? { resolver: onboarding.tenantResolver } : {}), ...(onboarding.catalogRepoUrl ? { catalogRepoUrl: onboarding.catalogRepoUrl } : {}), ...(onboarding.appCatalog ? { appCatalog: onboarding.appCatalog } : {}), ...(onboarding.activator ? { activator: onboarding.activator } : {}), ...(onboarding.tenantRegistry ? { registry: onboarding.tenantRegistry } : {}), ...(onboarding.resolveUnitApex ? { resolveUnitApex: onboarding.resolveUnitApex } : {}) });
+      registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: units.tenantEnabled, ...(units.tenantResolver ? { resolver: units.tenantResolver } : {}), ...(units.catalogRepoUrl ? { catalogRepoUrl: units.catalogRepoUrl } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.activator ? { activator: units.activator } : {}), ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.resolveUnitApex ? { resolveUnitApex: units.resolveUnitApex } : {}) });
       registerResetRoutes(a, {
         config, db: db.db, sqlite: db.sqlite, store, logger,
         github,
@@ -194,7 +194,7 @@ export async function wire(): Promise<Wired> {
     db,
     store,
     bus,
-    registry,
+    runDefinitions,
     executor,
     app,
     emergencyApp,

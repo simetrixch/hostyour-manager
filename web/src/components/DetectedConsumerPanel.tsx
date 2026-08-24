@@ -46,7 +46,7 @@ function DetectedLive({ d }: { d: DetectedConsumerView }) {
       </div>
     );
   if (live.reason === "onboarding-not-configured")
-    return <div className="recon recon--muted">Live checks unavailable — onboarding is not configured on this controller.</div>;
+    return <div className="recon recon--muted">Live checks unavailable — onboarding is not configured on this manager.</div>;
 
   return <LiveReconFacts live={live} />;
 }
@@ -194,7 +194,7 @@ export function DetectedConsumerPanel(props: {
           The scan request failed: {scanError}
         </p>
       ) : scan === null ? null : scan.reason === "onboarding-not-configured" ? (
-        <p className="alert alert--warn">Consumer onboarding is not configured on this controller — there are no consumer pointers to scan.</p>
+        <p className="alert alert--warn">Consumer onboarding is not configured on this manager — there are no consumer pointers to scan.</p>
       ) : (
         <>
           {/* The registration half failed. It is an alert rather than a branch that hides everything
@@ -209,7 +209,7 @@ export function DetectedConsumerPanel(props: {
           {scan.detected.length === 0 ? (
             <div className="empty">
               {/* The all-clear sentence is only TRUE when every pointer could be read. With skipped
-                  pointers it would claim the controller accounted for consumers it never even parsed. */}
+                  pointers it would claim the manager accounted for consumers it never even parsed. */}
               <p>
                 {scan.error !== undefined
                   ? "No consumer registration could be checked — see above."

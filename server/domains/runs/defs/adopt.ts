@@ -12,7 +12,7 @@ import { hasHardFailure, type PreflightReport } from "../../../../shared/preflig
 import { recordTailnetReading } from "../tailnet-probe.ts";
 import { recordAuthorizedKeysReading } from "../operator-keys-probe.ts";
 import { disablePasswordLoginStep, purgeBootstrapPasswordStep, restorePasswordLoginCleanup } from "./password-login.kit.ts";
-import { controllerKeyMarker } from "../../../../shared/operator-keys.ts";
+import { managerKeyMarker } from "../../../../shared/operator-keys.ts";
 
 // "adopt a server" — the first real Run. Takes a BARE server to READY:
 // connect with a one-time password, preflight, install a dedicated key, verify key-only
@@ -20,7 +20,7 @@ import { controllerKeyMarker } from "../../../../shared/operator-keys.ts";
 // stored password, mark ready. First-contact, so mutating: false: the attest-target law
 // guards runs on already-attested targets, not the run that establishes identity.
 //
-// A server leaves this run reachable by KEY ONLY, and reachable by this controller alone: the
+// A server leaves this run reachable by KEY ONLY, and reachable by this manager alone: the
 // daemon stops taking passwords (disable-password-login) and the bootstrap password sealed for
 // one-click adopt is destroyed (purge-bootstrap-password). Both are needed — the first is a setting
 // a reinstall or a cloud-init rewrite can reopen, the second is a working credential that outlives
@@ -68,7 +68,7 @@ const removeKeyCleanup: Cleanup = {
     // Deletes by the marker this run's own key carries and by nothing else. The operator-key run kinds
     // write a marker that starts `hostyour-operator:`, so neither pattern can reach the other's
     // line: this one is `hostyour` followed immediately by a colon.
-    await remoteExec(ctx, session, `sed -i '\\#${controllerKeyMarker(server.name)}#d' ~/.ssh/authorized_keys`);
+    await remoteExec(ctx, session, `sed -i '\\#${managerKeyMarker(server.name)}#d' ~/.ssh/authorized_keys`);
   },
 };
 
@@ -213,7 +213,7 @@ function adoptSteps(params: AdoptParams): Step[] {
           ctx.log("meta", `Reusing existing SSH key ${reuse.fingerprint}`);
           return;
         }
-        const key = generateServerKeypair(controllerKeyMarker(server.name));
+        const key = generateServerKeypair(managerKeyMarker(server.name));
         const ref = await ctx.creds.seal({
           kind: "ssh_key",
           label: `SSH key for ${server.name}`,
@@ -364,7 +364,7 @@ function adoptSteps(params: AdoptParams): Step[] {
         // deployed (and therefore carries no cluster row) a membership to show.
         const tailnetState = await recordTailnetReading(ctx, session, sid);
         // The FIRST authorized-keys reading, taken here because this is the first moment it is worth
-        // anything: the controller's own key is on the box, so the reading can tell that line apart
+        // anything: the manager's own key is on the box, so the reading can tell that line apart
         // from every other. Cloud images ship with the provisioning key of whoever ordered the
         // machine still in this file, and that key is a working way in that no run kind here can
         // remove — a server that finished adopting must not have to wait for someone to press a

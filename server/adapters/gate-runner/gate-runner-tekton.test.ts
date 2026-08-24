@@ -6,7 +6,7 @@ import { reportHashPayload, type GateReport } from "../../../shared/gates.ts";
 
 const SHA = "a".repeat(40);
 
-// The cluster values chain the Controller reads off the install branch and hands to the sandbox.
+// The cluster values chain the Manager reads off the install branch and hands to the sandbox.
 const CHAIN = [
   { path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
   { path: "platform/values-prod.yaml", content: "global:\n  env: prod\n" },
@@ -58,7 +58,7 @@ function cfg(openCredential: (id: string) => Promise<Buffer> = () => Promise.res
     namespace: "gate-runner", pipelineName: "gate-run", serviceAccount: "pipeline-sa",
     reportWriterServiceAccount: "gate-report-writer", podFsGroup: 1000,
     workspaceStorage: "1Gi", runnerVersion: "0.1.0", kubeVersion: "1.30.0", jobBudgetMs: 480000,
-    fence: { mustFailTargets: ["10.1.1.1:443"], controllerAddr: "10.152.183.5:8080", mustPassTarget: "github.com:443" },
+    fence: { mustFailTargets: ["10.1.1.1:443"], managerAddr: "10.152.183.5:8080", mustPassTarget: "github.com:443" },
     openCredential,
   };
 }

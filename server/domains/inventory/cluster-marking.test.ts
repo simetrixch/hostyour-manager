@@ -105,12 +105,12 @@ describe("resolveClusterMarking", () => {
   const installerTail = `  unitApex: example.com\n  platformDomain: example.com\n`;
 
   it("resolves a map exactly as today's writers leave it, carrying platform-domain", async () => {
-    const installerSlave = `${slaveMap}${installerTail}  endpoints:\n    mail:\n      url: https://post.example.com\n  apiHost: 100.64.0.11\n  apiPort: 16443\n`;
+    const installerSlave = `${slaveMap}${installerTail}  endpoints:\n    mail:\n      url: https://mail.example.com\n  apiHost: 100.64.0.11\n  apiPort: 16443\n`;
     const repo = repoWith({ [MASTER]: `${masterMap}${installerTail}`, [SLAVE]: installerSlave });
     expect(await resolveClusterMarking(repo, "m1")).toMatchObject({ fqdn: MASTER, platformDomain: "example.com" });
     expect(await resolveClusterMarking(repo, "s1")).toMatchObject({
       fqdn: SLAVE, unitApex: "example.com", platformDomain: "example.com",
-      postUrl: "https://post.example.com", apiHost: "100.64.0.11", apiPort: 16443,
+      mailUrl: "https://mail.example.com", apiHost: "100.64.0.11", apiPort: 16443,
     });
   });
 
@@ -208,15 +208,15 @@ describe("setClusterRelease", () => {
     // A pin regenerates the WHOLE file, so anything the schema does not carry is gone from git.
     // set-role.sh refuses to stamp a cluster whose map has no unit-apex, so losing it here would
     // break the very branch regeneration the pin exists to drive.
-    const repo = repoWith({ [SLAVE]: `${slaveMap}  unitApex: example.com\n  platformDomain: example.com\n  endpoints:\n    mail:\n      url: https://post.example.com\n` });
+    const repo = repoWith({ [SLAVE]: `${slaveMap}  unitApex: example.com\n  platformDomain: example.com\n  endpoints:\n    mail:\n      url: https://mail.example.com\n` });
     await setClusterRelease(repo, SLAVE, TAG, "run_1");
 
     const after = await resolveClusterMarking(repo, "s1");
-    expect(after).toMatchObject({ release: TAG, unitApex: "example.com", platformDomain: "example.com", postUrl: "https://post.example.com" });
+    expect(after).toMatchObject({ release: TAG, unitApex: "example.com", platformDomain: "example.com", mailUrl: "https://mail.example.com" });
     const bytes = repo.read(repo.booksBranch, clusterMarkingPath(SLAVE));
     expect(bytes).toContain('unitApex: example.com');
     expect(bytes).toContain('platformDomain: example.com');
-    expect(bytes).toContain('url: https://post.example.com');
+    expect(bytes).toContain('url: https://mail.example.com');
   });
 
   it("re-pinning the SAME tag commits nothing — a resumed run reads its own pin back", async () => {
@@ -281,7 +281,7 @@ describe("readClusterReleases + clusterReleaseRead — a version is reported ONL
 
   it("names the missing configuration when there is no platform repo to read maps from", async () => {
     const releases = await readClusterReleases(undefined);
-    expect(releases).toEqual({ ok: false, reason: expect.stringContaining("wire-onboarding.ts:204") });
+    expect(releases).toEqual({ ok: false, reason: expect.stringContaining("wire-units.ts:204") });
   });
 });
 

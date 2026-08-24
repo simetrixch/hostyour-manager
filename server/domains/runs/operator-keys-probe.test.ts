@@ -1,18 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { AUTHORIZED_KEYS_PROBE_SCRIPT, parseAuthorizedKeysProbe } from "./operator-keys-probe.ts";
-import { controllerKeyMarker, operatorKeyMarker } from "../../../shared/operator-keys.ts";
+import { managerKeyMarker, operatorKeyMarker } from "../../../shared/operator-keys.ts";
 import { fingerprintPublicKey } from "../../security/fingerprint.ts";
 
 // The probe and its parser, tested apart from any run: the script's own properties (it names one
 // file, it never escalates, and every path exits 0), and the console-side reading of what it prints.
 
-const BLOB_MINE = "AAAAC3NzaC1lZDI1NTE5AAAAIControllerOwnKeyAAAAAAAAAAAAAAAAAAAAAAAA";
+const BLOB_MINE = "AAAAC3NzaC1lZDI1NTE5AAAAIManagerOwnKeyAAAAAAAAAAAAAAAAAAAAAAAA";
 const BLOB_PAT = "AAAAC3NzaC1lZDI1NTE5AAAAIOperatorPatKeyAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const BLOB_HETZ = "AAAAC3NzaC1lZDI1NTE5AAAAICloudImageKeyAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 const CTX = {
-  controllerFingerprints: [fingerprintPublicKey(`ssh-ed25519 ${BLOB_MINE}`)],
-  // The operator keys this controller holds. A line reads as an operator's only when its
+  managerFingerprints: [fingerprintPublicKey(`ssh-ed25519 ${BLOB_MINE}`)],
+  // The operator keys this manager holds. A line reads as an operator's only when its
   // fingerprint is the one stored under the label its comment names.
   operatorKeys: [{ label: "pat", fingerprint: fingerprintPublicKey(`ssh-ed25519 ${BLOB_PAT}`) }],
   // The parser does not read this field, and states it anyway. The classification this reading
@@ -20,7 +20,7 @@ const CTX = {
   // a revert) against a fixture WITHOUT the marker compares `comment === undefined`, so the
   // stranger's marked key below would still read foreign and the case would prove nothing. With the
   // marker here, the restored branch fails it.
-  controllerMarker: controllerKeyMarker("s1"),
+  managerMarker: managerKeyMarker("s1"),
 };
 
 const out = (...lines: string[]): string => ["AKEYS readable", ...lines.map((l) => `AKEY ${l}`)].join("\n");
@@ -55,19 +55,19 @@ describe("the authorized-keys probe script", () => {
 describe("parsing what the probe printed", () => {
   it("classifies the three origins a real file mixes", () => {
     const probe = parseAuthorizedKeysProbe(out(
-      `ssh-ed25519 ${BLOB_MINE} ${controllerKeyMarker("s1")}`,
+      `ssh-ed25519 ${BLOB_MINE} ${managerKeyMarker("s1")}`,
       `ssh-ed25519 ${BLOB_PAT} ${operatorKeyMarker("pat")}`,
       `ssh-ed25519 ${BLOB_HETZ} someone@hetzner`,
     ), CTX);
     expect(probe.readable).toBe(true);
-    expect(probe.keys.map((k) => k.kind)).toEqual(["controller", "operator", "foreign"]);
+    expect(probe.keys.map((k) => k.kind)).toEqual(["manager", "operator", "foreign"]);
     expect(probe.keys[1]?.label).toBe("pat");
     expect(probe.keys[2]?.comment).toBe("someone@hetzner");
     expect(probe.unparsed).toBe(0);
   });
 
-  it("reads a stranger's key wearing the CONTROLLER marker as foreign — only the sealed fingerprint vouches", () => {
-    const probe = parseAuthorizedKeysProbe(out(`ssh-ed25519 ${BLOB_HETZ} ${controllerKeyMarker("s1")}`), CTX);
+  it("reads a stranger's key wearing the MANAGER marker as foreign — only the sealed fingerprint vouches", () => {
+    const probe = parseAuthorizedKeysProbe(out(`ssh-ed25519 ${BLOB_HETZ} ${managerKeyMarker("s1")}`), CTX);
     expect(probe.keys[0]?.kind).toBe("foreign");
   });
 

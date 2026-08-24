@@ -1,6 +1,6 @@
 // The concrete GitHub consumer client (fetch, no SDK — same rationale as github.ts: a trivial
 // dependency surface). PER-CALL PAT: every method takes the consumer's token + owner/repo, so ONE
-// instance (constructed in boot/wire-onboarding.ts) serves every consumer. Mirrors github.ts's
+// instance (constructed in boot/wire-units.ts) serves every consumer. Mirrors github.ts's
 // request/header/error style (Bearer, x-github-api-version, user-agent) but is a SEPARATE client — the
 // github.ts one is platform-repo/single-token scoped and has no hook or workflow methods.
 import type {

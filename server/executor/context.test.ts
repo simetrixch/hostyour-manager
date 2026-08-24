@@ -21,7 +21,7 @@ const logger = createLogger(
     OIDC_ISSUER: "https://i.example/",
     OIDC_CLIENT_ID: "c",
     OIDC_CLIENT_SECRET: "s",
-    CONTROLLER_VERSION: "test",
+    MANAGER_VERSION: "test",
     DATA_DIR: "/data",
     LOG_LEVEL: "silent",
   } as NodeJS.ProcessEnv),

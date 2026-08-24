@@ -20,7 +20,7 @@ function server(over: Partial<ServerView>): ServerView {
   };
 }
 
-describe("sshAddressLine — where this controller's session actually opens", () => {
+describe("sshAddressLine — where this manager's session actually opens", () => {
   it("names lanHost when the row carries one, which is what the executor dials", () => {
     expect(sshAddressLine(server({ lanHost: "10.1.1.11", tailnetHost: "100.64.0.11" })))
       .toBe("ssh ubuntu@10.1.1.11:22");

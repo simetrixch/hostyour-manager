@@ -1,6 +1,6 @@
-// The Controller's kube ports. A master Argo reader, a per-cluster
+// The Manager's kube ports. A master Argo reader, a per-cluster
 // client, and the master AppProject writer:
-//  - MasterArgoReader — over the Controller pod's in-cluster ServiceAccount (or the dev kubeconfig
+//  - MasterArgoReader — over the Manager pod's in-cluster ServiceAccount (or the dev kubeconfig
 //    override); watch the generated Application CR (which lives on the master) reach Synced/Healthy
 //    at the frozen SHA: watch-sync, watch-prune, watch-removal. No SSH tunnel — the CRs are local
 //    to the master. Read-only: ArgoCD's own git poll is what picks a registration commit up.
@@ -56,7 +56,7 @@ export interface ArgoAppStatus {
   /** What the app's SINGULAR `.spec.source` TARGETS — the revision the GitOps pointer pins, as
    *  ArgoCD sees it, for an app that declares one source the old way. The exact DESIRED twin of
    *  syncRevision, and null for the same reason that field is: an app that declares `.spec.sources[]`
-   *  (every Application this Controller reads — see targetSources) leaves the singular form empty,
+   *  (every Application this Manager reads — see targetSources) leaves the singular form empty,
    *  as does a Missing app with no spec at all. Read it through targetedRevisionFor, never directly:
    *  that function is what knows which of the two forms an app expressed its sources in.
    *  REQUIRED (like syncRevision, not optional like the arrays): every constructor must state what it
@@ -201,7 +201,7 @@ export interface JobPvcMount {
 }
 
 /** What ClusterReader.runJob creates: one batch/v1 Job running ONE container of the pinned dbtools
- *  image, whose whole work is `script` under `sh -ec`. The Controller composes these and never runs a
+ *  image, whose whole work is `script` under `sh -ec`. The Manager composes these and never runs a
  *  database client itself — the clients live in the image, on the cluster where the databases are. */
 export interface JobSpec {
   /** The Job name — a DNS label, unique per run+purpose (the caller composes it). */
@@ -224,7 +224,7 @@ export interface ClusterReader {
   smoke(namespace: string): Promise<SmokeResult>;
   /** Run ONE Job to completion in `namespace` and return its outcome + collected pod log. The job
    *  carrier of the move/backup/restore mechanism: dumps, restores and listings all run as in-cluster
-   *  Jobs of the pinned dbtools image, because the databases are reachable there and the Controller
+   *  Jobs of the pinned dbtools image, because the databases are reachable there and the Manager
    *  carries no database clients. Idempotent by name: a crash-resumed step re-runs the SAME job name,
    *  and the writer replaces a leftover Job of that name before creating the new one. */
   runJob(namespace: string, spec: JobSpec, opts: { timeoutMs: number; signal?: AbortSignal }): Promise<JobResult>;
@@ -264,7 +264,7 @@ export interface ClusterReader {
    *  the Job outlives its run by its TTL. Idempotent for the crash-resumed step, which re-runs the
    *  SAME job name: a leftover Secret of the name is deleted before the create, mirroring how runJob
    *  replaces a leftover Job. That delete-then-create is also what keeps the grant to `create` +
-   *  `delete` with no read verb — the Controller never needs to GET a Secret it wrote itself. */
+   *  `delete` with no read verb — the Manager never needs to GET a Secret it wrote itself. */
   applySecret(namespace: string, name: string, data: Record<string, string>): Promise<void>;
   /** Delete a namespaced Secret by name — the reap half of applySecret, and the resumed-step delete
    *  inside it. Absent is success: a run whose Job died before the Secret was written must still settle
@@ -310,7 +310,7 @@ export interface ClusterReader {
    *  changes — the other half is the pods reading it again, and nothing on the platform did that.
    *
    *  HOW: a merge-patch that stamps `hostyour.cloud/restartedAt` on the pod TEMPLATE's annotations.
-   *  Changing the template is what makes the controller roll its pods — the same mechanism
+   *  Changing the template is what makes the manager roll its pods — the same mechanism
    *  `kubectl rollout restart` uses, and the reason the annotation goes on spec.template.metadata and
    *  not on the workload's own metadata, where it would change nothing.
    *
@@ -348,8 +348,8 @@ export const CLAIM_RELOCATING_ANNOTATION = "platform.hostyour.cloud/relocating";
 
 // ---- MasterProjectWriter (the one writing kube path) --------------------------------------
 
-/** The ownership label every Controller-managed consumer AppProject carries. The writer only ever
- *  updates/deletes a project that carries a Controller label — it never touches a foreign/system one. */
+/** The ownership label every Manager-managed consumer AppProject carries. The writer only ever
+ *  updates/deletes a project that carries a Manager label — it never touches a foreign/system one. */
 /** The pod-template annotation a restart stamps. Its VALUE is never read — what makes the workload
  *  roll is that the template CHANGED — so the timestamp is there for the operator who runs
  *  `kubectl describe` afterwards and wants to know when, and by what. */
@@ -357,14 +357,14 @@ export const RESTART_ANNOTATION = "hostyour.cloud/restartedAt";
 
 export const CONSUMER_PROJECT_LABEL = { key: "hostyour.cloud/consumer", value: "true" } as const;
 
-/** The ownership label every Controller-managed TENANT AppProject (<guid>) carries — the tenant
+/** The ownership label every Manager-managed TENANT AppProject (<guid>) carries — the tenant
  *  analogue of CONSUMER_PROJECT_LABEL, so one guard covers both formats. */
 export const TENANT_PROJECT_LABEL = { key: "hostyour.cloud/tenant", value: "true" } as const;
 
-/** Every label that marks an AppProject as Controller-managed (consumer OR tenant). The writer only
- *  ever updates/deletes a project carrying one of these (isControllerOwned, kube-map.ts) — it fails
+/** Every label that marks an AppProject as Manager-managed (consumer OR tenant). The writer only
+ *  ever updates/deletes a project carrying one of these (isManagerOwned, kube-map.ts) — it fails
  *  closed on a project without any, so it never touches a foreign/system project. */
-export const CONTROLLER_PROJECT_LABELS = [CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL] as const;
+export const MANAGER_PROJECT_LABELS = [CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL] as const;
 
 /** AppProject names the writer must NEVER create/update/delete — the platform's shared/system
  *  projects: the ones hostyour-cloud's argocd/<stage>/apps/projects.yaml renders, plus ArgoCD's own
@@ -372,8 +372,8 @@ export const CONTROLLER_PROJECT_LABELS = [CONSUMER_PROJECT_LABEL, TENANT_PROJECT
  *  refuses these as unit names before a run exists: the writer fails closed regardless. */
 export const RESERVED_PROJECT_NAMES: readonly string[] = ["default", "core", "data", "services", "observability", "cicd", "builds", "manager"];
 
-/** The per-consumer / per-tenant AppProject the Controller renders + writes
- *  (domains/onboarding/appproject.ts). Isolation: name == namespace == the unit; only its own
+/** The per-consumer / per-tenant AppProject the Manager renders + writes
+ *  (domains/units/appproject.ts). Isolation: name == namespace == the unit; only its own
  *  repo(s) as a source; only its own namespace as a destination; only Namespace (+ the tenant's own
  *  Tenant CR) as a cluster-scoped resource; Application/ApplicationSet/AppProject/Role/RoleBinding
  *  blacklisted so a chart cannot escalate. A destination pins the target by `server` (consumer:
@@ -402,8 +402,8 @@ export interface AdmissionValidation {
   message: string;
 }
 
-/** The per-unit ValidatingAdmissionPolicy the Controller renders + writes
- *  (domains/onboarding/admission-policy.ts). Cluster-scoped, `failurePolicy: Fail` — an unevaluable
+/** The per-unit ValidatingAdmissionPolicy the Manager renders + writes
+ *  (domains/units/admission-policy.ts). Cluster-scoped, `failurePolicy: Fail` — an unevaluable
  *  expression must REFUSE the object, never wave it through. matchConstraints narrows the kinds the
  *  policy sees at all; matchConditions narrow WHICH requests of those kinds are evaluated — a false
  *  condition SKIPS the request (scope, not verdict), while under `failurePolicy: Fail` an
@@ -437,9 +437,9 @@ export interface AdmissionPolicyBindingManifest {
   };
 }
 
-/** The Controller's ONE writing kube port: the per-consumer / per-tenant AppProject on the master's
+/** The Manager's ONE writing kube port: the per-consumer / per-tenant AppProject on the master's
  *  argocd namespace, over the pod SA's in-cluster access. Guarded — only ever manages a project
- *  carrying a CONTROLLER_PROJECT_LABELS label, and refuses RESERVED_PROJECT_NAMES (fail-closed). */
+ *  carrying a MANAGER_PROJECT_LABELS label, and refuses RESERVED_PROJECT_NAMES (fail-closed). */
 export interface MasterProjectWriter {
   /** Idempotent create-or-update (a crash-resumed executor re-runs apply-appproject). Refuses a
    *  reserved name; refuses to overwrite an existing project that is not consumer-owned. */
@@ -448,14 +448,14 @@ export interface MasterProjectWriter {
    *  name; refuses to delete a project that is not consumer-owned. */
   deleteAppProject(namespace: string, name: string): Promise<{ deleted: boolean }>;
   /** Does the project still stand? The offboard orphan scan reads it back after the delete: the
-   *  isolation project is written outside any chart, so nothing but this Controller ever removes it,
+   *  isolation project is written outside any chart, so nothing but this Manager ever removes it,
    *  and a project outliving its unit is what a re-onboard of the same name would then find. */
   appProjectExists(namespace: string, name: string): Promise<boolean>;
 }
 
 // ---- BuildRbacWriter (a unit's build grants) ------------------------------------------------
 
-/** A namespaced Role the Controller writes (domains/onboarding/build-rbac.ts). `resourceNames` is what
+/** A namespaced Role the Manager writes (domains/units/build-rbac.ts). `resourceNames` is what
  *  keeps the argo-sync grant to the unit's OWN Applications in a namespace that holds everyone's. */
 export interface RoleManifest {
   apiVersion: "rbac.authorization.k8s.io/v1";
@@ -492,8 +492,8 @@ export interface BuildRbacObject {
 }
 
 /** Writes a unit's build grants. Master-local like the AppProject writer: the build namespace and
- *  the ArgoCD namespace both live on the cluster the Controller itself runs on. Guarded — it only ever
- *  updates or deletes an object carrying the Controller ownership label, so it fails closed and never
+ *  the ArgoCD namespace both live on the cluster the Manager itself runs on. Guarded — it only ever
+ *  updates or deletes an object carrying the Manager ownership label, so it fails closed and never
  *  touches a Role somebody else put there under the same name. */
 export interface BuildRbacWriter {
   /** Idempotent create-or-update of every grant; returns how many objects were CREATED (as opposed to
@@ -504,7 +504,7 @@ export interface BuildRbacWriter {
   /** Which of these grants' objects still stand — empty when none does. Takes the same grants the
    *  delete takes, so a caller reads back exactly what it asked to have removed. The offboard orphan
    *  scan uses it: the unit's AppProject blacklists Role and RoleBinding, so no chart renders these
-   *  and no prune reaps them; only the Controller's own delete does. */
+   *  and no prune reaps them; only the Manager's own delete does. */
   listBuildRbac(grants: readonly BuildRbacGrant[]): Promise<BuildRbacObject[]>;
 }
 
@@ -526,7 +526,7 @@ export interface RepoCredentialManifest {
 
 /** Writes the per-unit ArgoCD repository Secret. Master-local like the AppProject writer — every
  *  ArgoCD instance's namespace lives on the cluster this pod runs on. Guarded the same way: it only
- *  ever replaces or deletes a Secret carrying the Controller ownership label, so it fails closed on
+ *  ever replaces or deletes a Secret carrying the Manager ownership label, so it fails closed on
  *  a name collision with something somebody else put there. */
 export interface RepoCredentialWriter {
   /** Idempotent create-or-replace (a crash-resumed onboard re-runs the step). */
@@ -557,7 +557,7 @@ export interface ResolvedClusterKube {
 
 /** Returns the RIGHT kube clients for a target cluster (the master self-cluster or a
  *  slave), resolved from inventory (the clusters/servers rows) + the plane credentials — never a
- *  hardcoded cluster-name list. The controller pod holds only its OWN cluster's access (the pod SA
+ *  hardcoded cluster-name list. The manager pod holds only its OWN cluster's access (the pod SA
  *  in-cluster); this port is the seam that turns a target `clusterId` into per-cluster access. The
  *  default impl lives in the onboarding domain (cluster-kube.ts); a scripted fake lives in testing/. */
 export interface ClusterKubeResolver {

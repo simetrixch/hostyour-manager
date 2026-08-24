@@ -13,13 +13,13 @@ import type { DriftVerdict } from "../../shared/enums.ts";
 //             targetedRevisionFor). This is what the platform will converge on.
 //   deployed  what the cluster actually RUNS right now (server syncedRevisionFor / singleSourceRevision).
 //
-// Both are read off the APPLICATION and off nothing else. The Controller keeps no record of a unit's
+// Both are read off the APPLICATION and off nothing else. The Manager keeps no record of a unit's
 // revision: the registration states none, and the delivery branch's own pin is the release cycle's to
 // write. The words are therefore not copy — they are the claim each surface makes — and a claim that
 // lives in two files drifts in two files.
 //
 // This module holds ONLY the vocabulary + the rendering of it. WHICH verdict a revision pair earns is the
-// SERVER's answer, computed once in driftOf (server/domains/onboarding/api.ts) so the two cards can never
+// SERVER's answer, computed once in driftOf (server/domains/units/api.ts) so the two cards can never
 // disagree; the browser only names what it was handed — which is why the readout below takes the server's
 // answer and returns a word plus a badge tone, and decides nothing itself.
 

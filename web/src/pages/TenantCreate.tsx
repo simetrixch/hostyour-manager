@@ -111,7 +111,7 @@ export function TenantCreate() {
       <p className="callout">
         A tenant fans one registration out to one self-contained member per service — auth, jobs and report always, plus
         one per app you declare — each with its own namespace <code>&lt;guid&gt;-&lt;member&gt;</code> and its own
-        AppProject, all rendered from the fixed catalog repo. The Controller renders and validates the entire
+        AppProject, all rendered from the fixed catalog repo. The Manager renders and validates the entire
         fan-out (T1..T4) before anything is deployed; you approve on the next screen.
       </p>
 

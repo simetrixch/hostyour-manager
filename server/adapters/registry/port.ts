@@ -1,11 +1,11 @@
-// The Controller's RegistryProbe port (tenant ensure-images). The tenant fan-out charts pull every
+// The Manager's RegistryProbe port (tenant ensure-images). The tenant fan-out charts pull every
 // first-party image from the registry their cluster's values chain names (zot.<build-plane>); the
 // ensure-images step asks THIS port whether a pinned <repo>:<tag> already exists there BEFORE the
 // tenant pointer is written. A missing tag fails the run, and an undecidable probe fails closed.
 //
 // Kept a PORT (types only) so the domain step depends on the abstraction; the concrete fetch impl
 // lives in registry-http.ts (the same /v2 manifest probe the image-guard PreSync hook curls, using
-// the same mounted controller-registry-pull dockerconfigjson), the fake in testing/.
+// the same mounted manager-registry-pull dockerconfigjson), the fake in testing/.
 
 /** One registry-hosted image coordinate: the registry host + the repository path under it + the
  *  bare tag — exactly how the requiredImages entries split `<registryHost>/<repo>:<tag>`. */

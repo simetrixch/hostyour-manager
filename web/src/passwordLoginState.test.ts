@@ -90,8 +90,8 @@ describe("passwordLoginChip — an open door is never worded softly, and an unre
   });
 });
 
-describe("passwordLoginRunKindOffer — the buttons follow the key this controller holds, never the reading", () => {
-  it("offers both run kinds on a host this controller has a key for", () => {
+describe("passwordLoginRunKindOffer — the buttons follow the key this manager holds, never the reading", () => {
+  it("offers both run kinds on a host this manager has a key for", () => {
     expect(passwordLoginRunKindOffer(server("on", facts()))).toEqual({ disable: true, enable: true });
   });
 

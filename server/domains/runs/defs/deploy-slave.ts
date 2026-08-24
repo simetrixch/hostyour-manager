@@ -35,7 +35,7 @@ import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
 // driven over `ansiwise-rest serve` and proven by a dry run the machine's gate then admits the real run
 // against. Two hosts: the MASTER cuts the slave's install branch (deploy-slave-branch) and takes
 // its registration (register-slave); the SLAVE is built by the same three machine-layer programs
-// every cluster is (deploy-host, deploy-cluster, deploy-gitops), joins the private network with a
+// every cluster is (deploy-host, deploy-cluster, deploy-platform-services), joins the private network with a
 // credential the master mints, and emits the one credentials file the registration is made from.
 //
 // Before the first of those programs, place-ansiwise puts the binary they are driven through, the
@@ -125,7 +125,7 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
   };
 }
 
-/** deploy-host's operator_public_key: the public half of the key this controller installed at
+/** deploy-host's operator_public_key: the public half of the key this manager installed at
  *  adopt (the newest ssh_key credential's stored public line). The program re-installs it
  *  idempotently and proves sshd would accept it. A row without one (an adopt from before the
  *  public line was stored) sends nothing, and the program refuses the missing answer by name. */
@@ -188,9 +188,9 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         checks.push(makeCheck("vault.reachable", reachable ? "pass" : "fail",
           reachable ? `HTTP ${httpCode} from ${url}` : `no HTTP answer from ${url} (curl exit ${vr.code}${httpCode ? `, code ${httpCode}` : ""})`));
 
-        // The pod (Calico) CIDR must be disjoint from the cluster LAN, or controller pods can't
+        // The pod (Calico) CIDR must be disjoint from the cluster LAN, or manager pods can't
         // route to the slave's LAN IP (the `dial …:16443 i/o timeout` blocker). Purely LOCAL — the
-        // Controller already knows the cluster LAN (the /24 around the inventory lanHost) and the
+        // Manager already knows the cluster LAN (the /24 around the inventory lanHost) and the
         // installer's default pod CIDR; no probe. Reads `lanHost` and NOT the address the slave is
         // dialled on: this asks about the cluster network, and a slave dialled on its tailnet
         // address is out of a pod pool's reach by construction. Skipped (no check pushed) when
@@ -319,9 +319,9 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     refreshCheckoutStep(target),
     armed(redeploying ? undefined : microk8sResetSlaveCleanup,
       ansiwiseProgramStep(target, "deploy-cluster", ports, { extra: machineAnswers })),
-    // deploy-gitops also declares elevation_password — the ENGINE fills that one from the
+    // deploy-platform-services also declares elevation_password — the ENGINE fills that one from the
     // password the POST carries beside the answers; sending it as an answer is refused.
-    ansiwiseProgramStep(target, "deploy-gitops", ports, { extra: machineAnswers }),
+    ansiwiseProgramStep(target, "deploy-platform-services", ports, { extra: machineAnswers }),
     ...(redeploying ? [] : [
       // The join: mint on the master, carry the credential over the session, spend it in ONE
       // program run on the slave — the tailnet kit's own step, because a first join is the same
@@ -403,7 +403,7 @@ export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): Run
   return {
   kind: "deploy-slave",
   paramsSchema: DeploySlaveParams,
-  mutating: true, // mutating ⇒ steps()[0] MUST be attest-target, asserted at registry boot
+  mutating: true, // mutating ⇒ steps()[0] MUST be attest-target, asserted where the run definitions are assembled at boot
   plan: async (params, { db }) => {
     const slave = loadServer(db, params.serverId);
     const master = loadMaster(db);

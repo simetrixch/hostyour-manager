@@ -4,7 +4,7 @@ import { errValidation } from "../../../kernel/errors.ts";
 import { attestMachineId } from "../../../executor/attest.ts";
 import { remoteCmd, remoteScript } from "../../../executor/stepkit.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
-import { hasControllerKey, type RunKind } from "../../../../shared/enums.ts";
+import { hasManagerKey, type RunKind } from "../../../../shared/enums.ts";
 import { purgeBootstrapPassword } from "../../inventory/write.ts";
 import { recordPasswordLoginReading, SSHD_HELPERS } from "../password-login-probe.ts";
 import { loadServer } from "./deploy-slave.kit.ts";
@@ -13,7 +13,7 @@ import { loadServer } from "./deploy-slave.kit.ts";
 // that shuts the door in the first place: the scripts they ship to a host, the steps they are
 // composed of, and the one plan builder they state their target in.
 //
-// WHY THIS IS A RUN KIND AND NOT A CHECKBOX. Nothing this controller stores changes what a daemon
+// WHY THIS IS A RUN KIND AND NOT A CHECKBOX. Nothing this manager stores changes what a daemon
 // answers on port 22. A switch that flipped a column would be the same shape as the file that
 // caused this work — a thing that looks like protection, is inert, and stops the next reader
 // looking. The switch is a run because only a run can write the drop-in, validate it, reload the
@@ -314,7 +314,7 @@ function enablePasswordLoginStep(serverId: string): Step {
 /**
  * The SECOND door, and the one that outlives the machine's configuration: the bootstrap password
  * sealed beside the server row so the list can offer one-click adopt. sshd's door is a setting a
- * reinstall or a cloud-init rewrite can reopen; this one is a working credential this controller
+ * reinstall or a cloud-init rewrite can reopen; this one is a working credential this manager
  * holds, and nothing but this step takes it away.
  *
  * A step of its own rather than a line inside the act above, because the two doors fail
@@ -363,7 +363,7 @@ const SUMMARY: Record<PasswordLoginKind, (o: { name: string; steps: number; host
 
 const WARNINGS: Record<PasswordLoginKind, string[]> = {
   "password-login-disable": [
-    "Afterwards this host takes key logins only. Anyone who reaches it by password today — a console session that is not this controller, a script, a colleague — will not afterwards.",
+    "Afterwards this host takes key logins only. Anyone who reaches it by password today — a console session that is not this manager, a script, a colleague — will not afterwards.",
     "The stored bootstrap password is destroyed, so one-click adopt asks for a password again.",
   ],
   "password-login-enable": [
@@ -386,13 +386,13 @@ const WARNINGS: Record<PasswordLoginKind, string[]> = {
  */
 export function passwordLoginPlan(kind: PasswordLoginKind, serverId: string, db: Db): Plan {
   const server = loadServer(db, serverId);
-  if (!hasControllerKey(server.status)) {
+  if (!hasManagerKey(server.status)) {
     // What the refusal states is the RULE, not a claim about the machine: an adoption that failed
     // part way leaves its row back at 'bare' while the key it installed is still on the host, so a
-    // message saying "this controller holds no key for it" would be false exactly there. That run
+    // message saying "this manager holds no key for it" would be false exactly there. That run
     // is retried or aborted from its own run screen, which is where the key is accounted for.
     throw errValidation(
-      `refusing: "${server.name}" is '${server.status}' — only a server whose adoption finished is driven over this controller's own key. ` +
+      `refusing: "${server.name}" is '${server.status}' — only a server whose adoption finished is driven over this manager's own key. ` +
       `An adoption that stopped part way is retried or aborted from its own run screen.`,
     );
   }

@@ -6,13 +6,17 @@ import { meta } from "../../db/schema/meta.ts";
 import type { Config } from "../../kernel/config.ts";
 import { bootEpochMs, isRevoked } from "./revocation.ts";
 
-export const SESSION_COOKIE = "__Host-controller";
+export const SESSION_COOKIE = "__Host-manager";
 
 /** The __Host- prefix hardens the prod (https) cookie but REQUIRES Secure — impossible over
  *  plain http. So dev/e2e over http://localhost falls back to a plain name; https keeps the
- *  hardened one. The prefix is a transport-hardening detail, not a security invariant. */
+ *  hardened one. The prefix is a transport-hardening detail, not a security invariant.
+ *
+ *  The NAME is what the browser keys the session by: a browser holding a cookie under a different
+ *  name does not send it, and the operator is signed out and signs in again. Nothing server-side
+ *  keys off it — the session lives in the cookie's own encrypted value. */
 export function sessionCookieName(config: Config): string {
-  return config.cookieSecure ? SESSION_COOKIE : "controller-session";
+  return config.cookieSecure ? SESSION_COOKIE : "manager-session";
 }
 
 const ALG = "dir";

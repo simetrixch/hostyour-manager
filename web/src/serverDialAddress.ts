@@ -1,4 +1,4 @@
-// The TWO address questions a server card has to answer, in words: where does THIS controller open
+// The TWO address questions a server card has to answer, in words: where does THIS manager open
 // its SSH session, and where do the master's in-cluster components dial that machine's
 // kube-apiserver. A pure module beside tailnetState.ts / runScreen.ts / relocationBand.ts, for the
 // same reason those are: vitest runs with environment "node" and includes no .tsx, so wording left
@@ -7,7 +7,7 @@
 // A server row carries three addresses and they answer those two questions. `host` and `lanHost`
 // are SSH transports and nothing else. `tailnetHost` is not an SSH transport at all: it is what
 // deploy-slave writes into the cluster map's apiHost field and states to the slave's own bring-up,
-// so the master's per-slave ArgoCD, Vault, the shared dashboard and the Controller's per-slave kube
+// so the master's per-slave ArgoCD, Vault, the shared dashboard and the Manager's per-slave kube
 // client all reach the same machine at the same place.
 //
 // The card printed one line, built from `host`, and called it the target. That is what let a wrong
@@ -16,7 +16,7 @@
 import { isMasterRole } from "../../shared/enums.ts";
 import type { ServerView } from "../../shared/api-types.ts";
 
-/** Where this controller's SSH session goes, said the way the executor resolves it.
+/** Where this manager's SSH session goes, said the way the executor resolves it.
  *
  *  MIRRORS the default arm of server/executor/transport.ts, which is the authority: `lanHost` when
  *  the row carries one, `host` otherwise. The browser cannot import that module — it is server code

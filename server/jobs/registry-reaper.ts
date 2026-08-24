@@ -1,6 +1,6 @@
 // The registry-reaper entrypoint — a run-once job that wires the real adapters and calls reap()
 // exactly once, then exits 0 (clean) / 1 (any failure). The GitOps deploy invokes this on the
-// controller image with the controller's own env; this file is the composition root, kept out of
+// manager image with the manager's own env; this file is the composition root, kept out of
 // boot/wire.ts because the reaper is its OWN process, not part of the server.
 //
 // FAIL-CLOSED on config, too. The floor is a search over three carrier classes, and every one of them
@@ -16,23 +16,23 @@ import { booksBranch } from "../domains/inventory/read.ts";
 import { CredentialStore } from "../security/store.ts";
 import { loadOrCreateDataKey } from "../kernel/datakey.ts";
 import { VaultKvClient } from "../adapters/vault/vault-kv.ts";
-import { createGitHubClient, type GitHubConfig } from "../adapters/github/github.ts";
+import { createGitHubPlatform, type GitHubPlatformConfig } from "../adapters/github-platform/github-platform-http.ts";
 import { GitPlatformRepo, GitRepoReader } from "../adapters/git/git.ts";
 import { HttpRegistryMaintenance } from "../adapters/registry/registry-http.ts";
 import { reap } from "../domains/registry-cleanup/reap.ts";
 import type { CarrierRepo } from "../domains/registry-cleanup/search.ts";
 
 /** Where the reaper's PUSH credential dockerconfigjson is mounted by the CronJob. The push-user has
- *  delete rights; distinct from the controller-registry-pull path the probe uses. */
-const DEFAULT_PUSH_DOCKERCONFIG_PATH = "/etc/controller/registry-push/.dockerconfigjson";
+ *  delete rights; distinct from the manager-registry-pull path the probe uses. */
+const DEFAULT_PUSH_DOCKERCONFIG_PATH = "/etc/manager/registry-push/.dockerconfigjson";
 
 /** One GitOps repo as a carrier: its branch list over the REST API, its files over a persistent
  *  worktree. `workRoot` is its own so the reaper never collides with the onboarding worktrees, and the
  *  two carrier repos never collide with each other. The search READS (search.ts, CarrierRepo), so
  *  neither carrier mints a branch: a books branch missing here means the floor cannot be built, and
  *  the reaper must fail closed on that rather than scan a ref it created itself. */
-function carrierRepo(cfg: GitHubConfig, dataDir: string, workRootName: string, books: string): CarrierRepo {
-  const github = createGitHubClient(cfg);
+function carrierRepo(cfg: GitHubPlatformConfig, dataDir: string, workRootName: string, books: string): CarrierRepo {
+  const github = createGitHubPlatform(cfg);
   const repo = new GitPlatformRepo({
     platformRepoURL: `https://github.com/${cfg.owner}/${cfg.repo}.git`,
     booksBranch: books,

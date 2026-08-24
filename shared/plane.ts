@@ -9,7 +9,7 @@ import { z } from "zod";
  * ClusterPlane **v0** — the Run-written identity of a slave's management plane, stored in
  * clusters.plane_json (mode "json"). TWO deploy-slave steps write it: `create-mgmt` folds in the
  * harvested kube access, `register` writes the whole plane over it. The per-cluster kube client
- * resolver (server/domains/onboarding/cluster-kube.ts) is the only code that reads the column, and
+ * resolver (server/domains/units/cluster-kube.ts) is the only code that reads the column, and
  * it dials three fields: `kube`, `argo.namespace` and `credentialIds.clusterBearer`. The remaining
  * fields are the run's written account of the plane it provisioned — no screen renders them, and
  * they are read by a person going to the row. Everything here is a stable fact of the slave, and
@@ -27,7 +27,7 @@ import { z } from "zod";
  *                        the API server URL + the base64 CA bundle the slave emitted at adopt.
  *                        Stored here so the resolver builds the client from the plane alone —
  *                        NO cross-namespace read of the master's cluster-slave Secret.
- *  - `credentialIds`   — Controller credential-store ids for the harvested slave creds.
+ *  - `credentialIds`   — Manager credential-store ids for the harvested slave creds.
  *  - `hostnames.kube`  — kube-<name>.<master-fqdn> once Headlamp is enabled (optional).
  */
 
@@ -76,8 +76,8 @@ export type ClusterPlaneV0 = z.infer<typeof ClusterPlaneV0>;
 /** What reading clusters.plane_json produced. A UNION rather than `ClusterPlaneV0 | null`, because
  *  the four outcomes are four different facts about a cluster and a reader that folds them cannot
  *  say which one it met: no document at all is the master's own cluster row (nothing writes a plane
- *  for the cluster the controller sits on) or a slave before deploy-slave; a document this build
- *  does not know is a newer controller's write; and a document that fails the body schema is a
+ *  for the cluster the manager sits on) or a slave before deploy-slave; a document this build
+ *  does not know is a newer manager's write; and a document that fails the body schema is a
  *  half-written row — `create-mgmt` stashes `{kube}` on this column BEFORE `register` writes the
  *  whole document, so an unversioned partial is a normal state of a slave mid-deploy. */
 export type ClusterPlaneRead =

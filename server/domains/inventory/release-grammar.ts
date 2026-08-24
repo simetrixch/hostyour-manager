@@ -1,6 +1,6 @@
 // The release-tag grammar has ONE statement in this process — RELEASE_TAG_RE in shared/release.ts,
 // which cluster-marking.ts puts in the schema of a cluster map's `release:` field, so it decides what
-// this Controller accepts as a pin. Outside the process there is a MIRROR of it: `global.releaseTagFilter`
+// this Manager accepts as a pin. Outside the process there is a MIRROR of it: `global.releaseTagFilter`
 // in the platform repo's platform/values-common.yaml. The image-builder Trigger fires on
 // `^refs/tags/deploy/<stage>/<filter>$` and the consumer-build release pipeline re-verifies the tag
 // against `^<filter>$`, so that literal decides what the build plane accepts.
@@ -8,7 +8,7 @@
 // Nothing derives one from the other — they are two literals in two repositories — and a byte between
 // them fails nothing at the moment it is written. It produces a tag one side accepts and the other
 // rejects: a release that builds and cannot be pinned, or a pin nothing ever built. This module is
-// what makes the two comparable, in the one place both are present: a running Controller with the
+// what makes the two comparable, in the one place both are present: a running Manager with the
 // platform repo configured (server/boot/selfchecks.ts).
 //
 // It takes the SAME route to the platform repo the channel ceiling takes (channel-stages.ts) — the
@@ -52,7 +52,7 @@ export function assertMirrorsReleaseGrammar(filter: string): void {
   const anchored = `^${filter}$`;
   if (anchored === RELEASE_TAG_RE.source) return;
   throw errValidation(
-    `the release grammar has drifted — the Controller accepts ${RELEASE_TAG_RE.source} (shared/release.ts RELEASE_TAG_RE), ` +
+    `the release grammar has drifted — the Manager accepts ${RELEASE_TAG_RE.source} (shared/release.ts RELEASE_TAG_RE), ` +
     `the build plane accepts ${anchored} (${CHANNEL_STAGES_PATH} global.releaseTagFilter, anchored), ` +
     "so there are release tags one side mints and the other refuses",
   );

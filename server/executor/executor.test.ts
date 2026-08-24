@@ -11,7 +11,7 @@ import { CredentialStore } from "../security/store.ts";
 import { registerSecret } from "../security/redact.ts";
 import { RunEventBus } from "./bus.ts";
 import { Executor } from "./executor.ts";
-import { buildRegistry } from "../domains/runs/registry.ts";
+import { buildRunDefinitions } from "../domains/runs/run-definitions.ts";
 import { getRun, readEvents } from "./read.ts";
 import type { SshFactory } from "../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "./types.ts";
@@ -23,7 +23,7 @@ const logger = createLogger(
     OIDC_ISSUER: "https://i.example/",
     OIDC_CLIENT_ID: "c",
     OIDC_CLIENT_SECRET: "s",
-    CONTROLLER_VERSION: "test",
+    MANAGER_VERSION: "test",
     DATA_DIR: "/data",
     LOG_LEVEL: "silent",
   } as NodeJS.ProcessEnv),
@@ -40,8 +40,8 @@ describe("Executor — noop happy path + resume", () => {
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
     const bus = new RunEventBus();
-    const registry = buildRegistry({ db: db.db });
-    const executor = new Executor({ db: db.db, creds: store, bus, logger, registry, sshFactory: noSsh, actor: () => "op_system" });
+    const runDefinitions = buildRunDefinitions({ db: db.db });
+    const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
     return { db, executor, bus };
   }
   afterEach(() => {
@@ -94,7 +94,7 @@ describe("Executor — noop happy path + resume", () => {
 
     // A NEW executor (fresh process, empty RunSecrets) resumes.
     const store2 = new CredentialStore({ db: db.db, logger });
-    const executor2 = new Executor({ db: db.db, creds: store2, bus: new RunEventBus(), logger, registry: buildRegistry({ db: db.db }), sshFactory: noSsh, actor: () => "op_system" });
+    const executor2 = new Executor({ db: db.db, creds: store2, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh, actor: () => "op_system" });
     await executor2.resumeOnBoot();
 
     const run = getRun(db.db, runId);
@@ -122,7 +122,7 @@ describe("Executor — noop happy path + resume", () => {
       paramsSchema: z.record(z.string(), z.unknown()),
       mutating: false,
       plan: async () => ({
-        kind: "noop", targetKind: "self", targetId: "controller", summary: "fails on purpose",
+        kind: "noop", targetKind: "self", targetId: "manager", summary: "fails on purpose",
         steps: [{ name: "boom", title: "Blow up" }], warnings: [], requiredSecrets: [],
       }),
       steps: () => [{
@@ -139,8 +139,8 @@ describe("Executor — noop happy path + resume", () => {
     const db = openDb(join(dir, "controller.db"));
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
-    const registry = new Map<RunKind, AnyRunDefinition>([["noop", failingDef]]);
-    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, registry, sshFactory: noSsh, actor: () => "op_system" });
+    const runDefinitions = new Map<RunKind, AnyRunDefinition>([["noop", failingDef]]);
+    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
 
     const { runId } = await executor.plan("noop", {});
     await executor.approve(runId);
@@ -165,11 +165,11 @@ function events(db: DbHandle): string[] {
 
 describe("Executor — a run whose failure the database cannot take", () => {
   // What a run does when the thing supervising it has gone away. In a test that is a closed database
-  // handle; in the controller it is a shutdown that closed it, a full disk, or a file the OS took back.
+  // handle; in the manager it is a shutdown that closed it, a full disk, or a file the OS took back.
   // Either way execute() lands in its catch-all, failRun cannot write, and the executor's job is to say
   // so where it still can and stop. It must NOT reject: nothing holds execute()'s promise — approve()
   // fires the run and the route answers 202 — so a rejection reaches the process, and Node's answer to
-  // an unhandled rejection is to terminate the controller and every other run in flight with it.
+  // an unhandled rejection is to terminate the manager and every other run in flight with it.
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   afterEach(() => {
@@ -184,7 +184,7 @@ describe("Executor — a run whose failure the database cannot take", () => {
       paramsSchema: z.record(z.string(), z.unknown()),
       mutating: false,
       plan: async () => ({
-        kind: "noop", targetKind: "self", targetId: "controller", summary: "blocks, then fails",
+        kind: "noop", targetKind: "self", targetId: "manager", summary: "blocks, then fails",
         steps: [{ name: "block", title: "Block" }], warnings: [], requiredSecrets: [],
       }),
       steps: () => [{
@@ -208,7 +208,7 @@ describe("Executor — a run whose failure the database cannot take", () => {
     const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });
     const executor = new Executor({
       db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(),
-      logger: capturing, registry: new Map<RunKind, AnyRunDefinition>([["noop", def]]),
+      logger: capturing, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]),
       sshFactory: noSsh, actor: () => "op_system",
     });
     return { db, executor, lines };
@@ -265,8 +265,8 @@ describe("Executor — cancel between steps + concurrent resume", () => {
     const db = openDb(join(dir, "controller.db"));
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
-    const registry = new Map<RunKind, AnyRunDefinition>([["noop", def]]);
-    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, registry, sshFactory: noSsh, actor: () => "op_system" });
+    const runDefinitions = new Map<RunKind, AnyRunDefinition>([["noop", def]]);
+    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
     return { db, executor };
   }
   afterEach(() => {
@@ -288,7 +288,7 @@ describe("Executor — cancel between steps + concurrent resume", () => {
       paramsSchema: z.record(z.string(), z.unknown()),
       mutating: false,
       plan: async () => ({
-        kind: "noop", targetKind: "self", targetId: "controller", summary: "cancel mid-step",
+        kind: "noop", targetKind: "self", targetId: "manager", summary: "cancel mid-step",
         steps: [{ name: "slow", title: "Slow" }, { name: "mutate-2", title: "Mutate 2" }, { name: "mutate-3", title: "Mutate 3" }],
         warnings: [], requiredSecrets: [],
       }),
@@ -326,7 +326,7 @@ describe("Executor — cancel between steps + concurrent resume", () => {
       paramsSchema: z.record(z.string(), z.unknown()),
       mutating: false,
       plan: async () => ({
-        kind: "noop", targetKind: "self", targetId: "controller", summary: "concurrent resume",
+        kind: "noop", targetKind: "self", targetId: "manager", summary: "concurrent resume",
         steps: [{ name: "block", title: "Block" }], warnings: [], requiredSecrets: [],
       }),
       steps: () => [{
@@ -345,7 +345,7 @@ describe("Executor — cancel between steps + concurrent resume", () => {
     // The crash picture resumeOnBoot finds: both approved, steps pending (as planned leaves them).
     db.sqlite.prepare("UPDATE runs SET status='approved'").run();
 
-    const { executor: executor2 } = { executor: new Executor({ db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger, registry: new Map<RunKind, AnyRunDefinition>([["noop", def]]), sshFactory: noSsh, actor: () => "op_system" }) };
+    const { executor: executor2 } = { executor: new Executor({ db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]), sshFactory: noSsh, actor: () => "op_system" }) };
     const resumeP = executor2.resumeOnBoot();
     // Both runs entered their step before resumeOnBoot's first await — the serial loop entered
     // only run A here and held run B back until A finished.
@@ -362,7 +362,7 @@ describe("Executor — cancel between steps + concurrent resume", () => {
 });
 
 describe("Executor — a resume the database cannot take", () => {
-  // resumeOnBoot runs before the controller serves anything, and boot.ts cannot hold its promise:
+  // resumeOnBoot runs before the manager serves anything, and boot.ts cannot hold its promise:
   // it resolves only once every resumed run has SETTLED, so awaiting it would keep the listener
   // down for the length of the longest onboarding. A throw out of its three bare database
   // statements therefore reaches the process as an unhandled rejection, Node ends the process, the
@@ -389,7 +389,7 @@ describe("Executor — a resume the database cannot take", () => {
       paramsSchema: z.record(z.string(), z.unknown()),
       mutating: false,
       plan: async () => ({
-        kind: "noop", targetKind: "self", targetId: "controller", summary: "one step, interrupted by a crash",
+        kind: "noop", targetKind: "self", targetId: "manager", summary: "one step, interrupted by a crash",
         steps: [{ name: "work", title: "Work" }], warnings: [], requiredSecrets: [],
       }),
       steps: () => [{ name: "work", title: "Work", run: async (ctx) => void ran.push(ctx.runId) }],
@@ -405,8 +405,8 @@ describe("Executor — a resume the database cannot take", () => {
     handles.push(db);
     const lines: string[] = [];
     const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });
-    const registry = new Map<RunKind, AnyRunDefinition>([["noop", def]]);
-    const common = { db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), registry, sshFactory: noSsh, actor: () => "op_system" };
+    const runDefinitions = new Map<RunKind, AnyRunDefinition>([["noop", def]]);
+    const common = { db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), runDefinitions, sshFactory: noSsh, actor: () => "op_system" };
     return { db, before: new Executor({ ...common, logger }), booting: new Executor({ ...common, logger: capturing }), lines };
   }
 
@@ -484,7 +484,7 @@ describe("Executor — a resume the database cannot take", () => {
 
     expect(getRun(db.db, runId)?.status).toBe("failed");
     const row = db.sqlite.prepare("SELECT error FROM runs WHERE id=?").get(runId) as { error: string };
-    expect(row.error).toContain("validation was interrupted by a controller restart");
+    expect(row.error).toContain("validation was interrupted by a manager restart");
     expect(lines).toHaveLength(0);
   });
 });

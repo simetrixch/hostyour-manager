@@ -4,7 +4,7 @@ import { errValidation } from "../../../kernel/errors.ts";
 import { attestMachineId } from "../../../executor/attest.ts";
 import { remoteScript } from "../../../executor/stepkit.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
-import { hasControllerKey, type RunKind } from "../../../../shared/enums.ts";
+import { hasManagerKey, type RunKind } from "../../../../shared/enums.ts";
 import { authorizedKeysHold, operatorKeyLine, operatorKeyMarker } from "../../../../shared/operator-keys.ts";
 import { loadOperatorKey } from "../../inventory/operator-keys.ts";
 import { recordAuthorizedKeysReading, type AuthorizedKeysReadingResult } from "../operator-keys-probe.ts";
@@ -14,7 +14,7 @@ import { loadServer } from "./deploy-slave.kit.ts";
 // a host, the steps they are composed of, and the one plan builder they state their target in.
 //
 // WHAT AN ACT IS ALLOWED TO TOUCH. One line of one file: the line in ~/.ssh/authorized_keys whose
-// comment is `hostyour-operator:<label>`. Everything else in that file — this controller's own
+// comment is `hostyour-operator:<label>`. Everything else in that file — this manager's own
 // key, another operator's key, a line the cloud image put there — is passed through byte for byte.
 //
 // FOUR RULES EVERY SCRIPT BELOW KEEPS.
@@ -24,7 +24,7 @@ import { loadServer } from "./deploy-slave.kit.ts";
 //   2. A READ FAILURE IS NEVER AN EMPTY RESULT. grep exits 1 when it selected nothing, which for an
 //      inverted match is a legitimate empty file; it exits 2 or more when it could not read at all,
 //      and installing the empty output of THAT would delete every key on the machine, this
-//      controller's included. The two are told apart before anything is written.
+//      manager's included. The two are told apart before anything is written.
 //   3. THE ARITHMETIC IS CHECKED BEFORE THE WRITE, and it is there for the one hazard the host lock
 //      does not cover: a HUMAN on the box. The copy is built from the file as it stood, and the
 //      counts are then read from the file again — so a key somebody appended in between (an
@@ -35,8 +35,8 @@ import { loadServer } from "./deploy-slave.kit.ts";
 //      sitting on the host under a comment this platform did not write is not removed by a removal
 //      that deletes by marker — and only a re-read says so.
 //
-// The controller's own key is proven untouched twice over: by rule 1 above, and by the step, which
-// reads the file on both sides of the act and fails if a line it classified as this controller's
+// The manager's own key is proven untouched twice over: by rule 1 above, and by the step, which
+// reads the file on both sides of the act and fails if a line it classified as this manager's
 // own has gone.
 
 /** The pattern an act filters by: whitespace, the marker, and the end of the line. Anchored because
@@ -143,11 +143,11 @@ function attestTargetStep(serverId: string): Step {
   };
 }
 
-/** How many of the lines a reading found are this controller's own. Undefined when there is no
+/** How many of the lines a reading found are this manager's own. Undefined when there is no
  *  readable reading at all, which is a different thing from none. */
-function controllerKeyCount(result: AuthorizedKeysReadingResult | null): number | undefined {
+function managerKeyCount(result: AuthorizedKeysReadingResult | null): number | undefined {
   if (result === null || result.read.kind !== "v0") return undefined;
-  return result.read.facts.keys.filter((k) => k.kind === "controller").length;
+  return result.read.facts.keys.filter((k) => k.kind === "manager").length;
 }
 
 /**
@@ -178,14 +178,14 @@ function actStep(kind: OperatorKeyKind, target: OperatorKeyTarget): Step {
       const r = await remoteScript(ctx, session, place ? "operator-key-place" : "operator-key-remove", script, { timeoutMs: 60_000 });
       const after = await recordAuthorizedKeysReading(ctx, session, target.serverId);
 
-      // The one failure this whole run kind is shaped around: an edit that took this controller's own
+      // The one failure this whole run kind is shaped around: an edit that took this manager's own
       // login identity out of the file would leave nobody able to reach the machine, and it is
       // checked before the script's own exit code because it is the more serious answer.
-      const had = controllerKeyCount(before);
-      const has = controllerKeyCount(after);
+      const had = managerKeyCount(before);
+      const has = managerKeyCount(after);
       if (had !== undefined && had > 0 && has === 0) {
         throw errValidation(
-          `refusing to report success: this controller's own key is no longer in the file it was in before this step — the run log holds both readings`,
+          `refusing to report success: this manager's own key is no longer in the file it was in before this step — the run log holds both readings`,
         );
       }
       if (r.code !== 0) throw errValidation(`the key could not be ${place ? "placed" : "removed"} (exit ${r.code}) — see the run log`);
@@ -246,7 +246,7 @@ const SUMMARY: Record<OperatorKeyKind, (o: { label: string; fp: string; name: st
   "operator-key-place": (o) =>
     `Put the operator key "${o.label}" (${o.fp}) in ~/.ssh/authorized_keys on "${o.name}" (${o.host}): ${o.steps} steps. ` +
     `The run reads the file, appends ONE line carrying that operator's own marker, and reads the file back to prove the key ` +
-    `is there and that this controller's own key still is. Every other line is passed through untouched.`,
+    `is there and that this manager's own key still is. Every other line is passed through untouched.`,
   "operator-key-remove": (o) =>
     `Take the operator key "${o.label}" (${o.fp}) out of ~/.ssh/authorized_keys on "${o.name}" (${o.host}): ${o.steps} steps, ` +
     `deleting only lines carrying that operator's marker. A host that never carried it is left alone and the run still succeeds; ` +
@@ -255,21 +255,21 @@ const SUMMARY: Record<OperatorKeyKind, (o: { label: string; fp: string; name: st
 
 const WARNINGS: Record<OperatorKeyKind, string[]> = {
   "operator-key-place": [
-    "Afterwards this person can log in to the host as the same user this controller uses, with the passwordless sudo the adoption configured.",
+    "Afterwards this person can log in to the host as the same user this manager uses, with the passwordless sudo the adoption configured.",
   ],
   "operator-key-remove": [
     "Only the line this platform wrote for that label goes. A copy of the same key placed by hand, under another comment, stays — and the run fails saying so rather than reporting a removal that did not happen.",
   ],
 };
 
-function assertReachable(server: { name: string; status: Parameters<typeof hasControllerKey>[0] }): void {
-  if (!hasControllerKey(server.status)) {
+function assertReachable(server: { name: string; status: Parameters<typeof hasManagerKey>[0] }): void {
+  if (!hasManagerKey(server.status)) {
     // The refusal states the RULE, not a claim about the machine: an adoption that failed part way
     // leaves its row back at 'bare' while the key it installed is still on the host, so a message
-    // saying "this controller holds no key for it" would be false exactly there.
+    // saying "this manager holds no key for it" would be false exactly there.
     throw errValidation(
       `refusing: "${server.name}" is '${server.status}' — only a server whose adoption finished is reached over this ` +
-      `controller's own key. An adoption that stopped part way is retried or aborted from its own run screen.`,
+      `manager's own key. An adoption that stopped part way is retried or aborted from its own run screen.`,
     );
   }
 }
@@ -322,7 +322,7 @@ export function authorizedKeysReadPlan(serverId: string, db: Db): Plan {
     targetId: serverId,
     summary:
       `Read ~/.ssh/authorized_keys on "${server.name}" (${dialled.host}:${server.sshPort}): ${steps.length} steps, changing ` +
-      `nothing. Every key line is fingerprinted and named as this controller's own, an operator key placed under a label, or ` +
+      `nothing. Every key line is fingerprinted and named as this manager's own, an operator key placed under a label, or ` +
       `placed by nothing here — which is the only way a key nobody put there on purpose becomes visible.`,
     steps: steps.map((s) => ({ name: s.name, title: s.title })),
     targets: [{ serverId, ownsHost: true, label: server.name }],

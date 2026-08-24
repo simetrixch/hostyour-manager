@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { assertGuardsArmed } from "../../executor/guards.ts";
-import { buildRegistry } from "./registry.ts";
+import { buildRunDefinitions } from "./run-definitions.ts";
 import { getRun } from "../../executor/read.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { AppError } from "../../kernel/errors.ts";
@@ -37,7 +37,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   /** One step out of the def's own list, for driving it directly. */
   function stepOf(h: Harness, name: string): Step {
-    const def = buildRegistry({ db: h.db.db, platformRepo: h.platformRepo }).get("deploy-slave") as AnyRunDefinition;
+    const def = buildRunDefinitions({ db: h.db.db, platformRepo: h.platformRepo }).get("deploy-slave") as AnyRunDefinition;
     const step = def.steps({ ...PARAMS, tier: "rehearsal" }).find((s) => s.name === name);
     if (!step) throw new Error(`no step ${name}`);
     return step;
@@ -81,8 +81,8 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   it("keeps steps({}) pure, program-step-shaped, starts with attest-target; guards.armed passes", async () => {
     const { db } = await makeHarness();
-    const registry = buildRegistry({ db: db.db });
-    const def = registry.get("deploy-slave") as AnyRunDefinition;
+    const runDefinitions = buildRunDefinitions({ db: db.db });
+    const def = runDefinitions.get("deploy-slave") as AnyRunDefinition;
     expect(def.mutating).toBe(true);
     const a = def.steps({});
     const b = def.steps({});
@@ -90,12 +90,12 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(a[0]?.name).toBe("attest-target");
     expect(a.map((s) => s.name)).toEqual(b.map((s) => s.name)); // pure in params
     // The boot self-check (guards.armed → assertGuardsArmed) covers deploy-slave.
-    expect(() => assertGuardsArmed(registry)).not.toThrow();
+    expect(() => assertGuardsArmed(runDefinitions)).not.toThrow();
   });
 
   it("resolves every cleanup name the steps can register (abortWithCleanup's lookup path)", async () => {
     const { db } = await makeHarness();
-    const def = buildRegistry({ db: db.db }).get("deploy-slave") as AnyRunDefinition;
+    const def = buildRunDefinitions({ db: db.db }).get("deploy-slave") as AnyRunDefinition;
     const names = (def.cleanups?.({ ...PARAMS, tier: "rehearsal" }) ?? []).map((c) => c.name);
     expect(names.sort()).toEqual(["microk8s-reset-slave", "remove-slave", "remove-slave-marking"]);
   });
@@ -235,13 +235,15 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     // The slave part (what makes the slaves-appset dial it), the identity, and the inheritance —
     // every installation-wide value is the MASTER's, never asked a second time.
     for (const want of [
-      "fqdn: s1.example.com", "stage: prod", "role: slave", "master: m1.example.com",
-      // books-cluster is the slaves ApplicationSet's SELECTOR key — a map without it is
-      // invisible to the generator.
-      "books-cluster: m1.example.com",
-      "apiHost: 100.64.0.11", "apiPort: 16443", "build-plane: m1.example.com",
-      "unit-apex: example.com", "platform-domain: example.com",
-      "alert-recipients: ops@example.com", "catalog-repo: acme/acme-catalog",
+      // The identity is `global.domain`; the file is named for the cluster, so no `fqdn` key.
+      "stage: prod", "role: slave", "  domain: s1.example.com", "  master: m1.example.com",
+      // booksCluster is the slaves ApplicationSet's SELECTOR key, and a selector matches FLAT
+      // top-level keys only — so it stands at the top, where a map without it is invisible to
+      // the generator.
+      "booksCluster: m1.example.com",
+      "  apiHost: 100.64.0.11", "  apiPort: 16443", "  buildPlane: m1.example.com",
+      "  unitApex: example.com", "  platformDomain: example.com",
+      "  alertRecipients: ops@example.com", "  catalogUrl: https://github.com/acme/acme-catalog.git",
     ]) expect(map).toContain(want);
     // The short name is DERIVED from the fqdn — never stored.
     expect(map).not.toContain("name:");
@@ -258,8 +260,9 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   it("mark-slave keeps what another writer recorded: a standing release pin survives the rewrite", async () => {
     const h = await makeHarness({
       marking: [
-        "fqdn: s1.example.com", "stage: prod", "role: slave", "build-plane: m1.example.com",
-        "release: 1.0.0-stable-20260801120000", "master: m1.example.com", "apiHost: 100.64.0.11", "apiPort: 16443",
+        "stage: prod", "role: slave", "release: 1.0.0-stable-20260801120000",
+        "", "global:", "  domain: s1.example.com", "  buildPlane: m1.example.com",
+        "  master: m1.example.com", "  apiHost: 100.64.0.11", "  apiPort: 16443",
       ].join("\n") + "\n",
     });
     h.db.db.insert(clusters).values({
@@ -268,7 +271,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     await stepOf(h, "mark-slave").run(hostedStepCtx(h));
     const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath(PARAMS.domain)) ?? "";
     expect(map).toContain("release: 1.0.0-stable-20260801120000"); // set-pin's field, not this step's
-    expect(map).toContain("unit-apex: example.com");               // the inheritance still landed
+    expect(map).toContain("  unitApex: example.com");             // the inheritance still landed
   });
 
   it("mark-slave in REDEPLOY mode arms NO cleanup — dropping the map part of a live slave cascades its teardown", async () => {
@@ -473,10 +476,10 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   });
 
   it("the master's map is what mark-slave inherits from — MASTER_MARKING_YAML carries every field the composition reads", () => {
-    // A fixture drift guard: the composition reads build-plane, unit-apex, platform-domain,
-    // alert-recipients and catalog-repo off the master's map; a fixture that lost one would turn
+    // A fixture drift guard: the composition reads buildPlane, unitApex, platformDomain,
+    // alertRecipients and catalogUrl off the master's map; a fixture that lost one would turn
     // the inheritance tests above green for the wrong reason.
-    for (const key of ["build-plane", "unit-apex", "platform-domain", "alert-recipients", "catalog-repo"]) {
+    for (const key of ["buildPlane", "unitApex", "platformDomain", "alertRecipients", "catalogUrl"]) {
       expect(MASTER_MARKING_YAML).toContain(`${key}: `);
     }
   });

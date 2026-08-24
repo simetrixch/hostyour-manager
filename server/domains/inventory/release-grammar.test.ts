@@ -5,7 +5,7 @@ import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "./channel-stages.ts"
 import { readReleaseTagFilter, assertMirrorsReleaseGrammar } from "./release-grammar.ts";
 
 // The build plane's copy of the grammar lives in another repository, so nothing here can compare the
-// two REAL literals — that comparison is the release.grammar_mirror boot self-check, on a Controller
+// two REAL literals — that comparison is the release.grammar_mirror boot self-check, on a Manager
 // that has both sides in front of it. What these tests hold down is the mechanism that check stands
 // on: the reader takes the copy off the trunk out of the platform values file, the comparison anchors
 // it before comparing, and one character of difference is red.
@@ -14,7 +14,7 @@ import { readReleaseTagFilter, assertMirrorsReleaseGrammar } from "./release-gra
  *  — a second literal in this file would be a third place for the grammar to drift. */
 const MIRROR = RELEASE_TAG_RE.source.replace(/^\^/, "").replace(/\$$/, "");
 /** The same grammar with one segment changed: fourteen digits of timestamp become twelve. The build
- *  plane would then fire on tags this Controller refuses as a pin, and refuse tags it accepts. */
+ *  plane would then fire on tags this Manager refuses as a pin, and refuse tags it accepts. */
 const DRIFTED = MIRROR.replace("{14}", "{12}");
 
 const valuesWith = (filter: string): string =>

@@ -76,7 +76,7 @@ export function tailnetChip(server: ServerView, now: number): TailnetChip {
     return {
       label: "tailnet: reading unreadable",
       className: "chip chip--warn",
-      detail: `The stored reading is version ${read.v}; this controller reads version 0 only, so ${RE_READ}.`,
+      detail: `The stored reading is version ${read.v}; this manager reads version 0 only, so ${RE_READ}.`,
       runId: null,
     };
   }
@@ -95,7 +95,7 @@ export function tailnetChip(server: ServerView, now: number): TailnetChip {
   const taken = `Read ${age}; ${RE_READ}.`;
   const runId = facts.runId;
   // The coordinator is named, never judged: a host on somebody else's network holds an address out
-  // of the same range and reports Running exactly like ours, and the controller is told no
+  // of the same range and reports Running exactly like ours, and the manager is told no
   // coordinator URL of its own to compare against. Naming it is what lets an operator see the
   // difference at all.
   const via = facts.coordinator ? ` via ${facts.coordinator}` : "";

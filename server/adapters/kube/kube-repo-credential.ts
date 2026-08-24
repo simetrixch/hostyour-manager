@@ -1,14 +1,14 @@
-// The concrete RepoCredentialWriter — the per-unit ArgoCD repository Secret the Controller writes
+// The concrete RepoCredentialWriter — the per-unit ArgoCD repository Secret the Manager writes
 // imperatively at onboarding and deletes at offboard/purge. A sibling of kube-rbac.ts rather than
 // part of kube.ts: same adapter, same clients, its own file so neither grows past what one reader can
 // hold. Master-local — every ArgoCD instance's namespace (the master's "argocd", a slave's per-slave
 // namespace) lives on the cluster this pod runs on. Like the other IO shells it NEEDS a live cluster
-// and is integration-tested there; the render is pure (domains/onboarding/repo-credential.ts).
+// and is integration-tested there; the render is pure (domains/units/repo-credential.ts).
 import { CoreV1Api } from "@kubernetes/client-node";
 import type { RepoCredentialWriter, RepoCredentialManifest } from "./port.ts";
-import { CONTROLLER_PROJECT_LABELS } from "./port.ts";
+import { MANAGER_PROJECT_LABELS } from "./port.ts";
 import { buildKubeConfig, isNotFound, upstream, type MasterKubeInput } from "./kube.ts";
-import { isControllerOwned } from "./kube-map.ts";
+import { isManagerOwned } from "./kube-map.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
 export class KubeRepoCredentialWriter implements RepoCredentialWriter {
@@ -29,7 +29,7 @@ export class KubeRepoCredentialWriter implements RepoCredentialWriter {
       }
       return { created: true };
     }
-    assertControllerOwned(namespace, name, existing);
+    assertManagerOwned(namespace, name, existing);
     try {
       const resourceVersion = (existing as { metadata?: { resourceVersion?: string } }).metadata?.resourceVersion;
       await this.core.replaceNamespacedSecret({
@@ -46,7 +46,7 @@ export class KubeRepoCredentialWriter implements RepoCredentialWriter {
   async deleteRepoCredential(namespace: string, name: string): Promise<{ deleted: boolean }> {
     const existing = await this.read(namespace, name);
     if (existing === null) return { deleted: false };
-    assertControllerOwned(namespace, name, existing);
+    assertManagerOwned(namespace, name, existing);
     try {
       await this.core.deleteNamespacedSecret({ name, namespace });
     } catch (e) {
@@ -72,12 +72,12 @@ export class KubeRepoCredentialWriter implements RepoCredentialWriter {
   }
 }
 
-/** Refuse to touch a Secret the Controller did not create. The name is per-unit, so a collision means
+/** Refuse to touch a Secret the Manager did not create. The name is per-unit, so a collision means
  *  something else claimed it — replacing it would silently swap somebody's credential. */
-function assertControllerOwned(namespace: string, name: string, existing: unknown): void {
-  if (!isControllerOwned(existing)) {
+function assertManagerOwned(namespace: string, name: string, existing: unknown): void {
+  if (!isManagerOwned(existing)) {
     throw errValidation(
-      `refusing to touch Secret "${name}" in ${namespace} — it is not Controller-managed (missing a Controller ownership label: ${CONTROLLER_PROJECT_LABELS.map((l) => `${l.key}=${l.value}`).join(" or ")})`,
+      `refusing to touch Secret "${name}" in ${namespace} — it is not Manager-managed (missing a Manager ownership label: ${MANAGER_PROJECT_LABELS.map((l) => `${l.key}=${l.value}`).join(" or ")})`,
     );
   }
 }

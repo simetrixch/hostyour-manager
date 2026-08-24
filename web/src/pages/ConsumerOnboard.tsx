@@ -8,7 +8,7 @@ import { RELEASE_VERSION_RE } from "../../../shared/release.ts";
  *  stripped) — the SAME regex the server enforces (shared/release.ts), never a second hand-kept copy. */
 const VERSION_PATTERN = RELEASE_VERSION_RE.source.replace(/^\^/, "").replace(/\$$/, "");
 
-/** Onboard wizard: point the Controller at an external GitHub repo, name the release the run
+/** Onboard wizard: point the Manager at an external GitHub repo, name the release the run
  *  will TRIGGER (version + channel — the repo's release script mints the tag), and pick where it
  *  lands: a target cluster for a unit that deploys itself, or a bare stage for a build-only unit.
  *  The heavy lifting (the gates, the registration, the kit injection, the triggered release
@@ -111,7 +111,7 @@ export function ConsumerOnboard() {
       </header>
 
       <p className="callout">
-        Point the Controller at an external GitHub repository and name the release to cut. The run checks the repo
+        Point the Manager at an external GitHub repository and name the release to cut. The run checks the repo
         against the gates, writes the registration, injects the release kit and the webhook, and then triggers
         the release cycle ONCE through the injected workflow — the first deployment comes out of that cycle. You see
         every gate result and approve on the next screen before anything is written.
@@ -224,7 +224,7 @@ export function ConsumerOnboard() {
           <span className="field__label">Repository PAT</span>
           <input type="password" value={repoPat} onChange={(e) => setRepoPat(e.target.value)} placeholder="github_pat_…" autoComplete="off" required />
           <span className="field__hint">
-            The one GitHub PAT for this consumer (repo + workflow + admin:repo_hook). The Controller seals it, clones
+            The one GitHub PAT for this consumer (repo + workflow + admin:repo_hook). The Manager seals it, clones
             and pushes with it, and seeds it for the unit&apos;s build — it never appears in logs or the sandbox.
           </span>
         </label>

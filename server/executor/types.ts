@@ -135,7 +135,7 @@ export type PlanStreamResult<P = Record<string, unknown>> =
 export interface RunDefinition<P = Record<string, unknown>> {
   kind: RunKind;
   paramsSchema: z.ZodType<P>;
-  /** mutating ⇒ steps()[0].name === "attest-target" (asserted at registry boot). */
+  /** mutating ⇒ steps()[0].name === "attest-target" (asserted where the run definitions are assembled at boot). */
   mutating: boolean;
   plan(params: P, deps: PlannerDeps): Promise<Plan>;
   /** Optional streaming planner (onboard). When present, the executor's planStreamed() path drives

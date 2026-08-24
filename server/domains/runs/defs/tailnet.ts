@@ -8,7 +8,7 @@ import { tailnetPlan, tailnetSteps, type TailnetPorts } from "./tailnet.kit.ts";
 // machine's own catalogue (digita-deploy ansiwise/programs/), driven over the machine's
 // `ansiwise-rest serve` surface; the shared steps and the plan live in tailnet.kit.ts, and what stands
 // here is the one thing that must be written out per run kind, its own `kind` literal (the source
-// census in registry-census.test.ts reads exactly that field).
+// census in run-definitions-census.test.ts reads exactly that field).
 //
 // THREE ACTS, and the line between the last two is the whole reason there are three:
 //

@@ -22,7 +22,7 @@ export const servers = sqliteTable("servers", {
   lanHost: text("lan_host"),                                       // 10.1.1.x — the address it answers on inside the cluster network
   // A THIRD address, and NOT a third SSH transport: the address the MASTER's IN-CLUSTER components
   // dial this machine's kube-apiserver on once it is a slave — its per-slave ArgoCD instance, Vault
-  // on every ESO login, the shared dashboard's kubeconfig, and the Controller's own per-slave kube
+  // on every ESO login, the shared dashboard's kubeconfig, and the Manager's own per-slave kube
   // client, which writes. deploy-slave puts it in the cluster map's apiHost field and passes the
   // same value to the slave's --emit-mgmt-credentials, so the git side and the slave-composed side
   // carry one address instead of two that can disagree. Falls back to lan_host and then host, which
@@ -69,9 +69,9 @@ export const servers = sqliteTable("servers", {
   // the same shape: the state the card keys on, plus the document listing every key line the
   // reading found. Every writer goes through recordAuthorizedKeysReading
   // (domains/runs/operator-keys-probe.ts), which reads ~/.ssh/authorized_keys on the host and
-  // classifies each line against two things this controller knows — the marker adopt wrote and the
+  // classifies each line against two things this manager knows — the marker adopt wrote and the
   // fingerprint of the ssh_key credential sealed for this server. Four moments write it: adopt's
-  // `baseline`, which reads a machine straight after the controller's own key landed on it, and the
+  // `baseline`, which reads a machine straight after the manager's own key landed on it, and the
   // three operator-key run kinds. The default is "unknown", the honest reading of a row nothing has
   // looked at, and the only literal no step writes.
   authorizedKeysState: text("authorized_keys_state", { enum: SERVER_AUTHORIZED_KEYS_STATE }).notNull().default("unknown"),
@@ -120,19 +120,19 @@ export const apps = sqliteTable("apps", {
   id: text("id").primaryKey(),                                     // "app_" + ulid
   clusterId: text("cluster_id").notNull().references(() => clusters.id, { onDelete: "restrict" }),
   name: text("name").notNull(),
-  // NO revision column. The Controller records no pin of its own: the registration states no revision,
-  // and what a unit runs is read off its Application's spec (server/domains/onboarding/live-recon.ts
+  // NO revision column. The Manager records no pin of its own: the registration states no revision,
+  // and what a unit runs is read off its Application's spec (server/domains/units/live-recon.ts
   // driftOf). A column here would have no writer with anything true to write, and calling one the pin is
   // what made the Consumers card cry "Drift" at two converged consumers.
   // Which stage this consumer runs at on `clusterId` — copied from the cluster's own row so a reader
   // of the inventory needs no join, and part of the upsert key. A cluster carries exactly ONE stage
-  // and a registration for stage X may only name a cluster marked X (domains/onboarding/registry.ts
+  // and a registration for stage X may only name a cluster marked X (domains/units/registrations.ts
   // assertClusterStage), so a unit deployed at two stages stands on two clusters and (clusterId, name)
   // already separates its rows; carrying the stage in the key states that identity outright instead of
   // leaving it implied by the cluster row.
   //
   // NOT NULL, because the one INSERT of this table cannot produce a null and a null would break it:
-  // every row is written by upsertAppRow (domains/onboarding/onboard-steps.ts), whose AppRowValues
+  // every row is written by upsertAppRow (domains/units/onboard-steps.ts), whose AppRowValues
   // carries the stage, and the remaining writers only flip status or clusterId. SQLite treats NULLs as
   // DISTINCT in a unique index, so a null-stage row would sit outside apps_cluster_name_stage_uq
   // entirely, while upsertAppRow looks the existing row up with `stage = ?` — which never matches a
@@ -225,7 +225,7 @@ export const tenantApps = sqliteTable("tenant_apps", {
 //
 // It is data and not a values file for a reason branch-classes.yaml states: a books path — what one
 // installation knows about itself — is never tracked on the trunk, so a table that both ships with the
-// product and gets overwritten in service could not be one file. The Controller holds it, resolves it
+// product and gets overwritten in service could not be one file. The Manager holds it, resolves it
 // into each unit's registration when it writes one, and ArgoCD delivers the resolved figures. Nothing
 // on a cluster reads this table; a cluster reads registrations.
 //

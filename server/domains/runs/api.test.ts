@@ -10,7 +10,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
-import { buildRegistry } from "./registry.ts";
+import { buildRunDefinitions } from "./run-definitions.ts";
 import { registerRunRoutes } from "./api.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { runActor } from "../../kernel/actor.ts";
@@ -22,7 +22,7 @@ const config = parseConfig({
   OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c",
   OIDC_CLIENT_SECRET: "s",
-  CONTROLLER_VERSION: "test",
+  MANAGER_VERSION: "test",
   DATA_DIR: "/d",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv);
@@ -44,7 +44,7 @@ describe("runs API + SSE", () => {
     db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_test', 'test', 'Test')").run();
     const store = new CredentialStore({ db: db.db, logger });
     const bus = new RunEventBus();
-    const executor = new Executor({ db: db.db, creds: store, bus, logger, registry: buildRegistry({ db: db.db }), sshFactory: noSsh, actor: runActor });
+    const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh, actor: runActor });
     const session = new SessionCodec(db.db, config);
     const app = createApp({
       config,

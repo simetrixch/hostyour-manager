@@ -1,4 +1,4 @@
-// The Tekton gate-runner (redesigned) — the Controller's concrete GateRunner. It
+// The Tekton gate-runner (redesigned) — the Manager's concrete GateRunner. It
 // dispatches an in-cluster `gate-run` Tekton PipelineRun in the locked-down, egress-fenced `gate-runner`
 // namespace and reads the frozen GateReport back from the ConfigMap the run's publish step writes. This
 // REPLACES the host-podman-Quadlet HTTP runner: no host, no loopback, no manual bring-up — the fence is
@@ -43,7 +43,7 @@ export interface GateRunCluster {
   deletePipelineRun(name: string): Promise<void>;
   deleteConfigMap(name: string): Promise<void>;
   deleteSecret(name: string): Promise<void>;
-  /** The names of every Controller-dispatched PipelineRun standing in the namespace (the impl
+  /** The names of every Manager-dispatched PipelineRun standing in the namespace (the impl
    *  filters by the managed-by label pipelineRunBody stamps). Orphan-sweep input. */
   listPipelineRunNames(): Promise<string[]>;
   /** Every Secret name in the namespace — the sweep keeps only the gate-cred-* it owns. */
@@ -54,7 +54,7 @@ export interface GateRunCluster {
 
 export interface TektonGateRunnerConfig {
   /** OPTIONAL kubeconfig-file override (dev/test). Absent ⇒ the pod ServiceAccount's in-cluster
-   *  credentials (the production mode) — the gate-run ns lives on the master with the Controller. */
+   *  credentials (the production mode) — the gate-run ns lives on the master with the Manager. */
   kubeconfigPath?: string;
   namespace: string; // "gate-runner"
   pipelineName: string; // "gate-run"
@@ -63,7 +63,7 @@ export interface TektonGateRunnerConfig {
    *  API token (gate-report-writer, apps/gate-runner rbac.yaml). Bound per-task via the PipelineRun's
    *  taskRunSpecs; a Pipeline cannot pin a per-task SA. Without this override publish-report inherits
    *  the token-less pipeline-sa, so its kubectl finds no in-cluster credential and falls back to
-   *  http://localhost:8080 — the report ConfigMap is never written and the Controller sees
+   *  http://localhost:8080 — the report ConfigMap is never written and the Manager sees
    *  "no report ConfigMap". */
   reportWriterServiceAccount: string; // "gate-report-writer"
   /** fsGroup stamped on every gate-run pod. The clone step (alpine/git) writes the shared workspace
@@ -76,7 +76,7 @@ export interface TektonGateRunnerConfig {
   kubeVersion: string; // e.g. "1.30.0" — the kubeconform target
   jobBudgetMs: number;
   /** The egress-fence self-probe targets the CLI proves from inside (fail-closed). */
-  fence: { mustFailTargets: string[]; controllerAddr: string; mustPassTarget: string };
+  fence: { mustFailTargets: string[]; managerAddr: string; mustPassTarget: string };
   /** Opens a sealed private-repo read credential (git-over-HTTPS token) by id. */
   openCredential: (id: string) => Promise<Buffer>;
 }
@@ -250,7 +250,7 @@ export class TektonGateRunner implements GateRunner {
     await this.reap(jobId);
   }
 
-  /** Orphan sweep, run once at boot (wire-onboarding). A controller restart loses every in-flight
+  /** Orphan sweep, run once at boot (wire-units). A manager restart loses every in-flight
    *  validation's jobId — it lives only in the validating call's scope, and resumeOnBoot fails the
    *  interrupted `planning` runs — so any gate object still standing in the namespace belongs to no
    *  live validation. Every jobId any surviving object names gets its whole triple reaped: above
@@ -320,7 +320,7 @@ export class TektonGateRunner implements GateRunner {
           p("run-id", runId),
           p("repo-credential-secret", credSecretName(runId)),
           p("must-fail-targets", this.cfg.fence.mustFailTargets.join(",")),
-          p("controller-addr", this.cfg.fence.controllerAddr),
+          p("manager-addr", this.cfg.fence.managerAddr),
           p("must-pass-target", this.cfg.fence.mustPassTarget),
           p("confirmed-listening", req.mustFailTargetsConfirmedListening ? "true" : "false"),
           p("runner-version", this.cfg.runnerVersion),
@@ -332,7 +332,7 @@ export class TektonGateRunner implements GateRunner {
   }
 }
 
-/** A short, DB-safe, collision-resistant run suffix. crypto.randomUUID is available in the Controller
+/** A short, DB-safe, collision-resistant run suffix. crypto.randomUUID is available in the Manager
  *  runtime (unlike the workflow sandbox), so a trimmed uuid is fine. */
 function randomSuffix(): string {
   return globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 12);

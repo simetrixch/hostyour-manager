@@ -40,7 +40,7 @@ export function PurgeTenantDialog(props: { target: PurgeTenantTarget; onConfirm:
       <p>
         This force-removes the tenant&apos;s <strong>whole footprint by guid</strong> — its GitOps pointer, every ArgoCD Application of
         its fan-out, the <span className="mono">{target.guid}</span> isolation AppProject, and finally the namespace, whether or not
-        the Controller has an inventory row for it.
+        the Manager has an inventory row for it.
       </p>
       <p>
         Deleting its <strong>Tenant CR</strong> is what deprovisions the tenant: the tenant operator then deletes its Vault path{" "}

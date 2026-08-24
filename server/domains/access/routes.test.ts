@@ -40,7 +40,7 @@ describe("OIDC login flow + chokepoint end-to-end", () => {
       OIDC_ISSUER: mock.issuer,
       OIDC_CLIENT_ID: mock.clientId,
       OIDC_CLIENT_SECRET: mock.clientSecret,
-      CONTROLLER_VERSION: "test",
+      MANAGER_VERSION: "test",
       DATA_DIR: dir,
       LOG_LEVEL: "silent",
     } as NodeJS.ProcessEnv);
@@ -120,7 +120,7 @@ describe("OIDC login flow + chokepoint end-to-end", () => {
       OIDC_ISSUER: "https://i.example/",
       OIDC_CLIENT_ID: "c",
       OIDC_CLIENT_SECRET: "s",
-      CONTROLLER_VERSION: "test",
+      MANAGER_VERSION: "test",
       DATA_DIR: "/d",
       LOG_LEVEL: "silent",
     } as NodeJS.ProcessEnv);

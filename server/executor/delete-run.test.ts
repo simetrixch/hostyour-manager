@@ -20,7 +20,7 @@ const logger = createLogger(
     OIDC_ISSUER: "https://i.example/",
     OIDC_CLIENT_ID: "c",
     OIDC_CLIENT_SECRET: "s",
-    CONTROLLER_VERSION: "test",
+    MANAGER_VERSION: "test",
     DATA_DIR: "/data",
     LOG_LEVEL: "silent",
   } as NodeJS.ProcessEnv),
@@ -50,7 +50,7 @@ const testDef: RunDefinition = {
   plan: async () => ({
     kind: "noop",
     targetKind: "self",
-    targetId: "controller",
+    targetId: "manager",
     summary: "delete-run test",
     steps: testSteps.map((s) => ({ name: s.name, title: s.title })),
     warnings: [],
@@ -71,8 +71,8 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     const db = openDb(join(dir, "controller.db"));
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
-    const registry: Map<RunKind, AnyRunDefinition> = new Map([["noop", testDef]]);
-    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, registry, sshFactory: noSsh, actor: () => "op_system" });
+    const runDefinitions: Map<RunKind, AnyRunDefinition> = new Map([["noop", testDef]]);
+    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
     return { db, executor };
   }
   afterEach(() => {

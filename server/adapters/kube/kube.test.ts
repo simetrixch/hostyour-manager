@@ -73,7 +73,7 @@ describe("buildKubeConfig (input-variant dispatch)", () => {
     expect(kc.getCurrentUser()?.token).toBe("bearer-tok");
     // The kubeconfig user NAME is asserted precisely because nothing else can
     // catch it drifting: the API server authenticates the token and never sees this name, so a name
-    // that understates the credential — it read "controller-readonly" — fails no request and simply
+    // that understates the credential — it read "manager-readonly" — fails no request and simply
     // misleads the next reader into believing a slave refuses cluster-scoped writes. Pinning it here
     // makes the honest name load-bearing.
     expect(kc.getCurrentUser()?.name).toBe("cluster-admin-bearer");

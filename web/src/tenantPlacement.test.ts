@@ -32,7 +32,7 @@ describe("tenantPlacement", () => {
   });
 
   // The registration path must be the shape the tenant registry actually writes and guards
-  // (server/domains/onboarding/tenant-registry.ts `registrationPath` + TENANT_REGISTRATION_GUARD:
+  // (server/domains/units/tenant-registrations.ts `registrationPath` + TENANT_REGISTRATION_GUARD:
   // registrations/<guid>/<stage>.yaml). A read-out the operator cannot check against catalog is
   // worse than none, because it reads as a fact.
   it("names the registration file in the shape the tenant registry writes", () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getRun } from "../../executor/read.ts";
-import type { AnsiwiseClient } from "../../adapters/ansiwise/client.ts";
+import type { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import type { ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { requireProgramsStep } from "./defs/ansiwise-run.kit.ts";
@@ -28,7 +28,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
   describe("the release, over the machine's own deployment programs", () => {
     const releaseParams = { serverId: MASTER_ID, version: "1.0.0", channel: "stable" as const };
 
-    it("INNOCENT CASE (release): programs → pin → refresh → regenerate-branch → deploy-cluster → deploy-gitops, every program proven dry then run on the machine's own records", { timeout: 120_000 }, async () => {
+    it("INNOCENT CASE (release): programs → pin → refresh → regenerate-branch → deploy-cluster → deploy-platform-services, every program proven dry then run on the machine's own records", { timeout: 120_000 }, async () => {
       const h = await liveMaster(serve());
       const email = uniqueEmail();
       const before = await observer().runs();
@@ -36,7 +36,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       const r = await h.executor.plan("release", releaseParams);
       expect(r.plan.steps.map((s) => s.name)).toEqual([
         "attest-target", "require-programs", "set-pin", "refresh-checkout",
-        "run-regenerate-branch", "run-deploy-cluster", "run-deploy-gitops", "argocd-follow",
+        "run-regenerate-branch", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow",
       ]);
       await h.executor.approve(r.runId, releaseSecrets(email));
       await h.executor.settle(r.runId);
@@ -51,7 +51,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath("m1.example.com"))).toContain(`release: ${tag}`);
 
       // The machine's OWN records: dry + run per program, every one green, all three programs.
-      expectProven(freshRuns(before, await observer().runs()), ["regenerate-branch", "deploy-cluster", "deploy-gitops"]);
+      expectProven(freshRuns(before, await observer().runs()), ["regenerate-branch", "deploy-cluster", "deploy-platform-services"]);
 
       // The machine's checkout was refreshed BEFORE the programs read it (the pin commit and the tag
       // reach the machine through that step or not at all), the conversations went over the machine's
@@ -73,7 +73,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       expect(r.plan.steps.map((s) => s.name)).toEqual([
         "attest-target", "require-programs", "set-pin", "prepare-regeneration",
         "run-regenerate-slave-branch", "refresh-checkout",
-        "run-deploy-cluster", "run-deploy-gitops", "argocd-follow",
+        "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow",
       ]);
       await h.executor.approve(r.runId, deploySecrets(email));
       await h.executor.settle(r.runId);
@@ -86,7 +86,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       expect(tag).toMatch(/^1\.0\.0-stable-\d{14}$/);
       expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath(PARAMS.domain))).toContain(`release: ${tag}`);
 
-      expectProven(freshRuns(before, await observer().runs()), ["regenerate-slave-branch", "deploy-cluster", "deploy-gitops"]);
+      expectProven(freshRuns(before, await observer().runs()), ["regenerate-slave-branch", "deploy-cluster", "deploy-platform-services"]);
 
       // WHICH HOST DID WHAT, which is the ticket's own claim. The master stood its two checkouts and
       // held two conversations (the shared require-programs ask, then the regeneration); the slave
@@ -118,7 +118,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       // acts by design, and a retry of the run adopts exactly that tag instead of minting a second.
       const fresh = freshRuns(before, await observer().runs());
       expect(fresh.filter((x) => x.program === "regenerate-branch" && x.mode === "run")).toHaveLength(0);
-      expect(fresh.filter((x) => x.program === "deploy-cluster" || x.program === "deploy-gitops")).toHaveLength(0);
+      expect(fresh.filter((x) => x.program === "deploy-cluster" || x.program === "deploy-platform-services")).toHaveLength(0);
       expect(h.platformRepo.tags.size).toBe(1);
     });
 

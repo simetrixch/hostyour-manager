@@ -9,13 +9,13 @@ import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerBranchRoutes, classifyBranch } from "./api.ts";
-import { GitHubError, type GitHubClient, type BranchRef, type BranchComparison } from "../../adapters/github/github.ts";
+import { GitHubPlatformError, type GitHubPlatform, type BranchRef, type BranchComparison } from "../../adapters/github-platform/github-platform-http.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { BranchesView, BranchDiffView } from "../../../shared/api-types.ts";
 
 const baseEnv = {
   PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/",
-  OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", CONTROLLER_VERSION: "test",
+  OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test",
   DATA_DIR: "/d", LOG_LEVEL: "silent",
 };
 const withGitHub = parseConfig({
@@ -27,7 +27,7 @@ const logger = createLogger(withGitHub);
 
 function fakeGitHub(branches: BranchRef[], compareFn: (head: string) => BranchComparison) {
   const calls: string[] = [];
-  const client: GitHubClient = {
+  const client: GitHubPlatform = {
     listBranches: async () => branches,
     compare: async (_base: string, head: string) => { calls.push(head); return compareFn(head); },
     deleteBranch: async () => undefined,
@@ -44,7 +44,7 @@ describe("classifyBranch (derive-dont-type)", () => {
   const M = "m1.example.com";
   it("classifies against the master FQDN", () => {
     expect(classifyBranch("master", M)).toBe("master");
-    expect(classifyBranch("m1.example.com", M)).toBe("controller");
+    expect(classifyBranch("m1.example.com", M)).toBe("manager");
     expect(classifyBranch("s1.example.com", M)).toBe("slave");
     expect(classifyBranch("feature-x", M)).toBe("other");
     expect(classifyBranch("deep.sub.example.com", M)).toBe("other"); // two extra labels ⇒ not a slave
@@ -54,7 +54,7 @@ describe("classifyBranch (derive-dont-type)", () => {
 describe("branches API", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
-  async function make(config: Config, github?: GitHubClient): Promise<{ app: Hono<AppEnv>; cookie: string }> {
+  async function make(config: Config, github?: GitHubPlatform): Promise<{ app: Hono<AppEnv>; cookie: string }> {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-branch-"));
     dirs.push(dir);
     const db = openDb(join(dir, "controller.db"));
@@ -132,11 +132,11 @@ describe("branches API", () => {
 
   it("surfaces GitHub failures: 404 → NOT_FOUND, other → UPSTREAM 502 with the message", async () => {
     const branches: BranchRef[] = [{ name: "master", sha: "m1" }, { name: "s1.example.com", sha: "f1" }];
-    const notFound = fakeGitHub(branches, () => { throw new GitHubError("no", 404); });
+    const notFound = fakeGitHub(branches, () => { throw new GitHubPlatformError("no", 404); });
     const nf = await make(withGitHub, notFound.client);
     expect((await nf.app.request("/api/branches/s1.example.com/diff", authed(nf.cookie))).status).toBe(404);
 
-    const rate = fakeGitHub(branches, () => { throw new GitHubError("API rate limit exceeded", 403); });
+    const rate = fakeGitHub(branches, () => { throw new GitHubPlatformError("API rate limit exceeded", 403); });
     const rl = await make(withGitHub, rate.client);
     const res = await rl.app.request("/api/branches/s1.example.com/diff", authed(rl.cookie));
     expect(res.status).toBe(502);

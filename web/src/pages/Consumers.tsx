@@ -49,7 +49,7 @@ function ConsumerLive({ appId }: { appId: string }) {
       </div>
     );
   if (live.reason === "onboarding-not-configured")
-    return <div className="recon recon--muted">Live checks unavailable — onboarding is not configured on this controller.</div>;
+    return <div className="recon recon--muted">Live checks unavailable — onboarding is not configured on this manager.</div>;
 
   return (
     <>
@@ -68,7 +68,7 @@ function ConsumerLive({ appId }: { appId: string }) {
 }
 
 /** The onboarded consumer apps as a two-tab section. LEFT ("Reconciliation") is the
- *  combined view: each SQL row (what the Controller BELIEVES) beside the live cluster + ArgoCD facts
+ *  combined view: each SQL row (what the Manager BELIEVES) beside the live cluster + ArgoCD facts
  *  (what actually RUNS), drift highlighted. RIGHT ("Runs") is this section's runs — the ONE shared
  *  runs component filtered to consumer kinds. Every lifecycle action plans a Run and hands off to the
  *  Run screen; a settled row is kept even after offboard. */
@@ -174,7 +174,7 @@ export function Consumers() {
       <header className="page__head">
         <div>
           <h2 className="page__title">Consumers</h2>
-          <p className="page__desc">External apps this controller has onboarded onto the clusters.</p>
+          <p className="page__desc">External apps this manager has onboarded onto the clusters.</p>
         </div>
         <div className="page__actions">
           {/* Scan every active cluster's install branch for consumers whose GitOps pointer stands with

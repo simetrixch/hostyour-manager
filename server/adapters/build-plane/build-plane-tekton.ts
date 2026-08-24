@@ -1,4 +1,4 @@
-// The Tekton BuildPlane — the Controller's concrete BuildPlane, the structural sibling of the
+// The Tekton BuildPlane — the Manager's concrete BuildPlane, the structural sibling of the
 // Tekton gate-runner (gate-runner-tekton.ts): a narrow cluster seam (BuildPlaneCluster — a fake in
 // tests, KubeBuildPlaneCluster in production) under a small adapter that owns the watch policy.
 // Read-only against tekton.dev over the pod SA: it lists and reads PipelineRuns in a unit's own
@@ -56,7 +56,7 @@ export class KubeBuildPlaneCluster implements BuildPlaneCluster {
     const kc = new KubeConfig();
     // EXPLICIT dispatch (mirrors kube.ts buildKubeConfig, never loadFromDefault): a set path is the
     // dev/test file override; absent ⇒ the pod ServiceAccount's in-cluster credentials — the
-    // production mode (the build cluster IS the Controller's own cluster).
+    // production mode (the build cluster IS the Manager's own cluster).
     if (kubeconfigPath !== undefined) kc.loadFromFile(kubeconfigPath);
     else kc.loadFromCluster();
     this.custom = kc.makeApiClient(CustomObjectsApi);
@@ -94,7 +94,7 @@ export class KubeBuildPlaneCluster implements BuildPlaneCluster {
 
 export interface TektonBuildPlaneConfig {
   /** OPTIONAL kubeconfig-file override (dev/test). Absent ⇒ the pod ServiceAccount's in-cluster
-   *  credentials (the production mode) — the build plane is the Controller's own cluster. */
+   *  credentials (the production mode) — the build plane is the Manager's own cluster. */
   kubeconfigPath?: string;
   /** Succeeded-condition poll tick; overridable for tests. */
   pollMs?: number;
@@ -114,7 +114,7 @@ export class TektonBuildPlane implements BuildPlane {
     // The run lives in the UNIT's own build namespace and was created by the EventListener when the
     // release script pushed the deploy ref — this is a pure watch, nothing is created. The match:
     // the ownership label, the release-tag param's `<version>-<channel>-` prefix (the ts14 half of
-    // the tag is minted repo-side and the controller never computes it), and — when the trigger time
+    // the tag is minted repo-side and the manager never computes it), and — when the trigger time
     // is known — a creation at/after it, so an OLD run of the same release is never adopted.
     const ns = `${query.unit}-build`;
     const selector = `image-builder.io/consumer=${query.unit}`;

@@ -66,7 +66,7 @@ describe("assembleReport", () => {
   });
 
   it("authors the hash over the shared canonical payload — the verifier's recomputation matches", () => {
-    // The receipt check in the Controller's gate-runner adapter recomputes exactly this digest; a
+    // The receipt check in the Manager's gate-runner adapter recomputes exactly this digest; a
     // report whose authored hash did not verify against its own body would be refused there.
     const r = assembleReport(input());
     const { reportHash, ...body } = r;

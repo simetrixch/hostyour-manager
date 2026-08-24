@@ -79,13 +79,13 @@ function start(): Promise<void> {
 beforeEach(start);
 afterEach(() => new Promise<void>((r) => server.close(() => r())));
 
-/** Every write rides the Controller's OWN kubernetes-auth identity, so every test needs a real
+/** Every write rides the Manager's OWN kubernetes-auth identity, so every test needs a real
  *  ServiceAccount token file on disk — a scaffold torn down per test. */
 function withSelf<T>(fn: (seeder: VaultSelfSeeder) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "ctrl-seeder-sa-"));
   const saTokenPath = join(dir, "token");
   writeFileSync(saTokenPath, "sa-jwt\n", "utf8");
-  const seeder = new VaultSelfSeeder({ self: { addr: base, k8sAuthMount: "kubernetes", k8sRole: "controller", saTokenPath } });
+  const seeder = new VaultSelfSeeder({ self: { addr: base, k8sAuthMount: "kubernetes", k8sRole: "manager", saTokenPath } });
   return fn(seeder).finally(() => rmSync(dir, { recursive: true, force: true }));
 }
 
@@ -97,7 +97,7 @@ const input = (over: Partial<VaultSeedInput> = {}): VaultSeedInput => ({
 });
 
 describe("VaultSelfSeeder seed (the consumer's ceremony secrets)", () => {
-  it("logs in over the controller's own kubernetes-auth identity, puts the app entry write-only, and revokes the token", async () => {
+  it("logs in over the manager's own kubernetes-auth identity, puts the app entry write-only, and revokes the token", async () => {
     await withSelf(async (seeder) => {
       expect(await seeder.seed(input())).toEqual({ created: true });
       expect(recorded.map((r) => `${r.method} ${r.url}`)).toEqual([
@@ -105,7 +105,7 @@ describe("VaultSelfSeeder seed (the consumer's ceremony secrets)", () => {
         "POST /v1/secret/data/prod/consumer/acme/app",
         "POST /v1/auth/token/revoke-self",
       ]);
-      expect(recorded[0]!.body).toEqual({ role: "controller", jwt: "sa-jwt" });
+      expect(recorded[0]!.body).toEqual({ role: "manager", jwt: "sa-jwt" });
       expect(recorded[1]!.token).toBe("s.tok123");
       // `options.cas: 0` is LOAD-BEARING, not decoration — it is the whole create-only guarantee.
       // Drop it and the write silently becomes an overwrite: the caller re-mints every `generate:`
@@ -154,7 +154,7 @@ describe("VaultSelfSeeder seed (the consumer's ceremony secrets)", () => {
     });
   });
 
-  it("fails the seed closed when the Controller carries no own Vault login", async () => {
+  it("fails the seed closed when the Manager carries no own Vault login", async () => {
     const seeder = new VaultSelfSeeder({});
     await expect(seeder.seed(input())).rejects.toBeInstanceOf(VaultError);
     expect(recorded).toHaveLength(0); // no HTTP happened — refused before any call
@@ -179,7 +179,7 @@ describe("VaultSelfSeeder build repo-pat (stage-free)", () => {
         "POST /v1/secret/data/build/acme/repo-pat",
         "POST /v1/auth/token/revoke-self",
       ]);
-      expect(recorded[0]!.body).toEqual({ role: "controller", jwt: "sa-jwt" });
+      expect(recorded[0]!.body).toEqual({ role: "manager", jwt: "sa-jwt" });
       expect(recorded[1]!.body).toEqual({ data: { pat: "github_pat_x" }, options: { cas: 0 } });
     });
   });
@@ -206,7 +206,7 @@ describe("VaultSelfSeeder build repo-pat (stage-free)", () => {
     });
   });
 
-  it("fails closed when the controller self identity is missing (dev/tests without Vault)", async () => {
+  it("fails closed when the manager self identity is missing (dev/tests without Vault)", async () => {
     const seeder = new VaultSelfSeeder({});
     await expect(seeder.seedBuildRepoPat(patInput())).rejects.toBeInstanceOf(VaultError);
     expect(recorded).toHaveLength(0); // no HTTP happened — refused before any call
@@ -313,7 +313,7 @@ describe("VaultSelfSeeder deleteApp (consumer tier)", () => {
     });
   });
 
-  it("fails closed when the Controller carries no own Vault login", async () => {
+  it("fails closed when the Manager carries no own Vault login", async () => {
     const seeder = new VaultSelfSeeder({});
     await expect(seeder.deleteApp(appDeleteInput())).rejects.toBeInstanceOf(VaultError);
     expect(recorded).toHaveLength(0); // no HTTP happened — refused before any call

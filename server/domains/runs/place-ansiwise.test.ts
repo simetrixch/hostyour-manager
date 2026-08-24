@@ -204,7 +204,7 @@ describe("the download address", () => {
     const { parseConfig } = await import("../../kernel/config.ts");
     const base = {
       PUBLIC_URL: "https://c.example.invalid", OIDC_ISSUER: "https://i.example.invalid/",
-      OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", CONTROLLER_VERSION: "0.0.0",
+      OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", MANAGER_VERSION: "0.0.0",
     } as unknown as NodeJS.ProcessEnv;
     expect(() => parseConfig({ ...base, ANSIWISE_DOWNLOAD_URL: "https://e.invalid/ansiwise-<version>" }))
       .toThrow(/must carry <name>/);

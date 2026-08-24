@@ -4,8 +4,8 @@
 //
 // ONE Vault and ONE identity, so no input here names either. The platform runs a single Vault, on
 // the master: a slave's secrets live on it too, under the master's per-slave KV mount. Every write
-// below therefore goes to the address the Controller itself authenticates against
-// (adapters/vault/vault-self-seeder.ts VaultSelfAuth, from config.vault) over the Controller's own
+// below therefore goes to the address the Manager itself authenticates against
+// (adapters/vault/vault-self-seeder.ts VaultSelfAuth, from config.vault) over the Manager's own
 // kubernetes-auth login — the same surface its credential store uses. An input carrying a Vault
 // address or a login credential id would read as a routing choice, and there is none to make;
 // worse, an address nothing dials is a fact an operator approving a run would read as the place the
@@ -166,14 +166,14 @@ export interface VaultSeedOutcome {
  *  and every member verifies against, the TOTP encryption key, the invite-gated bootstrap token, and
  *  the engine key its jobs presents and its engine checks.
  *
- *  WHY THE CONTROLLER AND NOT A ServiceClaim. Every other backing resource a tenant needs is claimed by
+ *  WHY THE MANAGER AND NOT A ServiceClaim. Every other backing resource a tenant needs is claimed by
  *  the member chart that needs it and provisioned per NAMESPACE — which is exactly what makes a claim
  *  safe (the provisioner names its resources `<namespace>_<claim>`, so no claim can reach another
  *  unit's). These five are per-TENANT and shared: example-auth signs, and the engine and report of every
  *  app verify, out of the SAME entry, reached from four different namespaces through an ACL templated
  *  on the tenant annotation. A per-namespace claim would mint a different keypair per member and the
  *  IdP would sign with a key its own engine cannot verify. A per-tenant value needs a per-tenant
- *  writer, and the Controller already mints these exact kinds for a consumer (secret-mint.ts). */
+ *  writer, and the Manager already mints these exact kinds for a consumer (secret-mint.ts). */
 export interface TenantCryptoSeedInput {
   stage: Stage;
   /** The bare guid — the leaf name, and the value the members' ACL template resolves to. */

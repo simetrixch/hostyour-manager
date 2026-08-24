@@ -18,7 +18,7 @@ const logger = createLogger(
   parseConfig({
     PUBLIC_URL: "https://x.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c",
     OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", LOG_LEVEL: "silent",
-    CONTROLLER_VERSION: "test",
+    MANAGER_VERSION: "test",
   } as NodeJS.ProcessEnv),
 );
 

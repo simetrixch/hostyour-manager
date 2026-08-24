@@ -18,7 +18,7 @@ describe("enums (single source of truth)", () => {
     // Three acts, not one with a switch: a disconnect leaves the private network, a reconnect
     // re-establishes with the credential the host still holds, and a rejoin is for a host that
     // holds none — only the coordinator can mint one, so that run kind needs the master too. A family
-    // is registered whole or not at all (selfchecks registry.total), so all three belong to one.
+    // is registered whole or not at all (selfchecks run-definitions.total), so all three belong to one.
     for (const kind of ["tailnet-disconnect", "tailnet-reconnect", "tailnet-rejoin"] as const) {
       expect(RUN_KIND).toContain(kind);
       expect(RUN_FAMILY.cluster as readonly string[]).toContain(kind);
@@ -41,7 +41,7 @@ describe("enums (single source of truth)", () => {
   });
 
   it("LOCK_RESOURCE carries the two global locks", () => {
-    expect(LOCK_RESOURCE).toContain("controller");
+    expect(LOCK_RESOURCE).toContain("manager");
     expect(LOCK_RESOURCE).toContain("all");
   });
 

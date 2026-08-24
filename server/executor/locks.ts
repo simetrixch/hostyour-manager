@@ -14,7 +14,7 @@ export function deriveServerLocks(targets: RunTargetRef[]): LockClaim[] {
 }
 
 export function isGlobalClaim(c: LockClaim): boolean {
-  return (c.resource === "controller" && c.key === "self") || (c.resource === "all" && c.key === "*");
+  return (c.resource === "manager" && c.key === "self") || (c.resource === "all" && c.key === "*");
 }
 
 export function dedupeClaims(claims: LockClaim[]): LockClaim[] {
@@ -31,7 +31,7 @@ export function dedupeClaims(claims: LockClaim[]): LockClaim[] {
 }
 
 /**
- * Acquire every claim atomically. Global claims (controller:self / all:*) require the
+ * Acquire every claim atomically. Global claims (manager:self / all:*) require the
  * table empty; any conflict throws RESOURCE_BUSY and inserts nothing (all-or-nothing).
  *
  * The claims go in as the caller states them, with no rewriting on the way: there is ONE Vault for the

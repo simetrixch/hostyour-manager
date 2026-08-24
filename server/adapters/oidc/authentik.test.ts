@@ -20,7 +20,7 @@ describe("OIDC adapter against a real in-process mock IdP", () => {
       OIDC_ISSUER: mock.issuer,
       OIDC_CLIENT_ID: mock.clientId,
       OIDC_CLIENT_SECRET: mock.clientSecret,
-      CONTROLLER_VERSION: "test",
+      MANAGER_VERSION: "test",
       DATA_DIR: "/d",
       LOG_LEVEL: "silent",
     } as NodeJS.ProcessEnv);
@@ -88,7 +88,7 @@ describe("OIDC adapter against a real in-process mock IdP", () => {
       OIDC_ISSUER: "http://127.0.0.1:1/", // nothing listening
       OIDC_CLIENT_ID: "c",
       OIDC_CLIENT_SECRET: "s",
-      CONTROLLER_VERSION: "test",
+      MANAGER_VERSION: "test",
       DATA_DIR: "/d",
       LOG_LEVEL: "silent",
     } as NodeJS.ProcessEnv);

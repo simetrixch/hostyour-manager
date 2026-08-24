@@ -4,7 +4,7 @@
 // live clusters). The Raw* shapes are structural subsets of the @kubernetes/client-node models
 // (every field optional), so the live code passes V1Deployment & friends straight in.
 import type { ArgoAppStatus, ArgoSyncSource, ArgoTargetSource, WorkloadStatus, DeployState } from "./port.ts";
-import { CONTROLLER_PROJECT_LABELS, RESERVED_PROJECT_NAMES } from "./port.ts";
+import { MANAGER_PROJECT_LABELS, RESERVED_PROJECT_NAMES } from "./port.ts";
 import { ARGO_SYNC, ARGO_HEALTH } from "../../../shared/enums.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
@@ -245,9 +245,9 @@ export function assertWritableProjectName(name: string): void {
   }
 }
 
-/** True when a raw AppProject carries ANY Controller ownership label (consumer OR tenant) — the
+/** True when a raw AppProject carries ANY Manager ownership label (consumer OR tenant) — the
  *  writer manages both formats' isolation projects, so one guard covers both. */
-export function isControllerOwned(raw: unknown): boolean {
+export function isManagerOwned(raw: unknown): boolean {
   const labels = asObject<{ metadata?: { labels?: Record<string, string> } }>(raw).metadata?.labels ?? {};
-  return CONTROLLER_PROJECT_LABELS.some((l) => labels[l.key] === l.value);
+  return MANAGER_PROJECT_LABELS.some((l) => labels[l.key] === l.value);
 }

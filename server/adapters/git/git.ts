@@ -3,7 +3,7 @@
 //
 //  - GitRepoReader clones a consumer repo into a fresh mkdtemp workdir (init + fetch + detached
 //    checkout, so a branch, a tag, and a 40-char SHA all resolve) to resolve + pin the SHA and read
-//    single files — the read credential stays Controller-side.
+//    single files — the read credential stays Manager-side.
 //  - GitPlatformRepo keeps one persistent worktree per branch under deps.workRoot: fetch +
 //    hard-reset to origin/<branch>, then commit + push with a bounded pull-rebase retry (with an
 //    opt-in exponential backoff — deps.pushBackoff — for the contended books branch in
@@ -148,7 +148,7 @@ export interface GitPlatformRepoDeps {
   booksBranch: string;
   /** Does this adapter mint `booksBranch` when origin does not carry it? The answer is a property of
    *  the REPOSITORY, not of the branch, and getting it wrong destroys a cluster — which is why it is
-   *  required with no default and stated at both call sites (boot/wire-onboarding.ts).
+   *  required with no default and stated at both call sites (boot/wire-units.ts).
    *
    *  FALSE for hostyour-cloud: there the books branch IS the master cluster's install branch, which
    *  the deploy-branch program cuts and stamps — every ArgoCD revision retargeted onto it, the FQDN
@@ -240,7 +240,7 @@ export class GitPlatformRepo implements PlatformRepo {
   /**
    * CREATE the books branch on origin, at the trunk's head, by pushing a ref — no commit, no
    * worktree, nothing derived: the branch simply starts where the product stands and everything the
-   * Controller writes onto it afterwards is a normal commit.
+   * Manager writes onto it afterwards is a normal commit.
    *
    * This exists because in catalog NOTHING else creates it, which is exactly what
    * `deps.createsBooksBranch` states — see it for why the same call on hostyour-cloud must raise
@@ -353,7 +353,7 @@ export class GitPlatformRepo implements PlatformRepo {
     // landed (crash-resume, a same-value suspend flip, a redundant rewrite) stages bytes identical
     // to HEAD. A plain `git commit` would exit non-zero ("nothing to commit") and throw; instead detect
     // the empty staged diff and return the current HEAD — the prior attempt's SHA — keeping the { commit }
-    // contract and making every registry rewrite genuinely resume-safe.
+    // contract and making every registrations rewrite genuinely resume-safe.
     const staged = (await this.run(dir, ["diff", "--cached", "--name-only"])).trim();
     if (staged === "") {
       const head = (await this.run(dir, ["rev-parse", "HEAD"])).trim();

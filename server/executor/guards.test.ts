@@ -119,7 +119,7 @@ describe("crypto gate", () => {
     await expect(runGuards("release", { serverId: "srv_x" }, { db })).resolves.toBeUndefined();
   });
 
-  it("assertGuardsArmed rejects a registry once create-tenant's gate is disarmed", () => {
+  it("assertGuardsArmed rejects a runDefinitions once create-tenant's gate is disarmed", () => {
     // Guard against a future edit silently emptying KIND_GUARDS["create-tenant"]: temporarily blank
     // it and confirm the boot self-check now fails on create-tenant (it is in the armed set).
     const original = KIND_GUARDS["create-tenant"];
@@ -137,7 +137,7 @@ describe("crypto gate", () => {
     expect(KIND_GUARDS.noop).toHaveLength(0);
   });
 
-  it("assertGuardsArmed passes an empty registry and rejects a mutating def without attest-target", () => {
+  it("assertGuardsArmed passes an empty runDefinitions and rejects a mutating def without attest-target", () => {
     const empty = new Map<RunKind, AnyRunDefinition>();
     expect(() => assertGuardsArmed(empty)).not.toThrow();
     const bad = new Map<RunKind, AnyRunDefinition>([
@@ -196,8 +196,8 @@ describe("streaming plan path runs the crypto gate (runGuards fix)", () => {
     const store = new CredentialStore({ db: db.db, logger });
     // CredentialStore's constructor upserts keystore.mode=plaintext, so set the desired mode AFTER it.
     db.sqlite.prepare("UPDATE meta SET value=? WHERE key='keystore.mode'").run(mode);
-    const registry = new Map<RunKind, AnyRunDefinition>([["create-tenant", streamingCreateTenantDef()]]);
-    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, registry, sshFactory: noSsh, actor: () => "op_system" });
+    const runDefinitions = new Map<RunKind, AnyRunDefinition>([["create-tenant", streamingCreateTenantDef()]]);
+    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
     return { db, executor };
   }
   afterEach(() => {

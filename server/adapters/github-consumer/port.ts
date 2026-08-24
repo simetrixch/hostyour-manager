@@ -3,7 +3,7 @@
 // build.<build-plane>/github, introspects the PAT's granted scopes (readTokenScopes) for the onboard
 // preflight, and drives the release workflow the kit injected: dispatch it (trigger-release) and
 // follow its run (watch-release-workflow). A PER-CALL adapter:
-// unlike server/adapters/github/github.ts (platform repo, one fixed GITHUB_WRITE_PAT), every method
+// unlike server/adapters/github-platform/github-platform-http.ts (platform repo, one fixed GITHUB_WRITE_PAT), every method
 // here carries the CONSUMER's own PAT + the target owner/repo, because each consumer is a distinct
 // private repo authenticated by its own sealed credential. Kept a PORT so the onboard/
 // offboard/purge steps depend on the abstraction; the fetch impl is github-consumer-http.ts, the
@@ -198,7 +198,7 @@ export class WorkflowNotFoundError extends Error {
 }
 
 /** Any other GitHub consumer API failure (a transport error, or a non-2xx that is not a scope
- *  refusal or the retryable dispatch 404). Mirrors github.ts's GitHubError shape but kept a DISTINCT
+ *  refusal or the retryable dispatch 404). Mirrors github-platform-http.ts's GitHubPlatformError shape but kept a DISTINCT
  *  type (this adapter is decoupled from the platform-repo client). Carries GitHub's own message
  *  verbatim — never a generic mask. */
 export class GitHubConsumerError extends Error {

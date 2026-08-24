@@ -1,7 +1,7 @@
 // cluster-marking.ts — THE resolution of a cluster to what the platform knows about it: its role,
 // its stage, its short name and whether it carries the build plane. All four come from ONE file,
 // `clusters/active/<fqdn>.yaml`. A master's map is written when the cluster is installed (the
-// deployment programs' install path); a SLAVE's map is the Controller's to write — deploy-slave's
+// deployment programs' install path); a SLAVE's map is the Manager's to write — deploy-slave's
 // mark-slave step, through writeClusterMarking below — because a slave's branch deliberately
 // carries no books and the per-slave generator reads the map here. No third writer exists: a copy
 // somewhere else is what let maps drift away from the branches they describe.
@@ -44,8 +44,8 @@
 //   unit-apex    the public apex units (consumers and tenants) serve under, <name>.<unit-apex>.
 //   platform-domain  the installation's business domain — the mail sender identity and the relay's
 //                sender allowlist. The branch programs write it (defaulting to the unit apex).
-//   post-url     where units reach the shared example-post service; absent on an installation
-//                that has none.
+//   endpoints.mail.url  where units reach the installation's shared mail service; absent on an
+//                installation that runs none.
 //   catalog-repo the <owner>/<name> of the repository holding this installation's tenant charts
 //                and their per-stage pins. The branch programs demand it (nothing composes a
 //                repository this cloud does not own).
@@ -173,7 +173,7 @@ export interface ClusterMarking {
   /** Carried, never read here. */
   alertRecipients?: string;
   /** Carried, never read here. */
-  postUrl?: string;
+  mailUrl?: string;
   /** Carried, never read here. */
   catalogRepo?: string;
 }
@@ -221,7 +221,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
     ...(g.alertRecipients !== undefined
       ? { alertRecipients: Array.isArray(g.alertRecipients) ? g.alertRecipients.join(",") : g.alertRecipients }
       : {}),
-    ...(mailUrl !== undefined ? { postUrl: mailUrl } : {}),
+    ...(mailUrl !== undefined ? { mailUrl } : {}),
     ...(catalogRepo ? { catalogRepo } : {}),
   };
 }
@@ -266,7 +266,7 @@ export type ClusterReleases =
   | { ok: true; byFqdn: ReadonlyMap<string, ClusterMarking> }
   | { ok: false; reason: string };
 
-/** Read the maps for that surface. `repo` is absent on a Controller whose platform repo is not
+/** Read the maps for that surface. `repo` is absent on a Manager whose platform repo is not
  *  configured — there is then no books branch to read and no map anywhere, which is a reason and not
  *  an error. Everything else that goes wrong (a branch that will not fetch, a map that fails the
  *  strict schema, two maps deriving one short name) arrives as the message the read threw with. */
@@ -274,7 +274,7 @@ export async function readClusterReleases(repo: PlatformRepo | undefined): Promi
   if (!repo) {
     return {
       ok: false,
-      reason: "there is no platform repo to read — it is built only where GitHub is configured AND a books branch is named (server/boot/wire-onboarding.ts:204), and the cluster maps that state which release a cluster stands on live on that branch",
+      reason: "there is no platform repo to read — it is built only where GitHub is configured AND a books branch is named (server/boot/wire-units.ts:204), and the cluster maps that state which release a cluster stands on live on that branch",
     };
   }
   try {
@@ -331,7 +331,7 @@ export function buildPlaneFqdnFromMarkings(repo: PlatformRepo): BuildPlaneFqdnRe
   return async (cluster: string) => (await resolveClusterMarking(repo, cluster)).buildPlaneFqdn;
 }
 
-/** Mirror a marking onto the inventory rows the Controller reads at run time: the cluster's stage
+/** Mirror a marking onto the inventory rows the Manager reads at run time: the cluster's stage
  *  and its server's role. The map is the writable place; these two columns are the copy, and they
  *  are what every role/stage decision in this process actually queries. Writes an audit entry for
  *  each column it moves and returns what changed, so a divergence between the map and the DB is
@@ -423,9 +423,9 @@ function serializeMarking(m: ClusterMarking): string {
   // Left out, the round-trip below catches it: the file reads back as a marking without the
   // mail address, which is not the marking it was built from.
   const nested =
-    m.postUrl === undefined
+    m.mailUrl === undefined
       ? ""
-      : "  endpoints:" + "\n" + "    mail:" + "\n" + `      url: ${scalar(m.postUrl)}` + "\n";
+      : "  endpoints:" + "\n" + "    mail:" + "\n" + `      url: ${scalar(m.mailUrl)}` + "\n";
   const body =
     fields.map(([k, v]) => `${k}: ${scalar(v)}`).join("\n") +
     "\n\nglobal:\n" +
@@ -493,7 +493,8 @@ export async function setClusterRelease(
 /** Write ONE cluster's whole map onto the books branch — deploy-slave's mark-slave step, the
  *  writer that puts a slave into the slaves ApplicationSet's world. What the caller does not
  *  state is KEPT from the standing file: the header (the file's own explanation), the release pin
- *  (set-pin's field, written by a different run kind) and post-url (install-time), so marking a slave
+ *  (set-pin's field, written by a different run kind) and the mail service's address
+ *  (install-time), so marking a slave
  *  again never deletes what another writer recorded. Commits only when the marking actually
  *  changed, so a redeploy re-running the step converges instead of committing over itself. */
 export async function writeClusterMarking(
@@ -507,7 +508,7 @@ export async function writeClusterMarking(
     ...marking,
     ...(current?.header !== undefined ? { header: current.header } : {}),
     ...(current?.release !== undefined ? { release: current.release } : {}),
-    ...(current?.postUrl !== undefined && marking.postUrl === undefined ? { postUrl: current.postUrl } : {}),
+    ...(current?.mailUrl !== undefined && marking.mailUrl === undefined ? { mailUrl: current.mailUrl } : {}),
   };
   if (current && sameMarking(current, next)) return { changed: false };
   await commitMarking(repo, {

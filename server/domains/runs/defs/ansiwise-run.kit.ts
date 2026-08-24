@@ -2,14 +2,14 @@ import type { Step, StepCtx } from "../../../executor/types.ts";
 import type { SshSession } from "../../../adapters/ssh/port.ts";
 import type { ReleaseDownloads } from "../../../adapters/downloads/port.ts";
 import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
-import { AnsiwiseClient } from "../../../adapters/ansiwise/client.ts";
+import { AnsiwiseClient } from "../../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../../../adapters/ansiwise/port.ts";
 import { isMasterRole, type Stage } from "../../../../shared/enums.ts";
 import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 
 // Driving one ansiwise PROGRAM on a machine, through the machine's own REST surface — the step
 // that replaces `setup.sh --<stage>` on hosts whose machine layer is delivered by the
-// deploy-cluster / deploy-gitops programs (digita-deploy ansiwise/programs/) instead of shell.
+// deploy-cluster / deploy-platform-services programs (digita-deploy ansiwise/programs/) instead of shell.
 //
 // THE SHAPE IS: prove, then act, and never re-implement the proof. `dry` first, asserted green
 // off the machine's own record; then `run`, which the machine's gate only admits against a green
@@ -134,7 +134,7 @@ export async function openServeConversation(
 export type ExtraAnswers = (ctx: StepCtx) => Promise<Record<string, string | string[]>>;
 
 /** What a program step takes beyond the program's name. `elevation_password` is deliberately NOT
- *  an ExtraAnswers concern although deploy-gitops declares an answer of that name: the ENGINE
+ *  an ExtraAnswers concern although deploy-platform-services declares an answer of that name: the ENGINE
  *  fills that one from the password the POST carries beside the answers, and refuses a caller who
  *  sends it as an answer ("it is not an answer anybody sends"). */
 export interface ProgramStepOpts {

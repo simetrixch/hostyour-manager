@@ -12,7 +12,7 @@ export interface DbHandle {
 const MIGRATIONS_DIR = fileURLToPath(new URL("./migrations", import.meta.url));
 
 /**
- * Open the controller DB and run the explicit migration phase:
+ * Open the manager DB and run the explicit migration phase:
  * pragmas → foreign_keys OFF (outside any tx) → migrate() → foreign_keys ON →
  * assert foreign_key_check empty + integrity_check ok. Future rebuild migrations
  * (table copy/drop/recreate) are therefore true by construction.

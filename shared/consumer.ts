@@ -29,7 +29,7 @@ const chartPath = z.string().regex(/^[^/].*$/);
 const publicFqdn = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/);
 
 /** The manifest `tenant:` fan-out block — declared by a build-only fan-out repo
- *  (catalog) so the controller renders/validates the whole tenant package instead of one
+ *  (catalog) so the manager renders/validates the whole tenant package instead of one
  *  chart. Kept INLINE here (never in shared/tenant.ts) because ConsumerManifestSchema references it
  *  and gates.ts already imports consumer.ts: defining it in tenant.ts would close the cycle
  *  consumer -> tenant -> gates -> consumer. The acyclic order stays enums <- consumer <- gates <-
@@ -40,7 +40,7 @@ const publicFqdn = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0
  *  declares under `perApp` (an engine and a front today).
  *
  *  `{app}` is the ONE token this schema defines, and it is substituted with the app's name when the
- *  Controller resolves a PER-APP source — in every valueFiles entry and in every string inside
+ *  Manager resolves a PER-APP source — in every valueFiles entry and in every string inside
  *  `values`. It exists because a per-app chart's file names and resource names are the product's own
  *  convention (`values-<app>.yaml`, a Service named after the app), and the alternative was the
  *  platform composing those names, which is the same defect one layer down. A standing member's
@@ -95,7 +95,7 @@ export const TenantSpecSchema = z.object({
     engine: TenantSourceSchema,
     front: TenantSourceSchema.extend({
       /** A complete replacement source, keyed by app name. Keyed lookup IS the selection: the appset
-       *  never compares an app name against a literal, because the Controller has already resolved
+       *  never compares an app name against a literal, because the Manager has already resolved
        *  which source this app renders. */
       override: z.record(z.string(), TenantSourceSchema).optional(),
     }),
@@ -119,7 +119,7 @@ export const TenantSpecSchema = z.object({
 });
 export type TenantSpec = z.infer<typeof TenantSpecSchema>;
 
-/** One manifest secrets[] declaration (contract v1.3). `generate` marks a key the CONTROLLER
+/** One manifest secrets[] declaration (contract v1.3). `generate` marks a key the MANAGER
  *  mints at seed time (the operator is NEVER asked for it); a required key WITHOUT `generate` is
  *  operator-supplied. The mint kinds:
  *    hex32 / hex16 / uuid  — a single crypto-random value.
@@ -158,7 +158,7 @@ export const ConsumerActivationPromptSchema = z.object({
 });
 
 /** The OPTIONAL `activation:` block a consumer declares in deploy/platform.yaml:
- *  a manifest-declared post-onboard call the Controller makes over the consumer's OWN ingress
+ *  a manifest-declared post-onboard call the Manager makes over the consumer's OWN ingress
  *  once the app is serving — example-auth's first-admin bootstrap is the canonical case
  *  (POST /api/v1/bootstrap/invite-admin, gated by X-Bootstrap-Token, returns an activate_url).
  *
@@ -298,7 +298,7 @@ export type ConsumerManifest = z.infer<typeof ConsumerManifestSchema>;
 
 /** The NAME of the Application the consumers ApplicationSet generates from a pointer: the appset
  *  template stamps `{{ .name }}-<stage>` (hostyour-cloud argocd/<stage>/apps/consumers-appset.yaml),
- *  e.g. "example-auth-prod" — NOT the bare consumer name. Every Controller watch on the generated
+ *  e.g. "example-auth-prod" — NOT the bare consumer name. Every Manager watch on the generated
  *  Application (onboard watch-sync, offboard watch-removal, suspend/resume) MUST derive the name
  *  here, or it polls a CR that never exists. The AppProject/namespace stay the bare name (G1). */
 export function consumerArgoAppName(consumerName: string, stage: Stage): string {
@@ -371,12 +371,12 @@ export const ConsumerRegistrationSchema = z
     // How this consumer runs MongoDB, copied VERBATIM from the manifest. The appset gates its
     // conditional MongoDB source on it, and the quota above was summed from it.
     mongodb: MongodbModeSchema.optional(),
-    // The six figures that bound this consumer's namespace, resolved by the Controller from its size
-    // table when it writes the registration (domains/onboarding/unit-size.ts resolveUnitQuota) and
+    // The six figures that bound this consumer's namespace, resolved by the Manager from its size
+    // table when it writes the registration (domains/units/unit-size.ts resolveUnitQuota) and
     // passed straight through to hostyour-cloud/apps/unit-quota by the ApplicationSet.
     //
     // The NUMBERS and not a size NAME, deliberately. A name would have to be resolved on the cluster
-    // side, and the table it resolves against lives in the Controller's database, which no cluster can
+    // side, and the table it resolves against lives in the Manager's database, which no cluster can
     // read; putting the table in git instead is what branch-classes.yaml rules out, since a file that
     // both ships with the product and gets edited in service cannot be one path. So the registration
     // states what the unit gets — as literally as it states its databases and its services — and the

@@ -1,12 +1,12 @@
 // gate-runner/src/report.ts
-// Assemble the frozen GateReport (shared/gates.ts) the runner returns and the Controller
+// Assemble the frozen GateReport (shared/gates.ts) the runner returns and the Manager
 // freezes into plan_json. The `verdict` is the runner's leg of the triple lock — every HARD gate
-// passed AND the sandbox self-probe attested green; the Controller separately re-checks the
+// passed AND the sandbox self-probe attested green; the Manager separately re-checks the
 // schema-validates + sandbox legs. `reportHash` is sha256 over the canonical JSON of the report
 // with the reportHash field removed — serialized by the shared reportHashPayload, the same
-// function the Controller's adapter recomputes the hash with on receipt, so author and verifier
+// function the Manager's adapter recomputes the hash with on receipt, so author and verifier
 // cannot drift. The final GateReportSchema.parse is a fail-closed belt: the runner never emits a
-// report that would fail the Controller's own schema check.
+// report that would fail the Manager's own schema check.
 import { createHash } from "node:crypto";
 import {
   GateReportSchema,
@@ -42,7 +42,7 @@ export function sandboxGreen(s: SandboxAttestation): boolean {
 
 /** Build the report, compute its hash over the canonical body, and validate the whole against the
  *  shared schema (fail-closed). Throws if the assembled report is somehow schema-invalid — a runner
- *  bug that must never reach the Controller as a silent partial answer. */
+ *  bug that must never reach the Manager as a silent partial answer. */
 export function assembleReport(input: ReportInput): GateReport {
   const verdict: "pass" | "fail" =
     hardGatesPass(input.gates) && sandboxGreen(input.sandbox) ? "pass" : "fail";

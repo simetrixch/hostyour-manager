@@ -47,7 +47,7 @@ export function ServerReadings(props: {
       <div className="servercard__chips">
         <span className="chip">
           {server.role}
-          {isMasterRole(server.role) ? " · this controller" : ""}
+          {isMasterRole(server.role) ? " · this manager" : ""}
         </span>
         {readings.map((r) => (
           <span key={r.label} className={r.className}>
@@ -78,7 +78,7 @@ export function ServerReadings(props: {
               type="button"
               className="btn"
               onClick={onReadAuthorizedKeys}
-              title="Read this host's ~/.ssh/authorized_keys and change nothing. Every key line is fingerprinted and named as this controller's own, an operator key placed under a label, or one placed by nothing here."
+              title="Read this host's ~/.ssh/authorized_keys and change nothing. Every key line is fingerprinted and named as this manager's own, an operator key placed under a label, or one placed by nothing here."
             >
               Read authorized keys
             </button>

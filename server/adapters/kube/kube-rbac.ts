@@ -1,16 +1,16 @@
-// The concrete BuildRbacWriter — a unit's build Roles + RoleBindings, written by the Controller because
+// The concrete BuildRbacWriter — a unit's build Roles + RoleBindings, written by the Manager because
 // the unit's AppProject blacklists both kinds, so nothing the unit deploys through ArgoCD can create
 // them. Which of them belong to the unit and which to the unit at ONE stage is stated where they are
-// rendered (domains/onboarding/build-rbac.ts); this writer applies and deletes whatever it is handed.
+// rendered (domains/units/build-rbac.ts); this writer applies and deletes whatever it is handed.
 // A sibling of kube.ts rather than part of it: same adapter, same clients, its own file so neither
 // grows past what one reader can hold. Master-local — the unit's `<name>-build` namespace and the
 // ArgoCD namespace both live on the cluster this pod runs on. Like the other IO shells here it NEEDS a
-// live cluster and is integration-tested there; the render is pure (domains/onboarding/build-rbac.ts).
+// live cluster and is integration-tested there; the render is pure (domains/units/build-rbac.ts).
 import { RbacAuthorizationV1Api } from "@kubernetes/client-node";
 import type { BuildRbacWriter, BuildRbacGrant, BuildRbacObject, RoleManifest, RoleBindingManifest } from "./port.ts";
-import { CONTROLLER_PROJECT_LABELS } from "./port.ts";
+import { MANAGER_PROJECT_LABELS } from "./port.ts";
 import { buildKubeConfig, isNotFound, upstream, type MasterKubeInput } from "./kube.ts";
-import { isControllerOwned } from "./kube-map.ts";
+import { isManagerOwned } from "./kube-map.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
 export class KubeBuildRbacWriter implements BuildRbacWriter {
@@ -68,7 +68,7 @@ export class KubeBuildRbacWriter implements BuildRbacWriter {
       }
       return true;
     }
-    assertControllerOwned("Role", namespace, name, existing);
+    assertManagerOwned("Role", namespace, name, existing);
     try {
       await this.rbac.replaceNamespacedRole({ name, namespace, body: withResourceVersion(role, existing) });
     } catch (e) {
@@ -88,7 +88,7 @@ export class KubeBuildRbacWriter implements BuildRbacWriter {
       }
       return true;
     }
-    assertControllerOwned("RoleBinding", namespace, name, existing);
+    assertManagerOwned("RoleBinding", namespace, name, existing);
     try {
       await this.rbac.replaceNamespacedRoleBinding({ name, namespace, body: withResourceVersion(binding, existing) });
     } catch (e) {
@@ -109,7 +109,7 @@ export class KubeBuildRbacWriter implements BuildRbacWriter {
   private async deleteOne(kind: "Role" | "RoleBinding", namespace: string, name: string): Promise<boolean> {
     const existing = await this.read(kind, namespace, name);
     if (existing === null) return false;
-    assertControllerOwned(kind, namespace, name, existing);
+    assertManagerOwned(kind, namespace, name, existing);
     try {
       if (kind === "Role") await this.rbac.deleteNamespacedRole({ name, namespace });
       else await this.rbac.deleteNamespacedRoleBinding({ name, namespace });
@@ -128,12 +128,12 @@ function withResourceVersion<T extends { metadata: { name: string; namespace: st
   return { ...manifest, metadata: { ...manifest.metadata, ...(resourceVersion !== undefined ? { resourceVersion } : {}) } };
 }
 
-/** Refuse to touch an object the Controller did not create. The names are per-unit, so a collision
+/** Refuse to touch an object the Manager did not create. The names are per-unit, so a collision
  *  means something else claimed the name — overwriting it would silently change somebody's access. */
-function assertControllerOwned(kind: string, namespace: string, name: string, existing: unknown): void {
-  if (!isControllerOwned(existing)) {
+function assertManagerOwned(kind: string, namespace: string, name: string, existing: unknown): void {
+  if (!isManagerOwned(existing)) {
     throw errValidation(
-      `refusing to touch ${kind} "${name}" in ${namespace} — it is not Controller-managed (missing a Controller ownership label: ${CONTROLLER_PROJECT_LABELS.map((l) => `${l.key}=${l.value}`).join(" or ")})`,
+      `refusing to touch ${kind} "${name}" in ${namespace} — it is not Manager-managed (missing a Manager ownership label: ${MANAGER_PROJECT_LABELS.map((l) => `${l.key}=${l.value}`).join(" or ")})`,
     );
   }
 }

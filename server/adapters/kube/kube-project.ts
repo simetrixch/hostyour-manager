@@ -1,20 +1,20 @@
 // The MasterProjectWriter impl — split from kube.ts (which holds the two readers) purely along the
 // 400-line budget; the guards and the access path are unchanged. The ONLY writing kube path of the
-// Controller: the per-unit isolation AppProject in an ArgoCD namespace on the master host.
+// Manager: the per-unit isolation AppProject in an ArgoCD namespace on the master host.
 import { CustomObjectsApi } from "@kubernetes/client-node";
 import type { MasterProjectWriter, AppProjectManifest } from "./port.ts";
-import { CONTROLLER_PROJECT_LABELS } from "./port.ts";
+import { MANAGER_PROJECT_LABELS } from "./port.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { assertWritableProjectName, isControllerOwned } from "./kube-map.ts";
+import { assertWritableProjectName, isManagerOwned } from "./kube-map.ts";
 import { buildKubeConfig, isNotFound, upstream, type MasterKubeInput } from "./kube.ts";
 
 const APPPROJECT = { group: "argoproj.io", version: "v1alpha1", plural: "appprojects" } as const;
 
-/** The Controller's ONLY writing kube client: the per-consumer isolation AppProject on the
+/** The Manager's ONLY writing kube client: the per-consumer isolation AppProject on the
  *  master's argocd namespace (the CR is master-local, over the pod SA's in-cluster
  *  access). Every
  *  method is guarded: it refuses a reserved platform project name (assertWritableProjectName) and
- *  refuses to update/delete a project that carries no Controller ownership label (isControllerOwned),
+ *  refuses to update/delete a project that carries no Manager ownership label (isManagerOwned),
  *  so it fails closed and never touches a foreign/system project. NEEDS a live cluster —
  *  integration-tested on the live clusters; the guards are pure (kube-map.ts, unit-tested). */
 export class KubeMasterProjectWriter implements MasterProjectWriter {
@@ -39,9 +39,9 @@ export class KubeMasterProjectWriter implements MasterProjectWriter {
       }
       return { created: true };
     }
-    if (!isControllerOwned(existing)) {
+    if (!isManagerOwned(existing)) {
       throw errValidation(
-        `refusing to overwrite AppProject "${name}" in ${namespace} — it is not Controller-managed (missing a Controller ownership label: ${CONTROLLER_PROJECT_LABELS.map((l) => `${l.key}=${l.value}`).join(" or ")})`,
+        `refusing to overwrite AppProject "${name}" in ${namespace} — it is not Manager-managed (missing a Manager ownership label: ${MANAGER_PROJECT_LABELS.map((l) => `${l.key}=${l.value}`).join(" or ")})`,
       );
     }
     // Optimistic concurrency: a replace must carry the observed resourceVersion. It is not part of
@@ -62,9 +62,9 @@ export class KubeMasterProjectWriter implements MasterProjectWriter {
     assertWritableProjectName(name);
     const existing = await this.getAppProject(namespace, name);
     if (existing === null) return { deleted: false };
-    if (!isControllerOwned(existing)) {
+    if (!isManagerOwned(existing)) {
       throw errValidation(
-        `refusing to delete AppProject "${name}" in ${namespace} — it is not Controller-managed (missing a Controller ownership label: ${CONTROLLER_PROJECT_LABELS.map((l) => `${l.key}=${l.value}`).join(" or ")})`,
+        `refusing to delete AppProject "${name}" in ${namespace} — it is not Manager-managed (missing a Manager ownership label: ${MANAGER_PROJECT_LABELS.map((l) => `${l.key}=${l.value}`).join(" or ")})`,
       );
     }
     try {

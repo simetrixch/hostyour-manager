@@ -79,15 +79,15 @@ describe("lock manager", () => {
     expect(listLocks(db).some((l) => l.resource === "git-branch")).toBe(false);
   });
 
-  it("controller:self conflicts with any existing claim, both directions", () => {
+  it("manager:self conflicts with any existing claim, both directions", () => {
     const { db, sqlite } = fresh();
     seedRun(sqlite, "run_a");
     seedRun(sqlite, "run_b");
     seedRun(sqlite, "run_c");
     acquireLocks(db, "run_a", [{ resource: "server", key: "s1" }]);
-    expect(busyCode(() => acquireLocks(db, "run_b", [{ resource: "controller", key: "self" }]))).toBe("RESOURCE_BUSY");
+    expect(busyCode(() => acquireLocks(db, "run_b", [{ resource: "manager", key: "self" }]))).toBe("RESOURCE_BUSY");
     releaseLocks(db, "run_a");
-    acquireLocks(db, "run_b", [{ resource: "controller", key: "self" }]);
+    acquireLocks(db, "run_b", [{ resource: "manager", key: "self" }]);
     expect(busyCode(() => acquireLocks(db, "run_c", [{ resource: "server", key: "s9" }]))).toBe("RESOURCE_BUSY");
   });
 

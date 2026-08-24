@@ -13,7 +13,7 @@ import {
   ANSIWISE_PROGRAM_TIMEOUT_MS, type AnsiwisePorts, type ProgramCheckpoint,
 } from "./ansiwise-run.kit.ts";
 import {
-  loadServer, loadMaster, requireSlaveCluster, slaveApiHost, sealTokenOnce, credLabels,
+  loadServer, loadMaster, masterFqdnOf, requireSlaveCluster, slaveApiHost, sealTokenOnce, credLabels,
   requirePlatformRepo, statedTarget,
   type DeploySlavePorts, type SlaveTarget,
 } from "./deploy-slave.kit.ts";
@@ -188,7 +188,7 @@ export function createMgmtStep(target: SlaveTarget, ports: DeploySlavePorts & An
         const conversation = await openServeConversation(ctx, mSession, ports, signal);
         try {
           const answers = await composeAnswers(ctx, conversation.client, REGISTER_PROGRAM, target, signal,
-            async () => ({ slave_fqdn: domain, api_server_url: apiServerUrl, ...fresh }));
+            async () => ({ slave_fqdn: domain, master_fqdn: masterFqdnOf(ctx.db, loadMaster(ctx.db)), api_server_url: apiServerUrl, ...fresh }));
           const dry = await programPhase(ctx, conversation.client, cp, "dry", { program: REGISTER_PROGRAM, answers, password, signal, save });
           if (dry.exitCode !== 0) {
             throw errValidation(
@@ -252,7 +252,7 @@ export function removeSlaveCleanup(ports: DeploySlavePorts & AnsiwisePorts): Cle
         const target = statedTarget(String(ctx.params.serverId), domain, stage);
         const cp: ProgramCheckpoint = { program: REMOVE_PROGRAM };
         const nosave = (): void => undefined;
-        const answers = await composeAnswers(ctx, conversation.client, REMOVE_PROGRAM, target, signal, async () => ({ slave_fqdn: domain }));
+        const answers = await composeAnswers(ctx, conversation.client, REMOVE_PROGRAM, target, signal, async () => ({ slave_fqdn: domain, master_fqdn: masterFqdnOf(ctx.db, loadMaster(ctx.db)) }));
         const dry = await programPhase(ctx, conversation.client, cp, "dry", { program: REMOVE_PROGRAM, answers, password, signal, save: nosave });
         if (dry.exitCode !== 0) {
           throw errValidation(

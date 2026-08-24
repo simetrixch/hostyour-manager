@@ -3,13 +3,13 @@ import { PINNED, DEPLOYED, sha7, driftReadout } from "../reconVocabulary.ts";
 
 /** The revision half of a live reconciliation card, rendered ONCE for BOTH the Consumers page and the
  *  Tenants page. It exists as one component for the same reason the server builds the block in one
- *  function (driftOf, server/domains/onboarding/api.ts): the two cards answer the same question about
+ *  function (driftOf, server/domains/units/api.ts): the two cards answer the same question about
  *  two unit kinds, and when they were written twice they gave different answers to the same situation —
- *  the tenant card stopped comparing the Controller's record at all while the consumer card went
+ *  the tenant card stopped comparing the Manager's record at all while the consumer card went
  *  on pinning against it and cried "Drift" at converged consumers.
  *
  *  ONE row — the deployment question, and the only one worth a badge: what the Application TARGETS vs
- *  what the cluster RUNS. A second "Record" row once sat here (the Controller's own recorded revision
+ *  what the cluster RUNS. A second "Record" row once sat here (the Manager's own recorded revision
  *  vs that target), but that column goes stale the moment a unit takes a single GitOps release after
  *  onboarding — so it was lit on almost every card and warned of nothing, and the owner removed the
  *  display. The consumer record still feeds the server's fallback for a Missing Application (driftOf);

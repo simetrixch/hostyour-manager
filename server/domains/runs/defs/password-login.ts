@@ -5,7 +5,7 @@ import { passwordLoginPlan, passwordLoginSteps, restorePasswordLoginCleanup } fr
 // The per-server password-login switch, as two run kinds. Each is a run like every other: a plan, an
 // approval, steps and a log. The shared scripts, steps and plan live in password-login.kit.ts; what
 // stands here is the one thing that must be written out per run kind, its own `kind` literal (the
-// source census in registry-census.test.ts reads exactly that field).
+// source census in run-definitions-census.test.ts reads exactly that field).
 //
 // TWO ACTS, AND THEY ARE NOT SYMMETRIC.
 //
@@ -13,11 +13,11 @@ import { passwordLoginPlan, passwordLoginSteps, restorePasswordLoginCleanup } fr
 //                           `sshd -T` after the reload, never by the file the run just wrote — and
 //                           the bootstrap password sealed beside the server row is destroyed. The
 //                           first is a setting a reinstall or a cloud-init rewrite can reopen; the
-//                           second is a working credential this controller holds, and it outlives
+//                           second is a working credential this manager holds, and it outlives
 //                           the machine's configuration.
 //   password-login-enable   ONE door, the daemon's. Nothing re-seals a bootstrap password, because
 //                           this run has no password to seal — it is a repair run kind, for the case
-//                           where a machine has to be reachable without this controller's key.
+//                           where a machine has to be reachable without this manager's key.
 //
 // THE SWITCH DEFAULTS TO OFF, AND ADOPTION SETS IT. The adopt run shuts the door itself, right
 // after it has verified key-only login (defs/adopt.ts): there is no state in which password login

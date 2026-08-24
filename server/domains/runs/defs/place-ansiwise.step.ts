@@ -63,7 +63,7 @@ function requireDownloads(ports: AnsiwisePorts): ReleaseDownloads {
  *  the machine yet.
  *
  *  WHAT THIS STEP NO LONGER PLACES is written out in place-ansiwise.ts, with where each of them went:
- *  the packages are deploy-host's `install_packages` row, the catalogue checkout is deploy-gitops's
+ *  the packages are deploy-host's `install_packages` row, the catalogue checkout is deploy-platform-services's
  *  `git_clone` row, and the material checkout at PLATFORM_CHECKOUT is declared by no program yet. A
  *  machine that reaches the first program step without a catalogue is answered by that step, in the
  *  words of a binary that finds no program of that name — which is a better sentence than any this
@@ -86,7 +86,7 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
 
 /** `enable-ansiwise-service` — the machine's own resident surface, switched on once it has the two
  *  facts a bare one has not got: an address in the tailnet to stand on, and the token file
- *  deploy-gitops wrote. It composes no unit and no command inside one: `installAnsiwiseService`
+ *  deploy-platform-services wrote. It composes no unit and no command inside one: `installAnsiwiseService`
  *  invokes `ansiwise-rest install-service`, which is the one thing that knows what a unit has to
  *  carry (place-ansiwise.ts, THE UNIT IS NOT COMPOSED HERE).
  *

@@ -50,7 +50,7 @@ export function Clusters() {
       </div>
     );
 
-  // clusters.servers is the MANAGED set only (the slaves) — the master (this controller)
+  // clusters.servers is the MANAGED set only (the slaves) — the master (this manager)
   // rides clusters.master and is shown, labeled, below the tiles, never counted.
   const stats: Array<[string, string | number]> = [
     ["Slaves", clusters.servers.length],
@@ -64,7 +64,7 @@ export function Clusters() {
       <header className="page__head">
         <div>
           <h2 className="page__title">Clusters</h2>
-          <p className="page__desc">Everything this controller manages, at a glance.</p>
+          <p className="page__desc">Everything this manager manages, at a glance.</p>
         </div>
         <div className={`verdict verdict--${clusters.verdict}`}>
           <span className="verdict__label">Clusters</span>
@@ -83,7 +83,7 @@ export function Clusters() {
 
       {clusters.master && (
         <p className="clusters__master">
-          Master: {clusters.master.name} (this controller)
+          Master: {clusters.master.name} (this manager)
         </p>
       )}
 

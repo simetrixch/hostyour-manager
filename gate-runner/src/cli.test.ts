@@ -33,7 +33,7 @@ const ENV = {
   RUNNER_VERSION: "t",
   KUBE_VERSION: "1.30.0",
   MUST_FAIL_TARGETS: "10.1.1.1:443",
-  CONTROLLER_ADDR: "10.152.183.5:8080",
+  MANAGER_ADDR: "10.152.183.5:8080",
   MUST_PASS_TARGET: "github.com:443",
   CONFIRMED_LISTENING: "true",
 } satisfies NodeJS.ProcessEnv;
@@ -45,8 +45,8 @@ function inputs(sourceDir: string, confirmedListening = true): CliInputs {
 
 // github reachable, everything internal blocked => fence green.
 const green: ConnectFn = (host) => Promise.resolve(host === "github.com");
-// the controller address is ALSO reachable => not denied => fence degraded.
-const controllerReachable: ConnectFn = (host) => Promise.resolve(host === "github.com" || host === "10.152.183.5");
+// the manager address is ALSO reachable => not denied => fence degraded.
+const managerReachable: ConnectFn = (host) => Promise.resolve(host === "github.com" || host === "10.152.183.5");
 
 describe("parseEnv", () => {
   it("parses a valid task env into CliInputs", () => {
@@ -69,14 +69,14 @@ describe("parseEnv", () => {
 });
 
 describe("runGateCli fail-closed", () => {
-  it("refuses to render (gate-less degraded report) when the Controller did not attest confirmed-listening", async () => {
+  it("refuses to render (gate-less degraded report) when the Manager did not attest confirmed-listening", async () => {
     const report = await runGateCli(inputs(await ws(), false), green);
     expect(report.gates).toHaveLength(0);
     expect(sandboxGreen(report.sandbox)).toBe(false);
     expect(report.verdict).toBe("fail");
   });
   it("refuses to render when the egress fence is not green (an internal target is reachable)", async () => {
-    const report = await runGateCli(inputs(await ws()), controllerReachable);
+    const report = await runGateCli(inputs(await ws()), managerReachable);
     expect(report.gates).toHaveLength(0);
     expect(report.sandbox.controllerAddrDenied).toBe(false);
     expect(report.verdict).toBe("fail");

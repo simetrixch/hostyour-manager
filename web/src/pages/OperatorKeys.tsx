@@ -17,11 +17,11 @@ const EMPTY = { label: "", publicKey: "" };
 /**
  * A human operator's own SSH key, and which machines carry it.
  *
- * This controller holds only the PUBLIC line — the private half never leaves the person whose key
+ * This manager holds only the PUBLIC line — the private half never leaves the person whose key
  * it is — plus the label the key is placed and removed under. The label is not decoration: it is
  * written into every host's authorized_keys as the comment `hostyour-operator:<label>`, and a
  * removal deletes by exactly that comment, which is what keeps it away from the line this
- * controller uses to reach the machine at all.
+ * manager uses to reach the machine at all.
  */
 export function OperatorKeys() {
   const nav = useNavigate();
@@ -87,7 +87,7 @@ export function OperatorKeys() {
       <header className="page__head">
         <div>
           <h2 className="page__title">Operator keys</h2>
-          <p className="page__desc">Human SSH keys this controller can place on the servers and take off again.</p>
+          <p className="page__desc">Human SSH keys this manager can place on the servers and take off again.</p>
         </div>
         <div className="page__actions">
           <Link className="btn" to="/servers">

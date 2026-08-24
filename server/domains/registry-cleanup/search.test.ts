@@ -14,7 +14,7 @@ const AUTH_REPO = "https://github.com/example/example-auth.git";
 function cloudWithRegistrations(): FakeCarrierRepo {
   const cloud = new FakeCarrierRepo();
   cloud.seed(cloud.booksBranch, "registrations/example-auth/prod.yaml", stageRegistration({ name: "example-auth", repoURL: AUTH_REPO, repoCredentialId: "cred_auth", chartPath: "deploy/chart", cluster: "m1" }));
-  cloud.seed(cloud.booksBranch, "registrations/hostyour-manager/build.yaml", buildRegistration({ name: "hostyour-manager", repoURL: "https://github.com/example/hostyour-manager.git", builds: ["controller"] }));
+  cloud.seed(cloud.booksBranch, "registrations/hostyour-manager/build.yaml", buildRegistration({ name: "hostyour-manager", repoURL: "https://github.com/example/hostyour-manager.git", builds: ["manager"] }));
   return cloud;
 }
 
@@ -60,14 +60,14 @@ describe("searchCarriers — the three carrier classes", () => {
 
   it("(c) reads hostyour-cloud apps/*/values-<stage>.yaml on master AND the install branches", async () => {
     const cloud = new FakeCarrierRepo();
-    cloud.seed("master", "apps/controller/values-prod.yaml", pinFile([["controller", "0.2.0"]]));
-    cloud.seed("m1.example.com", "apps/controller/values-prod.yaml", pinFile([["controller", "0.1.0"]]));
+    cloud.seed("master", "apps/manager/values-prod.yaml", pinFile([["manager", "0.2.0"]]));
+    cloud.seed("m1.example.com", "apps/manager/values-prod.yaml", pinFile([["manager", "0.1.0"]]));
 
     const hits = await searchCarriers(deps({ cloud }));
 
     // The install branch stands on an OLDER release than master; reading master alone would leave the
     // tag the running cluster actually pulls out of the answer.
-    expect(new Set(hits.map((h) => pinKey(h.pin)))).toEqual(new Set(["controller:0.2.0", "controller:0.1.0"]));
+    expect(new Set(hits.map((h) => pinKey(h.pin)))).toEqual(new Set(["manager:0.2.0", "manager:0.1.0"]));
   });
 
   it("reads a SUSPENDED unit like any other — a suspended deploy is resumable and its image stays live", async () => {
@@ -83,7 +83,7 @@ describe("searchCarriers — the three carrier classes", () => {
 
   it("a build-only registration contributes nothing of its own — it has no chart to pin from", async () => {
     const cloud = new FakeCarrierRepo();
-    cloud.seed(cloud.booksBranch, "registrations/hostyour-manager/build.yaml", buildRegistration({ name: "hostyour-manager", repoURL: "https://github.com/example/hostyour-manager.git", builds: ["controller"] }));
+    cloud.seed(cloud.booksBranch, "registrations/hostyour-manager/build.yaml", buildRegistration({ name: "hostyour-manager", repoURL: "https://github.com/example/hostyour-manager.git", builds: ["manager"] }));
     const unit = new FakeUnitRepo();
 
     expect(await searchCarriers(deps({ cloud, unit }))).toEqual([]);

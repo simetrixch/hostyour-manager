@@ -5,15 +5,15 @@
 // authorized_keys file carries a comment that says who put it there, and a removal deletes lines by
 // that comment and by nothing else:
 //
-//   hostyour:<server name>          the CONTROLLER's own login identity for that one host,
+//   hostyour:<server name>          the MANAGER's own login identity for that one host,
 //                                        written by the adopt run and deleted by its compensation.
 //   hostyour-operator:<label>       ONE human's key, placed under the label it was added
 //                                        under, and deleted by the operator-key-remove run.
 //
 // They cannot collide in either direction, and that is by construction rather than by care: the
-// controller marker is `hostyour` followed immediately by a colon, the operator marker is
+// manager marker is `hostyour` followed immediately by a colon, the operator marker is
 // `hostyour` followed by `-operator`, and a label may not contain a colon at all. So a removal
-// aimed at an operator can never match the controller's line — which would take this platform's own
+// aimed at an operator can never match the manager's line — which would take this platform's own
 // way into the machine away — and adopt's compensation can never strip a human's key.
 //
 // A LABEL IS ALSO WHAT MAKES THE PATTERN SAFE. The removal is a `grep` pattern built from the
@@ -28,12 +28,12 @@ import { AUTHORIZED_KEY_KIND, type AuthorizedKeyKind, type ServerAuthorizedKeysS
 /** The comment adopt puts on the key it generates for a server, and the pattern its compensation
  *  deletes by. Named here so the two sides of that pair, and the operator marker that must never
  *  match it, are stated in one place. */
-export function controllerKeyMarker(serverName: string): string {
+export function managerKeyMarker(serverName: string): string {
   return `hostyour:${serverName}`;
 }
 
 /** What every operator-key comment starts with. The `-operator` is what keeps it out of the
- *  controller marker above: `hostyour:` never appears in it. */
+ *  manager marker above: `hostyour:` never appears in it. */
 export const OPERATOR_MARKER_PREFIX = "hostyour-operator:";
 
 export function operatorKeyMarker(label: string): string {
@@ -95,7 +95,7 @@ export function isAuthorizedKeysEntry(line: string): boolean {
 }
 
 /**
- * Normalize an operator's pasted public key to the line this controller stores: `<type> <blob>`,
+ * Normalize an operator's pasted public key to the line this manager stores: `<type> <blob>`,
  * with whatever comment the operator pasted DROPPED.
  *
  * The comment is dropped rather than kept because the placed line's comment is the marker, and a
@@ -118,7 +118,7 @@ export function operatorKeyLine(publicKey: string, label: string): string {
   return `${publicKey} ${operatorKeyMarker(label)}`;
 }
 
-/** What this controller knows about one operator key it holds: the label the line on a host carries
+/** What this manager knows about one operator key it holds: the label the line on a host carries
  *  and the fingerprint of the key that label stands for. */
 export interface OperatorKeyIdentity {
   label: string;
@@ -129,26 +129,26 @@ export interface OperatorKeyIdentity {
  * Who a key line belongs to. The FINGERPRINT decides, never the comment: a comment is text on the
  * host, and anyone who can append to the file can type either marker into it.
  *
- * "controller" is a fingerprint match against the ssh_key credentials sealed for this server. That
- * one signal covers both ways a controller key gets onto a host: adopt seals the key it generates
+ * "manager" is a fingerprint match against the ssh_key credentials sealed for this server. That
+ * one signal covers both ways a manager key gets onto a host: adopt seals the key it generates
  * before it installs the line, and the boot seed seals the master's key it reads from a file — so
- * every line this controller can log in with is one whose fingerprint it holds. The marker comment
+ * every line this manager can log in with is one whose fingerprint it holds. The marker comment
  * adopt writes is for the REMOVAL grep, not for classification: honoring it here would let a
- * stranger's key reading `ssh-ed25519 <their key> hostyour:s1` report as the controller's own,
+ * stranger's key reading `ssh-ed25519 <their key> hostyour:s1` report as the manager's own,
  * fold the file to "accounted", and hide a working way into the machine behind the very card that
  * exists to surface it.
  *
  * "operator" takes BOTH its marker and a stored key: the label names which row, and the fingerprint
- * must be the one this controller stores under that very label. Anything else is a key nothing here
- * placed, which is exactly what "foreign" means. Passing no keys at all (a controller that holds
+ * must be the one this manager stores under that very label. Anything else is a key nothing here
+ * placed, which is exactly what "foreign" means. Passing no keys at all (a manager that holds
  * none) therefore makes every marker line foreign, which is the truth about such a host.
  */
 export function classifyAuthorizedKey(
   key: { fingerprint: string; comment: string },
-  ctx: { controllerFingerprints: readonly string[]; operatorKeys: readonly OperatorKeyIdentity[] },
+  ctx: { managerFingerprints: readonly string[]; operatorKeys: readonly OperatorKeyIdentity[] },
 ): { kind: AuthorizedKeyKind; label: string | null } {
-  if (ctx.controllerFingerprints.includes(key.fingerprint)) {
-    return { kind: "controller", label: null };
+  if (ctx.managerFingerprints.includes(key.fingerprint)) {
+    return { kind: "manager", label: null };
   }
   if (key.comment.startsWith(OPERATOR_MARKER_PREFIX)) {
     const label = key.comment.slice(OPERATOR_MARKER_PREFIX.length);

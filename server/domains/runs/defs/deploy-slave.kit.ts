@@ -25,7 +25,7 @@ import { removeSlaveMarkingPart, clusterMarkingPath } from "../../inventory/clus
  *  port used to carry the address a MACHINE clones the platform tree from, because place-ansiwise
  *  cloned it with composed bash. Nothing in this manager clones a tree onto a machine any more — a
  *  clone is a `git_clone` row of a program, which reads its origin and its credential out of the
- *  machine's own settings files by NAME (digita-deploy ansiwise/programs/deploy-gitops.yaml) rather
+ *  machine's own settings files by NAME (digita-deploy ansiwise/programs/deploy-platform-services.yaml) rather
  *  than taking either through a caller. */
 export interface DeploySlavePorts {
   platformRepo?: PlatformRepo;
@@ -122,7 +122,7 @@ export function slaveApiHost(server: typeof servers.$inferSelect): string {
  *  meaningless. A master+slave carries that part and is found here too. */
 export function loadMaster(db: Db): typeof servers.$inferSelect {
   const row = db.select().from(servers).where(inArray(servers.role, [...MASTER_ROLES])).get();
-  if (!row) throw errValidation("no master server registered — the platform needs exactly one role=master server (this controller's host) before a slave can be deployed");
+  if (!row) throw errValidation("no master server registered — the platform needs exactly one role=master server (this manager's host) before a slave can be deployed");
   return row;
 }
 

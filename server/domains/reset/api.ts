@@ -5,12 +5,12 @@ import type { Db } from "../../db/client.ts";
 import type { Config } from "../../kernel/config.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { CredentialStore } from "../../security/store.ts";
-import type { GitHubClient } from "../../adapters/github/github.ts";
+import type { GitHubPlatform } from "../../adapters/github-platform/github-platform-http.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { ResetResult, ResetBranchOutcome, ResetPointerOutcome } from "../../../shared/api-types.ts";
 import { AppError, errValidation, errNotConfigured, errIllegalTransition, errUpstream } from "../../kernel/errors.ts";
 import { writeAudit } from "../../db/audit-writer.ts";
-import { wipeControllerDb, rehearseControllerDbWipe, countLiveRuns, backupControllerDb } from "../../db/reset.ts";
+import { wipeManagerDb, rehearseManagerDbWipe, countLiveRuns, backupManagerDb } from "../../db/reset.ts";
 import { booksBranch } from "../inventory/read.ts";
 import { CLUSTER_MARKING_DIR } from "../inventory/cluster-marking.ts";
 
@@ -21,7 +21,7 @@ export interface ResetApiDeps {
   store: CredentialStore;
   logger: Logger;
   /** Injected by wire IFF config.github is set (composition root builds the adapter). */
-  github: GitHubClient | undefined;
+  github: GitHubPlatform | undefined;
   /** wire: stops the master-reconcile timer, then seedMaster (idempotent) — keeps the RUNNING
    *  pod coherent after the wipe (role=master row + self-SSH key re-materialized). */
   reseedMaster: () => Promise<void>;
@@ -39,12 +39,12 @@ const msg = (err: unknown): string => (err instanceof Error ? err.message : Stri
 // IS its install branch, so a map names the branch it belongs to with no recomposition.
 const MARKING_RE = new RegExp(`^${CLUSTER_MARKING_DIR}/([a-z0-9-]+(?:\\.[a-z0-9-]+)+)\\.yaml$`);
 
-/** Serializes resets in-process (module-level on purpose; one Controller pod). */
+/** Serializes resets in-process (module-level on purpose; one Manager pod). */
 let resetInFlight = false;
 
 /**
  * THE destructive reset (Reset wizard backend). Removes the selected clusters' maps from master,
- * deletes their install branches on GitHub, then wipes the cluster state out of the controller DB in
+ * deletes their install branches on GitHub, then wipes the cluster state out of the manager DB in
  * one transaction. Deliberately NOT a Run — the executor persists runs in the very tables the wipe
  * clears, so a reset-run would erase its own log; a direct route + audit entry instead.
  *
@@ -85,7 +85,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
     // Every refusal leaves an audit trace (log-everything) BEFORE it throws.
     const refuse = (err: AppError): never => {
       writeAudit(deps.db, {
-        actor: operator.sub, action: "controller.reset.refused",
+        actor: operator.sub, action: "manager.reset.refused",
         detail: { reason: err.message, via: operator.via },
       });
       throw err;
@@ -114,7 +114,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
     const live = countLiveRuns(deps.sqlite);
     if (live > 0) refuse(errIllegalTransition(`cannot reset: ${live} run(s) in flight (planning/approved/running) — cancel or let them finish`));
 
-    let gh: GitHubClient | undefined;
+    let gh: GitHubPlatform | undefined;
     let masterBranch: string | undefined;
     let base: string | undefined;
     if (branches.length > 0 || deps.github) {
@@ -165,7 +165,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       // The same listing decides which maps are ORPHANS — a map whose install branch is gone. A
       // listing of the wrong repo would make every map an orphan and remove them all, so orphan
       // reconciliation runs only with the master's own install branch present in the listing: that
-      // branch is the proof that these branches belong to the repo this controller was installed
+      // branch is the proof that these branches belong to the repo this manager was installed
       // from. Maps SELECTED for deletion need no such proof — the operator named them.
       const reconcileOrphans = masterBranch !== undefined && shaByName.has(masterBranch);
 
@@ -176,7 +176,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       let wipeRehearsed = false;
       if (input.wipeDb) {
         try {
-          rehearseControllerDbWipe(deps.sqlite);
+          rehearseManagerDbWipe(deps.sqlite);
           wipeRehearsed = true;
         } catch (err) {
           refuse(new AppError("INTERNAL", `the database wipe would fail (${msg(err)}) — refused before anything was deleted; no branch and no cluster map was touched`));
@@ -220,7 +220,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       for (const b of slaveBranches) {
         const sha = shaByName.get(b);
         try {
-          await (gh as GitHubClient).deleteBranch(b);
+          await (gh as GitHubPlatform).deleteBranch(b);
           outcomes.push({ branch: b, ok: true, ...(sha ? { sha } : {}) });
           log.info({ branch: b, sha, actor: operator.sub }, "reset: deleted install branch");
         } catch (err) {
@@ -233,7 +233,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       if (deletingMaster && masterBranch) {
         const sha = shaByName.get(masterBranch);
         try {
-          await (gh as GitHubClient).deleteBranch(masterBranch);
+          await (gh as GitHubPlatform).deleteBranch(masterBranch);
           outcomes.push({ branch: masterBranch, ok: true, ...(sha ? { sha } : {}) });
           log.warn({ branch: masterBranch, sha, actor: operator.sub }, "reset: deleted the MASTER's own install branch (explicit opt-in)");
         } catch (err) {
@@ -252,19 +252,19 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
           // on its own schedule, which on a fresh install is exactly when a reset gets run. A backup
           // taken before those awaits would miss a row that collectVaultRefs then finds and
           // deleteVaultValues destroys: the value gone, and the snapshot unable to restore the row.
-          const backupFile = backupControllerDb(deps.sqlite, deps.config.dataDir);
+          const backupFile = backupManagerDb(deps.sqlite, deps.config.dataDir);
           const vaultRefs = deps.store.collectVaultRefs();
-          const rows = wipeControllerDb(deps.sqlite);
+          const rows = wipeManagerDb(deps.sqlite);
           const vaultOrphans = await deps.store.deleteVaultValues(vaultRefs);
           dbResult = { wiped: true, rows, backupFile, vaultOrphans };
           log.warn({ rows, backupFile, vaultOrphans, actor: operator.sub },
-            "reset: controller DB wiped (cluster state; operators/meta kept)");
+            "reset: manager DB wiped (cluster state; operators/meta kept)");
         } catch (err) {
           // Reported, never thrown: the branches above are already deleted, and a bare error response
           // would leave the operator without the list of what went or the shas to push it back.
           dbResult = { wiped: false, error: msg(err) };
           log.error({ err: msg(err), actor: operator.sub },
-            "reset: controller DB NOT wiped — the transaction rolled back whole, the branches above ARE deleted");
+            "reset: manager DB NOT wiped — the transaction rolled back whole, the branches above ARE deleted");
         }
       }
 
@@ -276,7 +276,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       // survives even when the row does not.
       const detail = { via: operator.via, wipeDb: input.wipeDb, includeMaster: input.includeMaster, branches: outcomes, pointers, db: dbResult };
       try {
-        writeAudit(deps.db, { actor: operator.sub, action: "controller.reset", detail });
+        writeAudit(deps.db, { actor: operator.sub, action: "manager.reset", detail });
       } catch (err) {
         log.error({ err: msg(err), actor: operator.sub, detail }, "reset: the audit entry could NOT be written — this log line is the only record of what the reset did");
       }
