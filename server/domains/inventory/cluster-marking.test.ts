@@ -190,6 +190,55 @@ describe("removeSlaveMarkingPart", () => {
 describe("setClusterRelease", () => {
   const TAG = "1.2.0-stable-20260728120000";
 
+  // THE MAP AS THE TEMPLATE ACTUALLY WRITES IT (digita-deploy ansiwise/templates/cluster-map.tpl),
+  // not the four fields this module happens to name. The schema lets `global` through on purpose,
+  // so a chart can add a value without failing every map read — but a writer that emits only what
+  // it understands turns that permission into DATA LOSS the moment anything rewrites the file, and
+  // the first thing that rewrites it is the first release pin.
+  const FULL_MAP = [
+    "stage: prod", "role: master", "booksCluster: m1.example.com", "",
+    "global:",
+    "  domain: m1.example.com",
+    "  clusterName: m1",
+    "  booksCluster: m1.example.com",
+    "  buildPlane: m1.example.com",
+    "  unitApex: example.com",
+    "  platformDomain: example.com",
+    "  alertRecipients: ['ops@example.com']",
+    "  catalogUrl: https://github.com/acme/acme-catalog.git",
+    "  vaultKubernetesAuthPath: kubernetes-m1",
+    "  registryPullUser: acme-pull",
+    "  registryPushUser: acme-push",
+    "  endpoints:",
+    "    registry:",
+    "      host: zot.m1.example.com",
+    "    mail: {url: 'https://post.example.com'}",
+    "    vault: {url: 'https://vault.m1.example.com'}",
+    "    idp: {url: 'https://idp.m1.example.com'}",
+    "    tailnet: {url: 'https://tale.m1.example.com'}",
+    "  servicesLocal:",
+    "    registry: true",
+    "    vault: true",
+    "    observability: true",
+  ].join("\n") + "\n";
+
+  it("keeps every value the map carried, including the ones this module does not name", async () => {
+    const repo = repoWith({ [MASTER]: FULL_MAP });
+    await setClusterRelease(repo, MASTER, TAG, "run_1");
+    const after = repo.read(repo.booksBranch, clusterMarkingPath(MASTER)) ?? "";
+
+    // Each of these is read by a chart. A pin that drops one leaves an installation whose charts
+    // render against a value that is simply gone, and nothing between here and the render says so.
+    for (const kept of [
+      "clusterName: m1", "vaultKubernetesAuthPath: kubernetes-m1",
+      "registryPullUser: acme-pull", "registryPushUser: acme-push",
+      "host: zot.m1.example.com", "vault.m1.example.com", "idp.m1.example.com",
+      "tale.m1.example.com", "servicesLocal",
+    ]) expect(after, `the pin dropped ${kept}`).toContain(kept);
+    expect(after).toContain(`release: ${TAG}`);
+  });
+
+
   it("states the pin without disturbing anything else the map says", async () => {
     const repo = repoWith({ [SLAVE]: `${slaveMap}  apiHost: 100.64.0.11\n  apiPort: 16443\n` });
     expect((await resolveClusterMarking(repo, "s1")).release).toBeUndefined();

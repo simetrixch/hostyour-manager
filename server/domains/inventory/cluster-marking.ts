@@ -62,7 +62,7 @@
 // Boundary: domain layer — the db schema, shared/ and the git PlatformRepo port only. Deliberately
 // imports NO other domain (inventory is the base domain every other one may read, not the reverse).
 import { eq } from "drizzle-orm";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
@@ -176,6 +176,13 @@ export interface ClusterMarking {
   mailUrl?: string;
   /** Carried, never read here. */
   catalogRepo?: string;
+  /** Everything `global` carried that this module does not name, carried VERBATIM. The schema lets
+   *  the block through on purpose, so a chart may add a value without failing every map read on the
+   *  release that introduces it - but a writer that emits only what it understands turns that
+   *  permission into DATA LOSS the moment anything rewrites the file, and the first thing that
+   *  rewrites it is the first release pin. Every endpoint, every servicesLocal flag, the cluster's
+   *  short name and its Vault auth path travel here. */
+  globalRest?: Record<string, unknown>;
 }
 
 /** The leading comment block of a map file: every line from the top until the first that is not a
@@ -187,6 +194,13 @@ function headerOf(text: string): string | undefined {
   const header = lines.slice(0, i).join("\n").replace(/\s+$/, "");
   return header === "" ? undefined : header;
 }
+
+/** The keys of `global` this module states itself, and so the ones that must NOT also travel in
+ *  globalRest - a key written from both would stand in the file twice. */
+const NAMED_GLOBALS = new Set([
+  "domain", "booksCluster", "buildPlane", "master", "apiHost", "apiPort",
+  "unitApex", "platformDomain", "alertRecipients", "catalogUrl",
+]);
 
 function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking {
   const parsed = ClusterMarkingFileSchema.safeParse(raw);
@@ -202,7 +216,10 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
   // second time beside it. The map states one thing about the catalogue — where a build clones it
   // from — and every other spelling of it follows from that one.
   const catalogRepo = g.catalogUrl?.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
+  // Derived, like catalogRepo: the address stands in the endpoints block, which travels whole in
+  // globalRest, so reading it by name here does not make this module a second writer of it.
   const mailUrl = (g.endpoints as { mail?: { url?: string } } | undefined)?.mail?.url;
+  const rest = Object.fromEntries(Object.entries(g).filter(([k]) => !NAMED_GLOBALS.has(k)));
   return {
     ...(header !== undefined ? { header } : {}),
     fqdn: g.domain,
@@ -223,6 +240,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
       : {}),
     ...(mailUrl !== undefined ? { mailUrl } : {}),
     ...(catalogRepo ? { catalogRepo } : {}),
+    ...(Object.keys(rest).length > 0 ? { globalRest: rest } : {}),
   };
 }
 
@@ -419,13 +437,19 @@ function serializeMarking(m: ClusterMarking): string {
   // value not starting alphanumeric, is quoted rather than reasoned about.
   const scalar = (v: string | number): string =>
     typeof v === "number" || (/^[A-Za-z0-9]/.test(v) && !/: | #/.test(v)) ? String(v) : JSON.stringify(v);
-  // THE ONE NESTED VALUE, written as a block because that is the shape the charts read it in.
-  // Left out, the round-trip below catches it: the file reads back as a marking without the
-  // mail address, which is not the marking it was built from.
+  // EVERYTHING ELSE THE BLOCK CARRIED, given back as it came. Nested values - the endpoints, the
+  // servicesLocal flags - are handed to the YAML writer rather than assembled here: the
+  // fixed-order emission above exists so a SCALAR cannot carry a colon into its neighbour, and
+  // that reasoning does not extend to a tree. Left out, this is silent data loss and not a
+  // failure; the round-trip guard below catches it now, because the marking states these keys.
   const nested =
-    m.mailUrl === undefined
+    m.globalRest === undefined || Object.keys(m.globalRest).length === 0
       ? ""
-      : "  endpoints:" + "\n" + "    mail:" + "\n" + `      url: ${scalar(m.mailUrl)}` + "\n";
+      : stringifyYaml(m.globalRest, { indent: 2 })
+          .split("\n")
+          .filter((l) => l.length > 0)
+          .map((l) => `  ${l}`)
+          .join("\n") + "\n";
   const body =
     fields.map(([k, v]) => `${k}: ${scalar(v)}`).join("\n") +
     "\n\nglobal:\n" +
