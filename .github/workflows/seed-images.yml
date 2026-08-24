@@ -105,6 +105,18 @@ jobs:
           IMAGE_TAG="${RELEASE_TAG}-${SHA7}"
           echo "seed-images: ${GITHUB_REF_NAME} @ ${GITHUB_SHA} -> release ${RELEASE_TAG}, image tag ${IMAGE_TAG}"
 
+          # THE FOUR OCI LABELS ARE WHAT MAKES A SEED PROVABLE, and they are the same four the
+          # in-cluster build stamps (hostyour-cloud
+          # clusters/inventories/image-builder/templates/tasks/buildah-build-push.yaml). The release
+          # pipeline's registry probe reads .revision and .source back off the image before it lets a
+          # run reuse a tag instead of building it, because the platform registry answers a local
+          # miss by fetching from ghcr.io on demand — an unlabelled seed therefore looks exactly like
+          # an image from a foreign upstream, and the probe stops the release. .source must carry the
+          # `.git` suffix: it is compared against the registration's repoURL, which is the
+          # repository's clone_url.
+          SOURCE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
           # The manifest names the unit, and the unit name must equal the repository name: the
           # release pipeline refuses a run where the two disagree, and a seed pushed under a name
           # that pipeline would refuse would be a seed no release could ever replace.
@@ -146,6 +158,11 @@ jobs:
             fi
 
             echo "seed-images: ${name} — containerfile ${containerfile}, context ${context} -> ${ref}"
-            docker build --file "${containerfile}" --tag "${ref}" "${context}"
+            docker build --file "${containerfile}" --tag "${ref}" \
+              --label "org.opencontainers.image.source=${SOURCE_URL}" \
+              --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+              --label "org.opencontainers.image.created=${CREATED}" \
+              --label "org.opencontainers.image.version=${RELEASE_TAG}" \
+              "${context}"
             docker push "${ref}"
           done
