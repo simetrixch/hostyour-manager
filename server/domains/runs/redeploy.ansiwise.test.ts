@@ -358,13 +358,13 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect((row?.tailnetJson as { runId?: string } | null)?.runId).toBe(runId);
   });
 
-  it("PLANTED DEFECT (tailnet-rejoin): a profile without global.tailnetUrl is refused BY NAME before any machine is asked anything", { timeout: 60_000 }, async () => {
+  it("PLANTED DEFECT (tailnet-rejoin): a profile without global.endpoints.tailnet.url is refused BY NAME before any machine is asked anything", { timeout: 60_000 }, async () => {
     const h = await tailnetHost(serve, { tailnetUrl: false });
     const before = await observer.runs();
 
     const runId = await settled(h, "tailnet-rejoin", { serverId: SLAVE_ID }, elevationOnly());
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
-    expect(stepColumn(h.db, runId, "rejoin", "error")).toMatch(/no readable global\.tailnetUrl/);
+    expect(stepColumn(h.db, runId, "rejoin", "error")).toMatch(/no readable global\.endpoints\.tailnet\.url/);
 
     // Not one machine run started, on either surface — no serve conversation was even opened.
     expect(await observer.runs()).toHaveLength(before.length);

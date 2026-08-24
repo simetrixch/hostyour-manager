@@ -29,7 +29,7 @@ function req(): GateJobRequest {
     repoURL: "https://github.com/x/y.git",
     requestedRef: "main",
     resolvedSha: "0".repeat(40),
-    clusterValueFiles: [{ path: "installation/profile.yaml", content: "global:\n  vaultUrl: https://v:8200\n" }],
+    clusterValueFiles: [{ path: "installation/profile.yaml", content: "global:\n  endpoints:\n    vault:\n      url: https://v:8200\n" }],
     mustFailTargetsConfirmedListening: true,
   };
 }

@@ -3,7 +3,7 @@
 // against the single-Vault injection contract. Two rules, both fail-closed:
 //   every rendered SecretStore must authenticate to Vault with the role "consumer-eso" and
 //        point at the cluster's own Vault URL. That URL is read back out of the SAME values chain
-//        G3 rendered with (`global.vaultUrl`, last file that sets it wins), so the gate holds the
+//        G3 rendered with (`global.endpoints.vault.url`, last file that sets it wins), so the gate holds the
 //        render against the cluster's value rather than against anything the Controller computed.
 //        The rendered-output equality on `server` is the SOLE control against a chart hardcoding a
 //        non-templated `server:` literal, so it stays hard.
@@ -30,7 +30,7 @@ const SEVERITY: GateSeverity = "hard";
 const CONSUMER_ROLE = "consumer-eso";
 
 const EXPECTED =
-  "SecretStore role==consumer-eso + server==the cluster chain's global.vaultUrl; every " +
+  "SecretStore role==consumer-eso + server==the cluster chain's global.endpoints.vault.url; every " +
   "ExternalSecret / ClusterExternalSecret remoteRef.key==<stage>/consumer/<name>/app " +
   "referencing only manifest-declared secrets";
 
@@ -47,9 +47,9 @@ function asArray(v: unknown): readonly unknown[] {
 }
 
 /** The cluster's Vault URL as the values chain resolves it: walk the files in layering order and keep
- *  the last `global.vaultUrl` that is set — the same last-wins merge helm performs over these files in
- *  G3's render. An unparseable file contributes nothing; null means no file in the chain sets the key,
- *  which leaves nothing to hold the rendered SecretStore against. */
+ *  the last `global.endpoints.vault.url` that is set — the same last-wins merge helm performs over
+ *  these files in G3's render. An unparseable file contributes nothing; null means no file in the
+ *  chain sets the key, which leaves nothing to hold the rendered SecretStore against. */
 export function chainVaultServer(files: readonly ClusterValueFile[]): string | null {
   let found: string | null = null;
   for (const file of files) {
@@ -61,7 +61,9 @@ export function chainVaultServer(files: readonly ClusterValueFile[]): string | n
     }
     const root = asRecord(doc);
     const globals = root ? asRecord(root.global) : null;
-    const url = globals ? asString(globals.vaultUrl) : null;
+    const endpoints = globals ? asRecord(globals.endpoints) : null;
+    const vault = endpoints ? asRecord(endpoints.vault) : null;
+    const url = vault ? asString(vault.url) : null;
     if (url !== null) found = url;
   }
   return found;
@@ -117,7 +119,7 @@ function checkStore(doc: RenderedDoc, vaultServer: string, problems: string[], e
   if (server !== vaultServer) {
     problems.push(
       `SecretStore ${q(doc.name)} (doc ${doc.docIndex}) targets Vault server ${q(server)} but the ` +
-        `cluster's global.vaultUrl is ${q(vaultServer)}`,
+        `cluster's global.endpoints.vault.url is ${q(vaultServer)}`,
     );
     evidence.push(pin(doc, "spec.provider.vault.server", server));
   }
@@ -224,7 +226,7 @@ function check(ctx: GateContext): GateResult {
       expected: EXPECTED,
       found:
         `No file of the cluster values chain (${ctx.clusterValueFiles.map((f) => f.path).join(", ") || "none supplied"}) ` +
-        "sets global.vaultUrl, so the cluster's Vault server is unknown.",
+        "sets global.endpoints.vault.url, so the cluster's Vault server is unknown.",
       reason:
         "Without the cluster's Vault URL the rendered SecretStore's `server` cannot be held against " +
         "anything, which is the sole control against a chart hardcoding its own Vault; the plan " +

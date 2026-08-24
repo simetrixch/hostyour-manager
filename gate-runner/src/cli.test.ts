@@ -23,7 +23,7 @@ const ENV = {
   CLUSTER_VALUE_FILES: JSON.stringify([
     { path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
     { path: "platform/values-prod.yaml", content: "global:\n  env: prod\n" },
-    { path: "installation/profile.yaml", content: "global:\n  vaultUrl: https://vault.m1.example:8200\n" },
+    { path: "installation/profile.yaml", content: "global:\n  endpoints:\n    vault:\n      url: https://vault.m1.example:8200\n" },
   ]),
   REPO_URL: "https://github.com/x/acme.git",
   REQUESTED_REF: "main",

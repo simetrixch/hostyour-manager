@@ -57,7 +57,7 @@ const cap = (text: string): string => (text.length > TEXT_CAP ? `${text.slice(0,
 export const PLATFORM_NAMESPACES: readonly string[] = [
   "default",
   "argocd", "controller", "dbgate", "example-system", "external-secrets", "gate-runner",
-  "image-builder", "kube-system", "mongodb", "observability", "postfix",
+  "image-builder", "kube-system", "mail-relay", "mongodb", "observability",
   "redis", "registry", "service-provisioner", "tailnet-coordinator",
   // The tekton catalog element renders three namespaces of its own, not one: the pipeline
   // controller in `tekton`, the remote-resolver deployment in `tekton-resolvers` and the read-only

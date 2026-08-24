@@ -14,7 +14,7 @@ const consumerName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/);
 /** The backing services a consumer may request in its manifest (contract v1.3). THIS list is the
  *  vocabulary's one owner: the published schema restates it for the reader, and hostyour-cloud's
  *  consumer-contract census holds the two against each other in both directions. */
-export const CONSUMER_SERVICE = ["mongodb", "postgresql", "redis", "registry-pull", "forwardauth", "smtp-relay", "smtp-ops"] as const;
+export const CONSUMER_SERVICE = ["mongodb", "postgresql", "redis", "registry-pull", "forwardauth", "mail-relay", "smtp-ops"] as const;
 export const ConsumerServiceSchema = z.enum(CONSUMER_SERVICE);
 export type ConsumerService = (typeof CONSUMER_SERVICE)[number];
 

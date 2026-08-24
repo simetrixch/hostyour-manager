@@ -1,7 +1,7 @@
 // gate-runner/src/gates/g7.test.ts
 // One clean-context PASS plus a dedicated FAIL per failure mode of G7 "secret contract":
 //   1. an ExternalSecret referencing a property not declared in manifest.secrets,
-//   2. a SecretStore whose server != the cluster chain's global.vaultUrl (a hardcoded literal),
+//   2. a SecretStore whose server != the cluster chain's global.endpoints.vault.url (a hardcoded literal),
 //   3. an ExternalSecret with a wrong remoteRef.key,
 //   4. a null manifest,
 //   5. a ClusterExternalSecret (spec.externalSecretSpec) with an undeclared remoteRef.property,
@@ -17,12 +17,12 @@ import { chainVaultServer, g7 } from "./g7.ts";
 const VAULT_SERVER = "https://vault.svc.cluster.local:8200";
 const EXPECTED_KEY = "test/consumer/acme/app"; // <stage>/consumer/<name>/app
 
-// The cluster's values chain as the gate receives it: the per-stage file carries global.vaultUrl and
+// The cluster's values chain as the gate receives it: the per-stage file carries global.endpoints.vault.url and
 // the profile loads LAST, so the profile's value is the one G7 must hold the render against.
 const CHAIN: ClusterValueFile[] = [
-  { path: "platform/values-common.yaml", content: "global:\n  clusterIssuer: letsencrypt-prod\n" },
-  { path: "platform/values-test.yaml", content: "global:\n  env: test\n  vaultUrl: https://vault.elsewhere:8200\n" },
-  { path: "installation/profile.yaml", content: `global:\n  vaultUrl: ${VAULT_SERVER}\n` },
+  { path: "platform/values-common.yaml", content: "global:\n  clusterIssuer: platform-acme\n" },
+  { path: "platform/values-test.yaml", content: "global:\n  env: test\n  endpoints:\n    vault:\n      url: https://vault.elsewhere:8200\n" },
+  { path: "installation/profile.yaml", content: `global:\n  endpoints:\n    vault:\n      url: ${VAULT_SERVER}\n` },
 ];
 
 function baseManifest(): ConsumerManifest {
@@ -191,7 +191,7 @@ describe("G7 secret contract", () => {
     expect(r.reason).toContain("not declared");
   });
 
-  it("FAIL 2: a SecretStore server != the cluster chain's global.vaultUrl (hardcoded literal)", () => {
+  it("FAIL 2: a SecretStore server != the cluster chain's global.endpoints.vault.url (hardcoded literal)", () => {
     const badServer = "https://evil.attacker.example:8200";
     const r = g7.check(makeCtx({ rendered: [secretStore({ server: badServer }), externalSecret()] }));
     expect(r.status).toBe("fail");
@@ -274,16 +274,16 @@ describe("G7 secret contract", () => {
 });
 
 describe("chainVaultServer", () => {
-  it("takes the LAST file that sets global.vaultUrl — installation/profile.yaml wins over the stage file", () => {
+  it("takes the LAST file that sets global.endpoints.vault.url — installation/profile.yaml wins over the stage file", () => {
     expect(chainVaultServer(CHAIN)).toBe(VAULT_SERVER);
   });
 
-  it("fails the gate when no file of the chain sets global.vaultUrl", () => {
+  it("fails the gate when no file of the chain sets global.endpoints.vault.url", () => {
     const noVault = [{ path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" }];
     expect(chainVaultServer(noVault)).toBeNull();
     const r = g7.check(makeCtx({ clusterValueFiles: noVault }));
     expect(r.status).toBe("fail");
-    expect(r.found).toContain("global.vaultUrl");
+    expect(r.found).toContain("global.endpoints.vault.url");
     expect(r.reason).toContain("Vault URL");
   });
 });

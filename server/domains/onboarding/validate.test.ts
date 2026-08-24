@@ -28,7 +28,7 @@ function target(over: Partial<OnboardTarget> = {}): OnboardTarget {
     clusterValueFiles: [
       { path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
       { path: "platform/values-dev.yaml", content: "global:\n  env: dev\n" },
-      { path: "installation/profile.yaml", content: "global:\n  vaultUrl: https://vault.s1.example:8200\n" },
+      { path: "installation/profile.yaml", content: "global:\n  endpoints:\n    vault:\n      url: https://vault.s1.example:8200\n" },
     ],
     ...over,
   };

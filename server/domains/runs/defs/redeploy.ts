@@ -62,7 +62,7 @@ const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-gitops"] as const;
  *  dropped at approve and the program's own default (or its refusal, by name) decides. */
 const MASTER_ARM_INPUTS = [
   { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to before a certificate expires" },
-  { field: "letsencrypt_server", label: "The ACME directory this installation registers with (staging to rehearse, production to serve)" },
+  { field: "letsencrypt_server", label: "The ACME directory this installation registers with — the authority's production one; a staging directory is refused, because its root is in no machine's trust store" },
   { field: "build_plane", label: "The cluster the image registry stands on — blank when this cluster hosts it itself" },
   { field: "lan_cidr", label: "The IPv4 range this machine shares with the other clusters — blank when it shares none" },
   { field: "storage_path", label: "Where the machine's separate storage is mounted — blank when it has none" },

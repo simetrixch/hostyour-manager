@@ -235,7 +235,7 @@ export async function liveMaster(serve: ServeFixture): Promise<Harness> {
 }
 
 /** A harness whose SLAVE is the tailnet run kinds' target. The cluster row and the profile (where the
- *  rejoin reads global.tailnetUrl) are the rejoin's world; the two client run kinds run without either
+ *  rejoin reads global.endpoints.tailnet.url) are the rejoin's world; the two client run kinds run without either
  *  — the host that needs them most is exactly the one whose deploy went wrong. */
 export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean; tailnetUrl?: string | false } = {}): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
@@ -248,7 +248,7 @@ export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean
       // Seeded BESIDE the values chain's sentinel file: the fake materializes its own profile on
       // a branch's first touch unless platform/values-common.yaml already stands there.
       h.platformRepo.seed("s1.example.com", "platform/values-common.yaml", "global: {}\n");
-      h.platformRepo.seed("s1.example.com", "installation/profile.yaml", `global:\n  tailnetUrl: ${opts.tailnetUrl ?? "https://tale.m1.example.com"}\n`);
+      h.platformRepo.seed("s1.example.com", "installation/profile.yaml", `global:\n  endpoints:\n    tailnet:\n      url: ${opts.tailnetUrl ?? "https://tale.m1.example.com"}\n`);
     }
   }
   return h;
@@ -267,7 +267,7 @@ export async function deployWorld(serve: ServeFixture): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve", marking: false });
   h.platformRepo.seed("s1.example.com", "platform/values-common.yaml", "global: {}\n");
-  h.platformRepo.seed("s1.example.com", "installation/profile.yaml", "global:\n  tailnetUrl: https://tale.m1.example.com\n");
+  h.platformRepo.seed("s1.example.com", "installation/profile.yaml", "global:\n  endpoints:\n    tailnet:\n      url: https://tale.m1.example.com\n");
   return h;
 }
 
