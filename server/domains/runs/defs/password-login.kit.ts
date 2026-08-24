@@ -48,7 +48,7 @@ import { loadServer } from "./deploy-slave.kit.ts";
 /** The ONE file this platform states the password door in, in both directions. The `00-` prefix is
  *  the whole point of the name: it is what makes the file sort — and therefore be read — before
  *  every other drop-in, including cloud-init's. */
-const DROP_IN = "/etc/ssh/sshd_config.d/00-hostyour-passwords.conf";
+export const DROP_IN = "/etc/ssh/sshd_config.d/00-hostyour-passwords.conf";
 
 /** The two keywords that are the SAME door: sshd's own, and PAM's, which serves passwords through
  *  keyboard-interactive. Turning off only the first leaves the door open. */
@@ -113,11 +113,23 @@ const SURVIVES = `survives_without_passwords() {
 /** Print every file that STATES either keyword, in the order sshd reads them, so a drop-in that
  *  disagrees with the verdict above is visible instead of being believed. Reported and never
  *  edited: a file this platform did not write carries settings far beyond these two keywords, and
- *  the drop-in above already wins over all of them. */
+ *  the drop-in above already wins over all of them.
+ *
+ *  TWO GREPS, AND THE ELEVATED ONE NAMES ITS PATTERNS OUTRIGHT. The sudoers rule this command runs
+ *  under matches the whole argument string, so a rule carrying `*` where a pattern belongs lets the
+ *  account put `-f /etc/shadow` there instead — grep reads its patterns from a file only root may
+ *  read and prints the lines that match. Two fixed `-e` patterns leave the rule with no wildcard at
+ *  all, and the anchoring the ERE used to do runs afterwards over grep's own `file:line:text`
+ *  output, where it needs no elevation. `-H` is what makes that output shape a fact rather than a
+ *  coincidence: grep prints the file name only when it was given more than one operand, so a host
+ *  without /etc/ssh/sshd_config.d would otherwise print bare `line:text` and the anchor would drop
+ *  every match. */
 const INVENTORY = `inventory() {
   echo "files stating either keyword, in the order sshd reads them:"
-  as_root grep -rniE '^[[:space:]]*(PasswordAuthentication|KbdInteractiveAuthentication)[[:space:]]' \\
-    /etc/ssh/sshd_config /etc/ssh/sshd_config.d 2>/dev/null | sort || echo "  (none)"
+  as_root grep -rniH -e PasswordAuthentication -e KbdInteractiveAuthentication \\
+    /etc/ssh/sshd_config /etc/ssh/sshd_config.d 2>/dev/null \\
+    | grep -iE '^[^:]+:[0-9]+:[[:space:]]*(PasswordAuthentication|KbdInteractiveAuthentication)[[:space:]]' \\
+    | sort || echo "  (none)"
 }`;
 
 /** Make the RUNNING daemon re-read its configuration, and say so honestly when there is nothing to
@@ -148,13 +160,21 @@ const RELOAD = `reload_sshd() {
  *  parses the FILES; it has no channel to the running process, so it cannot tell "the daemon
  *  reloaded" from "the file changed". A drop-in left on disk that the running daemon never read
  *  would make the probe report a shut door while the daemon goes on taking passwords — the same
- *  class of mistake the `99-` file made, from the other end. */
+ *  class of mistake the `99-` file made, from the other end.
+ *
+ *  `--` BEFORE THE SOURCE FILE, in both writers, and the sudoers rule carries it too. The rule can
+ *  only ever say `*` where the source stands, because `mktemp` picks that name; sudo matches the
+ *  whole argument string, so without `--` that `*` swallows OPTIONS as well, and
+ *  `install -t /etc/sudoers.d` then makes this account the author of a root-owned sudoers file.
+ *  After `--` every operand is a file name: `install` sees several sources and a target that is not
+ *  a directory, and refuses. What the rule still permits is the drop-in's CONTENT, which is the
+ *  thing this call site exists to choose and which no sudoers rule can narrow. */
 const APPLY = `apply() {
   local value="$1" tmp prev=""
   tmp="$(mktemp)"
   cat > "$tmp"
   if as_root test -e "${DROP_IN}"; then prev="$(mktemp)"; as_root cat "${DROP_IN}" > "$prev"; fi
-  as_root install -m 0644 -o root -g root "$tmp" "${DROP_IN}"
+  as_root install -m 0644 -o root -g root -- "$tmp" "${DROP_IN}"
   rm -f "$tmp"
   if ! as_root "$(sshd_bin)" -t; then
     put_back "$prev"
@@ -169,7 +189,7 @@ const APPLY = `apply() {
   [ -z "$prev" ] || rm -f "$prev"
 }
 put_back() {
-  if [ -n "$1" ]; then as_root install -m 0644 -o root -g root "$1" "${DROP_IN}"; rm -f "$1"
+  if [ -n "$1" ]; then as_root install -m 0644 -o root -g root -- "$1" "${DROP_IN}"; rm -f "$1"
   else as_root rm -f "${DROP_IN}"; fi
 }`;
 
