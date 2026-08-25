@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import type { DbHandle } from "../../db/client.ts";
 import { adoptDef, elevatedName, MANAGER_ELEVATED, SUDOERS_DROP_IN, sudoersDropIn, unpinnedElevated, type ElevatedCommand } from "./defs/adopt.ts";
 import { DROP_IN as SSHD_DROP_IN } from "./defs/password-login.kit.ts";
+import { TAILNET_PROBE_SCRIPT } from "./tailnet-probe.ts";
 import { getRun, readEvents } from "../../executor/read.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import { servers } from "../../db/schema/inventory.ts";
@@ -49,7 +50,9 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
   }
 
   it("grants the NAMED commands on a non-root account and never the blanket right, arms the removal, and says in the log that it STAYS", async () => {
-    const host: { commands: string[]; dropIn?: string | null } = { commands: [] };
+    // The ordinary first adoption: a cloud-image account in the machine's own sudo group, which is
+    // what the operator's password buys `install` on a machine carrying no drop-in yet.
+    const host: FakeHost = { commands: [], machineSudo: "password" };
     const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, host), "digi1");
     const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
@@ -72,7 +75,13 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
     // THE PLANTED STATE: a machine adopted before this change, carrying the one line every adoption
     // used to write. `sudo -l` on it says every command, as every user, without a password — and
     // that is the standing route to root #19 is about.
-    const host: { commands: string[]; dropIn?: string | null } = { commands: [], dropIn: LEGACY_BLANKET_DROP_IN };
+    //
+    // AND `machineSudo: "none"`, WHICH IS THE HARD HALF: the account holds no sudoers entry of its
+    // own, so that blanket line is its whole way to root and the file this run installs is the
+    // whole of what it holds afterwards. The operator's password buys `install` off the blanket and
+    // nothing after it — a root command this run ships once the file is in place is answered by the
+    // file or refused.
+    const host: FakeHost = { commands: [], machineSudo: "none", dropIn: LEGACY_BLANKET_DROP_IN };
     const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, host), "digi1");
     const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
@@ -93,12 +102,70 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
     expect(meta).toContain("An earlier adoption left");
   });
 
+  /** What sudo is asked to AUTHORIZE in one command line this run shipped: sudo's own options come
+   *  off the front, and the redirection and the pipeline the exit code is read through come off the
+   *  back — none of those is the command a rule has to name. `null` where the line asks sudo about
+   *  ITSELF (`sudo -l` lists the account's own rules and needs no rule of its own) and where the
+   *  line elevates nothing at all. */
+  function sudoAsks(command: string): string | null {
+    const at = command.indexOf("sudo ");
+    if (at < 0) return null;
+    const asked = (command.slice(at + "sudo ".length)
+      .replace(/^(?:-n |-S |-p '' |-- )+/, "")
+      .split(" | ")[0] ?? "")
+      .replace(/\s*\d?>\s*\/dev\/null/g, "")
+      .trim();
+    return asked === "" || asked.startsWith("-") ? null : asked;
+  }
+
+  it("runs no root command after the install that the file it installed does not permit", async () => {
+    // THE MACHINE WHOSE ONLY WAY TO ROOT IS THE FILE THIS RUN REPLACES: an earlier adoption's
+    // blanket line in this product's own drop-in, and `machineSudo: "none"` beside it. On this
+    // machine "permitted by the installed file" and "able to run at all" are the same statement —
+    // which is what makes the rule below measurable instead of argued, and it is the machine #19
+    // exists to repair.
+    //
+    // A PASSWORD IS NOT A RIGHT. A `sudo -S` shipped after the install authenticates the account
+    // and is then refused for any command no row of MANAGER_ELEVATED names, so a step that raises
+    // one there fails ONE COMMAND SHORT of finishing — after `install` has already taken the
+    // blanket away, and with the armed remove-sudoers then taking the drop-in too, which leaves the
+    // account with no sudo at all and the machine worse than the run found it.
+    //
+    // HOW MUCH THIS COVERS: every command line the run shipped over the session after the install,
+    // and no more. A command INSIDE an uploaded script — the tailnet probe's `sudo -n tailscale`,
+    // the password-login helpers' `as_root` — is run by `bash` on the host and never reaches this
+    // fake's exec, so those are held by the census above ("grants exactly the commands this
+    // repository elevates") and not here.
+    const host: FakeHost = { commands: [], machineSudo: "none", dropIn: LEGACY_BLANKET_DROP_IN };
+    const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, host), "digi1");
+    const { runId } = await executor.plan("cluster-adopt", { serverId });
+    await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
+    await executor.settle(runId);
+    // The step's own error FIRST, because it names the command sudo turned away — a bare status
+    // assertion would go red saying only that something did.
+    expect(stepColumn(db, runId, "configure-sudo", "error") ?? "").toBe("");
+    expect(getRun(db.db, runId)?.status).toBe("succeeded");
+
+    const shipped = host.commands ?? [];
+    const installedAt = shipped.findIndex((c) => c.includes("install -m 0440"));
+    expect(installedAt).toBeGreaterThan(-1);
+    const elevated = shipped.slice(installedAt + 1).map(sudoAsks).filter((c): c is string => c !== null);
+    // WHAT WAS ACTUALLY MEASURED, because a clean answer over an EMPTY set would mean nobody was
+    // looking. On the green path these are three: `sudo -n true` twice — this step's own proof and
+    // verify-key-login — and `sudo -n timedatectl set-ntp true` from enable-ntp. The floor is
+    // asserted rather than the exact list, which a change of step order would break for no reason.
+    expect(elevated.length).toBeGreaterThanOrEqual(3);
+    expect(elevated).toContain("true");
+    const file = sudoersDropIn("digi1");
+    expect(elevated.filter((c) => !sudoersPermits(file, c))).toEqual([]);
+  });
+
   it("writes NOTHING where the MACHINE'S OWN configuration grants every command — and arms no removal for a grant it did not make", async () => {
     // The cloud-image case: `ALL=(ALL) NOPASSWD:ALL` from a file this product did not write, which
     // it therefore cannot take back. Writing a drop-in beside it would add a grant that changes
     // nothing and that no successful run removes. This is the INNOCENT machine — it never carried
     // this product's grant, and the run must leave it exactly as it found it.
-    const host: FakeHost = { commands: [], imageBlanket: true };
+    const host: FakeHost = { commands: [], machineSudo: "nopasswd" };
     const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, host), "digi1");
     const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
@@ -120,7 +187,7 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
     // not take, a rule the parser read differently than this code meant it — is the exact state the
     // run exists to remove, so reporting the machine ready would be the software claiming an
     // outcome it did not reach.
-    const host: FakeHost = { commands: [], installLeavesBlanket: true };
+    const host: FakeHost = { commands: [], machineSudo: "password", installLeavesBlanket: true };
     const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, host), "digi1");
     const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
@@ -162,7 +229,7 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
 
   it("asks the machine before writing, and asks it in a form whose EXIT CODE is the answer", async () => {
     const commands: string[] = [];
-    const { executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, { commands }), "digi1");
+    const { executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, undefined, { commands, machineSudo: "password" }), "digi1");
     const { runId } = await executor.plan("cluster-adopt", { serverId });
     await executor.approve(runId, { "adopt-password": Buffer.from(PASSWORD) });
     await executor.settle(runId);
@@ -192,6 +259,10 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
     for (const name of unpinnedElevated().map(elevatedName)) expect(plan.summary).toContain(name);
     expect(plan.summary).toContain(SSHD_DROP_IN);
     expect(plan.summary).toContain("systemctl reload ssh");
+    // The READ that the granted `install` and `cat` compose into, named where the operator decides.
+    // Without this the card describes a write and the account can also read /etc/shadow, which is
+    // the software telling the person something smaller than what it is about to do.
+    expect(plan.summary).toContain("/etc/shadow");
     expect(plan.summary).toContain('"digi1 ALL=(ALL) NOPASSWD:ALL" has that line replaced by this run');
     expect(plan.summary).toContain("proves sudo in the preflight and installs an SSH key");
     // CONDITIONAL, because configure-sudo writes nothing where the machine already grants blanket
@@ -318,7 +389,11 @@ describe("the drop-in as a machine reads it", () => {
     (f: string): string => plant(f, "-m 0644 -o root -g root -- *", "-m 0644 -o root -g root *"),
     (f: string): string => plant(f, "/usr/bin/grep -rniH -e PasswordAuthentication -e KbdInteractiveAuthentication", "/usr/bin/grep -rniE *"),
     (f: string): string => plant(f, "NOPASSWD: ", `NOPASSWD: /usr/bin/grep -qE * ${SUDOERS_DROP_IN}, `),
-    (f: string): string => plant(f, /\/usr\/bin\/tailscale [^,]*,[\s\S]*?\/usr\/bin\/tailscale [^,]*,[\s\S]*?\/usr\/bin\/tailscale [^,]*/, "/usr/bin/tailscale"),
+    // Every pinned tailscale rule back to the shape that named no arguments. Written to be
+    // INDEPENDENT OF HOW MANY there are: a plant coupled to today's three would take this whole
+    // file down at module load the day a reading is added or dropped, which is a probe that stops
+    // measuring instead of an assertion that fails.
+    (f: string): string => plant(f, /\/usr\/bin\/tailscale [^,\n\\]*/g, "/usr/bin/tailscale"),
   ].reduce((f, step) => step(f), file);
 
   it.each(REFUSED.slice(0, 4))("permitted, on the shape that was there, the command that %s", (_why, command) => {
@@ -329,21 +404,34 @@ describe("the drop-in as a machine reads it", () => {
     for (const [, command] of REFUSED.slice(4)) expect(sudoersPermits(OLD_SHAPES, command)).toBe(false);
   });
 
-  it("still permits the three tailscale readings the probe really takes, on the narrowed file", () => {
+  it("permits every tailscale reading the probe really takes and no other, the argument strings read OUT of the probe", () => {
     // The other half of the tailscale plant: closing `tailscale up --ssh` may not close the probe.
-    for (const args of ["version", "status --json", "debug prefs"]) {
-      expect(sudoersPermits(file, `tailscale ${args}`)).toBe(true);
-    }
+    //
+    // THE STRINGS COME OFF THE CALL SITE, because the census cannot see this one. It reads BINARY
+    // NAMES (`(?:sudo -n|as_root)\s+(\S+)`), and `tailscale` is granted — so a FOURTH reading added
+    // to the probe passes it while the machine refuses the command, and `ts()`'s
+    // `|| sudo -n tailscale "$@" 2>/dev/null` swallows that refusal into a fact the probe simply
+    // does not report. A pinned rule is only as good as something deriving what it has to permit.
+    const asks = [...TAILNET_PROBE_SCRIPT.matchAll(/\bts ([^)\n|$"]+)/g)].map((m) => (m[1] ?? "").trim());
+    expect(asks).not.toEqual([]); // a derivation that found nothing would permit everything by asking nothing
+    expect(asks.filter((args) => !sudoersPermits(file, `tailscale ${args}`))).toEqual([]);
     expect(sudoersPermits(file, "tailscale up --ssh")).toBe(false);
     expect(sudoersPermits(file, "tailscale status")).toBe(false);
   });
 
-  it("permits the one thing no rule can take away: the CONTENT of the sshd drop-in", () => {
+  it("permits the two things no rule can take away: the CONTENT of the sshd drop-in, and a read of any file through it", () => {
     // With `--` the account can no longer make install write anywhere else. This is what stays: it
     // chooses the bytes of the drop-in that sorts before every other sshd file, and
     // `systemctl reload ssh` is granted beside it, so `PermitRootLogin yes` is a root login away.
-    // That is why "install" is named to the operator alongside microk8s and tailscale.
+    // That is why "install" is named to the operator alongside microk8s.
     expect(sudoersPermits(file, `install -m 0644 -o root -g root -- /tmp/evil ${SSHD_DROP_IN}`)).toBe(true);
     expect(sudoersPermits(file, "systemctl reload ssh")).toBe(true);
+    // AND THE READ THAT COMES WITH THE WRITE, asserted because it is the half the prose used to
+    // leave out: install's SOURCE is the account's to name, the destination is mode 0644, and `cat`
+    // of that destination is a row of its own. Pinning the source would not help — the account owns
+    // that path and a symlink from it is followed as root. So it is disclosed instead, and the
+    // summary test above asserts the operator is told.
+    expect(sudoersPermits(file, `install -m 0644 -o root -g root -- /etc/shadow ${SSHD_DROP_IN}`)).toBe(true);
+    expect(sudoersPermits(file, `cat ${SSHD_DROP_IN}`)).toBe(true);
   });
 });

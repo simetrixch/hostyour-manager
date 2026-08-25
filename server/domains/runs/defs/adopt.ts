@@ -116,6 +116,18 @@ export interface ElevatedCommand {
  *  file works, the tailnet probe, the password-login run kinds — plus the cleanup that removes the
  *  file, which runs on an abort that may already have discarded the password.
  *
+ *  READ THE OTHER WAY ROUND, THAT SENTENCE BINDS THE STEP AND NOT THE TABLE: from the moment
+ *  configure-sudo installs this file, the account holds what this file grants and nothing else, so
+ *  every root command the run issues after the install must be one of these rows — or one asked
+ *  only while the machine still grants every command anyway. THE PASSWORD DOES NOT BUY PAST IT: a
+ *  password authenticates the account, a sudoers rule authorizes the command, and the two are not
+ *  the same thing. On a machine an earlier adoption left carrying `ALL=(ALL) NOPASSWD:ALL` in this
+ *  product's own drop-in, whose account holds no sudoers entry of its own, that blanket is the
+ *  whole of the account's way to root: the install takes it away, and a `sudo -S` issued after it
+ *  for a command no row names fails on a right nothing on that machine grants — one command short
+ *  of finishing, with the armed removal then taking the file too. adopt.sudo.test.ts drives that
+ *  machine (`machineSudo: "none"` beside the legacy drop-in) and fails a run that tries it.
+ *
  *  WHAT THIS IS NOT IS A CONTAINMENT BOUNDARY, and the operator is told so before approving.
  *  `unpinnedElevated()` reads the rows that leave their arguments open — a `*`, which sudo matches
  *  against the whole argument string and which therefore stands for any run of characters, or no
@@ -126,6 +138,14 @@ export interface ElevatedCommand {
  *      that sorts before every other (password-login.kit DROP_IN), and `systemctl reload ssh` is
  *      granted beside it, so `PermitRootLogin yes` is a root login away. No rule can narrow this
  *      one: writing that file with content this manager composes IS the call site.
+ *      IT READS AS WELL AS IT WRITES, and that is the half a reader misses. `install SRC DEST`
+ *      copies SRC as root, `cat` of that same DEST is a row of its own, and the destination is
+ *      mode 0644 — so any file on the machine, /etc/shadow and a private key included, is two
+ *      granted commands away from this account. Pinning the SOURCE pattern would not close it:
+ *      the account owns whatever path the pattern allows and can point a symlink from it at any
+ *      file, which install follows as root. There is no rule shape that permits the write and
+ *      refuses the read, so this is DISCLOSED — in the table, and in the summary the operator
+ *      approves — rather than claimed to be contained.
  *
  *  What the list takes away is every OTHER command. The first is reached only by run kinds that
  *  already carry an elevation password (deploy-slave, redeploy, release and tailnet all declare
@@ -215,11 +235,17 @@ export const SUDO_ALREADY_BLANKET =
  *  first is how the leftover cemented itself: a re-adoption saw a machine that already granted
  *  everything, wrote nothing, and left its predecessor's grant standing for good.
  *
- *  RAISED WITH THE OPERATOR'S PASSWORD, not with a standing rule. Both places that ask this
- *  question are inside configure-sudo, which already requires that password to install the file, so
- *  a rule permitting `cat /etc/sudoers.d/90-hostyour` would be a right left on the machine for good
- *  in exchange for two commands that run once. The password goes on stdin and `cat` never reads
- *  stdin, so a machine that does not prompt at all leaves the line unconsumed and unread.
+ *  ASKED ONLY WHERE THE MACHINE ALREADY GRANTS EVERY COMMAND, which is what lets `sudo -n` reach
+ *  root here with no rule for `cat` on the machine and no password. Both call sites stand behind
+ *  SUDO_ALREADY_BLANKET, and while that answers yes this account runs any command as root without a
+ *  password, `cat` included. Neither of the other two ways to raise it is available: a standing rule
+ *  would be a right left on the machine for good in exchange for a question asked twice in one step,
+ *  and the operator's password would rest on a right nothing here measures — the account's OWN
+ *  sudoers entry, which the machine this question exists for need not have at all.
+ *
+ *  THE ORDER IS PART OF THE ANSWER. Asked where the machine grants nothing, a refusal and a clean
+ *  file produce the same non-zero exit, and the step would read "not granted" off a command that
+ *  never ran — a check that cannot go red.
  *
  *  ONLY `cat` IS ELEVATED, and the pattern is matched by a grep that runs as the login user. A
  *  `sudo grep -qE <pattern> <file>` would have to be permitted with a `*` where the pattern is, and
@@ -229,7 +255,7 @@ export const SUDO_ALREADY_BLANKET =
  *  the whole answer: an unreadable file feeds grep nothing and the pipeline exits non-zero, which
  *  is the answer "not granted". */
 export const OUR_DROP_IN_GRANTS_BLANKET =
-  `sudo -S -p '' -- cat ${SUDOERS_DROP_IN} 2>/dev/null | ` +
+  `sudo -n cat ${SUDOERS_DROP_IN} 2>/dev/null | ` +
   `grep -qE '^[^#]*ALL[[:space:]]*=[[:space:]]*\\(ALL([[:space:]]*:[[:space:]]*ALL)?\\)[[:space:]]*NOPASSWD:[[:space:]]*ALL[[:space:]]*$'`;
 
 // The baseline probe (step 7). BASE key value lines, parsed console-side.
@@ -386,8 +412,6 @@ function adoptSteps(params: AdoptParams): Step[] {
           return;
         }
         const session = await ctx.openPasswordSession();
-        const pw = requirePassword(ctx);
-        const pwLine = Buffer.concat([pw, Buffer.from("\n")]);
         // TWO QUESTIONS, NOT ONE, and asking only the first is the defect this step used to carry.
         // A cloud image commonly grants the first account `ALL=(ALL) NOPASSWD:ALL` from its own
         // configuration, and a machine adopted before carries the blanket line an earlier adoption
@@ -395,14 +419,14 @@ function adoptSteps(params: AdoptParams): Step[] {
         // opposite cases: the first is a grant this product did not make and cannot take back, the
         // second is one it made and must.
         const already = await remoteExec(ctx, session, SUDO_ALREADY_BLANKET);
-        const ours = already.code === 0
-          ? (await remoteExec(ctx, session, OUR_DROP_IN_GRANTS_BLANKET, { stdin: pwLine })).code === 0
-          : false;
+        const ours = already.code === 0 ? (await remoteExec(ctx, session, OUR_DROP_IN_GRANTS_BLANKET)).code === 0 : false;
         if (already.code === 0 && !ours) {
           ctx.log("meta", `"${server.sshUser}" already runs every command as root without a password on this machine, from configuration this product did not write — nothing is written, and ${SUDOERS_DROP_IN} is left as this run found it. That grant is not this run's to take back.`);
           ctx.checkpoint({ sudoersWritten: false, blanketFrom: "the machine's own configuration" });
           return;
         }
+        const pw = requirePassword(ctx);
+        const pwLine = Buffer.concat([pw, Buffer.from("\n")]);
         const content = sudoersDropIn(server.sshUser);
         const tmp = `/tmp/dc-sudoers-${ctx.runId}`;
         ctx.log("meta", ours
@@ -420,18 +444,22 @@ function adoptSteps(params: AdoptParams): Step[] {
         // leaves a machine nothing here can repair. `-f` checks the named file and reads nothing
         // else, which is why it needs no elevation of its own.
         await remoteCmd(ctx, session, `/usr/sbin/visudo -cf ${tmp} >/dev/null`);
-        // Register the teardown BEFORE the fallible visudo check so a bad drop-in is
-        // always cleaned up (previously a failed visudo left the file — and any leaked
-        // secret in it — on the box).
+        // Register the teardown BEFORE the mutation it takes back, so a drop-in that is in place
+        // when anything later fails is always removed (a failed install used to leave the file —
+        // and any leaked secret in it — on the box).
         ctx.registerCleanup(removeSudoersCleanup);
         try {
           // `install` sets owner/group/mode atomically and does NOT read stdin, so the
           // password (consumed by sudo only when it actually prompts, ignored otherwise)
           // can never reach the file.
+          //
+          // AND THIS IS THE LAST ROOT COMMAND THIS STEP RAISES WITH THE PASSWORD. It is also the
+          // one that replaces the account's rights with MANAGER_ELEVATED, and on a machine whose
+          // account holds no sudoers entry of its own — one an earlier adoption left blanket in
+          // our own drop-in — the blanket it overwrites was the whole of the way to root the
+          // password was riding on. A `sudo -S` issued after this line for a command no row names
+          // authenticates and is then refused, so what runs from here on is what the file grants.
           await remoteCmd(ctx, session, `sudo -S -p '' install -m 0440 -o root -g root ${tmp} ${SUDOERS_DROP_IN}`, { stdin: pwLine });
-          // Raised with the same password, so no rule for `visudo` is left on the machine for the
-          // sake of one command that runs here and nowhere else.
-          await remoteCmd(ctx, session, "sudo -S -p '' -- visudo -c >/dev/null", { stdin: pwLine });
         } finally {
           await remoteExec(ctx, session, `rm -f ${tmp}`);
         }
@@ -439,25 +467,39 @@ function adoptSteps(params: AdoptParams): Step[] {
         // that was written. Both directions are failures the step must not survive: a drop-in that
         // still says every command means the run granted what it came to take away, and a drop-in
         // that grants nothing usable means the run has left a machine no later run can reach root
-        // on. `sudo -n true` is the first row of the table and so the whole of what it can prove
-        // here — the rows for microk8s, tailscale and sshd name binaries a bare machine does not
-        // have yet, and a rule for a path is not a rule that has been exercised (#12).
-        if ((await remoteExec(ctx, session, OUR_DROP_IN_GRANTS_BLANKET, { stdin: pwLine })).code === 0) {
-          throw errValidation(
-            `${SUDOERS_DROP_IN} still grants "${server.sshUser}" every command as root after this run rewrote it — ` +
-            `the blanket right was not taken back, so the adoption stops here rather than reporting a machine it did not hand over.`,
-          );
+        // on.
+        //
+        // ASKED IN THE ORDER THAT NEEDS NO RIGHT FIRST, because every question from here on is
+        // answered by the file just installed and by nothing else. `sudo -n -l` lists the account's
+        // own rules and needs no rule of its own; while it says the machine no longer grants every
+        // command, no file can be granting it and there is nothing left to read. Only where it
+        // still says yes is the drop-in read, and at that moment the account runs any command as
+        // root without a password, `cat` included. The other order asks a `cat` no rule permits and
+        // reads "not granted" off a command that was refused.
+        const blanketAfter = await remoteExec(ctx, session, SUDO_ALREADY_BLANKET);
+        if (blanketAfter.code === 0) {
+          if ((await remoteExec(ctx, session, OUR_DROP_IN_GRANTS_BLANKET)).code === 0) {
+            throw errValidation(
+              `${SUDOERS_DROP_IN} still grants "${server.sshUser}" every command as root after this run rewrote it — ` +
+              `the blanket right was not taken back, so the adoption stops here rather than reporting a machine it did not hand over.`,
+            );
+          }
+          ctx.log("meta", `"${server.sshUser}" still runs every command as root without a password on this machine, from configuration this product did not write — ${SUDOERS_DROP_IN} no longer grants it, and nothing here can take back what another file states.`);
         }
+        // AND SUDO ITSELF IS THE PARSER WHOSE VERDICT THIS TAKES. A drop-in sudo cannot parse takes
+        // sudo down for every account on the machine, so this line fails there too — which is why
+        // the file is validated as a temp file BEFORE it is installed, where the diagnostic names
+        // the offending line and nothing is yet in place to repair. `sudo -n true` is the first row
+        // of the table and so the whole of what it can prove here: the rows for microk8s, tailscale
+        // and sshd name binaries a bare machine does not have yet, and a rule for a path is not a
+        // rule that has been exercised (#12).
         const usable = await remoteExec(ctx, session, "sudo -n true");
         if (usable.code !== 0) {
           throw errValidation(
             `${SUDOERS_DROP_IN} was installed but "${server.sshUser}" cannot run even the first of its commands as root without a password — ` +
-            `every later run on this machine reaches root that way, so the adoption stops here.`,
+            `either sudo will not read the file, or the rule it read does not grant what it says. ` +
+            `Every later run on this machine reaches root that way, so the adoption stops here.`,
           );
-        }
-        const blanketAfter = await remoteExec(ctx, session, SUDO_ALREADY_BLANKET);
-        if (blanketAfter.code === 0) {
-          ctx.log("meta", `"${server.sshUser}" still runs every command as root without a password on this machine, from configuration this product did not write — ${SUDOERS_DROP_IN} no longer grants it, and nothing here can take back what another file states.`);
         }
         ctx.checkpoint({ sudoersWritten: true, granted: MANAGER_ELEVATED.length, blanketTakenBack: ours, blanketElsewhere: blanketAfter.code === 0 });
       },
@@ -590,7 +632,9 @@ function sudoGrant(sshUser: string): string {
     `and the password-login run kinds reach root on this machine that way and carry no password of their own. ` +
     `${open.length} of them leave their arguments open (${open.join(", ")}) and so still reach root: "microk8s kubectl" ` +
     `administers the cluster, and "install" onto ${SSHD_PASSWORD_DROP_IN} — beside the granted "systemctl reload ssh" — ` +
-    `lets that account choose the content of the sshd drop-in that sorts before every other. ` +
+    `lets that account choose the content of the sshd drop-in that sorts before every other. That same "install" also ` +
+    `COPIES any file it is pointed at into that world-readable path, which "cat" is granted on, so /etc/shadow and any ` +
+    `private key on the machine are readable by that account. No rule can permit the write and refuse the read. ` +
     `So this is a smaller grant and not a boundary. ` +
     `A machine an earlier adoption left carrying "${sshUser} ALL=(ALL) NOPASSWD:ALL" has that line replaced by this run.`
   );

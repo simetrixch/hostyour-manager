@@ -61,6 +61,21 @@ export const BLANKET_LINE = /^[^#]*ALL[ \t]*=[ \t]*\(ALL(?:[ \t]*:[ \t]*ALL)?\)[
  *  prove the run takes it back. */
 export const LEGACY_BLANKET_DROP_IN = "digi1 ALL=(ALL) NOPASSWD:ALL\n";
 
+/** What the MACHINE'S OWN sudoers grants this account — the entry no run here writes and none can
+ *  take back, and therefore the only right that survives whatever configure-sudo installs.
+ *
+ *    "none"      no entry of the account's own. It reaches root ONLY through
+ *                /etc/sudoers.d/90-hostyour, and only for the commands that file names. A machine an
+ *                earlier adoption left carrying the blanket line in that file is this case: the
+ *                blanket is its whole way to root, and the install is the moment that way is
+ *                replaced by the new file.
+ *    "password"  `ALL=(ALL) ALL` — every command as root once the account's password is given. The
+ *                ordinary cloud-image account, and the state a first adoption arrives on.
+ *    "nopasswd"  `ALL=(ALL) NOPASSWD:ALL` from the machine's own configuration. configure-sudo
+ *                writes nothing on this machine: there is nothing a second grant would add and
+ *                nothing this product could take back. */
+type MachineSudo = "none" | "password" | "nopasswd";
+
 function escapeForPattern(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -100,17 +115,15 @@ export function sudoersPermits(file: string | null, command: string): boolean {
 // `sshdOut` answers the password-login probe, which the adopt run runs twice — once before it
 // shuts the daemon's password door and once after — so it is a function of the call count.
 //
-// THE SUDO SIDE IS MODELLED AS THE RIGHT, NOT AS THE FILE. `host.imageBlanket` is what the
-// machine's OWN configuration grants — the cloud image's `ALL=(ALL) NOPASSWD:ALL`, which no run
-// here writes and none can take back — and `host.dropIn` is the live content of
-// /etc/sudoers.d/90-hostyour, which the run's own `install` really replaces. Every `sudo -n` the run
-// ships is then answered by asking whether those two together permit it, so a test asserting that a
-// command reached root is asserting the machine's answer and not the manager's intention.
-// `host.commands` collects every command line the run really shipped.
+// THE SUDO SIDE IS MODELLED AS THE RIGHT, NOT AS THE FILE. `host.machineSudo` is what the machine's
+// OWN sudoers grants the account, which no run here writes and none can take back, and
+// `host.dropIn` is the live content of /etc/sudoers.d/90-hostyour, which the run's own `install`
+// really replaces. Every `sudo` the run ships is then answered by asking whether those two together
+// permit it, so a test asserting that a command reached root is asserting the machine's answer and
+// not the manager's intention. `host.commands` collects every command line the run really shipped.
 export interface FakeHost {
-  /** `ALL=(ALL) NOPASSWD:ALL` from the machine's OWN configuration — a cloud image's, which no run
-   *  here writes and none can take back. */
-  imageBlanket?: boolean;
+  /** What the machine's OWN sudoers grants this account. Defaults to `"none"`. */
+  machineSudo?: MachineSudo;
   /** The live content of /etc/sudoers.d/90-hostyour, which the run's own `install` really replaces.
    *  `null` is the file not being there. */
   dropIn?: string | null;
@@ -128,8 +141,9 @@ export function fakeFactory(preflightOut = HEALTHY_PREFLIGHT, probeOut = PROBE_N
   const installed: string[] = []; // the authorized_keys lines install-key really appended
   let pending: string | null = null; // what `cat > /tmp/dc-sudoers-…` holds, before `install` moves it
   if (host.dropIn === undefined) host.dropIn = null;
+  const machineSudo: MachineSudo = host.machineSudo ?? "none";
   const dropInBlanket = (): boolean => host.dropIn !== null && host.dropIn !== undefined && BLANKET_LINE.test(host.dropIn);
-  const blanketNow = (): boolean => host.imageBlanket === true || dropInBlanket();
+  const blanketNow = (): boolean => machineSudo === "nopasswd" || dropInBlanket();
   return (target: SshTarget) => {
     if (target.auth.kind === "password" && target.auth.password.toString("utf8") !== PASSWORD) {
       return Promise.reject(new Error("authentication failed"));
@@ -138,16 +152,28 @@ export function fakeFactory(preflightOut = HEALTHY_PREFLIGHT, probeOut = PROBE_N
     // `sudo -n` still answers on a machine adopted that way.
     const permits = (command: string): boolean =>
       target.username === "root" || blanketNow() || sudoersPermits(host.dropIn ?? null, command);
+    // …and the same question with the account's password on stdin. THE PASSWORD AUTHENTICATES, IT
+    // DOES NOT AUTHORIZE: proving who the account is buys nothing where no rule names the command,
+    // so `sudo -S` reaches past `permits()` only as far as the machine's own sudoers entry goes. An
+    // account whose entry is "none" therefore loses every command /etc/sudoers.d/90-hostyour does
+    // not name the instant the run replaces that file — which is the machine an earlier adoption
+    // left blanket, and the one this run exists to repair.
+    const permitsWithPassword = (command: string): boolean => machineSudo !== "none" || permits(command);
     const execImpl = async (command: string, o: ExecOptions): Promise<ExecResult> => {
       const emit = (s: string): void => {
         for (const l of s.split("\n")) o.onStdout?.(l);
       };
       host.commands?.push(command);
-      // A `sudo -S` command is authorized by the PASSWORD on stdin and by no rule at all, so one
-      // that arrives without it is refused here. A real machine would prompt and fail; answering it
-      // anyway would let a call site lose its password with every assertion still green.
-      if (command.startsWith("sudo -S ") && o.stdin?.toString("utf8") !== `${PASSWORD}\n`) {
-        throw new Error(`sudo -S shipped without the password on stdin: ${command}`);
+      if (command.startsWith("sudo -S ")) {
+        // A `sudo -S` that arrives without the password would prompt on a real machine and fail.
+        // Answering it anyway would let a call site lose its password with every assertion green.
+        if (o.stdin?.toString("utf8") !== `${PASSWORD}\n`) {
+          throw new Error(`sudo -S shipped without the password on stdin: ${command}`);
+        }
+        const asked = command.slice("sudo -S ".length).replace(/^(?:-p '' |-- )+/, "");
+        if (!permitsWithPassword(asked)) {
+          return { code: 1, stdoutTail: "", stderrTail: `sudo: ${target.username} is not allowed to execute '${asked}' as root` };
+        }
       }
       // `sudo -l | grep -q` is the question about the RIGHT: grep's exit code is the answer, so a
       // machine that does not grant it answers 1 here, exactly as the real pipeline would.
@@ -155,11 +181,12 @@ export function fakeFactory(preflightOut = HEALTHY_PREFLIGHT, probeOut = PROBE_N
         return { code: blanketNow() ? 0 : 1, stdoutTail: "", stderrTail: "" };
       }
       // …and the second question, about the FILE this product writes: whether the answer above is
-      // this product's own doing. Only the `cat` is elevated, and it is raised with the operator's
-      // password rather than by a rule — so the machine answers it whether or not a drop-in stands,
-      // and a file that is not there feeds the grep nothing, which answers 1: "not granted".
-      if (command.startsWith(`sudo -S -p '' -- cat ${SUDOERS_DROP_IN}`)) {
-        return { code: dropInBlanket() ? 0 : 1, stdoutTail: "", stderrTail: "" };
+      // this product's own doing. Only the `cat` is elevated, and it is asked of the drop-in the
+      // same way any other elevated command is — a machine that does not permit it feeds the grep
+      // nothing, and an empty pipeline answers 1, which is the answer "not granted".
+      if (command.startsWith(`sudo -n cat ${SUDOERS_DROP_IN}`)) {
+        const readable = permits(`cat ${SUDOERS_DROP_IN}`);
+        return { code: readable && dropInBlanket() ? 0 : 1, stdoutTail: "", stderrTail: "" };
       }
       if (command.startsWith("cat > /tmp/dc-sudoers-")) {
         pending = o.stdin?.toString("utf8") ?? "";
