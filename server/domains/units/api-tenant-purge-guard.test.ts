@@ -77,7 +77,7 @@ function seedCluster(): void {
 
 /** The tenant's inventory rows at whichever lifecycle status the test needs. */
 function seedTenantRow(status: TenantStatus): void {
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status }).run();
   db.db.insert(tenantApps).values({ id: "tna_erp", tenantId: "tnt_1", name: "erp", status }).run();
 }
 

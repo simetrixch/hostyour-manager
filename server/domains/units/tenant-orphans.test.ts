@@ -93,7 +93,7 @@ async function deployedWithRaw(raw: Record<string, string>, ...entries: TenantFi
 
 describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
   it("returns only the pointers inventory does not know, resolved to their cluster row", async () => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     const registrations = await deployed(entry(GUID, "acme.example"), entry(ORPHAN, "ghost.example"));
     expect(await scanOrphanTenants({ db: db.db, registrations })).toEqual({
       orphans: [{ guid: ORPHAN, subdomain: "ghost.example", stage: "prod", cluster: "s1", clusterId: "cls_1" }],
@@ -102,7 +102,7 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
   });
 
   it("finds nothing when every deployed pointer has a row, and nothing when nothing is deployed", async () => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     expect(await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme.example")) })).toEqual({ orphans: [], skipped: [] });
     expect(await scanOrphanTenants({ db: db.db, registrations: await deployed() })).toEqual({ orphans: [], skipped: [] });
   });
@@ -110,7 +110,7 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
   it("treats an OFFBOARDED row as absent — a live pointer beside it is leftover state, not a healthy tenant", async () => {
     // The row is kept for audit; the pointer should have gone with the offboard. Same rule as
     // resolveTeardownTarget (tenant-replace.ts), so the two can never disagree about what an orphan is.
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status: "offboarded" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "offboarded" }).run();
     const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme.example")) });
     expect(found.orphans.map((o) => o.guid)).toEqual([GUID]);
   });
@@ -122,7 +122,7 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
     // "purged" row is GitOps pointing at a tenant that no longer exists — and reading that row as "known"
     // would hide it from the only surface that can see it (every removal git-rm's the pointer first, so
     // nothing else looks). Written as the shared TENANT_SETTLED_STATUS set, never `!== "offboarded"`.
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status: "purged" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "purged" }).run();
     const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme.example")) });
     expect(found.orphans.map((o) => o.guid)).toEqual([GUID]);
   });
@@ -130,7 +130,7 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
   it("is stage-scoped on BOTH sides: a row at another stage never covers a pointer at this one", async () => {
     // The same guid recorded at dev must not mask the prod pointer — guid+stage is the identity the
     // pointer path itself is keyed on (registrations/<guid>/<stage>.yaml).
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "dev", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "dev", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme.example")) });
     expect(found.orphans).toEqual([{ guid: GUID, subdomain: "acme.example", stage: "prod", cluster: "s1", clusterId: "cls_1" }]);
   });
@@ -204,7 +204,7 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
     owner: "team-acme", chartsRef: SHA, adminEmail: "admin@acme.example", ...over,
   });
   const seedRow = (over: Record<string, unknown> = {}): void => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status: "active", ...over }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active", ...over }).run();
   };
   /** The failed create-tenant run itself: its row plus its attest-target step at the status the executor
    *  would have left it — "ok" once the precondition held (every step after it mutates), "failed" when it

@@ -532,7 +532,7 @@ export function recordProvisionalStep(_ports: OnboardPorts, p: DeployableOnboard
             repoUrl: p.repoURL,
             chartPath: p.chartPath,
             repoCredentialId: p.repoCredentialId,
-            provenance: "controller",
+            provenance: "manager",
             lastRunId: ctx.runId,
             status: "provisioning",
           },
@@ -552,7 +552,7 @@ export function recordInventoryStep(_ports: OnboardPorts, p: DeployableOnboardPa
     title: "Record the consumer in inventory",
     run: async (ctx) => {
       // Overwrite-idempotent (a crash-resumed executor re-runs this local step): upsert on the
-      // (clusterId, name, stage) unique index. provenance "controller" marks a unit this Manager
+      // (clusterId, name, stage) unique index. provenance "manager" marks a unit this Manager
       // onboarded and gate-validated — the SAME word create-tenant writes for a tenant, so one query
       // reaches both kinds; clusterId records WHICH cluster the consumer runs on; lastRunId ties it to
       // this run.
@@ -564,7 +564,7 @@ export function recordInventoryStep(_ports: OnboardPorts, p: DeployableOnboardPa
           repoUrl: p.repoURL,
           chartPath: p.chartPath,
           repoCredentialId: p.repoCredentialId,
-          provenance: "controller",
+          provenance: "manager",
           lastRunId: ctx.runId,
           status: "active",
         }),

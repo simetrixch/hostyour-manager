@@ -54,10 +54,11 @@ describe("enums (single source of truth)", () => {
 
   it("APP_PROVENANCE is the two words a writer actually writes, and both unit kinds share them", () => {
     // Was three. "imported" was the consumer onboard's name for the act the tenant writer already
-    // called "controller", so the one fact had two words and a query for either answered about one
-    // unit kind only. Both record-inventory steps now write this list's first member; the second is
-    // the adopt-consumer row, which states the opposite (never gate-validated).
-    expect([...APP_PROVENANCE]).toEqual(["controller", "adopted"]);
+    // had a word for, so the one fact had two words and a query for either answered about one unit
+    // kind only. Both record-inventory steps now write this list's first member; the second is the
+    // adopt-consumer row, which states the opposite (never gate-validated). The first member is the
+    // PRODUCT's name and an operator reads it on the consumer and tenant lists.
+    expect([...APP_PROVENANCE]).toEqual(["manager", "adopted"]);
   });
 
   it("SERVER_TAILNET_STATE is the five readings, one of which is the never-measured default", () => {

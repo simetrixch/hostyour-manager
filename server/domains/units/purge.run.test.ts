@@ -104,7 +104,7 @@ function seedCluster(): void {
 /** The cluster PLUS the consumer's inventory row (a healthy, fully-onboarded consumer). */
 function seedApp(over: { repoCredentialId?: string } = {}): void {
   seedCluster();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "controller", status: "active", repoCredentialId: over.repoCredentialId ?? null }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: over.repoCredentialId ?? null }).run();
 }
 
 async function runAll(prt: PurgePorts, logs: string[], creds?: CredentialStore): Promise<void> {

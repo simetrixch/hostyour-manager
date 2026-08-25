@@ -73,7 +73,7 @@ async function seedTwoStages(reg: Registrations): Promise<void> {
 function seedProdApp(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: REPO, chartPath: "deploy/chart", provenance: "controller", status: "active", repoCredentialId: "cred_prod" }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_prod" }).run();
 }
 
 /** dev: its OWN server, cluster and row (app_2) — a cluster carries exactly one stage, so the unit's
@@ -81,7 +81,7 @@ function seedProdApp(): void {
 function seedDevApp(): void {
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "dev", domain: "s2.example", status: "active" }).run();
-  db.db.insert(apps).values({ id: "app_2", clusterId: "cls_2", name: "acme", stage: "dev", repoUrl: REPO, chartPath: "deploy/chart", provenance: "controller", status: "active", repoCredentialId: "cred_dev" }).run();
+  db.db.insert(apps).values({ id: "app_2", clusterId: "cls_2", name: "acme", stage: "dev", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_dev" }).run();
 }
 
 /** The build grants as the two onboards left them: ONE `acme-build` namespace shared by both stages

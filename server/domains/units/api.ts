@@ -99,7 +99,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
   const { executor, db, store, onboardingEnabled, resolver, registrations, platformRepo } = deps;
 
   // The consumer inventory: every onboarded app + which cluster it runs on (apps.clusterId ->
-  // clusters.domain/stage). provenance "controller" marks a consumer this Manager onboarded and
+  // clusters.domain/stage). provenance "manager" marks a consumer this Manager onboarded and
   // gate-validated, "adopted" one whose row was reconstructed from the registration — the same two
   // words the tenant projection below carries, so a reader compares the two lists on one vocabulary.
   app.get("/api/consumers", (c) =>

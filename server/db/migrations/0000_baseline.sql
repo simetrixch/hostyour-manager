@@ -1,13 +1,34 @@
--- The baseline schema: the tables and indexes drizzle-kit generates from server/db/schema/*.ts,
--- then the two sections it cannot produce — the append-only triggers and the reserved system
--- operators. Regenerating this file drops both; re-add them at the end, after the tables they
--- touch exist.
+-- The schema, in ONE migration. The tables and indexes are what drizzle-kit generates from
+-- server/db/schema/*.ts; the two sections after them are what it cannot produce — the append-only
+-- triggers and the reserved system operators. Regenerating this file drops both; re-add them at the
+-- end, after the tables they touch exist.
 --
--- UNTIL THE FIRST LIVE RELEASE THIS FILE IS THE SCHEMA: a column change is made here, inside the
--- CREATE TABLE, and never as a second migration beside it. Nothing has run this baseline — every
--- install is a fresh install, and the development databases on this machine are recreated rather
--- than migrated. AFTER that release the rule inverts to one migration per change and this file stops
--- moving.
+-- ONE GENERATED LINE ALSO HAS TO BE REPAIRED BY HAND, and it fails loudly rather than quietly:
+-- `servers_one_master_uq` is an index over an EXPRESSION, and the generator's SQL emitter splits
+-- that expression on its comma and backtick-quotes each half as if it were a column name. The
+-- snapshot holds the expression correctly, so only the SQL is wrong, and a database built from the
+-- unrepaired file dies inside migrate() with `no such column: (role IN ('master'`. After every
+-- regeneration put the line back to a single parenthesised expression:
+--   CREATE UNIQUE INDEX `servers_one_master_uq` ON `servers` ((role IN ('master', 'master+slave')))
+--   WHERE role IN ('master', 'master+slave');
+--
+-- THERE IS EXACTLY ONE MIGRATION AND THIS FILE IS THE SCHEMA. A column change is made here, inside
+-- the CREATE TABLE, and never as a second migration beside it. Nothing has run an older shape of it:
+-- every install is a fresh install, and a development database on a machine is recreated rather than
+-- migrated. A stored-value change — a run kind or a provenance word respelled — is therefore made in
+-- the CREATE TABLE default and in the writers, with no ALTER and no UPDATE carrying old rows across,
+-- because there are no old rows to carry.
+--
+-- EVERY CHUNK BETWEEN TWO BREAKPOINT MARKERS MUST CONTAIN A STATEMENT. The migrator splits this
+-- file on the marker drizzle writes between statements and prepares each chunk, so a chunk holding
+-- only a comment is not something it can prepare — it dies at boot on the comment text itself. Two
+-- consequences: a note always stands BEFORE the statement it is about, inside that statement's own
+-- chunk, never alone at the end of the file; and no comment anywhere in this file may spell that
+-- marker out, because the split is a plain text search and does not know it is inside a comment.
+--
+-- `unit_sizes` deliberately gets NO seed rows here: the numbers live once, in shared/unit-size.ts
+-- UNIT_SIZE_SEED, and boot inserts any that are missing (create-only, so an edited row is never
+-- reset). Seeding them in SQL as well would put the same figures in two places, free to drift.
 --
 -- Every edit here also bumps `when` in meta/_journal.json. That timestamp is the migrator's ONLY
 -- gate: it runs an entry when the newest created_at in __drizzle_migrations is older than the
@@ -53,7 +74,7 @@ CREATE TABLE `apps` (
 	`repo_url` text,
 	`chart_path` text,
 	`repo_credential_id` text,
-	`provenance` text DEFAULT 'controller' NOT NULL,
+	`provenance` text DEFAULT 'manager' NOT NULL,
 	`last_run_id` text,
 	`status` text DEFAULT 'active' NOT NULL,
 	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
@@ -103,13 +124,6 @@ CREATE TABLE `servers` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `servers_name_uq` ON `servers` (`name`);--> statement-breakpoint
 CREATE UNIQUE INDEX `servers_host_port_uq` ON `servers` (`host`,`ssh_port`);--> statement-breakpoint
--- At most ONE server carries the master part. Indexed on the PREDICATE, not on `role`: an index on
--- the column is unique per distinct VALUE, so a 'master' row would sit beside a 'master+slave' row
--- and the platform would have two management planes. The expression is 1 for every indexed row, and
--- the partial WHERE keeps the slaves (whose predicate is 0) out of the index, where they would all
--- collide with each other. drizzle-kit splits the expression on its comma into two bogus index
--- columns, so the line below is hand-corrected and has to be corrected again after every regenerate;
--- meta/0000_snapshot.json already carries the expression whole.
 CREATE UNIQUE INDEX `servers_one_master_uq` ON `servers` ((role IN ('master', 'master+slave'))) WHERE role IN ('master', 'master+slave');--> statement-breakpoint
 CREATE TABLE `tenant_apps` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -133,7 +147,7 @@ CREATE TABLE `tenants` (
 	`seed_users` integer DEFAULT false NOT NULL,
 	`suspended` integer DEFAULT false NOT NULL,
 	`owner` text,
-	`provenance` text DEFAULT 'controller' NOT NULL,
+	`provenance` text DEFAULT 'manager' NOT NULL,
 	`last_run_id` text,
 	`status` text DEFAULT 'active' NOT NULL,
 	`admin_state` text,
@@ -145,6 +159,19 @@ CREATE TABLE `tenants` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `tenants_cluster_guid_uq` ON `tenants` (`cluster_id`,`guid`);--> statement-breakpoint
+CREATE TABLE `unit_sizes` (
+	`component` text NOT NULL,
+	`name` text NOT NULL,
+	`requests_cpu` text NOT NULL,
+	`requests_memory` text NOT NULL,
+	`limits_cpu` text NOT NULL,
+	`limits_memory` text NOT NULL,
+	`pods` integer NOT NULL,
+	`persistent_volume_claims` integer NOT NULL,
+	`updated_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
+	PRIMARY KEY(`component`, `name`)
+);
+--> statement-breakpoint
 CREATE TABLE `meta` (
 	`key` text PRIMARY KEY NOT NULL,
 	`value` text NOT NULL,
@@ -261,19 +288,3 @@ BEGIN SELECT RAISE(ABORT, 'audit is append-only'); END;
 INSERT INTO operators (id, username, display_name) VALUES ('op_system', 'system', 'System');
 --> statement-breakpoint
 INSERT INTO operators (id, username, display_name) VALUES ('op_emergency', 'emergency', 'Break-glass');
---> statement-breakpoint
--- The size table. Rows are NOT seeded here: the numbers live once, in shared/unit-size.ts
--- UNIT_SIZE_SEED, and boot inserts any that are missing (create-only, so an edited row is never
--- reset). Seeding them in SQL as well would put the same figures in two places, free to drift.
-CREATE TABLE `unit_sizes` (
-	`component` text NOT NULL,
-	`name` text NOT NULL,
-	`requests_cpu` text NOT NULL,
-	`requests_memory` text NOT NULL,
-	`limits_cpu` text NOT NULL,
-	`limits_memory` text NOT NULL,
-	`pods` integer NOT NULL,
-	`persistent_volume_claims` integer NOT NULL,
-	`updated_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
-	PRIMARY KEY(`component`, `name`)
-);

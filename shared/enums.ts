@@ -210,7 +210,7 @@ export type DriftVerdict = (typeof DRIFT_VERDICT)[number];
 // tenants.provenance are the same question asked of a consumer and of a tenant, and the answer has to
 // read the same either way, because the query it exists for ("which units did this Manager onboard,
 // and which did it only write down") spans both tables:
-//   - "controller" — a Run of this Manager onboarded the unit and gate-validated what it deployed.
+//   - "manager"    — a Run of this Manager onboarded the unit and gate-validated what it deployed.
 //                    Written by the consumer onboard's record-inventory step (domains/units/
 //                    onboard-steps.ts) and by create-tenant's upsertTenantInventory (create-tenant.
 //                    run.ts), and it is the DEFAULT of both columns.
@@ -220,17 +220,21 @@ export type DriftVerdict = (typeof DRIFT_VERDICT)[number];
 //                    attested against the live cluster, never gate-validated by that run. Consumer-only
 //                    — there is no adopt run kind for a tenant.
 //
-// Two literals, not three. "imported" was the consumer onboard's word for exactly what the tenant
-// writer called "controller", so one act carried two names and a reader of either concluded they meant
-// different things: a query for one word answered about one unit kind and silently left out the other.
-// Its declared second meaning — a consumer taken over from a cluster this platform did not build — was
-// reserved for a connect-cluster run kind that is in no RUN_KIND, so nothing else wrote it either.
+// Two literals, not three. The consumer onboard and the tenant writer once had a word each for the
+// same act — one wrote "imported", the other wrote the word this list now spells "manager" — so a
+// reader of either concluded they meant different things, and a query for one answered about one unit
+// kind while silently leaving out the other. "imported" also had a declared second meaning, a consumer
+// taken over from a cluster this platform did not build, reserved for a connect-cluster run kind that
+// is in no RUN_KIND; nothing ever wrote it under that meaning either.
+//
+// The word is the PRODUCT's name, and this is the surface an operator reads it on: the consumer and
+// tenant lists render the stored value straight into a chip (web/src/pages/Consumers.tsx,
+// Tenants.tsx, TenantDetail.tsx), so the literal here is what a person sees.
 //
 // The column is plain SQLite text with no CHECK constraint (like tenants.status), so this list is a
-// TypeScript-side narrowing only: the DDL, the migration baseline and its snapshot are unchanged. No
-// stored row has to be rewritten either — the schema is unreleased, so every database that exists is
-// built fresh from that baseline and its rows come from the writers named above.
-export const APP_PROVENANCE = ["controller", "adopted"] as const;
+// TypeScript-side narrowing — but it IS the column's DDL default, so the single migration and its
+// snapshot carry it too and move with it.
+export const APP_PROVENANCE = ["manager", "adopted"] as const;
 export type AppProvenance = (typeof APP_PROVENANCE)[number];
 
 export const CLUSTER_STATUS = ["planned", "provisioning", "active",

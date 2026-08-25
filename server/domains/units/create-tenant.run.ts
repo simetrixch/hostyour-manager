@@ -250,7 +250,7 @@ function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase: Tenan
       // could drift out of step with them.
       identityProvider: p.identityProvider, members: p.members.map((m) => m.name).filter((n) => !p.apps.some((a) => a.name === n)),
       seedUsers: p.seedUsers,
-      owner: p.owner, provenance: "controller" as const,
+      owner: p.owner, provenance: "manager" as const,
       lastRunId: ctx.runId, updatedAt: new Date(),
     };
     const rowId = existing?.id ?? mintTenantRowId();

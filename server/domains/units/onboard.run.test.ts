@@ -246,12 +246,12 @@ describe("onboard run definition", () => {
     // seed-repo-pat wrote the stage-free build credential (local Vault)
     expect((prt.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: "acme", pat: "github_pat_test" }]);
 
-    // record-inventory wrote the apps row — provenance "controller", the SAME word create-tenant writes
+    // record-inventory wrote the apps row — provenance "manager", the SAME word create-tenant writes
     // for a tenant (create-tenant.run.test.ts asserts it on the other side), so one query answers about
     // both unit kinds. It records no revision, and the table has no column for one: the pin is the
     // delivery branch's.
     const row = db.db.select().from(apps).where(eq(apps.name, "acme")).get();
-    expect(row?.provenance).toBe("controller");
+    expect(row?.provenance).toBe("manager");
     expect(row).not.toHaveProperty("version");
 
     // the watches read the cycle's own results — the minted tag is read, never computed

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "da1ab12b-feae-4bc3-a8a9-7abf1f501524",
+  "id": "be7c3059-9dc2-4979-9728-f10e88a90215",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "audit": {
@@ -262,7 +262,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'controller'"
+          "default": "'manager'"
         },
         "last_run_id": {
           "name": "last_run_id",
@@ -734,6 +734,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "identity_provider": {
+          "name": "identity_provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "members": {
+          "name": "members",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "seed_users": {
           "name": "seed_users",
           "type": "integer",
@@ -763,7 +777,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'controller'"
+          "default": "'manager'"
         },
         "last_run_id": {
           "name": "last_run_id",
@@ -779,36 +793,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'active'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch('subsec') * 1000)"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch('subsec') * 1000)"
-        },
-        "identity_provider": {
-          "name": "identity_provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "members": {
-          "name": "members",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
         },
         "admin_state": {
           "name": "admin_state",
@@ -830,6 +814,22 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
         }
       },
       "indexes": {
@@ -858,6 +858,88 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "unit_sizes": {
+      "name": "unit_sizes",
+      "columns": {
+        "component": {
+          "name": "component",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requests_cpu": {
+          "name": "requests_cpu",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requests_memory": {
+          "name": "requests_memory",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "limits_cpu": {
+          "name": "limits_cpu",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "limits_memory": {
+          "name": "limits_memory",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pods": {
+          "name": "pods",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "persistent_volume_claims": {
+          "name": "persistent_volume_claims",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "unit_sizes_component_name_pk": {
+          "columns": [
+            "component",
+            "name"
+          ],
+          "name": "unit_sizes_component_name_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -1477,88 +1559,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "unit_sizes": {
-      "name": "unit_sizes",
-      "columns": {
-        "component": {
-          "name": "component",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "requests_cpu": {
-          "name": "requests_cpu",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "requests_memory": {
-          "name": "requests_memory",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "limits_cpu": {
-          "name": "limits_cpu",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "limits_memory": {
-          "name": "limits_memory",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "pods": {
-          "name": "pods",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "persistent_volume_claims": {
-          "name": "persistent_volume_claims",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch('subsec') * 1000)"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "unit_sizes_component_name_pk": {
-          "columns": [
-            "component",
-            "name"
-          ],
-          "name": "unit_sizes_component_name_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     }

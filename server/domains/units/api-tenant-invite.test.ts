@@ -46,7 +46,7 @@ const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION
 function seedTenant(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: DOMAIN, status: "active" }).run();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status: "active" }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
 }
 
 /** The tenant routes with the invite's port set. `apex` is left out to model a manager where the

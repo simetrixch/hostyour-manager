@@ -182,7 +182,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
 
     expect(await ports.registrations.readRegistration("prod", "acme")).not.toBeNull();
     const app = db.db.select().from(apps).where(eq(apps.name, "acme")).get();
-    expect(app?.provenance).toBe("controller"); // the word create-tenant writes for a tenant — one act, one word
+    expect(app?.provenance).toBe("manager"); // the word create-tenant writes for a tenant — one act, one word
     expect(app?.clusterId).toBe("cls_1");
     expect(app?.lastRunId).toBe(runId);
 

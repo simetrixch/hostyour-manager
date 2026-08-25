@@ -61,7 +61,7 @@ describe("inventory tenants + tenant_apps", () => {
     expect(t?.seedUsers).toBe(true);
     // Default: suspended is false; provenance/status take their defaults.
     expect(t?.suspended).toBe(false);
-    expect(t?.provenance).toBe("controller");
+    expect(t?.provenance).toBe("manager");
     expect(t?.status).toBe("active");
     // Nullable columns default to null; timestamps are populated by the DB default.
     expect(t?.owner).toBeNull();
@@ -138,6 +138,26 @@ describe("apps.stage", () => {
     seedCluster(db);
     insert(db, "app_1", "prod");
     expect(() => insert(db, "app_2", "prod")).toThrow(/UNIQUE/i);
+  });
+
+  // The provenance DEFAULT as the DATABASE holds it, on both tables that carry it. Inserted through
+  // raw SQL naming no provenance, because drizzle fills a static .default() into the INSERT it
+  // builds — so a row written through db.insert() proves the TypeScript literal and never reaches
+  // the DDL. Only a statement that omits the column can say what the migration actually wrote, and
+  // that is the value every row created by anything other than this code gets.
+  it("defaults provenance to the product's name in the DDL, on apps and on tenants", () => {
+    const db = fresh();
+    seedCluster(db);
+    db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, stage) VALUES ('app_d','cls_1','acme','prod')").run();
+    expect(db.sqlite.prepare("SELECT provenance FROM apps WHERE id='app_d'").get()).toEqual({ provenance: "manager" });
+
+    db.sqlite
+      .prepare(
+        "INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members) " +
+          "VALUES ('tnt_d','cls_1','zsjs023ctne0','acme','prod','auth','[\"auth\"]')",
+      )
+      .run();
+    expect(db.sqlite.prepare("SELECT provenance FROM tenants WHERE id='tnt_d'").get()).toEqual({ provenance: "manager" });
   });
 });
 

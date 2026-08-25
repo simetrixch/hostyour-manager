@@ -60,7 +60,7 @@ function seedCluster(): void {
 // being compared exactly like an active tenant's.
 function seedTenant(over: { status?: TenantStatus; suspended?: boolean } = {}): void {
   seedCluster();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: TGUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status: "active", ...over }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: TGUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active", ...over }).run();
   db.db.insert(tenantApps).values({ id: "tna_1", tenantId: "tnt_1", name: "erp" }).run();
 }
 
@@ -330,7 +330,7 @@ describe("tenant live reconciliation (GET /api/tenants/:id/live)", () => {
     // erp member would drop out, the rollup would run over base+auth alone and the card would read
     // Synced/Healthy for a tenant whose app never deployed.
     seedCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: TGUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status: "provisioning" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: TGUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "provisioning" }).run();
     db.db.insert(tenantApps).values({ id: "tna_1", tenantId: "tnt_1", name: "erp", status: "provisioning" }).run();
     const { app, cookie } = await makeTenantLive(liveResolver(SMOKE_OK, statuses({ [`${TGUID}-erp-prod`]: undefined })));
     const body = (await (await app.request("/api/tenants/tnt_1/live", authed(cookie))).json()) as {

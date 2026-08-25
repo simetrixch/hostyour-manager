@@ -143,7 +143,7 @@ export const apps = sqliteTable("apps", {
   // the credential-store id of a private repo's read credential; NULL = public. A loose ref
   // (not a Drizzle FK) to avoid an inventory<->credentials import cycle — same convention as audit.run_id.
   repoCredentialId: text("repo_credential_id"),
-  provenance: text("provenance", { enum: APP_PROVENANCE }).notNull().default("controller"),
+  provenance: text("provenance", { enum: APP_PROVENANCE }).notNull().default("manager"),
   // The last onboarding lifecycle run for this app (its step checkpoint holds the SmokeVerdict).
   // Loose ref to runs(id), same convention as above.
   lastRunId: text("last_run_id"),
@@ -183,7 +183,7 @@ export const tenants = sqliteTable("tenants", {
   seedUsers: integer("seed_users", { mode: "boolean" }).notNull().default(false),
   suspended: integer("suspended", { mode: "boolean" }).notNull().default(false), // tenant-wide pause
   owner: text("owner"),
-  provenance: text("provenance", { enum: APP_PROVENANCE }).notNull().default("controller"),
+  provenance: text("provenance", { enum: APP_PROVENANCE }).notNull().default("manager"),
   lastRunId: text("last_run_id"),                                 // loose ref to runs(id)
   // TENANT_STATUS, never the consumer APP_STATUS: a tenant additionally has "provisioning" (recorded
   // intent, run unfinished) and "purged" (deprovisioned by tenant-purge, as opposed to the un-deployed

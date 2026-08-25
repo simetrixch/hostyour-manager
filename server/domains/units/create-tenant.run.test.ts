@@ -251,7 +251,7 @@ describe("create-tenant run definition", () => {
 
     // record-inventory wrote the tenant row + one tenant_apps row
     const row = db.db.select().from(tenants).where(eq(tenants.guid, GUID)).get();
-    expect(row?.provenance).toBe("controller"); // the word onboard writes for a consumer — one act, one word
+    expect(row?.provenance).toBe("manager"); // the word onboard writes for a consumer — one act, one word
     expect(row?.clusterId).toBe("cls_1");
     expect(row?.subdomain).toBe("acme.example");
     expect(row?.lastRunId).toBe("run_tnt");

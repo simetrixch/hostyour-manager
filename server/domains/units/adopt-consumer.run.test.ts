@@ -128,7 +128,7 @@ describe("adopt-consumer run definition", () => {
 
   it("plan refuses when an UNSETTLED row already tracks the consumer — nothing invisible to adopt", async () => {
     seedCluster();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "controller", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "manager", status: "active" }).run();
     const def = makeAdoptConsumerDef(ports(await deployedRegistrations()));
     await expect(def.plan(PARAMS, { db: db.db })).rejects.toThrow(/already tracked/);
   });
@@ -137,7 +137,7 @@ describe("adopt-consumer run definition", () => {
     // approve re-validates nothing, so the run re-asks the plan-time refusal itself: a finishing
     // onboard (or a second adopt) that recorded the row in between must not be overwritten.
     seedCluster();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "controller", status: "suspended" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "manager", status: "suspended" }).run();
     const step = makeAdoptConsumerDef(ports(await deployedRegistrations())).steps(PARAMS).find((s) => s.name === "read-pointer")!;
     await expect(step.run(ctx("read-pointer", []))).rejects.toThrow(/already tracked/);
   });
@@ -173,7 +173,7 @@ describe("adopt-consumer run definition", () => {
       repoUrl: "https://github.com/x/acme.git",
       chartPath: "deploy/chart",
       repoCredentialId: null, // the registration carried none — nothing invented, nothing re-sealed
-      provenance: "adopted", // reconstructed from the registration — NEVER "controller" (gate-validated)
+      provenance: "adopted", // reconstructed from the registration — NEVER "manager" (gate-validated)
       status: "active",
       lastRunId: "run_adopt",
     });
@@ -244,7 +244,7 @@ describe("adopt-consumer run definition", () => {
     // A settled row records a removal that already ran; a registration standing again means the
     // consumer is back. The (clusterId, name, stage) upsert finds the old row instead of duplicating.
     seedCluster();
-    db.db.insert(apps).values({ id: "app_old", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "controller", status: "offboarded" }).run();
+    db.db.insert(apps).values({ id: "app_old", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "manager", status: "offboarded" }).run();
     await runAll(ports(await deployedRegistrations()), []);
     const all = db.db.select().from(apps).all();
     expect(all).toHaveLength(1);

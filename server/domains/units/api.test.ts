@@ -249,11 +249,11 @@ describe("consumer API", () => {
 
   it("lists onboarded consumers with their cluster", async () => {
     seedCluster();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "controller", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
     const { app, cookie } = await make(true);
     const rows = (await (await app.request("/api/consumers", authed(cookie))).json()) as Array<{ name: string; domain: string; provenance: string }>;
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ name: "acme", domain: "s1.example", provenance: "controller" });
+    expect(rows[0]).toMatchObject({ name: "acme", domain: "s1.example", provenance: "manager" });
   });
 
   it("targets lists ALL active clusters, the master self-cluster included", async () => {
@@ -266,7 +266,7 @@ describe("consumer API", () => {
 
   it("offboard: 201 + runId for an existing consumer", async () => {
     seedCluster();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "controller", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "manager", status: "active" }).run();
     const { app, cookie } = await make(true);
     const res = await app.request("/api/consumers/app_1/offboard", { method: "POST", ...authed(cookie), body: "{}" });
     expect(res.status).toBe(201);
@@ -373,7 +373,7 @@ async function makeTenant(enabled: boolean, appCatalog?: AppCatalogProvider): Pr
 // routes). Reuses seedCluster (srv_1 + cls_1 @ s1.example/prod, tier rehearsal).
 function seedTenant(): void {
   seedCluster();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: TGUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "controller", status: "active" }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: TGUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
   db.db.insert(tenantApps).values({ id: "tna_1", tenantId: "tnt_1", name: "erp" }).run();
 }
 
@@ -410,7 +410,7 @@ describe("tenant API", () => {
     const { app, cookie } = await makeTenant(true);
     const rows = (await (await app.request("/api/tenants", authed(cookie))).json()) as Array<{ guid: string; domain: string; provenance: string }>;
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ guid: TGUID, domain: "s1.example", stage: "prod", provenance: "controller" });
+    expect(rows[0]).toMatchObject({ guid: TGUID, domain: "s1.example", stage: "prod", provenance: "manager" });
   });
 
   it("returns one tenant with its per-app rows", async () => {

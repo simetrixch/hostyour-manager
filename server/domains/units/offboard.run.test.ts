@@ -110,7 +110,7 @@ function ctx(stepName: string, logs: string[], creds: CredentialStore = {} as un
 function seedApp(over: { repoCredentialId?: string } = {}): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "controller", status: "active", repoCredentialId: over.repoCredentialId ?? null }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: over.repoCredentialId ?? null }).run();
 }
 
 describe("offboard run definition", () => {

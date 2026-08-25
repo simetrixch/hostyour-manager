@@ -239,7 +239,7 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
             repoUrl: current.repoURL,
             chartPath: current.chartPath,
             repoCredentialId: current.repoCredentialId ?? null,
-            provenance: "adopted", // reconstructed from the registration — NEVER "controller" (gate-validated)
+            provenance: "adopted", // reconstructed from the registration — NEVER "manager" (gate-validated)
             status,
             lastRunId: ctx.runId,
           }),
