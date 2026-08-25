@@ -173,9 +173,9 @@ export function unitApexFromChain(files: readonly ClusterValueFile[]): string {
  *  without authentication, so reach to :6379 IS the grant, and a unit that never claimed it must not
  *  be able to write itself into the NetworkPolicy's selector.
  *
- *  `platform/mail-relay-consumer` follows the same rule for the same reason: the platform relay
+ *  `platform/postfix-consumer` follows the same rule for the same reason: the platform relay
  *  accepts mail on :587 without authenticating the sender, so reach IS the grant there too. The
- *  relay's NetworkPolicy (hostyour-cloud/clusters/inventories/mail-relay/templates/networkpolicy.yaml) admits this label
+ *  relay's NetworkPolicy (hostyour-cloud/clusters/inventories/postfix/templates/networkpolicy.yaml) admits this label
  *  and no namespace NAME, which is what lets the cloud base carry a relay without knowing which unit
  *  of which installation sends through it. */
 /** The pair that marks a namespace as a consumer's, and the selector that finds every one of them on a
@@ -194,7 +194,7 @@ function grantedNamespaceLabels(name: string, services: readonly string[]): Read
     ["hostyour.cloud/consumer-name", name],
     ["platform/db-consumer", "true"],
     ...(services.includes("redis") ? ([["platform/redis-consumer", "true"]] as const) : []),
-    ...(services.includes("mail-relay") ? ([["platform/mail-relay-consumer", "true"]] as const) : []),
+    ...(services.includes("postfix") ? ([["platform/postfix-consumer", "true"]] as const) : []),
   ];
 }
 

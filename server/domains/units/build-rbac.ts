@@ -55,9 +55,9 @@ export const BUILD_PIPELINE_SERVICE_ACCOUNT = "pipeline-sa";
 export const BUILD_NAMESPACE_SUFFIX = "-build";
 
 /** The namespace the platform's mail relay runs in — a PLATFORM app of this base
- *  (hostyour-cloud/clusters/inventories/mail-relay, its own catalog element), not a unit of any
+ *  (hostyour-cloud/clusters/inventories/postfix, its own catalog element), not a unit of any
  *  installation, so naming it here is the same kind of fact as `image-builder` and `manager` above. */
-export const RELAY_NAMESPACE = "mail-relay";
+export const RELAY_NAMESPACE = "postfix";
 
 /** The unit's build namespace — where its pipeline, its PipelineRuns and its build credentials live. */
 export function unitBuildNamespace(name: string): string {
