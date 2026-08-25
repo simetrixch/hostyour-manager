@@ -20,7 +20,7 @@ export const KV_MOUNT = "secret";
 export interface VaultConfig {
   addr: string; // https://vault.<domain>:8200
   k8sRole: string; // Vault kubernetes-auth role bound to the manager SA
-  kvPrefix: string; // path prefix under the mount, default "controller/cred"
+  kvPrefix: string; // path prefix under the mount, default "manager/cred"
   k8sAuthMount: string; // kubernetes auth mount, e.g. "kubernetes-m1"
   saTokenPath: string; // the projected ServiceAccount token
 }

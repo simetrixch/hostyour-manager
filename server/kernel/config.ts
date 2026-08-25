@@ -47,7 +47,7 @@ const EnvSchema = z.object({
   // in-cluster, so the default is what the live entries stand under. Moving it does not rename a
   // path — it points the store at an empty one and abandons what is there, so it is a Vault data
   // move, not an edit of this line.
-  VAULT_KV_PREFIX: z.string().default("controller/cred"),
+  VAULT_KV_PREFIX: z.string().default("manager/cred"),
   // The kubernetes auth mount is named after the cluster (kubernetes-<cluster>) and exists nowhere
   // else, so there is no value that is right by default. REQUIRED whenever VAULT_ADDR is set: a
   // default would send every login to a mount that does not exist and turn a wiring mistake into a

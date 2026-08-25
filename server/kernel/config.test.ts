@@ -158,9 +158,22 @@ describe("Vault backend config", () => {
     expect(c.vault).toEqual({
       addr: "https://vault.m1.example:8200",
       k8sRole: "manager",
-      kvPrefix: "controller/cred",
+      kvPrefix: "manager/cred",
       k8sAuthMount: "kubernetes-m1",
       saTokenPath: "/var/run/secrets/kubernetes.io/serviceaccount/token",
     });
+  });
+
+  it("lets VAULT_KV_PREFIX override the compiled default — the prefix is a surface, not a constant", () => {
+    // Nothing sets this variable in the cluster today, so the default above is the address the live
+    // entries stand under. That is a property of the deployment, not of this schema: a deployment
+    // that moves its credentials must be able to point the store at where they went.
+    const c = parseConfig({
+      ...validEnv,
+      VAULT_ADDR: "https://vault.m1.example:8200",
+      VAULT_K8S_AUTH_MOUNT: "kubernetes-m1",
+      VAULT_KV_PREFIX: "elsewhere/cred",
+    });
+    expect(c.vault?.kvPrefix).toBe("elsewhere/cred");
   });
 });

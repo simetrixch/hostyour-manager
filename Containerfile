@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# The Controller image. Multi-stage, rootless.
+# The Manager image. Multi-stage, rootless.
 #
 # The server runs under tsx (no JS emit — one source of truth, no build/runtime skew), so the
 # runtime image ships the TypeScript source + tsconfig + the full node_modules (tsx is a
@@ -39,7 +39,7 @@ RUN set -eux; \
 
 FROM node:24-slim AS runtime
 ENV NODE_ENV=production
-# git — the Controller shells `git` for BOTH the validation clone (GitRepoReader,
+# git — the Manager shells `git` for BOTH the validation clone (GitRepoReader,
 # adapters/git) and the GitOps pointer commit (GitPlatformRepo); node:24-slim ships
 # without it. ca-certificates for the HTTPS git remotes. Installed as root here, before
 # dropping to USER node below.

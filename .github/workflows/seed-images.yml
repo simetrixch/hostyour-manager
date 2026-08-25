@@ -2,9 +2,9 @@
 # build anything.
 #
 # WHAT PROBLEM THIS ANSWERS. Every other unit of the platform is built in-cluster by the release
-# pipeline, which is rendered from a registration, which the Controller writes. This repository IS
-# the Controller, so on a machine where nothing has been installed yet there is no Controller to
-# write the registration, no pipeline to render, and therefore no image to start the Controller
+# pipeline, which is rendered from a registration, which the Manager writes. This repository IS
+# the Manager, so on a machine where nothing has been installed yet there is no Manager to
+# write the registration, no pipeline to render, and therefore no image to start the Manager
 # from. The bytes have to come from outside that circle exactly once per release, and this is where
 # they come from.
 #

@@ -2,7 +2,7 @@
 #
 # The gate-runner image: the one-shot `gate` step of the in-cluster Tekton
 # gate-run pipeline. It runs under tsx (one source of truth, no build/runtime skew), like the
-# Controller, and additionally ships helm + kubeconform (the render + schema tools G3 drives).
+# Manager, and additionally ships helm + kubeconform (the render + schema tools G3 drives).
 # No credentials are baked in; the pipeline's clone step puts the repo at the pinned SHA into the
 # source workspace, and a Calico NetworkPolicy fences the pod's egress (proven from inside, fence.ts).
 #
