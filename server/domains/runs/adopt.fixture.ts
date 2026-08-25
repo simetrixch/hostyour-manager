@@ -143,18 +143,23 @@ export function fakeFactory(preflightOut = HEALTHY_PREFLIGHT, probeOut = PROBE_N
         for (const l of s.split("\n")) o.onStdout?.(l);
       };
       host.commands?.push(command);
+      // A `sudo -S` command is authorized by the PASSWORD on stdin and by no rule at all, so one
+      // that arrives without it is refused here. A real machine would prompt and fail; answering it
+      // anyway would let a call site lose its password with every assertion still green.
+      if (command.startsWith("sudo -S ") && o.stdin?.toString("utf8") !== `${PASSWORD}\n`) {
+        throw new Error(`sudo -S shipped without the password on stdin: ${command}`);
+      }
       // `sudo -l | grep -q` is the question about the RIGHT: grep's exit code is the answer, so a
       // machine that does not grant it answers 1 here, exactly as the real pipeline would.
       if (command.startsWith("LC_ALL=C sudo -n -l")) {
         return { code: blanketNow() ? 0 : 1, stdoutTail: "", stderrTail: "" };
       }
       // …and the second question, about the FILE this product writes: whether the answer above is
-      // this product's own doing. Only the `cat` is elevated, and it is asked of the drop-in the
-      // same way any other elevated command is — a machine that does not permit it feeds the grep
-      // nothing, and an empty pipeline answers 1, which is the answer "not granted".
-      if (command.startsWith(`sudo -n cat ${SUDOERS_DROP_IN}`)) {
-        const readable = permits(`cat ${SUDOERS_DROP_IN}`);
-        return { code: readable && dropInBlanket() ? 0 : 1, stdoutTail: "", stderrTail: "" };
+      // this product's own doing. Only the `cat` is elevated, and it is raised with the operator's
+      // password rather than by a rule — so the machine answers it whether or not a drop-in stands,
+      // and a file that is not there feeds the grep nothing, which answers 1: "not granted".
+      if (command.startsWith(`sudo -S -p '' -- cat ${SUDOERS_DROP_IN}`)) {
+        return { code: dropInBlanket() ? 0 : 1, stdoutTail: "", stderrTail: "" };
       }
       if (command.startsWith("cat > /tmp/dc-sudoers-")) {
         pending = o.stdin?.toString("utf8") ?? "";

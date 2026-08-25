@@ -226,6 +226,8 @@ describe("the drop-in as a machine reads it", () => {
       "/usr/bin/grep -rniE -f /etc/shadow x /etc/ssh/sshd_config /etc/ssh/sshd_config.d"],
     ["reads a root-only file one answer at a time: `-q` returns an exit code and nothing else, and a `*` before the file operands lets the account name /etc/shadow beside the drop-in and ask about it a regex at a time",
       "/usr/bin/grep -qE . /etc/shadow /etc/sudoers.d/90-hostyour"],
+    ["opens a root door of its own: a `tailscale` rule that names no arguments permits every subcommand, and `tailscale up --ssh` puts a login server on the machine that answers to the account's own tailnet identity",
+      "/usr/bin/tailscale up --ssh"],
     ["the innocent case, refused before this change as well: a command no rule names at all",
       "/usr/bin/cat /etc/shadow"],
     ["the second innocent case: a shell",
@@ -237,11 +239,11 @@ describe("the drop-in as a machine reads it", () => {
    *  table matches itself. */
   const GENUINE: string[] = [
     "true",                                                             // adopt configure-sudo, verify-key-login
-    "visudo -c",                                                        // adopt configure-sudo
     "timedatectl set-ntp true",                                         // adopt enable-ntp
     `rm -f ${SUDOERS_DROP_IN}`,                                         // adopt removeSudoersCleanup
-    `cat ${SUDOERS_DROP_IN}`,                                           // adopt OUR_DROP_IN_GRANTS_BLANKET
+    "tailscale version",                                                // tailnet-probe TAILNET_PROBE_SCRIPT
     "tailscale status --json",                                          // tailnet-probe TAILNET_PROBE_SCRIPT
+    "tailscale debug prefs",                                            // tailnet-probe TAILNET_PROBE_SCRIPT
     "snap remove --purge microk8s",                                     // deploy-slave.kit purgeMicrok8sStep
     "microk8s kubectl -n argocd get application x -o jsonpath={.status.sync.status}", // deploy-slave
     "/usr/sbin/sshd -T",                                                // password-login-probe effective()
@@ -289,30 +291,51 @@ describe("the drop-in as a machine reads it", () => {
     // THE COUNT COMES OFF THE TABLE. A row added with an open argument changes both records without
     // anybody rewriting a sentence, which is the only version of this that cannot go stale.
     const open = unpinnedElevated().map(elevatedName);
-    expect(open).toEqual(["tailscale", "microk8s", "install"]);
+    expect(open).toEqual(["microk8s", "install"]);
     expect(file).toContain(`${open.length} of the rules below leave their arguments`);
     for (const name of open) expect(file).toContain(name);
   });
 
   // -------------------------------------------------------------------------------------------
   // THE PROBE PLANTED WITH THE SHAPE THAT WAS THERE. A refusal proves nothing unless the same
-  // assertion goes red on the file this change replaced, so the three closed rules are put back the
-  // way they were and every escalation above is expected to be permitted again.
+  // assertion goes red on the file this change replaced, so every rule this repository closed is put
+  // back the way it was and every escalation above is expected to be permitted again.
   // -------------------------------------------------------------------------------------------
-  const OLD_SHAPES = file
-    .replace("-m 0644 -o root -g root -- *", "-m 0644 -o root -g root *")
-    .replace("/usr/bin/grep -rniH -e PasswordAuthentication -e KbdInteractiveAuthentication", "/usr/bin/grep -rniE *")
-    .replace(`/usr/bin/cat ${SUDOERS_DROP_IN}`, `/usr/bin/grep -qE * ${SUDOERS_DROP_IN}`);
+  /** One plant, and it must TAKE. A `replace` whose pattern has drifted leaves the file untouched,
+   *  and every case below then measures TODAY'S rules while reading as a proof about yesterday's —
+   *  a probe that passes by looking at the wrong thing. Loud at module load, because a plant that
+   *  quietly did nothing is exactly what nobody notices. */
+  function plant(text: string, from: string | RegExp, to: string): string {
+    const out = text.replace(from, to);
+    if (out === text) throw new Error(`the plant "${from}" matched nothing — the probe would measure today's rules`);
+    return out;
+  }
 
-  it.each(REFUSED.slice(0, 3))("permitted, on the shape that was there, the command that %s", (_why, command) => {
-    // A replace that matched nothing would leave the file untouched and pass every case below by
-    // measuring the NEW rules, so the plant is asserted to have taken.
-    expect(OLD_SHAPES).not.toBe(file);
+  // Each shape is the one that really stood in this file, restored one at a time. The last two are
+  // rules this change removed outright rather than narrowed: the elevated `grep -qE *` that read
+  // the drop-in an exit code at a time, and the bare `tailscale` that named no arguments.
+  const OLD_SHAPES = [
+    (f: string): string => plant(f, "-m 0644 -o root -g root -- *", "-m 0644 -o root -g root *"),
+    (f: string): string => plant(f, "/usr/bin/grep -rniH -e PasswordAuthentication -e KbdInteractiveAuthentication", "/usr/bin/grep -rniE *"),
+    (f: string): string => plant(f, "NOPASSWD: ", `NOPASSWD: /usr/bin/grep -qE * ${SUDOERS_DROP_IN}, `),
+    (f: string): string => plant(f, /\/usr\/bin\/tailscale [^,]*,[\s\S]*?\/usr\/bin\/tailscale [^,]*,[\s\S]*?\/usr\/bin\/tailscale [^,]*/, "/usr/bin/tailscale"),
+  ].reduce((f, step) => step(f), file);
+
+  it.each(REFUSED.slice(0, 4))("permitted, on the shape that was there, the command that %s", (_why, command) => {
     expect(sudoersPermits(OLD_SHAPES, command)).toBe(true);
   });
 
   it("refuses the innocent cases on the old shape too, so a red probe is the wildcard and not the plant", () => {
-    for (const [, command] of REFUSED.slice(3)) expect(sudoersPermits(OLD_SHAPES, command)).toBe(false);
+    for (const [, command] of REFUSED.slice(4)) expect(sudoersPermits(OLD_SHAPES, command)).toBe(false);
+  });
+
+  it("still permits the three tailscale readings the probe really takes, on the narrowed file", () => {
+    // The other half of the tailscale plant: closing `tailscale up --ssh` may not close the probe.
+    for (const args of ["version", "status --json", "debug prefs"]) {
+      expect(sudoersPermits(file, `tailscale ${args}`)).toBe(true);
+    }
+    expect(sudoersPermits(file, "tailscale up --ssh")).toBe(false);
+    expect(sudoersPermits(file, "tailscale status")).toBe(false);
   });
 
   it("permits the one thing no rule can take away: the CONTENT of the sshd drop-in", () => {
