@@ -6,9 +6,12 @@ import { decodeTime } from "ulid";
 import { openDb, type DbHandle } from "./client.ts";
 import { writeAudit } from "./audit-writer.ts";
 
-// The audit table has no ordinal and its `ts` is milliseconds, so `id` is the only key that can put
-// the trail in order. These tests are about that one property: an id written later must sort after
-// an id written earlier, including when both were written inside the same millisecond.
+// `id` is the key an operator orders a trail by, and `ts` has millisecond resolution, so two rows
+// written inside one millisecond cannot be told apart by it. These tests are about that one
+// property of the id: one written later must sort after one written earlier, including when both
+// were written inside the same millisecond. SQLite's own rowid orders the table as well and
+// server/security/store.ts:262 reads a sibling table that way; what it does not do is travel onto
+// the row a caller gets, which is why the id is made to rise here as well.
 describe("audit id ordering (db/audit-writer.ts)", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
@@ -55,17 +58,25 @@ describe("audit id ordering (db/audit-writer.ts)", () => {
   });
 
   // The counter-probe of the assertion above: it compares a decoded payload against the positions
-  // 0..N-1, and that comparison must be able to see a single pair out of place. A trail read back
-  // with two neighbours swapped is what the defect looked like, so it is built here by hand and the
-  // same comparison is required to reject it.
+  // 0..N-1, and that comparison must be able to see a single pair out of place. The trail is built
+  // HERE, out of the positions themselves, and NOT read back from a writer. A probe starting from
+  // whatever the writer produced would, on the code this test exists for, start from an already
+  // scrambled array — and then it asserts only that a scrambled array is not sorted, which is true
+  // whatever the comparison does. Measured on plain `ulid()`: the read-back was scrambled in 500 of
+  // 500 draws and that form of the assertion passed 500 of 500.
   it("the ordering assertion rejects a trail with one adjacent pair swapped", () => {
-    const positions = writeAndReadBack(fresh()).map((r) => r.position);
-    const swapped = positions.map((p, i) => (i === 0 ? positions[1] : i === 1 ? positions[0] : p));
+    const inOrder = [...Array(WRITES).keys()];
+    const swapped = inOrder.map((p, i) => (i === 0 ? inOrder[1] : i === 1 ? inOrder[0] : p));
 
     expect(swapped).not.toEqual([...Array(WRITES).keys()]);
   });
 
-  it("ids keep rising across a gap in time, so the trail orders whole-second-apart rows too", async () => {
+  // THE OTHER HALF OF THE FACTORY, and it is not the same-millisecond tiebreak. Two writes in
+  // DIFFERENT milliseconds are already ordered by the prefix, so plain `ulid()` passes this too —
+  // measured, 400 of 400. What it holds is that `monotonicFactory` does not stay on a prefix it has
+  // already used once the clock has moved: a factory that kept incrementing the old millisecond
+  // would return one distinct millisecond here instead of two.
+  it("the factory follows the clock instead of staying on a millisecond it has already used", async () => {
     const db = fresh();
     writeAudit(db.db, { actor: "op_probe", action: "probe.gap", detail: { position: 0 } });
     await new Promise((resolve) => setTimeout(resolve, 5));
