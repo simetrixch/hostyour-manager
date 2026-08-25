@@ -148,7 +148,7 @@ export async function selfProbe(cfg: FenceConfig, connect: ConnectFn = defaultCo
   );
 
   const denied = await Promise.all(mustFailTargets.map((t) => probeDenied(connect, parseTarget(t), timeoutMs)));
-  const controllerAddrDenied = await probeDenied(connect, parseTarget(cfg.managerAddr), timeoutMs);
+  const managerAddrDenied = await probeDenied(connect, parseTarget(cfg.managerAddr), timeoutMs);
   const mustPassReached = await probeReached(connect, parseTarget(cfg.mustPassTarget), timeoutMs);
 
   return {
@@ -157,7 +157,7 @@ export async function selfProbe(cfg: FenceConfig, connect: ConnectFn = defaultCo
     // Every must-fail target must be denied. An EMPTY list proves nothing, so it is not a pass —
     // a deliberate fail-closed refinement of the plain `.every()` (which is vacuously true on []).
     mustFailDenied: denied.length > 0 && denied.every((d) => d),
-    controllerAddrDenied,
+    managerAddrDenied,
     mustPassReached,
   };
 }

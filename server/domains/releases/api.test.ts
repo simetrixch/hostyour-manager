@@ -67,7 +67,7 @@ describe("GET /api/releases — which release an installation stands on, and whi
   }> {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-releases-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     for (const [id, name, role, cls, domain, stage] of [
       ["srv_m", "m1", "master", "cls_m", MASTER, "prod"],

@@ -155,7 +155,7 @@ export function ResetWizard() {
             </ul>
             <p className="field__hint">
               Your pre-reset backup: <span className="mono">{result.db.backupFile}</span> — restore by copying it back
-              over <span className="mono">controller.db</span> while the pod is stopped.
+              over <span className="mono">manager.db</span> while the pod is stopped.
             </p>
             {result.reseeded && <p className="field__hint">The master server row was re-registered in-process.</p>}
             {result.db.vaultOrphans.map((ref) => (

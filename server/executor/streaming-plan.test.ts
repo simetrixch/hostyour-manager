@@ -84,7 +84,7 @@ afterEach(() => {
 function makeWith(def: AnyRunDefinition): { db: DbHandle; executor: Executor; lines: string[] } {
   const dir = mkdtempSync(join(tmpdir(), "ctrl-sp-nodb-"));
   dirs.push(dir);
-  const db = openDb(join(dir, "controller.db"));
+  const db = openDb(join(dir, "manager.db"));
   handles.push(db);
   const lines: string[] = [];
   const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });

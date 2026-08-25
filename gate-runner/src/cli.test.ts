@@ -78,7 +78,7 @@ describe("runGateCli fail-closed", () => {
   it("refuses to render when the egress fence is not green (an internal target is reachable)", async () => {
     const report = await runGateCli(inputs(await ws()), managerReachable);
     expect(report.gates).toHaveLength(0);
-    expect(report.sandbox.controllerAddrDenied).toBe(false);
+    expect(report.sandbox.managerAddrDenied).toBe(false);
     expect(report.verdict).toBe("fail");
   });
 });

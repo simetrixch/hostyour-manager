@@ -361,7 +361,7 @@ describe("schema census: the database the migrations build declares the same sch
 
   it("creates exactly the tables and columns the drizzle schema declares", () => {
     dir = mkdtempSync(join(tmpdir(), "ctrl-census-"));
-    handle = openDb(join(dir, "controller.db")); // the whole folder applied, exactly as boot applies it
+    handle = openDb(join(dir, "manager.db")); // the whole folder applied, exactly as boot applies it
     const { sqlite } = handle;
     const columns = schemaColumns();
     const schemaTables = new Set(columns.map((c) => c.sqlTable));
@@ -398,7 +398,7 @@ describe("schema census: the database the migrations build declares the same sch
   // carries all of it, and drizzle-kit writes it — so it is what the executed SQL is measured against.
   it("carries the indexes, keys, defaults and NOT NULLs the head snapshot declares", () => {
     dir = mkdtempSync(join(tmpdir(), "ctrl-census-"));
-    handle = openDb(join(dir, "controller.db"));
+    handle = openDb(join(dir, "manager.db"));
     const { sqlite } = handle;
     const { tables } = readHeadSnapshot();
     const drift: string[] = [];

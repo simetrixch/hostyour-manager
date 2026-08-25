@@ -42,7 +42,7 @@ describe("manager DB reset (db/reset.ts)", () => {
   function make(): DbHandle {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-reset-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     return db;
   }

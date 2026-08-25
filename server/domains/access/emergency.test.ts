@@ -33,7 +33,7 @@ describe("break-glass", () => {
   function fresh(): { db: DbHandle; session: SessionCodec; store: EmergencyStore } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-bg-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     return { db, session: new SessionCodec(db.db, config), store: new EmergencyStore() };
   }
@@ -134,7 +134,7 @@ describe("admin.sock app", () => {
   function fresh(): { db: DbHandle; session: SessionCodec; store: EmergencyStore } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-sockapp-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     return { db, session: new SessionCodec(db.db, config), store: new EmergencyStore() };
   }

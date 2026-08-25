@@ -26,7 +26,7 @@ describe("CredentialStore (plaintext pass-through)", () => {
   function fresh() {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-store-"));
     dirs.push(dir);
-    const handle = openDb(join(dir, "controller.db"));
+    const handle = openDb(join(dir, "manager.db"));
     closers.push(() => handle.sqlite.close());
     return { store: new CredentialStore({ db: handle.db, logger }), sqlite: handle.sqlite };
   }

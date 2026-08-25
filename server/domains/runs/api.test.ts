@@ -36,7 +36,7 @@ describe("runs API + SSE", () => {
   async function make(): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string; db: DbHandle }> {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-api-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     // The chokepoint attributes every planned run to the session's sub, and runs.started_by is an
     // FK onto operators — in production upsertOperator wrote that row at login; the harness mints

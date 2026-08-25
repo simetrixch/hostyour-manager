@@ -21,7 +21,7 @@ describe("crypto gate", () => {
   function fresh(mode = "plaintext"): DbHandle {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-gd-"));
     dirs.push(dir);
-    const h = openDb(join(dir, "controller.db"));
+    const h = openDb(join(dir, "manager.db"));
     handles.push(h);
     h.sqlite.prepare("INSERT INTO meta (key, value) VALUES ('keystore.mode', ?)").run(mode);
     return h;
@@ -187,7 +187,7 @@ describe("streaming plan path runs the crypto gate (runGuards fix)", () => {
   function make(mode = "plaintext"): { db: DbHandle; executor: Executor } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-sp-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_r','r','2.2.2.2','root','slave')").run();
     db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, tier) VALUES ('cls_real','srv_r','prod','r.example','real')").run();

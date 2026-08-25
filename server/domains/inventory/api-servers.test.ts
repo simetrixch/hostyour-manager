@@ -65,7 +65,7 @@ describe("server inventory API", () => {
   async function make(platformRepo?: FakePlatformRepo): Promise<Harness> {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-servers-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     // The chokepoint attributes every write to the session's sub, and runs.started_by is an FK onto
     // operators — in production upsertOperator wrote that row at login; the harness mints the cookie

@@ -36,7 +36,7 @@ export interface ReportInput {
  *  fence (a job that reached "done" already passed this, but the verdict re-asserts it). */
 export function sandboxGreen(s: SandboxAttestation): boolean {
   return (
-    s.mustFailTargetsConfirmedListening && s.mustFailDenied && s.controllerAddrDenied && s.mustPassReached
+    s.mustFailTargetsConfirmedListening && s.mustFailDenied && s.managerAddrDenied && s.mustPassReached
   );
 }
 
@@ -47,7 +47,7 @@ export function assembleReport(input: ReportInput): GateReport {
   const verdict: "pass" | "fail" =
     hardGatesPass(input.gates) && sandboxGreen(input.sandbox) ? "pass" : "fail";
   const body = {
-    contractVersion: "1.3" as const,
+    contractVersion: "1.4" as const,
     runnerVersion: input.runnerVersion,
     repoURL: input.repoURL,
     requestedRef: input.requestedRef,

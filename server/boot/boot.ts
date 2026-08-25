@@ -3,7 +3,7 @@ import { wire } from "./wire.ts";
 
 /**
  * Ordered boot. LAW 0: boots with the whole world down — the only hard
- * dependencies are DATA_DIR + controller.db. Kube / OIDC discovery / git are lazy and
+ * dependencies are DATA_DIR + manager.db. Kube / OIDC discovery / git are lazy and
  * visibly degrading; they join in later increments.
  */
 export async function boot(): Promise<void> {

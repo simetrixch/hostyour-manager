@@ -33,7 +33,7 @@ describe("OIDC login flow + chokepoint end-to-end", () => {
   function make(mock: MockIdp): { app: Hono<AppEnv>; db: DbHandle } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-auth-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const config = parseConfig({
       PUBLIC_URL: "https://m1.example",

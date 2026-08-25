@@ -36,10 +36,10 @@ function target(over: Partial<OnboardTarget> = {}): OnboardTarget {
 
 function report(gate: GateResult, verdict: "pass" | "fail", manifest: ConsumerManifest | null = null): GateReport {
   return {
-    contractVersion: "1.3", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
+    contractVersion: "1.4", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
     requestedRef: "main", resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest,
     dependencies: [], gates: [gate],
-    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, controllerAddrDenied: true, mustPassReached: true },
+    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
     verdict, reportHash: "runner-hash",
   };
 }

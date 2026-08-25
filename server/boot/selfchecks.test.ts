@@ -52,7 +52,7 @@ describe("boot self-checks", () => {
   function fresh(onboardingConfig: Config = wiredConfig) {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-sc-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
     const onboarding = buildUnits(onboardingConfig, store, db.db, logger);

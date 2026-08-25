@@ -60,7 +60,7 @@ export const SandboxAttestationSchema = z.object({
   mustFailTargets: z.array(z.string()), // rendered from config, never guessed
   mustFailTargetsConfirmedListening: z.boolean(), // the Manager's attestation, echoed
   mustFailDenied: z.boolean(), // the runner observed its own connects blocked
-  controllerAddrDenied: z.boolean(), // the second must-fail probe (the Manager's own address)
+  managerAddrDenied: z.boolean(), // the second must-fail probe (the Manager's own address)
   mustPassReached: z.boolean(),
 });
 export type SandboxAttestation = z.infer<typeof SandboxAttestationSchema>;
@@ -75,7 +75,14 @@ export type ResolvedDependency = z.infer<typeof ResolvedDependencySchema>;
 
 /** The full validation report, frozen into runs.plan_json and streamed gate-by-gate. */
 export const GateReportSchema = z.object({
-  contractVersion: z.literal("1.3"),
+  // A LITERAL, so a report written against any other version of this shape is REFUSED rather than
+  // read half-right: the runner writes it and the Manager parses it, and the two are separate
+  // images. They cannot normally drift — one release tag builds both (.github/workflows/
+  // seed-images.yml) and one bump writes both pins — but a pin rolled back by hand can pair a new
+  // Manager with an old runner, and this line is what turns that into a named refusal at the first
+  // gate-run instead of a field silently read as undefined. Bump it whenever a field is added,
+  // removed or renamed here.
+  contractVersion: z.literal("1.4"),
   runnerVersion: z.string(),
   repoURL: z.string(),
   requestedRef: z.string(),

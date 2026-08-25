@@ -7,7 +7,7 @@
 # dev-tier dependency that IS needed at run). Migrations resolve source-relative
 # (import.meta.url), so COPY server/ carries them.
 #
-# DATA_DIR is the one mounted volume; it holds controller.db and the admin.sock (break-glass
+# DATA_DIR is the one mounted volume; it holds manager.db and the admin.sock (break-glass
 # mint — the server binds it there and sets its mode 0700 itself). The pod publishes
 # 127.0.0.1:8484 (UI via Traefik / SSH tunnel) and 127.0.0.1:8485 (break-glass listener only,
 # never WAN-routed).

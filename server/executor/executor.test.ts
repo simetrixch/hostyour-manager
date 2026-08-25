@@ -36,7 +36,7 @@ describe("Executor — noop happy path + resume", () => {
   function make(): { db: DbHandle; executor: Executor; bus: RunEventBus } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-ex-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
     const bus = new RunEventBus();
@@ -136,7 +136,7 @@ describe("Executor — noop happy path + resume", () => {
     };
     const dir = mkdtempSync(join(tmpdir(), "ctrl-ex-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
     const runDefinitions = new Map<RunKind, AnyRunDefinition>([["noop", failingDef]]);
@@ -202,7 +202,7 @@ describe("Executor — a run whose failure the database cannot take", () => {
   function makeWith(def: AnyRunDefinition): { db: DbHandle; executor: Executor; lines: string[] } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-nodb-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const lines: string[] = [];
     const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });
@@ -262,7 +262,7 @@ describe("Executor — cancel between steps + concurrent resume", () => {
   function makeWith(def: AnyRunDefinition): { db: DbHandle; executor: Executor } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-cx-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
     const runDefinitions = new Map<RunKind, AnyRunDefinition>([["noop", def]]);
@@ -401,7 +401,7 @@ describe("Executor — a resume the database cannot take", () => {
   function makeResume(def: AnyRunDefinition): { db: DbHandle; before: Executor; booting: Executor; lines: string[] } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-resume-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const lines: string[] = [];
     const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });

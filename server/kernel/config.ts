@@ -353,7 +353,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     // CREATES a missing file rather than refusing, so a different name here boots a green process
     // on an empty schema and leaves the real rows unreachable beside it — moving it is a rename of
     // the file on every volume, done with the pod stopped, not an edit of this line.
-    dbFile: join(e.DATA_DIR, "controller.db"),
+    dbFile: join(e.DATA_DIR, "manager.db"),
     // Base 8, guaranteed by the schema's octal-digit regex above.
     adminSocketMode: Number.parseInt(e.ADMIN_SOCKET_MODE, 8),
     // Empty string counts as unset (deployments often template the var to "") — absent means

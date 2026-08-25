@@ -57,7 +57,7 @@ describe("branches API", () => {
   async function make(config: Config, github?: GitHubPlatform): Promise<{ app: Hono<AppEnv>; cookie: string }> {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-branch-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const session = new SessionCodec(db.db, config);
     const app = createApp({

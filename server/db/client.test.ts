@@ -10,7 +10,7 @@ describe("openDb — migration phase + append-only invariants", () => {
   function fresh(): DbHandle {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-db-"));
     dirs.push(dir);
-    const h = openDb(join(dir, "controller.db"));
+    const h = openDb(join(dir, "manager.db"));
     handles.push(h);
     return h;
   }
@@ -28,7 +28,7 @@ describe("openDb — migration phase + append-only invariants", () => {
   it("re-opens idempotently (migrate is a no-op the second time)", () => {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-db-"));
     dirs.push(dir);
-    const file = join(dir, "controller.db");
+    const file = join(dir, "manager.db");
     const h1 = openDb(file);
     handles.push(h1);
     h1.sqlite.close();

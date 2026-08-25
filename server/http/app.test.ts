@@ -27,7 +27,7 @@ describe("http app shell + gate", () => {
   function make(readiness: ReadyzView): { app: ReturnType<typeof createApp>; session: SessionCodec } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-app-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const session = new SessionCodec(db.db, config);
     const app = createApp({ config, logger, getReadiness: () => readiness, session, registerAuth: () => undefined });
@@ -100,7 +100,7 @@ describe("http app shell + gate", () => {
     const shortIdle = { ...config, session: { idleSeconds: 30, absoluteSeconds: 43200 } };
     const dir = mkdtempSync(join(tmpdir(), "ctrl-app-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const session = new SessionCodec(db.db, shortIdle);
     const app = createApp({ config: shortIdle, logger, getReadiness: () => ({ ok: true, checks: [] }), session, registerAuth: () => undefined });

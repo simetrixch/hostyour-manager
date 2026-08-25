@@ -68,7 +68,7 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     terminalCalls.length = 0;
     const dir = mkdtempSync(join(tmpdir(), "ctrl-del-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
     const runDefinitions: Map<RunKind, AnyRunDefinition> = new Map([["noop", testDef]]);

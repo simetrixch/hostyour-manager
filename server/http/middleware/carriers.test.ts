@@ -32,7 +32,7 @@ describe("session carriers: cookie and bearer", () => {
   function make(): { app: ReturnType<typeof createApp>; session: SessionCodec } {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-carrier-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const session = new SessionCodec(db.db, config);
     const app = createApp({

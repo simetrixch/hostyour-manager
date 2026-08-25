@@ -82,7 +82,7 @@ describe("hardGatesPass — the verdict's hard-gate leg", () => {
 describe("GateReport — top-level shape", () => {
   it("validates a minimal well-formed report", () => {
     const report = {
-      contractVersion: "1.3",
+      contractVersion: "1.4",
       runnerVersion: "0.1.0",
       repoURL: "https://github.com/example/app.git",
       requestedRef: "main",
@@ -96,7 +96,7 @@ describe("GateReport — top-level shape", () => {
         mustFailTargets: ["https://10.1.1.1:443/"],
         mustFailTargetsConfirmedListening: true,
         mustFailDenied: true,
-        controllerAddrDenied: true,
+        managerAddrDenied: true,
         mustPassReached: true,
       },
       verdict: "pass",

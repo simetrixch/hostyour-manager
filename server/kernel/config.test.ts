@@ -16,7 +16,7 @@ describe("parseConfig", () => {
     expect(c.redirectUri).toBe("https://m1.example.com/auth/callback");
     expect(c.cookieSecure).toBe(true);
     expect(c.origin).toBe("https://m1.example.com");
-    expect(c.dbFile.endsWith("controller.db")).toBe(true);
+    expect(c.dbFile.endsWith("manager.db")).toBe(true);
     expect(c.oidc.adminsGroup).toBe("admins");
     expect(c.port).toBe(8484);
     expect(c.emergencyPort).toBe(8485);

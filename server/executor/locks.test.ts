@@ -12,7 +12,7 @@ describe("lock manager", () => {
   function fresh(): DbHandle {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-lk-"));
     dirs.push(dir);
-    const h = openDb(join(dir, "controller.db"));
+    const h = openDb(join(dir, "manager.db"));
     handles.push(h);
     return h;
   }

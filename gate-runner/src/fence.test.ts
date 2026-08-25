@@ -31,7 +31,7 @@ describe("fence.selfProbe", () => {
     const att = await selfProbe(BASE, fn);
 
     expect(att.mustFailDenied).toBe(true);
-    expect(att.controllerAddrDenied).toBe(true);
+    expect(att.managerAddrDenied).toBe(true);
     expect(att.mustPassReached).toBe(true);
     expect(att.mustFailTargetsConfirmedListening).toBe(true); // echoed from cfg
     expect(att.mustFailTargets).toEqual(["10.1.1.1:443", "traefik.lan:80"]); // echoed verbatim
@@ -45,7 +45,7 @@ describe("fence.selfProbe", () => {
     const att = await selfProbe(BASE, fn);
 
     expect(att.mustFailDenied).toBe(false);
-    expect(att.controllerAddrDenied).toBe(true); // the other must-fail probe still held
+    expect(att.managerAddrDenied).toBe(true); // the other must-fail probe still held
     expect(att.mustPassReached).toBe(true);
   });
 
@@ -56,7 +56,7 @@ describe("fence.selfProbe", () => {
 
     expect(att.mustPassReached).toBe(false);
     expect(att.mustFailDenied).toBe(true);
-    expect(att.controllerAddrDenied).toBe(true);
+    expect(att.managerAddrDenied).toBe(true);
   });
 
   // (4) target parsing: a URL, a host:port, and a bare host resolve to the right host/port.
@@ -89,7 +89,7 @@ describe("fence.selfProbe", () => {
     };
     const att = await selfProbe(BASE, throwing);
     expect(att.mustFailDenied).toBe(false);
-    expect(att.controllerAddrDenied).toBe(false);
+    expect(att.managerAddrDenied).toBe(false);
     expect(att.mustPassReached).toBe(false);
   });
 

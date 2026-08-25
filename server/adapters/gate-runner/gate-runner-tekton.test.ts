@@ -15,10 +15,10 @@ const CHAIN = [
 
 function report(verdict: "pass" | "fail" = "pass"): GateReport {
   const body = {
-    contractVersion: "1.3" as const, runnerVersion: "t", repoURL: "https://github.com/x/y.git", requestedRef: "main",
+    contractVersion: "1.4" as const, runnerVersion: "t", repoURL: "https://github.com/x/y.git", requestedRef: "main",
     resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest: null,
     dependencies: [], gates: [],
-    sandbox: { mustFailTargets: ["c:8080"], mustFailTargetsConfirmedListening: true, mustFailDenied: true, controllerAddrDenied: true, mustPassReached: true },
+    sandbox: { mustFailTargets: ["c:8080"], mustFailTargetsConfirmedListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
     verdict,
   };
   // The hash the runner's assembleReport authors — poll verifies it on receipt, so the fixture

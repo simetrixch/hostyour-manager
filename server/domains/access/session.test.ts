@@ -25,7 +25,7 @@ describe("SessionCodec — sealed JWE session", () => {
   function codec(cfg: Config = config): SessionCodec {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-ses-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     return new SessionCodec(db.db, cfg);
   }
@@ -55,7 +55,7 @@ describe("SessionCodec — sealed JWE session", () => {
   it("an unknown `via` reads back as 'emergency', never as the privileged 'oidc'", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-via-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const c = new SessionCodec(db.db, config);
     const now = Math.floor(Date.now() / 1000);

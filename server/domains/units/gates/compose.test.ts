@@ -12,10 +12,10 @@ function runnerReport(over: Partial<GateReport> = {}): GateReport {
     expected: "deploy/platform.yaml exists and validates", found: "manifest parsed", reason: null, detail: "ok",
   };
   return {
-    contractVersion: "1.3", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
+    contractVersion: "1.4", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
     requestedRef: "main", resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest: null,
     dependencies: [], gates: [g1],
-    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, controllerAddrDenied: true, mustPassReached: true },
+    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
     verdict: "pass", reportHash: "runner-hash",
     ...over,
   };

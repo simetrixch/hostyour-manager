@@ -20,7 +20,7 @@ describe("inventory tenants + tenant_apps", () => {
   function fresh(): DbHandle {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-tnt-"));
     dirs.push(dir);
-    const h = openDb(join(dir, "controller.db"));
+    const h = openDb(join(dir, "manager.db"));
     handles.push(h);
     return h;
   }
@@ -108,7 +108,7 @@ describe("apps.stage", () => {
   function fresh(): DbHandle {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-app-"));
     dirs.push(dir);
-    const h = openDb(join(dir, "controller.db"));
+    const h = openDb(join(dir, "manager.db"));
     handles.push(h);
     return h;
   }
@@ -172,7 +172,7 @@ describe("servers_one_master_uq", () => {
   function fresh(): DbHandle {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-mst-"));
     dirs.push(dir);
-    const h = openDb(join(dir, "controller.db"));
+    const h = openDb(join(dir, "manager.db"));
     handles.push(h);
     return h;
   }

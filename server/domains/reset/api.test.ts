@@ -84,7 +84,7 @@ describe("reset API (POST /api/reset)", () => {
     const dir = mkdtempSync(join(tmpdir(), "ctrl-reset-api-"));
     dirs.push(dir);
     const config = parseConfig({ ...baseEnv, DATA_DIR: dir } as NodeJS.ProcessEnv);
-    const db = openDb(join(dir, "controller.db"));
+    const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     // a master row (so masterFqdn derives m1.example.com) + a slave row (to prove the wipe)
     db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES ('srv_m','m1','m1.example.com','m1','master','ready')").run();

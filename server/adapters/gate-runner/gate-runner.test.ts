@@ -5,7 +5,7 @@ import type { GateJobRequest } from "./port.ts";
 
 function report(verdict: "pass" | "fail" = "pass"): GateReport {
   return {
-    contractVersion: "1.3",
+    contractVersion: "1.4",
     runnerVersion: "test",
     repoURL: "https://github.com/x/y.git",
     requestedRef: "main",
@@ -15,7 +15,7 @@ function report(verdict: "pass" | "fail" = "pass"): GateReport {
     manifest: null,
     dependencies: [],
     gates: [],
-    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, controllerAddrDenied: true, mustPassReached: true },
+    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
     verdict,
     reportHash: "h",
   };
