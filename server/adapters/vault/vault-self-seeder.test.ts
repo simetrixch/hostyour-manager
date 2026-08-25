@@ -82,7 +82,7 @@ afterEach(() => new Promise<void>((r) => server.close(() => r())));
 /** Every write rides the Manager's OWN kubernetes-auth identity, so every test needs a real
  *  ServiceAccount token file on disk — a scaffold torn down per test. */
 function withSelf<T>(fn: (seeder: VaultSelfSeeder) => Promise<T>): Promise<T> {
-  const dir = mkdtempSync(join(tmpdir(), "ctrl-seeder-sa-"));
+  const dir = mkdtempSync(join(tmpdir(), "mgr-seeder-sa-"));
   const saTokenPath = join(dir, "token");
   writeFileSync(saTokenPath, "sa-jwt\n", "utf8");
   const seeder = new VaultSelfSeeder({ self: { addr: base, k8sAuthMount: "kubernetes", k8sRole: "manager", saTokenPath } });

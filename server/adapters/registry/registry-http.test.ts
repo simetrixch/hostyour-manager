@@ -15,7 +15,7 @@ const OTHER_AUTH = Buffer.from("other:pw").toString("base64");
 
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "ctrl-regprobe-"));
+  dir = mkdtempSync(join(tmpdir(), "mgr-regprobe-"));
 });
 afterEach(() => {
   vi.unstubAllGlobals();

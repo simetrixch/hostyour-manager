@@ -43,7 +43,7 @@ describe("boot/seed-master — master self-registration", () => {
   });
 
   function setup(): { db: DbHandle; store: CredentialStore; dir: string } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-seed-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-seed-"));
     dirs.push(dir);
     const h = openDb(join(dir, "c.db"));
     handles.push(h);

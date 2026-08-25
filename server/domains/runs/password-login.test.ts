@@ -125,7 +125,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
   /** An adopted slave with a key and a stored bootstrap password — the second door — plus the
    *  master, which these run kinds may target like any other internet-facing machine. */
   async function setup(): Promise<{ db: DbHandle; store: CredentialStore }> {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-pwlogin-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-pwlogin-"));
     dirs.push(dir);
     const db = openDb(join(dir, "c.db"));
     handles.push(db);

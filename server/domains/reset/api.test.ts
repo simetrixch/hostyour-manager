@@ -81,7 +81,7 @@ describe("reset API (POST /api/reset)", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function make(github: GitHubPlatform | undefined, over: { reseed?: () => Promise<void> } = {}) {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-reset-api-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-reset-api-"));
     dirs.push(dir);
     const config = parseConfig({ ...baseEnv, DATA_DIR: dir } as NodeJS.ProcessEnv);
     const db = openDb(join(dir, "manager.db"));

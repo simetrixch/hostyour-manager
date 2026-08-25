@@ -66,7 +66,7 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
   function make(): { db: DbHandle; executor: Executor } {
     failAct = true;
     terminalCalls.length = 0;
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-del-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-del-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

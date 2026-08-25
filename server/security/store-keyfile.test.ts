@@ -26,7 +26,7 @@ describe("CredentialStore — keyfile mode (AES-256-GCM at rest)", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
   function db(): DbHandle["db"] {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-ks-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-ks-"));
     dirs.push(dir);
     const h = openDb(join(dir, "c.db"));
     handles.push(h);

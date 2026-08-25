@@ -74,7 +74,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
   // `undefined` in extraEnv REMOVES a key from the enabled base env (an empty string would fail
   // the min(1) schema of the optional enable vars — absent, not blank, is how a feature is off).
   function setup(extraEnv: Record<string, string | undefined> = {}): Parameters<typeof buildUnits> {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-wireonb-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-wireonb-"));
     dirs.push(dir);
     const config = parseConfig({ ...enabledEnv, DATA_DIR: dir, ...extraEnv } as NodeJS.ProcessEnv);
     const h = openDb(join(dir, "c.db"));
@@ -100,7 +100,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
   });
 
   it("still honors a set KUBECONFIG_PATH as the explicit file override", () => {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-wireonb-kc-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-wireonb-kc-"));
     dirs.push(dir);
     const file = join(dir, "kubeconfig.yaml");
     writeFileSync(file, KUBECONFIG_YAML, "utf8");

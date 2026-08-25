@@ -212,7 +212,7 @@ export function adoptWorkbench(): {
   const dirs: string[] = [];
   return {
     make(factory: SshFactory = fakeFactory(), sshUser = "root") {
-      const dir = mkdtempSync(join(tmpdir(), "ctrl-adopt-"));
+      const dir = mkdtempSync(join(tmpdir(), "mgr-adopt-"));
       dirs.push(dir);
       const db = openDb(join(dir, "c.db"));
       handles.push(db);

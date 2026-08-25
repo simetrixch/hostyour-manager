@@ -25,7 +25,7 @@ describe("operator keys — the rows", () => {
   });
 
   function setup(): DbHandle {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-opkeys-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-opkeys-"));
     dirs.push(dir);
     const db = openDb(join(dir, "c.db"));
     handles.push(db);

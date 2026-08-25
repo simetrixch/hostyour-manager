@@ -62,7 +62,7 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
    *  needs. Both addresses are present on purpose: a plan that named the LAN one would look
    *  identical on a row that has only a public address. */
   function setup(): DbHandle {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-tailnet-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-tailnet-"));
     dirs.push(dir);
     const db = openDb(join(dir, "c.db"));
     handles.push(db);

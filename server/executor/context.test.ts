@@ -48,7 +48,7 @@ describe("RunContext — adopt password ceremony", () => {
   });
 
   function setup(runId: string): { db: DbHandle; store: CredentialStore; bus: RunEventBus; serverId: string } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-ctx-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-ctx-"));
     dirs.push(dir);
     const db = openDb(join(dir, "c.db"));
     handles.push(db);
@@ -131,7 +131,7 @@ describe("RunContext — multi-target SSH cache (one session per target host and
   async function setup(
     closed: string[],
   ): Promise<{ rc: RunContext; slaveId: string; masterId: string }> {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-multi-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-multi-"));
     dirs.push(dir);
     const db = openDb(join(dir, "c.db"));
     handles.push(db);
@@ -210,7 +210,7 @@ describe("RunContext — which address a session opens on", () => {
   const TAILNET_ADDRESS = "100.71.4.9";
 
   async function setup(): Promise<{ db: DbHandle; store: CredentialStore; serverId: string; dialled: string[] }> {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-transport-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-transport-"));
     dirs.push(dir);
     const db = openDb(join(dir, "c.db"));
     handles.push(db);

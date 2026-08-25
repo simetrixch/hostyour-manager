@@ -43,7 +43,7 @@ describe("CredentialStore — vault mode (values in Vault KV)", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
   function db(): DbHandle["db"] {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-vault-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-vault-"));
     dirs.push(dir);
     const h = openDb(join(dir, "c.db"));
     handles.push(h);

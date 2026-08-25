@@ -25,7 +25,7 @@ describe("http app shell + gate", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function make(readiness: ReadyzView): { app: ReturnType<typeof createApp>; session: SessionCodec } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-app-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-app-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
@@ -98,7 +98,7 @@ describe("http app shell + gate", () => {
     // Fakes ONLY Date (both lifetime checks read the wall clock) — a real sleep under full-suite
     // CPU contention overshoots any margin. Absolute stays long; the cap is session.test.ts's concern.
     const shortIdle = { ...config, session: { idleSeconds: 30, absoluteSeconds: 43200 } };
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-app-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-app-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

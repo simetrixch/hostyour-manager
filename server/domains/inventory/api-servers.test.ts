@@ -63,7 +63,7 @@ describe("server inventory API", () => {
   const dirs: string[] = [];
 
   async function make(platformRepo?: FakePlatformRepo): Promise<Harness> {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-servers-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-servers-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

@@ -18,7 +18,7 @@ describe("inventory tenants + tenant_apps", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function fresh(): DbHandle {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-tnt-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-tnt-"));
     dirs.push(dir);
     const h = openDb(join(dir, "manager.db"));
     handles.push(h);
@@ -106,7 +106,7 @@ describe("apps.stage", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function fresh(): DbHandle {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-app-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-app-"));
     dirs.push(dir);
     const h = openDb(join(dir, "manager.db"));
     handles.push(h);
@@ -170,7 +170,7 @@ describe("servers_one_master_uq", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function fresh(): DbHandle {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-mst-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-mst-"));
     dirs.push(dir);
     const h = openDb(join(dir, "manager.db"));
     handles.push(h);

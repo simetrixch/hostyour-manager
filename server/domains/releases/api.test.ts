@@ -65,7 +65,7 @@ describe("GET /api/releases — which release an installation stands on, and whi
     app: Hono<AppEnv>;
     cookie: string;
   }> {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-releases-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-releases-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

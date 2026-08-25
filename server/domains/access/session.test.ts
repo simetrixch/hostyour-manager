@@ -23,7 +23,7 @@ describe("SessionCodec — sealed JWE session", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function codec(cfg: Config = config): SessionCodec {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-ses-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-ses-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
@@ -53,7 +53,7 @@ describe("SessionCodec — sealed JWE session", () => {
   // with the codec's own key, because a token holding an unknown `via` is exactly what a session
   // sealed by a future mint and read by today's decoder would be.
   it("an unknown `via` reads back as 'emergency', never as the privileged 'oidc'", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-via-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-via-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

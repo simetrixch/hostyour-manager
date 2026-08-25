@@ -46,7 +46,7 @@ describe("buildKubeConfig (input-variant dispatch)", () => {
   });
 
   it("{ kubeconfigPath } loads the file — the explicit dev/test override", () => {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-kubecfg-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-kubecfg-"));
     dirs.push(dir);
     const file = join(dir, "kubeconfig.yaml");
     writeFileSync(file, KUBECONFIG_YAML, "utf8");
@@ -94,7 +94,7 @@ describe("KubeMasterArgoReader.watchApplication (poll loop: until / failFast / b
   // A reader whose ONLY live method (getApplication) is replaced by a scripted queue; pollMs=1 so the
   // loop spins fast. The queue's last entry repeats once exhausted (a steady terminal observation).
   function stubbedReader(queue: ArgoAppStatus[]): { reader: KubeMasterArgoReader; calls: () => number } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-watch-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-watch-"));
     dirs.push(dir);
     const file = join(dir, "kubeconfig.yaml");
     writeFileSync(file, KUBECONFIG_YAML, "utf8");

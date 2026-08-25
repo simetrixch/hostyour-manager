@@ -373,7 +373,7 @@ export function disposeHarnesses(): void {
 // (under plaintext the gate counts the first run's leftover planned row as a live slave).
 export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string; versionsYaml?: string } = {}): Promise<Harness> {
   const hosts = opts.hosts ?? scriptedHosts();
-  const dir = mkdtempSync(join(tmpdir(), "ctrl-ds-"));
+  const dir = mkdtempSync(join(tmpdir(), "mgr-ds-"));
   dirs.push(dir);
   const db = openDb(join(dir, "c.db"));
   handles.push(db);

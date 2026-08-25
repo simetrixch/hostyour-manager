@@ -30,7 +30,7 @@ describe("inventory server CRUD", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
   function setup(): { db: DbHandle["db"]; store: CredentialStore } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-inv-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-inv-"));
     dirs.push(dir);
     const h = openDb(join(dir, "c.db"));
     handles.push(h);

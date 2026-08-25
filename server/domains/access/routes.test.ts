@@ -31,7 +31,7 @@ describe("OIDC login flow + chokepoint end-to-end", () => {
   });
 
   function make(mock: MockIdp): { app: Hono<AppEnv>; db: DbHandle } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-auth-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-auth-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

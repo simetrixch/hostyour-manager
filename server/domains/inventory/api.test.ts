@@ -31,7 +31,7 @@ describe("clusters + locks API", () => {
   const dirs: string[] = [];
 
   async function make(storeMode: StoreMode = "plaintext", platformRepo?: FakePlatformRepo): Promise<{ app: Hono<AppEnv>; db: DbHandle; cookie: string }> {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-clusters-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-clusters-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

@@ -10,7 +10,7 @@ describe("lock manager", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function fresh(): DbHandle {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-lk-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-lk-"));
     dirs.push(dir);
     const h = openDb(join(dir, "manager.db"));
     handles.push(h);

@@ -38,7 +38,7 @@ describe("attestMachineId ", () => {
   });
 
   function setup(machineId: string | null): { db: DbHandle; serverId: string } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-attest-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-attest-"));
     dirs.push(dir);
     const db = openDb(join(dir, "c.db"));
     handles.push(db);

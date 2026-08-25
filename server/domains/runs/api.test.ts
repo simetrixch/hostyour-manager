@@ -34,7 +34,7 @@ describe("runs API + SSE", () => {
   const dirs: string[] = [];
 
   async function make(): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string; db: DbHandle }> {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-api-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-api-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

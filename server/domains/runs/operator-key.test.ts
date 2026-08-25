@@ -138,7 +138,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
    *  key on file. The master is here because it is the machine an operator most needs to reach by
    *  hand — and it is never adopted, so it carries no adoptedAt at all. */
   async function setup(): Promise<{ db: DbHandle; store: CredentialStore; keyId: string }> {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-opkey-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-opkey-"));
     dirs.push(dir);
     const db = openDb(join(dir, "c.db"));
     handles.push(db);

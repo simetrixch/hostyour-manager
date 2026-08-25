@@ -55,7 +55,7 @@ describe("branches API", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   async function make(config: Config, github?: GitHubPlatform): Promise<{ app: Hono<AppEnv>; cookie: string }> {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-branch-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-branch-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

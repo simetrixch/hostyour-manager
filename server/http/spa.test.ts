@@ -9,7 +9,7 @@ import type { AppEnv } from "./app-env.ts";
 describe("SPA static serving", () => {
   const dirs: string[] = [];
   function dist(withBuild = true): string {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-spa-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-spa-"));
     dirs.push(dir);
     if (withBuild) {
       writeFileSync(join(dir, "index.html"), "<!doctype html><div id=root></div>");

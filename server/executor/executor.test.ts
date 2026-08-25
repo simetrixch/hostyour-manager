@@ -34,7 +34,7 @@ describe("Executor — noop happy path + resume", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function make(): { db: DbHandle; executor: Executor; bus: RunEventBus } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-ex-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-ex-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
@@ -134,7 +134,7 @@ describe("Executor — noop happy path + resume", () => {
         },
       }],
     };
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-ex-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-ex-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
@@ -200,7 +200,7 @@ describe("Executor — a run whose failure the database cannot take", () => {
   }
 
   function makeWith(def: AnyRunDefinition): { db: DbHandle; executor: Executor; lines: string[] } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-nodb-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-nodb-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
@@ -260,7 +260,7 @@ describe("Executor — cancel between steps + concurrent resume", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function makeWith(def: AnyRunDefinition): { db: DbHandle; executor: Executor } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-cx-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-cx-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
@@ -399,7 +399,7 @@ describe("Executor — a resume the database cannot take", () => {
   /** The run that planned the work and the run that boots after the crash are different processes,
    *  and only the second one's log is measured. */
   function makeResume(def: AnyRunDefinition): { db: DbHandle; before: Executor; booting: Executor; lines: string[] } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-resume-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-resume-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

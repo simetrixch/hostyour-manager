@@ -37,7 +37,7 @@ describe("domains/units/cluster-kube — per-cluster kube resolver ", () => {
   });
 
   function setup(): { db: DbHandle; store: CredentialStore } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-clusterkube-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-clusterkube-"));
     dirs.push(dir);
     const h = openDb(join(dir, "c.db"));
     handles.push(h);

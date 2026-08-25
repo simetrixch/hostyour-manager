@@ -141,7 +141,7 @@ describe("Executor recovery — retry / skip / abort-with-cleanup", () => {
     cleanupLog.length = 0;
     verifyLog.length = 0;
     mutateLog.length = 0;
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-rec-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-rec-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

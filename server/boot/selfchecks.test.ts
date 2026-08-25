@@ -50,7 +50,7 @@ describe("boot self-checks", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function fresh(onboardingConfig: Config = wiredConfig) {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-sc-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-sc-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

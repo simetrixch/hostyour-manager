@@ -19,7 +19,7 @@ describe("crypto gate", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function fresh(mode = "plaintext"): DbHandle {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-gd-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-gd-"));
     dirs.push(dir);
     const h = openDb(join(dir, "manager.db"));
     handles.push(h);
@@ -185,7 +185,7 @@ describe("streaming plan path runs the crypto gate (runGuards fix)", () => {
   const noSsh: SshFactory = () => Promise.reject(new Error("ssh must not be used during planning"));
 
   function make(mode = "plaintext"): { db: DbHandle; executor: Executor } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-sp-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-sp-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);

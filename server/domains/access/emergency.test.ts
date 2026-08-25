@@ -31,7 +31,7 @@ describe("break-glass", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function fresh(): { db: DbHandle; session: SessionCodec; store: EmergencyStore } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-bg-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-bg-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
@@ -91,7 +91,7 @@ describe("break-glass", () => {
   it.skipIf(process.platform === "win32")("admin.sock carries the mode ADMIN_SOCKET_MODE names — set explicitly, never umask-inherited", async () => {
     for (const [written, expected] of [["0770", 0o770], ["0700", 0o700]] as const) {
       const { db, session, store } = fresh();
-      const dir = mkdtempSync(join(tmpdir(), "ctrl-sock-"));
+      const dir = mkdtempSync(join(tmpdir(), "mgr-sock-"));
       dirs.push(dir);
       const sockPath = join(dir, "admin.sock");
       const modeConfig = parseConfig({ ...baseEnv, ADMIN_SOCKET_MODE: written } as NodeJS.ProcessEnv);
@@ -132,7 +132,7 @@ describe("admin.sock app", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   function fresh(): { db: DbHandle; session: SessionCodec; store: EmergencyStore } {
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-sockapp-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-sockapp-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
@@ -240,7 +240,7 @@ describe("admin.sock app", () => {
   // Linux semantics (Windows refuses the bind), so it runs where the check battery runs on Linux.
   it.skipIf(process.platform === "win32")("serveAdminSocket answers a real HTTP request over the unix socket", async () => {
     const { db, session, store } = fresh();
-    const dir = mkdtempSync(join(tmpdir(), "ctrl-sock-"));
+    const dir = mkdtempSync(join(tmpdir(), "mgr-sock-"));
     dirs.push(dir);
     const socketPath = join(dir, "admin.sock");
     const server = serveAdminSocket(socketPath, { config, session, store, db: db.db, logger });
