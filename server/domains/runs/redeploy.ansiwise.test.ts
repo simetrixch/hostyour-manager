@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { readFileSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { getRun, readEvents } from "../../executor/read.ts";
@@ -7,7 +9,7 @@ import { generateServerKeypair } from "../../adapters/ssh/keygen.ts";
 import { startFakeSshServer, type FakeSshServer } from "../../adapters/ssh/testing/fake-server.ts";
 import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused } from "../../adapters/ansiwise/port.ts";
-import { ansiwiseBinaries, NO_BINARY, startServe, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
+import { ansiwiseBinaries, NO_BINARY, startServe, runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
 import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
@@ -198,6 +200,51 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(runsAfter).toBe(runsBefore);
   });
 
+  // ============== the wait itself: what it does when the machine's end is never installed ==============
+  //
+  // The engine writes a run's closing header beside the real one and renames over it. On this
+  // platform that rename fails while any process has run.json open and it carries no retry, so the
+  // exit code is left standing in run.json.writing and the record never gains an end. The wait below
+  // used to spend the caller's whole budget on that, and vitest then reported a bare 120s timeout
+  // pointing at the it() line — which named neither the run nor the machine. These two hold the wait
+  // to telling the two states apart, and they do it on TIME, because what changed is when it gives
+  // up and not what it says.
+
+  it("a run whose end was written but never installed is refused at once, not waited out", { timeout: 60_000 }, async () => {
+    await liveMaster(serve);
+    const run = await observerStart(serve, { program: "deploy-cluster", mode: "dry", answers: composedAnswers(uniqueEmail()) });
+    await observerEnded(observer, serve, run.run, AbortSignal.timeout(30_000)); // the innocent case: it ends, and the wait returns
+    const dir = join(runRoot(serve.dir), run.run);
+
+    // The state the engine leaves behind when its rename does not land, built here by hand: the
+    // closing header standing under the pending name, and a record that carries no end.
+    const ended = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, unknown>;
+    writeFileSync(join(dir, "run.json.writing"), JSON.stringify(ended));
+    writeFileSync(join(dir, "run.json"), JSON.stringify({ ...ended, exit_code: null }));
+
+    const began = Date.now();
+    await expect(observerEnded(observer, serve, run.run, AbortSignal.timeout(30_000))).rejects.toThrow();
+    expect(Date.now() - began, "the wait spent the budget instead of reading what was on the disk").toBeLessThan(10_000);
+  });
+
+  it("a run that has simply not ended yet is still waited out, to the caller's own budget", { timeout: 60_000 }, async () => {
+    await liveMaster(serve);
+    const run = await observerStart(serve, { program: "deploy-cluster", mode: "dry", answers: composedAnswers(uniqueEmail()) });
+    await observerEnded(observer, serve, run.run, AbortSignal.timeout(30_000));
+    const dir = join(runRoot(serve.dir), run.run);
+
+    // The counter-probe of the test above. Same record with its end taken away, but NO pending
+    // header beside it — a run still going looks exactly like this, and giving up on one of those
+    // would turn a slow machine into a failure.
+    const ended = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, unknown>;
+    rmSync(join(dir, "run.json.writing"), { force: true });
+    writeFileSync(join(dir, "run.json"), JSON.stringify({ ...ended, exit_code: null }));
+
+    const began = Date.now();
+    await expect(observerEnded(observer, serve, run.run, AbortSignal.timeout(4_000))).rejects.toThrow();
+    expect(Date.now() - began, "the wait gave up on a run that had not ended, with nothing on the disk saying it had").toBeGreaterThanOrEqual(3_500);
+  });
+
   it("a checkpoint holding a FINISHED-RED machine run starts a fresh one — a retry that could never work", { timeout: 120_000 }, async ({ signal }) => {
     // THE TRAP THIS CLOSES. A re-entry keeps its checkpoint, and a mark whose run had already ended
     // red fell into the re-attach branch: every retry watched the same finished run, read the same
@@ -212,7 +259,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       mode: "dry",
       answers: { ...composedAnswers(email), letsencrypt_email: "not-an-email" },
     });
-    await observerEnded(observer, bad.run, signal);
+    await observerEnded(observer, serve, bad.run, signal);
     const ended = await observer.run(bad.run);
     expect(ended.exit_code === 0).toBe(false);
 

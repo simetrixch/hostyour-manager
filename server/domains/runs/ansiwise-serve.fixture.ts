@@ -1,5 +1,7 @@
 import { expect } from "vitest";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import type { Conversation } from "../../adapters/ssh/testing/fake-server.ts";
 import type { SshSession } from "../../adapters/ssh/port.ts";
@@ -7,7 +9,7 @@ import type { RunKind } from "../../../shared/enums.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseRunRecord } from "../../adapters/ansiwise/port.ts";
-import { openChannel, programYaml, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
+import { openChannel, programYaml, runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
@@ -450,7 +452,7 @@ export async function observerStart(serve: ServeFixture, start: { program: strin
  *  AND IT REPORTS WHAT IT SAW, NOT WHAT IT ASSUMES. Giving up is not evidence that the run did not
  *  end — it may end a moment later — so the refusal says this stopped watching and what the last
  *  reading was, and never that the run "never ended". */
-export async function observerEnded(observer: AnsiwiseClient, id: string, signal: AbortSignal): Promise<void> {
+export async function observerEnded(observer: AnsiwiseClient, serve: ServeFixture, id: string, signal: AbortSignal): Promise<void> {
   let lastSeen = "no record on the machine yet";
   while (!signal.aborted) {
     try {
@@ -460,9 +462,57 @@ export async function observerEnded(observer: AnsiwiseClient, id: string, signal
     } catch (err) {
       if (!(err instanceof AnsiwiseRefused) || err.status !== 404) throw err;
     }
+    const stranded = await strandedEnd(serve, id);
+    if (stranded !== undefined) throw new Error(stranded);
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error(`stopped watching machine run ${id} — the test's own budget ran out; last reading: ${lastSeen}`);
+}
+
+/** How long the two files have to keep saying the same thing before it counts (see strandedEnd). */
+const STRANDED_SETTLE_MS = 1_000;
+
+/** What an id's record and its pending header say about the run having ended, read straight off this
+ *  machine's disk rather than through the surface. */
+function headerEnds(serve: ServeFixture, id: string): { record: boolean; pending: boolean } {
+  const ended = (file: string): boolean => {
+    try {
+      const { exit_code: code } = JSON.parse(readFileSync(join(runRoot(serve.dir), id, file), "utf8")) as { exit_code?: number | null };
+      return code !== undefined && code !== null;
+    } catch {
+      return false; // absent, or half written — either way it is not an end anybody can read
+    }
+  };
+  return { record: ended("run.json"), pending: ended("run.json.writing") };
+}
+
+/** The message for an end the machine wrote that never became its record, or nothing when the record
+ *  is simply not there yet.
+ *
+ *  A run's closing header is written beside the real one and renamed over it (ansiwise-core
+ *  lib/src/infrastructure/file_recorder.dart, RunRecorder.save). Measured on Windows over 365 runs
+ *  of this fixture: that rename fails while any process has run.json open, at a rate that rises with
+ *  how often it is read — 0 of 100 with no reader, 1 of 40 read ten times a second, 12 of 60 read as
+ *  fast as the surface answers — and it carries no retry, so run.json.writing is left holding the
+ *  exit code while run.json keeps the header the run began with. Every one of those 34 orphans held
+ *  the exit code, so the run itself finished and only the rename was lost.
+ *
+ *  Waiting on a record in that state waits for something nothing will ever write, which is why this
+ *  is read at all: without it the caller spends its whole budget and vitest reports a bare timeout
+ *  pointing at the it() line, which says nothing about the machine.
+ *
+ *  CONFIRMED BEFORE IT IS REPORTED. The same two files hold exactly this shape for the microseconds
+ *  between the write and the rename of every ordinary save, so a single reading could call a run
+ *  stranded that is about to be fine. The state has to still be there a second later, which is four
+ *  orders of magnitude longer than that window. */
+async function strandedEnd(serve: ServeFixture, id: string): Promise<string | undefined> {
+  const first = headerEnds(serve, id);
+  if (first.record || !first.pending) return undefined;
+  await new Promise((r) => setTimeout(r, STRANDED_SETTLE_MS));
+  const again = headerEnds(serve, id);
+  if (again.record || !again.pending) return undefined;
+  const dir = join(runRoot(serve.dir), id);
+  return `machine run ${id} ended and its end was never installed: ${join(dir, "run.json.writing")} carries the exit code and ${join(dir, "run.json")} still carries none, ${STRANDED_SETTLE_MS}ms apart. The engine renames the one onto the other and that rename did not land; nothing will retry it, so no amount of further waiting can find an end here`;
 }
 
 /** A hand StepCtx for driving one program step directly — the executor-shaped surface with the
