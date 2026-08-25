@@ -5,7 +5,8 @@ import type { ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture
 import { AppError } from "../../kernel/errors.ts";
 import { requireProgramsStep } from "./defs/ansiwise-run.kit.ts";
 import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
-import { PARAMS, MASTER_ID, SLAVE_ID, stepColumn } from "./deploy-slave.fixture.ts";
+import { PARAMS, MASTER_ID, SLAVE_ID } from "./deploy-slave.fixture.ts";
+import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import {
   uniqueEmail, elevationOnly, deploySecrets, releaseSecrets,
   liveMaster, releaseSlaveWorld, recordWindow, startedRuns, expectProven, settled, programStepCtx,

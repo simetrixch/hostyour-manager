@@ -2,13 +2,13 @@ import { describe, it, expect, afterEach } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { DbHandle } from "../../db/client.ts";
 import { adoptDef, elevatedName, MANAGER_ELEVATED, SUDOERS_DROP_IN, sudoersDropIn, unpinnedElevated, type ElevatedCommand } from "./defs/adopt.ts";
 import { DROP_IN as SSHD_DROP_IN } from "./defs/password-login.kit.ts";
 import { getRun, readEvents } from "../../executor/read.ts";
+import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import { servers } from "../../db/schema/inventory.ts";
-import { steps as runSteps } from "../../db/schema/runs.ts";
 import {
   adoptWorkbench, fakeFactory, sudoersPermits,
   BLANKET_LINE, LEGACY_BLANKET_DROP_IN, HEALTHY_PREFLIGHT, PROBE_NO_CLIENT, PASSWORD, type FakeHost,
@@ -44,8 +44,8 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
   const make = bench.make;
 
   function configureSudoCheckpoint(db: DbHandle, runId: string): { data?: { sudoersWritten?: boolean }; __cleanups?: string[] } {
-    const row = db.db.select().from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.name, "configure-sudo"))).get();
-    return (row?.checkpointJson ?? {}) as { data?: { sudoersWritten?: boolean }; __cleanups?: string[] };
+    return JSON.parse(stepColumn(db, runId, "configure-sudo", "checkpoint_json") ?? "{}") as
+      { data?: { sudoersWritten?: boolean }; __cleanups?: string[] };
   }
 
   it("grants the NAMED commands on a non-root account and never the blanket right, arms the removal, and says in the log that it STAYS", async () => {

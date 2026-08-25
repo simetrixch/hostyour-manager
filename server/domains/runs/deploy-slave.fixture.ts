@@ -424,13 +424,6 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   return { db, executor, store, hosts, platformRepo, releases };
 }
 
-export function stepColumn(db: DbHandle, runId: string, name: string, column: "error" | "checkpoint_json"): string | null {
-  const row = db.sqlite
-    .prepare(`SELECT ${column} AS v FROM steps WHERE run_id = ? AND name = ?`)
-    .get(runId, name) as { v: string | null } | undefined;
-  return row?.v ?? null;
-}
-
 /** Under FAKE timers (vi.useFakeTimers must be active): yield microtasks until the run
  *  schedules its next sleep (the scripted hosts are pure microtasks, so the only timers are
  *  the bounded waits' poll sleeps). */

@@ -8,13 +8,19 @@ export interface FakeExec {
   hang?: boolean; // never exit — used to exercise timeout/abort
 }
 
+/** One command answered by HOLDING THE CHANNEL OPEN — the server side of SshSession.openChannel.
+ *  The handler is handed the exec stream (a Duplex whose reads are the client's writes) and drives
+ *  both directions itself: echo bytes back, or pipe them to a real process's stdio or socket. It
+ *  ends the conversation with stream.exit()+stream.end(); the fixture never does.
+ *
+ *  The type is exported because the handlers are written OUTSIDE adapters/, and `ServerChannel` is
+ *  an ssh2 type that only this directory may name (`adapters-own-io-libs` in
+ *  .dependency-cruiser.cjs). A caller elsewhere states this type and never reaches for the library. */
+export type Conversation = (stream: ServerChannel) => void;
+
 export interface FakeServerOptions {
   execTable?: Record<string, FakeExec>;
-  /** Commands answered by HOLDING THE CHANNEL OPEN — the server side of SshSession.openChannel.
-   *  The handler is handed the exec stream (a Duplex whose reads are the client's writes) and
-   *  drives both directions itself: echo bytes back, or pipe them to a real process's stdio or
-   *  socket. It ends the conversation with stream.exit()+stream.end(); the fixture never does. */
-  conversations?: Record<string, (stream: ServerChannel) => void>;
+  conversations?: Record<string, Conversation>;
   acceptPassword?: string;
   authorizedKeys?: string[]; // OpenSSH public lines
   /** Emulate sshd's per-connection cap on CONCURRENT session channels (OpenSSH

@@ -11,9 +11,10 @@ import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
 import { getRun } from "../../executor/read.ts";
 import {
-  makeHarness, disposeHarnesses, bareStepCtx, stepColumn, PARAMS, SLAVE_ID, MASTER_ID,
+  makeHarness, disposeHarnesses, bareStepCtx, PARAMS, SLAVE_ID, MASTER_ID,
   SLAVE_MARKING_YAML, MASTER_MARKING_YAML, REDEPLOY_STEP_NAMES,
 } from "./deploy-slave.fixture.ts";
+import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import type { Harness } from "./deploy-slave.fixture.ts";
 
 // The cluster release, at the fake-repo level: what each of the two arms PLANS, what set-pin writes,

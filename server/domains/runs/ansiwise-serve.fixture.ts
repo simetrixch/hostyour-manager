@@ -1,7 +1,7 @@
 import { expect } from "vitest";
 import { spawn } from "node:child_process";
 import { eq } from "drizzle-orm";
-import type { ServerChannel } from "ssh2";
+import type { Conversation } from "../../adapters/ssh/testing/fake-server.ts";
 import type { SshSession } from "../../adapters/ssh/port.ts";
 import type { RunKind } from "../../../shared/enums.ts";
 import type { StepCtx } from "../../executor/types.ts";
@@ -193,7 +193,7 @@ export function fixturePrograms(): Record<string, string> {
 /** A real sshd whose "ansiwise-rest serve" exec spawns the binary so its own standard input and output
  *  ARE the connection — exactly what an SSH exec channel hands a process. No token on this door: a
  *  session is authenticated by sshd, and a machine at its first installation has no token yet. */
-export function serveConversation(serve: ServeFixture): (stream: ServerChannel) => void {
+export function serveConversation(serve: ServeFixture): Conversation {
   return (stream) => {
     const child = spawn(serve.exe, ["serve", "--programs", "programs", "--config", "ansiwise.yaml"], { cwd: serve.dir });
     stream.pipe(child.stdin);

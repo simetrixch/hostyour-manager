@@ -18,7 +18,6 @@ module.exports = {
 
     { name: "domains-no-crosstalk", severity: "error",
       comment: "Domains don't import each other (inventory is the shared read exception). Tests may compose across domains.",
-      comment: "Domains never import each other. Exception: inventory is the base domain.",
       from: { path: "^server/domains/([^/]+)/", pathNot: "\\.test\\.ts$" },
       to: { path: "^server/domains/(?!$1/|inventory/)[^/]+/" } },
 
@@ -57,12 +56,16 @@ module.exports = {
         "module that only its own test still imports goes red — that is the leftover this rule exists to " +
         "catch. Reachability, not `orphan`: an orphan needs zero dependencies AND zero dependents, so a " +
         "leftover that itself still imports something could never be caught as one. Exempt alongside the " +
-        "tests is the rest of the test surface — the adapter fakes under adapters/*/testing/ and the " +
-        "*.fixture.ts files, which exist to serve tests and are reachable from nothing else by design.",
+        "tests is the rest of the test surface — the adapter fakes under adapters/*/testing/, the " +
+        "*.fixture.ts files and the *.suite.ts files, which exist to serve tests and are reachable from " +
+        "nothing else by design. A *.suite.ts holds describe/it blocks that a *.test.ts registers by " +
+        "calling it, for the case where two suites must share ONE process-wide fixture and therefore " +
+        "cannot be two test files; splitting it out is a split of the FILE, so it is as much test " +
+        "surface as the test that calls it.",
       from: { path: ENTRY_POINTS },
       to: {
         path: "^(server|shared|web/src|gate-runner/src)",
-        pathNot: [ENTRY_POINTS, "\\.test\\.tsx?$", "\\.d\\.ts$", "^server/adapters/[^/]+/testing/", "\\.fixture\\.ts$"],
+        pathNot: [ENTRY_POINTS, "\\.test\\.tsx?$", "\\.d\\.ts$", "^server/adapters/[^/]+/testing/", "\\.fixture\\.ts$", "\\.suite\\.ts$"],
         reachable: false,
       } },
   ],

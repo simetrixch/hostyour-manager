@@ -16,8 +16,9 @@ import { readServerTailnet } from "../../../shared/tailnet.ts";
 import { SLAVE_MACHINE_INPUTS } from "./defs/deploy-slave.ts";
 import {
   STEP_NAMES, REDEPLOY_STEP_NAMES, PARAMS, EMIT_ARGOCD_TOKEN, EMIT_REVIEWER_TOKEN, EMIT_CREDS_JSON,
-  disposeHarnesses, stepColumn, MASTER_ID, SLAVE_ID, MINT_AUTHKEY, ANSIWISE_PIN,
+  disposeHarnesses, MASTER_ID, SLAVE_ID, MINT_AUTHKEY, ANSIWISE_PIN,
 } from "./deploy-slave.fixture.ts";
+import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import { ANSIWISE_SERVICE_PORT } from "./defs/place-ansiwise.ts";
 import {
   uniqueEmail, approveSecrets, elevationOnly, deploySecrets, composedAnswers,

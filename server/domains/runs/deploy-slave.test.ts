@@ -17,10 +17,11 @@ import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
 import type { AnyRunDefinition, Step, StepCtx, Cleanup } from "../../executor/types.ts";
 import {
   SLAVE_ID, MASTER_ID, PARAMS, STEP_NAMES, HEALTHY_SLAVE_PREFLIGHT, MASTER_MARKING_YAML,
-  scriptedHosts, makeHarness, disposeHarnesses, stepColumn, hostedStepCtx, bareStepCtx,
+  scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx, bareStepCtx,
   drainToVerifyDeadline, drainToNextTimer,
   type Harness,
 } from "./deploy-slave.fixture.ts";
+import { stepColumn } from "../../executor/run-rows.fixture.ts";
 
 // deploy-slave: plan shape, guards, the failure modes of everything that runs BEFORE the first
 // program conversation, and the local steps driven directly (mark-slave's map write, the verify
