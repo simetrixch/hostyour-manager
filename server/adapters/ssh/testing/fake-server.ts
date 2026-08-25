@@ -1,5 +1,5 @@
 import { Server, utils, type AuthContext, type ServerChannel } from "ssh2";
-import { fingerprintPublicKey } from "../../../security/fingerprint.ts";
+import { generateServerKeypair } from "../keygen.ts";
 
 export interface FakeExec {
   stdout?: string;
@@ -39,15 +39,20 @@ export interface FakeSshServer {
  * In-process ssh2.Server fixture — the ONE backend reused by unit tests, e2e, and the
  * Playwright run. Not a security boundary: publickey auth accepts on a
  * key-blob match without verifying the signature (fine for a test server).
+ *
+ * The host key comes from generateServerKeypair, NOT from ssh2's generateKeyPairSync directly:
+ * about 1 draw in 256 of the raw generator is a pair ssh2's own parser rejects, and `new Server`
+ * parses hostKeys in its constructor, so an unchecked draw throws out of this function before it
+ * can return. generateServerKeypair parses every draw back and redraws on a bad one.
  */
 export async function startFakeSshServer(opts: FakeServerOptions = {}): Promise<FakeSshServer> {
-  const hostKeyPair = utils.generateKeyPairSync("ed25519");
+  const hostKey = generateServerKeypair("fake-ssh-server");
   const authorizedBlobs = (opts.authorizedKeys ?? []).map((line) => {
     const b64 = line.trim().split(/\s+/)[1];
     return b64 ? Buffer.from(b64, "base64") : Buffer.alloc(0);
   });
 
-  const server = new Server({ hostKeys: [hostKeyPair.private] }, (client) => {
+  const server = new Server({ hostKeys: [hostKey.privateOpenSsh] }, (client) => {
     // sshd sets TCP_NODELAY on its side of the connection; without it every reply
     // (ssh2 writes one SSH packet as several small TCP segments) stalls behind the
     // client's delayed ACK. ssh2's Connection has setNoDelay; @types/ssh2 omits it.
@@ -132,7 +137,7 @@ export async function startFakeSshServer(opts: FakeServerOptions = {}): Promise<
 
   return {
     port,
-    hostKeyFingerprint: fingerprintPublicKey(hostKeyPair.public),
+    hostKeyFingerprint: hostKey.fingerprint,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
