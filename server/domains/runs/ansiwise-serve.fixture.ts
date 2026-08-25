@@ -349,19 +349,31 @@ export async function observerStart(serve: ServeFixture, start: { program: strin
   }
 }
 
-/** Waits until the machine's record for [id] carries an end. 404 right after the accept is "not
- *  written yet": a run is a detached process that writes its header a beat after it starts. */
-export async function observerEnded(observer: AnsiwiseClient, id: string): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt++) {
+/** Waits until the machine's record for [id] carries an end, for as long as the CALLER is willing to
+ *  wait. 404 right after the accept is "not written yet": a run is a detached process that writes its
+ *  header a beat after it starts.
+ *
+ *  THE BUDGET IS THE CALLER'S AND THIS HOLDS NONE OF ITS OWN. [signal] is the AbortSignal vitest
+ *  gives every test, which fires when that test's declared timeout runs out — so a caller that
+ *  budgeted 300s waits 300s. A deadline inside here instead would silently overrule every one of
+ *  them, and the callers do not agree on a number: they declare 60s, 120s and 300s deliberately.
+ *
+ *  AND IT REPORTS WHAT IT SAW, NOT WHAT IT ASSUMES. Giving up is not evidence that the run did not
+ *  end — it may end a moment later — so the refusal says this stopped watching and what the last
+ *  reading was, and never that the run "never ended". */
+export async function observerEnded(observer: AnsiwiseClient, id: string, signal: AbortSignal): Promise<void> {
+  let lastSeen = "no record on the machine yet";
+  while (!signal.aborted) {
     try {
       const record = await observer.run(id);
       if (record.exit_code !== undefined && record.exit_code !== null) return;
+      lastSeen = "a record carrying no end";
     } catch (err) {
       if (!(err instanceof AnsiwiseRefused) || err.status !== 404) throw err;
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error(`machine run ${id} never ended`);
+  throw new Error(`stopped watching machine run ${id} — the test's own budget ran out; last reading: ${lastSeen}`);
 }
 
 /** A hand StepCtx for driving one program step directly — the executor-shaped surface with the

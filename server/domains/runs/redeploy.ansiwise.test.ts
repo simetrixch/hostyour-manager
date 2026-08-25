@@ -198,7 +198,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(runsAfter).toBe(runsBefore);
   });
 
-  it("a checkpoint holding a FINISHED-RED machine run starts a fresh one — a retry that could never work", { timeout: 120_000 }, async () => {
+  it("a checkpoint holding a FINISHED-RED machine run starts a fresh one — a retry that could never work", { timeout: 120_000 }, async ({ signal }) => {
     // THE TRAP THIS CLOSES. A re-entry keeps its checkpoint, and a mark whose run had already ended
     // red fell into the re-attach branch: every retry watched the same finished run, read the same
     // red record, and failed the same way — while the step's own message told the operator to retry
@@ -212,7 +212,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       mode: "dry",
       answers: { ...composedAnswers(email), letsencrypt_email: "not-an-email" },
     });
-    await observerEnded(observer, bad.run);
+    await observerEnded(observer, bad.run, signal);
     const ended = await observer.run(bad.run);
     expect(ended.exit_code === 0).toBe(false);
 
