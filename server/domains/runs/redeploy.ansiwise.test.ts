@@ -22,7 +22,7 @@ import { ANSIWISE_SERVICE_PORT } from "./defs/place-ansiwise.ts";
 import {
   uniqueEmail, approveSecrets, elevationOnly, deploySecrets, composedAnswers,
   fixturePrograms, serveConversation, liveMaster, tailnetHost, deployWorld, liveSlaveWorld,
-  freshRuns, expectProven, expectAbsent, settled, recordAppeared, observerStart, observerEnded, programStepCtx,
+  recordWindow, startedRuns, expectProven, expectAbsent, settled, recordAppeared, observerStart, observerEnded, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
 import { releaseSuite } from "./release.ansiwise.suite.ts";
 
@@ -154,7 +154,6 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   it("INNOCENT CASE: the whole master arm runs green — both programs proven dry, then run, on the machine's own records; no pin moves", { timeout: 120_000 }, async () => {
     const h = await liveMaster(serve);
     const email = uniqueEmail();
-    const before = await observer.runs();
 
     const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(email));
     expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
@@ -172,7 +171,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // The machine's OWN records: dry + run per program, every one green. This is the record an
     // operator on the machine reads — the manager reported nothing the machine does not stand behind.
-    expectProven(freshRuns(before, await observer.runs()), ["deploy-cluster", "deploy-platform-services"]);
+    expectProven(h.db, runId, await observer.runs(), ["deploy-cluster", "deploy-platform-services"]);
 
     // The step's checkpoint carries both machine runs green — what a re-entry would skip on.
     const checkpoint = stepColumn(h.db, runId, "run-deploy-cluster", "checkpoint_json") ?? "";
@@ -290,7 +289,6 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   ] as const) {
     it(`INNOCENT CASE (${kind}): the program runs on the host's own surface over the PUBLIC address — no cluster row needed — and the membership is re-read`, { timeout: 120_000 }, async () => {
       const h = await tailnetHost(serve, { cluster: false });
-      const before = await observer.runs();
 
       const r = await h.executor.plan(kind, { serverId: SLAVE_ID });
       expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", `run-${program}`, "read-membership"]);
@@ -300,7 +298,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
 
       // The machine's OWN records: dry + run, both green — the proof, then the act.
-      expectProven(freshRuns(before, await observer.runs()), [program]);
+      expectProven(h.db, r.runId, await observer.runs(), [program]);
 
       // EVERY session went to the host's PUBLIC address (servers.host) — never the LAN one every
       // other run kind would use — and the master was not touched at all.
@@ -316,7 +314,6 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   it("INNOCENT CASE (tailnet-rejoin): mint on the master, carry the credential, ONE rejoin program run on the host — every machine run green, the key nowhere in the run surface", { timeout: 120_000 }, async () => {
     const h = await tailnetHost(serve);
-    const before = await observer.runs();
 
     const r = await h.executor.plan("cluster-tailnet-rejoin", { serverId: SLAVE_ID });
     expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", "rejoin", "read-membership"]);
@@ -327,7 +324,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The machine's OWN records: dry + run per program, all green. The rejoin program's rows judge
     // the COMPOSITION — login_server off the branch's profile, auth_key off the master's key file —
     // so a wrong value goes red on the machine's side of the wire.
-    expectProven(freshRuns(before, await observer.runs()), ["tailnet-mint-join-key", "tailnet-rejoin"]);
+    expectProven(h.db, r.runId, await observer.runs(), ["tailnet-mint-join-key", "tailnet-rejoin"]);
 
     // Two surfaces: the mint conversation on the MASTER (its usual address), the rejoin on the
     // host's PUBLIC one; the key file was read and removed on the master.
@@ -346,7 +343,6 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   it("PLANTED DEFECT (tailnet-rejoin): a coordinator address the machine's dry run judges red fails the step BEFORE the logout — no run-mode rejoin starts, and the membership was still re-read", { timeout: 60_000 }, async () => {
     const h = await tailnetHost(serve, { tailnetUrl: "https://tale.wrong.example.com" });
-    const before = await observer.runs();
 
     const runId = await settled(h, "cluster-tailnet-rejoin", { serverId: SLAVE_ID }, elevationOnly());
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
@@ -354,9 +350,9 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // The mint is fine — its two runs are green — and the act never started: not one run-mode
     // rejoin record on the machine, so the logout never happened.
-    const fresh = freshRuns(before, await observer.runs());
-    expectProven(fresh, ["tailnet-mint-join-key"]);
-    expect(fresh.filter((x) => x.program === "tailnet-rejoin" && x.mode === "run")).toHaveLength(0);
+    const all = await observer.runs();
+    expectProven(h.db, runId, all, ["tailnet-mint-join-key"]);
+    expect(recordWindow(all, startedRuns(h.db, runId)).filter((x) => x.program === "tailnet-rejoin" && x.mode === "run")).toHaveLength(0);
 
     // The failure still re-read the host, so the card shows the world as the failed run left it.
     const row = h.db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
@@ -365,14 +361,13 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   it("PLANTED DEFECT (tailnet-rejoin): a profile without global.endpoints.tailnet.url is refused BY NAME before any machine is asked anything", { timeout: 60_000 }, async () => {
     const h = await tailnetHost(serve, { tailnetUrl: false });
-    const before = await observer.runs();
 
     const runId = await settled(h, "cluster-tailnet-rejoin", { serverId: SLAVE_ID }, elevationOnly());
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
     expect(stepColumn(h.db, runId, "rejoin", "error")).toMatch(/no readable global\.endpoints\.tailnet\.url/);
 
     // Not one machine run started, on either surface — no serve conversation was even opened.
-    expect(await observer.runs()).toHaveLength(before.length);
+    expect(startedRuns(h.db, runId)).toEqual([]);
     expect(h.hosts.log.filter((l) => l.command === "ansiwise-rest serve")).toHaveLength(0);
   });
 
@@ -381,7 +376,6 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   it("INNOCENT CASE (deploy-slave): the whole run kind runs green — every program dry-proven then run on the machines' own records, one address everywhere, the tokens nowhere", { timeout: 300_000 }, async () => {
     const h = await deployWorld(serve);
     const email = uniqueEmail();
-    const before = await observer.runs();
 
     const r = await h.executor.plan("cluster-deploy-slave", PARAMS);
     expect(r.plan.steps.map((s) => s.name)).toEqual(STEP_NAMES);
@@ -400,7 +394,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // The machines' OWN records: dry + run per program, every one green — the branch cut and the
     // registration on the master's surface, the machine layer, the join and the emit on the slave's.
-    expectProven(freshRuns(before, await observer.runs()), [
+    expectProven(h.db, r.runId, await observer.runs(), [
       "deploy-slave-branch", "deploy-host", "deploy-cluster", "deploy-platform-services",
       "tailnet-mint-join-key", "tailnet-rejoin", "emit-cluster-credentials", "register-slave",
     ]);
@@ -459,16 +453,15 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The defect sits in the FILE contract: the slave hands back an authority the master must not
     // trust. The fixture's ca_data row is the machine-side judge.
     h.hosts.credsOut = EMIT_CREDS_JSON.replace("TFMtQ0EtREFUQQ==", "VEFNUEVSRUQ=");
-    const before = await observer.runs();
 
     const runId = await settled(h, "cluster-deploy-slave", PARAMS, deploySecrets(uniqueEmail()));
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
     expect(stepColumn(h.db, runId, "create-mgmt", "error")).toMatch(/DRY run of register-slave on the master is not green/);
     // The emit itself is green — the defect is in what it handed over — and the registration
     // never ran: not one run-mode register-slave record on the machine.
-    const fresh = freshRuns(before, await observer.runs());
-    expectProven(fresh, ["emit-cluster-credentials"]);
-    expect(fresh.filter((x) => x.program === "register-slave" && x.mode === "run")).toHaveLength(0);
+    const all = await observer.runs();
+    expectProven(h.db, runId, all, ["emit-cluster-credentials"]);
+    expect(recordWindow(all, startedRuns(h.db, runId)).filter((x) => x.program === "register-slave" && x.mode === "run")).toHaveLength(0);
     // The tampered file's tokens still appear nowhere in the persisted surface.
     const dump = JSON.stringify(readEvents(h.db.db, runId));
     expect(dump).not.toContain(EMIT_ARGOCD_TOKEN);
@@ -491,7 +484,6 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       expect(cp.__cleanups, step).toEqual([name]);
     }
 
-    const before = await observer.runs();
     const logMark = h.hosts.log.length;
     // The failed run's secrets were wiped with it — the abort re-supplies the elevation password,
     // exactly the way a retry does, because the remove-slave cleanup drives the master's programs.
@@ -517,7 +509,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     for (const gone of ["master:", "booksCluster:", "apiHost:", "apiPort:"]) expect(map).not.toContain(gone);
 
     // The removal itself is a machine act, dry-proven then run on the master's own record...
-    expectProven(freshRuns(before, await observer.runs()), ["remove-slave"]);
+    expectProven(h.db, runId, await observer.runs(), ["remove-slave"]);
     // ...and the destructive snap purge ran on the SLAVE.
     const tail = h.hosts.log.slice(logMark);
     expect(tail.find((l) => l.command.includes("snap remove --purge microk8s"))?.host).toBe("10.1.1.11");
@@ -526,7 +518,6 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   it("INNOCENT CASE (redeploy, slave arm): the live slave is re-reconciled over the programs — no branch cut, no join, a fresh emit re-points the registration, and nothing is armed", { timeout: 300_000 }, async () => {
     const h = await liveSlaveWorld(serve);
     const email = uniqueEmail();
-    const before = await observer.runs();
 
     const r = await h.executor.plan("cluster-redeploy", { serverId: SLAVE_ID });
     expect(r.plan.steps.map((s) => s.name)).toEqual(REDEPLOY_STEP_NAMES);
@@ -538,9 +529,9 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // The machine layer and the handshake re-ran, each dry-proven; the two BIRTH acts did not —
     // no branch cut, no mint, no rejoin, on either machine's records.
-    const fresh = freshRuns(before, await observer.runs());
-    expectProven(fresh, ["deploy-host", "deploy-cluster", "deploy-platform-services", "emit-cluster-credentials", "register-slave"]);
-    expectAbsent(fresh, ["deploy-slave-branch", "tailnet-mint-join-key", "tailnet-rejoin"]);
+    const all = await observer.runs();
+    expectProven(h.db, r.runId, all, ["deploy-host", "deploy-cluster", "deploy-platform-services", "emit-cluster-credentials", "register-slave"]);
+    expectAbsent(h.db, r.runId, all, ["deploy-slave-branch", "tailnet-mint-join-key", "tailnet-rejoin"]);
 
     // Not one compensating action was armed: every one of them undoes a WORKING slave.
     for (const step of ["mark-slave", "run-deploy-cluster", "create-mgmt"] as const) {

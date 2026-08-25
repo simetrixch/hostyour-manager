@@ -12,6 +12,7 @@ import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeHarness, scriptedHosts, logger, MASTER_ID, SLAVE_ID, type Harness } from "./deploy-slave.fixture.ts";
+import type { DbHandle } from "../../db/client.ts";
 
 // The fixture half of the ONE suite that talks to a real `ansiwise-rest serve`
 // (redeploy.ansiwise.test.ts): the measuring programs the serve installation carries, the worlds
@@ -295,25 +296,113 @@ export async function releaseSlaveWorld(serve: ServeFixture): Promise<Harness> {
 
 // ---- reading the machine's own records ----
 
-/** The records that appeared between two `observer.runs()` readings. */
-export function freshRuns(before: AnsiwiseRunRecord[], after: AnsiwiseRunRecord[]): AnsiwiseRunRecord[] {
-  return after.filter((a) => !before.some((b) => b.id === a.id && b.mode === a.mode));
+// WHICH RECORDS BELONG TO THE RUN UNDER TEST, and why this is not a diff over time. These assertions
+// used to take the records that appeared between two `observer.runs()` readings. The machine's record
+// store is one directory shared by every `ansiwise-rest serve` the suite starts, and a run is a
+// DETACHED child: it writes its record when it finishes, which can be after the test that started it
+// has ended. So a record belonging to an earlier test landed inside a later test's two readings and
+// was counted as that test's — the later test then saw a program it never ran, or saw one of its own
+// programs twice. Neither emptying the store between tests nor filtering on the record id's stamp
+// closes that: the id's stamp reaches seconds, and the stray shares the second.
+//
+// So the records are named rather than timed. Every program step checkpoints the machine runs it
+// drove (ProgramCheckpoint in defs/ansiwise-run.kit.ts: the program, its `dry` mark and its `live`
+// mark, each carrying the machine's own run id), and the checkpoint is written by the step that did
+// the work. That is an identity, and an identity cannot be handed to the wrong test.
+//
+// The machine's own records are still read, because a checkpoint says what the MANAGER believes and
+// the whole point of this suite is to hold that against what the MACHINE stands behind. They are read
+// over a WINDOW: from the oldest run this manager run recorded, to the newest record on the machine.
+// A second run of the same program — the defect this suite exists to catch — is newer than that
+// oldest id and is therefore inside the window and caught. A stray from an earlier test is older and
+// is therefore outside it. `GET /runs` answers newest-first (the runs endpoint says so), which is
+// what makes the window a slice rather than a comparison.
+
+/** One machine run this manager run started: which program, in which mode, under which id. */
+export interface StartedRun {
+  program: string;
+  mode: string;
+  id: string;
 }
 
-/** The GREEN modes [fresh] holds for [program], sorted — `["dry", "run"]` is the proven-then-
+// programPhase (defs/ansiwise-run.kit.ts) logs one meta line per phase it starts, and one when it
+// re-attaches to a phase already in flight. Those two lines are the manager's COMPLETE account of the
+// machine runs it drove — complete in a way the step checkpoints are not, because a step may
+// deliberately record nothing (tailnet's mint is create-only and is never checkpointed, by its own
+// documented design) while still having started a machine run.
+const STARTED = /^(\S+) (dry|run): (?:machine run (\S+) started|re-attaching to machine run (\S+))/;
+
+/** Every machine run [runId] started, read out of its own run log, de-duplicated: a re-attach names
+ *  a run that was already started, and it is the same run. */
+export function startedRuns(db: DbHandle, runId: string): StartedRun[] {
+  const rows = db.sqlite
+    .prepare("SELECT text FROM events WHERE run_id = ? ORDER BY seq")
+    .all(runId) as { text: string }[];
+  const seen = new Set<string>();
+  const out: StartedRun[] = [];
+  for (const row of rows) {
+    const m = STARTED.exec(row.text);
+    if (m === null) continue;
+    const id = m[3] ?? m[4] ?? "";
+    const key = JSON.stringify([m[1], m[2], id]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ program: m[1] ?? "", mode: m[2] ?? "", id });
+  }
+  return out;
+}
+
+/** The machine's records from the OLDEST run [started] names to the newest on the machine. [all] is
+ *  `observer.runs()`, newest-first. Empty when this run started nothing — then there is no window and
+ *  no claim to make about the machine. */
+export function recordWindow(all: AnsiwiseRunRecord[], started: StartedRun[]): AnsiwiseRunRecord[] {
+  const mine = new Set(started.map((r) => r.id));
+  let oldest = -1;
+  all.forEach((r, i) => {
+    if (mine.has(r.id)) oldest = i;
+  });
+  return oldest === -1 ? [] : all.slice(0, oldest + 1);
+}
+
+/** The GREEN modes [window] holds for [program], sorted — `["dry", "run"]` is the proven-then-
  *  performed shape every innocent case asserts per program. */
-export function greenModes(fresh: AnsiwiseRunRecord[], program: string): string[] {
-  return fresh.filter((x) => x.program === program && x.exit_code === 0).map((x) => x.mode).sort();
+export function greenModes(window: AnsiwiseRunRecord[], program: string): string[] {
+  return window.filter((x) => x.program === program && x.exit_code === 0).map((x) => x.mode).sort();
 }
 
-/** Assert the proven-then-performed pair on the machine's own records, per program. */
-export function expectProven(fresh: AnsiwiseRunRecord[], programs: string[]): void {
-  for (const program of programs) expect(greenModes(fresh, program), program).toEqual(["dry", "run"]);
+/** Assert the proven-then-performed pair, on BOTH accounts and by IDENTITY.
+ *
+ *  Leg one: the manager started exactly one dry and one run for the program, and the machine's record
+ *  for each of those ids is green. That is the manager's claim held against what the machine stands
+ *  behind, named rather than counted.
+ *
+ *  Leg two: over the window those ids open, the machine carries no OTHER green record for the
+ *  program. That is what catches a second run — the defect this suite exists for — whoever started
+ *  it, while a record from an earlier test stays outside the window and cannot be mistaken for one. */
+export function expectProven(db: DbHandle, runId: string, all: AnsiwiseRunRecord[], programs: string[]): void {
+  const started = startedRuns(db, runId);
+  const window = recordWindow(all, started);
+  for (const program of programs) {
+    const mine = started.filter((r) => r.program === program);
+    expect(mine.map((r) => r.mode).sort(), `${program}: the machine runs ${runId} started`).toEqual(["dry", "run"]);
+    for (const r of mine) {
+      const record = all.find((x) => x.id === r.id);
+      expect(record, `${program}: the machine has no record of the ${r.mode} run ${r.id}`).toBeDefined();
+      expect(record?.exit_code, `${program}: the ${r.mode} run ${r.id} on the machine`).toBe(0);
+    }
+    expect(greenModes(window, program), program).toEqual(["dry", "run"]);
+  }
 }
 
-/** Assert not one record of ANY mode exists for these programs among [fresh]. */
-export function expectAbsent(fresh: AnsiwiseRunRecord[], programs: string[]): void {
-  for (const program of programs) expect(fresh.filter((x) => x.program === program), program).toHaveLength(0);
+/** Assert this run drove these programs NOT AT ALL: it started no machine run for one, and the
+ *  machine carries no record of one over the window this run's other programs opened. */
+export function expectAbsent(db: DbHandle, runId: string, all: AnsiwiseRunRecord[], programs: string[]): void {
+  const started = startedRuns(db, runId);
+  const window = recordWindow(all, started);
+  for (const program of programs) {
+    expect(started.filter((r) => r.program === program), `${program}: run ${runId} started a machine run for it`).toHaveLength(0);
+    expect(window.filter((x) => x.program === program), program).toHaveLength(0);
+  }
 }
 
 /** plan → approve → settle in one breath, for the cases whose plan shape another test already

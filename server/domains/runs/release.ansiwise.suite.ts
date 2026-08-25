@@ -8,7 +8,7 @@ import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
 import { PARAMS, MASTER_ID, SLAVE_ID, stepColumn } from "./deploy-slave.fixture.ts";
 import {
   uniqueEmail, elevationOnly, deploySecrets, releaseSecrets,
-  liveMaster, releaseSlaveWorld, freshRuns, expectProven, settled, programStepCtx,
+  liveMaster, releaseSlaveWorld, recordWindow, startedRuns, expectProven, settled, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
 
 // THE RELEASE, END TO END, over the REAL `ansiwise-rest serve` — both arms, and the step that stands in
@@ -31,7 +31,6 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
     it("INNOCENT CASE (release): programs → pin → refresh → regenerate-branch → deploy-cluster → deploy-platform-services, every program proven dry then run on the machine's own records", { timeout: 120_000 }, async () => {
       const h = await liveMaster(serve());
       const email = uniqueEmail();
-      const before = await observer().runs();
 
       const r = await h.executor.plan("cluster-release", releaseParams);
       expect(r.plan.steps.map((s) => s.name)).toEqual([
@@ -51,7 +50,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath("m1.example.com"))).toContain(`release: ${tag}`);
 
       // The machine's OWN records: dry + run per program, every one green, all three programs.
-      expectProven(freshRuns(before, await observer().runs()), ["regenerate-branch", "deploy-cluster", "deploy-platform-services"]);
+      expectProven(h.db, r.runId, await observer().runs(), ["regenerate-branch", "deploy-cluster", "deploy-platform-services"]);
 
       // The machine's checkout was refreshed BEFORE the programs read it (the pin commit and the tag
       // reach the machine through that step or not at all), the conversations went over the machine's
@@ -67,7 +66,6 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
     it("INNOCENT CASE (release, SLAVE): the regeneration runs on the MASTER at the pin the master's own branch carries, the machine layer on the slave — every program proven dry then run", { timeout: 120_000 }, async () => {
       const h = await releaseSlaveWorld(serve());
       const email = uniqueEmail();
-      const before = await observer().runs();
 
       const r = await h.executor.plan("cluster-release", { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" });
       expect(r.plan.steps.map((s) => s.name)).toEqual([
@@ -86,7 +84,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       expect(tag).toMatch(/^1\.0\.0-stable-\d{14}$/);
       expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath(PARAMS.domain))).toContain(`release: ${tag}`);
 
-      expectProven(freshRuns(before, await observer().runs()), ["regenerate-slave-branch", "deploy-cluster", "deploy-platform-services"]);
+      expectProven(h.db, r.runId, await observer().runs(), ["regenerate-slave-branch", "deploy-cluster", "deploy-platform-services"]);
 
       // WHICH HOST DID WHAT, which is the ticket's own claim. The master stood its two checkouts and
       // held two conversations (the shared require-programs ask, then the regeneration); the slave
@@ -104,7 +102,6 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
 
     it("PLANTED DEFECT (release): a committer identity the machine's dry run judges red fails run-regenerate-branch — no run-mode regeneration, and the two deploy programs never start", { timeout: 60_000 }, async () => {
       const h = await liveMaster(serve());
-      const before = await observer().runs();
 
       // "not-an-email" fails the program's own ^[^@]+@[^@]+$ row — the defect is ON THE MACHINE'S
       // SIDE of the wire, and the machine's dry run is what catches it. (releaseSecrets seeds a VALID
@@ -116,9 +113,9 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       // The proof failed, so nothing after it was acted on: not one run-mode regeneration, and the
       // two deploy programs saw no run of ANY mode. The pin stands — set-pin precedes the machine
       // acts by design, and a retry of the run adopts exactly that tag instead of minting a second.
-      const fresh = freshRuns(before, await observer().runs());
-      expect(fresh.filter((x) => x.program === "regenerate-branch" && x.mode === "run")).toHaveLength(0);
-      expect(fresh.filter((x) => x.program === "deploy-cluster" || x.program === "deploy-platform-services")).toHaveLength(0);
+      const window = recordWindow(await observer().runs(), startedRuns(h.db, runId));
+      expect(window.filter((x) => x.program === "regenerate-branch" && x.mode === "run")).toHaveLength(0);
+      expect(window.filter((x) => x.program === "deploy-cluster" || x.program === "deploy-platform-services")).toHaveLength(0);
       expect(h.platformRepo.tags.size).toBe(1);
     });
 
