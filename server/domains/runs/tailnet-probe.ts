@@ -53,6 +53,17 @@ echo "TAILNET backend $(printf '%s' "$status" | jq -r '.BackendState // empty')"
 echo "TAILNET address $(printf '%s' "$status" | jq -r '((.Self.TailscaleIPs // .TailscaleIPs) // []) | map(select(contains(":") | not)) | .[0] // empty')"
 echo "TAILNET coordinator $(ts debug prefs | jq -r '.ControlURL // empty')"
 `;
+// WHY THE COORDINATOR COMES OFF `debug prefs` AND NOT OFF THE STATUS ABOVE IT. `status --json` at
+// the client version an installation ends up with (1.98.10, measured against the vendor's own
+// release build) prints 13 fields — Version, TUN, BackendState, AuthURL, TailscaleIPs, Self,
+// Health, MagicDNSSuffix, CurrentTailnet, CertDomains, Peer, User, ClientVersion — and none of them
+// is the control URL. AuthURL is the interactive login URL, which is a different thing and is empty
+// on a joined node. ipn/ipnstate.go's Status struct carries no control URL field at that tag either,
+// so this is not a reading that a newer parse of the same output could recover.
+// The reading costs one more sudo rule than the status does, and what that rule hands over was
+// measured rather than assumed: at 1.98.10 the daemon strips PrivateNodeKey, OldPrivateNodeKey and
+// NetworkLockKey out of the preferences before the local API answers, so this prints settings and
+// no key material. The grant's own table states the same measurement beside the rule it justifies.
 
 /** Turn the probe's stdout into the facts. A key whose value came out empty produces a line with
  *  nothing after the key, which matches no `TAILNET <key> <value>` pair and therefore lands here as

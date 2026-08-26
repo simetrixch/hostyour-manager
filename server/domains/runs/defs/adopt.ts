@@ -169,6 +169,18 @@ export const MANAGER_ELEVATED: ElevatedCommand[] = [
   // would open a root door of the account's own — is refused where one unpinned rule permitted it.
   { cmd: "/usr/bin/tailscale", args: "version", at: "tailnet-probe TAILNET_PROBE_SCRIPT" },
   { cmd: "/usr/bin/tailscale", args: "status --json", at: "tailnet-probe TAILNET_PROBE_SCRIPT" },
+  // `debug prefs` prints the client's whole preferences block as root, so whether it hands out the
+  // node's PRIVATE key decides whether this row may stand. MEASURED against the client version an
+  // installation ends up with, 1.98.10 (commit 0ee734d3089846b27bc6ebcddd3d6ee5ec13e04d), the
+  // vendor's own release build run as uid 0: the output is 28 fields, and the one that would carry
+  // key material is `Config` — Prefs.Persist, renamed in JSON. The daemon zeroes PrivateNodeKey,
+  // OldPrivateNodeKey and NetworkLockKey and drops AttestationKey on a COPY before the local API
+  // answers, so the field NAMES appear and the values do not (tailscale ipn/ipnlocal/local.go,
+  // stripKeysFromPrefs, reached from LocalBackend.Prefs()). The other 27 fields are settings: the
+  // control URL, the exit-node and route choices, the hostname, the netfilter mode.
+  // It cannot be replaced by the row above it. `status --json` at this version carries 13 fields and
+  // none of them is the control URL — measured, and ipn/ipnstate.go's Status struct has no such
+  // field at this tag — while the coordinator address is what the probe reads this for.
   { cmd: "/usr/bin/tailscale", args: "debug prefs", at: "tailnet-probe TAILNET_PROBE_SCRIPT" },
   { cmd: "/usr/bin/snap", args: "remove --purge microk8s", at: "deploy-slave.kit purgeMicrok8sStep" },
   { cmd: "/snap/bin/microk8s", args: "kubectl *", at: "deploy-slave.remote, deploy-slave argocd-follow" },

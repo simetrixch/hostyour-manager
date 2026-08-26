@@ -63,4 +63,19 @@ describe("the probe script asks the client, not the address", () => {
   it("retries under sudo, because tailscaled's local socket is root-owned", () => {
     expect(TAILNET_PROBE_SCRIPT).toContain("sudo -n tailscale");
   });
+
+  it("takes ONE field out of `debug prefs`, and never the block the private keys live in", () => {
+    // `debug prefs` is the widest thing this probe runs as root. Measured at the client version an
+    // installation ends up with (1.98.10): the daemon strips PrivateNodeKey, OldPrivateNodeKey and
+    // NetworkLockKey out of the preferences before the local API answers, so what it prints is
+    // settings. The field NAMES still stand in the output, under `Config`, and a later reading that
+    // pulled anything out of that block would be reading a place key material has stood before —
+    // through a run log and into an events row, where a redaction nobody wrote would have to catch
+    // it. So the probe reads ControlURL and stops.
+    const reads = [...TAILNET_PROBE_SCRIPT.matchAll(/ts debug prefs \| jq -r '([^']+)'/g)].map((m) => m[1]);
+    expect(reads).toEqual([".ControlURL // empty"]); // exactly one reading, and it is the coordinator
+    expect(TAILNET_PROBE_SCRIPT).not.toContain(".Config");
+    expect(TAILNET_PROBE_SCRIPT).not.toContain("PrivateNodeKey");
+    expect(TAILNET_PROBE_SCRIPT).not.toContain("NetworkLockKey");
+  });
 });
