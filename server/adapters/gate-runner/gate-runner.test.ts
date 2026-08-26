@@ -49,7 +49,12 @@ describe("FakeGateRunner", () => {
     expect(r.submitted[0]?.resolvedSha).toHaveLength(40);
   });
 
-  it("throws RUNNER_BUSY when the queue-of-1 is busy", async () => {
+  // THE FAKE'S OWN BEHAVIOUR, and the title says so because no production runner has it. The port
+  // allows RUNNER_BUSY and the Tekton adapter never throws it — it submits a PipelineRun and lets the
+  // cluster schedule it, so there is no queue there to be full. Scripting it here is what lets the
+  // domain be driven through that branch. A title naming a "queue-of-1" is the same false sentence
+  // #63 took out of port.ts, and a test title is worse than a comment: it is what somebody greps for.
+  it("the scripted runner throws RUNNER_BUSY when a test flips it busy", async () => {
     const r = new FakeGateRunner({ busy: true });
     await expect(r.submit(req())).rejects.toMatchObject({ code: "RUNNER_BUSY", http: 409 });
   });

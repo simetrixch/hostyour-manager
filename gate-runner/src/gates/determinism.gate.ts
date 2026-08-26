@@ -208,13 +208,22 @@ export const determinismGate: CheckGate = {
     }
 
     if (violations.length === 0) {
-      return pass({
-        id: ID,
-        title: TITLE,
-        severity: SEVERITY,
-        expected: EXPECTED,
-        found: `Scanned ${actionsScanned} template action(s) across ${filesScanned} file(s) under "${scope}"; none use lookup, .Capabilities, or .Release.IsInstall/IsUpgrade.`,
-      });
+      // NOTHING SCANNED IS NOT A CLEAN SCAN, and the comment at the head of this branch's sibling
+      // says so in as many words: "scanned 0 actions, none use lookup" is what a chart full of
+      // violations would look like if the scan had missed it. That sentence was still produced
+      // whenever a chartPath was dispatched that matches no file the runner materialised — a chart
+      // directory the manifest declares and the repository does not ship, or a path the dispatch and
+      // the tree disagree about. The row stays a pass, because an empty chart directory is what the
+      // RENDER gate decides and reporting it twice would send a reader to two places; what it may
+      // not do is read like a gate that looked.
+      const found =
+        filesScanned === 0
+          ? `No file stands under "${scope}", so there was no template action to scan and this row ` +
+            `inspected nothing of this repository. Whether a chart directory that ships no file is ` +
+            `a fault is decided by the render gate, which is the row that opens it.`
+          : `Scanned ${actionsScanned} template action(s) across ${filesScanned} file(s) under ` +
+            `"${scope}"; none use lookup, .Capabilities, or .Release.IsInstall/IsUpgrade.`;
+      return pass({ id: ID, title: TITLE, severity: SEVERITY, expected: EXPECTED, found });
     }
 
     const shown = violations

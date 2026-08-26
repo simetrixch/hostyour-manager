@@ -57,6 +57,18 @@ describe("determinismGate on a build-only dispatch", () => {
     expect(r.found).toContain("No manifest was parsed for this report");
     expect(r.found).toContain("dispatched build-only");
   });
+
+    it("does not report a clean scan when there was nothing under the chart path to scan", () => {
+      // THE OTHER HALF of the same defect: chartPath is SET and matches no file the runner
+      // materialised. "Scanned 0 template action(s) across 0 file(s); none use lookup" is exactly what
+      // a chart full of violations looks like if the scan missed it, which is what the comment at the
+      // head of the chartless branch forbids in as many words.
+      const r = determinismGate.check(makeCtx({ 'README.md': 'not a chart file' }, 'deploy/chart'));
+
+      expect(r.status).toBe('pass');
+      expect(r.found).not.toContain('Scanned 0');
+      expect(r.found).toContain('inspected nothing of this repository');
+    });
 });
 
 describe("determinismGate determinism", () => {
