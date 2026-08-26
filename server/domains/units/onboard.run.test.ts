@@ -419,20 +419,25 @@ describe("the first master's ungated onboarding, tried from the ordinary route",
     expect(res.plan.steps.map((st) => st.name)).not.toContain("check");
   });
 
-  // EACH ROW IS AN ATTEMPT TO REACH THE UNGATED BRANCH, and each must end with the gate dispatched.
-  const attempts: [string, boolean, Record<string, unknown>][] = [
-    ["a customer's build-only consumer on a from-zero installation", true, { consumerName: "acme" }],
-    ["the platform's own unit onboarded to a target cluster", true, { clusterId: "cls_1", stage: undefined }],
-    ["the platform's own unit on a Manager that names no platform unit", false, {}],
+  // EACH ROW IS AN ATTEMPT TO REACH THE UNGATED BRANCH, and each must end with the gate dispatched
+  // AND with the run saying which condition refused it. A branch that closes quietly is the worse
+  // half of this: an operator watching the last program of a first master meet a gate they were told
+  // it would skip has nothing anywhere to read, and the answer is a deployment variable.
+  const attempts: [string, boolean, Record<string, unknown>, RegExp][] = [
+    ["a customer's build-only consumer on a from-zero installation", true, { consumerName: "acme" }, /is not this platform's own unit/],
+    ["the platform's own unit onboarded to a target cluster", true, { clusterId: "cls_1", stage: undefined }, /./],
+    ["the platform's own unit on a Manager that names no platform unit", false, {}, /names no platform unit \(PLATFORM_UNIT_NAME is unset\)/],
   ];
-  for (const [what, namesPlatformUnit, reqOver] of attempts) {
-    it(`sends ${what} through the gate`, async () => {
+  for (const [what, namesPlatformUnit, reqOver, says] of attempts) {
+    it(`sends ${what} through the gate, and says which condition refused it`, async () => {
       seedClusters();
       const { prt, runner } = platformPorts({}, namesPlatformUnit);
-      const res = await makeOnboardDef(prt).planStream!(request(reqOver), planCtx());
+      const lines: string[] = [];
+      const res = await makeOnboardDef(prt).planStream!(request(reqOver), { ...planCtx(), log: (l: string) => { lines.push(l); } });
       expect(runner.submitted, what).toHaveLength(1);
       // It went through the gate; whether that gate passed is the gate's business, not this test's.
       expect(["planned", "rejected"]).toContain(res.outcome);
+      expect(lines.join("\n"), what).toMatch(says);
     });
   }
 

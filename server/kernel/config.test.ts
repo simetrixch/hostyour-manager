@@ -138,6 +138,30 @@ describe("parseConfig", () => {
   it("carries KUBECONFIG_PATH through as the explicit dev/test file override when set", () => {
     expect(parseConfig({ ...validEnv, KUBECONFIG_PATH: "/tmp/kubeconfig" }).kubeconfigPath).toBe("/tmp/kubeconfig");
   });
+
+  it("leaves platformUnitName ABSENT without PLATFORM_UNIT_NAME, and REFUSES an empty one by name", () => {
+    // ABSENT closes the one branch that skips the gate (domains/units/first-master.ts), which is the
+    // safe direction and the state of every Manager that does not install first masters.
+    expect(parseConfig(validEnv).platformUnitName).toBeUndefined();
+    expect(parseConfig({ ...validEnv, PLATFORM_UNIT_NAME: "hostyour-manager" }).platformUnitName).toBe("hostyour-manager");
+
+    // AN EMPTY VALUE IS NOT THE ABSENT ONE, and the difference decides whether an installation can
+    // onboard its own manager. A deployment that templated the variable from a key somebody left
+    // empty must STOP the Manager and name the variable, not quietly close the branch its own
+    // installer needs — an operator would then watch the last program of a first master fail at a
+    // gate nobody asked for, with nothing anywhere saying why.
+    expect(() => parseConfig({ ...validEnv, PLATFORM_UNIT_NAME: "" })).toThrow(ConfigError);
+    try {
+      parseConfig({ ...validEnv, PLATFORM_UNIT_NAME: "" });
+    } catch (e) {
+      expect((e as ConfigError).issues.join(" ")).toContain("PLATFORM_UNIT_NAME");
+    }
+    // A name that is not a unit name is refused the same way — the word has to be the one the
+    // manifest and the onboarding request already carry, and neither can be an upper-case string
+    // or a path.
+    expect(() => parseConfig({ ...validEnv, PLATFORM_UNIT_NAME: "Hostyour-Manager" })).toThrow(ConfigError);
+    expect(() => parseConfig({ ...validEnv, PLATFORM_UNIT_NAME: "hostyour/manager" })).toThrow(ConfigError);
+  });
 });
 
 describe("tenant onboarding config (catalog)", () => {
