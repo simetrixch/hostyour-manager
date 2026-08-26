@@ -15,6 +15,7 @@ import { FakePlatformRepo } from "../adapters/git/testing/fake.ts";
 import { RELEASE_TAG_RE } from "../../shared/release.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../domains/inventory/channel-stages.ts";
 import { PRODUCT_BRANCH } from "../../shared/branches.ts";
+import { INSTALL_ORDER_PATH } from "../domains/inventory/install-order.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf } from "./selfchecks.ts";
 
 const BASE_ENV = {
@@ -298,6 +299,63 @@ describe("boot self-checks", () => {
     expect(check?.kind).toBe("skipped");
     expect(check?.ok).toBe(false);
     expect(readinessOf(results).checks.map((c) => c.name)).not.toContain("ansiwise.pin_readable");
+  });
+
+  // THE PLATFORM'S DECLARATION OF THE PROGRAM ORDER, held against the order this manager really
+  // drives. The declaration had no reader at all, and a declaration nothing consumes looks exactly
+  // like one that is obeyed — three of its own sentences were false for days before a person noticed.
+  //
+  // The stated order is a LITERAL here, taken off the platform repository's own file, never composed
+  // from what the run happens to do: a fixture derived from the subject cannot disagree with it.
+  const STATED_MASTER = ["deploy-host", "deploy-branch", "deploy-cluster", "deploy-platform-services", "onboard-manager"];
+  const declaring = (programs: readonly string[]): FakePlatformRepo => {
+    const repo = new FakePlatformRepo();
+    repo.seed(PRODUCT_BRANCH, INSTALL_ORDER_PATH, ["sequence:", "  master:", ...programs.map((p) => `    - program: ${p}`), ""].join("\n"));
+    return repo;
+  };
+
+  it("install-order.agrees is GREEN against the platform's stated order, and says how much it held", async () => {
+    const { db, runDefinitions } = fresh();
+    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: declaring(STATED_MASTER) });
+    const check = results.find((r) => r.name === "install-order.agrees");
+    expect(check?.kind).toBe("degrading");
+    expect(check?.ok).toBe(true);
+    // How much it covered, not only that it found nothing: a program the declaration does not state
+    // is named, so a clean answer can never mean nobody was looking. The declaration states no slave
+    // sequence on purpose, so the master-side branch cut is one of them.
+    expect(check?.detail).toMatch(/held [1-9]\d* of the [1-9]\d* program\(s\)/);
+    expect(check?.detail).toContain("deploy-slave-branch");
+  });
+
+  // THE COUNTER-PROBE: the declaration edited and the manager not. Two of the programs the slave run
+  // drives swap places in the stated order, and the check must name which after which — both orders
+  // in the message, because either side can be the wrong one.
+  it("install-order.agrees is RED when the stated order and the driven order disagree, and does NOT fail boot", async () => {
+    const { db, runDefinitions } = fresh();
+    const swapped = ["deploy-host", "deploy-branch", "deploy-platform-services", "deploy-cluster", "onboard-manager"];
+    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: declaring(swapped) });
+    const check = results.find((r) => r.name === "install-order.agrees");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("deploy-platform-services after deploy-cluster");
+    expect(check?.detail).toContain(swapped.join(" -> "));
+    expect(() => assertBlockingChecksPass(results)).not.toThrow();
+    expect(readinessOf(results).checks).toContainEqual({ name: "install-order.agrees", ok: false });
+  });
+
+  it("install-order.agrees is RED when the trunk carries no such declaration at all", async () => {
+    const { db, runDefinitions } = fresh();
+    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: new FakePlatformRepo() });
+    const check = results.find((r) => r.name === "install-order.agrees");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(INSTALL_ORDER_PATH);
+  });
+
+  it("install-order.agrees SKIPS without a platform repo instead of reporting a pass", async () => {
+    const { db, runDefinitions } = fresh();
+    const results = await runAsyncSelfChecks({ db, config, runDefinitions });
+    const check = results.find((r) => r.name === "install-order.agrees");
+    expect(check?.kind).toBe("skipped");
+    expect(readinessOf(results).checks.map((c) => c.name)).not.toContain("install-order.agrees");
   });
 
   it("the append-only probe leaves no sentinel row behind (rolled back)", () => {

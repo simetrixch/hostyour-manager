@@ -131,7 +131,7 @@ export async function wire(): Promise<Wired> {
   // then skips instead of reporting a comparison it never made.
   const checks = [
     ...runSelfChecks({ db, config, store, bus, runDefinitions }),
-    ...(await runAsyncSelfChecks({ db, config, ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}) })),
+    ...(await runAsyncSelfChecks({ db, config, runDefinitions, ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}) })),
   ];
   assertBlockingChecksPass(checks);
   // A blocking failure has thrown by now, so what is left is what boot goes on WITH. /readyz carries

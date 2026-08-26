@@ -11,6 +11,8 @@ import { renderForbidden } from "../domains/access/forbidden.ts";
 import { SessionCodec } from "../domains/access/session.ts";
 import { readReleaseTagFilter, assertMirrorsReleaseGrammar } from "../domains/inventory/release-grammar.ts";
 import { readAnsiwisePin, ANSIWISE_PIN_PATH, ANSIWISE_PIN_BRANCH, ANSIWISE_PIN_KEY } from "../domains/inventory/ansiwise-pin.ts";
+import { readInstallOrder, holdsInstallOrder, INSTALL_ORDER_PATH } from "../domains/inventory/install-order.ts";
+import { PROGRAM_STEP_PREFIX } from "../domains/runs/defs/ansiwise-run.kit.ts";
 import type { PlatformRepo } from "../adapters/git/port.ts";
 import { spaBytes } from "../http/spa.ts";
 import type { ReadyzView } from "../../shared/api-types.ts";
@@ -303,10 +305,82 @@ async function checkAnsiwisePinReadable(platformRepo: PlatformRepo | undefined):
   }
 }
 
+/** The run kind whose program order is held against the platform's declaration: the one that installs
+ *  a slave, which is the only run kind of this manager that drives an installation's programs. */
+const SLAVE_KIND: RunKind = "cluster-deploy-slave";
+
+/** The programs one run kind drives, in the order its own step list drives them. Derived from the
+ *  step names — `ansiwiseProgramStep` names every one of them `run-<program>` — so a program added to
+ *  or taken out of that run is a program this check gains or loses, without anybody editing a list. */
+function programsOf(runDefinitions: RunDefinitions, kind: RunKind): string[] {
+  const def = runDefinitions.get(kind);
+  if (!def) return [];
+  return def.steps({}).map((s) => s.name).filter((n) => n.startsWith(PROGRAM_STEP_PREFIX)).map((n) => n.slice(PROGRAM_STEP_PREFIX.length));
+}
+
+/**
+ * DOES THE ORDER THIS MANAGER DRIVES PROGRAMS IN STILL FOLLOW THE ONE THE PLATFORM STATES?
+ *
+ * The platform's trunk carries a declaration of the order an installation's programs run in. Nothing
+ * read it — and a declaration nothing consumes looks exactly like one that is obeyed, which is why
+ * three of its own sentences were false for days before a person happened to notice. This is its
+ * reader.
+ *
+ * IT READS AND DOES NOT DRIVE, and that is a decision rather than a stage on the way to one. A run
+ * that composed its steps out of a file on a remote trunk would fail to PLAN whenever that trunk is
+ * unreachable — a worse failure than the drift it would prevent, and on the exact run that installs a
+ * machine. So the run kind keeps its steps, and the declaration is held against them here: a row
+ * changed on either side goes red at boot, with both orders named.
+ *
+ * WHAT IT CANNOT HOLD, named rather than counted (a clean answer must not be able to mean nobody was
+ * looking):
+ *
+ *   1. A program this run drives that the declaration does not state. The declaration states no slave
+ *      sequence, on purpose — half of a slave's steps are this manager's own acts and a list of only
+ *      the program rows would describe a shape nobody can follow. Such a program is reported BY NAME
+ *      in the detail, green or red, and `deploy-slave-branch` is expected to be one.
+ *   2. The SET. This holds the ORDER of what the two sides share and nothing else, so a program
+ *      DROPPED from this run stays green: the run legitimately drives a subset — three of the
+ *      master's five — and nothing here can tell a subset that is meant from one that lost a phase.
+ *      Holding the set needs the declaration to state a slave sequence of its own, which it does not,
+ *      and which is not this repository's to add. Measured: taking `deploy-host` out of the run keeps
+ *      this check green.
+ *
+ * DEGRADING, for the reason the two checks above it state: it reaches a REMOTE.
+ */
+async function checkInstallOrder(platformRepo: PlatformRepo | undefined, runDefinitions: RunDefinitions | undefined): Promise<CheckResult> {
+  const name = "install-order.agrees";
+  if (!platformRepo || !runDefinitions) {
+    return {
+      name,
+      kind: "skipped",
+      ok: false,
+      detail: "the platform repo is not configured on this manager — the stated program order could not be read, so nothing was compared",
+    };
+  }
+  const programs = programsOf(runDefinitions, SLAVE_KIND);
+  if (programs.length === 0) {
+    return { name, kind: "skipped", ok: false, detail: `the ${SLAVE_KIND} run kind drives no program step, so there is no order of this manager's to hold against the declaration` };
+  }
+  try {
+    const stated = await readInstallOrder(platformRepo);
+    const verdict = holdsInstallOrder(programs, stated);
+    const covered = `held ${verdict.held.length} of the ${programs.length} program(s) ${SLAVE_KIND} drives against ${INSTALL_ORDER_PATH}` +
+      `${verdict.unstated.length > 0 ? `; the declaration states none of: ${verdict.unstated.join(", ")}` : ""}`;
+    return verdict.agrees
+      ? { name, kind: "degrading", ok: true, detail: covered }
+      : { name, kind: "degrading", ok: false, detail: `${verdict.detail ?? "the two orders disagree"} — ${covered}` };
+  } catch (e) {
+    return { name, kind: "degrading", ok: false, detail: messageOf(e) };
+  }
+}
+
 /** Async checks (jose is Promise-based, the platform-repo read is a git fetch). Run after
  *  runSelfChecks; results concat. `platformRepo` is optional exactly as the wiring has it —
- *  wire-units.ts builds the port only with config.github and a books branch behind it. */
-export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; platformRepo?: PlatformRepo }): Promise<CheckResult[]> {
+ *  wire-units.ts builds the port only with config.github and a books branch behind it.
+ *  `runDefinitions` is optional for the same shape of reason: a check that holds a run kind against
+ *  the platform's declaration has nothing to hold without one. */
+export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; platformRepo?: PlatformRepo; runDefinitions?: RunDefinitions }): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   try {
     const codec = new SessionCodec(deps.db.db, deps.config);
@@ -319,6 +393,7 @@ export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; p
   }
   results.push(await checkReleaseGrammarMirror(deps.platformRepo));
   results.push(await checkAnsiwisePinReadable(deps.platformRepo));
+  results.push(await checkInstallOrder(deps.platformRepo, deps.runDefinitions));
   return results;
 }
 

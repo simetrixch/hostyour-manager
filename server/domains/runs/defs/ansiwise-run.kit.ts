@@ -202,11 +202,16 @@ export function requireProgramsStep(ports: AnsiwisePorts, programs: readonly Pro
   };
 }
 
+/** What a program step's name begins with. Exported so a reader can derive WHICH programs a run kind
+ *  drives out of its own step list instead of carrying a second copy of them — the step name is the
+ *  only place that fact stands. */
+export const PROGRAM_STEP_PREFIX = "run-";
+
 /** `run-<program>`: prove the program with a dry run, then run it, following both into the run
  *  log. Both phases go through the ONE machine surface and the machine's own gate. */
 export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports: AnsiwisePorts, opts: ProgramStepOpts = {}): Step {
   return {
-    name: `run-${program}`,
+    name: `${PROGRAM_STEP_PREFIX}${program}`,
     title: `Prove, then run, the ${program} program on the ${opts.onMaster ? "master" : "machine"} (dry → run)`,
     run: async (ctx) => {
       const cp = ctx.readCheckpoint<ProgramCheckpoint>() ?? { program };
