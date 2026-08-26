@@ -162,19 +162,34 @@ const RELOAD = `reload_sshd() {
  *  would make the probe report a shut door while the daemon goes on taking passwords — the same
  *  class of mistake the `99-` file made, from the other end.
  *
- *  `--` BEFORE THE SOURCE FILE, in both writers, and the sudoers rule carries it too. The rule can
- *  only ever say `*` where the source stands, because `mktemp` picks that name; sudo matches the
- *  whole argument string, so without `--` that `*` swallows OPTIONS as well, and
- *  `install -t /etc/sudoers.d` then makes this account the author of a root-owned sudoers file.
- *  After `--` every operand is a file name: `install` sees several sources and a target that is not
- *  a directory, and refuses. What the rule still permits is the drop-in's CONTENT, which is the
- *  thing this call site exists to choose and which no sudoers rule can narrow. */
-const APPLY = `apply() {
+ *  THE ROOT WRITE NAMES NO SOURCE PATH, and that is what keeps the standing sudoers grant from
+ *  being a way to read the machine. A copier takes a source the account picks, so a rule for it can
+ *  only say `*` where that source stands — and the account owns whatever path the pattern allows
+ *  and can point a symlink from it at /etc/shadow, which the copier follows as root into a
+ *  destination it is then free to read. There is no sudoers form that permits such a copy and
+ *  refuses that read. So the write is split into two commands that carry no path of the account's
+ *  choosing at all, and both rules are pinned with no wildcard: `install` copies /dev/null onto the
+ *  drop-in, which creates or resets it root-owned at mode 0644, and `tee` fills it from THIS
+ *  script's stdin. Measured with coreutils 9.4 on Ubuntu 24.04: `install -m 0644 /dev/null target`
+ *  leaves an empty 0644 file, and a following `tee` writes it without changing that mode.
+ *
+ *  The mode is set by `install` rather than left to `tee` alone, because a file `tee` creates takes
+ *  whatever the elevating process's umask happens to be, and that is a setting of the machine and
+ *  not of this script.
+ *
+ *  What no rule can narrow is the CONTENT: the account still chooses the bytes of the drop-in that
+ *  sorts before every other sshd file, and that is the thing this call site exists to do. The
+ *  operator is told about that one in the summary they approve. */
+const APPLY = `write_drop_in() {
+  as_root install -m 0644 -o root -g root /dev/null "${DROP_IN}"
+  as_root tee "${DROP_IN}" > /dev/null
+}
+apply() {
   local value="$1" tmp prev=""
   tmp="$(mktemp)"
   cat > "$tmp"
   if as_root test -e "${DROP_IN}"; then prev="$(mktemp)"; as_root cat "${DROP_IN}" > "$prev"; fi
-  as_root install -m 0644 -o root -g root -- "$tmp" "${DROP_IN}"
+  write_drop_in < "$tmp"
   rm -f "$tmp"
   if ! as_root "$(sshd_bin)" -t; then
     put_back "$prev"
@@ -189,7 +204,7 @@ const APPLY = `apply() {
   [ -z "$prev" ] || rm -f "$prev"
 }
 put_back() {
-  if [ -n "$1" ]; then as_root install -m 0644 -o root -g root -- "$1" "${DROP_IN}"; rm -f "$1"
+  if [ -n "$1" ]; then write_drop_in < "$1"; rm -f "$1"
   else as_root rm -f "${DROP_IN}"; fi
 }`;
 
@@ -203,7 +218,9 @@ ${APPLY}
 pw=""; kbd=""; pubkey=""; methods=""`;
 
 // SURVIVES belongs to this script alone: opening a door cannot leave a host with no way in.
-const DISABLE_SCRIPT = `${PREAMBLE}
+// Both scripts are exported so a real `bash` can parse the bytes this kit ships (remote-syntax.test.ts):
+// nothing else on the way to a machine reads them, so a typo would first be met by the host.
+export const DISABLE_SCRIPT = `${PREAMBLE}
 ${SURVIVES}
 read_effective || { echo "the effective sshd configuration cannot be read, so no change may claim an effect" >&2; exit 1; }
 # The key door has to be open BEFORE the password door shuts, or this host answers nobody.
@@ -219,7 +236,7 @@ read_effective || { echo "the effective sshd configuration cannot be read after 
 echo "password login is off; key login is on"
 `;
 
-const ENABLE_SCRIPT = `${PREAMBLE}
+export const ENABLE_SCRIPT = `${PREAMBLE}
 printf '%s' '${dropInContent("yes")}' | apply yes
 inventory
 read_effective || { echo "the effective sshd configuration cannot be read after the reload" >&2; exit 1; }

@@ -134,24 +134,26 @@ export interface ElevatedCommand {
  *  argument string at all, which permits any arguments — and every one of them is a way to root:
  *
  *    `microk8s kubectl` administers the cluster and reaches root through it.
- *    `install` onto SSHD_PASSWORD_DROP_IN lets the account choose the CONTENT of the sshd drop-in
- *      that sorts before every other (password-login.kit DROP_IN), and `systemctl reload ssh` is
- *      granted beside it, so `PermitRootLogin yes` is a root login away. No rule can narrow this
- *      one: writing that file with content this manager composes IS the call site.
- *      IT READS AS WELL AS IT WRITES, and that is the half a reader misses. `install SRC DEST`
- *      copies SRC as root, `cat` of that same DEST is a row of its own, and the destination is
- *      mode 0644 — so any file on the machine, /etc/shadow and a private key included, is two
- *      granted commands away from this account. Pinning the SOURCE pattern would not close it:
- *      the account owns whatever path the pattern allows and can point a symlink from it at any
- *      file, which install follows as root. There is no rule shape that permits the write and
- *      refuses the read, so this is DISCLOSED — in the table, and in the summary the operator
- *      approves — rather than claimed to be contained.
  *
- *  What the list takes away is every OTHER command. The first is reached only by run kinds that
- *  already carry an elevation password (deploy-slave, redeploy, release and tailnet all declare
+ *  THE SSHD DROP-IN IS PINNED NOW, AND WHAT REMAINS IS THE CONTENT ALONE. The write used to be a
+ *  copier — `install SRC DEST` with a `*` where SRC stands, because mktemp picks that name — and a
+ *  copier reads: the account owns whatever path the pattern allows and can point a symlink from it
+ *  at /etc/shadow or a private key, which install follows as root into a destination of mode 0644
+ *  that `cat` is granted on. No sudoers form permits that write and refuses that read. So the write
+ *  names no source path at all (password-login.kit write_drop_in): `install /dev/null <drop-in>`
+ *  creates or resets the file root-owned at 0644 and `tee <drop-in>` fills it from the script's own
+ *  stdin, both pinned with no wildcard. The `cat` row that stays reads exactly one path, whose
+ *  content this manager writes.
+ *  What no rule can narrow is the CONTENT of that drop-in: it sorts before every other sshd file
+ *  (password-login.kit DROP_IN) and `systemctl reload ssh` is granted beside it, so
+ *  `PermitRootLogin yes` is a root login away. Writing that file with content this manager composes
+ *  IS the call site, so it is DISCLOSED — in the summary the operator approves — rather than
+ *  claimed to be contained.
+ *
+ *  What the list takes away is every OTHER command. The cluster row is reached only by run kinds
+ *  that already carry an elevation password (deploy-slave, redeploy, release and tailnet all declare
  *  ANSIWISE_ELEVATION_SECRET), so it can leave the moment those call sites take the password route
- *  the rest of the platform already uses; the second is reached by the password-login run kinds,
- *  which declare `requiredSecrets: []` and would have to start asking for one.
+ *  the rest of the platform already uses.
  *
  *  A ROW MAY NOT CARRY `[`, `?` OR `\`. sudo compares arguments with fnmatch(3), where those are
  *  metacharacters as much as `*` is — `[[:space:]]` in a rule matches ONE space, not that literal
@@ -175,7 +177,8 @@ export const MANAGER_ELEVATED: ElevatedCommand[] = [
   { cmd: "/usr/bin/test", args: "-x /usr/sbin/sshd", at: "password-login-probe SSHD_HELPERS sshd_bin()" },
   { cmd: "/usr/bin/test", args: `-e ${SSHD_PASSWORD_DROP_IN}`, at: "password-login.kit APPLY" },
   { cmd: "/usr/bin/cat", args: SSHD_PASSWORD_DROP_IN, at: "password-login.kit APPLY" },
-  { cmd: "/usr/bin/install", args: `-m 0644 -o root -g root -- * ${SSHD_PASSWORD_DROP_IN}`, at: "password-login.kit APPLY, put_back" },
+  { cmd: "/usr/bin/install", args: `-m 0644 -o root -g root /dev/null ${SSHD_PASSWORD_DROP_IN}`, at: "password-login.kit write_drop_in" },
+  { cmd: "/usr/bin/tee", args: SSHD_PASSWORD_DROP_IN, at: "password-login.kit write_drop_in" },
   { cmd: "/usr/bin/rm", args: `-f ${SSHD_PASSWORD_DROP_IN}`, at: "password-login.kit put_back" },
   { cmd: "/usr/bin/grep", args: "-rniH -e PasswordAuthentication -e KbdInteractiveAuthentication /etc/ssh/sshd_config /etc/ssh/sshd_config.d", at: "password-login.kit INVENTORY" },
   { cmd: "/usr/bin/systemctl", args: "reload ssh", at: "password-login.kit RELOAD" },
@@ -631,11 +634,11 @@ function sudoGrant(sshUser: string): string {
     `as root without a password — the ones this manager runs over its own session — and LEAVES IT THERE: deploy-slave ` +
     `and the password-login run kinds reach root on this machine that way and carry no password of their own. ` +
     `${open.length} of them leave their arguments open (${open.join(", ")}) and so still reach root: "microk8s kubectl" ` +
-    `administers the cluster, and "install" onto ${SSHD_PASSWORD_DROP_IN} — beside the granted "systemctl reload ssh" — ` +
-    `lets that account choose the content of the sshd drop-in that sorts before every other. That same "install" also ` +
-    `COPIES any file it is pointed at into that world-readable path, which "cat" is granted on, so /etc/shadow and any ` +
-    `private key on the machine are readable by that account. No rule can permit the write and refuse the read. ` +
-    `So this is a smaller grant and not a boundary. ` +
+    `administers the cluster and reaches root through it. Beyond that one row, the account can write ` +
+    `${SSHD_PASSWORD_DROP_IN} — beside the granted "systemctl reload ssh" — so it chooses the content of the sshd ` +
+    `drop-in that sorts before every other, and "PermitRootLogin yes" is a root login away. The write takes no file ` +
+    `name from that account, so it cannot copy a file of the machine's into a readable place; the content is the whole ` +
+    `of what it decides. So this is a smaller grant and not a boundary. ` +
     `A machine an earlier adoption left carrying "${sshUser} ALL=(ALL) NOPASSWD:ALL" has that line replaced by this run.`
   );
 }

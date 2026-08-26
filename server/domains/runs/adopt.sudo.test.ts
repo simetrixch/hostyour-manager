@@ -259,10 +259,11 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
     for (const name of unpinnedElevated().map(elevatedName)) expect(plan.summary).toContain(name);
     expect(plan.summary).toContain(SSHD_DROP_IN);
     expect(plan.summary).toContain("systemctl reload ssh");
-    // The READ that the granted `install` and `cat` compose into, named where the operator decides.
-    // Without this the card describes a write and the account can also read /etc/shadow, which is
-    // the software telling the person something smaller than what it is about to do.
-    expect(plan.summary).toContain("/etc/shadow");
+    // The drop-in write is named as a CONTENT choice and as nothing wider, because that is now all
+    // it is: the two rules behind it take no file name from the account (password-login.kit
+    // write_drop_in). A card that still spoke of copying any file into a readable place would be
+    // describing a grant this run no longer makes.
+    expect(plan.summary).toContain("takes no file name from that account");
     expect(plan.summary).toContain('"digi1 ALL=(ALL) NOPASSWD:ALL" has that line replaced by this run');
     expect(plan.summary).toContain("proves sudo in the preflight and installs an SSH key");
     // CONDITIONAL, because configure-sudo writes nothing where the machine already grants blanket
@@ -299,6 +300,10 @@ describe("the drop-in as a machine reads it", () => {
       "/usr/bin/grep -qE . /etc/shadow /etc/sudoers.d/90-hostyour"],
     ["opens a root door of its own: a `tailscale` rule that names no arguments permits every subcommand, and `tailscale up --ssh` puts a login server on the machine that answers to the account's own tailnet identity",
       "/usr/bin/tailscale up --ssh"],
+    ["reads any file on the machine through the sshd drop-in: a copier takes a SOURCE the account names, the destination is mode 0644 and `cat` of it is a row of its own, so /etc/shadow is two granted commands away",
+      `/usr/bin/install -m 0644 -o root -g root -- /etc/shadow ${SSHD_DROP_IN}`],
+    ["the same read with the source pinned to a path the account owns, which is why pinning it is no answer: the account points a symlink from there and install follows it as root",
+      `/usr/bin/install -m 0644 -o root -g root -- /tmp/tmp.7Kq2Xf ${SSHD_DROP_IN}`],
     ["the innocent case, refused before this change as well: a command no rule names at all",
       "/usr/bin/cat /etc/shadow"],
     ["the second innocent case: a shell",
@@ -322,7 +327,8 @@ describe("the drop-in as a machine reads it", () => {
     "test -x /usr/sbin/sshd",                                           // password-login-probe sshd_bin()
     `test -e ${SSHD_DROP_IN}`,                                          // password-login.kit APPLY
     `cat ${SSHD_DROP_IN}`,                                              // password-login.kit APPLY
-    `install -m 0644 -o root -g root -- /tmp/tmp.7Kq2Xf ${SSHD_DROP_IN}`, // password-login.kit APPLY, put_back
+    `install -m 0644 -o root -g root /dev/null ${SSHD_DROP_IN}`,        // password-login.kit write_drop_in
+    `tee ${SSHD_DROP_IN}`,                                              // password-login.kit write_drop_in
     `rm -f ${SSHD_DROP_IN}`,                                            // password-login.kit put_back
     "grep -rniH -e PasswordAuthentication -e KbdInteractiveAuthentication /etc/ssh/sshd_config /etc/ssh/sshd_config.d", // INVENTORY
     "systemctl reload ssh",                                             // password-login.kit RELOAD
@@ -362,7 +368,7 @@ describe("the drop-in as a machine reads it", () => {
     // THE COUNT COMES OFF THE TABLE. A row added with an open argument changes both records without
     // anybody rewriting a sentence, which is the only version of this that cannot go stale.
     const open = unpinnedElevated().map(elevatedName);
-    expect(open).toEqual(["microk8s", "install"]);
+    expect(open).toEqual(["microk8s"]);
     expect(file).toContain(`${open.length} of the rules below leave their arguments`);
     for (const name of open) expect(file).toContain(name);
   });
@@ -386,7 +392,7 @@ describe("the drop-in as a machine reads it", () => {
   // rules this change removed outright rather than narrowed: the elevated `grep -qE *` that read
   // the drop-in an exit code at a time, and the bare `tailscale` that named no arguments.
   const OLD_SHAPES = [
-    (f: string): string => plant(f, "-m 0644 -o root -g root -- *", "-m 0644 -o root -g root *"),
+    (f: string): string => plant(f, "-m 0644 -o root -g root /dev/null", "-m 0644 -o root -g root *"),
     (f: string): string => plant(f, "/usr/bin/grep -rniH -e PasswordAuthentication -e KbdInteractiveAuthentication", "/usr/bin/grep -rniE *"),
     (f: string): string => plant(f, "NOPASSWD: ", `NOPASSWD: /usr/bin/grep -qE * ${SUDOERS_DROP_IN}, `),
     // Every pinned tailscale rule back to the shape that named no arguments. Written to be
@@ -396,12 +402,27 @@ describe("the drop-in as a machine reads it", () => {
     (f: string): string => plant(f, /\/usr\/bin\/tailscale [^,\n\\]*/g, "/usr/bin/tailscale"),
   ].reduce((f, step) => step(f), file);
 
-  it.each(REFUSED.slice(0, 4))("permitted, on the shape that was there, the command that %s", (_why, command) => {
+  it.each(REFUSED.slice(0, 6))("permitted, on the shape that was there, the command that %s", (_why, command) => {
     expect(sudoersPermits(OLD_SHAPES, command)).toBe(true);
   });
 
   it("refuses the innocent cases on the old shape too, so a red probe is the wildcard and not the plant", () => {
-    for (const [, command] of REFUSED.slice(4)) expect(sudoersPermits(OLD_SHAPES, command)).toBe(false);
+    for (const [, command] of REFUSED.slice(6)) expect(sudoersPermits(OLD_SHAPES, command)).toBe(false);
+  });
+
+  // THE GENERATION THIS CHANGE REPLACED, ON ITS OWN. The plant above restores the oldest shape, in
+  // which the source pattern swallowed options too; the file that stood here YESTERDAY already had
+  // `--` in front of the source and refused that one. What it still permitted is the READ, and this
+  // is what says so — without it the two read cases could be passing on the older wildcard alone
+  // and this change would read as closing something that was already shut.
+  const COPIER_SHAPE = plant(file, "-m 0644 -o root -g root /dev/null", "-m 0644 -o root -g root -- *");
+
+  it.each(REFUSED.slice(4, 6))("permitted, on the copier the drop-in used to be written with, the command that %s", (_why, command) => {
+    expect(sudoersPermits(COPIER_SHAPE, command)).toBe(true);
+  });
+
+  it("refuses on that copier the escalation the `--` had already closed, and the innocent cases with it", () => {
+    for (const [, command] of [...REFUSED.slice(0, 1), ...REFUSED.slice(6)]) expect(sudoersPermits(COPIER_SHAPE, command)).toBe(false);
   });
 
   it("permits every tailscale reading the probe really takes and no other, the argument strings read OUT of the probe", () => {
@@ -419,19 +440,22 @@ describe("the drop-in as a machine reads it", () => {
     expect(sudoersPermits(file, "tailscale status")).toBe(false);
   });
 
-  it("permits the two things no rule can take away: the CONTENT of the sshd drop-in, and a read of any file through it", () => {
-    // With `--` the account can no longer make install write anywhere else. This is what stays: it
-    // chooses the bytes of the drop-in that sorts before every other sshd file, and
-    // `systemctl reload ssh` is granted beside it, so `PermitRootLogin yes` is a root login away.
-    // That is why "install" is named to the operator alongside microk8s.
-    expect(sudoersPermits(file, `install -m 0644 -o root -g root -- /tmp/evil ${SSHD_DROP_IN}`)).toBe(true);
+  it("permits the ONE thing no rule can take away — the CONTENT of the sshd drop-in — and nothing wider", () => {
+    // What stays, and it is unavoidable: the account chooses the bytes of the drop-in that sorts
+    // before every other sshd file, and `systemctl reload ssh` is granted beside it, so
+    // `PermitRootLogin yes` is a root login away. Writing that file with content this manager
+    // composes IS the call site, which is why the operator is told about it.
+    expect(sudoersPermits(file, `tee ${SSHD_DROP_IN}`)).toBe(true);
     expect(sudoersPermits(file, "systemctl reload ssh")).toBe(true);
-    // AND THE READ THAT COMES WITH THE WRITE, asserted because it is the half the prose used to
-    // leave out: install's SOURCE is the account's to name, the destination is mode 0644, and `cat`
-    // of that destination is a row of its own. Pinning the source would not help — the account owns
-    // that path and a symlink from it is followed as root. So it is disclosed instead, and the
-    // summary test above asserts the operator is told.
-    expect(sudoersPermits(file, `install -m 0644 -o root -g root -- /etc/shadow ${SSHD_DROP_IN}`)).toBe(true);
+    // AND NOTHING WIDER. Neither granted command takes a path the account picks: `tee` names only
+    // the destination and reads the script's own stdin, and `install`'s source is the literal
+    // /dev/null, which sudo matches as text and not as a pattern. So the account cannot aim either
+    // one at a file of the machine's, and the `cat` row that stays reads that one destination.
+    expect(sudoersPermits(file, `tee ${SUDOERS_DROP_IN}`)).toBe(false);
+    expect(sudoersPermits(file, "tee /etc/shadow")).toBe(false);
+    expect(sudoersPermits(file, `install -m 0644 -o root -g root /etc/shadow ${SSHD_DROP_IN}`)).toBe(false);
+    expect(sudoersPermits(file, `install -m 0644 -o root -g root /dev/null ${SUDOERS_DROP_IN}`)).toBe(false);
     expect(sudoersPermits(file, `cat ${SSHD_DROP_IN}`)).toBe(true);
+    expect(sudoersPermits(file, "cat /etc/ssh/ssh_host_ed25519_key")).toBe(false);
   });
 });
