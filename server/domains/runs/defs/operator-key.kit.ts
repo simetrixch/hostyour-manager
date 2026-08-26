@@ -94,7 +94,7 @@ after="$(count "$tmp")"
  *  The append is safe on a file whose last line has no newline: grep terminates every line it
  *  prints, so the filtered copy always ends in one and the new line cannot be joined onto the last
  *  key — which would destroy both. */
-function placeScript(publicKey: string, label: string): string {
+export function placeScript(publicKey: string, label: string): string {
   return `${filterPreamble(label)}
 printf '%s\\n' '${operatorKeyLine(publicKey, label)}' >> "$tmp"
 install -m 600 "$tmp" "$ak"
@@ -108,7 +108,7 @@ echo "the key for '${label}' is in $ak ($(count "$ak") line(s) total)"
  *  states a postcondition — this label has no line in this file — and a host that never carried one
  *  already satisfies it. What it does not do is claim the KEY is gone; that verdict is the step's,
  *  taken from the file read back afterwards. */
-function removeScript(label: string): string {
+export function removeScript(label: string): string {
   return `${filterPreamble(label)}
 install -m 600 "$tmp" "$ak"
 rm -f "$tmp"
@@ -174,8 +174,9 @@ function actStep(kind: OperatorKeyKind, target: OperatorKeyTarget): Step {
       const before = await recordAuthorizedKeysReading(ctx, session, target.serverId);
       const held = before !== null && authorizedKeysHold(before.read, key.fingerprint);
       if (place && !held) ctx.registerCleanup(removeOperatorKeyCleanup);
-      const script = place ? placeScript(key.publicKey, key.label) : removeScript(key.label);
-      const r = await remoteScript(ctx, session, place ? "cluster-operator-key-place" : "cluster-operator-key-remove", script, { timeoutMs: 60_000 });
+      const r = place
+        ? await remoteScript(ctx, session, "cluster-operator-key-place", placeScript(key.publicKey, key.label), { timeoutMs: 60_000 })
+        : await remoteScript(ctx, session, "cluster-operator-key-remove", removeScript(key.label), { timeoutMs: 60_000 });
       const after = await recordAuthorizedKeysReading(ctx, session, target.serverId);
 
       // The one failure this whole run kind is shaped around: an edit that took this manager's own

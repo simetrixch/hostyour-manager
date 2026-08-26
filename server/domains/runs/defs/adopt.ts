@@ -262,7 +262,7 @@ export const OUR_DROP_IN_GRANTS_BLANKET =
   `grep -qE '^[^#]*ALL[[:space:]]*=[[:space:]]*\\(ALL([[:space:]]*:[[:space:]]*ALL)?\\)[[:space:]]*NOPASSWD:[[:space:]]*ALL[[:space:]]*$'`;
 
 // The baseline probe (step 7). BASE key value lines, parsed console-side.
-const BASELINE_SCRIPT = `#!/usr/bin/env bash
+export const BASELINE_SCRIPT = `#!/usr/bin/env bash
 echo "BASE nproc $(nproc 2>/dev/null || echo 0)"
 echo "BASE mem_bytes $(awk '/^MemTotal:/{print $2*1024}' /proc/meminfo 2>/dev/null || echo 0)"
 avail=$(df -B1 --output=avail / 2>/dev/null | tail -1 | tr -d ' ')
