@@ -5,13 +5,23 @@
 // a Calico NetworkPolicy and the sandbox is an ephemeral, token-less pod. The pipeline clones the repo
 // itself at the pinned SHA (github is the one egress the fence allows); a private repo's read credential
 // rides as a short-lived Secret this adapter creates + reaps.
+//
+// That ConfigMap carries exactly ONE of two keys, and which key it is is the whole discriminator:
+// `report.json` is a GateReport, `incomplete.json` says the gate task produced no report file. The
+// second is never parsed as the first (shared/gates.ts IncompleteGateRunSchema says why).
 import { createHash } from "node:crypto";
 import { KubeConfig, CoreV1Api, CustomObjectsApi, ApiException } from "@kubernetes/client-node";
-import { GateReportSchema, reportHashPayload, type GateReport } from "../../../shared/gates.ts";
+import { GateReportSchema, IncompleteGateRunSchema, reportHashPayload, type GateReport } from "../../../shared/gates.ts";
 import type { GateRunner, GateJobRequest, GateJobProgress } from "./port.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { AppError, errGateIncomplete } from "../../kernel/errors.ts";
 
 const TEKTON = { group: "tekton.dev", version: "v1", plural: "pipelineruns" } as const;
+const TEKTON_TASKRUNS = { group: "tekton.dev", version: "v1", plural: "taskruns" } as const;
+
+/** Tekton stamps both on every TaskRun it creates for a PipelineRun: the first joins a TaskRun back
+ *  to its run, the second names the task inside the pipeline ("clone", "gate", "publish-report"). */
+const PIPELINE_RUN_LABEL = "tekton.dev/pipelineRun";
+const PIPELINE_TASK_LABEL = "tekton.dev/pipelineTask";
 
 /** Stamped on every dispatched PipelineRun (pipelineRunBody) and matched again by the orphan
  *  sweep's list — one definition, so the sweep can never miss what submit stamps. */
@@ -31,6 +41,30 @@ function upstream(msg: string): AppError {
   return new AppError("UPSTREAM", `gate-runner (tekton): ${msg}`);
 }
 
+/** What the run's report ConfigMap was found to carry. The `publish-report` finally task writes
+ *  EXACTLY ONE of two keys and WHICH key it is decides the case — no shared shape, so nothing has to
+ *  be parsed before it is known which of the two arrived. The other two states are the ConfigMap not
+ *  being there at all and it standing with neither key on it. */
+export type ReportConfigMap =
+  | { state: "report"; json: string } // data["report.json"] — a real GateReport
+  | { state: "incomplete"; json: string } // data["incomplete.json"] — the gate task produced no report file
+  | { state: "unrecognized"; keys: string[] } // the ConfigMap stands, carrying neither key
+  | { state: "absent" }; // no report ConfigMap at all
+
+/** One TaskRun's ending, read off its Succeeded condition. `succeeded` is null while the condition
+ *  still reads Unknown — a task that never settled, which is a different fact from one that failed. */
+export interface TaskRunOutcome {
+  pipelineTaskName: string;
+  succeeded: boolean | null;
+  reason: string; // Tekton's condition reason, e.g. "Failed", "TaskRunImagePullFailed"
+  message: string; // Tekton's condition message, e.g. `"step-gate" exited with code 137`
+}
+
+/** What poll captured about a run's TaskRuns before the reap took them. `read: false` is NOT "nothing
+ *  failed": it says the statuses could not be read at all, and an operator has to be told which of
+ *  the two they are looking at. */
+export type TaskRunEvidence = { read: true; taskRuns: TaskRunOutcome[] } | { read: false; why: string };
+
 /** The narrow cluster seam the runner needs — a fake in tests, KubeGateRunCluster in production. Every
  *  op targets the ONE gate-run namespace on the control cluster. */
 export interface GateRunCluster {
@@ -38,8 +72,12 @@ export interface GateRunCluster {
   createPipelineRun(body: unknown): Promise<void>;
   /** null while the PipelineRun is still running; {succeeded} once its Succeeded condition settles. */
   pipelineRunOutcome(name: string): Promise<{ succeeded: boolean } | null>;
-  /** The report ConfigMap's `report.json` value, or null if the ConfigMap is absent. */
-  readReport(cmName: string): Promise<string | null>;
+  /** What the report ConfigMap carries, by key — the ConfigMap's absence included. */
+  readReportConfigMap(cmName: string): Promise<ReportConfigMap>;
+  /** How each of a PipelineRun's TaskRuns ended. This is the ONLY place the cause of a gate task
+   *  that died before writing a report exists, and deleting the PipelineRun deletes its TaskRuns
+   *  with it, so poll reads this BEFORE the reap. */
+  listTaskRunOutcomes(pipelineRunName: string): Promise<TaskRunOutcome[]>;
   deletePipelineRun(name: string): Promise<void>;
   deleteConfigMap(name: string): Promise<void>;
   deleteSecret(name: string): Promise<void>;
@@ -122,16 +160,44 @@ export class KubeGateRunCluster implements GateRunCluster {
     return { succeeded: cond.status === "True" };
   }
 
-  async readReport(cmName: string): Promise<string | null> {
+  async readReportConfigMap(cmName: string): Promise<ReportConfigMap> {
+    let data: Record<string, string>;
     try {
       const cm = (await this.core.readNamespacedConfigMap({ name: cmName, namespace: this.namespace })) as {
         data?: Record<string, string>;
       };
-      return cm.data?.["report.json"] ?? null;
+      data = cm.data ?? {};
     } catch (e) {
-      if (isNotFound(e)) return null;
+      if (isNotFound(e)) return { state: "absent" };
       throw e;
     }
+    const report = data["report.json"];
+    if (report !== undefined) return { state: "report", json: report };
+    const incomplete = data["incomplete.json"];
+    if (incomplete !== undefined) return { state: "incomplete", json: incomplete };
+    return { state: "unrecognized", keys: Object.keys(data) };
+  }
+
+  async listTaskRunOutcomes(pipelineRunName: string): Promise<TaskRunOutcome[]> {
+    const raw = (await this.custom.listNamespacedCustomObject({
+      ...TEKTON_TASKRUNS,
+      namespace: this.namespace,
+      labelSelector: `${PIPELINE_RUN_LABEL}=${pipelineRunName}`,
+    })) as {
+      items?: Array<{
+        metadata?: { name?: string; labels?: Record<string, string> };
+        status?: { conditions?: Array<{ type?: string; status?: string; reason?: string; message?: string }> };
+      }>;
+    };
+    return (raw.items ?? []).map((tr) => {
+      const cond = (tr.status?.conditions ?? []).find((c) => c.type === "Succeeded");
+      return {
+        pipelineTaskName: tr.metadata?.labels?.[PIPELINE_TASK_LABEL] ?? tr.metadata?.name ?? "(unnamed TaskRun)",
+        succeeded: cond?.status === "True" ? true : cond?.status === "False" ? false : null,
+        reason: cond?.reason ?? "",
+        message: cond?.message ?? "",
+      };
+    });
   }
 
   async deletePipelineRun(name: string): Promise<void> {
@@ -215,17 +281,45 @@ export class TektonGateRunner implements GateRunner {
     if (outcome === null) return { phase: "gating", gatesSoFar: [] };
 
     // Settled (succeeded or failed): the report is the source of truth, not the exit status — a gate
-    // FAIL is a completed run whose report carries verdict "fail". The publish step runs `finally`, so
-    // a report is always present; its ABSENCE is an internal failure the plan must reject, not hang on.
-    const raw = await this.cluster.readReport(reportCmName(jobId));
+    // FAIL is a completed run whose report carries verdict "fail".
+    //
+    // The TaskRun statuses are captured FIRST, before the reap. Measured on apps3 (2026-08-26): the
+    // reap ran one line before the parse, so a gate task that died took its own TaskRun status with
+    // it and the operator was left with schema violations about a report that was never written. The
+    // TaskRuns are the only place the cause of a dead gate task exists, and they fall with the
+    // PipelineRun the reap deletes.
+    const evidence = await this.captureTaskRuns(jobId);
+    const cm = await this.cluster.readReportConfigMap(reportCmName(jobId));
     await this.reap(jobId);
-    if (raw === null) {
-      throw upstream(`the gate-run completed (succeeded=${outcome.succeeded}) but published no report ConfigMap`);
+
+    if (cm.state === "absent") {
+      throw this.gateIncomplete(
+        `the gate-run settled (succeeded=${outcome.succeeded}) but published no report ConfigMap ${reportCmName(jobId)} at all — the publish-report task runs as a \`finally\` task, so it should have written one even after the gate task died`,
+        null,
+        evidence,
+      );
+    }
+    if (cm.state === "unrecognized") {
+      throw this.gateIncomplete(
+        `the report ConfigMap ${reportCmName(jobId)} carries neither report.json nor incomplete.json — it carries: ${cm.keys.length > 0 ? cm.keys.join(", ") : "(no data keys at all)"}. The gate-runner that wrote it and this Manager disagree about the report contract`,
+        null,
+        evidence,
+      );
+    }
+    if (cm.state === "incomplete") {
+      // NOT parsed as a report: this key is the runner saying it produced none, so reading it against
+      // GateReportSchema would answer a dead gate task with a list of missing report fields.
+      const notice = readIncompleteNotice(cm.json);
+      throw this.gateIncomplete(
+        `the report ConfigMap ${reportCmName(jobId)} carries incomplete.json instead of report.json: the gate task produced no report file${notice.note !== null ? ` (${notice.note})` : ""}`,
+        notice.reason,
+        evidence,
+      );
     }
     let report: GateReport;
     let published: Record<string, unknown>;
     try {
-      published = JSON.parse(raw) as Record<string, unknown>;
+      published = JSON.parse(cm.json) as Record<string, unknown>;
       report = GateReportSchema.parse(published);
     } catch (e) {
       throw upstream(`the published gate report is malformed: ${e instanceof Error ? e.message : String(e)}`);
@@ -268,6 +362,33 @@ export class TektonGateRunner implements GateRunner {
     for (const n of configMaps) if (n.startsWith(reportPrefix)) ids.add(n.slice(reportPrefix.length));
     await Promise.all([...ids].map((id) => this.reap(id)));
     return { reaped: ids.size };
+  }
+
+  /** Read how the run's TaskRuns ended, ahead of the reap. A read that FAILS is recorded as such and
+   *  never as an empty list: an empty list reads as "no task failed", and this call can fail for a
+   *  reason that has nothing to do with the run — the Manager's Role in the gate-run namespace has to
+   *  grant `list` on tekton.dev/taskruns, and without that grant the API server answers 403. */
+  private async captureTaskRuns(jobId: string): Promise<TaskRunEvidence> {
+    try {
+      return { read: true, taskRuns: await this.cluster.listTaskRunOutcomes(jobId) };
+    } catch (e) {
+      return { read: false, why: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** The named failure for every case where the gate-run produced no report. It opens by saying that
+   *  NOTHING was judged, because the reader it is written for is an agent working in the consumer's or
+   *  tenant's own repository: a failed gate G7 is that repository's bug and this is not, and the two
+   *  must never read alike. One fact per LINE — the run log writes one events row per line
+   *  (server/executor/context.ts emit), so a joined blob would arrive as a single unreadable row. */
+  private gateIncomplete(cause: string, reason: string | null, evidence: TaskRunEvidence): AppError {
+    const lines = [
+      "the gate-run did not run to completion — NO gate report exists, so nothing was judged about the repository under validation. This is a failure of the gate-run itself, not a finding about that repository.",
+      cause,
+      ...(reason !== null ? [`the gate-run's own reason: ${reason}`] : []),
+      ...taskRunLines(evidence),
+    ];
+    return errGateIncomplete(`gate-runner (tekton): ${lines.join("\n")}`);
   }
 
   /** Best-effort delete of a run's objects (PipelineRun + report ConfigMap + credential Secret). */
@@ -330,6 +451,48 @@ export class TektonGateRunner implements GateRunner {
       },
     };
   }
+}
+
+/** The incomplete notice as the failure can use it. `reason` is read LENIENTLY — a notice that misses
+ *  the rest of IncompleteGateRunSchema must still deliver its one sentence, because refusing it would
+ *  put the operator back in front of a failure that says nothing. `note` is non-null exactly when the
+ *  notice did not hold that schema, so a runner writing a shape this Manager does not know is stated
+ *  rather than silently tolerated. */
+function readIncompleteNotice(json: string): { reason: string | null; note: string | null } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (e) {
+    return { reason: null, note: `its incomplete.json is not JSON: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  const held = IncompleteGateRunSchema.safeParse(parsed);
+  if (held.success) return { reason: held.data.reason, note: null };
+  const reason = (parsed as { reason?: unknown } | null)?.reason;
+  return {
+    reason: typeof reason === "string" && reason.length > 0 ? reason : null,
+    note: `its incomplete.json does not hold IncompleteGateRunSchema: ${held.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`,
+  };
+}
+
+/** What the captured TaskRuns say, one line each. Every branch says something DIFFERENT: statuses
+ *  that could not be read, a PipelineRun that produced no TaskRuns, and the outcomes themselves are
+ *  three distinct facts, and collapsing any two of them into "nothing to show" would tell the
+ *  operator that nothing failed. */
+function taskRunLines(evidence: TaskRunEvidence): string[] {
+  if (!evidence.read) {
+    return [`the gate-run's TaskRun statuses could NOT be read, so why it died is not known here: ${evidence.why}`];
+  }
+  if (evidence.taskRuns.length === 0) {
+    return ["the gate-run's PipelineRun had no TaskRuns at all — no task of the pipeline ever started"];
+  }
+  return [
+    "what the gate-run's TaskRuns ended as:",
+    ...evidence.taskRuns.map(
+      (t) =>
+        `  ${t.pipelineTaskName}: ${t.succeeded === null ? "never settled" : t.succeeded ? "succeeded" : "FAILED"}` +
+        ` — ${t.reason || "(no reason)"}: ${t.message || "(no message)"}`,
+    ),
+  ];
 }
 
 /** A short, DB-safe, collision-resistant run suffix. crypto.randomUUID is available in the Manager

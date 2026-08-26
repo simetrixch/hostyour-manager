@@ -19,6 +19,7 @@ const HTTP_BY_CODE: Record<ApiErrorCode, number> = {
   UPSTREAM: 502,
   RUNNER_BUSY: 409,
   SANDBOX_DEGRADED: 503,
+  GATE_INCOMPLETE: 502,
   UNDECLARED_TARGET: 500,
   INTERNAL: 500,
 };
@@ -76,3 +77,9 @@ export const errRunnerBusy = (): AppError =>
 // because untrusted code is never validated in a degraded sandbox.
 export const errSandboxDegraded = (message = "The validation sandbox is degraded and refused the job"): AppError =>
   new AppError("SANDBOX_DEGRADED", message);
+// The gate-run produced NO gate report — the gate task died before writing one, the publish step
+// wrote a ConfigMap this Manager does not recognise, or no report ConfigMap was published at all.
+// Held apart from a gate that FAILED, which is a report carrying a verdict and a named gate: this
+// code says nothing was judged about the repository under validation, so whoever reads it must not
+// go looking for the fault in that repository's own files.
+export const errGateIncomplete = (message: string): AppError => new AppError("GATE_INCOMPLETE", message);

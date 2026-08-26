@@ -39,7 +39,9 @@ export interface GateRunner {
   /** Submit a validation job. Throws RUNNER_BUSY (the queue-of-1 is busy) or SANDBOX_DEGRADED
    *  (the fence self-probe was not green) — both fail-closed. */
   submit(req: GateJobRequest): Promise<{ jobId: string }>;
-  /** Poll a job's progress; `report` attaches once the phase reaches "done". */
+  /** Poll a job's progress; `report` attaches once the phase reaches "done". Throws GATE_INCOMPLETE
+   *  when the job produced NO report — nothing was judged about the repository, which is a different
+   *  answer from a report whose verdict is "fail". */
   poll(jobId: string): Promise<GateJobProgress>;
   /** Abort a running job (operator discard). No-op if the job is already done or unknown. */
   cancel(jobId: string): Promise<void>;

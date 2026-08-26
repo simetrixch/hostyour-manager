@@ -24,6 +24,7 @@ export type ApiErrorCode =
   | "UNDECLARED_TARGET"
   | "RUNNER_BUSY"
   | "SANDBOX_DEGRADED"
+  | "GATE_INCOMPLETE"
   | "INTERNAL";
 
 export interface ApiError {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pino } from "pino";
 import { z } from "zod";
 import { openDb, type DbHandle } from "../db/client.ts";
-import { AppError } from "../kernel/errors.ts";
+import { AppError, errGateIncomplete } from "../kernel/errors.ts";
 import { CredentialStore } from "../security/store.ts";
 import { RunEventBus } from "./bus.ts";
 import { Executor } from "./executor.ts";
@@ -245,5 +245,67 @@ describe("streaming plan — a prologue the database cannot take", () => {
     expect(metaLines(db, runId)[0]).toBe("Validating the repository in the sandbox…");
     expect(runRow(db, runId).status).toBe("planned");
     expect(lines).toHaveLength(0);
+  });
+});
+
+/** A def whose streaming planner throws the way the gate-runner adapter does when a gate-run produced
+ *  no report. */
+function throwingPlannerDef(message: string): AnyRunDefinition {
+  return {
+    kind: "noop",
+    paramsSchema: z.record(z.string(), z.unknown()),
+    mutating: false,
+    plan: async () => {
+      throw new AppError("INTERNAL", "this def is planned via planStream, not plan()");
+    },
+    planStream: async () => {
+      throw errGateIncomplete(message);
+    },
+    steps: () => [{ name: "do-it", title: "Do it", run: async () => undefined }],
+  };
+}
+
+/** The shape TektonGateRunner.poll raises when the report ConfigMap carries incomplete.json: one fact
+ *  per line — the sentence that says nothing was judged, the case, the runner's own reason, and the
+ *  TaskRun statuses the reap would otherwise have destroyed. */
+const GATE_INCOMPLETE_LINES = [
+  "gate-runner (tekton): the gate-run did not run to completion — NO gate report exists, so nothing was judged about the repository under validation.",
+  "the report ConfigMap gate-report-gr1 carries incomplete.json instead of report.json: the gate task produced no report file",
+  "the gate-run's own reason: gate task produced no report file (killed before it wrote one)",
+  "what the gate-run's TaskRuns ended as:",
+  `  gate: FAILED — Failed: "step-gate" exited with code 137 (OOMKilled)`,
+];
+
+describe("streaming plan — a many-line failure reaching the operator", () => {
+  // What an operator reads of a failed validation is the run log: runs.error never leaves the server
+  // (RunView carries no error field), so the log lines ARE the surface. RunContext.emit writes ONE
+  // events row per newline, which is what lets a failure carry a reason and its evidence instead of
+  // one flattened sentence — and what this asserts, because a join anywhere on that path would leave
+  // the operator with a blob no screen wraps.
+
+  it("every line of the failure becomes its own run-log line, none of them lost or joined", async () => {
+    const { db, executor } = makeWith(throwingPlannerDef(GATE_INCOMPLETE_LINES.join("\n")));
+    const { runId } = await executor.planStreamed("noop", {});
+    await executor.settle(runId);
+
+    const row = runRow(db, runId);
+    expect(row.status).toBe("failed");
+    for (const line of GATE_INCOMPLETE_LINES) expect(row.error).toContain(line);
+
+    const meta = metaLines(db, runId);
+    // The first line is prefixed by the catch; the rest arrive verbatim, one row each.
+    expect(meta).toContain(`✗ validation failed: ${GATE_INCOMPLETE_LINES[0]}`);
+    for (const line of GATE_INCOMPLETE_LINES.slice(1)) expect(meta).toContain(line);
+  });
+
+  it("counter-probe: a ONE-line failure arrives as exactly one added run-log line", async () => {
+    // Without this the test above would pass just as well against a log that wrote every failure as
+    // one row per word, or one that wrote each failure five times.
+    const { db, executor } = makeWith(throwingPlannerDef("the gate-run did not run to completion"));
+    const { runId } = await executor.planStreamed("noop", {});
+    await executor.settle(runId);
+
+    const meta = metaLines(db, runId);
+    expect(meta).toEqual(["Validating the repository in the sandbox…", "✗ validation failed: the gate-run did not run to completion"]);
   });
 });

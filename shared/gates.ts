@@ -98,6 +98,33 @@ export const GateReportSchema = z.object({
 });
 export type GateReport = z.infer<typeof GateReportSchema>;
 
+/** What the report ConfigMap carries INSTEAD of a report when the gate task produced no report file
+ *  (an internal error, an OOM kill, an image that never pulled). The pipeline's `publish-report`
+ *  finally task writes it under the key `incomplete.json`; a real report rides `report.json`, and
+ *  the ConfigMap carries EXACTLY ONE of the two.
+ *
+ *  It is NOT a variant of a report and must never be read as one. A GateReport carries a sandbox
+ *  attestation and a reportHash; a publish step that filled those in would be attesting to a fence
+ *  it never observed and hashing a report that does not exist.
+ *
+ *  It carries NO contractVersion, and the separate KEY is what makes that safe. GateReportSchema's
+ *  contractVersion is a literal so a report written against another version is refused rather than
+ *  read half-right, and that guard must not be weakened; this object sidesteps it instead, because
+ *  the Manager asks for `report.json` and that key's absence is not a malformed report — it is not a
+ *  report at all.
+ *
+ *  `incompleteVersion` is a plain string and NOT a literal. A version this Manager does not know
+ *  must still deliver its `reason`: refusing the one message that explains why the gate produced
+ *  nothing would put the operator back in front of a failure that says nothing, which is the whole
+ *  defect this object exists to end. */
+export const IncompleteGateRunSchema = z.object({
+  incompleteVersion: z.string(),
+  runId: z.string(),
+  reason: z.string(), // one plain sentence saying the gate task produced no report file
+  generatedAt: z.string(), // RFC3339 UTC
+});
+export type IncompleteGateRun = z.infer<typeof IncompleteGateRunSchema>;
+
 /** The verdict's hard-gate leg: it passes only if
  *  every HARD gate passed. Callers still enforce the other two legs (schema-validates + the
  *  sandbox attestation) before treating a report as a pass. */
