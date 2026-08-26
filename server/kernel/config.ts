@@ -203,7 +203,7 @@ const EnvSchema = z.object({
   // — the deployment tool and the serving binary — and the serving one refuses to start when the
   // other is not standing beside it, so an address that can name only one of them can never place a
   // working machine. `<name>` stands for which asset and `<version>` for the version
-  // platform/versions.yaml pins; the bootstrap fills both in itself (place-ansiwise.ts). An address
+  // clusters/platform/versions.yaml pins; the bootstrap fills both in itself (place-ansiwise.ts). An address
   // missing either slot is refused HERE rather than at the machine: without `<version>` it names one
   // build for ever and puts the pin and the placed file in disagreement, and without `<name>` it
   // fetches one asset twice and the machine ends up with two copies of the same half. Absent ⇒ the

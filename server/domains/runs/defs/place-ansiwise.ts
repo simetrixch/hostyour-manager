@@ -74,7 +74,7 @@ import { errValidation } from "../../../kernel/errors.ts";
 //
 // WHAT THE MANAGER STILL HAS TO STATE, and it is two values and no shell: WHERE a released
 // executable is fetched from (ANSIWISE_DOWNLOAD_URL, carrying both slots below) and WHICH version
-// (platform/versions.yaml's pin, inventory/ansiwise-pin.ts). Never what the caller happens to hold.
+// (clusters/platform/versions.yaml's pin, inventory/ansiwise-pin.ts). Never what the caller happens to hold.
 
 /** The deployment tool: the binary that runs a program, and the one every run is a detached child
  *  of. Named as a constant because three places say it — the transfer, the reading, and the
@@ -282,7 +282,7 @@ export interface CommandOutcome {
 /** What the bootstrap needs said, and every one of these is a value: nothing here is a session, a
  *  database row or a run. */
 export interface BootstrapRequest {
-  /** The version to place — platform/versions.yaml's pin (inventory/ansiwise-pin.ts), never what the
+  /** The version to place — clusters/platform/versions.yaml's pin (inventory/ansiwise-pin.ts), never what the
    *  caller happens to hold. */
   version: string;
   /** WHERE a released executable is fetched from, carrying NAME_PLACEHOLDER and VERSION_PLACEHOLDER.

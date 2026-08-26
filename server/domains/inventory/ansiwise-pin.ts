@@ -1,5 +1,5 @@
 // The version of the `ansiwise` binary a machine is given. There is exactly ONE pin and it does not
-// live here — it is `cliTools.ansiwise.version` in the platform repo's platform/versions.yaml, the
+// live here — it is `cliTools.ansiwise.version` in the platform repo's clusters/platform/versions.yaml, the
 // file that states what every component of this platform is pinned at and where each pin is
 // written. This module is a READER of that file and nothing else, for the same reason the channel
 // table beside it is read rather than copied: a second statement of a version is a place for two
@@ -17,8 +17,12 @@ import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 
-/** The file the pin lives in, on the platform repo. */
-export const ANSIWISE_PIN_PATH = "platform/versions.yaml";
+/** The file the pin lives in, on the platform repo. It is the platform repository's path and not
+ *  this repository's to choose, so its own test seeds a LITERAL rather than this constant: a fixture
+ *  that seeds what the reader reads agrees with the reader whatever the platform repository holds,
+ *  and that is how this path went on naming `platform/versions.yaml` for a whole rename — green here,
+ *  and a slave's engine placement dying on the machine. */
+export const ANSIWISE_PIN_PATH = "clusters/platform/versions.yaml";
 
 /** The branch the pin is read off — the trunk every install branch descends from. */
 export const ANSIWISE_PIN_BRANCH = PRODUCT_BRANCH;
@@ -27,7 +31,7 @@ export const ANSIWISE_PIN_BRANCH = PRODUCT_BRANCH;
  *  the entry to write off the message instead of going to look for it. */
 export const ANSIWISE_PIN_KEY = "cliTools.ansiwise.version";
 
-/** The slice of platform/versions.yaml this reader takes. Everything else in the file — every other
+/** The slice of clusters/platform/versions.yaml this reader takes. Everything else in the file — every other
  *  component, every stamp site, every upstream — is ignored. */
 const VersionsFile = z.object({
   cliTools: z.object({ ansiwise: z.object({ version: z.string().min(1) }) }),

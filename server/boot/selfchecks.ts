@@ -10,6 +10,7 @@ import { reconcileLocks } from "../executor/locks.ts";
 import { renderForbidden } from "../domains/access/forbidden.ts";
 import { SessionCodec } from "../domains/access/session.ts";
 import { readReleaseTagFilter, assertMirrorsReleaseGrammar } from "../domains/inventory/release-grammar.ts";
+import { readAnsiwisePin, ANSIWISE_PIN_PATH, ANSIWISE_PIN_BRANCH, ANSIWISE_PIN_KEY } from "../domains/inventory/ansiwise-pin.ts";
 import type { PlatformRepo } from "../adapters/git/port.ts";
 import { spaBytes } from "../http/spa.ts";
 import type { ReadyzView } from "../../shared/api-types.ts";
@@ -231,7 +232,7 @@ export function runSelfChecks(deps: {
 /**
  * The release grammar the Manager enforces against the build plane's copy of it: RELEASE_TAG_RE
  * (shared/release.ts), which validates the `release:` pin of every cluster map, against
- * global.releaseTagFilter in the platform repo's clusters/clusters/platform/values-common.yaml, which the image-builder
+ * global.releaseTagFilter in the platform repo's clusters/platform/values-common.yaml, which the image-builder
  * Trigger fires on and the release pipeline re-verifies. Two literals in two repositories, neither
  * derived from the other — see domains/inventory/release-grammar.ts for what a byte between them costs.
  * A running Manager with the platform repo configured is the only place both sides are present, so
@@ -266,6 +267,42 @@ async function checkReleaseGrammarMirror(platformRepo: PlatformRepo | undefined)
   }
 }
 
+/**
+ * CAN THIS MANAGER STILL FIND THE VERSION IT PLACES ON A MACHINE? The `ansiwise` binary is pinned in
+ * one file on the platform repo's trunk (domains/inventory/ansiwise-pin.ts), and that file's path is
+ * the platform repository's to choose. When it moved under `clusters/`, nothing here noticed: the
+ * pin's own fixture seeded whatever the reader read, so the suite stayed green, and the first thing
+ * that failed was a slave's engine placement on the machine — mid-run, with the operator reading a
+ * message that named a file and said nothing about it having been renamed.
+ *
+ * This is where that question can be asked before anybody needs the answer: a running Manager with
+ * the platform repo configured is the only place the trunk is reachable. It reads the pin exactly the
+ * way the placement does — same module, same branch, same refusals — so a moved file, a missing entry
+ * or an empty version arrives at boot instead of halfway into onboarding the first slave.
+ *
+ * DEGRADING, for the reason the grammar mirror beside it states: it reaches a REMOTE. A git that
+ * cannot be read right now must not take down a Manager whose clusters, consumers and tenants have
+ * nothing to do with placing a binary. Without a platform repo it SKIPS and says so; reporting `ok`
+ * there would be a green light for a read that never happened.
+ */
+async function checkAnsiwisePinReadable(platformRepo: PlatformRepo | undefined): Promise<CheckResult> {
+  const name = "ansiwise.pin_readable";
+  if (!platformRepo) {
+    return {
+      name,
+      kind: "skipped",
+      ok: false,
+      detail: "the platform repo is not configured on this manager — the version a machine is placed at could not be read, so nothing was checked",
+    };
+  }
+  try {
+    const version = await readAnsiwisePin(platformRepo);
+    return { name, kind: "degrading", ok: true, detail: `${ANSIWISE_PIN_PATH} on ${ANSIWISE_PIN_BRANCH} pins ${ANSIWISE_PIN_KEY} at ${version}` };
+  } catch (e) {
+    return { name, kind: "degrading", ok: false, detail: messageOf(e) };
+  }
+}
+
 /** Async checks (jose is Promise-based, the platform-repo read is a git fetch). Run after
  *  runSelfChecks; results concat. `platformRepo` is optional exactly as the wiring has it —
  *  wire-units.ts builds the port only with config.github and a books branch behind it. */
@@ -281,6 +318,7 @@ export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; p
     results.push({ name: "session.roundtrip", kind: "blocking", ok: false, detail: messageOf(e) });
   }
   results.push(await checkReleaseGrammarMirror(deps.platformRepo));
+  results.push(await checkAnsiwisePinReadable(deps.platformRepo));
   return results;
 }
 

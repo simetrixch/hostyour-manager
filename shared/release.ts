@@ -1,6 +1,6 @@
 // Release identity. The single home of the release-tag grammar: the registry reaper's retention
 // classes and the web wizard read it from here. The build plane carries a copy of RELEASE_TAG_RE —
-// `global.releaseTagFilter` in the platform repo's clusters/clusters/platform/values-common.yaml, the inner pattern
+// `global.releaseTagFilter` in the platform repo's clusters/platform/values-common.yaml, the inner pattern
 // without anchors. No test can compare them: the two literals live in two repositories and this one
 // cannot see the other. What compares them is the `release.grammar_mirror` boot self-check
 // (server/boot/selfchecks.ts), on a running Manager, where both sides are present.

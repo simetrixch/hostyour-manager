@@ -338,7 +338,7 @@ export const MASTER_MARKING_YAML = [
   "  catalogUrl: https://github.com/acme/acme-catalog.git",
 ].join("\n") + "\n";
 
-/** The version platform/versions.yaml pins for the binary, and the file that carries it — the ONE
+/** The version clusters/platform/versions.yaml pins for the binary, and the file that carries it — the ONE
  *  source place-ansiwise reads. Every harness seeds it on the trunk, because without it the step
  *  refuses and no run of any cluster run kind gets past its machine layer. */
 export const ANSIWISE_PIN = "0.4.2";

@@ -14,6 +14,7 @@ import type { AnyRunDefinition } from "../executor/types.ts";
 import { FakePlatformRepo } from "../adapters/git/testing/fake.ts";
 import { RELEASE_TAG_RE } from "../../shared/release.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../domains/inventory/channel-stages.ts";
+import { PRODUCT_BRANCH } from "../../shared/branches.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf } from "./selfchecks.ts";
 
 const BASE_ENV = {
@@ -238,6 +239,65 @@ describe("boot self-checks", () => {
     expect(() => assertBlockingChecksPass(results)).not.toThrow();
     expect(readinessOf(results).ok).toBe(true);
     expect(readinessOf(results).checks.map((c) => c.name)).not.toContain("release.grammar_mirror");
+  });
+
+  // CAN THIS MANAGER STILL FIND THE VERSION IT PLACES ON A MACHINE? The pin's path is the platform
+  // repository's to choose, and when it moved under clusters/ nothing here noticed — the pin's own
+  // fixture seeded whatever the reader read, and the first thing that failed was a slave's engine
+  // placement, on the machine, mid-run. This check asks at boot instead.
+  //
+  // THE PATH IS A LITERAL HERE, never the constant under test: seeding from ANSIWISE_PIN_PATH is
+  // exactly what let the drift through, so this fixture states where the platform repository really
+  // carries the file (measured in simetrixch/hostyour-cloud, 2026-08-26).
+  const PIN_FILE = "clusters/platform/versions.yaml";
+  const PINNED = 'cliTools:\n  ansiwise:\n    version: "0.4.2"\n  yq:\n    version: "v4.53.3"\n';
+  const platformRepoPinning = (path: string, text: string): FakePlatformRepo => {
+    const repo = new FakePlatformRepo();
+    repo.seed(PRODUCT_BRANCH, path, text);
+    return repo;
+  };
+
+  it("ansiwise.pin_readable is GREEN when the trunk carries the pin, and says which version it read", async () => {
+    const { db } = fresh();
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoPinning(PIN_FILE, PINNED) });
+    const check = results.find((r) => r.name === "ansiwise.pin_readable");
+    expect(check?.kind).toBe("degrading");
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).toContain("0.4.2");
+    expect(readinessOf(results).checks).toContainEqual({ name: "ansiwise.pin_readable", ok: true });
+  });
+
+  // THE COUNTER-PROBE, and it is this ticket's own defect: the file where this Manager looked before
+  // the rename. Boot goes ON — a Manager that cannot place a binary right now still serves every
+  // cluster, consumer and tenant that has nothing to do with placing one — but /readyz carries the
+  // red line and the detail names the file and the branch, which is what a reader has to act on.
+  it("ansiwise.pin_readable is RED when the trunk carries the file at the OLD path, and does NOT fail boot", async () => {
+    const { db } = fresh();
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoPinning("platform/versions.yaml", PINNED) });
+    const check = results.find((r) => r.name === "ansiwise.pin_readable");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(PIN_FILE);
+    expect(check?.detail).toContain(PRODUCT_BRANCH);
+    expect(() => assertBlockingChecksPass(results)).not.toThrow();
+    expect(readinessOf(results).ok).toBe(true);
+    expect(readinessOf(results).checks).toContainEqual({ name: "ansiwise.pin_readable", ok: false });
+  });
+
+  it("ansiwise.pin_readable is RED when the file is there and states no version for the binary", async () => {
+    const { db } = fresh();
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoPinning(PIN_FILE, 'cliTools:\n  yq:\n    version: "v4.53.3"\n') });
+    const check = results.find((r) => r.name === "ansiwise.pin_readable");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("cliTools.ansiwise.version");
+  });
+
+  it("ansiwise.pin_readable SKIPS without a platform repo instead of reporting a pass", async () => {
+    const { db } = fresh();
+    const results = await runAsyncSelfChecks({ db, config });
+    const check = results.find((r) => r.name === "ansiwise.pin_readable");
+    expect(check?.kind).toBe("skipped");
+    expect(check?.ok).toBe(false);
+    expect(readinessOf(results).checks.map((c) => c.name)).not.toContain("ansiwise.pin_readable");
   });
 
   it("the append-only probe leaves no sentinel row behind (rolled back)", () => {

@@ -14,7 +14,7 @@ import type { ReleaseDownloads } from "../../../adapters/downloads/port.ts";
 // The manager's half of the BOOTSTRAP: the two steps deploy-slave and redeploy run, and the
 // resolution only a manager can do. The bootstrap itself (place-ansiwise.ts) takes a machine and
 // values and holds no run, no database and no session; what stands here is where those values come
-// from in THIS manager — the pin off platform/versions.yaml, the release address off the
+// from in THIS manager — the pin off clusters/platform/versions.yaml, the release address off the
 // installation's settings, the service address off the server row — and how a run's cached SSH
 // session satisfies the four things a placement asks of a machine.
 //
@@ -55,10 +55,10 @@ function requireDownloads(ports: AnsiwisePorts): ReleaseDownloads {
 }
 
 /** `place-ansiwise` — the BOOTSTRAP on a machine reached by THIS MANAGER: both ansiwise executables,
- *  at the version platform/versions.yaml pins, written over SFTP and nothing else done to the
+ *  at the version clusters/platform/versions.yaml pins, written over SFTP and nothing else done to the
  *  machine at all. The bootstrap itself (place-ansiwise.ts) takes a machine and values and is the
  *  same act wherever a machine is reached from; what stands here is the half only a manager can do —
- *  resolving a run into those values. The version comes off platform/versions.yaml on the trunk and
+ *  resolving a run into those values. The version comes off clusters/platform/versions.yaml on the trunk and
  *  the address off the installation's settings, each refused BY NAME while nothing has been asked of
  *  the machine yet.
  *
