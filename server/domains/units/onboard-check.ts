@@ -5,6 +5,8 @@ import type { Step } from "../../executor/types.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 import { validateOnboard, type OnboardTarget } from "./validate.ts";
 import { errValidation } from "../../kernel/errors.ts";
+import { resolveUnitQuota } from "./unit-size.ts";
+import { DEFAULT_UNIT_SIZE } from "../../../shared/unit-size.ts";
 
 /** The ref cloned before the gates run — the remote's default branch head. The onboarding validates
  *  what the repo IS, not a pin: only the release cycle ever turns a commit into something deployable. */
@@ -35,9 +37,17 @@ export function checkStep(ports: OnboardPorts, p: OnboardParams): Step {
               clusterValueFiles: await ports.registrations.readClusterValueFiles(p.domain, p.stage),
             };
       const outcome = await validateOnboard(
-        { repoURL: p.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: p.consumerName, repoCredentialId: p.repoCredentialId },
+        // The size the operator approved, re-judged by G24 against the manifest at the CURRENT head:
+        // a manifest that gained its own database units since the approval must not slip past on a
+        // gate that ran when it had none. A build-only unit holds no namespace, so the frugal
+        // default stands there and G24 reports that nothing of it deploys.
+        { repoURL: p.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: p.consumerName, repoCredentialId: p.repoCredentialId, size: p.form === "deployable" ? p.size : DEFAULT_UNIT_SIZE },
         target,
-        { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: (l) => ctx.log("stdout", l), signal: ctx.signal, attestListening: ports.attestListening },
+        {
+          repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains,
+          log: (l) => ctx.log("stdout", l), signal: ctx.signal, attestListening: ports.attestListening,
+          resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings),
+        },
       );
       if (outcome.verdict !== "pass" || outcome.builds === null) {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass");

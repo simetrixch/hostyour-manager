@@ -81,9 +81,16 @@ export type UnitQuota = z.infer<typeof UnitQuotaSchema>;
  *
  * WHERE THE NUMBERS COME FROM, measured 2026-08-05/06:
  *
- *   - The platform itself schedules ~4.3 vCPU / ~10.2 GiB of requests and the smallest machine it
- *     accepts is 8 vCPU / 16 GiB (hostyour-cloud install.sh's machine-size gate), so all units together
- *     share roughly 3.7 vCPU and 5.8 GiB on the smallest supported host.
+ *   - The platform itself schedules ~4.3 vCPU / ~10.2 GiB of requests, and these figures were derived
+ *     against a smallest supported machine of 8 vCPU / 16 GiB, which leaves all units together
+ *     roughly 3.7 vCPU and 5.8 GiB.
+ *     THAT FLOOR IS NOT THE ONE THE PLATFORM ADMITS TODAY, measured 2026-08-26. It was read from a
+ *     machine-size gate in a file that no longer exists; the gate that actually admits a machine now
+ *     asks for 2 processors and about 3.8 GiB. On a machine at THAT floor the platform's own requests
+ *     do not fit at all, so every figure below rests on a floor nothing enforces. Whether the floor
+ *     was lowered deliberately or this table's reasoning went stale is not readable from either side,
+ *     and the two cannot both stand — it is stated here rather than left as a dead reference, because
+ *     a derivation that names a file nobody can open is a number with no source at all.
  *   - `base` covers the application alone. A tenant member namespace sums to at most 200m/384Mi (an
  *     app: engine + front), and a consumer's own chart is its own business — small doubles that and
  *     the larger sizes double again.

@@ -126,7 +126,9 @@ describe("the manifest's mongodb word at plan time", () => {
   for (const mode of ["shared", "standalone", "replicaset"] as const) {
     it(`freezes "${mode}" into the params verbatim`, async () => {
       seedCluster();
-      const res = await makeOnboardDef(ports(mode)).planStream!(REQ, streamCtx());
+      // A unit that brings its OWN MongoDB is sized above the frugal default, which is what G24
+      // holds it to — the word being frozen here is not what that gate is about.
+      const res = await makeOnboardDef(ports(mode)).planStream!({ ...REQ, size: mode === "shared" ? "small" : "medium" }, streamCtx());
       expect(res.outcome).toBe("planned");
       if (res.outcome !== "planned" || res.params.form !== "deployable") return;
       // The registration is what the consumers ApplicationSet gates its per-consumer MongoDB source

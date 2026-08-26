@@ -30,6 +30,7 @@ import {
 } from "./onboard-release-cycle.ts";
 import { checkStep, DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
 import { admitFirstMasterUngated, planUngatedFirstMaster } from "./first-master.ts";
+import { resolveUnitQuota } from "./unit-size.ts";
 import { writeRegistrationStep, writeBuildRegistrationStep, recordBuildOnlyStep } from "./onboard-registration.ts";
 import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import { AppError, errNotFound } from "../../kernel/errors.ts";
@@ -526,9 +527,9 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         }
         ctx.log(`the gate applies to this onboarding — ${exemption.refusedBecause}`);
         const outcome = await validateOnboard(
-          { repoURL: req.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: req.consumerName, repoCredentialId: req.repoCredentialId },
+          { repoURL: req.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: req.consumerName, repoCredentialId: req.repoCredentialId, size: req.size },
           { domain: master.domain, stage, clusterValueFiles: [] },
-          { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, attestListening: ports.attestListening, ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
+          { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, attestListening: ports.attestListening, resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings), ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
         );
         if (outcome.verdict !== "pass" || outcome.builds === null) {
           const failed = outcome.report.gates.filter((g) => g.status !== "pass");
@@ -587,9 +588,9 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
           `clusterValues=${clusterValueFiles.map((f) => f.path).join(", ")}`,
       );
       const outcome = await validateOnboard(
-        { repoURL: req.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: req.consumerName, repoCredentialId: req.repoCredentialId },
+        { repoURL: req.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: req.consumerName, repoCredentialId: req.repoCredentialId, size: req.size },
         { ...r.target, clusterValueFiles },
-        { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, attestListening: ports.attestListening, ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
+        { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, attestListening: ports.attestListening, resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings), ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
       );
       if (outcome.verdict !== "pass" || outcome.builds === null) {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass");

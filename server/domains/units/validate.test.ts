@@ -8,6 +8,7 @@ import type { GateRunner, GateJobProgress } from "../../adapters/gate-runner/por
 import type { GateReport, GateResult } from "../../../shared/gates.ts";
 import { ConsumerManifestSchema, type ConsumerManifest } from "../../../shared/consumer.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedQuota } from "../../../shared/unit-size.ts";
 
 const SHA = "a".repeat(40);
 const RELEASE = "1.4.0-stable-20260719120000";
@@ -15,10 +16,10 @@ const RELEASE = "1.4.0-stable-20260719120000";
 /** The gates a passing onboarding is judged by: the sandbox's, then these from the Manager. The
  *  fixtures below emit the sandbox side as one G1, so the assertions on the composed report check
  *  the manager side against this tail. */
-const MANAGER_GATES = ["G17", "G23", "G16", "G18", "G19"];
+const MANAGER_GATES = ["G17", "G23", "G16", "G18", "G19", "G24"];
 
 function req(over: Partial<OnboardRequest> = {}): OnboardRequest {
-  return { repoURL: "https://github.com/x/acme.git", ref: RELEASE, consumerName: "acme", ...over };
+  return { repoURL: "https://github.com/x/acme.git", ref: RELEASE, consumerName: "acme", size: "medium", ...over };
 }
 
 function target(over: Partial<OnboardTarget> = {}): OnboardTarget {
@@ -67,7 +68,7 @@ class FakeAttestedBuilds implements AttestedBuildReader, AttestedFqdnReader {
 }
 
 function deps(repo: RepoReader, runner: GateRunner, over: Partial<ValidateDeps> = {}): ValidateDeps {
-  return { repo, runner, registrations: new FakeAttestedBuilds(), tenantSubdomains: async () => [], log: () => {}, signal: new AbortController().signal, attestListening: true, ...over };
+  return { repo, runner, registrations: new FakeAttestedBuilds(), tenantSubdomains: async () => [], log: () => {}, signal: new AbortController().signal, attestListening: true, resolveQuota: (size, brings) => seedQuota(size, brings), ...over };
 }
 
 /** A manifest that declares `builds`, with a chart unless `chart` is false. */

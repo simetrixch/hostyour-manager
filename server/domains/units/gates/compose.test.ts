@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateUnitName, PLATFORM_NAMESPACES } from "./compose.ts";
+import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateUnitName, gateUnitSize, PLATFORM_NAMESPACES } from "./compose.ts";
+import { DEFAULT_UNIT_SIZE, seedQuota, UNIT_SIZE, type MongodbMode, type UnitSize } from "../../../../shared/unit-size.ts";
 import { mapBuildsToChartPins } from "../builds.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
 import type { GateReport, GateResult } from "../../../../shared/gates.ts";
@@ -261,5 +262,58 @@ describe("composeReport", () => {
   it("stays fail when the runner failed even if every manager gate passes", () => {
     const c = composeReport(runnerReport({ verdict: "fail" }), [gateRepoAccess({ ok: true, detail: "clone succeeded" })]);
     expect(c.verdict).toBe("fail");
+  });
+});
+
+describe("G24 unit size (hard)", () => {
+  const size = (s: UnitSize, postgresql: boolean, mongodb: MongodbMode): ReturnType<typeof gateUnitSize> =>
+    gateUnitSize({ unitName: "acme", size: s, brings: { postgresql, mongodb }, quota: seedQuota(s, { postgresql, mongodb }) });
+
+  it("passes a unit that brings no database units of its own, at every size", () => {
+    for (const s of UNIT_SIZE) expect(size(s, false, "shared").status, s).toBe("pass");
+  });
+
+  it(`REFUSES a unit that brings its own PostgreSQL at "${DEFAULT_UNIT_SIZE}", and names both halves of the fix`, () => {
+    const g = size(DEFAULT_UNIT_SIZE, true, "shared");
+    expect(g.status).toBe("fail");
+    expect(g.reason).toContain("its own PostgreSQL");
+    // The failure text has to be actionable by somebody working in the CONSUMER's repository, who
+    // never opens the platform's source: it names the manifest change AND the operator's.
+    expect(g.reason).toContain("drop postgresql from services");
+    expect(g.reason).toContain("larger size");
+  });
+
+  for (const mode of ["standalone", "replicaset"] as const) {
+    it(`REFUSES a unit that brings its own MongoDB (${mode}) at "${DEFAULT_UNIT_SIZE}"`, () => {
+      const g = size(DEFAULT_UNIT_SIZE, false, mode);
+      expect(g.status).toBe("fail");
+      expect(g.reason).toContain("mongodb: shared");
+    });
+  }
+
+  it("passes the SAME compositions once the operator assigns a larger size", () => {
+    for (const s of UNIT_SIZE.filter((x) => x !== DEFAULT_UNIT_SIZE)) {
+      expect(size(s, true, "replicaset").status, s).toBe("pass");
+    }
+  });
+
+  it("REPORTS the six figures on a pass — the operator approves a number, not a word", () => {
+    const g = size("medium", true, "replicaset");
+    const q = seedQuota("medium", { postgresql: true, mongodb: "replicaset" });
+    expect(g.status).toBe("pass");
+    expect(g.found).toContain(q.requestsCpu);
+    expect(g.found).toContain(q.requestsMemory);
+    expect(g.found).toContain(`${q.pods} pod(s)`);
+    expect(g.evidence?.map((e) => e.fieldPath)).toEqual(["size", "quota"]);
+  });
+
+  it("passes a unit that deploys nothing, and says there is no namespace to size", () => {
+    const g = gateUnitSize({ unitName: "acme", size: DEFAULT_UNIT_SIZE, brings: null, quota: null });
+    expect(g.status).toBe("pass");
+    expect(g.found).toContain("holds no namespace");
+  });
+
+  it("is HARD — a size that does not cover what the unit brings rejects the onboarding, never warns", () => {
+    expect(size(DEFAULT_UNIT_SIZE, true, "shared").severity).toBe("hard");
   });
 });

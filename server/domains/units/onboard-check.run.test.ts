@@ -12,6 +12,7 @@ import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedUnitSizes } from "./unit-size.ts";
 
 // The check step's DRIFT BELT (onboard-check.ts): the gates re-run at the current default-branch
 // head, and the facts the approval froze — builds, databases, services, fqdn, secret specs,
@@ -33,7 +34,9 @@ const MANIFEST: ConsumerManifest = {
 const CHART_PINS = 'builds:\n  - name: acme-api\n    image: acme-api\n    tag: "0.0.0"\n';
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); });
+// The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
+// starts without it — and G24 resolves the unit's quota against it while the gates run.
+beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(manifest: ConsumerManifest = MANIFEST): GateReport {

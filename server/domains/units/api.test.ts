@@ -37,6 +37,7 @@ import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedUnitSizes } from "./unit-size.ts";
 
 /** The tenant product's manifest — the catalog reads it to learn which chart's values-<app>.yaml
  *  overlays are the app types. A repo without one is a repo the catalog cannot read. */
@@ -62,7 +63,9 @@ const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); });
+// The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
+// starts without it — and G24 resolves the unit's quota against it while the gates run.
+beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 /** The manifest the consumer fixtures onboard: one declared build, so gate G18's manifest half holds. */

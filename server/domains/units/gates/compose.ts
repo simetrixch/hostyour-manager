@@ -20,6 +20,7 @@ import type { Stage } from "../../../../shared/enums.ts";
 import type { ChartPinMapping } from "../builds.ts";
 import { BUILD_NAMESPACE_SUFFIX } from "../build-rbac.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
+import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, type UnitComposition, type UnitQuota, type UnitSize } from "../../../../shared/unit-size.ts";
 
 /** One build name another unit has already attested in its `registrations/<unit>/build.yaml`. */
 export interface ForeignBuild {
@@ -334,4 +335,82 @@ export function composeReport(runner: GateReport, managerGates: GateResult[]): G
   const gates: GateResult[] = [...runner.gates, ...managerGates];
   const verdict: "pass" | "fail" = hardGatesPass(gates) && runner.verdict === "pass" ? "pass" : "fail";
   return { ...runner, gates, verdict };
+}
+
+/** G24 unit size (HARD). The one gate that reads the SIZE, which is the operator's answer and never
+ *  the consumer's: there is deliberately no size field in ConsumerManifestSchema, because a customer
+ *  choosing their own ceiling is not a ceiling (shared/unit-size.ts).
+ *
+ *  WHAT IT JUDGES: the composition the MANIFEST declares against the size the OPERATOR assigned. A
+ *  consumer "needs units" when it brings database units of its own — `postgresql` among its
+ *  services, or a `mongodb` mode other than `shared` — and each such declaration both adds an Argo
+ *  source of its own and adds a component to the quota sum (base + postgresql + mongodb x members).
+ *
+ *  THE ONE REFUSAL: a unit that brings its own database units may not stand at `small`. That is read
+ *  off the seed table's own derivation rather than invented here. `small` is DEFAULT_UNIT_SIZE — the
+ *  frugal preset a unit lands on when nobody named a size — and its `base` row is derived from what
+ *  an APPLICATION weighs ("a tenant member namespace sums to at most 200m/384Mi ... small doubles
+ *  that"). Its `mongodb` row gives one member 100m/512Mi, while the same table records that this
+ *  platform runs its OWN shared replica-set members at 250m/512Mi, "which is this table's medium".
+ *  So a dedicated replica set sold at `small` gives each member less than the platform gives its
+ *  own, and a unit that also runs its own PostgreSQL is not the shape the `small` row was derived
+ *  for at all.
+ *
+ *  ON A PASS IT STILL REPORTS THE FIGURES, and that is half the point: without this gate the
+ *  operator approved a WORD, and the six numbers the unit's ResourceQuota is actually written from
+ *  appeared nowhere in the report.
+ *
+ *  WHAT IT DOES NOT JUDGE, and nothing else in the platform does either: what the TARGET CLUSTER can
+ *  still carry. No code reads node allocatable capacity, sums the quotas already committed on a
+ *  cluster, or knows how many units a cluster holds, so a unit that fits its size and does not fit
+ *  the machine passes here. */
+export function gateUnitSize(input: {
+  unitName: string;
+  size: UnitSize;
+  /** What the manifest declares the unit brings — null when nothing of it deploys (a build-only
+   *  unit has no namespace, so there is no quota to bound and nothing to size). */
+  brings: UnitComposition | null;
+  /** The six figures the size table resolves for (size, brings) — null exactly when brings is. */
+  quota: UnitQuota | null;
+}): GateResult {
+  const { unitName, size, brings, quota } = input;
+  const expected =
+    "a unit that brings database units of its own — postgresql among its services, or a mongodb mode other than shared — " +
+    `is assigned a size above the frugal default "${DEFAULT_UNIT_SIZE}", and its namespace quota is the size table's sum for what it brings`;
+  if (brings === null || quota === null) {
+    return {
+      id: "G24", title: "unit size", severity: "hard", status: "pass", expected,
+      found: `nothing of "${unitName}" deploys, so it holds no namespace, is bounded by no ResourceQuota and needs no size`,
+      reason: null, detail: "build-only — no namespace to size",
+    };
+  }
+  const owned: string[] = [];
+  if (brings.postgresql) owned.push("its own PostgreSQL (services declares postgresql)");
+  if (brings.mongodb !== "shared") owned.push(`its own MongoDB (mongodb: ${brings.mongodb}, ${MONGODB_MEMBERS[brings.mongodb]} member(s))`);
+  const figures =
+    `requests ${quota.requestsCpu}/${quota.requestsMemory}, limits ${quota.limitsCpu}/${quota.limitsMemory}, ` +
+    `${quota.pods} pod(s), ${quota.persistentVolumeClaims} PVC(s)`;
+  const composition = owned.length > 0 ? owned.join(" and ") : "no database units of its own — it uses the cluster's shared MongoDB and no PostgreSQL";
+  const ok = owned.length === 0 || size !== DEFAULT_UNIT_SIZE;
+  return {
+    id: "G24",
+    title: "unit size",
+    severity: "hard",
+    status: ok ? "pass" : "fail",
+    expected,
+    found: cap(`"${unitName}" is assigned size "${size}" and brings ${composition}; its namespace quota resolves to ${figures}`),
+    reason: ok
+      ? null
+      : cap(
+        `"${unitName}" brings ${composition}, and "${DEFAULT_UNIT_SIZE}" is the frugal preset a unit lands on when nobody names a size — ` +
+        `its figures are derived from an application alone, and its mongodb row gives one member less than this platform gives the members of its own shared replica set. ` +
+        "Either ask the operator to onboard this unit at a larger size, or declare no database units of its own in the manifest: " +
+        "drop postgresql from services and use the cluster's shared MongoDB (mongodb: shared).",
+      ),
+    detail: ok ? `size ${size} covers what the unit brings` : `size ${size} is the frugal default and the unit brings database units of its own`,
+    evidence: [
+      { source: "manager" as const, name: unitName, fieldPath: "size", value: size },
+      { source: "manager" as const, name: unitName, fieldPath: "quota", value: figures.slice(0, 256) },
+    ],
+  };
 }

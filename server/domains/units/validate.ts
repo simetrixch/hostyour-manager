@@ -20,7 +20,8 @@ import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
-import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateUnitName, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
+import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateUnitName, gateUnitSize, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
+import type { UnitComposition, UnitQuota, UnitSize } from "../../../shared/unit-size.ts";
 import { mapBuildsToChartPins, type ChartPinMapping } from "./builds.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 
@@ -43,6 +44,9 @@ function clusterDomainFromChain(files: readonly ClusterValueFile[]): string | nu
 /** What the operator submits from the wizard (the immutable identity of an onboard). */
 export interface OnboardRequest {
   repoURL: string;
+  /** The size the OPERATOR assigned this unit — never the consumer's to declare. G24 holds it
+   *  against the composition the manifest declares. */
+  size: UnitSize;
   /** The revision the gates check — the default branch head ("HEAD"): the onboarding validates
    *  what the repo IS, and only the release cycle ever turns a commit into something deployable. */
   ref: string;
@@ -99,6 +103,9 @@ export interface ValidateDeps {
   signal: AbortSignal;
   /** The Manager's confirmed-listening attestation for the must-fail probe targets. */
   attestListening: boolean;
+  /** The size table, bound to the Manager's own inventory by the caller — G24 needs the six figures
+   *  a size resolves to for what the unit brings, and this module holds no db of its own. */
+  resolveQuota: (size: UnitSize, brings: UnitComposition) => UnitQuota;
   /** Poll pacing; the fake returns "done" on the first poll, so this never fires in tests. */
   pollIntervalMs?: number;
   /** Terminating deadline of the whole runner poll (default DEFAULT_POLL_BUDGET_MS). The sandbox
@@ -211,6 +218,17 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
       chart = { path: target.chartPath, stage: target.stage, mapping: mapBuildsToChartPins({ declaredBuilds, source, valuesStageYaml }) };
     }
 
+    // WHAT THE UNIT BRINGS, off the manifest — G24's input. Null for a build-only unit: nothing of
+    // it deploys, so it holds no namespace and there is no quota to bound. The two fields are the
+    // ones that both add an Argo source of their own and add a component to the quota sum.
+    const brings: UnitComposition | null =
+      target.chartPath === undefined
+        ? null
+        : {
+            postgresql: (runnerReport.manifest?.services ?? []).includes("postgresql"),
+            mongodb: runnerReport.manifest?.mongodb ?? "shared",
+          };
+
     const foreignBuilds = await deps.registrations.listAttestedBuildNames(req.consumerName);
     // Read unconditionally: the unit's platform host is composed from its name whether or not the
     // manifest declares an extra fqdn, so the tenant-subdomain clause of G23 always has an object.
@@ -234,6 +252,7 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
       gateBuildNameUniqueness({ unitName: req.consumerName, buildNames: declaredBuilds, foreignBuilds }),
       gateBuildDeclaration({ declaredBuilds, chart }),
       gateFqdnGrant({ unitName: req.consumerName, fqdn: declaredFqdn, unitApex, clusterDomain, foreignFqdns }),
+      gateUnitSize({ unitName: req.consumerName, size: req.size, brings, quota: brings ? deps.resolveQuota(req.size, brings) : null }),
     ];
     for (const g of managerGates) deps.log(`${g.id} ${g.status} — ${g.detail}`);
 

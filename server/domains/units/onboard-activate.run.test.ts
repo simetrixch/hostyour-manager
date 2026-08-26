@@ -16,6 +16,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome } from "./vault-seeder.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedUnitSizes } from "./unit-size.ts";
 
 // Focused tests for the post-onboard `activate` step (impl: onboard-activate.ts). Kept apart from
 // onboard.run.test.ts so each file stays within the per-file line budget; the harness below is a
@@ -23,7 +24,9 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 const SHA = "a".repeat(40);
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); });
+// The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
+// starts without it — and G24 resolves the unit's quota against it while the gates run.
+beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 // A example-auth-shaped activation: the seeded bootstrap token gates POST /api/v1/bootstrap/invite-admin
