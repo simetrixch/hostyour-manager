@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { reap, type ReapDeps, type ReapLogger } from "./reap.ts";
 import { FakeRegistryMaintenance } from "../../adapters/registry/testing/fake.ts";
-import { FakeCarrierRepo, FakeUnitRepo, stageRegistration, pinFile } from "./carriers.fixture.ts";
+import { FakeCarrierRepo, FakeUnitRepo, stageRegistration, pinFile, platformAppPinPath } from "./carriers.fixture.ts";
 
 // The reaper end-to-end against fakes — no git, no network, no registry. The safety proof lives here:
 // DELETE is called for EXACTLY the computed delete-set and NEVER for a tag a carrier pins, a single
@@ -39,12 +39,22 @@ function catalogRepo(repo: string, aged: number, pins: readonly string[]): Recor
   return tags;
 }
 
+/** A hostyour-cloud that CARRIES the platform's own chart directory and states no pin in it. That is
+ *  the only shape in which the whole floor can be empty and still be a floor somebody read: an
+ *  absent directory is refused by the search itself, because it means the walk is looking at a path
+ *  the repository does not have rather than at a repository that pins nothing. */
+function cloudCarryingNoPins(): FakeCarrierRepo {
+  const cloud = new FakeCarrierRepo();
+  cloud.seed("master", platformAppPinPath("manager", "prod"), "global:\n  env: prod\n");
+  return cloud;
+}
+
 /**
  * The three carrier classes, together, as the floor sees them:
  *   (a) registration example-auth with a chartPath -> its repo's deploy/prod pins example-auth-backend
  *   (b) catalog books br. charts/example-engine/pins-dev.yaml    pins example-engine
- *   (c) hostyour-cloud master      apps/manager/values-prod.yaml      pins manager (newer)
- *       hostyour-cloud m1 branch apps/manager/values-prod.yaml     pins manager (OLDER)
+ *   (c) hostyour-cloud master      clusters/inventories/manager/values-prod.yaml      pins manager (newer)
+ *       hostyour-cloud m1 branch clusters/inventories/manager/values-prod.yaml     pins manager (OLDER)
  * Each of the three repositories additionally carries twelve aged, unpinned tags, all NEWER than the
  * pins, so every pin is outside the newest-ten and survives only because the floor holds it.
  *
@@ -56,8 +66,8 @@ function threeClassFixture(opts: { withDeployCarrier?: boolean } = {}): {
 } {
   const cloud = new FakeCarrierRepo();
   cloud.seed(cloud.booksBranch, "registrations/example-auth/prod.yaml", stageRegistration({ name: "example-auth", repoURL: AUTH_REPO, repoCredentialId: "cred_auth", chartPath: "deploy/chart", cluster: "m1" }));
-  cloud.seed("master", "apps/manager/values-prod.yaml", pinFile([["manager", MANAGER_PIN_MASTER]]));
-  cloud.seed("m1.example.com", "apps/manager/values-prod.yaml", pinFile([["manager", MANAGER_PIN_BRANCH]]));
+  cloud.seed("master", "clusters/inventories/manager/values-prod.yaml", pinFile([["manager", MANAGER_PIN_MASTER]]));
+  cloud.seed("m1.example.com", "clusters/inventories/manager/values-prod.yaml", pinFile([["manager", MANAGER_PIN_BRANCH]]));
 
   const deploy = new FakeCarrierRepo();
   // With the carrier: the chart states its pin. Without it: the same chart on the same branch, stating
@@ -183,7 +193,7 @@ describe("reap — an empty floor can never reach a delete plan", () => {
     const logger = makeLogger();
 
     await expect(
-      reap({ cloud: new FakeCarrierRepo(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), registry, logger, dryRun: false }),
+      reap({ cloud: cloudCarryingNoPins(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), registry, logger, dryRun: false }),
     ).rejects.toThrow(/referenced floor is EMPTY/);
 
     expect(registry.deleted).toEqual([]);
@@ -195,7 +205,7 @@ describe("reap — an empty floor can never reach a delete plan", () => {
     const registry = new FakeRegistryMaintenance({ manager: catalogRepo("manager", 12, []) });
 
     await expect(
-      reap({ cloud: new FakeCarrierRepo(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), registry, logger: makeLogger(), dryRun: true }),
+      reap({ cloud: cloudCarryingNoPins(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), registry, logger: makeLogger(), dryRun: true }),
     ).rejects.toThrow(/referenced floor is EMPTY/);
   });
 });

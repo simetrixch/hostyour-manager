@@ -21,7 +21,7 @@
 //       and pins-<stage>.yaml on an installation's books branch (what that installation actually
 //       runs). Both are floor: a tag either of them names is deployed somewhere and must not be
 //       deleted.
-//   (c) the platform apps: hostyour-cloud, apps/*/values-<stage>.yaml, on EVERY branch — master AND the
+//   (c) the platform apps: hostyour-cloud, clusters/inventories/*/values-<stage>.yaml, on EVERY branch — master AND the
 //       install branches. An install branch stands on the release a cluster actually runs, which can
 //       be OLDER than master, so reading master alone would leave the tags of running clusters
 //       unprotected.
@@ -60,7 +60,7 @@ export interface CarrierRepo {
 }
 
 export interface SearchDeps {
-  /** hostyour-cloud: the registrations on the books branch (class a's index) and apps/* on every
+  /** hostyour-cloud: the registrations on the books branch (class a's index) and clusters/inventories/* on every
    *  branch (class c). */
   cloud: CarrierRepo;
   /** catalog: charts/* on every branch (class b). */
@@ -71,9 +71,17 @@ export interface SearchDeps {
 
 /** The directory of hostyour-cloud that holds one registration per unit. */
 const REGISTRATIONS_DIR = "registrations";
-/** The chart directories of the two glob classes. */
+/** The chart directories of the two glob classes.
+ *
+ *  CLOUD_APPS_DIR is the platform repository's own path and not this repository's to choose. It read
+ *  `apps` until the platform gathered what a cluster is made of under `clusters/`, and nothing here
+ *  noticed: an absent directory is an empty listing, so the walk answered nothing and said nothing
+ *  (git-workdir.ts listWorkdirDir swallows ENOENT/ENOTDIR by contract). The release surface then
+ *  reported no app versions at all, and the reaper's keep floor lost the class that protects the
+ *  platform's own images. That is why searchGlob refuses an empty class (c) below, and why the tests
+ *  for both classes seed a LITERAL rather than these constants. */
 const DEPLOY_CHARTS_DIR = "charts";
-const CLOUD_APPS_DIR = "apps";
+const CLOUD_APPS_DIR = "clusters/inventories";
 /** The repository each glob class stands in, as the carrier string names it. */
 const DEPLOY_LABEL = "catalog";
 const CLOUD_LABEL = "hostyour-cloud";
@@ -104,12 +112,12 @@ export async function searchCarriers(deps: SearchDeps, signal?: AbortSignal): Pr
  * same branches.
  *
  * The reader that takes this class alone is the release surface: an install branch stands on the
- * release a cluster actually runs, so `apps/<app>/values-<stage>.yaml` on the branch named after a
+ * release a cluster actually runs, so `clusters/inventories/<app>/values-<stage>.yaml` on the branch named after a
  * cluster's FQDN states which image version that cluster's platform apps run. Fail-closed as above — a
  * truncated branch listing or an unparseable pin file throws rather than answering short.
  */
 export function searchPlatformApps(cloud: CarrierRepo): Promise<GlobSearch> {
-  return searchGlob(cloud, CLOUD_LABEL, CLOUD_APPS_DIR, stagePinFiles());
+  return searchGlob(cloud, CLOUD_LABEL, CLOUD_APPS_DIR, stagePinFiles(), { mustCarry: true });
 }
 
 /** Class (a): every stage registration with a chartPath, read out of its unit's own delivery branch. */
@@ -175,14 +183,33 @@ async function readUnitChart(
 
 /** Classes (b) and (c): the pin files of every immediate child of `dir`, on every branch
  *  of one GitOps repo, in the pin files that class names. A chart without one of them is not a
- *  carrier through it — unlike class (a), nothing claimed it was. */
-async function searchGlob(repo: CarrierRepo, label: string, dir: string, files: readonly PinFile[]): Promise<GlobSearch> {
+ *  carrier through it — unlike class (a), nothing claimed it was.
+ *
+ *  `mustCarry` says whether NO branch holding a single child under `dir` is a refusal. It is a
+ *  property of the REPOSITORY and therefore stated per class, not derived here: the platform's own
+ *  repository always ships the directory its own charts live in, so an answer of nothing means this
+ *  walk is looking at the wrong path — the state that actually happened when the platform moved its
+ *  charts. A CUSTOMER's catalogue is not held to it, because a pure fan-out catalogue that ships no
+ *  chart of its own is a shape the platform supports and refusing it would break a correct
+ *  installation. The refusal cannot tell a directory that is absent from one that is empty and does
+ *  not try to: both mean the same thing here — the floor this class contributes is empty, and a floor
+ *  that can silently be empty is a floor that can delete everything it was meant to protect. */
+async function searchGlob(
+  repo: CarrierRepo,
+  label: string,
+  dir: string,
+  files: readonly PinFile[],
+  opts: { mustCarry?: boolean } = {},
+): Promise<GlobSearch> {
   const hits: GlobPinHit[] = [];
   const branches: string[] = [];
+  let carrying = 0;
   for (const branch of await repo.listBranches()) {
     branches.push(branch.name);
     await repo.withBranch(branch.name, async (scope) => {
-      for (const chart of await scope.listDir(dir)) {
+      const charts = await scope.listDir(dir);
+      if (charts.length > 0) carrying += 1;
+      for (const chart of charts) {
         for (const { file, stage } of files) {
           const path = `${dir}/${chart}/${file}`;
           const text = await scope.readFile(path);
@@ -192,6 +219,14 @@ async function searchGlob(repo: CarrierRepo, label: string, dir: string, files: 
         }
       }
     });
+  }
+  if (opts.mustCarry === true && carrying === 0) {
+    throw new Error(
+      `not one of ${label}'s ${branches.length} branch(es) carries anything under "${dir}" — that directory is where this platform's own charts and their image pins stand, ` +
+      `so the search is looking at a path the repository does not have. Refusing to answer, because an empty answer here reads as "this platform pins no images": ` +
+      `the release surface would report no app versions at all, and the registry reaper's keep floor would lose the class that protects the platform's own images. ` +
+      `Branches read: ${branches.join(", ") || "(none)"}.`,
+    );
   }
   return { branches, hits };
 }

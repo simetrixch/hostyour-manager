@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { searchCarriers, type CarrierRepo, type SearchDeps } from "./search.ts";
 import { pinKey } from "../../../shared/pin.ts";
-import { FakeCarrierRepo, FakeUnitRepo, stageRegistration, buildRegistration, pinFile } from "./carriers.fixture.ts";
+import { FakeCarrierRepo, FakeUnitRepo, stageRegistration, buildRegistration, pinFile, PLATFORM_APPS_DIR, platformAppPinPath } from "./carriers.fixture.ts";
 
 // The search is the ONE thing that decides what "pinned" means — for the release bump when it writes
 // and for the reaper's floor when it protects. These cases pin down the three carrier classes, the
@@ -12,14 +12,25 @@ const AUTH_REPO = "https://github.com/example/example-auth.git";
 
 /** hostyour-cloud with ONE deployable registration (example-auth at prod) plus a build-only unit. */
 function cloudWithRegistrations(): FakeCarrierRepo {
-  const cloud = new FakeCarrierRepo();
+  const cloud = cloudCarryingPlatformApps();
   cloud.seed(cloud.booksBranch, "registrations/example-auth/prod.yaml", stageRegistration({ name: "example-auth", repoURL: AUTH_REPO, repoCredentialId: "cred_auth", chartPath: "deploy/chart", cluster: "m1" }));
   cloud.seed(cloud.booksBranch, "registrations/hostyour-manager/build.yaml", buildRegistration({ name: "hostyour-manager", repoURL: "https://github.com/example/hostyour-manager.git", builds: ["manager"] }));
   return cloud;
 }
 
+/** A hostyour-cloud that carries the platform's own chart directory, because every real one does.
+ *  The search REFUSES a repository that carries nothing under it — that state means the walk is
+ *  looking at a path the repository does not have, which is what happened when the platform gathered
+ *  its charts under `clusters/` — so a case about classes (a) and (b) still has to stand in a world
+ *  where class (c) exists. */
+function cloudCarryingPlatformApps(): FakeCarrierRepo {
+  const cloud = new FakeCarrierRepo();
+  cloud.seed("master", platformAppPinPath("manager", "prod"), "global:\n  env: prod\n");
+  return cloud;
+}
+
 function deps(over: Partial<SearchDeps> = {}): SearchDeps {
-  return { cloud: new FakeCarrierRepo(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), ...over };
+  return { cloud: cloudCarryingPlatformApps(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), ...over };
 }
 
 describe("searchCarriers — the three carrier classes", () => {
@@ -58,10 +69,10 @@ describe("searchCarriers — the three carrier classes", () => {
     expect(deploy.fetched.sort()).toEqual(["c1.example.com", "c2.example.com", "master"]);
   });
 
-  it("(c) reads hostyour-cloud apps/*/values-<stage>.yaml on master AND the install branches", async () => {
+  it("(c) reads hostyour-cloud clusters/inventories/*/values-<stage>.yaml on master AND the install branches", async () => {
     const cloud = new FakeCarrierRepo();
-    cloud.seed("master", "apps/manager/values-prod.yaml", pinFile([["manager", "0.2.0"]]));
-    cloud.seed("m1.example.com", "apps/manager/values-prod.yaml", pinFile([["manager", "0.1.0"]]));
+    cloud.seed("master", platformAppPinPath("manager", "prod"), pinFile([["manager", "0.2.0"]]));
+    cloud.seed("m1.example.com", platformAppPinPath("manager", "prod"), pinFile([["manager", "0.1.0"]]));
 
     const hits = await searchCarriers(deps({ cloud }));
 
@@ -71,7 +82,7 @@ describe("searchCarriers — the three carrier classes", () => {
   });
 
   it("reads a SUSPENDED unit like any other — a suspended deploy is resumable and its image stays live", async () => {
-    const cloud = new FakeCarrierRepo();
+    const cloud = cloudCarryingPlatformApps();
     cloud.seed(cloud.booksBranch, "registrations/example-auth/prod.yaml", stageRegistration({ name: "example-auth", repoURL: AUTH_REPO, chartPath: "deploy/chart", cluster: "m1", suspended: true, quiesced: true }));
     const unit = new FakeUnitRepo();
     unit.seed(AUTH_REPO, "deploy/prod", "deploy/chart/values-prod.yaml", pinFile([["example-auth-backend", "0.4.0"]]));
@@ -82,7 +93,7 @@ describe("searchCarriers — the three carrier classes", () => {
   });
 
   it("a build-only registration contributes nothing of its own — it has no chart to pin from", async () => {
-    const cloud = new FakeCarrierRepo();
+    const cloud = cloudCarryingPlatformApps();
     cloud.seed(cloud.booksBranch, "registrations/hostyour-manager/build.yaml", buildRegistration({ name: "hostyour-manager", repoURL: "https://github.com/example/hostyour-manager.git", builds: ["manager"] }));
     const unit = new FakeUnitRepo();
 
@@ -135,5 +146,42 @@ describe("searchCarriers — FAIL-CLOSED (a carrier it cannot read is never read
     };
 
     await expect(searchCarriers(deps({ deploy: broken }))).rejects.toThrow(/branch listing truncated/);
+  });
+
+  // THE DEFECT THIS CLASS WAS ACTUALLY IN. hostyour-cloud gathered every chart under `clusters/`, the
+  // walk kept reading `apps/`, and a directory that is not there is an EMPTY LISTING rather than a
+  // refusal (git-workdir.ts listWorkdirDir swallows ENOENT/ENOTDIR by contract). So the search
+  // answered nothing about the platform's own images and said nothing about it: the release surface
+  // reported no app versions, and the reaper's keep floor lost the class that protects them while its
+  // dry-run log read exactly like a correct one.
+  it("a hostyour-cloud carrying NOTHING under the platform's chart directory ABORTS, naming the directory and the branches", async () => {
+    const cloud = new FakeCarrierRepo();
+    cloud.seed("master", "apps/manager/values-prod.yaml", pinFile([["manager", "0.2.0"]])); // the OLD layout
+    cloud.seed("m1.example.com", "apps/manager/values-prod.yaml", pinFile([["manager", "0.1.0"]]));
+
+    const rejected = searchCarriers(deps({ cloud }));
+    await expect(rejected).rejects.toThrow(new RegExp(PLATFORM_APPS_DIR));
+    await expect(rejected).rejects.toThrow(/2 branch\(es\)/);
+    await expect(rejected).rejects.toThrow(/master, m1\.example\.com|m1\.example\.com, master/);
+    // It must say what an empty answer would have MEANT, so nobody reads the refusal as "no pins".
+    await expect(rejected).rejects.toThrow(/keep floor/);
+  });
+
+  // The innocent case beside it: the directory carrying a chart that states no pin is NOT the same
+  // thing. That repository was read and pins nothing, which is a fact — the refusal above is about a
+  // repository this walk could not have read at all.
+  it("a platform chart directory that exists and pins nothing is not a refusal", async () => {
+    const cloud = new FakeCarrierRepo();
+    cloud.seed("master", platformAppPinPath("manager", "prod"), "global:\n  env: prod\n");
+    expect(await searchCarriers(deps({ cloud }))).toEqual([]);
+  });
+
+  // A CUSTOMER's catalogue is deliberately NOT held to it: a pure fan-out catalogue that ships no
+  // chart of its own is a shape this platform supports, and refusing it would break a correct
+  // installation. Class (b) therefore answers empty where class (c) refuses.
+  it("a catalog carrying no charts at all is NOT a refusal — only the platform's own repository is held to it", async () => {
+    const deploy = new FakeCarrierRepo();
+    deploy.seed("master", "readme.md", "a fan-out catalogue with no chart of its own\n");
+    expect(await searchCarriers(deps({ deploy }))).toEqual([]);
   });
 });

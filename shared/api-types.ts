@@ -341,14 +341,14 @@ export interface ClustersView {
  * The two halves answer one question at two depths. The CLUSTER half is the release pin in
  * clusters/active/<fqdn>.yaml — the tag the install branch is regenerated from, one statement per
  * cluster (ClusterReleaseRead above, carried on ServerView too). The APP half is what that branch's
- * `apps/<app>/values-<stage>.yaml` files pin, read by the SAME pin search whose result is the
+ * `clusters/inventories/<app>/values-<stage>.yaml` files pin, read by the SAME pin search whose result is the
  * registry reaper's protected floor (server/domains/registry-cleanup/search.ts, searchPlatformApps) —
  * one enumeration, so what this surface reports and what retention protects can never disagree. */
 
 /** ONE platform app's pinned image on ONE installation — a `builds[]` entry of that installation's
- *  own apps/<app>/values-<stage>.yaml, in the pin grammar's own words (shared/pin.ts BuildPin). */
+ *  own clusters/inventories/<app>/values-<stage>.yaml, in the pin grammar's own words (shared/pin.ts BuildPin). */
 export interface AppReleaseView {
-  /** The directory under `apps/` — the chart the pin stands in. */
+  /** The directory under `clusters/inventories/` — the chart the pin stands in. */
   app: string;
   /** builds[].name — which image of that chart this is. */
   build: string;
@@ -371,7 +371,7 @@ export interface InstallationReleaseView {
   role: ServerRole;
   /** The platform release the cluster's map pins — the same value ServerView carries. */
   release: ClusterReleaseRead;
-  /** The pins standing on `branch` in `apps/<app>/values-<stage>.yaml` for THIS cluster's stage, or
+  /** The pins standing on `branch` in `clusters/inventories/<app>/values-<stage>.yaml` for THIS cluster's stage, or
    *  null when the repository carries no branch of that name at all. The two are not the same fact:
    *  an empty list means the branch was read and pins nothing, null means there was nothing to read. */
   apps: AppReleaseView[] | null;

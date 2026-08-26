@@ -47,10 +47,10 @@ function seededCloud(): FakeCarrierRepo {
   cloud.seed(MASTER, clusterMapPath(MASTER), map(MASTER, "prod", "master", MASTER_TAG));
   cloud.seed(MASTER, clusterMapPath(SLAVE), map(SLAVE, "dev", "slave"));
   cloud.seed(MASTER, clusterMapPath(LONELY), map(LONELY, "dev", "slave"));
-  cloud.seed(MASTER, "apps/manager/values-prod.yaml", pinFile([["manager", "1.2.0-stable-20260728120000-abc1234"]]));
-  cloud.seed(MASTER, "apps/manager/values-dev.yaml", pinFile([["manager", "9.9.9-alpha-20260101000000-dddddd1"]]));
-  cloud.seed(MASTER, "apps/auth/values-prod.yaml", pinFile([["auth", "1.1.0-stable-20260701000000-bbb2222"]]));
-  cloud.seed(SLAVE, "apps/manager/values-dev.yaml", pinFile([["manager", "1.3.0-alpha-20260801000000-ccc3333"]]));
+  cloud.seed(MASTER, "clusters/inventories/manager/values-prod.yaml", pinFile([["manager", "1.2.0-stable-20260728120000-abc1234"]]));
+  cloud.seed(MASTER, "clusters/inventories/manager/values-dev.yaml", pinFile([["manager", "9.9.9-alpha-20260101000000-dddddd1"]]));
+  cloud.seed(MASTER, "clusters/inventories/auth/values-prod.yaml", pinFile([["auth", "1.1.0-stable-20260701000000-bbb2222"]]));
+  cloud.seed(SLAVE, "clusters/inventories/manager/values-dev.yaml", pinFile([["manager", "1.3.0-alpha-20260801000000-ccc3333"]]));
   return cloud;
 }
 
@@ -142,7 +142,7 @@ describe("GET /api/releases — which release an installation stands on, and whi
     const cloud = seededCloud();
     cloud.seed(
       MASTER,
-      "apps/post/values-prod.yaml",
+      "clusters/inventories/post/values-prod.yaml",
       ["builds:", "  - name: post-api", "    image: digita-post", '    tag: "2.0.0-stable-20260815000000-eee5555"', ""].join("\n"),
     );
     const { app, cookie } = await make({ cloud });

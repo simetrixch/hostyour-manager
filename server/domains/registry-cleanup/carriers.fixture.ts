@@ -57,6 +57,21 @@ export class FakeCarrierRepo implements CarrierRepo {
   }
 }
 
+/** WHERE THE PLATFORM'S OWN CHARTS AND THEIR IMAGE PINS STAND on hostyour-cloud, as a LITERAL and
+ *  never as the constant the search uses. A fixture that seeds from that constant agrees with the
+ *  reader whatever the platform repository holds, which is how the walk went on reading `apps/`
+ *  through the rename that gathered every chart under `clusters/` — green here, while the release
+ *  surface reported no app versions and the reaper's keep floor silently lost the class that protects
+ *  the platform's own images. Measured in simetrixch/hostyour-cloud on 2026-08-26: no branch of that
+ *  repository carries `apps/`, and `clusters/inventories/` is where the release bump writes the tags
+ *  (clusters/inventories/consumer-build/templates/pipeline-release.yaml globs exactly that path). */
+export const PLATFORM_APPS_DIR = "clusters/inventories";
+
+/** The path of ONE platform app's per-stage pin file, on hostyour-cloud. */
+export function platformAppPinPath(app: string, stage: string): string {
+  return `${PLATFORM_APPS_DIR}/${app}/values-${stage}.yaml`;
+}
+
 /** A unit's own repo, keyed by (repoURL, ref). A clone of a ref nothing was seeded on THROWS, which is
  *  how a test models the delivery branch a unit does not have — the case the search must refuse. */
 export class FakeUnitRepo implements Pick<RepoReader, "cloneAtRef" | "readFile" | "dispose"> {

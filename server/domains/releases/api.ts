@@ -9,7 +9,7 @@
 //   written by the release run's set-pin step and by nothing else. The install branch is regenerated
 //   from exactly that tag, so the pin and the branch state are one statement.
 //
-//   the APPS' versions — the `builds[]` pins of apps/<app>/values-<stage>.yaml ON THAT BRANCH, at
+//   the APPS' versions — the `builds[]` pins of clusters/inventories/<app>/values-<stage>.yaml ON THAT BRANCH, at
 //   the cluster's OWN stage. An install branch stands on the release the cluster actually runs,
 //   which can be older than the trunk, so the trunk's pins would answer a different question.
 //
