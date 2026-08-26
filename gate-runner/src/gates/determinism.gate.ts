@@ -158,6 +158,20 @@ export const determinismGate: CheckGate = {
   title: TITLE,
   severity: SEVERITY,
   check(ctx: GateContext): GateResult {
+    // A BUILD-ONLY unit ships no chart, so there is no templates/ tree and no values file for `tpl`
+    // to render. Say that, rather than reporting a clean scan of zero files: "scanned 0 actions, none
+    // use lookup" is what a chart full of violations would look like if the scan had missed it.
+    if (ctx.chartPath === null) {
+      return pass({
+        id: ID,
+        title: TITLE,
+        severity: SEVERITY,
+        expected: EXPECTED,
+        found:
+          `The manifest declares no chart, so this unit ships no Helm templates and no values file: ` +
+          `there is no template action to scan, and nothing of this repository is ever rendered.`,
+      });
+    }
     const prefix = chartPrefix(ctx.chartPath);
     const scope = prefix === "" ? "<chart root>" : prefix;
     let filesScanned = 0;

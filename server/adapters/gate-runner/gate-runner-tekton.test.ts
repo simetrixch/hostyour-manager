@@ -130,6 +130,24 @@ describe("TektonGateRunner", () => {
     expect(JSON.parse(chain.value)).toEqual(CHAIN);
   });
 
+  it("submit: still declares chart-path for a BUILD-ONLY unit, carrying the empty string for the absence", async () => {
+    const c = new FakeCluster({ outcome: null, cm: { state: "absent" }, taskRuns: [] });
+    const { chartPath: _none, ...buildOnly } = req();
+    await new TektonGateRunner(cfg(), c, () => "gate-run-fixed").submit(buildOnly);
+    const params = ((c.rec.pipelineRuns[0] as { spec: { params: { name: string; value: string }[] } }).spec).params;
+    // The Tekton param is a declared string with no default, so a PipelineRun that leaves it out is
+    // rejected by the API before any task starts. The param must be there and it must be empty — the
+    // CLI reads an empty chart-path back as "this unit ships no chart", never as a missing input.
+    const chartPath = params.find((p) => p.name === "chart-path");
+    expect(chartPath).toBeDefined();
+    expect(chartPath!.value).toBe("");
+    // The innocent case beside it, so an empty value cannot mean the param was never filled at all.
+    const c2 = new FakeCluster({ outcome: null, cm: { state: "absent" }, taskRuns: [] });
+    await new TektonGateRunner(cfg(), c2, () => "gate-run-fixed").submit(req());
+    const withChart = ((c2.rec.pipelineRuns[0] as { spec: { params: { name: string; value: string }[] } }).spec).params;
+    expect(withChart.find((p) => p.name === "chart-path")!.value).toBe("deploy/chart");
+  });
+
   it("submit: fills the credential Secret with a git-credentials line for a PRIVATE repo", async () => {
     const opened: string[] = [];
     const c = new FakeCluster({ outcome: null, cm: { state: "absent" }, taskRuns: [] });

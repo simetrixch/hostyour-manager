@@ -42,6 +42,18 @@ function csv(v: string | undefined): string[] {
   return typeof v === "string" ? v.split(",").map((s) => s.trim()).filter((s) => s.length > 0) : [];
 }
 
+/** CHART_PATH, or null for a unit that ships no chart. It is deliberately NOT read with req(): a
+ *  build-only unit has no chart directory, the Tekton param carrying it is a declared string with no
+ *  default so the run cannot leave it out, and the empty string is therefore the wire form of the
+ *  absence. Reading that as an unset required input refused every build-only unit — the platform's
+ *  own manager and the tenant fan-out repo among them — before a single gate ran.
+ *  A null here is not taken on trust: G1 holds it against the manifest's own `chart:` block and
+ *  refuses the two disagreeing, so a chart path lost in the wiring is still named as such. */
+function chartPathEnv(env: NodeJS.ProcessEnv): string | null {
+  const v = env.CHART_PATH;
+  return typeof v === "string" && v.trim() !== "" ? v : null;
+}
+
 /** Parse + validate the task env into CliInputs. Throws (=> non-zero exit, no report) on a bad shape:
  *  a malformed CLUSTER_VALUE_FILES or an unknown STAGE is an internal wiring error, not a gate result. */
 export function parseEnv(env: NodeJS.ProcessEnv): CliInputs {
@@ -52,7 +64,7 @@ export function parseEnv(env: NodeJS.ProcessEnv): CliInputs {
     meta: {
       targetName: req(env, "TARGET_NAME"),
       stage,
-      chartPath: req(env, "CHART_PATH"),
+      chartPath: chartPathEnv(env),
       clusterValueFiles,
       repoURL: req(env, "REPO_URL"),
       requestedRef: req(env, "REQUESTED_REF"),

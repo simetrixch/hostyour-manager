@@ -2,7 +2,9 @@
 // manifest, then one FAIL test per failure mode in the order structure.gate.ts rejects them (missing manifest / schema-invalid /
 // name mismatch / stage not a declared env / missing per-env values), plus defensive cases: a manifest that parses to
 // a non-object must reject cleanly, a Chart.yaml whose name disagrees fails the identity law, and a
-// build-only manifest (no chart) passes without shipping values files. Each FAIL asserts manifest is
+// build-only manifest (no chart) passes without shipping values files. Both directions of the
+// build-only RUN — the one dispatched with no chart path at all — are held here too, because G1 is
+// where the run's form and the repository's manifest are compared. Each FAIL asserts manifest is
 // null (the report contract: manifest non-null IFF pass).
 import { describe, expect, it } from "vitest";
 import { checkStructure } from "./structure.gate.ts";
@@ -33,11 +35,13 @@ function baseFiles(): Record<string, string> {
 
 function run(
   files: Record<string, string>,
-  over: Partial<{ chartPath: string; targetName: string; stage: string }> = {},
+  over: Partial<{ chartPath: string | null; targetName: string; stage: string }> = {},
 ) {
   return checkStructure({
     files: new Map(Object.entries(files)),
-    chartPath: over.chartPath ?? "deploy/chart",
+    // null is the build-only form — the run carries no chart directory at all — so it must survive
+    // the default, which `??` would swallow.
+    chartPath: over.chartPath === undefined ? "deploy/chart" : over.chartPath,
     targetName: over.targetName ?? "acme",
     stage: over.stage ?? "dev",
   });
@@ -154,6 +158,39 @@ describe("G1 structure", () => {
     expect(result.reason).toBeNull();
     expect(manifest).not.toBeNull();
     expect(manifest?.chart).toBeUndefined();
+  });
+
+  // The BUILD-ONLY RUN: the onboarding carries no chart directory at all, which is how the platform's
+  // own manager and the tenant fan-out repo are gated. G1 is where that form and the repository's own
+  // manifest are held against each other, so both directions are checked here.
+  const BUILD_ONLY_MANIFEST = [
+    "apiVersion: hostyour.cloud/v1",
+    "kind: ConsumerManifest",
+    "name: acme",
+    "owner: team-acme",
+    "envs:",
+    "  - dev",
+    "builds:",
+    "  - name: api",
+    "    containerfile: Containerfile",
+    "",
+  ].join("\n");
+
+  it("passes a build-only run over a build-only manifest, and SAYS the unit ships no chart", () => {
+    const { result, manifest } = run({ "deploy/platform.yaml": BUILD_ONLY_MANIFEST }, { chartPath: null });
+    expect(result.status).toBe("pass");
+    expect(manifest?.chart).toBeUndefined();
+    // Without this the pass reads as a full structural check on a unit whose chart half never applied.
+    expect(result.found).toContain("no chart");
+  });
+
+  it("REFUSES a manifest that declares a chart when the run carries no chart path", () => {
+    const { result, manifest } = run(baseFiles(), { chartPath: null });
+    expect(result.status).toBe("fail");
+    expect(manifest).toBeNull();
+    // The refusal must name both sides, so it can be acted on in the customer's own repository.
+    expect(result.found).toContain("deploy/chart"); // what the manifest declares
+    expect(result.found).toContain("build-only"); // the form the run was dispatched in
   });
 
   // Regression: a direct/test caller passing a null/undefined stage or targetName must reject cleanly

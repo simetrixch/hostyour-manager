@@ -434,7 +434,11 @@ export class TektonGateRunner implements GateRunner {
           p("git-url", req.repoURL),
           p("git-revision", req.resolvedSha),
           p("requested-ref", req.requestedRef),
-          p("chart-path", req.chartPath),
+          // A build-only unit carries no chartPath at all. The Tekton param is a declared string with
+          // no default, so the run cannot simply leave it out — the empty string is the wire form of
+          // "this unit ships no chart", and the CLI reads it back as an absence rather than as an
+          // unset input. Nothing else in this body may use "" to mean anything.
+          p("chart-path", req.chartPath ?? ""),
           p("stage", req.stage),
           p("target-name", req.targetName),
           p("cluster-value-files", JSON.stringify(req.clusterValueFiles)),

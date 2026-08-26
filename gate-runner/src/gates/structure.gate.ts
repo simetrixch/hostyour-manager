@@ -6,11 +6,15 @@
 //
 // It fails CLOSED on the first structural violation, in this order:
 //   1. deploy/platform.yaml exists, parses as YAML, and schema-validates as a ConsumerManifest.
-//   2. identity law: manifest.name == the onboarding target, and (if a Chart.yaml ships at chartPath)
-//      Chart.yaml.name == manifest.name.
-//   3. if the manifest declares a chart, that chart's Chart.yaml is actually in the cloned tree.
-//   4. every declared env has its base values.yaml and its per-env values-<env>.yaml overlay.
-//   5. the stage being onboarded is one of the declared envs.
+//   2. identity law: manifest.name == the onboarding target.
+//   3. the run's form and the manifest agree about the chart: a manifest that declares one must have
+//      been dispatched with a chart path. This is what keeps a null chartPath from being trusted —
+//      the build-only form is the ABSENCE of a chart path, so without this rule a path lost in the
+//      wiring would be read as "this unit ships no chart" and the render would be skipped in silence.
+//   4. Chart.yaml.name == manifest.name (when a Chart.yaml ships at chartPath), and a declared chart's
+//      Chart.yaml is actually in the cloned tree.
+//   5. every declared env has its base values.yaml and its per-env values-<env>.yaml overlay.
+//   6. the stage being onboarded is one of the declared envs.
 // The report contract is: the returned manifest is non-null IFF status == "pass". Every input
 // here is hostile (parsed YAML, cloned repo contents), so each read is guarded — a platform.yaml that parses
 // to a string, a Chart.yaml with no name field, a non-Map `files` — must reject cleanly, never crash.
@@ -28,7 +32,9 @@ const TEXT_CAP = 200; // cap any echoed untrusted string (a parse-error message,
 
 export interface StructureInput {
   files: ReadonlyMap<string, string>;
-  chartPath: string;
+  /** The chart directory the onboarding dispatched this run with, or NULL for the build-only form.
+   *  G1 is where the run's form and the repository's manifest are held against each other. */
+  chartPath: string | null;
   targetName: string;
   stage: string;
 }
@@ -54,10 +60,12 @@ function fileCount(files: ReadonlyMap<string, string>): number {
   return files !== null && typeof files === "object" && typeof files.size === "number" ? files.size : 0;
 }
 
-/** Strip trailing slash(es) so path joins never double a separator; a non-string chartPath -> "". */
-function normalizeDir(chartPath: string): string {
-  const raw = typeof chartPath === "string" ? chartPath : "";
-  return raw.replace(/\/+$/, "");
+/** Strip trailing slash(es) so path joins never double a separator; anything that is not a non-empty
+ *  string is the build-only form and yields null, which every chart check below keys on. */
+function normalizeDir(chartPath: string | null): string | null {
+  if (typeof chartPath !== "string") return null;
+  const trimmed = chartPath.replace(/\/+$/, "");
+  return trimmed === "" ? null : trimmed;
 }
 
 /** Join a (possibly empty) directory and a file name without emitting a leading slash. */
@@ -122,7 +130,6 @@ function reject(expected: string, found: string, reason: string): StructureOutco
 export function checkStructure(input: StructureInput): StructureOutcome {
   const { files, targetName, stage } = input;
   const chartDir = normalizeDir(input.chartPath);
-  const chartYamlPath = join(chartDir, "Chart.yaml");
 
   // ── 1. deploy/platform.yaml exists, parses, schema-validates ──────────────────────────────────
   const rawManifest = getFile(files, MANIFEST_PATH);
@@ -158,7 +165,7 @@ export function checkStructure(input: StructureInput): StructureOutcome {
   }
   const manifest = validated.data;
 
-  // ── 2. identity law: manifest.name == target, and Chart.yaml.name (if shipped) == manifest.name ─
+  // ── 2. identity law: manifest.name == target ──────────────────────────────────────────────────
   if (manifest.name !== targetName) {
     return reject(
       `The manifest name must equal the onboarding target name (identity law).`,
@@ -168,9 +175,24 @@ export function checkStructure(input: StructureInput): StructureOutcome {
     );
   }
 
-  const rawChartYaml = getFile(files, chartYamlPath);
+  // ── 3. the run's form and the manifest agree about the chart ──────────────────────────────────
+  if (manifest.chart && chartDir === null) {
+    return reject(
+      `A manifest that declares a chart must be gated with the chart's directory.`,
+      `${MANIFEST_PATH} declares chart.path "${cap(manifest.chart.path)}" but this gate run carries no ` +
+        `chart path — it was dispatched in the build-only form, which is for a unit that ships no chart.`,
+      `the two sides disagree about what this unit is: the onboarding says nothing of it deploys and ` +
+        `the repository says it does. Onboard it to a target cluster with its chart directory, or ` +
+        `remove the chart: block from ${MANIFEST_PATH}. Left as it is, the chart would never be rendered ` +
+        `by anything and no gate would ever look at it.`,
+    );
+  }
+
+  // ── 4. the chart's own identity, and a declared chart is actually in the bundle ────────────────
+  const chartYamlPath = chartDir === null ? null : join(chartDir, "Chart.yaml");
+  const rawChartYaml = chartYamlPath === null ? undefined : getFile(files, chartYamlPath);
   const chartYamlExists = rawChartYaml !== undefined;
-  if (chartYamlExists) {
+  if (chartYamlPath !== null && rawChartYaml !== undefined) {
     const chartName = readNameField(rawChartYaml);
     if (chartName !== manifest.name) {
       return reject(
@@ -182,8 +204,7 @@ export function checkStructure(input: StructureInput): StructureOutcome {
     }
   }
 
-  // ── 3. a declared chart must actually be in the bundle ────────────────────────────────────────
-  if (manifest.chart && !chartYamlExists) {
+  if (manifest.chart && chartYamlPath !== null && !chartYamlExists) {
     return reject(
       `${chartYamlPath} must exist when the manifest declares a chart.`,
       `${MANIFEST_PATH} declares chart.path "${cap(manifest.chart.path)}" but ${chartYamlPath} is not ` +
@@ -193,12 +214,12 @@ export function checkStructure(input: StructureInput): StructureOutcome {
     );
   }
 
-  // ── 4. every declared env has its base and per-env values overlay ─────────────────────────────
+  // ── 5. every declared env has its base and per-env values overlay ─────────────────────────────
   // Gated on a declared chart: `chart` is optional (contract v1.3, shared/consumer.ts) — a build-only
   // manifest ships no chart and therefore no values files, so requiring them unconditionally would
   // reject every build-only manifest. When a chart IS declared, both the base values.yaml and the
-  // per-env overlay are required for every declared env.
-  if (manifest.chart) {
+  // per-env overlay are required for every declared env. Rule 3 already proved chartDir is a path here.
+  if (manifest.chart && chartDir !== null) {
     const baseValues = join(chartDir, "values.yaml");
     for (const env of manifest.envs) {
       if (!has(files, baseValues)) {
@@ -221,7 +242,7 @@ export function checkStructure(input: StructureInput): StructureOutcome {
     }
   }
 
-  // ── 5. the onboarding stage must be a declared env ────────────────────────────────────────
+  // ── 6. the onboarding stage must be a declared env ────────────────────────────────────────
   if (!(manifest.envs as readonly string[]).includes(stage)) {
     return reject(
       `The onboarding stage must be one of the manifest's declared envs (the declared-env rule).`,
@@ -231,9 +252,12 @@ export function checkStructure(input: StructureInput): StructureOutcome {
     );
   }
 
-  const chartClause = manifest.chart
-    ? ` the chart at ${chartYamlPath} is present with a matching name, its per-env values files exist,`
-    : "";
+  // Say the build-only case OUT LOUD. Without it the pass reads as a full structural check on a unit
+  // whose chart half was never applicable, and the operator has no way to tell the two apart.
+  const chartClause =
+    manifest.chart && chartYamlPath !== null
+      ? ` the chart at ${chartYamlPath} is present with a matching name, its per-env values files exist,`
+      : ` it declares no chart, so nothing of this unit is rendered or deployed;`;
   return {
     result: pass({
       id: ID,

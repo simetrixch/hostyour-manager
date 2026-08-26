@@ -183,9 +183,10 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
     const { jobId } = await deps.runner.submit({
       targetName: req.consumerName,
       stage: target.stage,
-      // A build-only unit has no chart directory. The runner's structure gate keys its chart checks on
-      // the manifest's own `chart:` block, which such a manifest does not carry, so nothing joins this.
-      chartPath: target.chartPath ?? "",
+      // A build-only unit has no chart directory, and the ABSENCE is what the gate reads. Sending an
+      // empty string instead made the two sides mean different things by the same value: the CLI
+      // refused it as an unset required input and the whole run died before a single gate ran.
+      ...(target.chartPath !== undefined ? { chartPath: target.chartPath } : {}),
       repoURL: req.repoURL,
       requestedRef: req.ref,
       resolvedSha: cloned.resolvedSha,

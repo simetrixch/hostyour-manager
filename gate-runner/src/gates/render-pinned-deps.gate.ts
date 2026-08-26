@@ -156,6 +156,28 @@ function g3Fail(reason: string, found: string): GateResult {
   return fail({ id: ID, title: TITLE, severity: SEVERITY, expected: EXPECTED, found, reason });
 }
 
+/** G3 on a BUILD-ONLY unit: no chart, so nothing renders and nothing pins. The premise is not taken
+ *  on the runner's word — G1 read the manifest and refused it if the manifest declares a chart — so
+ *  this is a pass over a subject that provably cannot exist, not a check that was skipped.
+ *
+ *  It names the gates that consequently did not run, because those gates are the whole risk here.
+ *  Each of them judges rendered documents; over zero documents each would return a pass that no
+ *  chart could have made go red, and a reader cannot tell that apart from a repository that was
+ *  inspected and found clean. */
+export function noChartToRender(skippedGateIds: readonly string[]): GateResult {
+  const skipped = skippedGateIds.length > 0 ? `${skippedGateIds.join(", ")} did not run` : "no rendered-document gate exists to run";
+  return pass({
+    id: ID,
+    title: TITLE,
+    severity: SEVERITY,
+    expected: EXPECTED,
+    found:
+      `The manifest declares no chart, so this unit is build-only: nothing of it is ever deployed, ` +
+      `there is no chart to render and no dependency to pin. ${skipped} — each judges rendered ` +
+      `documents and this run produced none, so none of them has inspected this repository.`,
+  });
+}
+
 /** The render phase. Integration-tested on the live clusters (needs helm + kubeconform). */
 export async function runRender(input: RenderInput): Promise<RenderOutcome> {
   const lock = checkDependencyLock(input.files, input.chartPath);

@@ -1,11 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseEnv, runGateCli, type CliInputs } from "./cli.ts";
 import type { ConnectFn } from "./fence.ts";
 import { sandboxGreen } from "./report.ts";
 import { clusterMapPath } from "../../shared/cluster-values.ts";
+import { POST_RENDER_GATES } from "./gate-list.ts";
 
 const made: string[] = [];
 async function ws(): Promise<string> {
@@ -93,5 +94,98 @@ describe("runGateCli green path", () => {
     expect(report.gates.length).toBeGreaterThan(0); // G1 ran
     expect(report.gates[0]?.id).toBe("G1");
     expect(report.verdict).toBe("fail"); // G1 fails => plan rejected, render never attempted
+  });
+});
+
+// A BUILD-ONLY unit — one whose manifest declares builds and no chart — is not an edge case: the
+// platform's own manager and the tenant fan-out repo are both build-only, so this is the shape a
+// from-zero master runs first. It has no chart directory, so the run carries no chart path at all.
+//
+// What used to happen: the empty string the Manager sent for "no chart" was read as an unset required
+// input, the CLI threw before a single gate ran, and the whole PipelineRun died with a wiring
+// complaint. What must happen now is that the absence is a form the gates know and REPORT.
+const BUILD_ONLY_MANIFEST = [
+  "apiVersion: hostyour.cloud/v1",
+  "kind: ConsumerManifest",
+  "name: acme",
+  "owner: acme@example.invalid",
+  "envs: [prod]",
+  "builds:",
+  "  - name: acme-api",
+  "    containerfile: docker/Containerfile",
+  "",
+].join("\n");
+
+/** A build-only repo on disk. `extraManifest` appends to the manifest so a test can plant a chart
+ *  declaration into a unit the run says has none. */
+async function buildOnlyRepo(extraManifest = ""): Promise<string> {
+  const dir = await ws();
+  await mkdir(join(dir, "deploy"), { recursive: true });
+  await writeFile(join(dir, "deploy", "platform.yaml"), BUILD_ONLY_MANIFEST + extraManifest);
+  await mkdir(join(dir, "docker"), { recursive: true });
+  await writeFile(join(dir, "docker", "Containerfile"), "FROM scratch\n");
+  return dir;
+}
+
+/** The env of a build-only run: everything as usual, and CHART_PATH carrying the empty string the
+ *  Tekton param must hold (it is a declared string with no default, so the run cannot omit it). */
+function buildOnlyInputs(sourceDir: string): CliInputs {
+  return parseEnv({ ...ENV, SOURCE_DIR: sourceDir, CHART_PATH: "" });
+}
+
+describe("a unit that ships no chart", () => {
+  it("parses an empty CHART_PATH as the absence of a chart instead of refusing the run", () => {
+    expect(parseEnv({ ...ENV, CHART_PATH: "" }).meta.chartPath).toBeNull();
+    expect(parseEnv({ ...ENV, CHART_PATH: "   " }).meta.chartPath).toBeNull();
+    const { CHART_PATH: _unset, ...withoutChartPath } = ENV;
+    expect(parseEnv(withoutChartPath).meta.chartPath).toBeNull();
+    // The innocent case, so a null answer cannot mean the parse simply stopped reading the variable.
+    expect(parseEnv(ENV).meta.chartPath).toBe("deploy/chart");
+  });
+
+  it("INNOCENT CASE: a build-only unit passes, and the gates that could not run are NAMED, not green", async () => {
+    const report = await runGateCli(buildOnlyInputs(await buildOnlyRepo()), green);
+    expect(sandboxGreen(report.sandbox)).toBe(true);
+    expect(report.verdict).toBe("pass");
+
+    const ran = report.gates.map((g) => g.id);
+    expect(ran).toContain("G1"); // the manifest was read
+    expect(ran).toContain("G3"); // the render phase reported the absence
+
+    // The rendered-document gates judge documents this run never produced. Over zero documents each
+    // of them would return a pass no chart could have made go red, and a reader cannot tell that
+    // apart from a repository that was inspected and found clean — so none of them may appear.
+    const skipped = POST_RENDER_GATES.map((g) => g.id);
+    expect(skipped.length).toBeGreaterThan(0); // the exclusion below is not vacuous
+    expect(ran.filter((id) => skipped.includes(id))).toEqual([]);
+
+    // Named one by one rather than counted, in the phase that gates them.
+    const g3 = report.gates.find((g) => g.id === "G3");
+    expect(g3?.status).toBe("pass");
+    for (const id of skipped) expect(g3?.found).toContain(id);
+
+    // And the manifest gate says the unit is build-only rather than staying silent about the half it
+    // never applied.
+    const g1 = report.gates.find((g) => g.id === "G1");
+    expect(g1?.status).toBe("pass");
+    expect(g1?.found).toContain("no chart");
+  });
+
+  it("PLANTED DEFECT: a manifest that declares a chart is REFUSED when the run carries no chart path", async () => {
+    const dir = await buildOnlyRepo("chart:\n  path: deploy/chart\n");
+    await mkdir(join(dir, "deploy", "chart"), { recursive: true });
+    await writeFile(join(dir, "deploy", "chart", "Chart.yaml"), "name: acme\nversion: 0.1.0\n");
+    const report = await runGateCli(buildOnlyInputs(dir), green);
+
+    expect(report.verdict).toBe("fail");
+    const g1 = report.gates.find((g) => g.id === "G1");
+    expect(g1?.status).toBe("fail");
+    expect(g1?.reason).not.toBeNull();
+    // The refusal must say which two sides disagree, so the answer is actionable in the CUSTOMER's
+    // repository: it names the manifest's own declaration and the form the run was dispatched in.
+    expect(g1?.found).toContain("deploy/platform.yaml");
+    expect(g1?.found).toContain("build-only");
+    // Nothing may be rendered or judged past a refused manifest.
+    expect(report.gates.some((g) => g.id === "G3")).toBe(false);
   });
 });

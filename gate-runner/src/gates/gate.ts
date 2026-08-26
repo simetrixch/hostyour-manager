@@ -31,7 +31,10 @@ export interface RenderedDoc {
 export interface GateContext {
   readonly targetName: string;
   readonly stage: string;
-  readonly chartPath: string;
+  /** The chart directory inside the repo, or NULL for a build-only unit that ships no chart. A gate
+   *  whose subject lives in the chart states the absence in its own words rather than reporting a
+   *  clean scan of nothing. */
+  readonly chartPath: string | null;
   /** The target cluster's values chain, VERBATIM and in layering order — the same bytes G3 rendered
    *  with, so a gate that needs a cluster value (G7's Vault server) reads it from the chain rather
    *  than from a value the Manager pre-computed. */

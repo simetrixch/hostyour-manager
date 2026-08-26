@@ -16,7 +16,11 @@ import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 export interface GateJobRequest {
   targetName: string;
   stage: Stage;
-  chartPath: string;
+  /** The chart directory inside the repo. ABSENT for a build-only unit — one that carries a build
+   *  registration and no stage file, so nothing of it is ever deployed and there is no chart to
+   *  render. The absence is the form itself, not a missing input: the gate reads it as "this unit
+   *  ships no chart" and reports the chart-reading gates accordingly. */
+  chartPath?: string;
   repoURL: string;
   requestedRef: string;
   resolvedSha: string; // the pinned 40-char SHA the pipeline clones at

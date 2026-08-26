@@ -11,7 +11,7 @@ import type { ConsumerManifest } from "../../shared/consumer.ts";
 import type { Stage } from "../../shared/enums.ts";
 import type { ClusterValueFile } from "../../shared/cluster-values.ts";
 import { checkStructure } from "./gates/structure.gate.ts";
-import { runRender } from "./gates/render-pinned-deps.gate.ts";
+import { runRender, noChartToRender } from "./gates/render-pinned-deps.gate.ts";
 import { PRE_RENDER_GATES, POST_RENDER_GATES } from "./gate-list.ts";
 import { assembleReport } from "./report.ts";
 
@@ -30,7 +30,10 @@ export type Clock = () => number;
 export interface GateJobMeta {
   targetName: string;
   stage: Stage;
-  chartPath: string;
+  /** The chart directory inside the repo, or NULL for a build-only unit — one that ships no chart at
+   *  all, so nothing of it renders. Null is a form the run knows, not a missing input: G1 holds it
+   *  against the manifest's own `chart:` block and refuses the two disagreeing. */
+  chartPath: string | null;
   /** The target cluster's values chain, VERBATIM and in layering order (shared/cluster-values.ts). */
   clusterValueFiles: readonly ClusterValueFile[];
   repoURL: string;
@@ -85,26 +88,34 @@ export async function runGates(
 
   // G3 render — only when the structure is valid (an invalid chart cannot render meaningfully).
   if (structure.result.status === "pass" && manifest !== null) {
-    const render = await runRender({
-      workspace,
-      chartPath: meta.chartPath,
-      targetName: meta.targetName,
-      envs: manifest.envs,
-      clusterValueFiles: meta.clusterValueFiles,
-      files,
-      kubeVersion: cfg.kubeVersion,
-      depBuildMs: cfg.depBuildMs,
-      renderMs: cfg.renderMs,
-      signal,
-    });
-    emit(render.result);
-    rendered = render.rendered;
-    dependencies = render.dependencies;
+    if (meta.chartPath === null) {
+      // A BUILD-ONLY unit ships no chart, so there is nothing to render and the rendered-doc gates
+      // have no subject. They do NOT run and they do NOT report a pass: a green row from a gate that
+      // inspected zero documents is a verdict nothing could have made go red, and it reads exactly
+      // like a gate that looked and found the repo clean. G3 states the absence and names them.
+      emit(noChartToRender(POST_RENDER_GATES.map((g) => g.id)));
+    } else {
+      const render = await runRender({
+        workspace,
+        chartPath: meta.chartPath,
+        targetName: meta.targetName,
+        envs: manifest.envs,
+        clusterValueFiles: meta.clusterValueFiles,
+        files,
+        kubeVersion: cfg.kubeVersion,
+        depBuildMs: cfg.depBuildMs,
+        renderMs: cfg.renderMs,
+        signal,
+      });
+      emit(render.result);
+      rendered = render.rendered;
+      dependencies = render.dependencies;
 
-    // The rendered-doc gates — only when the render itself passed.
-    if (render.result.status === "pass") {
-      const renderedCtx: GateContext = { ...baseCtx, manifest, rendered, dependencies };
-      for (const gate of POST_RENDER_GATES) emit(gate.check(renderedCtx));
+      // The rendered-doc gates — only when the render itself passed.
+      if (render.result.status === "pass") {
+        const renderedCtx: GateContext = { ...baseCtx, manifest, rendered, dependencies };
+        for (const gate of POST_RENDER_GATES) emit(gate.check(renderedCtx));
+      }
     }
   }
 
