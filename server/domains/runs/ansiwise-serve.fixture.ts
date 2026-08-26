@@ -462,15 +462,34 @@ export async function observerEnded(observer: AnsiwiseClient, serve: ServeFixtur
     } catch (err) {
       if (!(err instanceof AnsiwiseRefused) || err.status !== 404) throw err;
     }
-    const stranded = await strandedEnd(serve, id);
+    const stranded = await strandedEnd(serve, id, signal);
     if (stranded !== undefined) throw new Error(stranded);
-    await new Promise((r) => setTimeout(r, 100));
+    await rest(100, signal);
   }
   throw new Error(`stopped watching machine run ${id} — the test's own budget ran out; last reading: ${lastSeen}`);
 }
 
 /** How long the two files have to keep saying the same thing before it counts (see strandedEnd). */
 const STRANDED_SETTLE_MS = 1_000;
+
+/** Waits [ms], or until [signal] fires — whichever comes first.
+ *
+ *  The waits in here are the only places that could overrun the caller's budget, and the settle
+ *  window below is a full second of it. A plain setTimeout holds the caller past its own deadline
+ *  and then reports a timeout with no reading behind it, which is the failure this whole file
+ *  exists to stop producing. */
+function rest(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
 
 /** What an id's record and its pending header say about the run having ended, read straight off this
  *  machine's disk rather than through the surface. */
@@ -505,10 +524,11 @@ function headerEnds(serve: ServeFixture, id: string): { record: boolean; pending
  *  between the write and the rename of every ordinary save, so a single reading could call a run
  *  stranded that is about to be fine. The state has to still be there a second later, which is four
  *  orders of magnitude longer than that window. */
-async function strandedEnd(serve: ServeFixture, id: string): Promise<string | undefined> {
+async function strandedEnd(serve: ServeFixture, id: string, signal: AbortSignal): Promise<string | undefined> {
   const first = headerEnds(serve, id);
   if (first.record || !first.pending) return undefined;
-  await new Promise((r) => setTimeout(r, STRANDED_SETTLE_MS));
+  await rest(STRANDED_SETTLE_MS, signal);
+  if (signal.aborted) return undefined;
   const again = headerEnds(serve, id);
   if (again.record || !again.pending) return undefined;
   const dir = join(runRoot(serve.dir), id);

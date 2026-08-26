@@ -409,13 +409,26 @@ async function appearedRecord(client: AnsiwiseClient, id: string, program: strin
 
 /** The record once it carries an end. The events stream ends when the run does, but the header
  *  is a separate file the run child replaces — one bounded breath covers the moment between the
- *  last event and the rewritten header. */
+ *  last event and the rewritten header.
+ *
+ *  WHAT THE REFUSAL NAMES, AND WHY IT NAMES TWO FILES. The engine writes the closing header beside
+ *  the real one and renames it over (ansiwise-core RunRecorder.save). On Windows that rename fails
+ *  while any process holds run.json open and it carries no retry, so the end can be sitting in
+ *  run.json.writing while run.json keeps the header the run began with — measured at 34 of 265 runs
+ *  that had a reader, 0 of 100 that had none (simetrixch/ansiwise-core#65). A refusal that said only
+ *  "read the record on the machine" sent the operator to the ONE file that is guaranteed not to
+ *  carry the answer in exactly that case. */
 async function endedRecord(ctx: StepCtx, client: AnsiwiseClient, id: string, signal: AbortSignal): Promise<AnsiwiseRunRecord> {
   for (let attempt = 0; ; attempt++) {
     const record = await client.run(id, { signal });
     if (record.end !== undefined) return record;
     if (attempt >= 20) {
-      throw errValidation(`machine run ${id} streamed its last event but its record never ended — read the record on the machine`);
+      throw errValidation(
+        `machine run ${id} streamed its last event but its record never ended. Read BOTH halves of ` +
+          `the header on the machine: the run's run.json, and run.json.writing beside it. A ` +
+          `run.json.writing carrying an exit_code that run.json does not is a rename the engine ` +
+          `lost, which no further waiting can find`,
+      );
     }
     ctx.log("meta", `machine run ${id}: events are over, waiting for the record to close`);
     await sleepUnlessAborted(500, signal);
