@@ -22,7 +22,7 @@ import type { ResetResult } from "../../../shared/api-types.ts";
 const baseEnv = {
   PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test",
-  DATA_DIR: tmpdir(), LOG_LEVEL: "silent",
+  DATA_DIR: tmpdir(), LOG_LEVEL: "silent", ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
   MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1", MASTER_STAGE: "prod",
   GITHUB_REPO: "simetrixch/hostyour-cloud", GITHUB_WRITE_PAT: "pat",
 };

@@ -22,6 +22,7 @@ describe("OIDC adapter against a real in-process mock IdP", () => {
       OIDC_CLIENT_SECRET: mock.clientSecret,
       MANAGER_VERSION: "test",
       DATA_DIR: "/d",
+      ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
       LOG_LEVEL: "silent",
     } as NodeJS.ProcessEnv);
     return { adapter: createOidcAdapter(config, createLogger(config)), config };
@@ -90,6 +91,7 @@ describe("OIDC adapter against a real in-process mock IdP", () => {
       OIDC_CLIENT_SECRET: "s",
       MANAGER_VERSION: "test",
       DATA_DIR: "/d",
+      ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
       LOG_LEVEL: "silent",
     } as NodeJS.ProcessEnv);
     const adapter = createOidcAdapter(config, createLogger(config));

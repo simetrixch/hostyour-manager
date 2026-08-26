@@ -23,6 +23,7 @@ const BASE_ENV = {
   OIDC_CLIENT_SECRET: "secret",
   MANAGER_VERSION: "test",
   DATA_DIR: "/data",
+  ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv;
 // The bare config wires NEITHER onboarding family (no gate-runner addr, no github, no catalog

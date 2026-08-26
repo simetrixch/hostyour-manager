@@ -17,6 +17,7 @@ const baseEnv = {
   OIDC_CLIENT_SECRET: "s",
   MANAGER_VERSION: "test",
   DATA_DIR: "/d",
+  ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
   LOG_LEVEL: "silent",
 };
 const config = parseConfig(baseEnv as NodeJS.ProcessEnv);

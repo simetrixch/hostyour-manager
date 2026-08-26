@@ -120,8 +120,9 @@ export function createEmergencyApp(deps: EmergencyDeps): Hono {
  * mode grants the group — which is how an account on the machine outside this container is admitted
  * at all; and root, which the permission check does not apply to. Anyone else gets EACCES from
  * connect(2) and never speaks to this app. It is a ceiling and not a guarantee of reach: the caller
- * also needs search permission on every directory down to the file, and where DATA_DIR is a volume
- * whose ownership the deployment does not control, that part is the storage's answer and not ours.
+ * also needs search permission on every directory down to the file, and the directory the socket
+ * stands in is mounted by the deployment (config.ts ADMIN_SOCKET_PATH), so that part is the mount's
+ * answer and not ours.
  * The two halves we DO set are the mode (config.ts ADMIN_SOCKET_MODE) and the uid and gid the
  * process runs as, so widening this is an act somebody performs and never a default drifting.
  */
@@ -172,7 +173,7 @@ export function serveAdminSocket(socketPath: string, deps: EmergencyDeps): HttpS
   // EADDRINUSE — the inode exists but nothing is bound to it, so the socket answers nothing and is
   // silently dead every boot until the file is removed. The manager is single-replica (RWO
   // /data), so any pre-existing admin.sock is OURS-but-dead; unlink it before binding. Guarded to a
-  // real socket so a mis-set DATA_DIR can never make us delete an arbitrary file.
+  // real socket so a mis-set ADMIN_SOCKET_PATH can never make us delete an arbitrary file.
   try {
     if (statSync(socketPath).isSocket()) unlinkSync(socketPath);
   } catch {
@@ -180,7 +181,10 @@ export function serveAdminSocket(socketPath: string, deps: EmergencyDeps): HttpS
   }
   // A listen failure (e.g. no AF_UNIX on the dev box) must never crash the manager — the
   // :8485 HTTP listener is the reachable half; only the socket's two routes are unavailable.
-  server.on("error", (err: unknown) => deps.logger.warn({ err: String(err) }, "admin.sock unavailable"));
+  // Logged at ERROR and carrying the path, because what is gone is the whole way back in when the
+  // IdP is down AND the only door a program has: a caller learns of it as a refused connect to a
+  // file that was never created, and this line is the only place that says which file and why.
+  server.on("error", (err: unknown) => deps.logger.error({ err: String(err), socketPath }, "admin.sock unavailable — the break-glass mint and the programmatic session route are both closed"));
   server.listen(socketPath, () => {
     // The bind creates the socket file with a umask-derived mode (0755 under the image's 022), and
     // connecting to a UNIX socket needs only WRITE permission on the file — so the mode IS the

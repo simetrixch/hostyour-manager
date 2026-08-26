@@ -7,10 +7,11 @@
 # dev-tier dependency that IS needed at run). Migrations resolve source-relative
 # (import.meta.url), so COPY server/ carries them.
 #
-# DATA_DIR is the one mounted volume; it holds manager.db and the admin.sock (break-glass
-# mint — the server binds it there and sets its mode 0700 itself). The pod publishes
-# 127.0.0.1:8484 (UI via Traefik / SSH tunnel) and 127.0.0.1:8485 (break-glass listener only,
-# never WAN-routed).
+# DATA_DIR is the mounted data volume; it holds manager.db. The admin socket stands OUTSIDE it, at
+# ADMIN_SOCKET_PATH, on a directory the deployment mounts: DATA_DIR is a claim whose place on the
+# host the storage provisioner chooses, and that place is long enough to overflow the 108 bytes a
+# UNIX socket path has. The pod publishes 127.0.0.1:8484 (UI via Traefik / SSH tunnel) and
+# 127.0.0.1:8485 (break-glass listener only, never WAN-routed).
 
 FROM node:24 AS build
 WORKDIR /app

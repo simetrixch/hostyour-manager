@@ -32,7 +32,6 @@ import { registerConsumerRoutes, registerTenantRoutes } from "../domains/units/a
 import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
-import { join } from "node:path";
 import type { AppEnv } from "../http/app-env.ts";
 import type { ReadyzView } from "../../shared/api-types.ts";
 
@@ -198,7 +197,7 @@ export async function wire(): Promise<Wired> {
     executor,
     app,
     emergencyApp,
-    serveEmergencySocket: () => void serveAdminSocket(join(config.dataDir, "admin.sock"), emergencyDeps),
+    serveEmergencySocket: () => void serveAdminSocket(config.adminSocketPath, emergencyDeps),
     checks,
   };
 }

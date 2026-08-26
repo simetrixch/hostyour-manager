@@ -16,7 +16,7 @@ import type { BranchesView, BranchDiffView } from "../../../shared/api-types.ts"
 const baseEnv = {
   PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test",
-  DATA_DIR: "/d", LOG_LEVEL: "silent",
+  DATA_DIR: "/d", LOG_LEVEL: "silent", ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
 };
 const withGitHub = parseConfig({
   ...baseEnv, MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1", MASTER_STAGE: "prod",

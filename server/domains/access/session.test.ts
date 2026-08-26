@@ -15,6 +15,7 @@ const config = parseConfig({
   OIDC_CLIENT_SECRET: "s",
   MANAGER_VERSION: "test",
   DATA_DIR: "/d",
+  ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv);
 const ORIGINAL_BOOT_EPOCH = bootEpochMs();

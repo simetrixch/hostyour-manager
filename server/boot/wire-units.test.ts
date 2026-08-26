@@ -32,6 +32,7 @@ const enabledEnv = {
   OIDC_CLIENT_ID: "manager",
   OIDC_CLIENT_SECRET: "s",
   MANAGER_VERSION: "test",
+  ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
   LOG_LEVEL: "silent",
   ONBOARD_GATE_MANAGER_ADDR: "10.152.183.5:8484",
   GITHUB_REPO: "simetrixch/hostyour-cloud",

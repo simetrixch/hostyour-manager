@@ -19,7 +19,7 @@ import type { SshFactory, SshSession, SshTarget, ExecOptions, ExecResult } from 
 const logger = createLogger(
   parseConfig({
     PUBLIC_URL: "https://x.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c",
-    OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", LOG_LEVEL: "silent",
+    OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", LOG_LEVEL: "silent", ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
     MANAGER_VERSION: "test",
   } as NodeJS.ProcessEnv),
 );

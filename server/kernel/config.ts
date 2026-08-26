@@ -2,6 +2,12 @@ import { join } from "node:path";
 import { z } from "zod";
 import { STAGE, CLUSTER_TIER } from "../../shared/enums.ts";
 
+/** The longest path a UNIX socket can stand on. `sun_path` in `struct sockaddr_un` is 108 bytes on
+ *  Linux (man 7 unix) and a pathname socket is NUL-terminated inside it, so 107 are usable. Over
+ *  that, bind(2) and connect(2) both answer ENAMETOOLONG — the socket file is never created and no
+ *  caller can name it. */
+export const MAX_SOCKET_PATH_BYTES = 107;
+
 // zod fail-fast env. The redirect URI + cookie flags are DERIVED from
 // PUBLIC_URL once, never from a request URL — the L1 lesson (old console built the
 // callback from the proxied req.url and got http:// behind the TLS proxy).
@@ -16,8 +22,29 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8484),
   EMERGENCY_PORT: z.coerce.number().int().positive().default(8485),
   DATA_DIR: z.string().min(1),
-  // The permission bits serveAdminSocket (domains/access/emergency.ts) puts on
-  // $DATA_DIR/admin.sock. That mode is the WHOLE boundary in front of a session mint that asks for
+  // WHERE serveAdminSocket (domains/access/emergency.ts) binds the admin socket — the break-glass
+  // mint and the programmatic session route. The caller is a program on the HOST rather than a
+  // process in this container, so the socket stands on a path both sides can name: the deployment
+  // mounts a directory and passes the container-side spelling of the socket file here.
+  //
+  // IT IS DELIBERATELY NOT UNDER DATA_DIR, and that is arithmetic and not taste. DATA_DIR is a
+  // ReadWriteOnce claim, and WHERE that claim lands on the host is the storage provisioner's
+  // choice, not the deployment's. Measured on a from-zero install: the provisioner composed
+  // /var/snap/microk8s/common/default-storage/<namespace>-<claim>-<uid>/admin.sock at 114 bytes
+  // against the 108 the kernel has room for, so the bind and every connect answered
+  // ENAMETOOLONG and onboarding could not open the socket at all. 40 of those bytes are a
+  // generated uid; nothing in this process shortens a path it does not choose.
+  //
+  // REQUIRED, no default. Any default would be a path the deployment did not mount, so the bind
+  // would land inside the container's own filesystem, where no caller on the host can reach it —
+  // a manager that boots green with its recovery door and its onboarding route both shut.
+  ADMIN_SOCKET_PATH: z.string().min(1).refine((p) => Buffer.byteLength(p, "utf8") <= MAX_SOCKET_PATH_BYTES, {
+    error: (issue) =>
+      `ADMIN_SOCKET_PATH is ${Buffer.byteLength(String(issue.input), "utf8")} bytes and a UNIX socket path holds at most ${MAX_SOCKET_PATH_BYTES}` +
+      " — bind(2) would answer ENAMETOOLONG and the break-glass mint would never come up",
+  }),
+  // The permission bits serveAdminSocket (domains/access/emergency.ts) puts on the admin socket.
+  // That mode is the WHOLE boundary in front of a session mint that asks for
   // no password: connect(2) on an AF_UNIX socket needs the WRITE bit on the inode, so which triad
   // carries it decides whether only the account the process runs as may mint, the socket's group as
   // well, or every account on the machine. Who that is depends on how a deployment places the
@@ -216,7 +243,11 @@ export interface Config {
   emergencyPort: number;
   dataDir: string;
   dbFile: string;
-  /** The permission bits serveAdminSocket puts on $DATA_DIR/admin.sock (ADMIN_SOCKET_MODE, parsed
+  /** Where serveAdminSocket binds the admin socket (ADMIN_SOCKET_PATH). The deployment mounts the
+   *  directory and names the file, because the program that connects runs on the host and not in
+   *  this container. Validated at boot to fit a UNIX socket path (MAX_SOCKET_PATH_BYTES). */
+  adminSocketPath: string;
+  /** The permission bits serveAdminSocket puts on the admin socket (ADMIN_SOCKET_MODE, parsed
    *  base 8). Connecting to that socket needs the WRITE bit, and the socket mints an operator
    *  session with no password — so this number is the boundary, and the deployment sets it. */
   adminSocketMode: number;
@@ -354,6 +385,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     // on an empty schema and leaves the real rows unreachable beside it — moving it is a rename of
     // the file on every volume, done with the pod stopped, not an edit of this line.
     dbFile: join(e.DATA_DIR, "manager.db"),
+    adminSocketPath: e.ADMIN_SOCKET_PATH,
     // Base 8, guaranteed by the schema's octal-digit regex above.
     adminSocketMode: Number.parseInt(e.ADMIN_SOCKET_MODE, 8),
     // Empty string counts as unset (deployments often template the var to "") — absent means

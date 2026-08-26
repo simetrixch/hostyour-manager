@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseConfig, ConfigError } from "./config.ts";
+import { parseConfig, ConfigError, MAX_SOCKET_PATH_BYTES } from "./config.ts";
 
 const validEnv = {
   PUBLIC_URL: "https://m1.example.com",
@@ -8,6 +8,7 @@ const validEnv = {
   OIDC_CLIENT_SECRET: "secret",
   MANAGER_VERSION: "test",
   DATA_DIR: "/data",
+  ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
 } as NodeJS.ProcessEnv;
 
 describe("parseConfig", () => {
@@ -44,6 +45,54 @@ describe("parseConfig", () => {
     } catch (e) {
       expect((e as ConfigError).issues.join(" ")).toContain("MANAGER_VERSION");
     }
+  });
+
+  it("carries ADMIN_SOCKET_PATH through, and REQUIRES it (the deployment names the mount, not this repo)", () => {
+    expect(parseConfig(validEnv).adminSocketPath).toBe("/run/manager/admin.sock");
+    const noPath: NodeJS.ProcessEnv = { ...validEnv };
+    delete noPath.ADMIN_SOCKET_PATH;
+    expect(() => parseConfig(noPath)).toThrow(ConfigError);
+    try {
+      parseConfig(noPath);
+    } catch (e) {
+      expect((e as ConfigError).issues.join(" ")).toContain("ADMIN_SOCKET_PATH");
+    }
+  });
+
+  it("refuses an ADMIN_SOCKET_PATH a UNIX socket cannot stand on, and says by how much", () => {
+    // The measured shape: a data claim the storage provisioner placed at
+    // /var/snap/microk8s/common/default-storage/<namespace>-<claim>-<uid>/admin.sock, 114 bytes,
+    // where bind(2) and connect(2) both answer ENAMETOOLONG. Refused at boot, naming the byte
+    // count, rather than surfacing as a refused connect in whatever runs first.
+    const overflowing = "/var/snap/microk8s/common/default-storage/manager-manager-data-pvc-90579cab-ae9d-48a3-aaaf-e4fe2d8ff503/admin.sock";
+    expect(Buffer.byteLength(overflowing, "utf8")).toBe(114);
+    expect(() => parseConfig({ ...validEnv, ADMIN_SOCKET_PATH: overflowing })).toThrow(ConfigError);
+    try {
+      parseConfig({ ...validEnv, ADMIN_SOCKET_PATH: overflowing });
+    } catch (e) {
+      const said = (e as ConfigError).issues.join(" ");
+      expect(said).toContain("ADMIN_SOCKET_PATH");
+      expect(said).toContain("114");
+      expect(said).toContain(String(MAX_SOCKET_PATH_BYTES));
+    }
+  });
+
+  it("accepts a path of exactly MAX_SOCKET_PATH_BYTES, and refuses the next byte", () => {
+    // The boundary itself, from both sides: sun_path is 108 bytes and the terminating NUL takes
+    // one, so 107 fit and 108 do not. An off-by-one either way is a limit nobody measured.
+    const atLimit = `/run/${"a".repeat(MAX_SOCKET_PATH_BYTES - "/run/".length)}`;
+    expect(Buffer.byteLength(atLimit, "utf8")).toBe(MAX_SOCKET_PATH_BYTES);
+    expect(parseConfig({ ...validEnv, ADMIN_SOCKET_PATH: atLimit }).adminSocketPath).toBe(atLimit);
+    expect(() => parseConfig({ ...validEnv, ADMIN_SOCKET_PATH: `${atLimit}a` })).toThrow(ConfigError);
+  });
+
+  it("counts ADMIN_SOCKET_PATH in BYTES, not in characters — the kernel copies bytes into sun_path", () => {
+    // A path of non-ASCII characters is shorter in characters than in bytes, and it is the bytes
+    // the kernel has room for. Measuring length in characters would accept a path that overflows.
+    const twoBytesEach = `/run/${"ä".repeat(60)}`; // 65 characters, 125 bytes
+    expect(twoBytesEach.length).toBeLessThanOrEqual(MAX_SOCKET_PATH_BYTES);
+    expect(Buffer.byteLength(twoBytesEach, "utf8")).toBeGreaterThan(MAX_SOCKET_PATH_BYTES);
+    expect(() => parseConfig({ ...validEnv, ADMIN_SOCKET_PATH: twoBytesEach })).toThrow(ConfigError);
   });
 
   it("defaults adminSocketMode to 0770 when ADMIN_SOCKET_MODE is absent", () => {

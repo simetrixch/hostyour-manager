@@ -16,6 +16,7 @@ const config = parseConfig({
   OIDC_CLIENT_SECRET: "secret",
   MANAGER_VERSION: "test",
   DATA_DIR: "/data",
+  ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv);
 const logger = createLogger(config);
