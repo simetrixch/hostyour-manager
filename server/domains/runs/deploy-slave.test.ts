@@ -339,10 +339,10 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   });
 
   it("verify-slave HARD gate 0: a never-Ready ExternalSecret fails NAMED, after force-sync kicks", async () => {
-    const h = await verifyWorld({ externalSecretsOut: "cluster-slave|True|SecretSynced\nrepo-hostyour-cloud|False|SecretSyncedError" });
+    const h = await verifyWorld({ externalSecretsOut: "cluster-slave|True|SecretSynced\nrepo-platform|False|SecretSyncedError" });
     const err = await expireVerify(h);
     expect(String((err as Error).message)).toMatch(/s1 ExternalSecrets Ready \(repo \+ cluster credentials\) did not converge/);
-    expect(String((err as Error).message)).toContain("repo-hostyour-cloud (SecretSyncedError)");
+    expect(String((err as Error).message)).toContain("repo-platform (SecretSyncedError)");
     // The backoff-breaking kick fired on the master, and gate 1 was never reached.
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command.includes("annotate externalsecrets.external-secrets.io --all force-sync="))).toBe(true);
     expect(h.hosts.log.some((l) => l.command.includes("get applications.argoproj.io"))).toBe(false);
@@ -380,7 +380,9 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const h = await verifyWorld({ promOut: "PROM_CHECK empty", certsOut: "" });
     const checkpoints: unknown[] = [];
     await stepOf(h, "verify-slave").run(hostedStepCtx(h, { checkpoint: (d) => checkpoints.push(d) }));
-    expect(checkpoints.at(-1)).toEqual({ extSecrets: 2, apps: 2, secretStores: 2, prom: "empty", certsTotal: 0, certsReady: 0 });
+    // Three ExternalSecrets, because the gate counts what the instance's chart ships rather than a
+    // list of names it was told to expect: cluster-slave plus the two repository credentials.
+    expect(checkpoints.at(-1)).toEqual({ extSecrets: 3, apps: 2, secretStores: 2, prom: "empty", certsTotal: 0, certsReady: 0 });
   });
 
   // ---- register + the credential idioms -------------------------------------------------------

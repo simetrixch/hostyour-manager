@@ -195,7 +195,7 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     mintedKeyExit: 0,
     tailnetProbeOut: TAILNET_PROBE_JOINED,
     appSyncOut: "Synced",
-    externalSecretsOut: "cluster-slave|True|SecretSynced\nrepo-hostyour-cloud|True|SecretSynced",
+    externalSecretsOut: "cluster-slave|True|SecretSynced\nrepo-platform|True|SecretSynced\nrepo-catalog|True|SecretSynced",
     diagOut: "==== verify-slave diagnostics (ns s1) ====",
     argoAppsOut: "root-applications|Synced|Healthy\nplatform-apps-prod|Synced|Healthy",
     secretStoresOut: "external-secrets/vault-backend|True\nredis/vault-backend|True",

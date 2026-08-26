@@ -7,6 +7,7 @@ import type { DbHandle } from "../../db/client.ts";
 import { adoptDef, elevatedName, MANAGER_ELEVATED, SUDOERS_DROP_IN, sudoersDropIn, unpinnedElevated, type ElevatedCommand } from "./defs/adopt.ts";
 import { DROP_IN as SSHD_DROP_IN } from "./defs/password-login.kit.ts";
 import { TAILNET_PROBE_SCRIPT } from "./tailnet-probe.ts";
+import { REMOTE_COMMANDS, REMOTE_SCRIPTS } from "./remote-scripts.fixture.ts";
 import { getRun, readEvents } from "../../executor/read.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import { servers } from "../../db/schema/inventory.ts";
@@ -438,6 +439,30 @@ describe("the drop-in as a machine reads it", () => {
     expect(asks.filter((args) => !sudoersPermits(file, `tailscale ${args}`))).toEqual([]);
     expect(sudoersPermits(file, "tailscale up --ssh")).toBe(false);
     expect(sudoersPermits(file, "tailscale status")).toBe(false);
+  });
+
+  it("sends NOTHING to a host that reads a Kubernetes Secret, and still reports both credential registrations", () => {
+    // WHY THIS IS A RULE AND NOT A PREFERENCE. The cluster row of the grant is `microk8s kubectl *`,
+    // and the only way to narrow it is to pin the arguments the call sites really issue. Pinning is
+    // worth nothing while one of them is `get secrets`: Kubernetes RBAC has no grant that lists a
+    // Secret's name and labels while refusing its value — the same right serves `-o yaml` — so a rule
+    // that reads as contained would not be. Every shell this manager sends is held to it, derived
+    // from the collection rather than from a list, so a `get secrets` added anywhere is red here.
+    const shell = [...REMOTE_SCRIPTS, ...REMOTE_COMMANDS];
+    expect(shell.length).toBeGreaterThan(10); // a scan over nothing would pass by measuring nothing
+    const reads = shell.filter((s) => /kubectl[^\n]*\bget\s+secrets?\b/.test(s.text)).map((s) => `${s.symbol} (${s.module})`);
+    expect(reads, "these read Secrets on a host, which no pinned kubectl rule can contain").toEqual([]);
+
+    // AND THE TWO FACTS THE REPLACED LINE REPORTED ARE STILL REPORTED. ArgoCD registers a repository
+    // and a cluster by the label `argocd.argoproj.io/secret-type` on a Secret in its namespace; the
+    // diagnostic reads that label off the ExternalSecrets that compose those Secrets, together with
+    // the target Secret each names and whether ESO wrote it.
+    const diag = REMOTE_SCRIPTS.find((s) => s.symbol === "slaveDiagScript")?.text ?? "";
+    expect(diag).not.toBe("");
+    expect(diag).toContain("argocd credential registration");
+    expect(diag).toContain('labels["argocd\\.argoproj\\.io/secret-type"]'); // the label that registers either one
+    expect(diag).toContain(".spec.target.name"); // WHICH Secret it composes, so a miss is actionable
+    expect(diag).toMatch(/argocd credential registration[\s\S]*conditions\[\?\(@\.type=="Ready"\)\]\.status/); // and whether it was written
   });
 
   it("permits the ONE thing no rule can take away — the CONTENT of the sshd drop-in — and nothing wider", () => {

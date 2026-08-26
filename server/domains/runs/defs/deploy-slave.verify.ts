@@ -139,8 +139,11 @@ export function verifySlaveStep(target: SlaveTarget): Step {
         await remoteScriptCapture(ctx, mSession, "slave-diag", slaveDiagScript(name), { timeoutMs: 60_000 });
       };
 
-      // ---- HARD 0: the instance's TWO ESO-materialized credentials (repo-hostyour-cloud +
-      // cluster-slave) are Ready in ns <name> ON THE MASTER. Without the repo credential the
+      // ---- HARD 0: EVERY ESO-materialized credential of the instance is Ready in ns <name> ON THE
+      // MASTER — the repository credentials and the remote cluster registration. The gate counts
+      // what it finds rather than naming them, so a credential the chart gains is gated too, and one
+      // it loses does not leave this step waiting for a row nothing writes. Without the repository
+      // credential the
       // instance cannot even FETCH the private repo — root-applications then sits at
       // Unknown/Unknown, which is exactly how the first live run died. A not-yet-Ready ES is
       // kicked with the chart's own force-sync annotation idiom (rate-limited): an annotation

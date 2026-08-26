@@ -167,12 +167,12 @@ export function argoAppsCmd(name: string): string {
 }
 
 /** Every ExternalSecret in the slave's ArgoCD namespace ON THE MASTER, one
- *  `name|<Ready status>|<reason>` row per line (step 6 HARD gate 0). These materialize the
- *  instance's TWO credentials from the master's Vault (apps/slave/templates/externalsecret-*):
- *  `repo-hostyour-cloud` (the PRIVATE-repo credential — without it every root-applications
- *  comparison fails as Unknown/Unknown) and `cluster-slave` (the remote cluster
- *  registration). Gate 0 makes a stuck/failing ESO delivery a NAMED failure instead of the
- *  opaque root-applications Unknown timeout the first live run produced. */
+ *  `name|<Ready status>|<reason>` row per line (step 6 HARD gate 0). They materialize the
+ *  instance's credentials out of the master's Vault, and the gate holds ALL of them rather than a
+ *  list of names — a credential added to that chart must not slip past a reader that knows two.
+ *  Without the repository credential the instance cannot even FETCH the private repo, and
+ *  root-applications then sits at Unknown/Unknown, which is how the first live run died. Gate 0
+ *  makes a stuck or failing ESO delivery a NAMED failure instead of that opaque timeout. */
 export function externalSecretsCmd(name: string): string {
   return `sudo -n microk8s kubectl -n ${name} get externalsecrets.external-secrets.io -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"|"}{.status.conditions[?(@.type=="Ready")].reason}{"\\n"}{end}'`;
 }
@@ -197,6 +197,20 @@ export function forceSyncExternalSecretsCmd(name: string): string {
 // messages and pod phases only — never secret data (`get secrets --show-labels` prints no
 // values). Every section tolerates absent resources (the `|| true` idiom): diagnostics must
 // never fail the step themselves.
+//
+// IT READS NO SECRET, AND THAT IS DELIBERATE. ArgoCD registers a repository and a cluster by
+// LABEL — a Secret in the instance's namespace carrying `argocd.argoproj.io/secret-type`. Reading
+// those Secrets to prove the two are registered needs `get` on secrets, and Kubernetes RBAC has no
+// grant that lists a Secret's name and labels while refusing its value: the same right serves
+// `-o yaml`. So the registration is read off the ExternalSecrets that COMPOSE those Secrets
+// instead — each one names its target Secret and the label it puts on it, and its Ready condition
+// says whether ESO wrote it. Two facts, one right this platform already needs for the section
+// above.
+// WHAT THAT READING CANNOT SEE: the label on the Secret OBJECT. It reads the label the
+// ExternalSecret asks for, which is what ESO writes and re-writes; a label edited onto the Secret
+// by hand is reverted rather than reported. What it gains is the failure it exists for — a missing
+// or wrong label is named WITH the ExternalSecret that carries it, where a Secret listing could
+// only print nothing.
 export function slaveDiagScript(name: string): string {
   const k = `sudo -n microk8s kubectl -n ${name}`;
   return `#!/usr/bin/env bash
@@ -211,8 +225,8 @@ echo "-- externalsecrets: name | Ready | message"
 ${k} get externalsecrets.external-secrets.io -o jsonpath='{range .items[*]}{.metadata.name}{" | "}{.status.conditions[?(@.type=="Ready")].status}{" | "}{.status.conditions[?(@.type=="Ready")].message}{"\\n"}{end}' 2>&1 || true
 echo "-- secretstores: name | Ready | message"
 ${k} get secretstores.external-secrets.io -o jsonpath='{range .items[*]}{.metadata.name}{" | "}{.status.conditions[?(@.type=="Ready")].status}{" | "}{.status.conditions[?(@.type=="Ready")].message}{"\\n"}{end}' 2>&1 || true
-echo "-- argocd credential secrets (the repository/cluster labels MUST both appear)"
-${k} get secrets -l argocd.argoproj.io/secret-type --show-labels --no-headers 2>&1 || true
+echo "-- argocd credential registration: externalsecret | target Secret | argocd.argoproj.io/secret-type | Ready"
+${k} get externalsecrets.external-secrets.io -o jsonpath='{range .items[*]}{.metadata.name}{" | "}{.spec.target.name}{" | "}{.spec.target.template.metadata.labels["argocd\\.argoproj\\.io/secret-type"]}{" | "}{.status.conditions[?(@.type=="Ready")].status}{"\\n"}{end}' 2>&1 || true
 echo "-- appprojects (root-applications references 'default' — created by the instance's argocd-server on boot)"
 ${k} get appprojects.argoproj.io -o name 2>&1 || true
 echo "-- instance pods (manager/repo-server/redis must be Running for any comparison to succeed)"

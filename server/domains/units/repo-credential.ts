@@ -11,7 +11,7 @@
 import { CONSUMER_PROJECT_LABEL, type RepoCredentialManifest } from "../../adapters/kube/port.ts";
 
 /** The Secret name of one unit's repository credential — `repo-<name>`, the naming the per-slave
- *  ArgoCD repo Secrets already use (repo-hostyour-cloud, repo-catalog), prefixed per unit. */
+ *  ArgoCD repo Secrets already use (repo-platform, repo-catalog), prefixed per unit. */
 export function consumerRepoCredentialName(consumerName: string): string {
   return `repo-${consumerName}`;
 }
