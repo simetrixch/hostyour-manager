@@ -134,6 +134,12 @@ export interface UnitsWiring {
    *  Undefined when tenant onboarding is not configured; the scan route then degrades to an empty
    *  result with a reason. */
   tenantRegistrations?: TenantRegistrations;
+  /** Bring the catalog's books branch into being at boot. The tenant ApplicationSet's git generator
+   *  reads that branch from the moment the installation is deployed, and until this ran it came into
+   *  being only on the first tenant registration — so a correct fresh installation showed the
+   *  ApplicationSet, and the root Application above it, in error. Undefined when tenant onboarding is
+   *  not configured; there is then no catalog to write into. */
+  ensureBooksBranch?: () => Promise<void>;
   /** The CONSUMER family's registration registrations, threaded to registerConsumerRoutes so the
    *  operator-triggered DETECTED scan (GET /api/consumers/detected) can diff the
    *  LIVE registrations/** against the inventory — the consumer twin of tenantRegistrations above, and the
@@ -172,6 +178,11 @@ interface Family {
   /** Present only for the consumer family — the registration registrations its detected-scan read route
    *  diffs against the inventory. Undefined when the family is not configured. */
   registrations?: Registrations;
+  /** Present only for the tenant family — bring the catalog's books branch into being, so the tenant
+   *  ApplicationSet's git generator has a revision to resolve before the first tenant exists. It
+   *  crosses as a closure because buildUnits is synchronous and the boot that awaits it is not.
+   *  Undefined when the family is not configured — there is then no catalog to write into. */
+  ensureBooksBranch?: () => Promise<void>;
 }
 
 /** The master (self-cluster) kube access every master-local client is built from: the pod
@@ -277,6 +288,7 @@ export function buildUnits(config: Config, store: CredentialStore, db: Db, logge
     ...(tenant.catalogRepoUrl ? { catalogRepoUrl: tenant.catalogRepoUrl } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
+    ...(tenant.ensureBooksBranch ? { ensureBooksBranch: tenant.ensureBooksBranch } : {}),
     // The shared activation client is always constructed above — surface it for the tenant invite route.
     activator,
     ...(resolveUnitApex ? { resolveUnitApex } : {}),
@@ -569,6 +581,19 @@ function buildTenantOnboarding(
     openCredential: openDeployToken,
     pushBackoff: { retries: 6, baseDelayMs: 250, maxDelayMs: 8_000 },
   });
+  // Bring the books branch into being at BOOT rather than at the first tenant registration. The
+  // tenant ApplicationSet's git generator reads that branch from the moment the installation is
+  // deployed, and a generator whose revision resolves to nothing puts the ApplicationSet — and the
+  // root Application above it — in error. Measured on a fresh install: `tenants-dev` was the one
+  // ApplicationSet in error on a platform where every other Application was Synced and Healthy, and
+  // nothing anywhere said the red was expected until somebody onboarded a tenant. A health view that
+  // is red about a correct installation teaches the reader to ignore the colour.
+  //
+  // A no-op turn is what drives it: resetToOrigin mints the branch when origin does not carry it and
+  // this adapter opted in (adapters/git/git.ts createsBooksBranch), so this needs no new act and no
+  // new port method — it only moves the moment the existing one runs. On every later boot the branch
+  // is there, the sync succeeds and nothing is created.
+  const ensureBooksBranch = (): Promise<void> => deployRepo.withBranch(deployRepo.booksBranch, async () => undefined);
   const tenantRegistrations = new TenantRegistrations(deployRepo, clusterStage);
   const argo = new KubeMasterArgoReader(masterKubeInput(config));
   const cluster = new KubeClusterReader(masterKubeInput(config));
@@ -689,5 +714,5 @@ function buildTenantOnboarding(
   // (GET /api/tenants/:id/live), and scan the LIVE tenant pointers for orphans (GET /api/tenants/orphans)
   // through the very registrations the runs commit pointers with — all the same instances (and the same one
   // repoURL the appsets are rendered from) the runs use, never a second one.
-  return { defs, enabled: true, resolver, catalogRepoUrl: repoURL, appCatalog, tenantRegistrations };
+  return { defs, enabled: true, resolver, catalogRepoUrl: repoURL, appCatalog, tenantRegistrations, ensureBooksBranch };
 }

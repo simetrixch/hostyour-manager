@@ -134,6 +134,17 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     expect(wiring.registrations?.branch).toBe("m1.example.com");
   });
 
+  it("offers boot the act that brings the catalog's books branch into being, and only where there is a catalog", () => {
+    // The tenant ApplicationSet's git generator reads that branch from the moment the installation is
+    // deployed. Until boot brought it into being it came into being on the first tenant registration,
+    // so a correct fresh install showed the ApplicationSet — and the root Application above it — in
+    // error, with nothing anywhere saying the red was expected.
+    expect(buildUnits(...setup()).ensureBooksBranch).toBeTypeOf("function");
+    // Without a catalog there is no repository to write into, so boot has nothing to call and must
+    // not be handed something that would fail on every start-up.
+    expect(buildUnits(...setup({ CATALOG_WRITE_PAT: undefined, CATALOG_REPO: undefined })).ensureBooksBranch).toBeUndefined();
+  });
+
   it("consumer stays off without the gate-runner config; the tenant family is independent", () => {
     const wiring = buildUnits(...setup({ ONBOARD_GATE_MANAGER_ADDR: undefined }));
     expect(wiring.enabled).toBe(false);

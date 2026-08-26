@@ -170,6 +170,43 @@ describe("GitPlatformRepo", () => {
   );
 
   it(
+    "a turn that writes NOTHING still brings the books branch into being, and a second one moves nothing",
+    async () => {
+      // This is the shape boot uses (boot/wire-units.ts ensureBooksBranch): the branch has to exist
+      // before the first tenant, because the tenant ApplicationSet's git generator reads it from the
+      // moment the installation is deployed and an unresolvable revision puts the ApplicationSet — and
+      // the root Application above it — in error. Nothing is committed: the branch simply starts where
+      // the product stands, and the generator then resolves to an empty file list instead of failing.
+      const { originDir, originURL, trunkSha } = makeTrunkOnlyOrigin();
+      const repo = makeRepo(originURL);
+
+      await repo.withBranch(repo.booksBranch, async () => undefined);
+      expect(git(originDir, "rev-parse", BOOKS).trim()).toBe(trunkSha);
+      // One ref, not a commit: the branch must carry the trunk's own head, with nothing added.
+      expect(git(originDir, "rev-list", "--count", BOOKS).trim()).toBe(git(originDir, "rev-list", "--count", "master").trim());
+
+      // Every later boot: the branch is there, the sync succeeds, and nothing is created or moved.
+      await repo.withBranch(repo.booksBranch, async () => undefined);
+      expect(git(originDir, "rev-parse", BOOKS).trim()).toBe(trunkSha);
+      expect(git(originDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split("\n").filter(Boolean).sort()).toEqual([BOOKS, "master"]);
+    },
+    SLOW,
+  );
+
+  it(
+    "the same empty turn against a repository an installer cuts the branch in RAISES instead of minting",
+    async () => {
+      // The boot call must never become a way for hostyour-cloud's books branch — which IS the master
+      // cluster's stamped install branch — to be re-created from the unstamped trunk.
+      const { originDir, originURL } = makeTrunkOnlyOrigin();
+      const repo = makeRepo(originURL, false);
+      await expect(repo.withBranch(repo.booksBranch, async () => undefined)).rejects.toThrow(/does not exist/);
+      expect(git(originDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split("\n").filter(Boolean)).toEqual(["master"]);
+    },
+    SLOW,
+  );
+
+  it(
     "REFUSES to create the books branch for a repository an installer cuts it in — the trunk is never published under its name",
     async () => {
       // hostyour-cloud's books branch IS the master cluster's install branch: the deploy-branch

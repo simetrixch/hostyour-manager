@@ -103,6 +103,21 @@ export async function wire(): Promise<Wired> {
   // single replica — the same dependency seed-master.ts states for its own reconcile.
   scheduleTenantCheck(executor, logger);
   await seedMaster(db.db, store, config, logger);
+  // The catalog's books branch, brought into being here rather than at the first tenant registration
+  // (wire-units.ts ensureBooksBranch). LOG AND CONTINUE on failure: a catalog that is unreachable at
+  // start-up must not take the Manager down, and what a failure leaves behind is exactly the state
+  // this call was added to end, never a worse one. It is logged at error because this is the only
+  // place that can say which branch and why — /readyz carries a verdict, not a reason.
+  if (units.ensureBooksBranch) {
+    try {
+      await units.ensureBooksBranch();
+    } catch (err) {
+      logger.error(
+        { err: String(err) },
+        "the catalog's books branch could not be created — the tenant ApplicationSet's git generator has no revision to resolve, so it and the root Application above it stay in error until a tenant is registered",
+      );
+    }
+  }
   // The size table (domains/units/unit-size.ts): fill in any of the three sizes this database
   // does not carry yet, and touch none that it does. Create-only, so an installation that edited a
   // size keeps its figures across every restart — the same rule the Vault seeder follows, and for the
