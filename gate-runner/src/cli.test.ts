@@ -107,6 +107,11 @@ describe("runGateCli fail-closed", () => {
   it("says the same thing about a repository whose manifest is fine and one that has no manifest at all", async () => {
     const good = await runGateCli(buildOnlyInputs(await buildOnlyRepo()), managerReachable);
     const empty = await runGateCli(buildOnlyInputs(await ws()), managerReachable);
+    // THE LIST IS HELD NON-EMPTY FIRST, and that is not belt and braces. With gates: [] — the exact
+    // apps3 shape — both `map` calls answer [] and both `gates[0]?.found` answer undefined, so every
+    // comparison below holds on the very report this check exists to refuse. An assertion that
+    // passes on the defect it is written against is not the one that catches it.
+    expect(good.gates.length).toBeGreaterThan(0);
     expect(good.gates.map((g) => g.id)).toEqual(empty.gates.map((g) => g.id));
     expect(good.gates[0]?.found).toBe(empty.gates[0]?.found);
     expect(good.manifest).toBeNull();

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { TektonGateRunner, type GateRunCluster, type ReportConfigMap, type TaskRunOutcome, type TektonGateRunnerConfig } from "./gate-runner-tekton.ts";
 import type { GateJobRequest } from "./port.ts";
-import { reportHashPayload, type GateReport } from "../../../shared/gates.ts";
+import { reportHashPayload, SANDBOX_FENCE_GATE_ID, type GateReport } from "../../../shared/gates.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
@@ -302,6 +302,60 @@ describe("TektonGateRunner", () => {
       await expect(rejected).rejects.toMatchObject({ code: "SANDBOX_DEGRADED", http: 503 });
     });
   }
+
+  // WHAT THE OPERATOR IS LEFT HOLDING. The refusal ends the run before anything writes
+  // runs.plan_json and the report ConfigMap is already reaped, so the G25 row the runner authored —
+  // the one row that names which sandbox gates therefore did not run — reaches a person only if this
+  // message carries it. A check asserting the throw alone passes with that row dropped, which is how
+  // it went missing.
+  it("poll: the refusal carries the runner's own fence row, naming the gates that did not run", async () => {
+    const green = report("pass");
+    const refused = {
+      ...green,
+      verdict: "fail" as const,
+      manifest: null,
+      gates: [
+        {
+          id: SANDBOX_FENCE_GATE_ID,
+          title: "sandbox fence",
+          severity: "hard" as const,
+          status: "fail" as const,
+          expected: "the fence holds before any gate reads the repository",
+          found: "The sandbox fence did not hold: the Manager's own address was reachable. G1, G2, G3 did not run — no gate has read this repository.",
+          reason: "a fault in the platform's own validation sandbox",
+          evidence: [],
+          detail: "the sandbox fence did not hold — no gate ran",
+        },
+      ],
+      sandbox: { ...green.sandbox, managerAddrDenied: false },
+    };
+    const { reportHash: _drop, ...rest } = refused;
+    const body = { ...rest, reportHash: createHash("sha256").update(reportHashPayload(rest)).digest("hex") };
+    const c = new FakeCluster({ outcome: { succeeded: true }, cm: { state: "report", json: JSON.stringify(body) }, taskRuns: OOM_TASKRUNS });
+
+    const rejected = new TektonGateRunner(cfg(), c, () => "gr8").poll("gr8");
+
+    await expect(rejected).rejects.toMatchObject({ code: "SANDBOX_DEGRADED" });
+    const message = await rejected.catch((e: { message: string }) => e.message);
+    expect(message).toContain("G1, G2, G3 did not run");
+    expect(message).toContain("G25 sandbox fence");
+  });
+
+  it("poll: a refusal on a report carrying no fence row says the row is missing, rather than nothing", async () => {
+    // A runner older than the row that says which gates were skipped writes gates: [] — the exact
+    // apps3 shape. The refusal must state that the report does not say, instead of falling silent
+    // and reading as a refusal with nothing behind it.
+    const green = report("pass");
+    const silent = { ...green, verdict: "fail" as const, manifest: null, gates: [], sandbox: { ...green.sandbox, mustFailDenied: false } };
+    const { reportHash: _drop, ...rest } = silent;
+    const body = { ...rest, reportHash: createHash("sha256").update(reportHashPayload(rest)).digest("hex") };
+    const c = new FakeCluster({ outcome: { succeeded: true }, cm: { state: "report", json: JSON.stringify(body) }, taskRuns: OOM_TASKRUNS });
+
+    const message = await new TektonGateRunner(cfg(), c, () => "gr9").poll("gr9").catch((e: { message: string }) => e.message);
+
+    expect(message).toContain("no sandbox-side row of its own");
+    expect(message).toContain("no gates at all");
+  });
 
   it("poll: INNOCENT CASE — the same report with every leg of the attestation green is accepted", async () => {
     const c = new FakeCluster({ outcome: { succeeded: true }, cm: { state: "report", json: JSON.stringify(report("pass")) }, taskRuns: OOM_TASKRUNS });

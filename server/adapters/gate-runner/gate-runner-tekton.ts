@@ -17,7 +17,7 @@
 // reach works in the repository under validation, and not one of these is that repository's fault.
 import { createHash } from "node:crypto";
 import { KubeConfig, CoreV1Api, CustomObjectsApi, ApiException } from "@kubernetes/client-node";
-import { GateReportSchema, IncompleteGateRunSchema, reportHashPayload, sandboxFailures, sandboxGreen, type GateReport } from "../../../shared/gates.ts";
+import { GateReportSchema, IncompleteGateRunSchema, reportHashPayload, sandboxFailures, sandboxGreen, SANDBOX_SIDE_GATE_IDS, type GateReport } from "../../../shared/gates.ts";
 import type { GateRunner, GateJobRequest, GateJobProgress } from "./port.ts";
 import { AppError, errGateIncomplete, errSandboxDegraded } from "../../kernel/errors.ts";
 
@@ -419,10 +419,32 @@ export class TektonGateRunner implements GateRunner {
       "the sandbox is what keeps untrusted repository content away from the cluster it is being onboarded to; a run inside a fence that is not provably holding is not a validation, whatever its gates report.",
       ...sandboxFailures(report.sandbox),
       `must-fail targets probed: ${report.sandbox.mustFailTargets.length > 0 ? report.sandbox.mustFailTargets.join(", ") : "(none configured)"}`,
+      // WHICH GATES THEREFORE DID NOT RUN, in the runner's own words rather than in a second set.
+      // The refusal ends the run before anything writes runs.plan_json, so the G25 row the runner
+      // authored reaches no reader unless this message carries it — and a count of gates that did
+      // not run says nothing about which parts of the repository went uninspected. `sandboxRows`
+      // reads the report in hand: the ConfigMap it came out of is already reaped by here, and the
+      // parsed report is the only copy left.
+      ...this.sandboxRows(report),
       `the runner that measured this: ${report.runnerVersion}`,
       "this is fixed in the platform's own gate-runner namespace — its egress NetworkPolicy — and the onboarding is re-run afterwards.",
     ];
     return errSandboxDegraded(`gate-runner (tekton): ${lines.join("\n")}`);
+  }
+
+  /** The rows the runner wrote about its own fence, as lines a person reads.
+   *
+   *  A fence-refused report carries exactly one gate — G25, whose `found` names every sandbox gate
+   *  that did not run. A report carrying none of them says so rather than falling silent, because a
+   *  refusal that listed nothing would read as a refusal with nothing behind it. */
+  private sandboxRows(report: GateReport): string[] {
+    const rows = report.gates.filter((g) => SANDBOX_SIDE_GATE_IDS.includes(g.id));
+    if (rows.length === 0) {
+      return [
+        `the report carries no sandbox-side row of its own (it carries ${report.gates.length > 0 ? report.gates.map((g) => g.id).join(", ") : "no gates at all"}), so which sandbox gates did not run is not stated in it — the runner that wrote it is older than the row that says so.`,
+      ];
+    }
+    return rows.map((g) => `${g.id} ${g.title}: ${g.found}`);
   }
 
   /** Best-effort delete of a run's objects (PipelineRun + report ConfigMap + credential Secret). */

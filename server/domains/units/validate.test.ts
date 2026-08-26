@@ -292,7 +292,11 @@ describe("validateOnboard", () => {
       expect(outcome.verdict).toBe("fail");
     });
 
-    it("reads no registration and no tenant list for gates that are not going to run", async () => {
+    // THE TENANT LIST IS READ UNCONDITIONALLY AND DELIBERATELY, above the branch, because G23 always
+    // needs it — measured with a counting dependency: one read in a no-manifest run. So this holds
+    // the REGISTRATION half alone, and says so: a title claiming the tenant list too is what somebody
+    // greps for when they want to know whether that read is guarded, and it is not.
+    it("reads no registration for gates that are not going to run", async () => {
       const repo = new FakeRepoReader({ resolvedSha: SHA });
       const runner = new FakeGateRunner({ report: report(g1Fail, "fail") });
       const attested = new FakeAttestedBuilds([{ unit: "unit-a", build: "shared-api" }]);

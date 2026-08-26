@@ -161,16 +161,24 @@ export const determinismGate: CheckGate = {
     // A BUILD-ONLY unit ships no chart, so there is no templates/ tree and no values file for `tpl`
     // to render. Say that, rather than reporting a clean scan of zero files: "scanned 0 actions, none
     // use lookup" is what a chart full of violations would look like if the scan had missed it.
+    //
+    // AND SAY WHICH OF THE TWO THINGS IS ACTUALLY KNOWN. `chartPath` is the RUN's dispatch parameter
+    // and `manifest` is what the repository declares, and this gate runs at pipeline.ts before the
+    // `manifest !== null` guard — so on a run whose G1 failed, nothing here has read the repository
+    // at all. One sentence for both cases claimed the manifest declares no chart on a report whose
+    // manifest is null, which is the same defect apps3 met from the other side: a row reporting on
+    // the repository from an input it does not have, and reporting it as a PASS, which reads exactly
+    // like a gate that looked.
     if (ctx.chartPath === null) {
-      return pass({
-        id: ID,
-        title: TITLE,
-        severity: SEVERITY,
-        expected: EXPECTED,
-        found:
-          `The manifest declares no chart, so this unit ships no Helm templates and no values file: ` +
-          `there is no template action to scan, and nothing of this repository is ever rendered.`,
-      });
+      const found =
+        ctx.manifest === null
+          ? `This run was dispatched build-only, so there is no chart directory to scan and no ` +
+            `template action in it. No manifest was parsed for this report, so nothing here says ` +
+            `what the repository declares — the row before this one is where that stands.`
+          : `The manifest declares no chart, so this unit ships no Helm templates and no values ` +
+            `file: there is no template action to scan, and nothing of this repository is ever ` +
+            `rendered.`;
+      return pass({ id: ID, title: TITLE, severity: SEVERITY, expected: EXPECTED, found });
     }
     const prefix = chartPrefix(ctx.chartPath);
     const scope = prefix === "" ? "<chart root>" : prefix;

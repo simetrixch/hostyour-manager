@@ -40,7 +40,14 @@ export interface GateJobProgress {
 }
 
 export interface GateRunner {
-  /** Submit a validation job. Throws RUNNER_BUSY when the queue-of-1 is busy — fail-closed. */
+  /** Submit a validation job.
+   *
+   *  RUNNER_BUSY IS A REFUSAL THE PORT ALLOWS AND NO IMPLEMENTATION MAKES TODAY. The Tekton adapter
+   *  submits a PipelineRun and lets the cluster schedule it, so nothing there is a queue that can be
+   *  full; the only caller of errRunnerBusy in the tree is the test double, which scripts it so the
+   *  domain can be driven through that path. It stays in the contract because an implementation that
+   *  serialises runs is the obvious next one and a caller has to be written for it — but a reader of
+   *  this line must not go looking for the queue in the adapter, because there is none. */
   submit(req: GateJobRequest): Promise<{ jobId: string }>;
   /** Poll a job's progress; `report` attaches once the phase reaches "done".
    *

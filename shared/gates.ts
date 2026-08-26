@@ -167,6 +167,22 @@ export function hardGatesPass(gates: GateResult[]): boolean {
   return gates.every((g) => g.severity !== "hard" || g.status === "pass");
 }
 
+/** The gate whose subject is the PLATFORM's own sandbox rather than the repository under validation.
+ *
+ *  IT LIVES HERE BECAUSE BOTH SIDES NAME IT. The runner writes this row instead of its gates when
+ *  its egress self-probe was not green; the Manager's refusal reads it back out of the report so the
+ *  operator is told WHICH sandbox gates therefore did not run. Two constants would put that pairing
+ *  one edit away from coming apart, with nothing reporting it until a run inside a broken fence —
+ *  which is the one moment nobody is in a position to notice a missing line. */
+export const SANDBOX_FENCE_GATE_ID = "G25";
+
+/** Every gate id a report can carry that is about the sandbox and not about the repository.
+ *
+ *  One entry today. It is a LIST because the reader on the Manager's side filters by membership, and
+ *  a second platform-side row added later has to reach that reader without anybody remembering to
+ *  widen a comparison. */
+export const SANDBOX_SIDE_GATE_IDS: readonly string[] = [SANDBOX_FENCE_GATE_ID];
+
 /** The verdict's SANDBOX leg: every probe of the fence self-attestation answered the way a holding
  *  fence answers. It lives HERE, beside hardGatesPass, because two separate images read it — the
  *  runner before it renders untrusted content, and the Manager when the report arrives — and a

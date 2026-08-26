@@ -15,9 +15,11 @@
 // must not be readable as anything a repository could fix.
 import { fail } from "./result.ts";
 import type { GateResult, SandboxAttestation } from "../../../shared/gates.ts";
-import { sandboxFailures } from "../../../shared/gates.ts";
+import { sandboxFailures, SANDBOX_FENCE_GATE_ID } from "../../../shared/gates.ts";
 
-export const SANDBOX_FENCE_GATE_ID = "G25";
+// Re-exported rather than declared: the id is a fact BOTH sides of the boundary read, so it stands
+// in shared/gates.ts beside the schema, and this file goes on being where a reader looks for it.
+export { SANDBOX_FENCE_GATE_ID };
 const TITLE = "sandbox fence";
 const SEVERITY = "hard" as const;
 const EXPECTED =

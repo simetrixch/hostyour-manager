@@ -7,18 +7,57 @@ import { describe, expect, it } from "vitest";
 import type { GateContext } from "./gate.ts";
 import { determinismGate } from "./determinism.gate.ts";
 
-function makeCtx(files: Record<string, string>, chartPath = "deploy/chart"): GateContext {
+function makeCtx(
+  files: Record<string, string>,
+  chartPath: string | null = "deploy/chart",
+  manifest: GateContext["manifest"] = null,
+): GateContext {
   return {
     targetName: "acme",
     stage: "dev",
     chartPath,
     clusterValueFiles: [],
     files: new Map(Object.entries(files)),
-    manifest: null,
+    manifest,
     rendered: [],
     dependencies: [],
   };
 }
+
+/** A parsed manifest that declares no chart — a build-only unit the sandbox actually read. */
+function buildOnlyManifest(): GateContext["manifest"] {
+  return {
+    name: "acme",
+    owner: "acme",
+    builds: [{ name: "acme-api", containerfile: "Containerfile" }],
+    envs: ["dev"],
+    services: [],
+    secrets: [],
+  } as unknown as GateContext["manifest"];
+}
+
+// WHAT THIS GATE MAY CLAIM ON A RUN THAT READ NOTHING. G2 runs at pipeline.ts:87, BEFORE the
+// `manifest !== null` guard at :90, so a report whose G1 failed reaches it with `chartPath` — the
+// RUN's dispatch parameter — set and `manifest` null. One sentence for both cases said "the manifest
+// declares no chart" about a report that carries no manifest: a PASS row reporting on the repository
+// from an input it does not have, which is the apps3 defect from the other side.
+describe("determinismGate on a build-only dispatch", () => {
+  it("says the manifest declares no chart only when a manifest was actually parsed", () => {
+    const r = determinismGate.check(makeCtx({}, null, buildOnlyManifest()));
+
+    expect(r.status).toBe("pass");
+    expect(r.found).toContain("The manifest declares no chart");
+  });
+
+  it("claims nothing about the manifest when the report carries none", () => {
+    const r = determinismGate.check(makeCtx({}, null));
+
+    expect(r.status).toBe("pass");
+    expect(r.found).not.toContain("The manifest declares no chart");
+    expect(r.found).toContain("No manifest was parsed for this report");
+    expect(r.found).toContain("dispatched build-only");
+  });
+});
 
 describe("determinismGate determinism", () => {
   it("passes when no template uses a non-deterministic construct", () => {
