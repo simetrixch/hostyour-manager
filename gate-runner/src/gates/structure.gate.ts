@@ -17,12 +17,12 @@
 import { parse } from "yaml";
 import { fail, pass } from "./result.ts";
 import type { GateResult } from "../../../shared/gates.ts";
-import { ConsumerManifestSchema, type ConsumerManifest } from "../../../shared/consumer.ts";
+import { ConsumerManifestSchema, CONSUMER_MANIFEST_PATH, type ConsumerManifest } from "../../../shared/consumer.ts";
 
 const ID = "G1";
 const TITLE = "structure";
 const SEVERITY = "hard" as const;
-const MANIFEST_PATH = "deploy/platform.yaml";
+const MANIFEST_PATH = CONSUMER_MANIFEST_PATH;
 const ISSUE_CAP = 6; // keep the schema-issue summary bounded for a hostile manifest.
 const TEXT_CAP = 200; // cap any echoed untrusted string (a parse-error message, a chart name).
 

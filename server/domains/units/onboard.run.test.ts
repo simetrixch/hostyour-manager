@@ -5,40 +5,18 @@ import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, OnboardParams, DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
-import { seedClusterMaps } from "./cluster-map.fixture.ts";
-import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
+import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter, FakeRepoCredentialWriter } from "../../adapters/kube/testing/fake.ts";
 import type { RoleManifest } from "../../adapters/kube/port.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
-import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
-import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput } from "./vault-seeder.ts";
-import { clusterMapPath } from "../../../shared/cluster-values.ts";
-
-const SHA = "a".repeat(40);
-/** The tag the release cycle minted for the fixture release {version 1.0.0, channel stable} — what
- *  the bump wrote into the delivery branch's values file and the build run's release-tag param. */
-const MINTED_TAG = "1.0.0-stable-20260719120000";
-
-/** The manifest every DEPLOYABLE fixture onboards: a chart + one declared build. */
-const MANIFEST: ConsumerManifest = {
-  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
-  name: "acme", owner: "team-acme", envs: ["prod"],
-  chart: { path: "deploy/chart" }, services: [], databases: [], secrets: [],
-  builds: [{ name: "acme-api", containerfile: "Containerfile" }],
-};
-/** The BUILD-ONLY twin: no chart — the deploy is central, only the build belongs to the unit. */
-const BUILD_ONLY_MANIFEST: ConsumerManifest = { ...MANIFEST, chart: undefined } as ConsumerManifest;
-/** The chart's per-stage pins: the builds[] entry whose `image` is the build name (G18's chart half)
- *  — and, on the delivery branch, the file the bump wrote the minted tag into (watch-deployment). */
-const CHART_PINS = `builds:\n  - name: acme-api\n    image: acme-api\n    tag: "${MINTED_TAG}-abc1234"\n`;
+import { CONSUMER_MANIFEST_PATH } from "../../../shared/consumer.ts";
+import { SHA, MINTED_TAG, MANIFEST, BUILD_ONLY_MANIFEST, CHART_PINS, passReport, ports, FakeSeeder } from "./onboard.fixture.ts";
 
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
@@ -47,104 +25,6 @@ let db: DbHandle;
 // exactly that step, which is the correct behaviour and not what these tests are about.
 beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
-
-function passReport(manifest: ConsumerManifest = MANIFEST): GateReport {
-  return {
-    contractVersion: "1.4", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
-    requestedRef: "HEAD", resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest,
-    dependencies: [],
-    gates: [{ id: "G1", title: "manifest present", severity: "hard", status: "pass", expected: "x", found: "y", reason: null, detail: "ok" }],
-    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
-    verdict: "pass", reportHash: "h",
-  };
-}
-
-// The ceremony-secret seed must NOT fire in the zero-secret path; the build repo-pat seed fires on
-// EVERY onboard (one PAT per unit), so it is a recording attest-or-create here.
-class FakeSeeder implements VaultSeeder {
-  seeded: VaultSeedInput[] = [];
-  buildRepoPats: BuildRepoPatSeedInput[] = [];
-  deletedBuildRepoPats: BuildRepoPatDeleteInput[] = [];
-  deletedApp: AppSecretsDeleteInput[] = [];
-  /** Overridable so a test can drive the create-only re-run / attest paths. */
-  created = true;
-  async seed(i: VaultSeedInput): Promise<VaultSeedOutcome> { this.seeded.push(i); return { created: this.created }; }
-  async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
-  async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
-  async seedBuildRepoPat(i: BuildRepoPatSeedInput): Promise<VaultSeedOutcome> { this.buildRepoPats.push(i); return { created: this.created }; }
-  async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deletedBuildRepoPats.push(i); }
-  async deleteApp(i: AppSecretsDeleteInput): Promise<void> { this.deletedApp.push(i); }
-  async deletePostgres(): Promise<void> {}
-  async deleteMongodb(): Promise<void> {}
-  async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
-  async deleteTenantCrypto(): Promise<void> {}
-}
-
-// Every fixture onboards to the prod stage, so a fixed resolver answers every cluster with "prod" —
-// the stage boundary Registrations.commitRegistration checks before it ever writes a stage file.
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
-
-/** A FakePlatformRepo whose cluster values chain carries `global.unitApex` for each domain — onboard's
- *  planStream resolves unitApex from exactly this chain (admission-policy.ts unitApexFromChain). */
-function platformRepo(...domains: string[]): FakePlatformRepo {
-  const repo = new FakePlatformRepo();
-  for (const domain of domains) {
-    repo.seed(domain, "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-    for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `clusters/platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
-    repo.seed(domain, clusterMapPath(domain), `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
-  }
-  return repo;
-}
-
-type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter };
-
-/** The full port set with every release-cycle fake wired green: the dispatched workflow run
- *  completes with success, the build plane carries the unit's Succeeded release run, and the DNS
- *  fake knows the target cluster's own A record. */
-function ports(over: Partial<OnboardPorts> & FakeKube = {}): OnboardPorts {
-  const { argo, cluster, projects, ...portOver } = over;
-  const buildPlane = new FakeBuildPlane();
-  buildPlane.seedReleaseRun("acme", { runName: "acme-release-1", releaseTag: MINTED_TAG, succeeded: true });
-  const dns = new FakeDnsProvider();
-  dns.seed("s1.example", "A", "203.0.113.10");
-  // ONE repo behind both the registrations and the build-plane read: the registrations and the cluster maps
-  // live in the same platform repo, exactly as they do in the wiring. The deployable form targets
-  // s1 and the build-only form the master m1, so both carry a map.
-  const platform = platformRepo("s1.example", "m1.example");
-  return {
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
-    runner: new FakeGateRunner({ report: passReport() }),
-    registrations: new Registrations(platform, prodClusterStage),
-    resolveBuildPlaneFqdn: seedClusterMaps(platform, { "s1.example": "prod", "m1.example": "prod" }),
-    seeder: new FakeSeeder(),
-    resolver: new FakeClusterKubeResolver({
-      clusterReader: cluster ?? new FakeClusterReader({
-        deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },
-        smoke: { namespaceExists: true, workloads: [{ kind: "Deployment", name: "acme-web", available: true, desired: 1, ready: 1 }], externalSecretsReady: true },
-      }),
-      argoReader: argo ?? new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
-      projectWriter: projects ?? new FakeMasterProjectWriter(),
-      argoNamespace: "argocd",
-    }),
-    platformRepoURL: "https://github.com/x/hostyour-cloud.git",
-    tenantSubdomains: async () => [],
-    attestListening: true,
-    argoWatchTimeoutMs: 1000,
-    releaseWorkflowTimeoutMs: 200,
-    releaseBuildTimeoutMs: 200,
-    releasePollIntervalMs: 1,
-    dispatchRetry: { budgetMs: 50, intervalMs: 1 },
-    github: new FakeGitHubConsumer(),
-    webhookSecret: "hmac_test",
-    webhookSubdomain: "build",
-    consumerRepo: new FakeConsumerRepo(),
-    buildRbac: new FakeBuildRbacWriter(),
-    repoCredential: new FakeRepoCredentialWriter(),
-    buildPlane,
-    dns,
-    ...portOver,
-  };
-}
 
 const BASE = {
   consumerName: "acme", repoURL: "https://github.com/x/acme.git", owner: "team-acme",
@@ -484,5 +364,89 @@ describe("onboard run definition", () => {
     expect(res.params.domain).toBe("s1.example");
     expect(res.plan.targetId).toBe("cls_1");
     expect(res.plan.steps.map((s) => s.name)).not.toContain("watch-deployment");
+  });
+});
+
+// THE ONE BRANCH THAT SKIPS THE GATE, reached the way an attacker would reach it: from the ordinary
+// wizard route. Every test here comes in through makeOnboardDef(...).planStream, the exact entry the
+// browser uses, and asserts on the gate runner's own record of what it was asked to do — a run
+// counted by `submitted` is a run that went through the gate.
+describe("the first master's ungated onboarding, tried from the ordinary route", () => {
+  const PLATFORM_UNIT = "hostyour";
+  const PLATFORM_MANIFEST = JSON.stringify({
+    apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", name: PLATFORM_UNIT, owner: "platform",
+    envs: ["dev"], builds: [{ name: "hostyour-manager", containerfile: "Containerfile" }],
+  });
+
+  /** The ports a first master runs with. `namesPlatformUnit: false` is the Manager that names no
+   *  platform unit at all — the state every Manager that does not install first masters is in. */
+  function platformPorts(over: Partial<OnboardPorts> = {}, namesPlatformUnit = true): { prt: OnboardPorts; runner: FakeGateRunner } {
+    const runner = new FakeGateRunner({ report: passReport(BUILD_ONLY_MANIFEST) });
+    const prt = ports({
+      runner,
+      repo: new FakeRepoReader({ resolvedSha: SHA, files: { [CONSUMER_MANIFEST_PATH]: PLATFORM_MANIFEST, "deploy/chart/values-prod.yaml": CHART_PINS } }),
+      ...(namesPlatformUnit ? { platformUnitName: PLATFORM_UNIT } : {}),
+      ...over,
+    });
+    return { prt, runner };
+  }
+
+  const request = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    consumerName: PLATFORM_UNIT, repoURL: "https://github.com/x/hostyour.git", version: "1.0.0", channel: "stable",
+    stage: "dev", owner: "platform", chartPath: "deploy/chart", repoCredentialId: "cred_pat", ...over,
+  });
+
+  const planCtx = (): { db: DbHandle["db"]; log: () => undefined; signal: AbortSignal } =>
+    ({ db: db.db, log: () => undefined, signal: new AbortController().signal });
+
+  it("plans the platform's own unit WITHOUT dispatching a gate run, and says so in the plan", async () => {
+    seedClusters();
+    const { prt, runner } = platformPorts();
+    const res = await makeOnboardDef(prt).planStream!(request(), planCtx());
+    expect(res.outcome).toBe("planned");
+    if (res.outcome !== "planned") return;
+    expect(runner.submitted).toHaveLength(0);
+    expect(res.params.form).toBe("build-only");
+    if (res.params.form !== "build-only") return;
+    // NOT a report. A pass no check could have produced is the shape LAW 0 forbids outright.
+    expect(res.params.report).toBeUndefined();
+    expect(res.params.ungated?.admittedBy).toHaveLength(4);
+    expect(res.params.builds).toEqual(["hostyour-manager"]);
+    // The operator approving it is told, in the summary and in a warning, that nothing checked this.
+    expect(res.plan.summary).toContain("WITHOUT A GATE RUN");
+    expect(res.plan.warnings.join(" ")).toContain("No gate ran");
+    // And the check step, which would re-run the gates at execute time, is not in the plan.
+    expect(res.plan.steps.map((st) => st.name)).not.toContain("check");
+  });
+
+  // EACH ROW IS AN ATTEMPT TO REACH THE UNGATED BRANCH, and each must end with the gate dispatched.
+  const attempts: [string, boolean, Record<string, unknown>][] = [
+    ["a customer's build-only consumer on a from-zero installation", true, { consumerName: "acme" }],
+    ["the platform's own unit onboarded to a target cluster", true, { clusterId: "cls_1", stage: undefined }],
+    ["the platform's own unit on a Manager that names no platform unit", false, {}],
+  ];
+  for (const [what, namesPlatformUnit, reqOver] of attempts) {
+    it(`sends ${what} through the gate`, async () => {
+      seedClusters();
+      const { prt, runner } = platformPorts({}, namesPlatformUnit);
+      const res = await makeOnboardDef(prt).planStream!(request(reqOver), planCtx());
+      expect(runner.submitted, what).toHaveLength(1);
+      // It went through the gate; whether that gate passed is the gate's business, not this test's.
+      expect(["planned", "rejected"]).toContain(res.outcome);
+    });
+  }
+
+  it("sends the platform's own unit through the gate once ANYTHING is registered — the branch is spent", async () => {
+    seedClusters();
+    const { prt, runner } = platformPorts();
+    // A single registration on the books branch, of any unit, ends the first installation forever.
+    await prt.registrations.commitRegistration({
+      unit: { name: "acme", repoURL: "https://github.com/x/acme.git", owner: "team-acme", suspended: false, quiesced: false },
+      builds: ["acme-api"],
+      runId: "run_seed",
+    });
+    const res = await makeOnboardDef(prt).planStream!(request(), planCtx());
+    expect(runner.submitted).toHaveLength(1);
+    expect(["planned", "rejected"]).toContain(res.outcome);
   });
 });

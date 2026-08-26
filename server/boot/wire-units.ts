@@ -418,6 +418,11 @@ function buildConsumerOnboarding(
     // The gate-runner's own sandbox self-probe is the primary lock; a manager-side probe of the
     // must-fail targets before each job is a follow-up, so this attestation is asserted for now.
     attestListening: true,
+    // The platform's OWN unit, by name, from the deployment. Present ⇒ that one unit may be
+    // onboarded without a gate run, and only at the first installation in the master role
+    // (domains/units/first-master.ts holds the other three conditions). Omitted when unset, so a
+    // Manager that does not install first masters carries no such branch at all.
+    ...(config.platformUnitName ? { platformUnitName: config.platformUnitName } : {}),
     // The manager-side bound of the validation poll — a margin above the sandbox job budget
     // (see the GATE_* pair above).
     validationBudgetMs: GATE_POLL_BUDGET_MS,

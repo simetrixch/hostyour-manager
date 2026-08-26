@@ -54,6 +54,17 @@ const EnvSchema = z.object({
   // an admin session. Default 0770 — the owner and the socket's group; the group is whatever the
   // deployment gives the inode, and no account is in it until one is deliberately put there.
   ADMIN_SOCKET_MODE: z.string().regex(/^0?[0-7]{3}$/, "ADMIN_SOCKET_MODE must be an octal file mode of three digits, e.g. 0770").default("0770"),
+  // The consumer NAME the platform's own unit is onboarded under — the ONE unit the product owner
+  // has exempted from the gate, and only at the first installation in the master role
+  // (domains/units/first-master.ts states every condition). The name comes from the deployment and
+  // never from the onboard request: a name a caller could put in the request is a name any caller
+  // can put in the request.
+  //
+  // OPTIONAL, and absent means the exemption is CLOSED — no unit may skip the gate on this Manager.
+  // That is not a default standing in for a real value: a Manager that does not install first
+  // masters has no platform unit, and the absent state disables a branch rather than mis-pointing
+  // one. Every other onboarding, on every Manager, goes through the gate either way.
+  PLATFORM_UNIT_NAME: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/, "PLATFORM_UNIT_NAME must be a DNS-1123 label of at most 40 characters — it is a unit name").optional(),
   // OPTIONAL kubeconfig-file override for every kube client (dev/test — point the adapters at a
   // file). Unset/empty ⇒ the clients load the pod ServiceAccount's in-cluster credentials
   // (kube.ts buildKubeConfig → loadFromCluster): the Manager acts on its OWN cluster over RBAC
@@ -251,6 +262,10 @@ export interface Config {
    *  base 8). Connecting to that socket needs the WRITE bit, and the socket mints an operator
    *  session with no password — so this number is the boundary, and the deployment sets it. */
   adminSocketMode: number;
+  /** The consumer name of the platform's own unit (PLATFORM_UNIT_NAME). Present ⇒ THAT unit, and no
+   *  other, may be onboarded without a gate run — and only at the first installation in the master
+   *  role, under the conditions domains/units/first-master.ts states. Absent ⇒ the branch is closed. */
+  platformUnitName?: string;
   /** OPTIONAL kubeconfig-file override for the kube clients (dev/test). Absent ⇒ the adapters use
    *  the pod ServiceAccount's in-cluster credentials (loadFromCluster) — the production mode.
    *  Never part of a feature's enable gate: onboarding goes live without it. */
@@ -388,6 +403,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     adminSocketPath: e.ADMIN_SOCKET_PATH,
     // Base 8, guaranteed by the schema's octal-digit regex above.
     adminSocketMode: Number.parseInt(e.ADMIN_SOCKET_MODE, 8),
+    ...(e.PLATFORM_UNIT_NAME ? { platformUnitName: e.PLATFORM_UNIT_NAME } : {}),
     // Empty string counts as unset (deployments often template the var to "") — absent means
     // in-cluster, so the property is omitted rather than carried as a falsy sentinel.
     ...(e.KUBECONFIG_PATH ? { kubeconfigPath: e.KUBECONFIG_PATH } : {}),

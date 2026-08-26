@@ -7,7 +7,7 @@ import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE } from "../../../shared/release.ts";
-import { GateReportSchema } from "../../../shared/gates.ts";
+import { GateReportSchema, UngatedOnboardSchema } from "../../../shared/gates.ts";
 import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, consumerArgoAppName } from "../../../shared/consumer.ts";
 import type { Activator } from "../../adapters/activation/port.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
@@ -29,6 +29,7 @@ import {
   triggerReleaseStep, watchReleaseWorkflowStep, watchReleaseBuildStep, watchDeploymentStep, type ReleaseCycleRuntime,
 } from "./onboard-release-cycle.ts";
 import { checkStep, DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
+import { admitFirstMasterUngated, planUngatedFirstMaster } from "./first-master.ts";
 import { writeRegistrationStep, writeBuildRegistrationStep, recordBuildOnlyStep } from "./onboard-registration.ts";
 import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import { AppError, errNotFound } from "../../kernel/errors.ts";
@@ -106,13 +107,16 @@ const OnboardParamsBase = z.object({
   // pipeline's to mint, so neither stands here. Never empty: the gates hard-fail a manifest
   // without builds.
   builds: z.array(z.string()),
-  report: GateReportSchema, // the composed, approved report — kept in the run record, never committed
 });
 
 /** The DEPLOYABLE form: everything the target cluster adds — its identity, the chart, and the
  *  manifest facts the registration carries. */
 export const DeployableOnboardParams = OnboardParamsBase.extend({
   form: z.literal("deployable"),
+  // The composed, approved gate report — kept in the run record, never committed. REQUIRED on this
+  // form and with no counterpart beside it: a deployable unit is the one a gate renders a chart
+  // for, and there is no path on which one is onboarded without a gate run.
+  report: GateReportSchema,
   clusterId: z.string().startsWith("cls_"),
   // The target cluster's SHORT NAME (clusterShortName of its domain, e.g. "m1") — the stage
   // registration's own `cluster` field, which the consumers ApplicationSet selects on.
@@ -163,13 +167,31 @@ export const DeployableOnboardParams = OnboardParamsBase.extend({
 });
 export type DeployableOnboardParams = z.infer<typeof DeployableOnboardParams>;
 
-/** The BUILD-ONLY form: nothing beyond the base — no cluster and no chart. */
+/** The BUILD-ONLY form: no cluster and no chart, and the only form that can carry `ungated`
+ *  instead of a report — the platform's own unit at the first installation in the master role
+ *  (first-master.ts states every condition that admits it). */
 export const BuildOnlyOnboardParams = OnboardParamsBase.extend({
   form: z.literal("build-only"),
+  // EXACTLY ONE of these two stands here, and the union's refine below is what says so. They are
+  // separate fields rather than one field of two shapes because a reader asking "was this gated?"
+  // must not have to inspect a value to find out, and because an ungated record is NOT a report and
+  // must never be read as one (shared/gates.ts UngatedOnboardSchema).
+  report: GateReportSchema.optional(),
+  ungated: UngatedOnboardSchema.optional(),
 });
 export type BuildOnlyOnboardParams = z.infer<typeof BuildOnlyOnboardParams>;
 
-export const OnboardParams = z.discriminatedUnion("form", [DeployableOnboardParams, BuildOnlyOnboardParams]);
+export const OnboardParams = z.discriminatedUnion("form", [DeployableOnboardParams, BuildOnlyOnboardParams])
+  .superRefine((p, ctx) => {
+    if (p.form !== "build-only") return;
+    if ((p.report === undefined) === (p.ungated === undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["report"],
+        message: "a build-only onboarding carries exactly one of report (a gate run produced it) and ungated (no gate ran at all)",
+      });
+    }
+  });
 export type OnboardParams = z.infer<typeof OnboardParams>;
 
 /** The Manager-side clients the steps drive (master-local; no SSH). The kube clients are no
@@ -250,6 +272,11 @@ export interface OnboardPorts {
    *  remove it. Optional but UNCONDITIONALLY needed by onboard — absent ⇒ inject-release-kit fails
    *  loud (no release kit → no release cycle), never a silent skip (setup-webhook precedent). */
   consumerRepo?: ConsumerRepo;
+  /** The consumer name of the PLATFORM'S OWN unit (config.ts PLATFORM_UNIT_NAME). The one unit that
+   *  may be onboarded without a gate run, and only at the first installation in the master role —
+   *  first-master.ts states the other three conditions. Absent ⇒ no onboarding on this Manager may
+   *  skip the gate, which is where every Manager that does not install first masters stands. */
+  platformUnitName?: string;
 }
 
 function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[] {
@@ -327,7 +354,12 @@ function buildOnlySteps(ports: OnboardPorts, p: BuildOnlyOnboardParams): Step[] 
     // touches git, the local Vault and the build plane's own namespaces, all on the cluster the
     // manager itself runs on.
     preflightScopesStep(ports, p),
-    checkStep(ports, p),
+    // The check step RE-RUNS the gates at the current head, so the one onboarding that was admitted
+    // without a gate has no check to run: leaving it in would dispatch at execute time the very
+    // sandbox the plan established there is no point waiting for. Omitted rather than turned into a
+    // step that logs and passes — a step named "check" that checks nothing is a green light for a
+    // measurement that never happened.
+    ...(p.ungated ? [] : [checkStep(ports, p)]),
     writeBuildRegistrationStep(ports, p),
     seedRepoPatStep(ports, p),
     // The two build-namespace grants are load-bearing in this form too: hostyour-cloud ships no
@@ -473,6 +505,26 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         // ---- BUILD-ONLY: no target cluster; the gates run without a chart or a values chain ----
         const stage = req.stage!;
         const master = resolveMasterCluster(ctx.db);
+        // THE ONE ONBOARDING THAT SKIPS THE GATE, and only when every condition in first-master.ts
+        // holds. The verdict is computed here, in the open, and the refusal reason is logged even
+        // when it refuses — an operator wondering why the gate ran reads the answer off the run.
+        const exemption = admitFirstMasterUngated({
+          platformUnitName: ports.platformUnitName,
+          consumerName: req.consumerName,
+          buildOnly: true,
+          registeredUnits: await ports.registrations.listUnitNames(),
+          masterDomain: master.domain,
+        });
+        if (exemption.admitted) {
+          const planned = await planUngatedFirstMaster(
+            { repo: ports.repo, log: ctx.log, signal: ctx.signal, registrationBranch: ports.registrations.branch },
+            { ...req, stage },
+            { clusterId: master.clusterId, domain: master.domain, admittedBy: exemption.admittedBy },
+            (p) => onboardSteps(ports, p),
+          );
+          return planned;
+        }
+        ctx.log(`the gate applies to this onboarding — ${exemption.refusedBecause}`);
         const outcome = await validateOnboard(
           { repoURL: req.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: req.consumerName, repoCredentialId: req.repoCredentialId },
           { domain: master.domain, stage, clusterValueFiles: [] },

@@ -7,6 +7,11 @@ import { z } from "zod";
 import { UnitQuotaSchema, UnitSizeSchema, MongodbModeSchema, type UnitQuota, type UnitSize, type MongodbMode } from "./unit-size.ts";
 import { STAGE, type Stage } from "./enums.ts";
 
+/** WHERE a consumer repository keeps its manifest. One spelling, because two readers ask for it:
+ *  the sandbox's structure gate, and the manager on the one path that does not dispatch a sandbox
+ *  (domains/units/first-master.ts). A second literal would let the two ask for different files. */
+export const CONSUMER_MANIFEST_PATH = "deploy/platform.yaml";
+
 /** DNS-1123 label, <= 40 chars. The identity law (G1) requires
  *  name == namespace == Chart.name == pointer name. */
 const consumerName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/);

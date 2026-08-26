@@ -125,6 +125,35 @@ export const IncompleteGateRunSchema = z.object({
 });
 export type IncompleteGateRun = z.infer<typeof IncompleteGateRunSchema>;
 
+/** What an onboard run carries INSTEAD of a report when NO gate ran at all — the one onboarding the
+ *  product owner has exempted, the platform's own unit at the first installation in the master role.
+ *
+ *  IT IS NOT A REPORT AND MUST NEVER BE READ AS ONE, for the same reason IncompleteGateRun is not:
+ *  a GateReport carries a sandbox attestation and a reportHash, and filling those in here would
+ *  attest to a fence nothing observed and hash a report that does not exist. A pass that no check
+ *  could have produced is the shape LAW 0 forbids outright, so the exempted run says NOT GATED
+ *  rather than saying pass.
+ *
+ *  `admittedBy` carries EVERY condition that had to hold, in words, and not a boolean. This is the
+ *  one branch in the system that skips the gate: whoever reads the run afterwards must be able to
+ *  see exactly what admitted it without going to the source, and a list that ever grows shorter is
+ *  visible in the record itself.
+ *
+ *  `ungatedVersion` is a plain string and NOT a literal, for IncompleteGateRun's reason: a record
+ *  this Manager does not know must still deliver what it says. */
+export const UngatedOnboardSchema = z.object({
+  ungatedVersion: z.string(),
+  unit: z.string(),
+  cluster: z.string(),
+  resolvedSha: z.string().regex(/^[0-9a-f]{40}$/),
+  /** The build names read straight from the manifest, since no sandbox read them here. */
+  builds: z.array(z.string()),
+  /** Every condition that admitted this onboarding past the gate, one sentence each. */
+  admittedBy: z.array(z.string()).min(1),
+  generatedAt: z.string(), // RFC3339 UTC
+});
+export type UngatedOnboard = z.infer<typeof UngatedOnboardSchema>;
+
 /** The verdict's hard-gate leg: it passes only if
  *  every HARD gate passed. Callers still enforce the other two legs (schema-validates + the
  *  sandbox attestation) before treating a report as a pass. */
