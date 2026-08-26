@@ -1,4 +1,4 @@
-import { eq, and, isNull, sql } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { Db } from "../db/client.ts";
 import type { Logger } from "../kernel/logger.ts";
@@ -264,19 +264,24 @@ export class CredentialStore {
    *  (`unixepoch('subsec') * 1000`) — two seal()/rotate() calls close enough together (a rotate
    *  right after a seal, a loaded box under test-suite contention) CAN land in the same
    *  millisecond, and createdAt alone ties; ORDER BY on a tie is undefined, not "insertion
-   *  order". `rowid` is SQLite's own monotonically-increasing insert counter for this table (a
-   *  plain rowid table — `id` is TEXT, not an INTEGER PRIMARY KEY alias), so it is the exact,
-   *  zero-schema-change tiebreak: within any tied createdAt group, the row inserted later always
-   *  has the larger rowid. `excludeRotated` additionally drops superseded rows (rotatedAt set) so
-   *  "newest ACTIVE key" is exact — off by default to keep every existing caller's behavior
-   *  unchanged (they either count presence or run their own rotate bookkeeping over the rotated
-   *  rows). */
+   *  order". `id` breaks it: kernel/ids.ts mints a monotonic ULID, so within any tied createdAt
+   *  group the row sealed later always carries the larger id.
+   *
+   *  SQLite's own `rowid` would break the same tie and would do it across processes, which the id
+   *  cannot — one factory per process is the whole of its guarantee. It is not used, because it
+   *  never leaves the query: rowid is not selected onto the CredentialRef a caller is handed, so a
+   *  caller sorting rows it already holds, an operator typing ORDER BY id, and an export all sit
+   *  outside it and would each need their own answer. The id travels with the row, so there is one.
+   *
+   *  `excludeRotated` additionally drops superseded rows (rotatedAt set) so "newest ACTIVE key" is
+   *  exact — off by default to keep every existing caller's behavior unchanged (they either count
+   *  presence or run their own rotate bookkeeping over the rotated rows). */
   async list(filter?: { serverId?: string; kind?: CredentialKind; excludeRotated?: boolean }): Promise<CredentialRef[]> {
     const conds = [isNull(credentials.revokedAt)];
     if (filter?.serverId) conds.push(eq(credentials.serverId, filter.serverId));
     if (filter?.kind) conds.push(eq(credentials.kind, filter.kind));
     if (filter?.excludeRotated) conds.push(isNull(credentials.rotatedAt));
-    const rows = this.db.select().from(credentials).where(and(...conds)).orderBy(credentials.createdAt, sql`rowid`).all();
+    const rows = this.db.select().from(credentials).where(and(...conds)).orderBy(credentials.createdAt, credentials.id).all();
     return rows.map(toRef);
   }
 

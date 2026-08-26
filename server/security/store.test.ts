@@ -103,6 +103,63 @@ describe("CredentialStore (plaintext pass-through)", () => {
     expect((await store.list()).map((r) => r.fingerprint)).toEqual(["sha256:same", "sha256:same"]);
   });
 
+  // WHAT ORDERS list(). Callers pick "the newest key" with `.at(-1)` (adopt discard-password reads
+  // the fingerprint that way), so the last row has to be the one sealed last. createdAt is a
+  // millisecond DB clock and ties under load; the id breaks the tie because kernel/ids.ts mints a
+  // monotonic ULID. These two are about that tie and nothing else.
+  const SEALS = 120;
+
+  async function sealInOrder(store: CredentialStore): Promise<void> {
+    for (let i = 0; i < SEALS; i++) {
+      await store.seal({ kind: "pat", label: String(i), plaintext: Buffer.from("x"), fingerprint: "sha256:tie" });
+    }
+  }
+
+  it("credentials sealed inside one millisecond come back in the order they were sealed", async () => {
+    const { store, sqlite } = fresh();
+    await sealInOrder(store);
+
+    // How much this covered: rows whose createdAt differs are ordered by the clock and say nothing
+    // about the tiebreak. Only the tied neighbours exercise it, so the count of those is asserted —
+    // a run where every seal got its own millisecond would pass the ordering check below while
+    // measuring nothing about it.
+    const stamps = (sqlite.prepare("SELECT created_at FROM credentials ORDER BY created_at, id").all() as { created_at: number }[])
+      .map((r) => r.created_at);
+    const tiedPairs = stamps.filter((ms, i) => i > 0 && ms === stamps[i - 1]).length;
+    expect(tiedPairs, `${SEALS} seals produced no two rows inside one millisecond, so the ordering assertion below was never exercised`).toBeGreaterThan(0);
+
+    expect((await store.list()).map((r) => r.label)).toEqual([...Array(SEALS).keys()].map(String));
+  });
+
+  // THE OTHER HALF, and it is the query's and not the minter's. The test above cannot see the
+  // second ORDER BY key at all: SQLite scans a plain rowid table in rowid order, so a bare
+  // `ORDER BY created_at` returns a tied group in insertion order too, and every row sealed
+  // through this store has its id and its rowid rising together. So the group is built HERE, by
+  // hand, with the two DISAGREEING — inserted in one order, named in the other — which is the only
+  // state in which "ordered by created_at and then by id" and "ordered by created_at and then by
+  // whatever SQLite scans" answer differently.
+  it("a tied createdAt group comes back ordered by id, not by the order the rows were inserted in", async () => {
+    const { store, sqlite } = fresh();
+    const insert = sqlite.prepare(
+      "INSERT INTO credentials (id, kind, label, encrypted_blob, fingerprint, created_at) VALUES (?, 'pat', ?, 'plain:v0:eA==', 'sha256:tie', 7000)",
+    );
+    for (const [id, label] of [["cred_C", "third"], ["cred_A", "first"], ["cred_B", "second"]]) insert.run(id, label);
+
+    expect((await store.list()).map((r) => r.label)).toEqual(["first", "second", "third"]);
+  });
+
+  // The counter-probe of the assertion above: it compares the labels against 0..N-1, and that
+  // comparison must be able to see a single pair out of place. The trail is built HERE, out of the
+  // labels themselves, and NOT read back from the store — a probe starting from whatever the store
+  // returned would, on a store that orders badly, start from an already scrambled array, and then
+  // it asserts only that a scrambled array is not sorted, which is true whatever the comparison does.
+  it("the ordering assertion rejects a list with one adjacent pair swapped", () => {
+    const inOrder = [...Array(SEALS).keys()].map(String);
+    const swapped = inOrder.map((label, i) => (i === 0 ? inOrder[1] : i === 1 ? inOrder[0] : label));
+
+    expect(swapped).not.toEqual(inOrder);
+  });
+
   it("list returns active credentials only and writes the audit trail", async () => {
     const { store, sqlite } = fresh();
     const a = await store.seal({ kind: "pat", label: "a", plaintext: Buffer.from("aaaa"), fingerprint: "sha256:a" });

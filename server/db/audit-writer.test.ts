@@ -9,9 +9,9 @@ import { writeAudit } from "./audit-writer.ts";
 // `id` is the key an operator orders a trail by, and `ts` has millisecond resolution, so two rows
 // written inside one millisecond cannot be told apart by it. These tests are about that one
 // property of the id: one written later must sort after one written earlier, including when both
-// were written inside the same millisecond. SQLite's own rowid orders the table as well and
-// server/security/store.ts:262 reads a sibling table that way; what it does not do is travel onto
-// the row a caller gets, which is why the id is made to rise here as well.
+// were written inside the same millisecond. The rise comes from the minter every row of this
+// platform is named by (kernel/ids.ts newId), so what is measured here through the audit table is
+// the same property security/store.ts orders its credentials by.
 describe("audit id ordering (db/audit-writer.ts)", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
