@@ -19,6 +19,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
 // The ensure-images gate at RUN level — its placement inside the create-tenant/add-app step lists,
@@ -117,7 +118,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registrations:\n      host: ${HOST}\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: ${HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
@@ -225,7 +226,7 @@ describe("create-tenant planStream resolves the registry host", () => {
       resolveClusterValueFiles: async (domain, stage) => {
         resolved.push(`${domain}/${stage}`);
         // the profile's zot.<build-plane> for a foreign build plane
-        return [{ path: "installation/profile.yaml", content: "global:\n  endpoints:\n    registrations:\n      host: zot.build1.example\n" }];
+        return [{ path: clusterMapPath("m1.example"), content: "global:\n  endpoints:\n    registry:\n      host: zot.build1.example\n" }];
       },
     });
     const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
@@ -238,8 +239,8 @@ describe("create-tenant planStream resolves the registry host", () => {
   it("rejects loud when the target cluster's chain resolves no registry host", async () => {
     seedClusters();
     // A chain that states no registry host — registryHostFromChain itself must reject the plan loud.
-    const prt = ports({ resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: "global: {}\n" }] });
-    await expect(makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", subdomain: "a.example", owner: "o", apps: [] }, planCtx())).rejects.toThrow(/registrations\.host/);
+    const prt = ports({ resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: "global: {}\n" }] });
+    await expect(makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", subdomain: "a.example", owner: "o", apps: [] }, planCtx())).rejects.toThrow(/registry\.host/);
   });
 });
 

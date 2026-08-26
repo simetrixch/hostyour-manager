@@ -13,7 +13,7 @@ import { credLabels, sealTokenOnce, newestCredId, statedTarget } from "./defs/de
 import { deploySlaveSteps, SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
 import { registerStep } from "./defs/deploy-slave.verify.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
-import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import type { AnyRunDefinition, Step, StepCtx, Cleanup } from "../../executor/types.ts";
 import {
   SLAVE_ID, MASTER_ID, PARAMS, STEP_NAMES, HEALTHY_SLAVE_PREFLIGHT, MASTER_MARKING_YAML,
@@ -232,7 +232,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const ctx = hostedStepCtx(h, { registerCleanup: (c) => armed.push(c), checkpoint: (d) => checkpoints.push(d) });
     await stepOf(h, "mark-slave").run(ctx);
 
-    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath(PARAMS.domain)) ?? "";
+    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)) ?? "";
     // The slave part (what makes the slaves-appset dial it), the identity, and the inheritance —
     // every installation-wide value is the MASTER's, never asked a second time.
     for (const want of [
@@ -270,7 +270,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
       id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
     }).run();
     await stepOf(h, "mark-slave").run(hostedStepCtx(h));
-    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath(PARAMS.domain)) ?? "";
+    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)) ?? "";
     expect(map).toContain("release: 1.0.0-stable-20260801120000"); // set-pin's field, not this step's
     expect(map).toContain("  unitApex: example.com");             // the inheritance still landed
   });

@@ -20,6 +20,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { RoleManifest, RoleBindingManifest } from "../../adapters/kube/port.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
 // The tenant's argo-sync grant at RUN level: where create-tenant writes it, what add-app extends it
@@ -112,7 +113,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registrations:\n      host: ${HOST}\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: ${HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => ATTESTED,

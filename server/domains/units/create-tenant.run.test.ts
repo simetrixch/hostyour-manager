@@ -24,6 +24,7 @@ import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
 import type { VaultSeeder, TenantCryptoSeedInput } from "../../adapters/vault/seeder-port.ts";
 import { TENANT_CRYPTO_PROPERTIES, TENANT_STORAGE_PROPERTIES } from "./tenant-crypto-mint.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
 const SHA = "a".repeat(40);
@@ -141,7 +142,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registrations:\n      host: ${REGISTRY_HOST}\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     // ensure-images defaults: every image present ⇒ the step is a pure probe/no-op, so the
     // existing suites never trigger a build (a test scripts missing tags to exercise that path).
     registryProbe: new FakeRegistryProbe(),

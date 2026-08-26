@@ -4,6 +4,8 @@
 // (the release-kit writer) keeps a per-repoURL file map + a commit recorder.
 import { errNotFound } from "../../../kernel/errors.ts";
 import type { RepoReader, ClonedRepo, PlatformRepo, BranchScope, CommitInput, ConsumerRepo, ConsumerRepoSession } from "../port.ts";
+import { clusterMapPath, PLATFORM_VALUES_COMMON, PLATFORM_VALUES_DIR } from "../../../../shared/cluster-values.ts";
+import { STAGE } from "../../../../shared/enums.ts";
 
 /** The scripted content a FakeRepoReader serves for a single clone (the resolved SHA + the files). */
 export interface FakeRepoReaderScript {
@@ -107,18 +109,41 @@ export class FakePlatformRepo implements PlatformRepo {
   // chain read that precedes every gate run would find nothing and fail on a branch the test never
   // meant to be incomplete.
   private async runTurn<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T> {
-    if (!this.store.has(`${branch}\0platform/values-common.yaml`)) {
-      this.seed(branch, "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-      for (const stage of ["dev", "test", "prod"]) {
-        this.seed(branch, `platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
+    // The paths come from the chain definition itself, never from literals spelled here. While they
+    // were literals, the fixture and the reader agreed with each other about a layout the repository
+    // had stopped having: every test was green and the running system could read none of it.
+    if (!this.store.has(`${branch}\0${PLATFORM_VALUES_COMMON}`)) {
+      this.seed(branch, PLATFORM_VALUES_COMMON, "global:\n  timezone: Europe/Amsterdam\n");
+      for (const stage of STAGE) {
+        this.seed(branch, `${PLATFORM_VALUES_DIR}/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
       }
-      // unitApex rides along because it is not optional to a caller: the admission policy pins the
-      // unit's ONE host to <name>.<unitApex>, so a chain without it fails the plan on a branch the
-      // test never meant to be incomplete. Each branch gets its OWN apex, which is what a unit
-      // standing at two stages requires — provision-dns refuses a second stage whose host another
-      // cluster's address already answers (domains/units/unit-dns.ts). A real install may well
-      // give two clusters one apex, so a test that wants THAT world seeds installation/profile.yaml itself.
-      this.seed(branch, "installation/profile.yaml", `global:\n  unitApex: ${branch}\n  endpoints:\n    vault:\n      url: https://vault.${branch}:8200\n`);
+    }
+    // The cluster's own map is the LAST file of the chain and it is also the file the cluster
+    // marking is read from — one file, two readers, exactly as an install branch carries it. So the
+    // seeded map is a VALID marking as well as a values file: a map that were only one of the two
+    // would fail whichever reader a test did not have in mind, and indexMarkings folds every map on
+    // every read, so one unparseable map takes the whole read down.
+    //
+    // Seeded ONLY when absent, and separately from the platform files above: a test that writes its
+    // own map for this cluster is stating what that cluster is, and this must never overwrite it.
+    //
+    // NEVER on the books branch. That branch's clusters/active/ is the whole installation's cluster
+    // inventory — indexMarkings folds every file in it — so a map invented there would add a cluster
+    // no test declared, and two clusters whose first FQDN labels collide are a refusal by design.
+    // Which clusters the books branch knows is a thing tests state (units/cluster-map.fixture.ts).
+    //
+    // unitApex rides along because it is not optional to a caller: the admission policy pins the
+    // unit's ONE host to <name>.<unitApex>, so a chain without it fails the plan on a branch the
+    // test never meant to be incomplete. Each branch gets its OWN apex, which is what a unit
+    // standing at two stages requires — provision-dns refuses a second stage whose host another
+    // cluster's address already answers (domains/units/unit-dns.ts). A real install may well
+    // give two clusters one apex, so a test that wants THAT world seeds the map itself.
+    if (branch !== this.booksBranch && !this.store.has(`${branch}\0${clusterMapPath(branch)}`)) {
+      this.seed(
+        branch,
+        clusterMapPath(branch),
+        `stage: prod\nrole: master\n\nglobal:\n  domain: ${branch}\n  buildPlane: ${branch}\n  unitApex: ${branch}\n  endpoints:\n    vault:\n      url: https://vault.${branch}:8200\n`,
+      );
     }
     return fn({
       branch,

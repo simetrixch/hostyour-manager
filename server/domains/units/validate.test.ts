@@ -7,6 +7,7 @@ import type { RepoReader } from "../../adapters/git/port.ts";
 import type { GateRunner, GateJobProgress } from "../../adapters/gate-runner/port.ts";
 import type { GateReport, GateResult } from "../../../shared/gates.ts";
 import { ConsumerManifestSchema, type ConsumerManifest } from "../../../shared/consumer.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
 const RELEASE = "1.4.0-stable-20260719120000";
@@ -26,9 +27,9 @@ function target(over: Partial<OnboardTarget> = {}): OnboardTarget {
     stage: "dev",
     chartPath: "deploy/chart",
     clusterValueFiles: [
-      { path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
-      { path: "platform/values-dev.yaml", content: "global:\n  env: dev\n" },
-      { path: "installation/profile.yaml", content: "global:\n  endpoints:\n    vault:\n      url: https://vault.s1.example:8200\n" },
+      { path: "clusters/platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
+      { path: "clusters/platform/values-dev.yaml", content: "global:\n  env: dev\n" },
+      { path: clusterMapPath("s1.example"), content: "global:\n  endpoints:\n    vault:\n      url: https://vault.s1.example:8200\n" },
     ],
     ...over,
   };
@@ -85,9 +86,9 @@ function manifestWith(builds: string[], chart = true, fqdn?: string): ConsumerMa
 
 /** A values chain that states the unitApex — what G19 holds a declared fqdn's suffix against. */
 const APEX_CHAIN = [
-  { path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
-  { path: "platform/values-dev.yaml", content: "global:\n  env: dev\n" },
-  { path: "installation/profile.yaml", content: "global:\n  unitApex: units.example.com\n" },
+  { path: "clusters/platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
+  { path: "clusters/platform/values-dev.yaml", content: "global:\n  env: dev\n" },
+  { path: clusterMapPath("s1.example"), content: "global:\n  unitApex: units.example.com\n" },
 ];
 
 const pinFile = (...images: string[]): string =>

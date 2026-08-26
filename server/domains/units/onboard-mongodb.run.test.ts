@@ -16,6 +16,7 @@ import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { MongodbMode } from "../../../shared/unit-size.ts";
 import type { MongodbSeedInput, VaultSeeder, VaultSeedOutcome } from "./vault-seeder.ts";
 import type { DeployableOnboardParams } from "./onboard.run.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // What the manifest's `mongodb` word DOES, at run level. It decides two things that must agree: the
 // registration the appset renders the instance from, and whether a credential is seeded at all. A
@@ -57,9 +58,9 @@ function passReport(mongodb: MongodbMode): GateReport {
 
 function platformRepo(): FakePlatformRepo {
   const repo = new FakePlatformRepo();
-  repo.seed("s1.example", "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-  for (const stage of ["dev", "test", "prod"]) repo.seed("s1.example", `platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
-  repo.seed("s1.example", "installation/profile.yaml", "global:\n  unitApex: example.com\n");
+  repo.seed("s1.example", "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+  for (const stage of ["dev", "test", "prod"]) repo.seed("s1.example", `clusters/platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
+  repo.seed("s1.example", clusterMapPath("s1.example"), "global:\n  unitApex: example.com\n");
   return repo;
 }
 

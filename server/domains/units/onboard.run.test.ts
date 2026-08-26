@@ -20,6 +20,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput } from "./vault-seeder.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
 /** The tag the release cycle minted for the fixture release {version 1.0.0, channel stable} — what
@@ -88,9 +89,9 @@ const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: clust
 function platformRepo(...domains: string[]): FakePlatformRepo {
   const repo = new FakePlatformRepo();
   for (const domain of domains) {
-    repo.seed(domain, "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-    for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
-    repo.seed(domain, "installation/profile.yaml", `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
+    repo.seed(domain, "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+    for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `clusters/platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
+    repo.seed(domain, clusterMapPath(domain), `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
   }
   return repo;
 }

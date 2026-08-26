@@ -23,10 +23,8 @@ import { masterCheckoutsScript, SLAVE_API_PORT } from "./deploy-slave.remote.ts"
 import { refreshCheckoutStep } from "./cluster-release.kit.ts";
 import { rejoinStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
-import {
-  clusterShortName, clusterMarkingPath, resolveClusterMarking, writeClusterMarking,
-  type ClusterMarking,
-} from "../../inventory/cluster-marking.ts";
+import { clusterShortName, resolveClusterMarking, writeClusterMarking, type ClusterMarking } from "../../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
 
@@ -298,8 +296,8 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         if (!redeploying) ctx.registerCleanup(removeSlaveMarkingCleanup(ports));
         const { changed } = await writeClusterMarking(repo, slaveMarking, ctx.runId);
         ctx.log("meta", changed
-          ? `${clusterMarkingPath(domain)} on ${repo.booksBranch} now marks ${slaveMarking.name}: role slave, stage ${stage}, ${apiHost}:${SLAVE_API_PORT}, build plane ${slaveMarking.buildPlaneFqdn}`
-          : `${clusterMarkingPath(domain)} already states this marking — nothing to commit`);
+          ? `${clusterMapPath(domain)} on ${repo.booksBranch} now marks ${slaveMarking.name}: role slave, stage ${stage}, ${apiHost}:${SLAVE_API_PORT}, build plane ${slaveMarking.buildPlaneFqdn}`
+          : `${clusterMapPath(domain)} already states this marking — nothing to commit`);
         ctx.checkpoint({ branch: domain, apiHost, changed });
       },
     },
@@ -367,7 +365,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
           });
           if (r.code === 0 && sync === "Synced") break;
           if (Date.now() >= deadline) {
-            throw errValidation(`Application ${appName} did not reach Synced within ${APP_SYNC_TIMEOUT_MS / 60_000} min — check the master's ArgoCD (slaves-appset) and the pushed map ${clusterMarkingPath(domain)}`);
+            throw errValidation(`Application ${appName} did not reach Synced within ${APP_SYNC_TIMEOUT_MS / 60_000} min — check the master's ArgoCD (slaves-appset) and the pushed map ${clusterMapPath(domain)}`);
           }
           ctx.log("meta", `waiting for Application ${appName} to appear + sync (currently: ${sync || "absent"})`);
           await sleepUnlessAborted(APP_SYNC_POLL_MS, ctx.signal);

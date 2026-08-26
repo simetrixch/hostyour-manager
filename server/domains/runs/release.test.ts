@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { clusters, servers } from "../../db/schema/inventory.ts";
-import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import { buildRunDefinitions } from "./run-definitions.ts";
@@ -77,7 +77,7 @@ async function liveSlave(): Promise<Harness> {
 async function liveMaster(over: { marking?: string } = {}): Promise<Harness> {
   const h = await makeHarness({ keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   h.platformRepo.seed(CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH, CHANNEL_TABLE);
-  if (over.marking) h.platformRepo.seed(h.platformRepo.booksBranch, clusterMarkingPath("m1.example.com"), over.marking);
+  if (over.marking) h.platformRepo.seed(h.platformRepo.booksBranch, clusterMapPath("m1.example.com"), over.marking);
   h.db.db.insert(clusters).values({
     id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com",
     status: "active", tier: "rehearsal", planeState: "ready",
@@ -86,7 +86,7 @@ async function liveMaster(over: { marking?: string } = {}): Promise<Harness> {
 }
 
 const markingOf = (h: Harness, fqdn: string): string =>
-  h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath(fqdn)) ?? "";
+  h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(fqdn)) ?? "";
 
 const MASTER_RELEASE = { serverId: MASTER_ID, version: "1.0.0", channel: "stable" as const };
 const SLAVE_RELEASE = { serverId: SLAVE_ID, version: "1.0.0", channel: "stable" as const };

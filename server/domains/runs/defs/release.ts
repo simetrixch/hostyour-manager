@@ -5,7 +5,8 @@ import type { Db } from "../../../db/client.ts";
 import { servers } from "../../../db/schema/inventory.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE, composeReleaseTag, parseReleaseTag, type ReleaseChannel } from "../../../../shared/release.ts";
-import { clusterMarkingPath, resolveClusterMarking, setClusterRelease } from "../../inventory/cluster-marking.ts";
+import { resolveClusterMarking, setClusterRelease } from "../../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { PRODUCT_BRANCH } from "../../../../shared/branches.ts";
 import { readChannelStages, assertChannelReaches } from "../../inventory/channel-stages.ts";
 import { activeClusterTarget, loadMaster, masterFqdnOf, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
@@ -186,11 +187,11 @@ function setPinStep(target: SlaveTarget, params: ReleaseParams, ports: ReleasePo
 
       const pin = await setClusterRelease(repo, domain, tag, ctx.runId);
       ctx.log("meta", pin.changed
-        ? `${clusterMarkingPath(domain)} now states release: ${tag}`
-        : `${clusterMarkingPath(domain)} already states release: ${tag} — nothing to commit`);
+        ? `${clusterMapPath(domain)} now states release: ${tag}`
+        : `${clusterMapPath(domain)} already states release: ${tag} — nothing to commit`);
 
       ctx.checkpoint({ tag, minted: minted.minted, pinCommitted: pin.changed });
-      ctx.log("meta", `the pin is stated — the regeneration reads it off ${clusterMarkingPath(domain)} and brings ${domain}'s branch to ${tag}`);
+      ctx.log("meta", `the pin is stated — the regeneration reads it off ${clusterMapPath(domain)} and brings ${domain}'s branch to ${tag}`);
     },
   };
 }

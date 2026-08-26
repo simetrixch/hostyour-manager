@@ -15,6 +15,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome } from "./vault-seeder.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // Focused tests for the post-onboard `activate` step (impl: onboard-activate.ts). Kept apart from
 // onboard.run.test.ts so each file stays within the per-file line budget; the harness below is a
@@ -44,9 +45,9 @@ const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: clust
  *  the fake's lazy default-chain seed never overwrites it. */
 function platformRepo(domain: string): FakePlatformRepo {
   const repo = new FakePlatformRepo();
-  repo.seed(domain, "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-  for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
-  repo.seed(domain, "installation/profile.yaml", `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
+  repo.seed(domain, "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+  for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `clusters/platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
+  repo.seed(domain, clusterMapPath(domain), `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
   return repo;
 }
 

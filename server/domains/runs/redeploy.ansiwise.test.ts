@@ -12,7 +12,7 @@ import { AnsiwiseRefused } from "../../adapters/ansiwise/port.ts";
 import { ansiwiseBinaries, NO_BINARY, startServe, runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
-import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
 import { readServerTailnet } from "../../../shared/tailnet.ts";
 import { SLAVE_MACHINE_INPUTS } from "./defs/deploy-slave.ts";
@@ -459,7 +459,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // THE ONE-ADDRESS LAW, on the record: the map the run committed carries the same spelling the
     // emit and the register were given as their answer — the fixture's api_server_url/ca_data rows
     // are what judged those, so the green register run above IS the proof the answers matched.
-    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath("s1.example.com")) ?? "";
+    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath("s1.example.com")) ?? "";
     for (const want of ["  master: m1.example.com", "booksCluster: m1.example.com", "  apiHost: 100.64.0.11", "  apiPort: 16443", "role: slave", "  catalogUrl: https://github.com/acme/acme-catalog.git"]) {
       expect(map).toContain(want);
     }
@@ -549,7 +549,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The map keeps the cluster's identity and loses ONLY the slave part — dropped by the
     // remove-slave cleanup itself, FIRST (the program's own contract), so the marking cleanup
     // afterwards found nothing left to drop.
-    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath("s1.example.com")) ?? "";
+    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath("s1.example.com")) ?? "";
     expect(map).toContain("role: slave");
     expect(map).toContain("  buildPlane: m1.example.com");
     // booksCluster goes WITH the slave part: a map still carrying the selector key without the

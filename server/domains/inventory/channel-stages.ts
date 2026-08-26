@@ -1,5 +1,5 @@
 // The channel ceiling: which stages a release channel may reach. There is exactly ONE table and it
-// does not live here — it is `global.channelStages` in the platform repo's platform/values-common.yaml,
+// does not live here — it is `global.channelStages` in the platform repo's clusters/platform/values-common.yaml,
 // enforced in the release pipeline at the point that writes a pin. This module is a READER of that
 // file and nothing else, which is what makes two things true at once: a table change reaches the
 // manager without a manager release, and every caller in this process answers the same question
@@ -18,10 +18,14 @@ import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, type ReleaseChannel } from "../../../shared/release.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
+import { PLATFORM_VALUES_COMMON } from "../../../shared/cluster-values.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 
-/** The file the one table lives in, on the platform repo. */
-export const CHANNEL_STAGES_PATH = "platform/values-common.yaml";
+/** The file the one table lives in, on the platform repo. The SAME constant the values chain names
+ *  as its first layer (shared/cluster-values.ts), so a rename of that path cannot move the chain and
+ *  leave this reader pointing at a file the repository stopped having — which is exactly what it
+ *  did. */
+export const CHANNEL_STAGES_PATH = PLATFORM_VALUES_COMMON;
 
 /** The branch the table is read off — the trunk every install branch descends from. */
 export const CHANNEL_STAGES_BRANCH = PRODUCT_BRANCH;
@@ -30,7 +34,7 @@ export const CHANNEL_STAGES_BRANCH = PRODUCT_BRANCH;
  *  the channels it states — a channel missing from it reaches nothing, which is the safe direction. */
 export type ChannelStages = Partial<Record<ReleaseChannel, Stage[]>>;
 
-/** The slice of platform/values-common.yaml this reader takes. Everything else in the file is ignored. */
+/** The slice of that file this reader takes. Everything else in it is ignored. */
 const ChannelStagesFile = z.object({
   global: z.object({ channelStages: z.record(z.enum(RELEASE_CHANNEL), z.array(z.enum(STAGE))) }).optional(),
 });

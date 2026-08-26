@@ -16,7 +16,7 @@ import type {
   // the row-less live probe its rows are verified with. One declaration, both ends — as above.
   DetectedScanView, ConsumerLiveProbeView,
   // The channel table the onboard wizard reads — served literally from the platform repo's
-  // platform/values-common.yaml (global.channelStages); the manager keeps no copy.
+  // clusters/platform/values-common.yaml (global.channelStages); the manager keeps no copy.
   ChannelStagesView,
   // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
   OperatorKeyView,

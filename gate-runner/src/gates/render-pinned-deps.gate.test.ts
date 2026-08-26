@@ -3,7 +3,7 @@
 // the tools), not here.
 import { describe, expect, it } from "vitest";
 import { checkDependencyLock, renderArgs, stagedClusterValuePath } from "./render-pinned-deps.gate.ts";
-import { clusterValueChainPaths } from "../../../shared/cluster-values.ts";
+import { clusterMapPath, clusterValueChainPaths, splitAtChartValues } from "../../../shared/cluster-values.ts";
 
 const CHART = "deploy/chart";
 
@@ -81,10 +81,13 @@ describe("checkDependencyLock", () => {
 });
 
 describe("renderArgs", () => {
-  const stagedChain = clusterValueChainPaths("prod").map((p, i) => stagedClusterValuePath("/ws", i, p));
+  const DOMAIN = "s1.example";
+  const chain = clusterValueChainPaths(DOMAIN, "prod").map((p, i) => ({ path: p, staged: stagedClusterValuePath("/ws", i, p) }));
+  const split = splitAtChartValues(chain);
+  const staged = { beforeChart: split.beforeChart.map((e) => e.staged), afterChart: split.afterChart.map((e) => e.staged) };
 
-  it("layers the chart's own values, then the cluster's three chain files, and passes NO --set", () => {
-    const args = renderArgs("acme", CHART, "prod", stagedChain);
+  it("layers the platform files, then the chart's own two, then the cluster's map — ArgoCD's order — and passes NO --set", () => {
+    const args = renderArgs("acme", CHART, "prod", staged);
     expect(args).toEqual([
       "template",
       "acme",
@@ -92,26 +95,46 @@ describe("renderArgs", () => {
       "--namespace",
       "acme",
       "-f",
+      "/ws/.gate-cluster-values-0-clusters-platform-values-common.yaml",
+      "-f",
+      "/ws/.gate-cluster-values-1-clusters-platform-values-prod.yaml",
+      "-f",
       "deploy/chart/values.yaml",
       "-f",
       "deploy/chart/values-prod.yaml",
       "-f",
-      "/ws/.gate-cluster-values-0-platform-values-common.yaml",
-      "-f",
-      "/ws/.gate-cluster-values-1-platform-values-prod.yaml",
-      "-f",
-      "/ws/.gate-cluster-values-2-installation-profile.yaml",
+      "/ws/.gate-cluster-values-2-clusters-active-s1.example.yaml",
     ]);
     // The cluster's values reach the chart as FILES, exactly as ArgoCD layers them at deploy. A
     // single --set here would be a value the Manager computed, which is the drift this forbids.
     expect(args).not.toContain("--set");
   });
 
+  it("puts the chart's own files BETWEEN the platform pair and the cluster's map", () => {
+    // The position is the whole promise: the chart may override a platform default and may not
+    // override the cluster's own map, and that is true at deploy whether or not it is true here.
+    const args = renderArgs("acme", CHART, "prod", staged);
+    const at = (needle: string): number => args.indexOf(needle);
+    expect(at("/ws/.gate-cluster-values-0-clusters-platform-values-common.yaml")).toBeLessThan(at("deploy/chart/values.yaml"));
+    expect(at("/ws/.gate-cluster-values-1-clusters-platform-values-prod.yaml")).toBeLessThan(at("deploy/chart/values.yaml"));
+    expect(at("deploy/chart/values-prod.yaml")).toBeLessThan(at("/ws/.gate-cluster-values-2-clusters-active-s1.example.yaml"));
+  });
+
+  it("splits the chain at the cluster map, whatever its position in the list", () => {
+    // By DIRECTORY, never by index: a platform file added to the chain must not push the cluster's
+    // map across the boundary, and the map must land after the chart's files wherever it is listed.
+    const shuffled = [{ path: clusterMapPath(DOMAIN) }, { path: "clusters/platform/values-common.yaml" }];
+    expect(splitAtChartValues(shuffled)).toEqual({
+      beforeChart: [{ path: "clusters/platform/values-common.yaml" }],
+      afterChart: [{ path: clusterMapPath(DOMAIN) }],
+    });
+  });
+
   it("stages each chain file under a name that still shows its origin and its position", () => {
-    expect(stagedChain).toEqual([
-      "/ws/.gate-cluster-values-0-platform-values-common.yaml",
-      "/ws/.gate-cluster-values-1-platform-values-prod.yaml",
-      "/ws/.gate-cluster-values-2-installation-profile.yaml",
+    expect(chain.map((e) => e.staged)).toEqual([
+      "/ws/.gate-cluster-values-0-clusters-platform-values-common.yaml",
+      "/ws/.gate-cluster-values-1-clusters-platform-values-prod.yaml",
+      "/ws/.gate-cluster-values-2-clusters-active-s1.example.yaml",
     ]);
   });
 });

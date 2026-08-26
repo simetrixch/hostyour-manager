@@ -6,11 +6,17 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import {
-  clusterShortName, clusterMarkingPath, resolveClusterMarking, buildPlaneFqdnFromMarkings,
-  projectClusterMarking, removeSlaveMarkingPart, setClusterRelease,
-  readClusterReleases, clusterReleaseRead,
+  clusterShortName,
+  resolveClusterMarking,
+  buildPlaneFqdnFromMarkings,
+  projectClusterMarking,
+  removeSlaveMarkingPart,
+  setClusterRelease,
+  readClusterReleases,
+  clusterReleaseRead,
   CLUSTER_MARKING_FILE_KEYS,
 } from "./cluster-marking.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // cluster-marking: the one place a cluster's role, stage, short name and build plane come from.
 // Its whole point is that the short name is DERIVED from the fqdn and stored nowhere, so the tests
@@ -24,7 +30,7 @@ const slaveMap = `stage: prod\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n  bui
 
 function repoWith(maps: Record<string, string>): FakePlatformRepo {
   const repo = new FakePlatformRepo();
-  for (const [fqdn, text] of Object.entries(maps)) repo.seed(repo.booksBranch, clusterMarkingPath(fqdn), text);
+  for (const [fqdn, text] of Object.entries(maps)) repo.seed(repo.booksBranch, clusterMapPath(fqdn), text);
   return repo;
 }
 
@@ -39,7 +45,7 @@ describe("clusterShortName", () => {
 describe("resolveClusterMarking", () => {
   it("resolves a cluster from its fqdn AND from its short name alone — the map stores no name", async () => {
     const repo = repoWith({ [MASTER]: masterMap, [SLAVE]: slaveMap });
-    expect(repo.read(repo.booksBranch, clusterMarkingPath(SLAVE))).not.toContain("name:");
+    expect(repo.read(repo.booksBranch, clusterMapPath(SLAVE))).not.toContain("name:");
 
     const byName = await resolveClusterMarking(repo, "s1");
     expect(byName).toEqual({
@@ -225,7 +231,7 @@ describe("setClusterRelease", () => {
   it("keeps every value the map carried, including the ones this module does not name", async () => {
     const repo = repoWith({ [MASTER]: FULL_MAP });
     await setClusterRelease(repo, MASTER, TAG, "run_1");
-    const after = repo.read(repo.booksBranch, clusterMarkingPath(MASTER)) ?? "";
+    const after = repo.read(repo.booksBranch, clusterMapPath(MASTER)) ?? "";
 
     // Each of these is read by a chart. A pin that drops one leaves an installation whose charts
     // render against a value that is simply gone, and nothing between here and the render says so.
@@ -262,7 +268,7 @@ describe("setClusterRelease", () => {
 
     const after = await resolveClusterMarking(repo, "s1");
     expect(after).toMatchObject({ release: TAG, unitApex: "example.com", platformDomain: "example.com", mailUrl: "https://mail.example.com" });
-    const bytes = repo.read(repo.booksBranch, clusterMarkingPath(SLAVE));
+    const bytes = repo.read(repo.booksBranch, clusterMapPath(SLAVE));
     expect(bytes).toContain('unitApex: example.com');
     expect(bytes).toContain('platformDomain: example.com');
     expect(bytes).toContain('url: https://mail.example.com');
@@ -315,7 +321,7 @@ describe("readClusterReleases + clusterReleaseRead — a version is reported ONL
 
   it("a cluster with no map at all reads unknown and names the file that would state it", () => {
     const read = clusterReleaseRead(SLAVE, { ok: true, byFqdn: new Map() });
-    expect(read).toEqual({ kind: "unknown", reason: expect.stringContaining(clusterMarkingPath(SLAVE)) });
+    expect(read).toEqual({ kind: "unknown", reason: expect.stringContaining(clusterMapPath(SLAVE)) });
   });
 
   it("RETURNS the failure instead of throwing — one unreadable map must not blank a whole page", async () => {

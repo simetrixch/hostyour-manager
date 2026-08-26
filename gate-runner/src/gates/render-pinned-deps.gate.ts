@@ -9,7 +9,7 @@
 import { writeFile } from "node:fs/promises";
 import { parse } from "yaml";
 import type { GateResult, ResolvedDependency } from "../../../shared/gates.ts";
-import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
+import { splitAtChartValues, type ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { RenderedDoc } from "./gate.ts";
 import { fail, pass } from "./result.ts";
 import { run, ExecError } from "../exec.ts";
@@ -122,22 +122,33 @@ export function stagedClusterValuePath(workspace: string, index: number, chainPa
   return `${workspace}/.gate-cluster-values-${index}-${chainPath.replaceAll("/", "-")}`;
 }
 
-/** The `helm template` argv for one env. Values come from FILES only, never `--set`: the chart's own
- *  two files first, then the cluster's chain, which therefore wins. Nothing the Manager computed
- *  enters the render — the cluster's values reach the chart the one way they reach it at deploy, and
- *  a chart cannot shadow them. */
-export function renderArgs(targetName: string, chartDir: string, env: string, stagedChain: readonly string[]): string[] {
+/** The `helm template` argv for one env. Values come from FILES only, never `--set`, and they layer
+ *  in the order the ApplicationSet lists them: the platform's files, then the chart's own two, then
+ *  the cluster's own map, which wins over everything. Nothing the Manager computed enters the render.
+ *
+ *  THE CHART'S FILES SIT IN THE MIDDLE and that position is the whole point. Layering the chain
+ *  entirely after them would let the platform's defaults beat a chart value the deploy lets the
+ *  chart set; layering it entirely before would let the chart beat the cluster's own map, which the
+ *  deploy does not. Either way an approved render and a deployed render say different things, which
+ *  is the one outcome this chain exists to make impossible. */
+export function renderArgs(
+  targetName: string,
+  chartDir: string,
+  env: string,
+  staged: { beforeChart: readonly string[]; afterChart: readonly string[] },
+): string[] {
   return [
     "template",
     targetName,
     chartDir,
     "--namespace",
     targetName,
+    ...staged.beforeChart.flatMap((path) => ["-f", path]),
     "-f",
     `${chartDir}/values.yaml`,
     "-f",
     `${chartDir}/values-${env}.yaml`,
-    ...stagedChain.flatMap((path) => ["-f", path]),
+    ...staged.afterChart.flatMap((path) => ["-f", path]),
   ];
 }
 
@@ -158,7 +169,7 @@ export async function runRender(input: RenderInput): Promise<RenderOutcome> {
   // Stage the cluster's values chain next to the clone so helm can layer the SAME bytes ArgoCD does.
   // Written under the workspace root, outside the chart, so the chart's own file set is untouched
   // (the static gates already read their files map before this point).
-  const stagedChain: string[] = [];
+  const stagedChain: { path: string; staged: string }[] = [];
   for (const [i, file] of input.clusterValueFiles.entries()) {
     const staged = stagedClusterValuePath(input.workspace, i, file.path);
     try {
@@ -170,8 +181,12 @@ export async function runRender(input: RenderInput): Promise<RenderOutcome> {
         dependencies: lock.dependencies,
       };
     }
-    stagedChain.push(staged);
+    stagedChain.push({ path: file.path, staged });
   }
+  // Where the chart's own values.yaml and values-<env>.yaml go, decided by the chain definition and
+  // not by this file, so the two cannot come apart.
+  const split = splitAtChartValues(stagedChain);
+  const stagedSplit = { beforeChart: split.beforeChart.map((e) => e.staged), afterChart: split.afterChart.map((e) => e.staged) };
 
   if (lock.dependencies.length > 0) {
     try {
@@ -184,7 +199,7 @@ export async function runRender(input: RenderInput): Promise<RenderOutcome> {
 
   const rendered: RenderedDoc[] = [];
   for (const env of input.envs) {
-    const args = renderArgs(input.targetName, chartDir, env, stagedChain);
+    const args = renderArgs(input.targetName, chartDir, env, stagedSplit);
     let stream: string;
     try {
       stream = (await run("helm", args, { cwd: input.workspace, timeoutMs: input.renderMs, maxBytes: budgetBytes, signal: input.signal })).stdout;

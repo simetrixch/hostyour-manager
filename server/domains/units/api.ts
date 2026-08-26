@@ -60,7 +60,7 @@ export interface ConsumerApiDeps {
 export interface ConsumerOnboardApiDeps extends ConsumerApiDeps {
   store: CredentialStore;
   /** The platform GitOps repo — the channel-table read (GET /api/consumers/channels) serves
-   *  global.channelStages LITERALLY from platform/values-common.yaml, so the manager keeps no
+   *  global.channelStages LITERALLY from clusters/platform/values-common.yaml, so the manager keeps no
    *  copy of the one table the release pipeline enforces. Absent ⇒ the route answers 501. */
   platformRepo?: PlatformRepo;
   /** The per-cluster kube resolver — powers the per-consumer live reconciliation read
@@ -237,7 +237,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
   );
 
   // The channel table the onboard wizard reads: which stages a release channel may reach.
-  // The source is LITERALLY the platform repo's platform/values-common.yaml → global.channelStages —
+  // The source is LITERALLY the platform repo's clusters/clusters/platform/values-common.yaml → global.channelStages —
   // the ONE literal table, enforced in the release pipeline at the point that writes; the manager
   // carries NO copy, so a table change reaches the wizard without a manager release. Read off the
   // trunk (master): the install branches carry the same file, and the trunk is the copy every

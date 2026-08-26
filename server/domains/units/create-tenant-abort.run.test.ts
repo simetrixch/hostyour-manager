@@ -31,6 +31,7 @@ import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 /** The standing members the product under test declares — stated by the fixture, the way a real
  *  tenant's registration states its own. */
@@ -171,7 +172,7 @@ function fakeTenantSeeder(): VaultSeeder {
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registrations:\n      host: zot.m1.example\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
     dns: seededDns(),
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),

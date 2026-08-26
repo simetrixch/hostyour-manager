@@ -36,6 +36,7 @@ import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { AppEnv } from "../../http/app-env.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 /** The tenant product's manifest — the catalog reads it to learn which chart's values-<app>.yaml
  *  overlays are the app types. A repo without one is a repo the catalog cannot read. */
@@ -98,9 +99,9 @@ const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: clust
 function seededPlatformRepo(): FakePlatformRepo {
   const repo = new FakePlatformRepo();
   for (const domain of ["s1.example", "s2.example"]) {
-    repo.seed(domain, "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-    for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
-    repo.seed(domain, "installation/profile.yaml", `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
+    repo.seed(domain, "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+    for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `clusters/platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
+    repo.seed(domain, clusterMapPath(domain), `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
   }
   return repo;
 }
@@ -336,7 +337,7 @@ function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerNames: async () => [],
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registrations:\n      host: zot.m1.example\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
   };
 }
 

@@ -22,6 +22,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
 // The final `activate` step of create-tenant (impl: create-tenant-activate.ts) — the tenant analogue
@@ -101,7 +102,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registrations:\n      host: ${REGISTRY_HOST}\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
     dns,
     buildRbac: new FakeBuildRbacWriter(),

@@ -15,6 +15,7 @@ import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeHarness, scriptedHosts, logger, MASTER_ID, SLAVE_ID, type Harness } from "./deploy-slave.fixture.ts";
 import type { DbHandle } from "../../db/client.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // The fixture half of the ONE suite that talks to a real `ansiwise-rest serve`
 // (redeploy.ansiwise.test.ts): the measuring programs the serve installation carries, the worlds
@@ -249,9 +250,9 @@ export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean
     }).run();
     if (opts.tailnetUrl !== false) {
       // Seeded BESIDE the values chain's sentinel file: the fake materializes its own profile on
-      // a branch's first touch unless platform/values-common.yaml already stands there.
-      h.platformRepo.seed("s1.example.com", "platform/values-common.yaml", "global: {}\n");
-      h.platformRepo.seed("s1.example.com", "installation/profile.yaml", `global:\n  endpoints:\n    tailnet:\n      url: ${opts.tailnetUrl ?? "https://tale.m1.example.com"}\n`);
+      // a branch's first touch unless clusters/platform/values-common.yaml already stands there.
+      h.platformRepo.seed("s1.example.com", "clusters/platform/values-common.yaml", "global: {}\n");
+      h.platformRepo.seed("s1.example.com", clusterMapPath("s1.example.com"), `global:\n  endpoints:\n    tailnet:\n      url: ${opts.tailnetUrl ?? "https://tale.m1.example.com"}\n`);
     }
   }
   return h;
@@ -269,8 +270,8 @@ export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean
 export async function deployWorld(serve: ServeFixture): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve", marking: false });
-  h.platformRepo.seed("s1.example.com", "platform/values-common.yaml", "global: {}\n");
-  h.platformRepo.seed("s1.example.com", "installation/profile.yaml", "global:\n  endpoints:\n    tailnet:\n      url: https://tale.m1.example.com\n");
+  h.platformRepo.seed("s1.example.com", "clusters/platform/values-common.yaml", "global: {}\n");
+  h.platformRepo.seed("s1.example.com", clusterMapPath("s1.example.com"), "global:\n  endpoints:\n    tailnet:\n      url: https://tale.m1.example.com\n");
   return h;
 }
 

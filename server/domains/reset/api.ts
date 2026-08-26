@@ -12,7 +12,7 @@ import { AppError, errValidation, errNotConfigured, errIllegalTransition, errUps
 import { writeAudit } from "../../db/audit-writer.ts";
 import { wipeManagerDb, rehearseManagerDbWipe, countLiveRuns, backupManagerDb } from "../../db/reset.ts";
 import { booksBranch } from "../inventory/read.ts";
-import { CLUSTER_MARKING_DIR } from "../inventory/cluster-marking.ts";
+import { CLUSTER_MAP_DIR } from "../../../shared/cluster-values.ts";
 
 export interface ResetApiDeps {
   config: Config;
@@ -37,7 +37,7 @@ const ResetInput = z.object({
 const msg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 // clusters/active/<fqdn>.yaml on master — the cluster map. Its file name IS the cluster's FQDN, which
 // IS its install branch, so a map names the branch it belongs to with no recomposition.
-const MARKING_RE = new RegExp(`^${CLUSTER_MARKING_DIR}/([a-z0-9-]+(?:\\.[a-z0-9-]+)+)\\.yaml$`);
+const MARKING_RE = new RegExp(`^${CLUSTER_MAP_DIR}/([a-z0-9-]+(?:\\.[a-z0-9-]+)+)\\.yaml$`);
 
 /** Serializes resets in-process (module-level on purpose; one Manager pod). */
 let resetInFlight = false;

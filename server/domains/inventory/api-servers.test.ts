@@ -14,7 +14,7 @@ import { buildRunDefinitions } from "../runs/run-definitions.ts";
 import { runActor } from "../../kernel/actor.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerServerRoutes } from "./api.ts";
-import { clusterMarkingPath } from "./cluster-marking.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { serverCredFlags } from "./write.ts";
 import { getRun } from "../../executor/read.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -127,8 +127,8 @@ describe("server inventory API", () => {
   /** The master pinned, the slave never released — the two states standing side by side. */
   function bothMaps(): FakePlatformRepo {
     const repo = new FakePlatformRepo({ booksBranch: MASTER });
-    repo.seed(MASTER, clusterMarkingPath(MASTER), map(MASTER, "master", PINNED));
-    repo.seed(MASTER, clusterMarkingPath(SLAVE), map(SLAVE, "slave"));
+    repo.seed(MASTER, clusterMapPath(MASTER), map(MASTER, "master", PINNED));
+    repo.seed(MASTER, clusterMapPath(SLAVE), map(SLAVE, "slave"));
     return repo;
   }
 

@@ -12,9 +12,8 @@
 // installation's, and a schema that refuses that shape fails here instead of on a fresh install.
 import type { Stage } from "../../../shared/enums.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import {
-  clusterMarkingPath, buildPlaneFqdnFromMarkings, type BuildPlaneFqdnResolver,
-} from "../inventory/cluster-marking.ts";
+import { buildPlaneFqdnFromMarkings, type BuildPlaneFqdnResolver } from "../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 /** The cluster every seeded map names as its build plane. */
 const BUILD_PLANE = "m1.example";
@@ -43,7 +42,7 @@ export function seedClusterMaps(repo: FakePlatformRepo, stages: Record<string, S
       (own ? "" : `  master: "${plane}"` + "\n") +
       `  unitApex: "example.com"` + "\n" +
       `  platformDomain: "example.com"` + "\n";
-    repo.seed(repo.booksBranch, clusterMarkingPath(fqdn), map);
+    repo.seed(repo.booksBranch, clusterMapPath(fqdn), map);
   }
   return buildPlaneFqdnFromMarkings(repo);
 }

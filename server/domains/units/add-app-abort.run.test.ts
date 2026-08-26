@@ -26,6 +26,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // ABORT-WITH-CLEANUP on an add-app run, driven through the REAL executor — the member-scoped sibling
 // of create-tenant-abort.run.test.ts. The compensation (revert-app-append) is destructive by cascade:
@@ -111,7 +112,7 @@ function harness(): Harness {
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registrations:\n      host: ${REGISTRY_HOST}\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],

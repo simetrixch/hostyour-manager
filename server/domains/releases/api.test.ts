@@ -9,7 +9,7 @@ import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerReleaseRoutes } from "./api.ts";
-import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { searchPlatformApps } from "../registry-cleanup/search.ts";
 import { FakeCarrierRepo, pinFile } from "../registry-cleanup/carriers.fixture.ts";
 import type { AppEnv } from "../../http/app-env.ts";
@@ -44,9 +44,9 @@ const map = (fqdn: string, stage: string, role: string, release?: string): strin
  *  every stage's values file and only the cluster's own stage is deployed. */
 function seededCloud(): FakeCarrierRepo {
   const cloud = new FakeCarrierRepo({ booksBranch: MASTER });
-  cloud.seed(MASTER, clusterMarkingPath(MASTER), map(MASTER, "prod", "master", MASTER_TAG));
-  cloud.seed(MASTER, clusterMarkingPath(SLAVE), map(SLAVE, "dev", "slave"));
-  cloud.seed(MASTER, clusterMarkingPath(LONELY), map(LONELY, "dev", "slave"));
+  cloud.seed(MASTER, clusterMapPath(MASTER), map(MASTER, "prod", "master", MASTER_TAG));
+  cloud.seed(MASTER, clusterMapPath(SLAVE), map(SLAVE, "dev", "slave"));
+  cloud.seed(MASTER, clusterMapPath(LONELY), map(LONELY, "dev", "slave"));
   cloud.seed(MASTER, "apps/manager/values-prod.yaml", pinFile([["manager", "1.2.0-stable-20260728120000-abc1234"]]));
   cloud.seed(MASTER, "apps/manager/values-dev.yaml", pinFile([["manager", "9.9.9-alpha-20260101000000-dddddd1"]]));
   cloud.seed(MASTER, "apps/auth/values-prod.yaml", pinFile([["auth", "1.1.0-stable-20260701000000-bbb2222"]]));
@@ -164,7 +164,7 @@ describe("GET /api/releases — which release an installation stands on, and whi
 
   it("a branch that exists and pins no app carries an EMPTY list — the opposite fact from the one above", async () => {
     const cloud = seededCloud();
-    cloud.seed(LONELY, clusterMarkingPath("unused.example.com"), map("unused.example.com", "dev", "slave"));
+    cloud.seed(LONELY, clusterMapPath("unused.example.com"), map("unused.example.com", "dev", "slave"));
     const { app, cookie } = await make({ cloud });
     expect(view(await get(app, cookie), LONELY).apps).toEqual([]);
   });

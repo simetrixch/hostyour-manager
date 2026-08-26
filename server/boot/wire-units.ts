@@ -11,7 +11,8 @@ import { KubeBuildRbacWriter } from "../adapters/kube/kube-rbac.ts";
 import { KubeRepoCredentialWriter } from "../adapters/kube/kube-repo-credential.ts";
 import { CloudflareDns } from "../adapters/dns/cloudflare-dns.ts";
 import type { DnsProvider } from "../adapters/dns/port.ts";
-import { clusterValueChainPaths, type ClusterValueFile } from "../../shared/cluster-values.ts";
+import type { ClusterValueFile } from "../../shared/cluster-values.ts";
+import { readClusterValueChain } from "../domains/inventory/cluster-value-chain.ts";
 import { unitApexFromChain } from "../domains/units/admission-policy.ts";
 import type { Stage } from "../../shared/enums.ts";
 import { buildPlaneFqdnFromMarkings } from "../domains/inventory/cluster-marking.ts";
@@ -225,24 +226,15 @@ export function buildUnits(config: Config, store: CredentialStore, db: Db, logge
   // so this reader serves them off the SAME platform-repo worktree: folded to the public unit apex
   // (global.unitApex) here, and handed over whole for the tenant planners, which derive the registrations
   // host from it and render every member chart with it.
-  const readClusterValueChain = platformRepo
-    ? async (domain: string, stage: Stage): Promise<ClusterValueFile[]> => {
-      return platformRepo.withBranch(domain, async (cluster) => {
-        const files: ClusterValueFile[] = [];
-        for (const path of clusterValueChainPaths(stage)) {
-          const content = await cluster.readFile(path);
-          if (content !== null) files.push({ path, content });
-        }
-        return files;
-      });
-    }
+  const readChain = platformRepo
+    ? async (domain: string, stage: Stage): Promise<ClusterValueFile[]> => readClusterValueChain(platformRepo, domain, stage)
     : undefined;
-  const resolveUnitApex = readClusterValueChain
-    ? async (domain: string, stage: Stage): Promise<string> => unitApexFromChain(await readClusterValueChain(domain, stage))
+  const resolveUnitApex = readChain
+    ? async (domain: string, stage: Stage): Promise<string> => unitApexFromChain(await readChain(domain, stage))
     : undefined;
   // The chain itself rides into the tenant family whole: the planners derive the registry host
   // from it (registryHostFromChain) AND render every member chart with it.
-  const resolveClusterValueFiles = readClusterValueChain;
+  const resolveClusterValueFiles = readChain;
   // The relocation surface both families' backup/restore/migrate defs share: the public
   // probe verify-quiesced measures with, the per-Job budget, the storage box and the dbtools image
   // pin. Box + image are optional in the WIRING — the steps that need them fail loud when absent.

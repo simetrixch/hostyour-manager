@@ -11,6 +11,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // The check step's DRIFT BELT (onboard-check.ts): the gates re-run at the current default-branch
 // head, and the facts the approval froze — builds, databases, services, fqdn, secret specs,
@@ -52,9 +53,9 @@ const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: clust
  *  what the Application will actually layer at sync. */
 function platformRepo(): FakePlatformRepo {
   const repo = new FakePlatformRepo();
-  repo.seed("s1.example", "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-  for (const stage of ["dev", "test", "prod"]) repo.seed("s1.example", `platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
-  repo.seed("s1.example", "installation/profile.yaml", "global:\n  unitApex: example.com\n");
+  repo.seed("s1.example", "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+  for (const stage of ["dev", "test", "prod"]) repo.seed("s1.example", `clusters/platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
+  repo.seed("s1.example", clusterMapPath("s1.example"), "global:\n  unitApex: example.com\n");
   return repo;
 }
 

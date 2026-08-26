@@ -32,6 +32,7 @@ import type { Stage } from "../../../shared/enums.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // The tenant ORPHAN SURFACE over HTTP: the two discovery reads that make an
 // unrecorded tenant nameable at all, plus the purge trigger they hand their target to.
@@ -153,7 +154,7 @@ function onboardPorts(registrations: TenantRegistrations): TenantOnboardPorts {
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerNames: async () => [],
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registrations:\n      host: zot.m1.example\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
   };
 }
 

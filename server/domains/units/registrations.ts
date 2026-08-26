@@ -28,7 +28,8 @@
 import type { z } from "zod";
 import { parse as parseYaml } from "yaml";
 import { ConsumerRegistrationSchema, type ConsumerRegistration, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
-import { clusterValueChainPaths, type ClusterValueFile } from "../../../shared/cluster-values.ts";
+import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
+import { readClusterValueChain } from "../inventory/cluster-value-chain.ts";
 import type { UnitQuota } from "../../../shared/unit-size.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 // The scan's skipped-registration shape is a WIRE shape: the detected-consumer scan
@@ -363,21 +364,11 @@ export class Registrations {
 
   /** Read the target cluster's values chain off its install branch, in layering order — the bytes
    *  every Application on that branch layers through the `$values` source, handed to the gate
-   *  sandbox verbatim. A missing file THROWS: the chain is the cluster's whole value surface, so a
-   *  render without it would silently drop the Vault URL, the registry host and the unit apex and
-   *  approve a chart nobody could deploy. */
+   *  sandbox verbatim. The reading itself lives in domains/inventory/cluster-value-chain.ts, which
+   *  the tenant family calls directly; two copies of it disagreed about whether a missing file is
+   *  fatal. */
   async readClusterValueFiles(domain: string, stage: Stage): Promise<ClusterValueFile[]> {
-    return this.repo.withBranch(domain, async (cluster) => {
-      const files: ClusterValueFile[] = [];
-      for (const path of clusterValueChainPaths(stage)) {
-        const content = await cluster.readFile(path);
-        if (content === null) {
-          throw new AppError("UPSTREAM", `install branch ${domain} carries no ${path} — the cluster values chain is incomplete`);
-        }
-        files.push({ path, content });
-      }
-      return files;
-    });
+    return readClusterValueChain(this.repo, domain, stage);
   }
 
   /** THE writer. Commits build.yaml ALWAYS — for a build-only AND for a deployable unit — plus the one

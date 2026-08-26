@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { parseEnv, runGateCli, type CliInputs } from "./cli.ts";
 import type { ConnectFn } from "./fence.ts";
 import { sandboxGreen } from "./report.ts";
+import { clusterMapPath } from "../../shared/cluster-values.ts";
 
 const made: string[] = [];
 async function ws(): Promise<string> {
@@ -21,9 +22,9 @@ const ENV = {
   STAGE: "prod",
   CHART_PATH: "deploy/chart",
   CLUSTER_VALUE_FILES: JSON.stringify([
-    { path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
-    { path: "platform/values-prod.yaml", content: "global:\n  env: prod\n" },
-    { path: "installation/profile.yaml", content: "global:\n  endpoints:\n    vault:\n      url: https://vault.m1.example:8200\n" },
+    { path: "clusters/platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
+    { path: "clusters/platform/values-prod.yaml", content: "global:\n  env: prod\n" },
+    { path: clusterMapPath("m1.example"), content: "global:\n  endpoints:\n    vault:\n      url: https://vault.m1.example:8200\n" },
   ]),
   REPO_URL: "https://github.com/x/acme.git",
   REQUESTED_REF: "main",
@@ -54,9 +55,9 @@ describe("parseEnv", () => {
     expect(i.meta.targetName).toBe("acme");
     expect(i.meta.stage).toBe("prod");
     expect(i.meta.clusterValueFiles.map((f) => f.path)).toEqual([
-      "platform/values-common.yaml",
-      "platform/values-prod.yaml",
-      "installation/profile.yaml",
+      "clusters/platform/values-common.yaml",
+      "clusters/platform/values-prod.yaml",
+      clusterMapPath("m1.example"),
     ]);
     expect(i.fence.mustFailTargets).toEqual(["10.1.1.1:443"]);
     expect(i.fence.mustPassTarget).toBe("github.com:443");

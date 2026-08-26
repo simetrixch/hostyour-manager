@@ -923,7 +923,7 @@ export type RunTenantStateView =
   | { state: "purged"; target: PurgeTenantTarget; row: RunTenantRowView };
 
 /** GET /api/consumers/channels — the channel table the onboard wizard reads: WHICH stages a release
- *  channel may reach. Served LITERALLY from the platform repo's platform/values-common.yaml
+ *  channel may reach. Served LITERALLY from the platform repo's clusters/platform/values-common.yaml
  *  (global.channelStages) — the ONE table, enforced in the release pipeline at the point that
  *  writes; the manager keeps no copy. Keys are the channels the file states (normally all
  *  three), each value the stages that channel admits, in the file's own order. */

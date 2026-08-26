@@ -11,7 +11,7 @@ import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
 import { buildRunDefinitions } from "./run-definitions.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { ANSIWISE_PIN_PATH } from "../inventory/ansiwise-pin.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import { servers } from "../../db/schema/inventory.ts";
@@ -379,11 +379,11 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   handles.push(db);
   const store = new CredentialStore({ db: db.db, logger });
   const platformRepo = new FakePlatformRepo();
-  if (opts.marking !== false) platformRepo.seed(platformRepo.booksBranch, clusterMarkingPath(PARAMS.domain), opts.marking ?? SLAVE_MARKING_YAML);
+  if (opts.marking !== false) platformRepo.seed(platformRepo.booksBranch, clusterMapPath(PARAMS.domain), opts.marking ?? SLAVE_MARKING_YAML);
   // The master's map rides along UNCONDITIONALLY (even when the slave's is scripted absent): a
   // master that installed itself carries one by construction, and mark-slave composes the slave's
   // map from it. A test about a master map without a field seeds over this.
-  platformRepo.seed(platformRepo.booksBranch, clusterMarkingPath("m1.example.com"), MASTER_MARKING_YAML);
+  platformRepo.seed(platformRepo.booksBranch, clusterMapPath("m1.example.com"), MASTER_MARKING_YAML);
   // The pin both executables are placed at, on the trunk where the bootstrap reads it. A test about a
   // pin that is missing or malformed seeds over this.
   platformRepo.seed(PRODUCT_BRANCH, ANSIWISE_PIN_PATH, opts.versionsYaml ?? VERSIONS_YAML);

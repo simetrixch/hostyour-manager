@@ -1,7 +1,7 @@
 // The release-tag grammar has ONE statement in this process — RELEASE_TAG_RE in shared/release.ts,
 // which cluster-marking.ts puts in the schema of a cluster map's `release:` field, so it decides what
 // this Manager accepts as a pin. Outside the process there is a MIRROR of it: `global.releaseTagFilter`
-// in the platform repo's platform/values-common.yaml. The image-builder Trigger fires on
+// in the platform repo's clusters/platform/values-common.yaml. The image-builder Trigger fires on
 // `^refs/tags/deploy/<stage>/<filter>$` and the consumer-build release pipeline re-verifies the tag
 // against `^<filter>$`, so that literal decides what the build plane accepts.
 //
@@ -24,7 +24,7 @@ import { RELEASE_TAG_RE } from "../../../shared/release.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "./channel-stages.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 
-/** The slice of platform/values-common.yaml this reader takes. Everything else in the file is ignored. */
+/** The slice of clusters/platform/values-common.yaml this reader takes. Everything else in the file is ignored. */
 const ReleaseTagFilterFile = z.object({
   global: z.object({ releaseTagFilter: z.string().min(1) }).optional(),
 });

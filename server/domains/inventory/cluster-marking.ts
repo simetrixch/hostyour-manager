@@ -71,10 +71,8 @@ import { AppError, errValidation } from "../../kernel/errors.ts";
 import { SERVER_ROLE, STAGE, type ServerRole, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_TAG_RE } from "../../../shared/release.ts";
 import type { ClusterReleaseRead } from "../../../shared/api-types.ts";
+import { CLUSTER_MAP_DIR, clusterMapPath } from "../../../shared/cluster-values.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
-
-/** The directory the maps live in. */
-export const CLUSTER_MARKING_DIR = "clusters/active";
 
 /** The ONE derivation of a cluster's short name — the first label of its FQDN.
  *  `m1.example.com` -> `m1`. Every reader of a short name in this repo goes through here;
@@ -82,11 +80,6 @@ export const CLUSTER_MARKING_DIR = "clusters/active";
  *  way, so the three artifact families can never disagree about what a cluster is called. */
 export function clusterShortName(fqdn: string): string {
   return fqdn.split(".")[0] || fqdn;
-}
-
-/** clusters/active/<fqdn>.yaml — the path of ONE cluster's map. */
-export function clusterMarkingPath(fqdn: string): string {
-  return `${CLUSTER_MARKING_DIR}/${fqdn}.yaml`;
 }
 
 /** The map as it stands on disk. Real YAML (the file carries comments), so it is parsed with the
@@ -254,16 +247,16 @@ async function indexMarkings(repo: PlatformRepo): Promise<{ byFqdn: Map<string, 
   return repo.withBranch(repo.booksBranch, async (books) => {
   const byFqdn = new Map<string, ClusterMarking>();
   const byName = new Map<string, ClusterMarking>();
-  for (const entry of await books.listDir(CLUSTER_MARKING_DIR)) {
+  for (const entry of await books.listDir(CLUSTER_MAP_DIR)) {
     if (!entry.endsWith(".yaml")) continue;
-    const path = `${CLUSTER_MARKING_DIR}/${entry}`;
+    const path = `${CLUSTER_MAP_DIR}/${entry}`;
     const text = await books.readFile(path);
     if (text === null) continue; // a directory entry, or removed between listing and reading
     const marking = foldMarking(path, parseYaml(text), text);
     const clash = byName.get(marking.name);
     if (clash) {
       throw errValidation(
-        `cluster maps ${clusterMarkingPath(clash.fqdn)} and ${path} both derive the short name "${marking.name}" — a cluster is addressed by that name (ArgoCD instance, AppProject, Vault mount), so the two would collide; rename one cluster's first FQDN label`,
+        `cluster maps ${clusterMapPath(clash.fqdn)} and ${path} both derive the short name "${marking.name}" — a cluster is addressed by that name (ArgoCD instance, AppProject, Vault mount), so the two would collide; rename one cluster's first FQDN label`,
       );
     }
     byFqdn.set(marking.fqdn, marking);
@@ -312,10 +305,10 @@ export function clusterReleaseRead(fqdn: string, releases: ClusterReleases): Clu
   if (!releases.ok) return { kind: "unknown", reason: releases.reason };
   const marking = releases.byFqdn.get(fqdn);
   if (!marking) {
-    return { kind: "unknown", reason: `no cluster map for ${fqdn} — expected ${clusterMarkingPath(fqdn)} on the books branch, which is where every cluster is marked when it is installed` };
+    return { kind: "unknown", reason: `no cluster map for ${fqdn} — expected ${clusterMapPath(fqdn)} on the books branch, which is where every cluster is marked when it is installed` };
   }
   if (marking.release === undefined) {
-    return { kind: "unknown", reason: `${clusterMarkingPath(fqdn)} carries no release key — no release run has pinned ${fqdn} yet` };
+    return { kind: "unknown", reason: `${clusterMapPath(fqdn)} carries no release key — no release run has pinned ${fqdn} yet` };
   }
   return { kind: "pinned", tag: marking.release };
 }
@@ -329,7 +322,7 @@ export async function resolveClusterMarking(repo: PlatformRepo, cluster: string)
   const found = byFqdn.get(cluster) ?? byName.get(cluster);
   if (!found) {
     throw errValidation(
-      `no cluster map for "${cluster}" — expected ${clusterMarkingPath(cluster)} on ${repo.booksBranch}; every cluster is marked when it is installed (the branch programs for a master, mark-slave for a slave), so a missing map means the install never completed or the map was removed by hand`,
+      `no cluster map for "${cluster}" — expected ${clusterMapPath(cluster)} on ${repo.booksBranch}; every cluster is marked when it is installed (the branch programs for a master, mark-slave for a slave), so a missing map means the install never completed or the map was removed by hand`,
     );
   }
   return found;
@@ -460,7 +453,7 @@ function serializeMarking(m: ClusterMarking): string {
   // the file is hand-editable; without this the first release pin deletes the only thing that says
   // how to edit it.
   const yaml = m.header === undefined ? body : `${m.header}\n${body}`;
-  const reparsed = foldMarking(clusterMarkingPath(m.fqdn), parseYaml(yaml), yaml);
+  const reparsed = foldMarking(clusterMapPath(m.fqdn), parseYaml(yaml), yaml);
   if (!sameMarking(reparsed, m)) {
     throw new AppError("INTERNAL", `cluster map serialize round-trip diverged for ${m.fqdn}`);
   }
@@ -489,7 +482,7 @@ async function commitMarking(repo: PlatformRepo, c: MarkingCommit): Promise<{ co
   return repo.withBranch(repo.booksBranch, (books) =>
     books.commit({
       message: c.message,
-      write: [{ path: clusterMarkingPath(c.marking.fqdn), content: serializeMarking(c.marking) }],
+      write: [{ path: clusterMapPath(c.marking.fqdn), content: serializeMarking(c.marking) }],
     }),
   );
 }

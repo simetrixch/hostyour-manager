@@ -5,6 +5,7 @@ import { Registrations, serializePointer, parseRegistration, makeRegistrationGua
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { ConsumerRegistrationSchema, type ConsumerRegistration } from "../../../shared/consumer.ts";
 import type { Stage } from "../../../shared/enums.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const REPO = "https://github.com/x/acme.git";
 
@@ -468,15 +469,15 @@ describe("clusterStageFromMarkings", () => {
 describe("Registrations.readClusterValueFiles", () => {
   it("reads the chain off the install branch in layering order", async () => {
     const repo = new FakePlatformRepo();
-    repo.seed("s1.example", "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-    repo.seed("s1.example", "platform/values-prod.yaml", "global:\n  env: prod\n");
-    repo.seed("s1.example", "installation/profile.yaml", "global:\n  endpoints:\n    vault:\n      url: https://vault.s1.example:8200\n");
+    repo.seed("s1.example", "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+    repo.seed("s1.example", "clusters/platform/values-prod.yaml", "global:\n  env: prod\n");
+    repo.seed("s1.example", clusterMapPath("s1.example"), "global:\n  endpoints:\n    vault:\n      url: https://vault.s1.example:8200\n");
 
     const files = await new Registrations(repo, CLUSTERS).readClusterValueFiles("s1.example", "prod");
     expect(files.map((f) => f.path)).toEqual([
-      "platform/values-common.yaml",
-      "platform/values-prod.yaml",
-      "installation/profile.yaml",
+      "clusters/platform/values-common.yaml",
+      "clusters/platform/values-prod.yaml",
+      clusterMapPath("s1.example"),
     ]);
     expect(files[1]!.content).toContain("env: prod");
   });
@@ -485,7 +486,7 @@ describe("Registrations.readClusterValueFiles", () => {
     // A branch that carries only part of the chain: seeding one file marks it materialized, so the
     // fake's own default seed never fills the rest in.
     const repo = new FakePlatformRepo();
-    repo.seed("bare.example", "platform/values-common.yaml", "global: {}\n");
+    repo.seed("bare.example", "clusters/platform/values-common.yaml", "global: {}\n");
     await expect(new Registrations(repo, CLUSTERS).readClusterValueFiles("bare.example", "prod")).rejects.toMatchObject({ code: "UPSTREAM" });
   });
 });

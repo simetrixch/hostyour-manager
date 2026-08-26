@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { resolveClusterNameById, resolveClusterIdByName, resolveMasterCluster, registryHostFromChain } from "./tenant-values.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 describe("the two cluster-name resolvers", () => {
   let db: DbHandle;
@@ -26,23 +27,23 @@ describe("the two cluster-name resolvers", () => {
 });
 
 describe("registryHostFromChain", () => {
-  const common = { path: "platform/values-common.yaml", content: "global:\n  endpoints:\n    registrations:\n      host: zot.m1.example.com\n" };
-  const stage = { path: "platform/values-prod.yaml", content: "global: {}\n" };
+  const common = { path: "clusters/platform/values-common.yaml", content: "global:\n  endpoints:\n    registry:\n      host: zot.m1.example.com\n" };
+  const stage = { path: "clusters/platform/values-prod.yaml", content: "global: {}\n" };
 
   it("takes the LAST file that states it — the cluster's own profile wins over the platform default", () => {
-    const profile = { path: "installation/profile.yaml", content: "global:\n  endpoints:\n    registrations:\n      host: zot.s1.example.com\n" };
+    const profile = { path: clusterMapPath("m1.example"), content: "global:\n  endpoints:\n    registry:\n      host: zot.s1.example.com\n" };
     expect(registryHostFromChain([common, stage, profile])).toBe("zot.s1.example.com");
   });
 
   it("follows a build plane that is NOT the cluster's master — the profile's host is the answer, never zot.<master>", () => {
     // set-role.sh writes the profile as zot.<build-plane>; with --build-plane pointing at a foreign
     // cluster this is the registrations the cluster actually pulls from, while the master is m1.
-    const profile = { path: "installation/profile.yaml", content: "global:\n  endpoints:\n    registrations:\n      host: zot.build1.example.com\n" };
+    const profile = { path: clusterMapPath("m1.example"), content: "global:\n  endpoints:\n    registry:\n      host: zot.build1.example.com\n" };
     expect(registryHostFromChain([common, stage, profile])).toBe("zot.build1.example.com");
   });
 
   it("falls back through the chain when the profile states none", () => {
-    expect(registryHostFromChain([common, stage, { path: "installation/profile.yaml", content: "global: {}\n" }])).toBe("zot.m1.example.com");
+    expect(registryHostFromChain([common, stage, { path: clusterMapPath("m1.example"), content: "global: {}\n" }])).toBe("zot.m1.example.com");
   });
 
   it("fails loud (VALIDATION) naming the files read when NO file states a registry host", () => {

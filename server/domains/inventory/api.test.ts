@@ -10,7 +10,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { acquireLocks } from "../../executor/locks.ts";
 import { registerClustersRoutes } from "./api.ts";
-import { clusterMarkingPath } from "./cluster-marking.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { ClustersView, LockView, StoreMode } from "../../../shared/api-types.ts";
@@ -125,8 +125,8 @@ describe("clusters + locks API", () => {
     /** The master pinned, the slave never released — the two states standing side by side. */
     function bothMaps(): FakePlatformRepo {
       const repo = new FakePlatformRepo({ booksBranch: MASTER });
-      repo.seed(MASTER, clusterMarkingPath(MASTER), map(MASTER, "master", PINNED));
-      repo.seed(MASTER, clusterMarkingPath(SLAVE), map(SLAVE, "slave"));
+      repo.seed(MASTER, clusterMapPath(MASTER), map(MASTER, "master", PINNED));
+      repo.seed(MASTER, clusterMapPath(SLAVE), map(SLAVE, "slave"));
       return repo;
     }
 

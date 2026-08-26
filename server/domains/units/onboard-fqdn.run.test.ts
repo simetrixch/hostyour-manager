@@ -14,6 +14,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // The declare-and-attest path of the manifest's extra FQDN at RUN level: planStream freezes the
 // G19-checked declaration into params (and rejects a name the platform already serves),
@@ -60,9 +61,9 @@ const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: clust
  *  declared fqdn's suffix against, and planStream composes the platform address from. */
 function platformRepo(): FakePlatformRepo {
   const repo = new FakePlatformRepo();
-  repo.seed("s1.example", "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-  for (const stage of ["dev", "test", "prod"]) repo.seed("s1.example", `platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
-  repo.seed("s1.example", "installation/profile.yaml", "global:\n  unitApex: example.com\n");
+  repo.seed("s1.example", "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+  for (const stage of ["dev", "test", "prod"]) repo.seed("s1.example", `clusters/platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
+  repo.seed("s1.example", clusterMapPath("s1.example"), "global:\n  unitApex: example.com\n");
   return repo;
 }
 

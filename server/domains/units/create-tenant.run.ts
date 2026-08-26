@@ -107,7 +107,7 @@ export interface TenantOnboardPorts {
    *  chain's profile carries zot.<build-plane>, so a cluster whose images are built on a foreign
    *  build plane resolves THAT registrations, never the master's), and the values every member chart is
    *  RENDERED with (the tenant appsets layer this same chain at deploy, and example-lib.image
-   *  requires global.endpoints.registrations.host from it — without the chain no member render can even
+   *  requires global.endpoints.registry.host from it — without the chain no member render can even
    *  resolve an image ref). */
   resolveClusterValueFiles: (domain: string, stage: Stage) => Promise<ClusterValueFile[]>;
   /** Writes the tenant's crypto entry `<stage>/tenants/<guid>` — the ONE Vault leaf every member

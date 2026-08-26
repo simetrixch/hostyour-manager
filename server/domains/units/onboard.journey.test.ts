@@ -25,6 +25,7 @@ import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { GateReport, GateResult } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome } from "./vault-seeder.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
 const logger = pino({ level: "silent" });
@@ -41,9 +42,9 @@ const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: clust
  *  the fake's lazy default-chain seed never overwrites it. */
 function platformRepo(domain: string): FakePlatformRepo {
   const repo = new FakePlatformRepo();
-  repo.seed(domain, "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-  for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
-  repo.seed(domain, "installation/profile.yaml", `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
+  repo.seed(domain, "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+  for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `clusters/platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
+  repo.seed(domain, clusterMapPath(domain), `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
   return repo;
 }
 

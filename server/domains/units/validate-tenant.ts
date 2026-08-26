@@ -49,7 +49,7 @@ export interface ValidateTenantRequest {
   probeGuid: string; // the throwaway guid the fan-out is rendered at
   /** The target cluster's values chain off its install branch. The tenant appsets layer exactly
    *  this chain onto every member chart at deploy, and the charts require values from it
-   *  (example-lib.image reads global.endpoints.registrations.host, the auth host composes from
+   *  (example-lib.image reads global.endpoints.registry.host, the auth host composes from
    *  global.unitApex) — a render without it fails at T2 before any gate can judge the chart. */
   clusterValueFiles: readonly ClusterValueFile[];
   credentialId?: string; // the manager's first-party catalog read credential

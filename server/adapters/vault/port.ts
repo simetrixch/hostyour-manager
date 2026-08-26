@@ -13,7 +13,7 @@ export interface VaultKv {
 
 /** The ONE KV-v2 mount, on every cluster and for every role. There is no per-cluster mount to
  *  resolve: the platform provisions `secret/` everywhere and tells the charts so once, in
- *  platform/values-common.yaml (global.vaultKvMount). What IS per-cluster is the kubernetes AUTH
+ *  clusters/platform/values-common.yaml (global.vaultKvMount). What IS per-cluster is the kubernetes AUTH
  *  mount (kubernetes-<cluster>), which arrives as configuration. */
 export const KV_MOUNT = "secret";
 

@@ -7,7 +7,7 @@
 //                               (inventory/cluster-marking.ts), the one derivation in this repo.
 //   - resolveMasterCluster:     the master self-cluster's row — the build-only onboard's target.
 //   - registryHostFromChain:    the registry host a cluster pulls its first-party images from, read
-//                               off the cluster's OWN values chain (global.endpoints.registrations.host).
+//                               off the cluster's OWN values chain (global.endpoints.registry.host).
 //
 // Boundary: domain layer — db schema + shared/ only, no adapters, no IO beyond the db reads.
 import { eq, inArray } from "drizzle-orm";
@@ -66,23 +66,29 @@ export function resolveMasterCluster(db: Db): { clusterId: string; domain: strin
   return { clusterId: row.id, domain: row.domain };
 }
 
-/** The registry host a cluster pulls its first-party images from: `global.endpoints.registrations.host`
+/** The registry host a cluster pulls its first-party images from: `global.endpoints.registry.host`
  *  off the cluster's OWN values chain, read in LAYERING order with the last file that states it
- *  winning — exactly as helm layers the chain, so the cluster's profile (which set-role.sh writes as
- *  zot.<build-plane>) overrides the platform defaults. Reading the configured value instead of
- *  composing a host from an inventory row keeps this answer identical to the host the deployed
- *  charts compose image refs from; the two diverge the moment a cluster's build plane is not its
- *  master. A chain that states it nowhere is a VALIDATION error naming the files that were read. */
+ *  winning — exactly as helm layers the chain, so the cluster's own map (which the run that
+ *  generates an install branch writes as zot.<build-plane>) overrides the platform defaults.
+ *  Reading the configured value instead of composing a host from an inventory row keeps this answer
+ *  identical to the host the deployed charts compose image refs from; the two diverge the moment a
+ *  cluster's build plane is not its master. A chain that states it nowhere is a VALIDATION error
+ *  naming the files that were read.
+ *
+ *  `registry`, not `registrations`. The charts read `global.endpoints.registry.host` and nothing on
+ *  an install branch has ever carried the other spelling, so this fold used to find nothing and
+ *  refuse every tenant plan. `registrations` in this platform is the directory of unit registration
+ *  files, which is a different thing entirely. */
 export function registryHostFromChain(files: readonly ClusterValueFile[]): string {
   let found: string | null = null;
   for (const file of files) {
     const parsed: unknown = parseYaml(file.content);
-    const host = (parsed as { global?: { endpoints?: { registrations?: { host?: unknown } } } } | null)?.global?.endpoints?.registrations?.host;
+    const host = (parsed as { global?: { endpoints?: { registry?: { host?: unknown } } } } | null)?.global?.endpoints?.registry?.host;
     if (typeof host === "string" && host.length > 0) found = host;
   }
   if (found === null) {
     throw errValidation(
-      `no global.endpoints.registrations.host in the cluster values chain (${files.map((f) => f.path).join(", ")}) — the fan-out's images are pulled from that registrations, so there is no host to probe them in`,
+      `no global.endpoints.registry.host in the cluster values chain (${files.map((f) => f.path).join(", ")}) — the fan-out's images are pulled from that registry, so there is no host to probe them in`,
     );
   }
   return found;

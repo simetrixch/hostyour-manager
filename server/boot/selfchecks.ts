@@ -231,7 +231,7 @@ export function runSelfChecks(deps: {
 /**
  * The release grammar the Manager enforces against the build plane's copy of it: RELEASE_TAG_RE
  * (shared/release.ts), which validates the `release:` pin of every cluster map, against
- * global.releaseTagFilter in the platform repo's platform/values-common.yaml, which the image-builder
+ * global.releaseTagFilter in the platform repo's clusters/clusters/platform/values-common.yaml, which the image-builder
  * Trigger fires on and the release pipeline re-verifies. Two literals in two repositories, neither
  * derived from the other — see domains/inventory/release-grammar.ts for what a byte between them costs.
  * A running Manager with the platform repo configured is the only place both sides are present, so

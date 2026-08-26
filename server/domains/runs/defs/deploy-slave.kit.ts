@@ -8,7 +8,8 @@ import { remoteCmd } from "../../../executor/stepkit.ts";
 import { MASTER_ROLES, type Stage, type ClusterTier } from "../../../../shared/enums.ts";
 import { errNotConfigured } from "../../../kernel/errors.ts";
 import type { PlatformRepo } from "../../../adapters/git/port.ts";
-import { removeSlaveMarkingPart, clusterMarkingPath } from "../../inventory/cluster-marking.ts";
+import { removeSlaveMarkingPart } from "../../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 
 // The deploy-slave step-kit: the db lookups, credential idioms,
 // timing helpers and compensating actions the steps share. Split out of deploy-slave.ts
@@ -250,8 +251,8 @@ export function removeSlaveMarkingCleanup(ports: DeploySlavePorts): Cleanup {
       const domain = String(ctx.params.domain);
       const { changed } = await removeSlaveMarkingPart(requirePlatformRepo(ports), domain, ctx.runId);
       ctx.log("meta", changed
-        ? `dropped the slave part of ${clusterMarkingPath(domain)} on master`
-        : `${clusterMarkingPath(domain)} carries no slave part — nothing to drop`);
+        ? `dropped the slave part of ${clusterMapPath(domain)} on master`
+        : `${clusterMapPath(domain)} carries no slave part — nothing to drop`);
     },
   };
 }

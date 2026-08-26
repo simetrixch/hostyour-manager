@@ -13,6 +13,7 @@ import type { GateContext, RenderedDoc } from "./gate.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import { chainVaultServer, secretContractGate } from "./secret-contract.gate.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const VAULT_SERVER = "https://vault.svc.cluster.local:8200";
 const EXPECTED_KEY = "test/consumer/acme/app"; // <stage>/consumer/<name>/app
@@ -20,9 +21,9 @@ const EXPECTED_KEY = "test/consumer/acme/app"; // <stage>/consumer/<name>/app
 // The cluster's values chain as the gate receives it: the per-stage file carries global.endpoints.vault.url and
 // the profile loads LAST, so the profile's value is the one G7 must hold the render against.
 const CHAIN: ClusterValueFile[] = [
-  { path: "platform/values-common.yaml", content: "global:\n  clusterIssuer: platform-acme\n" },
-  { path: "platform/values-test.yaml", content: "global:\n  env: test\n  endpoints:\n    vault:\n      url: https://vault.elsewhere:8200\n" },
-  { path: "installation/profile.yaml", content: `global:\n  endpoints:\n    vault:\n      url: ${VAULT_SERVER}\n` },
+  { path: "clusters/platform/values-common.yaml", content: "global:\n  clusterIssuer: platform-acme\n" },
+  { path: "clusters/platform/values-test.yaml", content: "global:\n  env: test\n  endpoints:\n    vault:\n      url: https://vault.elsewhere:8200\n" },
+  { path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    vault:\n      url: ${VAULT_SERVER}\n` },
 ];
 
 function baseManifest(): ConsumerManifest {
@@ -279,7 +280,7 @@ describe("chainVaultServer", () => {
   });
 
   it("fails the gate when no file of the chain sets global.endpoints.vault.url", () => {
-    const noVault = [{ path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" }];
+    const noVault = [{ path: "clusters/platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" }];
     expect(chainVaultServer(noVault)).toBeNull();
     const r = secretContractGate.check(makeCtx({ clusterValueFiles: noVault }));
     expect(r.status).toBe("fail");

@@ -4,7 +4,7 @@ import type { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import type { ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { requireProgramsStep } from "./defs/ansiwise-run.kit.ts";
-import { clusterMarkingPath } from "../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { PARAMS, MASTER_ID, SLAVE_ID } from "./deploy-slave.fixture.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import {
@@ -48,7 +48,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       expect(h.platformRepo.tags.size).toBe(1);
       const tag = [...h.platformRepo.tags.keys()][0] ?? "";
       expect(tag).toMatch(/^1\.0\.0-stable-\d{14}$/);
-      expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath("m1.example.com"))).toContain(`release: ${tag}`);
+      expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath("m1.example.com"))).toContain(`release: ${tag}`);
 
       // The machine's OWN records: dry + run per program, every one green, all three programs.
       expectProven(h.db, r.runId, await observer().runs(), ["regenerate-branch", "deploy-cluster", "deploy-platform-services"]);
@@ -83,7 +83,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       expect(h.platformRepo.tags.size).toBe(1);
       const tag = [...h.platformRepo.tags.keys()][0] ?? "";
       expect(tag).toMatch(/^1\.0\.0-stable-\d{14}$/);
-      expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMarkingPath(PARAMS.domain))).toContain(`release: ${tag}`);
+      expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain))).toContain(`release: ${tag}`);
 
       expectProven(h.db, r.runId, await observer().runs(), ["regenerate-slave-branch", "deploy-cluster", "deploy-platform-services"]);
 

@@ -6,7 +6,7 @@ import {
 import type { ChannelStages } from "./channel-stages.ts";
 
 // The channel ceiling has ONE table and it is not in this repo: it is global.channelStages in the
-// platform repo's platform/values-common.yaml. What these tests hold down is that this module READS
+// platform repo's clusters/platform/values-common.yaml. What these tests hold down is that this module READS
 // that file and states nothing of its own — a manager-side copy would be a second table, and a
 // second table is a place for the two to disagree about which stages a release may reach.
 

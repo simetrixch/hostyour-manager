@@ -3,14 +3,15 @@ import { describe, it, expect } from "vitest";
 import { TektonGateRunner, type GateRunCluster, type ReportConfigMap, type TaskRunOutcome, type TektonGateRunnerConfig } from "./gate-runner-tekton.ts";
 import type { GateJobRequest } from "./port.ts";
 import { reportHashPayload, type GateReport } from "../../../shared/gates.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
 
 // The cluster values chain the Manager reads off the install branch and hands to the sandbox.
 const CHAIN = [
-  { path: "platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
-  { path: "platform/values-prod.yaml", content: "global:\n  env: prod\n" },
-  { path: "installation/profile.yaml", content: "global:\n  endpoints:\n    vault:\n      url: https://vault.m1.example:8200\n" },
+  { path: "clusters/platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
+  { path: "clusters/platform/values-prod.yaml", content: "global:\n  env: prod\n" },
+  { path: clusterMapPath("m1.example"), content: "global:\n  endpoints:\n    vault:\n      url: https://vault.m1.example:8200\n" },
 ];
 
 function report(verdict: "pass" | "fail" = "pass"): GateReport {

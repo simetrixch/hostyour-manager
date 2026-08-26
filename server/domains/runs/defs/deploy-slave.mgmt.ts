@@ -7,7 +7,8 @@ import { errValidation } from "../../../kernel/errors.ts";
 import { localTx } from "../../../executor/stepkit.ts";
 import { registerSecret } from "../../../security/redact.ts";
 import type { Stage } from "../../../../shared/enums.ts";
-import { removeSlaveMarkingPart, clusterMarkingPath } from "../../inventory/cluster-marking.ts";
+import { removeSlaveMarkingPart } from "../../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import {
   openServeConversation, composeAnswers, programPhase, requireElevationPassword,
   ANSIWISE_PROGRAM_TIMEOUT_MS, type AnsiwisePorts, type ProgramCheckpoint,
@@ -237,8 +238,8 @@ export function removeSlaveCleanup(ports: DeploySlavePorts & AnsiwisePorts): Cle
       const stage = String(ctx.params.stage) as Stage;
       const { changed } = await removeSlaveMarkingPart(requirePlatformRepo(ports), domain, ctx.runId);
       ctx.log("meta", changed
-        ? `dropped the slave part of ${clusterMarkingPath(domain)} — the generated per-slave instance goes before its project`
-        : `${clusterMarkingPath(domain)} carries no slave part — straight to the program`);
+        ? `dropped the slave part of ${clusterMapPath(domain)} — the generated per-slave instance goes before its project`
+        : `${clusterMapPath(domain)} carries no slave part — straight to the program`);
 
       const password = requireElevationPassword(ctx);
       const master = loadMaster(ctx.db);

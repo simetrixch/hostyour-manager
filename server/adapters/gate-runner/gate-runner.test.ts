@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { FakeGateRunner } from "./testing/fake.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { GateJobRequest } from "./port.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 function report(verdict: "pass" | "fail" = "pass"): GateReport {
   return {
@@ -29,7 +30,7 @@ function req(): GateJobRequest {
     repoURL: "https://github.com/x/y.git",
     requestedRef: "main",
     resolvedSha: "0".repeat(40),
-    clusterValueFiles: [{ path: "installation/profile.yaml", content: "global:\n  endpoints:\n    vault:\n      url: https://v:8200\n" }],
+    clusterValueFiles: [{ path: clusterMapPath("m1.example"), content: "global:\n  endpoints:\n    vault:\n      url: https://v:8200\n" }],
     mustFailTargetsConfirmedListening: true,
   };
 }

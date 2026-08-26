@@ -25,6 +25,7 @@ import type { AnyRunDefinition } from "../../executor/types.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput } from "./vault-seeder.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // ABORT-WITH-CLEANUP on a consumer onboard, driven through the REAL executor (planStreamed -> approve
 // -> fail -> abort) — the consumer mirror of create-tenant-abort.run.test.ts. Four properties, each a
@@ -120,9 +121,9 @@ class FakeSeeder implements VaultSeeder {
 function platformRepo(...domains: string[]): FakePlatformRepo {
   const repo = new FakePlatformRepo();
   for (const domain of domains) {
-    repo.seed(domain, "platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-    for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
-    repo.seed(domain, "installation/profile.yaml", `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
+    repo.seed(domain, "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+    for (const stage of ["dev", "test", "prod"]) repo.seed(domain, `clusters/platform/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
+    repo.seed(domain, clusterMapPath(domain), `global:\n  unitApex: example.com\n  endpoints:\n    vault:\n      url: https://vault.${domain}:8200\n`);
   }
   return repo;
 }

@@ -23,6 +23,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { RenderedDoc, HelmRenderResult } from "../../adapters/helm/port.ts";
 import type { GateResult } from "../../../shared/gates.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
 const PROBE = "zsjs023ctne0"; // a live-shaped throwaway guid
@@ -67,8 +68,8 @@ const app = (name: string): AppRef => ({ name });
 /** The target cluster's chain as a plan hands it over — profile states the registry host the member
  *  charts require (example-lib.image), so a real render is possible with exactly this request. */
 const CHAIN = [
-  { path: "platform/values-prod.yaml", content: "global:\n  env: prod\n" },
-  { path: "installation/profile.yaml", content: "global:\n  unitApex: example.com\n  endpoints:\n    registrations:\n      host: zot.m1.example\n" },
+  { path: "clusters/platform/values-prod.yaml", content: "global:\n  env: prod\n" },
+  { path: clusterMapPath("m1.example"), content: "global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n" },
 ];
 
 function req(over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest {
@@ -324,10 +325,10 @@ describe("validateTenant", () => {
     ]);
     expect(helm.requests.map((r) => r.chartPath)).toContain("charts/example-engine");
     // Every member is rendered WITH the target cluster's folded chain — the charts require values
-    // from it (example-lib.image reads global.endpoints.registrations.host), so a render without it would
+    // from it (example-lib.image reads global.endpoints.registry.host), so a render without it would
     // fail T2 on every real install while the fakes kept passing.
     for (const r of helm.requests) {
-      expect(r.valuesObject).toMatchObject({ global: { env: "prod", unitApex: "example.com", endpoints: { registrations: { host: "zot.m1.example" } } } });
+      expect(r.valuesObject).toMatchObject({ global: { env: "prod", unitApex: "example.com", endpoints: { registry: { host: "zot.m1.example" } } } });
     }
 
     // gates + the clone streamed to the sink.

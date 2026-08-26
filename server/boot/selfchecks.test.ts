@@ -175,7 +175,7 @@ describe("boot self-checks", () => {
   });
 
   // The release grammar this Manager enforces (shared/release.ts RELEASE_TAG_RE) against the build
-  // plane's copy of it (global.releaseTagFilter, platform/values-common.yaml on the platform repo's
+  // plane's copy of it (global.releaseTagFilter, clusters/platform/values-common.yaml on the platform repo's
   // trunk). A boot with the platform repo wired is the only place both sides are present.
   //
   /** The copy as the platform repo states it: the grammar without its anchors, derived rather than typed. */

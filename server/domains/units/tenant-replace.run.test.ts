@@ -24,6 +24,7 @@ import type { Stage } from "../../../shared/enums.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
 // The create-tenant IDEMPOTENT-BY-SUBDOMAIN replace: a request whose subdomain
@@ -165,7 +166,7 @@ function ports(registrations: TenantRegistrations): TenantOnboardPorts {
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: "installation/profile.yaml", content: `global:\n  endpoints:\n    registrations:\n      host: ${REGISTRY_HOST}\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
     dns: seededDns(),
     buildRbac: new FakeBuildRbacWriter(),
