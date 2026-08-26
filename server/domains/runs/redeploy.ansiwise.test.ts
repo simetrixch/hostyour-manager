@@ -1,6 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { readFileSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { getRun, readEvents } from "../../executor/read.ts";
@@ -9,7 +7,7 @@ import { generateServerKeypair } from "../../adapters/ssh/keygen.ts";
 import { startFakeSshServer, type FakeSshServer } from "../../adapters/ssh/testing/fake-server.ts";
 import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused } from "../../adapters/ansiwise/port.ts";
-import { ansiwiseBinaries, NO_BINARY, startServe, runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
+import { ansiwiseBinaries, NO_BINARY, startServe, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -28,6 +26,7 @@ import {
   recordWindow, startedRuns, expectProven, expectAbsent, settled, recordAppeared, observerStart, observerEnded, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
 import { releaseSuite } from "./release.ansiwise.suite.ts";
+import { orphanedEndSuite } from "./orphaned-end.ansiwise.suite.ts";
 
 // EVERY run kind that drives the machine's deployment programs, on the REAL `ansiwise-rest serve`:
 // redeploy (both arms), release, the tailnet repair run kinds, deploy-slave, and the transport
@@ -174,7 +173,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // The machine's OWN records: dry + run per program, every one green. This is the record an
     // operator on the machine reads — the manager reported nothing the machine does not stand behind.
-    expectProven(h.db, runId, await observer.runs(), ["deploy-cluster", "deploy-platform-services"]);
+    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-cluster", "deploy-platform-services"]);
 
     // The step's checkpoint carries both machine runs green — what a re-entry would skip on.
     const checkpoint = stepColumn(h.db, runId, "run-deploy-cluster", "checkpoint_json") ?? "";
@@ -198,51 +197,6 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The proof failed, so the act never started: not one new run-mode record on the machine.
     const runsAfter = (await observer.runs()).filter((x) => x.program === "deploy-cluster" && x.mode === "run").length;
     expect(runsAfter).toBe(runsBefore);
-  });
-
-  // ============== the wait itself: what it does when the machine's end is never installed ==============
-  //
-  // The engine writes a run's closing header beside the real one and renames over it. On this
-  // platform that rename fails while any process has run.json open and it carries no retry, so the
-  // exit code is left standing in run.json.writing and the record never gains an end. The wait below
-  // used to spend the caller's whole budget on that, and vitest then reported a bare 120s timeout
-  // pointing at the it() line — which named neither the run nor the machine. These two hold the wait
-  // to telling the two states apart, and they do it on TIME, because what changed is when it gives
-  // up and not what it says.
-
-  it("a run whose end was written but never installed is refused at once, not waited out", { timeout: 60_000 }, async () => {
-    await liveMaster(serve);
-    const run = await observerStart(serve, { program: "deploy-cluster", mode: "dry", answers: composedAnswers(uniqueEmail()) });
-    await observerEnded(observer, serve, run.run, AbortSignal.timeout(30_000)); // the innocent case: it ends, and the wait returns
-    const dir = join(runRoot(serve.dir), run.run);
-
-    // The state the engine leaves behind when its rename does not land, built here by hand: the
-    // closing header standing under the pending name, and a record that carries no end.
-    const ended = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, unknown>;
-    writeFileSync(join(dir, "run.json.writing"), JSON.stringify(ended));
-    writeFileSync(join(dir, "run.json"), JSON.stringify({ ...ended, exit_code: null }));
-
-    const began = Date.now();
-    await expect(observerEnded(observer, serve, run.run, AbortSignal.timeout(30_000))).rejects.toThrow();
-    expect(Date.now() - began, "the wait spent the budget instead of reading what was on the disk").toBeLessThan(10_000);
-  });
-
-  it("a run that has simply not ended yet is still waited out, to the caller's own budget", { timeout: 60_000 }, async () => {
-    await liveMaster(serve);
-    const run = await observerStart(serve, { program: "deploy-cluster", mode: "dry", answers: composedAnswers(uniqueEmail()) });
-    await observerEnded(observer, serve, run.run, AbortSignal.timeout(30_000));
-    const dir = join(runRoot(serve.dir), run.run);
-
-    // The counter-probe of the test above. Same record with its end taken away, but NO pending
-    // header beside it — a run still going looks exactly like this, and giving up on one of those
-    // would turn a slow machine into a failure.
-    const ended = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, unknown>;
-    rmSync(join(dir, "run.json.writing"), { force: true });
-    writeFileSync(join(dir, "run.json"), JSON.stringify({ ...ended, exit_code: null }));
-
-    const began = Date.now();
-    await expect(observerEnded(observer, serve, run.run, AbortSignal.timeout(4_000))).rejects.toThrow();
-    expect(Date.now() - began, "the wait gave up on a run that had not ended, with nothing on the disk saying it had").toBeGreaterThanOrEqual(3_500);
   });
 
   it("a checkpoint holding a FINISHED-RED machine run starts a fresh one — a retry that could never work", { timeout: 120_000 }, async ({ signal }) => {
@@ -326,6 +280,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   // Registered from release.ansiwise.suite.ts — the one serve fixture this file starts, the release's
   // own tests in their own file. That module says why the split is of the FILE and not the process.
   releaseSuite(() => serve, () => observer);
+  orphanedEndSuite(() => serve, () => observer);
 
   // ================================ the tailnet run kinds, end to end ================================
 
@@ -346,7 +301,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
 
       // The machine's OWN records: dry + run, both green — the proof, then the act.
-      expectProven(h.db, r.runId, await observer.runs(), [program]);
+      expectProven(serve, h.db, r.runId, await observer.runs(), [program]);
 
       // EVERY session went to the host's PUBLIC address (servers.host) — never the LAN one every
       // other run kind would use — and the master was not touched at all.
@@ -372,7 +327,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The machine's OWN records: dry + run per program, all green. The rejoin program's rows judge
     // the COMPOSITION — login_server off the branch's profile, auth_key off the master's key file —
     // so a wrong value goes red on the machine's side of the wire.
-    expectProven(h.db, r.runId, await observer.runs(), ["tailnet-mint-join-key", "tailnet-rejoin"]);
+    expectProven(serve, h.db, r.runId, await observer.runs(), ["tailnet-mint-join-key", "tailnet-rejoin"]);
 
     // Two surfaces: the mint conversation on the MASTER (its usual address), the rejoin on the
     // host's PUBLIC one; the key file was read and removed on the master.
@@ -399,7 +354,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The mint is fine — its two runs are green — and the act never started: not one run-mode
     // rejoin record on the machine, so the logout never happened.
     const all = await observer.runs();
-    expectProven(h.db, runId, all, ["tailnet-mint-join-key"]);
+    expectProven(serve, h.db, runId, all, ["tailnet-mint-join-key"]);
     expect(recordWindow(all, startedRuns(h.db, runId)).filter((x) => x.program === "tailnet-rejoin" && x.mode === "run")).toHaveLength(0);
 
     // The failure still re-read the host, so the card shows the world as the failed run left it.
@@ -442,7 +397,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // The machines' OWN records: dry + run per program, every one green — the branch cut and the
     // registration on the master's surface, the machine layer, the join and the emit on the slave's.
-    expectProven(h.db, r.runId, await observer.runs(), [
+    expectProven(serve, h.db, r.runId, await observer.runs(), [
       "deploy-slave-branch", "deploy-host", "deploy-cluster", "deploy-platform-services",
       "tailnet-mint-join-key", "tailnet-rejoin", "emit-cluster-credentials", "register-slave",
     ]);
@@ -508,7 +463,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The emit itself is green — the defect is in what it handed over — and the registration
     // never ran: not one run-mode register-slave record on the machine.
     const all = await observer.runs();
-    expectProven(h.db, runId, all, ["emit-cluster-credentials"]);
+    expectProven(serve, h.db, runId, all, ["emit-cluster-credentials"]);
     expect(recordWindow(all, startedRuns(h.db, runId)).filter((x) => x.program === "register-slave" && x.mode === "run")).toHaveLength(0);
     // The tampered file's tokens still appear nowhere in the persisted surface.
     const dump = JSON.stringify(readEvents(h.db.db, runId));
@@ -557,7 +512,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     for (const gone of ["master:", "booksCluster:", "apiHost:", "apiPort:"]) expect(map).not.toContain(gone);
 
     // The removal itself is a machine act, dry-proven then run on the master's own record...
-    expectProven(h.db, runId, await observer.runs(), ["remove-slave"]);
+    expectProven(serve, h.db, runId, await observer.runs(), ["remove-slave"]);
     // ...and the destructive snap purge ran on the SLAVE.
     const tail = h.hosts.log.slice(logMark);
     expect(tail.find((l) => l.command.includes("snap remove --purge microk8s"))?.host).toBe("10.1.1.11");
@@ -578,7 +533,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The machine layer and the handshake re-ran, each dry-proven; the two BIRTH acts did not —
     // no branch cut, no mint, no rejoin, on either machine's records.
     const all = await observer.runs();
-    expectProven(h.db, r.runId, all, ["deploy-host", "deploy-cluster", "deploy-platform-services", "emit-cluster-credentials", "register-slave"]);
+    expectProven(serve, h.db, r.runId, all, ["deploy-host", "deploy-cluster", "deploy-platform-services", "emit-cluster-credentials", "register-slave"]);
     expectAbsent(h.db, r.runId, all, ["deploy-slave-branch", "tailnet-mint-join-key", "tailnet-rejoin"]);
 
     // Not one compensating action was armed: every one of them undoes a WORKING slave.

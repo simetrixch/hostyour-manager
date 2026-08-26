@@ -381,8 +381,16 @@ export function greenModes(window: AnsiwiseRunRecord[], program: string): string
  *
  *  Leg two: over the window those ids open, the machine carries no OTHER green record for the
  *  program. That is what catches a second run — the defect this suite exists for — whoever started
- *  it, while a record from an earlier test stays outside the window and cannot be mistaken for one. */
-export function expectProven(db: DbHandle, runId: string, all: AnsiwiseRunRecord[], programs: string[]): void {
+ *  it, while a record from an earlier test stays outside the window and cannot be mistaken for one.
+ *
+ *  A RECORD WITHOUT AN END IS NAMED, NOT COMPARED. `exit_code` is absent in exactly one state that
+ *  is not the program's doing — the closing header the engine renamed and lost — and leg one is
+ *  where a run in that state arrives first. Comparing the absence against 0 produces
+ *  `expected undefined to be +0`, which sends the reader looking for a program that went red;
+ *  endMissing says which of the two states it is and which file to open. Leg two cannot produce
+ *  that shape at all once leg one has passed: every id it counts is one leg one just found green,
+ *  so the modes it reports can only be a SUPERSET, which is the second run it exists to catch. */
+export function expectProven(serve: ServeFixture, db: DbHandle, runId: string, all: AnsiwiseRunRecord[], programs: string[]): void {
   const started = startedRuns(db, runId);
   const window = recordWindow(all, started);
   for (const program of programs) {
@@ -391,7 +399,9 @@ export function expectProven(db: DbHandle, runId: string, all: AnsiwiseRunRecord
     for (const r of mine) {
       const record = all.find((x) => x.id === r.id);
       expect(record, `${program}: the machine has no record of the ${r.mode} run ${r.id}`).toBeDefined();
-      expect(record?.exit_code, `${program}: the ${r.mode} run ${r.id} on the machine`).toBe(0);
+      const at = `${program}: the ${r.mode} run ${r.id} on the machine`;
+      const ended = record?.exit_code !== undefined && record.exit_code !== null;
+      expect(record?.exit_code, ended ? at : `${at} — ${endMissing(serve, r.id)}`).toBe(0);
     }
     expect(greenModes(window, program), program).toEqual(["dry", "run"]);
   }
@@ -452,7 +462,11 @@ export async function observerStart(serve: ServeFixture, start: { program: strin
  *
  *  AND IT REPORTS WHAT IT SAW, NOT WHAT IT ASSUMES. Giving up is not evidence that the run did not
  *  end — it may end a moment later — so the refusal says this stopped watching and what the last
- *  reading was, and never that the run "never ended". */
+ *  reading was, and never that the run "never ended".
+ *
+ *  ONE READER OF run.json, AND IT IS THE SURFACE. What the record says is what `observer.run` just
+ *  answered; the only file this opens itself is run.json.writing, which the rename does not care
+ *  about (pendingEnd carries the measurement). */
 export async function observerEnded(observer: AnsiwiseClient, serve: ServeFixture, id: string, signal: AbortSignal): Promise<void> {
   let lastSeen = "no record on the machine yet";
   while (!signal.aborted) {
@@ -492,22 +506,44 @@ function rest(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** What an id's record and its pending header say about the run having ended, read straight off this
- *  machine's disk rather than through the surface. */
-function headerEnds(serve: ServeFixture, id: string): { record: boolean; pending: boolean } {
-  const ended = (file: string): boolean => {
-    try {
-      const { exit_code: code } = JSON.parse(readFileSync(join(runRoot(serve.dir), id, file), "utf8")) as { exit_code?: number | null };
-      return code !== undefined && code !== null;
-    } catch {
-      return false; // absent, or half written — either way it is not an end anybody can read
-    }
-  };
-  return { record: ended("run.json"), pending: ended("run.json.writing") };
+/** Does the pending header beside [id]'s record carry an end?
+ *
+ *  THIS READS THE RENAME'S SOURCE AND NEVER ITS TARGET, and that is the whole reason it reads one
+ *  file instead of two. The state below is produced by a rename that fails while a reader holds the
+ *  target open, so a detector that opened run.json every poll turn was raising the rate of the very
+ *  thing it measures. Measured on this platform, 300 renames per row, the renaming process and the
+ *  reading process separate, the reader spinning as fast as it can read:
+ *
+ *    no reader                       0 of 300 renames lost
+ *    a reader on run.json            270 of 300 lost
+ *    a reader on run.json.writing    0 of 300 lost
+ *
+ *  What run.json says is taken from the record the caller already read over the surface instead —
+ *  the same reading the wait itself judges, so the two halves can no longer disagree about the same
+ *  moment. The surface is a reader of run.json as well and that one stays: it IS the wait. */
+function pendingEnd(serve: ServeFixture, id: string): boolean {
+  try {
+    const { exit_code: code } = JSON.parse(readFileSync(join(runRoot(serve.dir), id, "run.json.writing"), "utf8")) as { exit_code?: number | null };
+    return code !== undefined && code !== null;
+  } catch {
+    return false; // absent, or half written — either way it is not an end anybody can read
+  }
+}
+
+/** What to say about a machine run whose record carries no end, for a caller that has already
+ *  decided to fail: which of the two states this is, and where the answer stands. The disk is read
+ *  ONCE and with no settle window, so this belongs where the run is over and nothing is still
+ *  renaming — an assertion after the run settled, never a poll while it runs. */
+function endMissing(serve: ServeFixture, id: string): string {
+  const dir = join(runRoot(serve.dir), id);
+  return pendingEnd(serve, id)
+    ? `its end was written and never installed: ${join(dir, "run.json.writing")} carries the exit code and ${join(dir, "run.json")} carries none. The engine renames the one onto the other and that rename did not land`
+    : `its record carries no end and no ${join(dir, "run.json.writing")} beside it carries one either, so the run had not finished when this was read`;
 }
 
 /** The message for an end the machine wrote that never became its record, or nothing when the record
- *  is simply not there yet.
+ *  is simply not there yet. Called only where the SURFACE has just answered that the record carries
+ *  no end, which is the other half of the state and is never read off the disk here.
  *
  *  A run's closing header is written beside the real one and renamed over it (ansiwise-core
  *  lib/src/infrastructure/file_recorder.dart, RunRecorder.save). Measured on Windows over 365 runs
@@ -521,17 +557,15 @@ function headerEnds(serve: ServeFixture, id: string): { record: boolean; pending
  *  is read at all: without it the caller spends its whole budget and vitest reports a bare timeout
  *  pointing at the it() line, which says nothing about the machine.
  *
- *  CONFIRMED BEFORE IT IS REPORTED. The same two files hold exactly this shape for the microseconds
- *  between the write and the rename of every ordinary save, so a single reading could call a run
- *  stranded that is about to be fine. The state has to still be there a second later, which is four
- *  orders of magnitude longer than that window. */
+ *  CONFIRMED BEFORE IT IS REPORTED. run.json.writing holds exactly this shape for the microseconds
+ *  between the write and the rename of the closing save, so a single reading could call a run
+ *  stranded that is about to be fine. The pending header has to still carry the end a second later,
+ *  which is four orders of magnitude longer than that window — and it is gone the instant the
+ *  rename lands, so the settle also clears a run that ended DURING the window. */
 async function strandedEnd(serve: ServeFixture, id: string, signal: AbortSignal): Promise<string | undefined> {
-  const first = headerEnds(serve, id);
-  if (first.record || !first.pending) return undefined;
+  if (!pendingEnd(serve, id)) return undefined;
   await rest(STRANDED_SETTLE_MS, signal);
-  if (signal.aborted) return undefined;
-  const again = headerEnds(serve, id);
-  if (again.record || !again.pending) return undefined;
+  if (signal.aborted || !pendingEnd(serve, id)) return undefined;
   const dir = join(runRoot(serve.dir), id);
   return `machine run ${id} ended and its end was never installed: ${join(dir, "run.json.writing")} carries the exit code and ${join(dir, "run.json")} still carries none, ${STRANDED_SETTLE_MS}ms apart. The engine renames the one onto the other and that rename did not land; nothing will retry it, so no amount of further waiting can find an end here`;
 }

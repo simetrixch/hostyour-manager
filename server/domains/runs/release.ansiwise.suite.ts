@@ -51,7 +51,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath("m1.example.com"))).toContain(`release: ${tag}`);
 
       // The machine's OWN records: dry + run per program, every one green, all three programs.
-      expectProven(h.db, r.runId, await observer().runs(), ["regenerate-branch", "deploy-cluster", "deploy-platform-services"]);
+      expectProven(serve(), h.db, r.runId, await observer().runs(), ["regenerate-branch", "deploy-cluster", "deploy-platform-services"]);
 
       // The machine's checkout was refreshed BEFORE the programs read it (the pin commit and the tag
       // reach the machine through that step or not at all), the conversations went over the machine's
@@ -85,7 +85,7 @@ export function releaseSuite(serve: () => ServeFixture, observer: () => Ansiwise
       expect(tag).toMatch(/^1\.0\.0-stable-\d{14}$/);
       expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain))).toContain(`release: ${tag}`);
 
-      expectProven(h.db, r.runId, await observer().runs(), ["regenerate-slave-branch", "deploy-cluster", "deploy-platform-services"]);
+      expectProven(serve(), h.db, r.runId, await observer().runs(), ["regenerate-slave-branch", "deploy-cluster", "deploy-platform-services"]);
 
       // WHICH HOST DID WHAT, which is the ticket's own claim. The master stood its two checkouts and
       // held two conversations (the shared require-programs ask, then the regeneration); the slave
