@@ -1,6 +1,7 @@
 // The gate-runner report contract. Kept in shared/ so the
-// runner (which authors the sandbox gates G1/G2/G3/G6/G7/G8/G22), the Manager (which authors the
-// manager-side gates G16/G17/G18/G19/G23 and composes the report), and the web card all
+// runner (which authors the sandbox gates G1/G2/G3/G6/G7/G8/G22 and, when its own fence did not
+// hold, the refusal row G25), the Manager (which authors the manager-side gates
+// G16/G17/G18/G19/G23/G24, the refusal row G26, and composes the report), and the web card all
 // agree on one shape. zod-backed; the inferred types are the single source of truth.
 //
 // every gate states, in full sentences, what was EXPECTED, what was FOUND, and — on a
@@ -35,7 +36,7 @@ const TEXT_MAX = 2000;
  *  so the text and the predicate cannot drift. */
 export const GateResultSchema = z
   .object({
-    id: z.string().regex(/^[GT][0-9]{1,2}$/), // consumer "G1"…"G23" / tenant "T1"…"T4" (same shape)
+    id: z.string().regex(/^[GT][0-9]{1,2}$/), // consumer "G1"…"G26" / tenant "T1"…"T4" (same shape)
     title: z.string(),
     severity: z.enum(["hard", "soft"]),
     status: z.enum(["pass", "warn", "fail"]),
@@ -89,7 +90,12 @@ export const GateReportSchema = z.object({
   resolvedSha: z.string().regex(/^[0-9a-f]{40}$/),
   startedAt: z.number(),
   finishedAt: z.number(),
-  manifest: ConsumerManifestSchema.nullable(), // null <=> G1 failed
+  // Non-null IFF the structure gate ran AND passed. Null therefore covers TWO states, and reading it
+  // as one of them is how a report from a run that never started was read as a repository whose
+  // manifest declares nothing: the structure gate ran and failed (its own row in `gates` says why),
+  // or NO gate ran at all (then `gates` carries the runner's refusal row and no check gate).
+  // Whichever it is, `gates` is where the answer stands — never this field alone.
+  manifest: ConsumerManifestSchema.nullable(),
   dependencies: z.array(ResolvedDependencySchema),
   gates: z.array(GateResultSchema),
   sandbox: SandboxAttestationSchema,
@@ -159,6 +165,49 @@ export type UngatedOnboard = z.infer<typeof UngatedOnboardSchema>;
  *  sandbox attestation) before treating a report as a pass. */
 export function hardGatesPass(gates: GateResult[]): boolean {
   return gates.every((g) => g.severity !== "hard" || g.status === "pass");
+}
+
+/** The verdict's SANDBOX leg: every probe of the fence self-attestation answered the way a holding
+ *  fence answers. It lives HERE, beside hardGatesPass, because two separate images read it — the
+ *  runner before it renders untrusted content, and the Manager when the report arrives — and a
+ *  second copy would let "the fence held" come to mean two different things on the two sides. */
+export function sandboxGreen(s: SandboxAttestation): boolean {
+  return (
+    s.mustFailTargetsConfirmedListening && s.mustFailDenied && s.managerAddrDenied && s.mustPassReached
+  );
+}
+
+/** Which legs of the attestation did NOT hold, one full sentence each, in the order sandboxGreen
+ *  reads them. Empty exactly when sandboxGreen is true. Both refusals print this list — the runner's
+ *  own gate row and the Manager's refusal at receipt — so the same booleans cannot be described two
+ *  different ways.
+ *
+ *  mustFailDenied is an AGGREGATE over the target list: a false says not every target was denied and
+ *  cannot say WHICH one answered, so the sentence names the list that was probed and claims nothing
+ *  more than the boolean carries. */
+export function sandboxFailures(s: SandboxAttestation): string[] {
+  const out: string[] = [];
+  if (!s.mustFailTargetsConfirmedListening) {
+    out.push(
+      "the Manager did not attest that the must-fail probe targets were listening, so a blocked connect here would prove nothing about the fence",
+    );
+  }
+  if (!s.mustFailDenied) {
+    out.push(
+      s.mustFailTargets.length > 0
+        ? `not every must-fail target was denied — the sandbox reached at least one of the targets it probed (${s.mustFailTargets.join(", ")})`
+        : "no must-fail target was configured at all, so nothing was proven blocked",
+    );
+  }
+  if (!s.managerAddrDenied) {
+    out.push("the Manager's own address was not denied — the sandbox can reach the Manager");
+  }
+  if (!s.mustPassReached) {
+    out.push(
+      "the must-pass target was not reached, so this probe cannot tell a fence that blocks from a probe that cannot connect at all",
+    );
+  }
+  return out;
 }
 
 /** Recursively key-sorted structure — a stable serialization so the same report always serializes

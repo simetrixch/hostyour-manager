@@ -15,7 +15,10 @@ import { fail, pass } from "./result.ts";
 import { run, ExecError } from "../exec.ts";
 import { parseRenderedDocs } from "../render-docs.ts";
 
-const ID = "G3";
+/** The render phase's own gate id. Exported so the roster of every sandbox gate can be built from
+ *  the modules that own the ids rather than from a second list beside them. */
+export const RENDER_GATE_ID = "G3";
+const ID = RENDER_GATE_ID;
 const TITLE = "render + pinned deps";
 const SEVERITY = "hard" as const;
 const EXPECTED =

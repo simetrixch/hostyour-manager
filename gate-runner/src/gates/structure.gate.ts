@@ -23,7 +23,9 @@ import { fail, pass } from "./result.ts";
 import type { GateResult } from "../../../shared/gates.ts";
 import { ConsumerManifestSchema, CONSUMER_MANIFEST_PATH, type ConsumerManifest } from "../../../shared/consumer.ts";
 
-const ID = "G1";
+/** The structure phase's own gate id, exported for the same reason RENDER_GATE_ID is. */
+export const STRUCTURE_GATE_ID = "G1";
+const ID = STRUCTURE_GATE_ID;
 const TITLE = "structure";
 const SEVERITY = "hard" as const;
 const MANIFEST_PATH = CONSUMER_MANIFEST_PATH;

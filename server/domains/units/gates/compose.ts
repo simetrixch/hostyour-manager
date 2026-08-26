@@ -6,8 +6,15 @@
 // ones that need facts only the Manager holds (did the clone succeed? what do the OTHER units'
 // registrations attest?) — and recomputes the verdict over all the gates.
 //
-// Every gate here is HARD and UNCONDITIONAL: it is emitted for every onboarding and either passes or
-// fails it. There is no severity switch and no path that skips a gate.
+// Every gate here is HARD: there is no severity switch, and no gate that runs can end in anything
+// but a pass or a fail of the whole onboarding.
+//
+// FOUR OF THEM DO NOT ALWAYS RUN, and that is the one conditional path. G16/G18/G19/G24
+// (MANIFEST_FED_GATE_IDS) read the manifest the sandbox parsed; a report that carries none leaves
+// them with no input, and a gate given no input can only report an empty declaration — which reads
+// exactly like a repository that declares nothing. They are not run at all then, and gateManifestInput
+// stands in their place, naming them and failing the onboarding. A run nothing could judge is not a
+// run that passed.
 //
 // reportHash is left as the runner authored it: an UNKEYED sha256 over the runner's portion,
 // verified at receipt — it refuses corruption and a body rewritten without recomputing the hash,
@@ -309,6 +316,56 @@ export function gateFqdnGrant(input: {
     reason: ok ? null : "an FQDN the platform already serves cannot be attested twice — the ingress controller would resolve the conflict by arbitrary order; re-run the onboard after the name is free or the manifest names another",
     detail: ok ? `fqdn "${input.fqdn}" is free to attest` : "fqdn already served by this platform",
     evidence: ok ? [] : [{ source: "manager" as const, name: input.fqdn, value: collisions[0]!.slice(0, 256) }],
+  };
+}
+
+/** The manager-side gates whose only subject is what the MANIFEST declares. The sandbox parses that
+ *  manifest (G1) and the report carries it; when the report carries none, these four have no input
+ *  and do not run — gateManifestInput below is the row that says so and names them.
+ *
+ *  Held as ONE list because two readers need the same answer: the refusal row, which names what did
+ *  not run, and compose.test.ts, which holds this list against the gates a full run actually emits
+ *  so a gate added here later cannot go unnamed. */
+export const MANIFEST_FED_GATE_IDS: readonly string[] = ["G16", "G18", "G19", "G24"];
+
+/** G26 manifest input (HARD). What the manager-side gates are given, judged before they judge
+ *  anything. MANIFEST_FED_GATE_IDS read the manifest the sandbox parsed; when the report carries
+ *  `manifest: null` they have no input, and the defect this gate exists to end is what they used to
+ *  do with that: read the absence as an empty declaration and report it as the repository's fault.
+ *
+ *  Measured on apps3 on 2026-08-26: a report whose sandbox never ran carried no manifest, and G18
+ *  rejected the onboarding with "no build declared in deploy/platform.yaml" about a file that
+ *  declares three. The person that sentence is written for works in the customer's repository and
+ *  never opens this source; it sent them to fix something that was not broken.
+ *
+ *  IT IS A FAIL, and that is the decision: a run nothing could judge is not a run that passed. The
+ *  onboarding writes a namespace, a Vault path, databases and a build pipeline, and the four gates
+ *  that did not run are the ones that keep two units off one build name and hold a unit's size
+ *  against what it brings. Admitting it on the strength of the gates that DID run would be a pass
+ *  no check produced.
+ *
+ *  It does NOT say why the manifest is absent, because it cannot: the sandbox's own rows in the same
+ *  report are where that stands — a structure gate that failed is the repository's answer, and a
+ *  fence-refusal row is the platform's. */
+export function gateManifestInput(skippedGateIds: readonly string[]): GateResult {
+  const skipped = skippedGateIds.length > 0 ? skippedGateIds.join(", ") : "(none)";
+  return {
+    id: "G26",
+    title: "manifest input",
+    severity: "hard",
+    status: "fail",
+    expected:
+      "the gate report carries the manifest the sandbox parsed out of deploy/platform.yaml, so the manager-side gates that judge what it declares have something to read",
+    found: cap(
+      `the report carries no manifest, so ${skipped} did not run — none of them has read this repository's deploy/platform.yaml, ` +
+        "and nothing here is a statement about what that file declares",
+    ),
+    reason: cap(
+      "a gate that reads an absent input can only report an empty declaration, which reads exactly like a repository that declares nothing — so these gates are not run at all rather than made to invent a finding. " +
+        "The onboarding is refused because it could not be judged, not because the repository is wrong: what the sandbox's own gates in this same report say is where the reason stands.",
+    ),
+    detail: "no manifest in the report — the manifest-fed gates did not run",
+    evidence: skippedGateIds.slice(0, 20).map((id) => ({ source: "manager" as const, name: id, value: "did not run: no manifest in the report" })),
   };
 }
 

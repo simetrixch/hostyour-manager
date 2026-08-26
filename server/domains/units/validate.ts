@@ -4,8 +4,11 @@
 // revision), streams the sandbox gates as they land, composes the runner's report with the
 // manager-side gates, and returns the verdict.
 //
-// Every gate is HARD and UNCONDITIONAL — the composed report either passes or the
-// onboarding is rejected. What a later sync could still get wrong is not asked here at all: the
+// Every gate is HARD — the composed report either passes or the onboarding is rejected. The one
+// conditional path is the manifest: the four manager-side gates that read it (G16/G18/G19/G24) do
+// not run when the report carries none, because a gate handed no input can only report an empty
+// declaration, and that reads exactly like a repository declaring nothing. G26 stands in their place
+// and rejects the run. What a later sync could still get wrong is not asked here at all: the
 // namespace fence, the allowed kinds, the Secret writer, the unit's one host and the restricted pod
 // security are held by the AppProject, the ValidatingAdmissionPolicy and the namespace's Pod Security
 // Admission label, all provisioned at onboarding, so they hold for every future release without a
@@ -20,7 +23,7 @@ import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
-import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateUnitName, gateUnitSize, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
+import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
 import type { UnitComposition, UnitQuota, UnitSize } from "../../../shared/unit-size.ts";
 import { mapBuildsToChartPins, type ChartPinMapping } from "./builds.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
@@ -206,9 +209,35 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
       throw err;
     }
 
+    // Read unconditionally: the unit's platform host is composed from its name whether or not the
+    // manifest declares an extra fqdn, so the tenant-subdomain clause of G23 always has an object.
+    const tenantSubdomains = await deps.tenantSubdomains();
+
+    // The two gates whose subject the Manager holds itself: the clone it just made, and the name the
+    // operator submitted. Neither reads the repository's manifest, so both stand whatever the report
+    // carried. The name goes first: it is the identity every later fact hangs off (namespace,
+    // AppProject, build namespace, host), so a reserved name is refused before uniqueness is asked.
+    const managerGates: GateResult[] = [
+      gateRepoAccess({ ok: true, detail: `cloned ${req.repoURL} at ${cloned.resolvedSha}` }),
+      gateUnitName({ unitName: req.consumerName, tenantSubdomains }),
+    ];
+
+    // THE MANIFEST DECIDES WHETHER THE REST OF THE MANAGER-SIDE GATES RUN AT ALL. Below this branch
+    // every read is `manifest.x`, never `manifest?.x ?? <empty>`: the empty default is what let four
+    // gates judge a repository from an input the report never carried, and G18 then reported "no
+    // build declared in deploy/platform.yaml" about a file declaring three (measured on apps3,
+    // 2026-08-26). The absent input is reported as absent instead, and the run is rejected.
+    const manifest = runnerReport.manifest;
+    if (manifest === null) {
+      managerGates.push(gateManifestInput(MANIFEST_FED_GATE_IDS));
+      for (const g of managerGates) deps.log(`${g.id} ${g.status} — ${g.detail}`);
+      const rejected = composeReport(runnerReport, managerGates);
+      return { verdict: rejected.verdict, resolvedSha: cloned.resolvedSha, report: rejected, builds: null };
+    }
+
     // The builds the unit DECLARES — the manifest is the only source; nothing is derived from a
     // pipeline inventory or a naming prefix any more.
-    const declaredBuilds = (runnerReport.manifest?.builds ?? []).map((b) => b.name);
+    const declaredBuilds = manifest.builds.map((b) => b.name);
 
     // G18's chart half reads the per-stage values file of the pinned chart. A unit without a chartPath
     // is build-only, and the half reports that instead of failing on a file that cannot exist.
@@ -225,36 +254,26 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
     const brings: UnitComposition | null =
       target.chartPath === undefined
         ? null
-        : {
-            postgresql: (runnerReport.manifest?.services ?? []).includes("postgresql"),
-            mongodb: runnerReport.manifest?.mongodb ?? "shared",
-          };
+        : { postgresql: manifest.services.includes("postgresql"), mongodb: manifest.mongodb };
 
     const foreignBuilds = await deps.registrations.listAttestedBuildNames(req.consumerName);
-    // Read unconditionally: the unit's platform host is composed from its name whether or not the
-    // manifest declares an extra fqdn, so the tenant-subdomain clause of G23 always has an object.
-    const tenantSubdomains = await deps.tenantSubdomains();
 
     // G19's inputs exist only where a fqdn is declared: the attested set is read then (a stage file
     // that fails its schema throws loud there, and only there), and the two structural anchors come
     // off the target's values chain — empty for a build-only target, whose manifest cannot carry a
     // fqdn anyway. The chain read excludes only the candidate's own registration at THIS stage, so
     // its other stages' attestations count as taken.
-    const declaredFqdn = runnerReport.manifest?.fqdn ?? null;
+    const declaredFqdn = manifest.fqdn ?? null;
     const unitApex = declaredFqdn !== null && target.clusterValueFiles.length > 0 ? unitApexFromChain(target.clusterValueFiles) : null;
     const clusterDomain = declaredFqdn !== null ? clusterDomainFromChain(target.clusterValueFiles) : null;
     const foreignFqdns = declaredFqdn !== null ? await deps.registrations.listAttestedFqdns({ unit: req.consumerName, stage: target.stage }) : [];
 
-    const managerGates: GateResult[] = [
-      gateRepoAccess({ ok: true, detail: `cloned ${req.repoURL} at ${cloned.resolvedSha}` }),
-      // The name first: it is the identity every later fact hangs off (namespace, AppProject,
-      // build namespace, host), so a reserved name is refused before uniqueness is even asked.
-      gateUnitName({ unitName: req.consumerName, tenantSubdomains }),
+    managerGates.push(
       gateBuildNameUniqueness({ unitName: req.consumerName, buildNames: declaredBuilds, foreignBuilds }),
       gateBuildDeclaration({ declaredBuilds, chart }),
       gateFqdnGrant({ unitName: req.consumerName, fqdn: declaredFqdn, unitApex, clusterDomain, foreignFqdns }),
       gateUnitSize({ unitName: req.consumerName, size: req.size, brings, quota: brings ? deps.resolveQuota(req.size, brings) : null }),
-    ];
+    );
     for (const g of managerGates) deps.log(`${g.id} ${g.status} — ${g.detail}`);
 
     const report = composeReport(runnerReport, managerGates);

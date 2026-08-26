@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateUnitName, gateUnitSize, PLATFORM_NAMESPACES } from "./compose.ts";
+import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, PLATFORM_NAMESPACES } from "./compose.ts";
 import { DEFAULT_UNIT_SIZE, seedQuota, UNIT_SIZE, type MongodbMode, type UnitSize } from "../../../../shared/unit-size.ts";
 import { mapBuildsToChartPins } from "../builds.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
-import type { GateReport, GateResult } from "../../../../shared/gates.ts";
+import { hardGatesPass, type GateReport, type GateResult } from "../../../../shared/gates.ts";
 
 const SHA = "a".repeat(40);
 
@@ -243,6 +243,41 @@ describe("G19 fqdn grant (hard)", () => {
   it("fails the whole set of gates — it is a HARD gate", () => {
     const g19 = gateFqdnGrant({ unitName: "acme", fqdn: "shop.example.org", unitApex: null, clusterDomain: null, foreignFqdns: foreign });
     expect(composeReport(runnerReport(), [gateRepoAccess({ ok: true, detail: "ok" }), g19]).verdict).toBe("fail");
+  });
+});
+
+describe("G26 manifest input (hard)", () => {
+  it("fails, names every gate that could not run, and states no fact about the repository's files", () => {
+    const g = gateManifestInput(MANIFEST_FED_GATE_IDS);
+    expect(g.id).toBe("G26");
+    expect(g.severity).toBe("hard");
+    // A run nothing could judge is not a run that passed: the onboarding writes a namespace, a Vault
+    // path, databases and a build pipeline, and the gates that did not run are the ones that keep two
+    // units off one build name and hold a unit's size against what it brings.
+    expect(g.status).toBe("fail");
+    expect(g.reason).not.toBeNull();
+    expect(MANIFEST_FED_GATE_IDS.length).toBeGreaterThan(0);
+    for (const id of MANIFEST_FED_GATE_IDS) expect(g.found).toContain(id);
+    // Each named gate is carried as its own evidence row, so the card lists them rather than a count.
+    expect(g.evidence?.map((e) => e.name)).toEqual([...MANIFEST_FED_GATE_IDS]);
+
+    // The sentence G18 used to produce from an absent manifest, and the one this row must never
+    // repeat: it is a claim about a file nothing opened.
+    expect(g.found).not.toContain("no build declared");
+  });
+
+  it("holds together with G18's own fail — the two are different answers and read differently", () => {
+    const absent = gateManifestInput(MANIFEST_FED_GATE_IDS);
+    const declaredNothing = gateBuildDeclaration({ declaredBuilds: [], chart: null });
+    expect(declaredNothing.found).toBe("no build declared in deploy/platform.yaml");
+    expect(absent.found).not.toBe(declaredNothing.found);
+    expect(absent.detail).not.toBe(declaredNothing.detail);
+  });
+
+  it("fails the whole set of gates — it is a HARD gate", () => {
+    expect(hardGatesPass([gateRepoAccess({ ok: true, detail: "ok" }), gateManifestInput(MANIFEST_FED_GATE_IDS)])).toBe(false);
+    // INNOCENT CASE: the same set without it passes, so the false above is this gate and not the set.
+    expect(hardGatesPass([gateRepoAccess({ ok: true, detail: "ok" })])).toBe(true);
   });
 });
 

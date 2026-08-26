@@ -8,6 +8,7 @@ import type { GateRunner, GateJobProgress } from "../../adapters/gate-runner/por
 import type { GateReport, GateResult } from "../../../shared/gates.ts";
 import { ConsumerManifestSchema, type ConsumerManifest } from "../../../shared/consumer.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { MANIFEST_FED_GATE_IDS } from "./gates/compose.ts";
 import { seedQuota } from "../../../shared/unit-size.ts";
 
 const SHA = "a".repeat(40);
@@ -250,6 +251,93 @@ describe("validateOnboard", () => {
     expect(outcome.builds).toBeNull();
     // the full report is still returned so the operator sees every expected/found/reason.
     expect(outcome.report.gates.find((g) => g.id === "G1")?.reason).not.toBeNull();
+  });
+
+  // A MANAGER-SIDE GATE MUST NOT JUDGE A REPOSITORY FROM AN INPUT THE REPORT NEVER CARRIED.
+  // Measured on apps3 on 2026-08-26: the report carried manifest null, and G16/G18/G19/G24 read that
+  // as an empty declaration. G18 rejected the onboarding with "no build declared in
+  // deploy/platform.yaml" about a file that declares three builds, and the person that sentence is
+  // written for works in the customer's repository and never opens this source.
+  describe("a report that carries no manifest", () => {
+    it("does not run the manifest-fed gates, and no gate says anything about the repository's files", async () => {
+      const repo = new FakeRepoReader({ resolvedSha: SHA });
+      const runner = new FakeGateRunner({ report: report(g1Fail, "fail") });
+      const outcome = await validateOnboard(req(), target(), deps(repo, runner));
+
+      const ids = outcome.report.gates.map((g) => g.id);
+      // The two manager-side gates whose subject the Manager holds itself still stand: the clone it
+      // made, and the name the operator submitted. Neither reads the manifest.
+      expect(ids).toEqual(["G1", "G17", "G23", "G26"]);
+      expect(MANIFEST_FED_GATE_IDS.length).toBeGreaterThan(0); // the exclusion below is not vacuous
+      expect(ids.filter((id) => MANIFEST_FED_GATE_IDS.includes(id))).toEqual([]);
+
+      // The row that stands in their place says which ones did not run, one by one.
+      const g26 = outcome.report.gates.find((g) => g.id === "G26");
+      expect(g26?.severity).toBe("hard");
+      expect(g26?.status).toBe("fail");
+      expect(g26?.reason).not.toBeNull();
+      for (const id of MANIFEST_FED_GATE_IDS) expect(g26?.found).toContain(id);
+
+      // A run nothing could judge is not a run that passed.
+      expect(outcome.verdict).toBe("fail");
+      expect(outcome.builds).toBeNull();
+    });
+
+    it("holds for a build-only unit too — the form does not restore an input the report never carried", async () => {
+      const repo = new FakeRepoReader({ resolvedSha: SHA });
+      const runner = new FakeGateRunner({ report: report(g1Fail, "fail") });
+      const { chartPath: _chartPath, ...buildOnly } = target();
+      const outcome = await validateOnboard(req(), buildOnly, deps(repo, runner));
+      expect(outcome.report.gates.map((g) => g.id)).toEqual(["G1", "G17", "G23", "G26"]);
+      expect(outcome.verdict).toBe("fail");
+    });
+
+    it("reads no registration and no tenant list for gates that are not going to run", async () => {
+      const repo = new FakeRepoReader({ resolvedSha: SHA });
+      const runner = new FakeGateRunner({ report: report(g1Fail, "fail") });
+      const attested = new FakeAttestedBuilds([{ unit: "unit-a", build: "shared-api" }]);
+      await validateOnboard(req(), target(), deps(repo, runner, { registrations: attested }));
+      expect(attested.asked).toEqual([]);
+      expect(attested.askedFqdns).toEqual([]);
+    });
+
+    // THE ACCOUNTING CHECK, and it is what keeps MANIFEST_FED_GATE_IDS from going stale. Every
+    // manager-side gate a full run emits must, in the no-manifest run, either RUN or be NAMED as one
+    // that did not. A gate added to validateOnboard's manifest branch and forgotten in the list turns
+    // this red instead of silently judging a repository from a default.
+    it("accounts for every manager-side gate a full run emits", async () => {
+      const repoFull = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
+      const full = await validateOnboard(
+        req(),
+        target(),
+        deps(repoFull, new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"])) })),
+      );
+      const none = await validateOnboard(
+        req(),
+        target(),
+        deps(new FakeRepoReader({ resolvedSha: SHA }), new FakeGateRunner({ report: report(g1Fail, "fail") })),
+      );
+
+      const managerSide = full.report.gates.map((g) => g.id).filter((id) => id !== "G1");
+      const ran = none.report.gates.map((g) => g.id);
+      expect(managerSide.length).toBeGreaterThan(0);
+      const unaccounted = managerSide.filter((id) => !ran.includes(id) && !MANIFEST_FED_GATE_IDS.includes(id));
+      expect(unaccounted, `manager-side gates a no-manifest run neither runs nor names as unrun: ${unaccounted.join(", ")}`).toEqual([]);
+      // ...and the list names nothing that no run emits, so it cannot be padded into passing.
+      for (const id of MANIFEST_FED_GATE_IDS) expect(managerSide).toContain(id);
+    });
+
+    // INNOCENT CASE: with a manifest in the report, G18 still reports the repository's own fault in
+    // its own words — so the silence above is the absent input, not a gate that stopped judging.
+    it("INNOCENT CASE: a manifest that really declares no build still fails G18, and G26 never appears", async () => {
+      const repo = new FakeRepoReader({ resolvedSha: SHA });
+      const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith([])) });
+      const outcome = await validateOnboard(req(), target(), deps(repo, runner));
+      const g18 = outcome.report.gates.find((g) => g.id === "G18");
+      expect(g18?.status).toBe("fail");
+      expect(g18?.found).toBe("no build declared in deploy/platform.yaml");
+      expect(outcome.report.gates.some((g) => g.id === "G26")).toBe(false);
+    });
   });
 
   it("private repo: the credential opens the Manager clone AND is passed to the gate-run so its pipeline can clone", async () => {

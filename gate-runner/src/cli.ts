@@ -2,21 +2,30 @@
 // The one-shot CLI entrypoint — how the gate-runner IMAGE runs as an in-cluster Tekton task (the
 // replacement for the host-podman-Quadlet HTTP server). The `clone` task has already put the repo at
 // the pinned SHA into the source workspace; this reads its inputs from env, PROVES the egress fence
-// from inside (fence.ts self-probe, fail-closed — the same SANDBOX_DEGRADED refusal the HTTP path
-// made, only the fence is now a Calico NetworkPolicy instead of host nftables), runs the gates
-// over the cloned tree, and writes the frozen GateReport to a file the pipeline's publish step turns
-// into the ConfigMap the Manager reads. Exit 0 iff a report was written (a gate FAIL is a report
-// verdict, not a crash); exit non-zero only on an internal error that produced NO report, which the
-// pipeline's `finally` publish step then surfaces as a synthetic fail so the Manager never hangs.
+// from inside (fence.ts self-probe, fail-closed — the fence is a Calico NetworkPolicy rather than
+// host nftables now), runs the gates over the cloned tree, and writes the frozen GateReport to a file
+// the pipeline's publish step turns into the ConfigMap the Manager reads. Exit 0 iff a report was
+// written (a gate FAIL is a report verdict, not a crash); exit non-zero only on an internal error
+// that produced NO report, which the pipeline's `finally` publish step then surfaces as a synthetic
+// fail so the Manager never hangs.
+//
+// A FENCE THAT DID NOT HOLD STILL WRITES A REPORT, and it must: the attestation IS the measurement,
+// and a run that exited instead would take the only evidence of a broken fence with it. What the
+// report carries then is the refusal row (gates/sandbox-fence.gate.ts) and no check gate at all. The
+// Manager refuses that report at receipt with SANDBOX_DEGRADED, on the same predicate this file
+// reads (shared/gates.ts sandboxGreen).
 import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { GateReport, SandboxAttestation } from "../../shared/gates.ts";
+import { sandboxGreen } from "../../shared/gates.ts";
 import { STAGE, type Stage } from "../../shared/enums.ts";
 import { ClusterValueFilesSchema } from "../../shared/cluster-values.ts";
 import { runGates, type GateJobMeta, type PipelineConfig } from "./pipeline.ts";
 import { readWorkspace } from "./workspace.ts";
 import { selfProbe, type ConnectFn, type FenceConfig } from "./fence.ts";
-import { assembleReport, sandboxGreen } from "./report.ts";
+import { assembleReport } from "./report.ts";
+import { sandboxFenceRefusal } from "./gates/sandbox-fence.gate.ts";
+import { SANDBOX_GATE_IDS } from "./gate-list.ts";
 
 /** Everything the one-shot run needs, parsed + validated from the task env. */
 export interface CliInputs {
@@ -92,15 +101,19 @@ export function parseEnv(env: NodeJS.ProcessEnv): CliInputs {
 
 /** Prove the fence, then run the gates over the cloned workspace, returning the frozen report. If the
  *  fence self-probe is not green OR the Manager did not attest confirmed-listening, it REFUSES to
- *  render untrusted code and returns a gate-less report carrying the degraded sandbox — the
- *  Manager's own sandbox re-check (sandboxGreen) then fails the plan. `connect`/`now` are injectable
- *  for tests. */
+ *  read untrusted code and returns a report whose ONE gate row (G25) says the fence did not hold and
+ *  names every sandbox gate that therefore did not run — the Manager's own sandbox re-check
+ *  (sandboxGreen, at the gate-runner adapter's receipt) then refuses the run. `connect`/`now` are
+ *  injectable for tests. */
 export async function runGateCli(inputs: CliInputs, connect?: ConnectFn, now: () => number = Date.now): Promise<GateReport> {
   // Probe with the Manager's REAL confirmed-listening attestation: sandboxGreen requires it AND the
   // three egress probes, so a missing attestation OR a fence that is not holding both fail closed below,
-  // and the degraded report carries the truthful (not-green) sandbox the Manager re-checks.
+  // and the refusing report carries the truthful (not-green) sandbox the Manager re-checks.
   const sandbox: SandboxAttestation = await selfProbe(inputs.fence, connect);
-  const degraded = (): GateReport =>
+  // The report a refused run returns. It carries G25 and NOTHING else: a report whose `gates` were
+  // empty said only "no gate failed", which read exactly like a repository nobody could fault, and
+  // the Manager's own gates then composed a rejection naming the repository's files.
+  const fenceRefused = (): GateReport =>
     assembleReport({
       runnerVersion: inputs.pipeline.runnerVersion,
       repoURL: inputs.meta.repoURL,
@@ -110,13 +123,13 @@ export async function runGateCli(inputs: CliInputs, connect?: ConnectFn, now: ()
       finishedAt: now(),
       manifest: null,
       dependencies: [],
-      gates: [],
+      gates: [sandboxFenceRefusal(sandbox, SANDBOX_GATE_IDS)],
       sandbox,
     });
 
   // Fail closed BEFORE any untrusted chart render: a fence that is not provably green (which includes
   // the confirmed-listening precondition) means we do not run the gates at all.
-  if (!sandboxGreen(sandbox)) return degraded();
+  if (!sandboxGreen(sandbox)) return fenceRefused();
 
   const abort = new AbortController();
   const budget = setTimeout(() => abort.abort(), inputs.jobBudgetMs);

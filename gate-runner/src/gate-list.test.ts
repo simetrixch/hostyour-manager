@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { CheckGate } from "./gates/gate.ts";
-import { PRE_RENDER_GATES, POST_RENDER_GATES } from "./gate-list.ts";
+import { PRE_RENDER_GATES, POST_RENDER_GATES, SANDBOX_GATE_IDS } from "./gate-list.ts";
+import { STRUCTURE_GATE_ID } from "./gates/structure.gate.ts";
+import { RENDER_GATE_ID } from "./gates/render-pinned-deps.gate.ts";
 
 // A census over the gate list, not a behaviour test: the two lists here decide which gates a consumer
 // is actually judged by, and the report reads them as if all of them ran. A declared gate whose
@@ -80,6 +82,19 @@ describe("gate list census: every declared gate has an implementation", () => {
       .filter(({ gate }) => !declared.includes(gate))
       .map(({ file, gate }) => `${file} (${gate.id})`);
     expect(undeclared, `gate modules no list runs: ${undeclared.join(", ")}`).toEqual([]);
+  });
+
+  // A refused run reports SANDBOX_GATE_IDS as the checks that did not inspect the repository. A gate
+  // the roster leaves out is a check the reader is never told went unrun, so the roster is held
+  // against the same two lists the pipeline runs from, plus the two phases that are not CheckGates.
+  it("names every declared gate, and both pipeline phases, in the roster a refused run reports", () => {
+    for (const g of declared) expect(SANDBOX_GATE_IDS, `${g.id} is declared but the roster does not name it`).toContain(g.id);
+    expect(SANDBOX_GATE_IDS).toContain(STRUCTURE_GATE_ID);
+    expect(SANDBOX_GATE_IDS).toContain(RENDER_GATE_ID);
+    expect(SANDBOX_GATE_IDS.length).toBe(declared.length + 2);
+    // The innocent case: the roster does not name an id no list carries, so the containment above is
+    // not satisfied by a padded list.
+    expect(SANDBOX_GATE_IDS.filter((id) => id !== STRUCTURE_GATE_ID && id !== RENDER_GATE_ID && !declared.some((g) => g.id === id))).toEqual([]);
   });
 
   it("names every gate module after a word of the gate's own title", async () => {

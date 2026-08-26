@@ -1,7 +1,8 @@
 // gate-runner/src/report.test.ts — the report assembly (verdict legs + authored hash + schema belt).
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { assembleReport, sandboxGreen, type ReportInput } from "./report.ts";
+import { assembleReport, type ReportInput } from "./report.ts";
+import { sandboxGreen } from "../../shared/gates.ts";
 import { GateReportSchema, reportHashPayload, type GateResult, type SandboxAttestation } from "../../shared/gates.ts";
 
 const SHA = "a".repeat(40);

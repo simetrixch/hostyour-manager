@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseEnv, runGateCli, type CliInputs } from "./cli.ts";
 import type { ConnectFn } from "./fence.ts";
-import { sandboxGreen } from "./report.ts";
+import { sandboxGreen } from "../../shared/gates.ts";
 import { clusterMapPath } from "../../shared/cluster-values.ts";
-import { POST_RENDER_GATES } from "./gate-list.ts";
+import { POST_RENDER_GATES, SANDBOX_GATE_IDS } from "./gate-list.ts";
+import { SANDBOX_FENCE_GATE_ID } from "./gates/sandbox-fence.gate.ts";
 
 const made: string[] = [];
 async function ws(): Promise<string> {
@@ -70,18 +71,54 @@ describe("parseEnv", () => {
   });
 });
 
+// A REFUSED RUN READS NOTHING, AND THE REPORT HAS TO SAY SO. Measured on apps3 on 2026-08-26: the
+// refusal returned a schema-valid report whose `gates` were empty and whose `manifest` was null, and
+// the Manager composed its own gates on top and rejected the onboarding with "no build declared in
+// deploy/platform.yaml" about a file declaring three. An empty gate list says only "no gate failed".
 describe("runGateCli fail-closed", () => {
-  it("refuses to render (gate-less degraded report) when the Manager did not attest confirmed-listening", async () => {
+  it("refuses to read the repository when the Manager did not attest confirmed-listening, and names every gate that did not run", async () => {
     const report = await runGateCli(inputs(await ws(), false), green);
-    expect(report.gates).toHaveLength(0);
     expect(sandboxGreen(report.sandbox)).toBe(false);
     expect(report.verdict).toBe("fail");
+
+    // ONE row, and it is the refusal — not an empty list, and not a check gate.
+    expect(report.gates.map((g) => g.id)).toEqual([SANDBOX_FENCE_GATE_ID]);
+    const refusal = report.gates[0];
+    expect(refusal?.severity).toBe("hard");
+    expect(refusal?.status).toBe("fail");
+    expect(refusal?.reason).not.toBeNull();
+
+    // Named one by one rather than counted: a count does not say which parts of the repository went
+    // uninspected. The roster is derived, so a gate added to gate-list.ts is named without an edit here.
+    expect(SANDBOX_GATE_IDS.length).toBeGreaterThan(0); // the loop below is not vacuous
+    for (const id of SANDBOX_GATE_IDS) expect(refusal?.found).toContain(id);
   });
-  it("refuses to render when the egress fence is not green (an internal target is reachable)", async () => {
+
+  it("refuses when the egress fence is not green (an internal target is reachable)", async () => {
     const report = await runGateCli(inputs(await ws()), managerReachable);
-    expect(report.gates).toHaveLength(0);
     expect(report.sandbox.managerAddrDenied).toBe(false);
     expect(report.verdict).toBe("fail");
+    expect(report.gates.map((g) => g.id)).toEqual([SANDBOX_FENCE_GATE_ID]);
+  });
+
+  // THE OUTCOME THAT MATTERS, and the one the apps3 report failed: a refused run's report cannot be
+  // made to say ANYTHING about the repository. A tree that would fail G1 and a tree that would pass
+  // it produce the identical rows, so nothing downstream can read a repository fault out of one.
+  it("says the same thing about a repository whose manifest is fine and one that has no manifest at all", async () => {
+    const good = await runGateCli(buildOnlyInputs(await buildOnlyRepo()), managerReachable);
+    const empty = await runGateCli(buildOnlyInputs(await ws()), managerReachable);
+    expect(good.gates.map((g) => g.id)).toEqual(empty.gates.map((g) => g.id));
+    expect(good.gates[0]?.found).toBe(empty.gates[0]?.found);
+    expect(good.manifest).toBeNull();
+    expect(empty.manifest).toBeNull();
+
+    // INNOCENT CASE beside it: with the fence holding, those same two trees answer DIFFERENTLY — so
+    // the sameness above is the refusal refusing to look, not a run that never looks at anything.
+    const goodGreen = await runGateCli(buildOnlyInputs(await buildOnlyRepo()), green);
+    const emptyGreen = await runGateCli(buildOnlyInputs(await ws()), green);
+    expect(goodGreen.verdict).toBe("pass");
+    expect(emptyGreen.verdict).toBe("fail");
+    expect(goodGreen.manifest).not.toBeNull();
   });
 });
 
@@ -169,6 +206,16 @@ describe("a unit that ships no chart", () => {
     const g1 = report.gates.find((g) => g.id === "G1");
     expect(g1?.status).toBe("pass");
     expect(g1?.found).toContain("no chart");
+  });
+
+  // HOW MUCH THIS COVERS: the ids a run reaches WITHOUT helm — the two pipeline phases and the
+  // pre-render gate. The post-render gates need a real render, and they come out of the same array
+  // the roster is built from, so they cannot differ from it. What this catches is a THIRD phase added
+  // to pipeline.ts and not to gate-list.ts, which the derivation alone would not.
+  it("emits no gate id the refusal roster does not name", async () => {
+    const built = await runGateCli(buildOnlyInputs(await buildOnlyRepo()), green);
+    expect(built.gates.length).toBeGreaterThan(0);
+    for (const g of built.gates) expect(SANDBOX_GATE_IDS, `${g.id} is emitted but no refusal would name it`).toContain(g.id);
   });
 
   it("PLANTED DEFECT: a manifest that declares a chart is REFUSED when the run carries no chart path", async () => {

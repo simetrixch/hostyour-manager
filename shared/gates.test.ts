@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { GateResultSchema, GateReportSchema, hardGatesPass, reportHashPayload, type GateResult } from "./gates.ts";
+import { GateResultSchema, GateReportSchema, hardGatesPass, reportHashPayload, sandboxFailures, sandboxGreen, type GateResult, type SandboxAttestation } from "./gates.ts";
 
 // A valid passing gate; override fields per case.
 function gate(over: Record<string, unknown> = {}): unknown {
@@ -76,6 +76,49 @@ describe("hardGatesPass — the verdict's hard-gate leg", () => {
   it("fails when any hard gate fails", () => {
     const gates = [gate({ status: "fail", reason: "rejected" })] as GateResult[];
     expect(hardGatesPass(gates)).toBe(false);
+  });
+});
+
+describe("the verdict's sandbox leg — one predicate, read by the runner and the Manager", () => {
+  const green: SandboxAttestation = {
+    mustFailTargets: ["10.1.1.1:443"],
+    mustFailTargetsConfirmedListening: true,
+    mustFailDenied: true,
+    managerAddrDenied: true,
+    mustPassReached: true,
+  };
+  const LEGS = ["mustFailTargetsConfirmedListening", "mustFailDenied", "managerAddrDenied", "mustPassReached"] as const;
+
+  it("INNOCENT CASE: an attestation whose every leg holds is green and names no failure", () => {
+    expect(sandboxGreen(green)).toBe(true);
+    expect(sandboxFailures(green)).toEqual([]);
+  });
+
+  it("goes red on EACH leg on its own, and says which one — so a refusal never rests on one leg alone", () => {
+    for (const leg of LEGS) {
+      const broken = { ...green, [leg]: false };
+      expect(sandboxGreen(broken), `${leg} false must not be green`).toBe(false);
+      expect(sandboxFailures(broken), `${leg} false must name exactly one failure`).toHaveLength(1);
+    }
+  });
+
+  // The two are one answer read two ways — the boolean the code branches on and the words a person
+  // reads. A leg that broke the predicate and produced no sentence would refuse a run and say nothing.
+  it("names a failure for exactly the attestations the predicate refuses", () => {
+    for (const leg of LEGS) {
+      const broken = { ...green, [leg]: false };
+      expect(sandboxGreen(broken)).toBe(sandboxFailures(broken).length === 0);
+    }
+    expect(sandboxGreen(green)).toBe(sandboxFailures(green).length === 0);
+  });
+
+  // An empty must-fail list proves nothing blocked, and fence.ts composes mustFailDenied false for it.
+  // The sentence must not then claim the sandbox reached a target, because no target was probed.
+  it("says an empty must-fail list proved nothing, rather than naming targets it never probed", () => {
+    const none = { ...green, mustFailTargets: [], mustFailDenied: false };
+    const said = sandboxFailures(none);
+    expect(said).toHaveLength(1);
+    expect(said[0]).not.toContain("reached");
   });
 });
 
