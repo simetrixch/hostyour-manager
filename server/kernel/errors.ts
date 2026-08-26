@@ -73,10 +73,13 @@ export const errUpstream = (message: string): AppError => new AppError("UPSTREAM
 // second plan fails cleanly rather than hanging.
 export const errRunnerBusy = (): AppError =>
   new AppError("RUNNER_BUSY", "The validation sandbox is busy with another job — try again in a moment");
-// The gate-runner refused the job because its egress-fence self-probe was not green — fail-closed,
-// because untrusted code is never validated in a degraded sandbox.
-export const errSandboxDegraded = (message = "The validation sandbox is degraded and refused the job"): AppError =>
-  new AppError("SANDBOX_DEGRADED", message);
+// The gate-run's egress-fence self-probe was not green, so the sandbox that keeps untrusted
+// repository content away from the cluster was not provably holding. Fail-closed: the report is
+// refused where it crosses into the Manager, whatever its gates say. Held apart from GATE_INCOMPLETE
+// for the reader's sake — that one says no report exists, this one says a report exists and is
+// exactly what proves the sandbox was not sound. NEITHER is a finding about the repository under
+// validation, and the message always says so, which is why there is no default one.
+export const errSandboxDegraded = (message: string): AppError => new AppError("SANDBOX_DEGRADED", message);
 // The gate-run produced NO gate report — the gate task died before writing one, the publish step
 // wrote a ConfigMap this Manager does not recognise, or no report ConfigMap was published at all.
 // Held apart from a gate that FAILED, which is a report carrying a verdict and a named gate: this

@@ -54,9 +54,23 @@ describe("FakeGateRunner", () => {
     await expect(r.submit(req())).rejects.toMatchObject({ code: "RUNNER_BUSY", http: 409 });
   });
 
-  it("throws SANDBOX_DEGRADED when the fence self-probe was not green", async () => {
-    const r = new FakeGateRunner({ degraded: true });
-    await expect(r.submit(req())).rejects.toMatchObject({ code: "SANDBOX_DEGRADED", http: 503 });
+  // The fake refuses a not-green attestation where the real adapter does — at the report's receipt,
+  // in poll. submit() never sees an attestation: the self-probe runs INSIDE the sandbox, so its
+  // result exists only once the run has produced a report.
+  it("poll throws SANDBOX_DEGRADED when the report's fence self-probe was not green", async () => {
+    const degraded = report("fail");
+    degraded.sandbox = { ...degraded.sandbox, mustFailDenied: false };
+    const r = new FakeGateRunner({ report: degraded });
+    const { jobId } = await r.submit(req());
+    await expect(r.poll(jobId)).rejects.toMatchObject({ code: "SANDBOX_DEGRADED", http: 503 });
+  });
+
+  // The innocent case beside it: the same report with the attestation left green polls through, so a
+  // refusal above means the predicate refused rather than that poll refuses everything.
+  it("poll returns a report whose fence self-probe was green", async () => {
+    const r = new FakeGateRunner({ report: report("fail") });
+    const { jobId } = await r.submit(req());
+    await expect(r.poll(jobId)).resolves.toMatchObject({ phase: "done" });
   });
 
   it("poll of an unknown job is NOT_FOUND", async () => {

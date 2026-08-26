@@ -9,11 +9,17 @@
 // That ConfigMap carries exactly ONE of two keys, and which key it is is the whole discriminator:
 // `report.json` is a GateReport, `incomplete.json` says the gate task produced no report file. The
 // second is never parsed as the first (shared/gates.ts IncompleteGateRunSchema says why).
+//
+// POLL IS WHERE THE REPORT CROSSES INTO THE MANAGER, and all three things that must hold about a
+// report rather than about the repository are held there, on consecutive lines: it parses against
+// GateReportSchema, its body hashes to its own reportHash, and its sandbox attestation is green.
+// None of the three refusals is a gate verdict, and each says so in its own words — the reader they
+// reach works in the repository under validation, and not one of these is that repository's fault.
 import { createHash } from "node:crypto";
 import { KubeConfig, CoreV1Api, CustomObjectsApi, ApiException } from "@kubernetes/client-node";
-import { GateReportSchema, IncompleteGateRunSchema, reportHashPayload, type GateReport } from "../../../shared/gates.ts";
+import { GateReportSchema, IncompleteGateRunSchema, reportHashPayload, sandboxFailures, sandboxGreen, type GateReport } from "../../../shared/gates.ts";
 import type { GateRunner, GateJobRequest, GateJobProgress } from "./port.ts";
-import { AppError, errGateIncomplete } from "../../kernel/errors.ts";
+import { AppError, errGateIncomplete, errSandboxDegraded } from "../../kernel/errors.ts";
 
 const TEKTON = { group: "tekton.dev", version: "v1", plural: "pipelineruns" } as const;
 const TEKTON_TASKRUNS = { group: "tekton.dev", version: "v1", plural: "taskruns" } as const;
@@ -337,6 +343,13 @@ export class TektonGateRunner implements GateRunner {
         `the published gate report's reportHash does not verify (report carries ${report.reportHash}, its body hashes to ${computed}) — the report was corrupted or rewritten after the runner authored it`,
       );
     }
+    // The SANDBOX leg, and it is enforced here for the same reason the two above are: this line is
+    // where the report crosses out of the sandbox and into the Manager. Measured on apps3
+    // (2026-08-26): a report whose attestation said the node's own API server and the Manager were
+    // both reachable from inside the gate pod was accepted, composed with the manager-side gates and
+    // rejected for an unrelated reason — nothing anywhere refused because of those two booleans, so
+    // the attestation was a field and not a fence.
+    if (!sandboxGreen(report.sandbox)) throw this.sandboxDegraded(report);
     return { phase: "done", gatesSoFar: report.gates, report };
   }
 
@@ -389,6 +402,27 @@ export class TektonGateRunner implements GateRunner {
       ...taskRunLines(evidence),
     ];
     return errGateIncomplete(`gate-runner (tekton): ${lines.join("\n")}`);
+  }
+
+  /** The named refusal for a report whose sandbox self-probe did not come back green. It is held
+   *  APART from every gate verdict, and the wording carries that apart-ness, because the fence
+   *  protects the CLUSTER from the repository and not the other way round: a fence that did not hold
+   *  says nothing whatsoever about the repository under validation, and the reader this reaches works
+   *  in that repository. It is also held apart from GATE_INCOMPLETE, which says the gate task
+   *  produced no report — here a report exists and it is exactly what proves the refusal.
+   *
+   *  One fact per LINE: the run log writes one events row per line (server/executor/context.ts emit),
+   *  so a joined blob arrives as a single unreadable row. */
+  private sandboxDegraded(report: GateReport): AppError {
+    const lines = [
+      "the gate-run's own egress self-probe says the sandbox fence did NOT hold, so this run is refused. Nothing was judged about the repository under validation, and nothing in that repository can change this outcome.",
+      "the sandbox is what keeps untrusted repository content away from the cluster it is being onboarded to; a run inside a fence that is not provably holding is not a validation, whatever its gates report.",
+      ...sandboxFailures(report.sandbox),
+      `must-fail targets probed: ${report.sandbox.mustFailTargets.length > 0 ? report.sandbox.mustFailTargets.join(", ") : "(none configured)"}`,
+      `the runner that measured this: ${report.runnerVersion}`,
+      "this is fixed in the platform's own gate-runner namespace — its egress NetworkPolicy — and the onboarding is re-run afterwards.",
+    ];
+    return errSandboxDegraded(`gate-runner (tekton): ${lines.join("\n")}`);
   }
 
   /** Best-effort delete of a run's objects (PipelineRun + report ConfigMap + credential Secret). */

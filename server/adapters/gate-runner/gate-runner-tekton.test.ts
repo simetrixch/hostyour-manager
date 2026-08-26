@@ -282,4 +282,31 @@ describe("TektonGateRunner", () => {
     await expect(rejected).rejects.toMatchObject({ code: "UPSTREAM" });
     await expect(rejected).rejects.toThrow(/reportHash does not verify/);
   });
+
+  // THE SANDBOX LEG, enforced on the same line as the schema and the hash. Measured on apps3 on
+  // 2026-08-26: a report attesting that the node's own API server and the Manager were both reachable
+  // from inside the gate pod was accepted and composed into a verdict — the attestation was a field
+  // and not a fence. Each leg is planted on its own, so a refusal cannot rest on one of them alone.
+  const LEGS = ["mustFailTargetsConfirmedListening", "mustFailDenied", "managerAddrDenied", "mustPassReached"] as const;
+  for (const leg of LEGS) {
+    it(`poll: a report whose sandbox attestation says ${leg} did not hold is refused, and the refusal is not a gate verdict`, async () => {
+      const green = report("pass");
+      const body = { ...green, sandbox: { ...green.sandbox, [leg]: false } };
+      const { reportHash: _drop, ...rest } = body;
+      const degraded = { ...rest, reportHash: createHash("sha256").update(reportHashPayload(rest)).digest("hex") };
+      const c = new FakeCluster({ outcome: { succeeded: true }, cm: { state: "report", json: JSON.stringify(degraded) }, taskRuns: OOM_TASKRUNS });
+      const rejected = new TektonGateRunner(cfg(), c, () => "gr6").poll("gr6");
+      // SANDBOX_DEGRADED, never GATE_INCOMPLETE and never a verdict: the fence protects the cluster
+      // FROM the repository, so its failure is the platform's and the operator must not be sent to
+      // the repository under validation to fix it.
+      await expect(rejected).rejects.toMatchObject({ code: "SANDBOX_DEGRADED", http: 503 });
+    });
+  }
+
+  it("poll: INNOCENT CASE — the same report with every leg of the attestation green is accepted", async () => {
+    const c = new FakeCluster({ outcome: { succeeded: true }, cm: { state: "report", json: JSON.stringify(report("pass")) }, taskRuns: OOM_TASKRUNS });
+    const p = await new TektonGateRunner(cfg(), c, () => "gr7").poll("gr7");
+    expect(p.phase).toBe("done");
+    expect(p.report?.verdict).toBe("pass");
+  });
 });
