@@ -118,6 +118,7 @@ export async function startServe(
   programs: Record<string, string>,
 ): Promise<ServeFixture> {
   const dir = mkdtempSync(join(tmpdir(), "ansiwise-serve-"));
+  clearLeakedRunRecords(dir);
   const suffix = process.platform === "win32" ? ".exe" : "";
   // BESIDE EACH OTHER, under their own names. The serving binary looks for `ansiwise` in the
   // directory it was started from and exits 78 when it is not there, so a fixture that copied only
@@ -192,6 +193,33 @@ export async function startServe(
 /** WHERE the machine's run records land for an installation at [dir] (see close above). */
 export function runRoot(dir: string): string {
   return process.platform === "win32" ? join(parse(resolve(dir)).root, "var", "lib", "ansiwise", "runs") : "/var/lib/ansiwise/runs";
+}
+
+/** Has this process already swept the run root? Once is enough and more than once is wrong: a second
+ *  sweep would delete the records of a fixture still running in the same process. */
+let sweptRunRoot = false;
+
+/**
+ * SWEEP WHAT A PREVIOUS PROCESS LEAKED, once, before the first fixture of this one starts, so that
+ * `close()`'s claim above — that removing the root un-does everything the detached run children
+ * wrote — is TRUE of the directory rather than only attempted.
+ *
+ * The engine's run root is a compile-time constant of the machine's own code (`RunDirectory`'s
+ * default root, `/var/lib/ansiwise/runs`), so it is ONE directory shared by every fixture on the
+ * drive and no fixture can be given a root of its own. `close()` removes it, but a run's children are
+ * DETACHED: one that writes its record after the removal leaves it standing, and nothing afterwards
+ * owns it. Measured on 2026-08-26: 36 records from two days earlier were standing in that directory
+ * on a machine whose every fixture had closed.
+ *
+ * WHAT THIS IS NOT. It is not a fix for the intermittent failures of the suite that uses this
+ * fixture. Those were measured on a swept root as well — three green runs and one red in a row of
+ * four — so whatever produces them is not this leak, and a sweep that were sold as their cure would
+ * be a green answer nobody could rely on.
+ */
+function clearLeakedRunRecords(dir: string): void {
+  if (sweptRunRoot) return;
+  sweptRunRoot = true;
+  rmSync(runRoot(dir), { recursive: true, force: true });
 }
 
 export interface StartSpacer {
