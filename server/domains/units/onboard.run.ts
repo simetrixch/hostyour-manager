@@ -17,6 +17,7 @@ import { activateStep } from "./onboard-activate.ts";
 import { preflightScopesStep } from "./onboard-preflight-scopes.ts";
 import { setupWebhookStep } from "./onboard-webhook.ts";
 import { injectReleaseKitStep } from "./onboard-release-kit.ts";
+import { awaitBuildNamespaceStep } from "./onboard-await-build-namespace.ts";
 import { seedRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { seedPostgresSuperuserStep } from "./onboard-seed-postgres.ts";
 import { seedMongodbInstanceStep } from "./onboard-seed-mongodb.ts";
@@ -32,7 +33,7 @@ import { checkStep, DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
 import { admitFirstMasterUngated, planUngatedFirstMaster } from "./first-master.ts";
 import { resolveUnitQuota } from "./unit-size.ts";
 import { writeRegistrationStep, writeBuildRegistrationStep, recordBuildOnlyStep } from "./onboard-registration.ts";
-import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
+import type { BuildRbacWriter, RepoCredentialWriter, MasterArgoReader } from "../../adapters/kube/port.ts";
 import { AppError, errNotFound } from "../../kernel/errors.ts";
 import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome } from "./validate.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
@@ -234,6 +235,13 @@ export interface OnboardPorts {
    *  onboard — absent ⇒ the step fails loud (no grants → the webhook creates no PipelineRun and the
    *  manager cannot watch the release run), never a silent skip (setup-webhook precedent). */
   buildRbac?: BuildRbacWriter;
+  /** Reads the MASTER's own ArgoCD Applications (await-build-namespace). Injected directly rather
+   *  than resolved, and for two reasons that both matter: the per-unit build Application is
+   *  master-local whatever cluster the unit targets, and a BUILD-ONLY unit carries no `clusterId`
+   *  at all — it has no cluster, so there is nothing to resolve a reader from. Optional but
+   *  UNCONDITIONALLY needed by onboard: absent ⇒ the step fails loud, because the alternative is
+   *  writing grants into a namespace nobody has confirmed exists. */
+  buildArgo?: MasterArgoReader;
   /** Writes the per-unit ArgoCD repository Secret (provision-repo-credential). Optional but
    *  UNCONDITIONALLY needed by the deployable form — absent ⇒ the step fails loud (ArgoCD could
    *  never fetch the private consumer repo), never a silent skip. */
@@ -321,6 +329,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
     provisionRepoCredentialStep(ports, p),
     applyAppProjectStep(ports, p),
     applyAdmissionPolicyStep(ports, p),
+    awaitBuildNamespaceStep(ports, p),
     provisionBuildRbacStep(ports, p),
     // The unit's public address, before the release cycle: the deployment the cycle
     // produces must come up resolvable — cert issuance (HTTP-01) needs the host to resolve.
@@ -368,6 +377,7 @@ function buildOnlySteps(ports: OnboardPorts, p: BuildOnlyOnboardParams): Step[] 
     // them the EventListener cannot create the release PipelineRun and the manager cannot watch
     // it — the trigger below would fire into nothing. The argo-sync grant is not rendered (a
     // build-only unit has no Applications to sync).
+    awaitBuildNamespaceStep(ports, p),
     provisionBuildRbacStep(ports, p),
     injectReleaseKitStep(ports, p),
     setupWebhookStep(ports, p),

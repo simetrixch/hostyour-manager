@@ -35,6 +35,19 @@ import type {
 /** The single-cluster ClusterReader input the resolver hands the injected builder — the same shape
  *  as the kube adapter's ClusterKubeInput {server; token; caData} variant, but with caData REQUIRED:
  *  the resolver refuses a slave without a sealed CA bundle rather than skip TLS verification. */
+/** The ArgoCD namespace of the MASTER's own root instance.
+ *
+ *  NAMED BECAUSE TWO PLACES HAVE TO AGREE ON IT. The resolver hands it back as the `argoNamespace`
+ *  of a master target, and a caller that has to reach an Application which is master-local NO
+ *  MATTER WHAT THE TARGET IS cannot use that field: for a slave target the resolver answers the
+ *  per-slave ArgoCD namespace, correctly, and the per-unit BUILD Application is not there. It is
+ *  generated into this namespace by the consumer-build ApplicationSet, which runs on the master
+ *  (hostyour-cloud clusters/inventories/consumer-build, `runsOn: master`, template metadata
+ *  `namespace: argocd`), whichever cluster the unit is being onboarded to. Two literals would put
+ *  that pairing one rename away from coming apart.
+ */
+export const MASTER_ARGO_NAMESPACE = "argocd";
+
 export interface SlaveClusterInput {
   server: string;
   token: string;
@@ -136,7 +149,7 @@ export function makeClusterKubeResolver(deps: ClusterKubeDeps): ClusterKubeResol
           clusterReader: deps.master.clusterReader,
           argoReader: deps.master.argoReader,
           projectWriter: deps.master.projectWriter,
-          argoNamespace: "argocd",
+          argoNamespace: MASTER_ARGO_NAMESPACE,
         };
       }
 

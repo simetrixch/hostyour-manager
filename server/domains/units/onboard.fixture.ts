@@ -125,6 +125,14 @@ export function ports(over: Partial<OnboardPorts> & FakeKube = {}): OnboardPorts
     webhookSubdomain: "build",
     consumerRepo: new FakeConsumerRepo(),
     buildRbac: new FakeBuildRbacWriter(),
+    // The master-local reader await-build-namespace waits through. Scripted CONVERGED by default,
+    // because that step's subject is the wait and not the outcome: a fixture whose build Application
+    // never arrives would make every unrelated journey time out on it. A test that wants the wait to
+    // fail overrides this port and scripts the set empty, which is what the live watch answers for an
+    // Application its ApplicationSet has not generated yet.
+    buildArgo: new FakeMasterArgoReader({
+      everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" },
+    }),
     repoCredential: new FakeRepoCredentialWriter(),
     buildPlane,
     dns,

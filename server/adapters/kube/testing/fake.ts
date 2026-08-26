@@ -12,7 +12,12 @@ export class FakeMasterArgoReader implements MasterArgoReader {
    *  the fail-fast predicate watch-sync supplied for the phase-aware watch. */
   lastWatchOpts?: { timeoutMs: number; signal?: AbortSignal; failFast?: (s: ArgoAppStatus) => boolean };
 
-  constructor(private scripted: { status?: ArgoAppStatus | null; statuses?: ReadonlyMap<string, ArgoAppStatus>; throwOnGet?: Error; throwOnSet?: Error } = {}) {}
+  /** `everyName` answers a set-watch for ANY name asked, and is what a fixture whose subject is not
+   *  the watch scripts: enumerating names there means a name added later times out silently instead
+   *  of failing where it was added. It is opt-in precisely because the default — an unscripted name
+   *  reads Missing — is the completeness gate the live watch has, and a test about that gate must
+   *  keep it. `statuses` still wins per name where both are given. */
+  constructor(private scripted: { status?: ArgoAppStatus | null; statuses?: ReadonlyMap<string, ArgoAppStatus>; everyName?: ArgoAppStatus; throwOnGet?: Error; throwOnSet?: Error } = {}) {}
 
   setStatus(status: ArgoAppStatus | null): void {
     this.scripted = { ...this.scripted, status };
@@ -55,7 +60,7 @@ export class FakeMasterArgoReader implements MasterArgoReader {
     // absent from the script reads Missing, so the caller's `until` sees the whole set (a
     // non-terminal or incomplete scripted map models a timeout).
     const byName = new Map<string, ArgoAppStatus>();
-    for (const name of names) byName.set(name, this.scripted.statuses?.get(name) ?? MISSING_APP_STATUS);
+    for (const name of names) byName.set(name, this.scripted.statuses?.get(name) ?? this.scripted.everyName ?? MISSING_APP_STATUS);
     return byName;
   }
 }

@@ -113,6 +113,9 @@ function fakePorts(over: Partial<OnboardPorts> = {}): OnboardPorts {
     webhookSubdomain: "build",
     consumerRepo: new FakeConsumerRepo(),
     buildRbac: new FakeBuildRbacWriter(),
+    // The reader await-build-namespace waits through, scripted converged: this journey's
+    // subject is the run and not that wait.
+    buildArgo: new FakeMasterArgoReader({ everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
     repoCredential: new FakeRepoCredentialWriter(),
     buildPlane: journeyBuildPlane(),
     dns: journeyDns(),
@@ -170,7 +173,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     expect(planned?.status).toBe("planned");
     expect(planned?.steps.map((s) => s.name)).toEqual([
       "attest-target", "preflight-scopes", "check", "record-provisional", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
-      "provision-repo-credential", "apply-appproject", "apply-admission-policy", "provision-build-rbac", "provision-dns",
+      "provision-repo-credential", "apply-appproject", "apply-admission-policy", "await-build-namespace", "provision-build-rbac", "provision-dns",
       "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-workflow", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",
     ]);

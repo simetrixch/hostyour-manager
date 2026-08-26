@@ -173,6 +173,9 @@ function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator;
     webhookSubdomain: "build",
     consumerRepo: new FakeConsumerRepo(),
     buildRbac: new FakeBuildRbacWriter(),
+    // The reader await-build-namespace waits through, scripted converged: this journey's
+    // subject is the run and not that wait.
+    buildArgo: new FakeMasterArgoReader({ everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
     repoCredential: new FakeRepoCredentialWriter(),
     buildPlane,
     dns,

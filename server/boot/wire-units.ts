@@ -392,6 +392,12 @@ function buildConsumerOnboarding(
   // serves onboard, offboard and purge.
   const buildRbac = new KubeBuildRbacWriter(masterKubeInput(config));
 
+  // The watch that stands in front of those grants (await-build-namespace): the per-unit build
+  // Application is generated into the MASTER's own argocd namespace by an ApplicationSet that runs
+  // there, whichever cluster the unit targets — and a build-only unit has no clusterId to resolve a
+  // reader from in the first place. So it is handed over directly, exactly as buildRbac above is.
+  const buildArgo = argo;
+
   // The per-unit ArgoCD repository Secret (provision-repo-credential + its teardown inverses) —
   // master-local for the same reason: every ArgoCD instance's namespace lives on this cluster.
   const repoCredential = new KubeRepoCredentialWriter(masterKubeInput(config));
@@ -466,6 +472,7 @@ function buildConsumerOnboarding(
     // The build grants (provision-build-rbac step): the unit's AppProject blacklists Role/RoleBinding,
     // so the Manager writes them. UNCONDITIONALLY needed — absent ⇒ the step fails loud.
     buildRbac,
+    buildArgo,
   };
   const lifecyclePorts: LifecyclePorts = { registrations, resolver, argoWatchTimeoutMs: ARGO_WATCH_TIMEOUT_MS };
   const consumerRelocationPorts: ConsumerRelocationPorts = {

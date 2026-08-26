@@ -85,16 +85,49 @@ describe("onboard run definition", () => {
     expect(def.mutating).toBe(true);
     expect(def.steps({} as OnboardParams).map((s) => s.name)).toEqual([
       "attest-target", "preflight-scopes", "check", "record-provisional", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
-      "provision-repo-credential", "apply-appproject", "apply-admission-policy", "provision-build-rbac", "provision-dns",
+      "provision-repo-credential", "apply-appproject", "apply-admission-policy", "await-build-namespace", "provision-build-rbac", "provision-dns",
       "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-workflow", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",
     ]);
     expect(() => def.plan({} as OnboardParams, { db: db.db })).toThrow(/planStream/);
   });
 
+  // THE RACE await-build-namespace ENDS, and it is why that step is in the chain above.
+  //
+  // Measured on apps3 on 2026-08-26, on the first consumer this platform ever onboarded:
+  // write-registration ended at 1787773736850 and provision-build-rbac started at 1787773736876 —
+  // twenty-six milliseconds later — and failed with `namespaces "hostyour-manager-build" not found`.
+  // The namespace is rendered by the per-unit build Application, which an ApplicationSet generates
+  // FROM the registration that first step had just committed; ArgoCD had not seen the commit and
+  // could not have. Reproduced independently on apps4 the same evening. A unit's FIRST onboarding
+  // always failed and its second always succeeded, which reads like a flake and is not.
+  //
+  // The scripted reader is what the LIVE watch answers for an Application its ApplicationSet has not
+  // generated: every expected name reads Missing. The assertion is the OUTCOME — the run stops at
+  // the wait, and nothing was written into a namespace nobody confirmed.
+  it("refuses when GitOps has not rendered the build namespace, without writing a single grant", async () => {
+    const rbac = new FakeBuildRbacWriter();
+    const prt = ports({ buildArgo: new FakeMasterArgoReader(), buildRbac: rbac });
+    const p = buildOnlyParams();
+    const logs: string[] = [];
+
+    let stopped: string | null = null;
+    for (const step of makeOnboardDef(prt).steps(p)) {
+      try {
+        await step.run(ctx(p, step.name, logs));
+      } catch {
+        stopped = step.name;
+        break;
+      }
+    }
+
+    expect(stopped).toBe("await-build-namespace");
+    expect(rbac.keys()).toEqual([]);
+  });
+
   it("the build-only form is a SUBSET of the same chain — no attest, no provisioning of a target, no deployment watch", () => {
     expect(makeOnboardDef(ports()).steps(buildOnlyParams()).map((s) => s.name)).toEqual([
-      "preflight-scopes", "check", "write-registration", "seed-repo-pat", "provision-build-rbac",
+      "preflight-scopes", "check", "write-registration", "seed-repo-pat", "await-build-namespace", "provision-build-rbac",
       "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-build", "record",
     ]);
   });
