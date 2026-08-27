@@ -118,13 +118,20 @@ export const HEALTHY_SLAVE_PREFLIGHT = [
 // of the steps has a scripted answer; the PROGRAM conversations go through openConversation.
 export interface HostsScript {
   /** WHETHER THIS MACHINE CARRIES THE SUDOERS DROP-IN AN ADOPTION WRITES, which is the whole of what
-   *  a `sudo -n` this manager sends stands on. `false` is a machine that was never adopted — a FIRST
-   *  MASTER put there by ansiwise-client, whose /etc/sudoers.d/ holds nothing (measured on one on
-   *  2026-08-27: a README and no rule) — and it answers every `sudo -n` the way that machine does,
-   *  refusing it. A `sudo -S` is answered on either machine, and only when the elevation password
-   *  really rode on standard input: what authenticates the account is the password the RUN carries,
-   *  and a step that composed the elevation and then did not hand the password through would
-   *  otherwise be green here and refused on a real host. */
+   *  a `sudo -n` this manager sends stands on.
+   *
+   *  IT DEFAULTS TO `false`, the machine that grants NOTHING without a password. That is what a
+   *  first master installed by ansiwise-client really is (measured on one on 2026-08-27: a README
+   *  in /etc/sudoers.d/ and no rule), and it is stricter than an adopted slave — so a run proven
+   *  here works on both, and a step that reaches for a standing rule is refused here instead of
+   *  months later on somebody's machine. `true` is only for the one act that genuinely needs the
+   *  adoption's file: the destructive microk8s reset a failed slave install runs as a cleanup, which
+   *  fires on an abort that may already have discarded the run's password.
+   *
+   *  A `sudo -S` is answered on either machine, and only when the elevation password really rode on
+   *  standard input: what authenticates the account is the password the RUN carries, so a step that
+   *  composed the elevation and did not hand the password through is loud here rather than green
+   *  here and refused on a real host. */
   adopted: boolean;
   machineId: string;
   dnsOut: string;
@@ -206,7 +213,7 @@ export const ELEVATION_PASSWORD = "elevation-password-SECRET-0007";
 
 export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript {
   return {
-    adopted: true,
+    adopted: false,
     machineId: "abc123def4567890abc123def4567890",
     dnsOut: "DNS_WILDCARD 198.51.100.10",
     preflightOut: HEALTHY_SLAVE_PREFLIGHT,
@@ -262,12 +269,14 @@ export function hostsFactory(f: HostsScript): SshFactory {
       };
       const done = (code = 0): ExecResult => ({ code, stdoutTail: "", stderrTail: "" });
       // HOW THIS MACHINE ANSWERS A ROOT COMMAND — asked before anything is matched on, because it is
-      // the machine's answer and not the manager's intention. See HostsScript.adopted.
-      if (command.startsWith("sudo -S ")) {
+      // the machine's answer and not the manager's intention. Asked with `includes` and not
+      // `startsWith`, because a `sudo -n` can stand inside a compound line and the machine judges it
+      // there just the same. See HostsScript.adopted.
+      if (command.includes("sudo -S ")) {
         if (o.stdin?.toString("utf8") !== `${ELEVATION_PASSWORD}\n`) {
           throw new Error(`sudo -S shipped without the run's elevation password on stdin: ${command}`);
         }
-      } else if (command.startsWith("sudo -n ") && !f.adopted) {
+      } else if (command.includes("sudo -n ") && !f.adopted) {
         return { code: 1, stdoutTail: "", stderrTail: "sudo: interactive authentication is required" };
       }
       if (command === "cat /etc/machine-id") { emit(f.machineId); return done(); }

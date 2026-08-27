@@ -4,7 +4,7 @@ import type { Step, Cleanup, RunDefinition } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { STAGE, CLUSTER_TIER } from "../../../../shared/enums.ts";
 import { errValidation, errNotConfigured } from "../../../kernel/errors.ts";
-import { remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
+import { execCapture, remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
 import { PREFLIGHT_SCRIPT, parsePreflightOutput, makeCheck, hardenPreflightForSlave, podCidrOverlapCheck, formatNicsLine } from "../preflight.ts";
 import { hasHardFailure, type PreflightReport } from "../../../../shared/preflight.ts";
@@ -15,7 +15,7 @@ import {
   type DeploySlavePorts, type SlaveInstallInput, type SlaveTarget,
 } from "./deploy-slave.kit.ts";
 import {
-  ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET,
+  ansiwiseProgramStep, requireElevationPassword, ANSIWISE_ELEVATION_SECRET,
   type AnsiwisePorts, type ExtraAnswers,
 } from "./ansiwise-run.kit.ts";
 import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
@@ -392,20 +392,13 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         const { domain } = target.resolve(ctx.db);
         const master = loadMaster(ctx.db);
         const mSession = await ctx.ssh(master.id);
+        const elevation = requireElevationPassword(ctx); // the master's cluster, raised the same way every other read of it is
         const appName = `${clusterShortName(domain)}-apps`;
         const deadline = Date.now() + APP_SYNC_TIMEOUT_MS;
         for (;;) {
-          let sync = "";
-          const r = await mSession.exec(`sudo -n microk8s kubectl -n argocd get application ${appName} -o jsonpath={.status.sync.status}`, {
-            signal: ctx.signal,
-            timeoutMs: 30_000,
-            onStdout: (l) => {
-              sync += l.trim();
-              ctx.log("stdout", l);
-            },
-            onStderr: (l) => ctx.log("stderr", l),
-          });
-          if (r.code === 0 && sync === "Synced") break;
+          const read = await execCapture(ctx, mSession, `microk8s kubectl -n argocd get application ${appName} -o jsonpath={.status.sync.status}`, { timeoutMs: 30_000, elevation });
+          const sync = read.out.trim();
+          if (read.code === 0 && sync === "Synced") break;
           if (Date.now() >= deadline) {
             throw errValidation(`Application ${appName} did not reach Synced within ${APP_SYNC_TIMEOUT_MS / 60_000} min — check the master's ArgoCD (slaves-appset) and the pushed map ${clusterMapPath(domain)}`);
           }

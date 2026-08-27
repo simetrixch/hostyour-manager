@@ -114,14 +114,14 @@ export function verifySlaveStep(target: SlaveTarget): Step {
       localTx(ctx, (tx) => tx.update(clusters).set({ planeState: "verifying" }).where(eq(clusters.id, cluster.id)).run());
       const mSession = await ctx.ssh(master.id);
       const slave = await ctx.ssh(); // the slave (the run's ownsHost target)
-      const elevation = requireElevationPassword(ctx); // what the Application read below is raised with
+      const elevation = requireElevationPassword(ctx); // every cluster read below is raised with it
       const deadline = Date.now() + VERIFY_SLAVE_TIMEOUT_MS; // ONE window for all HARD gates
 
       // The shared master-side diagnostic bundle (rate-limited by pollUntil): conditions,
       // operation state, ES/SecretStore messages, credential-secret labels, pods — the
       // evidence the first live run's bare `OutOfSync/Missing` timeout never surfaced.
       const diagnose = async (): Promise<void> => {
-        await remoteScriptCapture(ctx, mSession, "slave-diag", slaveDiagScript(name), { timeoutMs: 60_000 });
+        await remoteScriptCapture(ctx, mSession, "slave-diag", slaveDiagScript(name), { timeoutMs: 60_000, elevation });
       };
 
       // ---- HARD 0: EVERY ESO-materialized credential of the instance is Ready in ns <name> ON THE
@@ -137,8 +137,8 @@ export function verifySlaveStep(target: SlaveTarget): Step {
       let extSecrets = 0;
       let lastKickAt = 0;
       await pollUntil(ctx, `${name} ExternalSecrets Ready (repo + cluster credentials)`, deadline, async () => {
-        const { code, out } = await execCapture(ctx, mSession, externalSecretsCmd(name), { timeoutMs: 30_000 });
-        if (code !== 0) return { ok: false, detail: `kubectl exit ${code} (ns ${name} not answering yet?)` };
+        const { code, out } = await execCapture(ctx, mSession, externalSecretsCmd(name), { timeoutMs: 30_000, elevation });
+        if (code !== 0) return { ok: false, detail: `kubectl exit ${code} reading ns ${name} — the run log above carries what it said` };
         const rows = parsePipeRows(out);
         if (rows.length === 0) return { ok: false, detail: `no ExternalSecrets in ns ${name} yet (the ${name}-apps sync may still be applying)` };
         extSecrets = rows.length;
@@ -147,7 +147,7 @@ export function verifySlaveStep(target: SlaveTarget): Step {
         if (Date.now() - lastKickAt >= ES_KICK_EVERY_MS) {
           lastKickAt = Date.now();
           ctx.log("meta", `force-sync annotating the ${name} ExternalSecrets (breaks a possible ESO error backoff)`);
-          await execCapture(ctx, mSession, forceSyncExternalSecretsCmd(name), { timeoutMs: 30_000 });
+          await execCapture(ctx, mSession, forceSyncExternalSecretsCmd(name), { timeoutMs: 30_000, elevation });
         }
         return { ok: false, detail: `${extSecrets - notReady.length}/${extSecrets} Ready — pending: ${notReady.slice(0, 5).map((r) => `${cell(r[0])} (${cell(r[2])})`).join(", ")}` };
       }, diagnose);
@@ -156,8 +156,6 @@ export function verifySlaveStep(target: SlaveTarget): Step {
       // ---- HARD 1: every Application in ns <name> is Synced AND Healthy. THE plane gate: the
       // slave-ArgoCD is up (ns <name>), reached the slave (the "<name>" cluster secret works),
       // and every app on the slave branch converged. Zero Applications = still generating ⇒ retry.
-      // The read is raised with the run's own elevation password — the same reading `argocd-follow`
-      // takes, over the same builder, so neither of them may stand on a rule an adoption wrote.
       let apps = 0;
       await pollUntil(ctx, `${name} applications Synced+Healthy`, deadline, async () => {
         const { code, out } = await execCapture(ctx, mSession, argoAppsCmd(name), { timeoutMs: 30_000, elevation });
@@ -176,8 +174,8 @@ export function verifySlaveStep(target: SlaveTarget): Step {
       // end to end, directly on the slave (reachable: the run owns the slave session).
       let stores = 0;
       await pollUntil(ctx, "slave ESO SecretStores Ready", deadline, async () => {
-        const { code, out } = await execCapture(ctx, slave, SECRET_STORES_CMD, { timeoutMs: 30_000 });
-        if (code !== 0) return { ok: false, detail: `kubectl exit ${code} on the slave` };
+        const { code, out } = await execCapture(ctx, slave, SECRET_STORES_CMD, { timeoutMs: 30_000, elevation });
+        if (code !== 0) return { ok: false, detail: `kubectl exit ${code} on the slave — the run log above carries what it said` };
         const rows = parsePipeRows(out);
         if (rows.length === 0) return { ok: false, detail: "no SecretStores on the slave yet (external-secrets still rolling out)" };
         stores = rows.length;
@@ -188,7 +186,7 @@ export function verifySlaveStep(target: SlaveTarget): Step {
       ctx.log("meta", `slave ESO: all ${stores} SecretStores are Ready — the ${name} vault auth path is proven`);
 
       // ---- SOFT 1: the slave's obs-agent is pushing (master Prometheus, promtool exec).
-      const promCap = await remoteScriptCapture(ctx, mSession, "prom-check", promCheckScript(domain), { timeoutMs: 60_000 });
+      const promCap = await remoteScriptCapture(ctx, mSession, "prom-check", promCheckScript(domain), { timeoutMs: 60_000, elevation });
       const prom = (promCap.result.code === 0 ? /^PROM_CHECK (\S+)/m.exec(promCap.stdout)?.[1] : undefined) ?? "skipped";
       ctx.log("meta",
         prom === "data"
@@ -198,7 +196,7 @@ export function verifySlaveStep(target: SlaveTarget): Step {
             : "soft: could not query the master's Prometheus — metrics check skipped (verify via Grafana)");
 
       // ---- SOFT 2: slave ingress certs issued (LE order/DNS can lag; a pending cert is a note).
-      const certCap = await execCapture(ctx, slave, CERTS_CMD, { timeoutMs: 30_000 });
+      const certCap = await execCapture(ctx, slave, CERTS_CMD, { timeoutMs: 30_000, elevation });
       const certRows = certCap.code === 0 ? parsePipeRows(certCap.out) : [];
       const certsReady = certRows.filter((r) => r[1] === "True").length;
       ctx.log("meta",

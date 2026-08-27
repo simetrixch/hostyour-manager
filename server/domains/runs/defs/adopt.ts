@@ -29,13 +29,11 @@ import { managerKeyMarker } from "../../../../shared/operator-keys.ts";
 //
 // A server adopted as a NON-ROOT account also leaves this run carrying /etc/sudoers.d/90-hostyour,
 // and it carries it for as long as this manager administers the machine, because that file is what
-// the manager's own `sudo -n` commands stand on afterwards — deploy-slave.remote.ts's verification
-// commands, deploy-slave.kit.ts, tailnet-probe.ts and the password-login run kinds, which declare
-// `requiredSecrets: []` (password-login.kit.ts passwordLoginPlan) and so hold no password to raise
-// themselves with. What the file grants is MANAGER_ELEVATED and nothing else: the commands listed
-// below, each one a call site in this repository. That is a SMALLER grant and not a boundary —
-// unpinnedElevated() reads the rules whose arguments the account still chooses, and each of them is
-// a way back to root; the table's own comment says which and how. A machine that already runs every
+// the manager's own `sudo -n` commands stand on afterwards — tailnet-probe.ts, the microk8s reset
+// in deploy-slave.kit.ts, and the password-login run kinds, which declare `requiredSecrets: []`
+// (password-login.kit.ts passwordLoginPlan) and so hold no password to raise themselves with. What
+// the file grants is MANAGER_ELEVATED and nothing else: the commands listed below, each one a call
+// site in this repository, and each with its arguments fixed. A machine that already runs every
 // command as root without a password from its OWN configuration gets no file at all — there is
 // nothing a second grant would add, and nothing this product could take back.
 
@@ -131,9 +129,9 @@ export interface ElevatedCommand {
  *  WHAT THIS IS NOT IS A CONTAINMENT BOUNDARY, and the operator is told so before approving.
  *  `unpinnedElevated()` reads the rows that leave their arguments open — a `*`, which sudo matches
  *  against the whole argument string and which therefore stands for any run of characters, or no
- *  argument string at all, which permits any arguments — and every one of them is a way to root:
- *
- *    `microk8s kubectl` administers the cluster and reaches root through it.
+ *  argument string at all, which permits any arguments — and every one of them is a way to root.
+ *  IT RETURNS NOTHING TODAY: every row below fixes its command AND its argument string. That is not
+ *  the same as a boundary, and the paragraph below says what is left after it.
  *
  *  THE SSHD DROP-IN IS PINNED NOW, AND WHAT REMAINS IS THE CONTENT ALONE. The write used to be a
  *  copier — `install SRC DEST` with a `*` where SRC stands, because mktemp picks that name — and a
@@ -150,10 +148,12 @@ export interface ElevatedCommand {
  *  IS the call site, so it is DISCLOSED — in the summary the operator approves — rather than
  *  claimed to be contained.
  *
- *  What the list takes away is every OTHER command. The cluster row is reached only by run kinds
- *  that already carry an elevation password (deploy-slave, redeploy, release and tailnet all declare
- *  ANSIWISE_ELEVATION_SECRET), so it can leave the moment those call sites take the password route
- *  the rest of the platform already uses.
+ *  What the list takes away is every OTHER command. THE CLUSTER ROW IS GONE — it read
+ *  `/snap/bin/microk8s kubectl *`, and every call site that ran kubectl on a machine now raises it
+ *  with the elevation password its run carries (executor/stepkit.ts `raised`), which is the route
+ *  the three program steps of those same run kinds already take. A machine therefore needs no
+ *  standing rule for the cluster at all, and a run that only READS one needs the approval — the
+ *  price of having ONE route instead of two.
  *
  *  A ROW MAY NOT CARRY `[`, `?` OR `\`. sudo compares arguments with fnmatch(3), where those are
  *  metacharacters as much as `*` is — `[[:space:]]` in a rule matches ONE space, not that literal
@@ -182,8 +182,11 @@ export const MANAGER_ELEVATED: ElevatedCommand[] = [
   // none of them is the control URL — measured, and ipn/ipnstate.go's Status struct has no such
   // field at this tag — while the coordinator address is what the probe reads this for.
   { cmd: "/usr/bin/tailscale", args: "debug prefs", at: "tailnet-probe TAILNET_PROBE_SCRIPT" },
-  { cmd: "/usr/bin/snap", args: "remove --purge microk8s", at: "deploy-slave.kit purgeMicrok8sStep" },
-  { cmd: "/snap/bin/microk8s", args: "kubectl *", at: "deploy-slave.remote, deploy-slave argocd-follow" },
+  // The reset a deploy-slave abort runs, and the reason it is here rather than raised with the
+  // run's password like every other cluster act: a cleanup runs on an abort that may already have
+  // discarded that password (executor/executor.ts abortWithCleanup takes them again only where the
+  // caller re-supplies them).
+  { cmd: "/usr/bin/snap", args: "remove --purge microk8s", at: "deploy-slave.kit microk8sResetSlaveCleanup" },
   { cmd: "/usr/sbin/sshd", args: "-T", at: "password-login-probe SSHD_HELPERS effective()" },
   { cmd: "/usr/sbin/sshd", args: "-t", at: "password-login.kit APPLY" },
   { cmd: "/usr/bin/test", args: "-x /usr/sbin/sshd", at: "password-login-probe SSHD_HELPERS sshd_bin()" },
@@ -212,20 +215,28 @@ export function unpinnedElevated(): ElevatedCommand[] {
   return MANAGER_ELEVATED.filter((e) => e.args === "" || e.args.includes("*"));
 }
 
+/** HOW FAR THIS GRANT IS NOT A BOUNDARY, in one sentence read off the table — and the SAME sentence
+ *  reaches both records: the header of the file on the machine, and the summary the operator
+ *  approves. ONE sentence, because two would drift apart; READ rather than written, because a row
+ *  added with a `*` in it, and equally the last such row leaving, has to change what both records
+ *  say without anybody rewriting either of them. */
+export function openArgumentsSentence(): string {
+  const open = unpinnedElevated().map(elevatedName);
+  return open.length > 0
+    ? `${open.length} of the rules leave their arguments open (${open.join(", ")}), and an account holding them still reaches root.`
+    : "Every rule fixes its command AND its arguments, so no rule lets the account decide what runs as root.";
+}
+
 /** The file, as it goes onto the machine. `(root)` and not `(ALL)`: every call site above runs as
- *  root and none as anybody else, so the runas half is narrowed with the command half.
- *
- *  The header counts the open rows off the table instead of asserting a number, so a row added with
- *  a `*` in it changes what the machine's own copy of this file says about itself. */
+ *  root and none as anybody else, so the runas half is narrowed with the command half. */
 export function sudoersDropIn(sshUser: string): string {
   const specs = MANAGER_ELEVATED.map((e) => (e.args ? `${e.cmd} ${e.args}` : e.cmd));
-  const open = unpinnedElevated();
   return [
     "# Written by hostyour when it adopted this machine.",
     "# Every command below is one the manager runs as root over its own SSH session with no password",
     "# to raise itself with. No OTHER command is granted.",
-    `# This is a smaller grant and not a boundary: ${open.length} of the rules below leave their arguments`,
-    `# open (${open.map(elevatedName).join(", ")}), and an account holding them still reaches root.`,
+    `# This is a smaller grant and not a boundary. ${openArgumentsSentence()}`,
+    `# It also writes ${SSHD_PASSWORD_DROP_IN}, which sorts before every other sshd file, and reloads the daemon — so it decides that file's content, and a root login is one line of it away.`,
     `${sshUser} ALL=(root) NOPASSWD: ${specs.join(", \\\n    ")}`,
     "",
   ].join("\n");
@@ -632,25 +643,23 @@ function passwordUses(sshUser: string): string {
  *  (shared/api-types.ts), so a warning string is frozen into plan_json and rendered on no screen;
  *  the summary is what the approve card shows (web/src/pages/RunDetail.tsx:207).
  *
- *  It says what the grant is NOT as plainly as what it is, and it names EVERY command that still
- *  reaches root — the count comes off `unpinnedElevated()` and never off this sentence, so a row
- *  added with an open argument cannot be left out of what the operator is shown. An operator told
- *  only "named commands, not every command" would read a containment boundary into a list that is
- *  not one. */
+ *  It says what the grant is NOT as plainly as what it is: `openArgumentsSentence()` names every
+ *  command whose arguments the file leaves open, so a row added with one cannot be left out of what
+ *  the operator is shown and the last such row leaving cannot leave the card claiming one is there.
+ *  The sshd drop-in's CONTENT is spelled out AFTER that sentence and never inside it, because it is
+ *  true whichever way the sentence reads — an operator told "every rule is pinned" would otherwise
+ *  read a containment boundary into a grant that is not one. */
 function sudoGrant(sshUser: string): string {
   if (sshUser === "root") return "";
-  const open = unpinnedElevated().map(elevatedName);
   return (
     ` Unless "${sshUser}" already runs every command as root without a password from this machine's own ` +
     `configuration, this run writes ${SUDOERS_DROP_IN}, granting that account ${MANAGER_ELEVATED.length} NAMED commands ` +
-    `as root without a password — the ones this manager runs over its own session — and LEAVES IT THERE: deploy-slave ` +
-    `and the password-login run kinds reach root on this machine that way and carry no password of their own. ` +
-    `${open.length} of them leave their arguments open (${open.join(", ")}) and so still reach root: "microk8s kubectl" ` +
-    `administers the cluster and reaches root through it. Beyond that one row, the account can write ` +
-    `${SSHD_PASSWORD_DROP_IN} — beside the granted "systemctl reload ssh" — so it chooses the content of the sshd ` +
-    `drop-in that sorts before every other, and "PermitRootLogin yes" is a root login away. The write takes no file ` +
-    `name from that account, so it cannot copy a file of the machine's into a readable place; the content is the whole ` +
-    `of what it decides. So this is a smaller grant and not a boundary. ` +
+    `as root without a password — the ones this manager runs over its own session — and LEAVES IT THERE: the ` +
+    `password-login run kinds and the microk8s reset a failed slave install runs reach root on this machine that way ` +
+    `and carry no password of their own. ${openArgumentsSentence()} ` +
+    `Beyond that, the account can write ${SSHD_PASSWORD_DROP_IN} — beside the granted "systemctl reload ssh" — so it chooses the content of the sshd drop-in that sorts before every other, and "PermitRootLogin yes" is a root login away. ` +
+    `The write takes no file name from that account, so it cannot copy a file of the machine's into a readable place; ` +
+    `the content is the whole of what it decides. So this is a smaller grant and not a boundary. ` +
     `A machine an earlier adoption left carrying "${sshUser} ALL=(ALL) NOPASSWD:ALL" has that line replaced by this run.`
   );
 }

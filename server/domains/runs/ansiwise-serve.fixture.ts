@@ -236,16 +236,11 @@ function seedChannelTable(h: Harness): void {
 /** A harness whose master carries an ACTIVE cluster — the state redeploy and release act on.
  *  The channel table rides along because a release's attest checks the ceiling against it.
  *
- *  THE MASTER HERE WAS NEVER ADOPTED, and that is the point rather than a convenience: a first
- *  master is installed by ansiwise-client, which writes no sudoers drop-in, so the machine refuses
- *  every `sudo -n` this manager might send it. Every master-arm journey in these suites therefore
- *  runs against a machine on which the only way to root is the elevation password the run itself
- *  carries — a step that reached for a standing rule instead is refused here the way it was refused
- *  on a real first master. The SLAVE worlds below keep the adopted machine, which is what a slave
- *  is: the one root command left on that route is the destructive microk8s reset, and a cleanup
- *  runs on an abort that may already have discarded the password. */
+ *  Its machine carries no sudoers drop-in, like every other world here — see HostsScript.adopted.
+ *  A first master is installed by ansiwise-client and never adopted, so on a real one the only way
+ *  to root is the elevation password the run itself carries. */
 export async function liveMaster(serve: ServeFixture): Promise<Harness> {
-  const hosts = scriptedHosts({ adopted: false, openConversation: async () => openChannel(serve) });
+  const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   seedChannelTable(h);
   h.db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, MASTER_ID)).run();

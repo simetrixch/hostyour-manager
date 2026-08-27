@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import type { DbHandle } from "../../db/client.ts";
-import { adoptDef, elevatedName, MANAGER_ELEVATED, SUDOERS_DROP_IN, sudoersDropIn, unpinnedElevated, type ElevatedCommand } from "./defs/adopt.ts";
+import { adoptDef, elevatedName, MANAGER_ELEVATED, openArgumentsSentence, SUDOERS_DROP_IN, sudoersDropIn, unpinnedElevated, type ElevatedCommand } from "./defs/adopt.ts";
 import { DROP_IN as SSHD_DROP_IN } from "./defs/password-login.kit.ts";
 import { TAILNET_PROBE_SCRIPT } from "./tailnet-probe.ts";
 import { REMOTE_COMMANDS, REMOTE_SCRIPTS } from "./remote-scripts.fixture.ts";
@@ -257,7 +257,15 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
     // boundary this list does not draw. The names come off unpinnedElevated(), so a row added with
     // a `*` in it cannot be left out of what the approve card shows.
     expect(plan.summary).toContain("smaller grant and not a boundary");
-    for (const name of unpinnedElevated().map(elevatedName)) expect(plan.summary).toContain(name);
+    const open = unpinnedElevated().map(elevatedName);
+    for (const name of open) expect(plan.summary).toContain(name);
+    // …and when there is NONE the card says THAT, instead of listing nothing and leaving the
+    // operator to read "named commands" as a boundary. One sentence reaches both the card and the
+    // file on the machine, so the two cannot drift apart and neither can fall out of step with the
+    // table — whichever way that sentence reads.
+    expect(open).toEqual([]);
+    expect(plan.summary).toContain(openArgumentsSentence());
+    expect(sudoersDropIn("digi1")).toContain(openArgumentsSentence());
     expect(plan.summary).toContain(SSHD_DROP_IN);
     expect(plan.summary).toContain("systemctl reload ssh");
     // The drop-in write is named as a CONTENT choice and as nothing wider, because that is now all
@@ -321,8 +329,7 @@ describe("the drop-in as a machine reads it", () => {
     "tailscale version",                                                // tailnet-probe TAILNET_PROBE_SCRIPT
     "tailscale status --json",                                          // tailnet-probe TAILNET_PROBE_SCRIPT
     "tailscale debug prefs",                                            // tailnet-probe TAILNET_PROBE_SCRIPT
-    "snap remove --purge microk8s",                                     // deploy-slave.kit purgeMicrok8sStep
-    "microk8s kubectl -n argocd get application x -o jsonpath={.status.sync.status}", // deploy-slave
+    "snap remove --purge microk8s",                                     // deploy-slave.kit microk8sResetSlaveCleanup
     "/usr/sbin/sshd -T",                                                // password-login-probe effective()
     "/usr/sbin/sshd -t",                                                // password-login.kit APPLY
     "test -x /usr/sbin/sshd",                                           // password-login-probe sshd_bin()
@@ -365,13 +372,39 @@ describe("the drop-in as a machine reads it", () => {
     for (const e of MANAGER_ELEVATED) expect(e.args).not.toMatch(/[[\]?\\]/);
   });
 
-  it("says in the file itself, and in the plan the operator approves, which rules still reach root", () => {
-    // THE COUNT COMES OFF THE TABLE. A row added with an open argument changes both records without
-    // anybody rewriting a sentence, which is the only version of this that cannot go stale.
+  it("says in the file itself, and in the plan the operator approves, that no rule leaves its arguments open", () => {
+    // THE ACCEPTANCE: the cluster row is gone and nothing took its place, so the reading that used
+    // to name a command still reaching root names none. Every kubectl this manager sends is raised
+    // with the elevation password its run carries and needs no rule on the machine at all.
     const open = unpinnedElevated().map(elevatedName);
-    expect(open).toEqual(["microk8s"]);
-    expect(file).toContain(`${open.length} of the rules below leave their arguments`);
+    expect(open).toEqual([]);
     for (const name of open) expect(file).toContain(name);
+    // AND THE FILE SAYS SO, off that same reading, so it cannot go on telling whoever opens it on
+    // the machine that a row is open once none is — the stale sentence this assertion catches.
+    expect(file).not.toContain("leave their arguments open");
+    expect(file).toContain("Every rule fixes its command AND its arguments");
+    // …and neither sells the empty list as containment. The one thing no sudoers form can narrow is
+    // the CONTENT of the drop-in the account is granted to write, and the file names it.
+    expect(file).toContain(SSHD_DROP_IN);
+  });
+
+  // THE ROW THAT WAS THERE, put back into the file the way it really stood, so the refusals above
+  // are the removal and not a matcher that says no to everything.
+  const CLUSTER_ROW = plant(file, "NOPASSWD: ", "NOPASSWD: /snap/bin/microk8s kubectl *, ");
+
+  it("permitted, on the cluster row that was there, every kubectl an account cared to run", () => {
+    // What that row was worth to whoever held it: `apply` of a privileged pod with a host mount,
+    // and the cluster's every Secret read out in full. Neither is narrowable by any sudoers form,
+    // which is why the row could only leave once no call site needed it.
+    expect(sudoersPermits(CLUSTER_ROW, "microk8s kubectl apply -f /tmp/pod.yaml")).toBe(true);
+    expect(sudoersPermits(CLUSTER_ROW, "microk8s kubectl get secrets -A -o yaml")).toBe(true);
+  });
+
+  it("refuses both on the file this change leaves — and the innocent case on the old row too, so the red above is the wildcard", () => {
+    expect(sudoersPermits(file, "microk8s kubectl apply -f /tmp/pod.yaml")).toBe(false);
+    expect(sudoersPermits(file, "microk8s kubectl get secrets -A -o yaml")).toBe(false);
+    expect(sudoersPermits(file, "microk8s kubectl get applications.argoproj.io")).toBe(false);
+    expect(sudoersPermits(CLUSTER_ROW, "cat /etc/shadow")).toBe(false);
   });
 
   // -------------------------------------------------------------------------------------------

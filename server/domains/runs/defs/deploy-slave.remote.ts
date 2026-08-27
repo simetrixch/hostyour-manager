@@ -8,6 +8,16 @@ import { PLATFORM_CHECKOUT } from "./place-ansiwise.ts";
 // does around those programs: git checkout upkeep, the credentials-file handover, and the
 // verify/handoff kubectl reads. Pure string builders + zod contracts, no IO, no db: the def
 // composes them, tests golden them.
+//
+// NOTHING HERE CARRIES A `sudo` OF ITS OWN, and that is a rule of this module rather than a
+// property of any one builder. `microk8s kubectl` administers the cluster as root, so every one of
+// these has to be raised — and the caller raises it, with the elevation password the run already
+// asked for at approve (executor/stepkit.ts `raised`). A SCRIPT is therefore raised WHOLE: its
+// kubectl lines carry no elevation each, because the first `sudo -S` would consume the password and
+// leave the rest of the script prompting a terminal that is not there.
+// The route that is NOT taken is `sudo -n`, answered only by a standing sudoers rule the adoption
+// writes. A machine that was never adopted — a first master, installed by ansiwise-client — carries
+// no such rule, and the one row that used to grant these is granted to nobody now.
 
 /** The MicroK8s kube-apiserver port — a platform constant (the emit-cluster-credentials answer
  *  and the cluster map's apiPort carry the same value). */
@@ -162,13 +172,7 @@ export const MgmtCredsBlob = z.object({
 /** Every Application ArgoCD drives for a cluster, one `name|sync|health` row per line — the
  *  `argocd-follow` step's whole reading, and verify-slave's HARD gate 1. WHERE it runs is the
  *  caller's: a cluster carrying the master part operates its own ArgoCD in namespace `argocd` on
- *  itself, while a pure slave's Application CRs live in namespace <name> on the master.
- *
- *  IT CARRIES NO `sudo` OF ITS OWN, and neither does anything else in this module that has to run as
- *  root. `microk8s kubectl` reaches the cluster's API as root, and the caller raises it with the
- *  elevation password the run already asked for at approve (executor/stepkit.ts `raised`). The other
- *  route — `sudo -n`, answered by a standing sudoers rule the adoption writes — is a route only an
- *  ADOPTED machine has, and a first master is installed by ansiwise-client and never adopted. */
+ *  itself, while a pure slave's Application CRs live in namespace <name> on the master. */
 export function argoAppsCmd(name: string): string {
   return `microk8s kubectl -n ${name} get applications.argoproj.io -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.sync.status}{"|"}{.status.health.status}{"\\n"}{end}'`;
 }
@@ -181,7 +185,7 @@ export function argoAppsCmd(name: string): string {
  *  root-applications then sits at Unknown/Unknown, which is how the first live run died. Gate 0
  *  makes a stuck or failing ESO delivery a NAMED failure instead of that opaque timeout. */
 export function externalSecretsCmd(name: string): string {
-  return `sudo -n microk8s kubectl -n ${name} get externalsecrets.external-secrets.io -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"|"}{.status.conditions[?(@.type=="Ready")].reason}{"\\n"}{end}'`;
+  return `microk8s kubectl -n ${name} get externalsecrets.external-secrets.io -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"|"}{.status.conditions[?(@.type=="Ready")].reason}{"\\n"}{end}'`;
 }
 
 /** Kick every ExternalSecret in ns <name> out of ESO's exponential error backoff: an annotation
@@ -194,7 +198,7 @@ export function externalSecretsCmd(name: string): string {
  *  successfully, where the reconcile has to fetch. On one that already holds a value the annotation
  *  is not what re-reads Vault — deleting the target Secret is. Harmless when healthy. */
 export function forceSyncExternalSecretsCmd(name: string): string {
-  return `sudo -n microk8s kubectl -n ${name} annotate externalsecrets.external-secrets.io --all force-sync=$(date +%s) --overwrite`;
+  return `microk8s kubectl -n ${name} annotate externalsecrets.external-secrets.io --all force-sync=$(date +%s) --overwrite`;
 }
 
 // The step-6 diagnostic bundle (master side, ns <name>) — run while a HARD gate is failing
@@ -219,7 +223,7 @@ export function forceSyncExternalSecretsCmd(name: string): string {
 // or wrong label is named WITH the ExternalSecret that carries it, where a Secret listing could
 // only print nothing.
 export function slaveDiagScript(name: string): string {
-  const k = `sudo -n microk8s kubectl -n ${name}`;
+  const k = `microk8s kubectl -n ${name}`;
   return `#!/usr/bin/env bash
 echo "==== verify-slave diagnostics (ns ${name}) ===="
 echo "-- root-applications: sync | health | revision"
@@ -247,11 +251,11 @@ echo "==== end diagnostics ===="
  *  https://vault.<master>:8200, the kubernetes-<name> auth mount TokenReview'd the slave SA,
  *  the <name>-eso policy let it in. A missing policy binding is the classic failure here, and this
  *  surfaces it directly rather than as an opaque app failure later. Runs over the slave session — the run's ownsHost target. */
-export const SECRET_STORES_CMD = `sudo -n microk8s kubectl get secretstores.external-secrets.io -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"\\n"}{end}'`;
+export const SECRET_STORES_CMD = `microk8s kubectl get secretstores.external-secrets.io -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"\\n"}{end}'`;
 
 /** Every cert-manager Certificate on the slave, same row shape (step 6 SOFT — LE issuance
  *  can lag on DNS propagation / rate limits; a pending cert is a note, not a failure). */
-export const CERTS_CMD = `sudo -n microk8s kubectl get certificates.cert-manager.io -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"\\n"}{end}'`;
+export const CERTS_CMD = `microk8s kubectl get certificates.cert-manager.io -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"\\n"}{end}'`;
 
 // The SOFT observability probe (step 6, master): is the slave's obs-agent pushing? Queries
 // the master's IN-CLUSTER Prometheus via promtool inside the prometheus container — no
@@ -262,9 +266,9 @@ export const CERTS_CMD = `sudo -n microk8s kubectl get certificates.cert-manager
 // best-effort.
 export function promCheckScript(domain: string): string {
   return `#!/usr/bin/env bash
-pod=$(sudo -n microk8s kubectl -n observability get pod -l app.kubernetes.io/name=prometheus -o name 2>/dev/null | head -1)
+pod=$(microk8s kubectl -n observability get pod -l app.kubernetes.io/name=prometheus -o name 2>/dev/null | head -1)
 if [ -z "$pod" ]; then echo "PROM_CHECK skipped"; exit 0; fi
-res=$(sudo -n microk8s kubectl -n observability exec "$pod" -c prometheus -- promtool query instant http://localhost:9090 'up{cluster="${domain}"}' 2>/dev/null || true)
+res=$(microk8s kubectl -n observability exec "$pod" -c prometheus -- promtool query instant http://localhost:9090 'up{cluster="${domain}"}' 2>/dev/null || true)
 if [ -n "$res" ]; then echo "PROM_CHECK data"; else echo "PROM_CHECK empty"; fi
 `;
 }

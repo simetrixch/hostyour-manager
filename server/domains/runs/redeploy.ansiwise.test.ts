@@ -519,6 +519,13 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     }
 
     const logMark = h.hosts.log.length;
+    // THE ONE ACT OF THIS REPOSITORY THAT STILL STANDS ON THE ADOPTION'S DROP-IN. Every step of the
+    // run above was driven on a machine granting nothing without a password (HostsScript.adopted
+    // defaults to false) and needed no rule. The microk8s reset below is different: it is a CLEANUP,
+    // it fires on an abort that may already have discarded the run's password, and it therefore
+    // raises itself with `sudo -n snap remove --purge microk8s` — a row of MANAGER_ELEVATED, and the
+    // reason a slave is adopted at all. So the machine is given the file it really carries.
+    h.hosts.adopted = true;
     // The failed run's secrets were wiped with it — the abort re-supplies the elevation password,
     // exactly the way a retry does, because the remove-slave cleanup drives the master's programs.
     await h.executor.abortWithCleanup(runId, elevationOnly());
