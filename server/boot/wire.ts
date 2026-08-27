@@ -75,6 +75,10 @@ export async function wire(): Promise<Wired> {
   const runDefinitions = buildRunDefinitions({
     db: db.db,
     ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}),
+    // The SAME two settings the platform repo above is built from, as the machine's programs are
+    // answered with it: `owner/name`. deploy-host's git_clone row cannot read this off the machine,
+    // because the checkout it would be read from is what that row establishes.
+    ...(config.github ? { platformOrigin: `${config.github.owner}/${config.github.repo}` } : {}),
     ...(config.ansiwiseServeCommand ? { ansiwiseServeCommand: config.ansiwiseServeCommand } : {}),
     ...(config.ansiwiseDownloadUrl ? { ansiwiseDownloadUrl: config.ansiwiseDownloadUrl } : {}),
     // WHERE the bootstrap reads the two ansiwise executables. Unconditional and not behind a setting:

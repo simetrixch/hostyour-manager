@@ -3,7 +3,7 @@ import { eq, and } from "drizzle-orm";
 import type { Step, Cleanup, RunDefinition } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { STAGE, CLUSTER_TIER } from "../../../../shared/enums.ts";
-import { errValidation } from "../../../kernel/errors.ts";
+import { errValidation, errNotConfigured } from "../../../kernel/errors.ts";
 import { remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
 import { PREFLIGHT_SCRIPT, parsePreflightOutput, makeCheck, hardenPreflightForSlave, podCidrOverlapCheck, formatNicsLine } from "../preflight.ts";
@@ -127,6 +127,48 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
  *  adopt (the newest ssh_key credential's stored public line). The program re-installs it
  *  idempotently and proves sshd would accept it. A row without one (an adopt from before the
  *  public line was stored) sends nothing, and the program refuses the missing answer by name. */
+/** deploy-host's two checkout answers: WHICH repository the platform tree comes from, and WHICH
+ *  branch it stands on. The one extra a machine-layer program takes that nothing on the machine can
+ *  answer, because the checkout it would be read from is what the program establishes.
+ *
+ *  THE BRANCH IS THE CLUSTER'S OWN, never the trunk. Every machine's live tree stands on its
+ *  installation branch: that is what its reconciler follows and what release-cluster and
+ *  regenerate-branch read the release out of (`clusters/active/<fqdn>.yaml` exists on that branch and
+ *  on no other). Answering `master` here would move the live tree onto the trunk — measured on apps3,
+ *  whose tree stood on master for twelve hours while ArgoCD went on reconciling from origin, and whose
+ *  release-cluster then refused because the file it records into was not there.
+ *
+ *  A machine being born as a master is the one case that takes `master`, and it is not this manager's
+ *  case: it has no cluster row yet and is installed by ansiwise-client, which answers this itself. */
+/** Everything deploy-host is owed that the machine cannot answer itself: the two checkout answers
+ *  above and the public half of the key this manager reaches the machine with. ONE `extra`, because
+ *  a program step takes one — and both run kinds that drive deploy-host owe the machine all three.
+ *
+ *  Note the DIFFERENT sources, which is why they are composed rather than read from one place: the
+ *  repository is this installation's setting, the branch is the target cluster's row, and the key is
+ *  a sealed credential. */
+export function hostAnswers(target: SlaveTarget, serverId: string, ports: DeploySlavePorts): ExtraAnswers {
+  const checkout = checkoutAnswers(target, ports);
+  const key = operatorKeyAnswer(serverId);
+  return async (ctx) => ({ ...(await checkout(ctx)), ...(await key(ctx)) });
+}
+
+export function checkoutAnswers(target: SlaveTarget, ports: DeploySlavePorts): ExtraAnswers {
+  return async (ctx) => {
+    const origin = ports.platformOrigin;
+    if (origin === undefined || origin.length === 0) {
+      throw errNotConfigured(
+        "the platform repository is not named — deploy-host's git_clone row is answered with it as " +
+        "owner/name, and a machine cannot read it off a checkout that does not exist yet. It is " +
+        "built from GITHUB_OWNER + GITHUB_REPO, the same two settings this manager's own platform " +
+        "repo stands on",
+      );
+    }
+    const { domain } = target.resolve(ctx.db);
+    return { platform_repo: origin, platform_branch: domain };
+  };
+}
+
 export function operatorKeyAnswer(serverId: string): ExtraAnswers {
   return async (ctx) => {
     const key = (await ctx.creds.list({ serverId, kind: "ssh_key" })).at(-1);
@@ -310,7 +352,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // ---- the machine layer, exactly as every cluster gets it: the three deployment programs on
     // the slave's own surface, each dry-proven then run. deploy-host makes the box workable (the
     // packages, the key proof) and must precede the checkout refresh, which needs git.
-    ansiwiseProgramStep(target, "deploy-host", ports, { extra: operatorKeyAnswer(sid) }),
+    ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(target, sid, ports) }),
     // The programs read /srv/hostyour-cloud as it stands and deliberately fetch nothing — this is
     // what brings the slave's checkout onto the branch the cut just pushed. The checkout itself was
     // placed above; this step is what moves it onto that branch's head.

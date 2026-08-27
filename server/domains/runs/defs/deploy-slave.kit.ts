@@ -30,6 +30,19 @@ import { clusterMapPath } from "../../../../shared/cluster-values.ts";
  *  than taking either through a caller. */
 export interface DeploySlavePorts {
   platformRepo?: PlatformRepo;
+  /** The platform repository as `owner/name`, which is what deploy-host's git_clone row is answered
+   *  with — the ONE thing about the checkout a bare machine cannot read off itself, because the
+   *  checkout is what the row establishes.
+   *
+   *  IT IS THIS INSTALLATION'S FACT AND NOT THE CATALOGUE'S. A repository written into a program
+   *  file would be one installation's shipped to every installation (digita-deploy
+   *  ansiwise/programs/deploy-host.yaml says so in its own header), and the manager already holds
+   *  it: GITHUB_REPO and GITHUB_OWNER are what its own platform repo is built from.
+   *
+   *  Optional for the same reason platformRepo is: without GITHUB_REPO there is no platform repo at
+   *  all, and a step that needs this fails loud naming it rather than a whole run kind disappearing
+   *  from the map. */
+  platformOrigin?: string;
 }
 
 /** WHICH run kind is driving the shared slave step list. The steps are the same either way — what

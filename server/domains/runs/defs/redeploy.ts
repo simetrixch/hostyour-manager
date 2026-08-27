@@ -4,7 +4,7 @@ import type { Step, RunDefinition } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { servers } from "../../../db/schema/inventory.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
-import { deploySlaveSteps, SLAVE_MACHINE_INPUTS, operatorKeyAnswer } from "./deploy-slave.ts";
+import { deploySlaveSteps, SLAVE_MACHINE_INPUTS, hostAnswers } from "./deploy-slave.ts";
 import { placeAnsiwiseStep } from "./place-ansiwise.step.ts";
 import { activeClusterTarget, loadMaster, masterFqdnOf, type DeploySlavePorts } from "./deploy-slave.kit.ts";
 import { attestClusterStep, argocdFollowStep, loadActiveCluster } from "./cluster-release.kit.ts";
@@ -103,7 +103,7 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
     // what puts both at what clusters/platform/versions.yaml pins. A master whose engine drifted off
     // that pin is the state this run kind exists to end.
     placeAnsiwiseStep(target, ports),
-    ansiwiseProgramStep(target, "deploy-host", ports, { extra: operatorKeyAnswer(params.serverId) }),
+    ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(target, params.serverId, ports) }),
     ...MASTER_ARM_PROGRAMS.map((program) => ansiwiseProgramStep(target, program, ports)),
     argocdFollowStep(target),
   ];

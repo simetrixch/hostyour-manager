@@ -138,6 +138,12 @@ export function fixturePrograms(): Record<string, string> {
     "deploy-host": programYaml("deploy-host", [
       { answer: "operator_user", pattern: "^(m1|ubuntu)$" },
       { answer: "operator_public_key", pattern: "^ssh-ed25519 " },
+      // The two the machine cannot answer itself, because the checkout they would be read off is
+      // what this program's git_clone row establishes. The BRANCH is the target cluster's own and
+      // never the trunk: a live tree standing on master is a machine whose release-cluster then
+      // cannot find clusters/active/<fqdn>.yaml, measured on a real one.
+      { answer: "platform_repo", pattern: "^acme/platform$" },
+      { answer: "platform_branch", pattern: "^(m1|s1)\.example\.com$" },
     ]),
     "emit-cluster-credentials": programYaml("emit-cluster-credentials", [
       { answer: "api_server_url", pattern: "^https://100\\.64\\.0\\.11:16443$" },

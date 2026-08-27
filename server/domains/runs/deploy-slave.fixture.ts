@@ -60,6 +60,9 @@ export const SLAVE_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5TESTKEY hostyou
  *  is owed the public half of the key this manager reaches it with, exactly as a slave's is. */
 export const MASTER_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5TESTKEY hostyour:m1";
 
+/** The platform repository as owner/name, the way this installation names it. */
+export const PLATFORM_ORIGIN = "acme/platform";
+
 // The tailnet-mint-join-key program's credential (the master's key file, read + removed by the
 // rejoin step). A pre-auth key puts a machine of the holder's choosing on the private network, so
 // the redaction assertions check it appears NOWHERE in the persisted run surface — and it is
@@ -396,6 +399,9 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
     db: db.db, creds: store, bus: new RunEventBus(), logger,
     runDefinitions: buildRunDefinitions({
       db: db.db, platformRepo,
+      // What deploy-host's git_clone row is answered with, as the composition root builds it from
+      // GITHUB_OWNER + GITHUB_REPO. A machine cannot read it off a checkout that does not exist yet.
+      platformOrigin: PLATFORM_ORIGIN,
       ansiwiseDownloadUrl: ANSIWISE_DOWNLOAD_URL,
       releaseDownloads: releases,
       ...(opts.ansiwiseServeCommand !== undefined ? { ansiwiseServeCommand: opts.ansiwiseServeCommand } : {}),
