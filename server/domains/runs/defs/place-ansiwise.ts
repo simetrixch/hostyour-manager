@@ -53,7 +53,7 @@ import {
 //                  apache2-utils. The bootstrap needs none of them now: the manager fetches the
 //                  bytes and SFTP carries them.
 //   the CHECKOUTS  `/srv/ansiwise-catalog` is `git_clone`'s (digita-deploy
-//                  ansiwise/programs/deploy-platform-services.yaml). `/srv/hostyour-cloud` is declared by no
+//                  ansiwise/programs/). `/srv/hostyour-cloud` is declared by no
 //                  program at all, and THAT IS A GAP THIS MODULE MAY NOT FILL. Cloning a private
 //                  repository needs a credential, and a credential can reach a single command only
 //                  through that command's argument list or its environment — the first stands in

@@ -184,6 +184,22 @@ export interface HostsScript {
    *  the run that mints it — the machine the service placement has to refuse rather than enable a
    *  unit that cannot read its own credential. */
   serviceToken: string | undefined;
+  /** The catalogue checkout at /srv/ansiwise-catalog, as the machine holds it. `catalogueBranch`
+   *  undefined is a machine that carries NO catalogue — `test -d` answers no and nothing else about
+   *  the checkout is asked. `catalogueRemoteHead` is what origin/<branch> stands on, so a reset
+   *  MOVES the head to it and the reading after the reset answers the moved value: a caller that
+   *  fetched and did not stand the tree on what it fetched is answered by a machine that did not
+   *  move. The DEFAULT is a machine that carries a catalogue one commit behind its origin, because
+   *  that is every machine these suites drive programs on.
+   *
+   *  A machine with no catalogue answers no program at all, so this is deliberately not the default:
+   *  it is the shape a bare machine has, and it is asserted by the test that is about a bare one. */
+  catalogueBranch: string | undefined;
+  catalogueHead: string;
+  catalogueRemoteHead: string;
+  /** What `git fetch origin <branch>` answers in the catalogue — non-zero is a machine whose own
+   *  read credential no longer opens its origin, or a tree git refuses as somebody else's. */
+  catalogueFetchExit: number;
   /** Whether the service the install-service invocation enabled actually COMES UP. False is what a
    *  unit that installs cleanly and then fails to bind looks like: install-service exits zero and the
    *  service manager says the machine is not serving. */
@@ -246,6 +262,10 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     serviceRunningVersion: undefined,
     serviceToken: "scripted-service-token",
     serviceStartsAfterInstall: true,
+    catalogueBranch: "main",
+    catalogueHead: "aaa1111",
+    catalogueRemoteHead: "bbb2222",
+    catalogueFetchExit: 0,
     execFaults: [],
     openConversation: (command) => Promise.reject(new Error(`no conversation scripted for "${command}"`)),
     log: [],

@@ -10,6 +10,7 @@ import {
   type PlacementMachine, type BootstrapVerdict,
 } from "./place-ansiwise.ts";
 import type { ReleaseDownloads } from "../../../adapters/downloads/port.ts";
+import { refreshCatalogue } from "./machine-catalogue.ts";
 
 // The manager's half of the BOOTSTRAP: the two steps deploy-slave and redeploy run, and the
 // resolution only a manager can do. The bootstrap itself (place-ansiwise.ts) takes a machine and
@@ -63,11 +64,13 @@ function requireDownloads(ports: AnsiwisePorts): ReleaseDownloads {
  *  the machine yet.
  *
  *  WHAT THIS STEP NO LONGER PLACES is written out in place-ansiwise.ts, with where each of them went:
- *  the packages are deploy-host's `install_packages` row, the catalogue checkout is deploy-platform-services's
- *  `git_clone` row, and the material checkout at PLATFORM_CHECKOUT is declared by no program yet. A
- *  machine that reaches the first program step without a catalogue is answered by that step, in the
- *  words of a binary that finds no program of that name — which is a better sentence than any this
- *  step could invent about a tree it no longer touches.
+ *  the packages are deploy-host's `install_packages` row, and both checkouts are `git_clone` rows.
+ *  MAKING one is still a program's, and REFRESHING the catalogue is this step's (machine-catalogue.ts)
+ *  — the difference is a credential: a clone needs an origin and a read credential the row holds by
+ *  name, and a refresh runs on a checkout that already carries both. A machine that reaches the first
+ *  program step without a catalogue is answered by that step, in the words of a binary that finds no
+ *  program of that name — which is a better sentence than any this step could invent about a tree it
+ *  cannot create.
  *
  *  A machine at its FIRST installation stands in no server row, so it cannot start THIS step. Keeping
  *  the resolution out here is what makes the bootstrap itself demand nothing such a machine cannot
@@ -75,20 +78,29 @@ function requireDownloads(ports: AnsiwisePorts): ReleaseDownloads {
 export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): Step {
   return {
     name: "place-ansiwise",
-    title: "Place both ansiwise executables on the machine, at the pinned version",
+    title: "Place the engine at the pinned version, and bring the catalogue it is judged by with it",
     run: async (ctx) => {
       const server = loadServer(ctx.db, target.serverId);
       const verdict = await runBootstrap(ctx, ports, server);
       // The other half of making a machine speakable, and it has to happen HERE: every program this
       // manager drives runs through `ansiwise-rest` as the operator, and the first thing a run does
-      // is write its own record. deploy-host's own row keeps these two directories right afterwards;
-      // it cannot make them right the first time, because it is a program and the programs are what
-      // cannot start (hostyour-manager#68).
+      // is write its own record. A program's own row keeps these directories right afterwards; it
+      // cannot make them right the first time, because it is a program and the programs are what
+      // cannot start.
       const handed = await handRunRoot(await placementMachine(ctx, server.name), {
         account: server.sshUser,
         elevationPassword: requireElevationPassword(ctx),
       });
-      ctx.checkpoint({ ...verdict, ...handed });
+      // AND THE CATALOGUE THE ENGINE IS JUDGED BY, in the same step and before any program. The
+      // machine's cluster program asserts the placed engine against the version stamped into the
+      // catalogue ON THE MACHINE, and the catalogue is refreshed by a row of a program that is
+      // itself read out of the catalogue — so without this a pin move reaches an installed machine
+      // one program after the row that asserts it. A machine carrying no catalogue is untouched,
+      // which is what keeps the birth of a machine out of this: putting the row into the first
+      // program a machine runs was tried and reverted, because it needs an answer the client's
+      // first-master flow does not send, and nothing here asks a program for anything.
+      const catalogue = await refreshCatalogue(await placementMachine(ctx, server.name));
+      ctx.checkpoint({ ...verdict, ...handed, catalogue });
     },
   };
 }

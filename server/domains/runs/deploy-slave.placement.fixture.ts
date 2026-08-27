@@ -1,6 +1,7 @@
 import { DownloadFailed, type ReleaseDownloads } from "../../adapters/downloads/port.ts";
 import type { HostsScript } from "./deploy-slave.fixture.ts";
 import { PATH_HOME } from "./defs/place-ansiwise.ts";
+import { CATALOG_CHECKOUT } from "./defs/machine-state.ts";
 
 // THE SCRIPTED MACHINE'S BOOTSTRAP HALF: what it answers when it is asked which release each of its
 // two executables is, what a file transfer does to it, and what the serving binary's install-service
@@ -116,6 +117,9 @@ export function answerPlacementCommand(
     return { out: "", code: 0 };
   }
 
+  const catalogue = answerCatalogueCommand(f, words);
+  if (catalogue !== undefined) return catalogue;
+
   if (command === "systemctl is-enabled ansiwise.service") {
     return { out: f.serviceEnabled ? "enabled" : "disabled", code: f.serviceEnabled ? 0 : 1 };
   }
@@ -141,6 +145,39 @@ export function answerPlacementCommand(
 
   if (words[1] === "install-service") {
     return installService(f, host, words);
+  }
+  return undefined;
+}
+
+/** The catalogue checkout, answered the way a machine holds one rather than by a marker: `test -d`
+ *  decides whether there is one at all, `symbolic-ref` names the branch it stands on, `rev-parse`
+ *  reads the head it is ACTUALLY on, and `reset --hard` MOVES that head to what origin carries. So a
+ *  caller that fetched and never stood the tree on what it fetched is answered by a machine whose
+ *  head did not move, and a caller that skipped the fetch is answered by the exit code the fetch was
+ *  scripted with.
+ *
+ *  Undefined for every command that is not about the catalogue, so the table above goes on. */
+function answerCatalogueCommand(f: HostsScript, words: string[]): { out: string; code: number } | undefined {
+  const [head, ...rest] = words;
+  if (head === "test" && rest[0] === "-d" && rest[1] === `${CATALOG_CHECKOUT}/.git`) {
+    return { out: "", code: f.catalogueBranch === undefined ? 1 : 0 };
+  }
+  if (head !== "git" || rest[0] !== "-C" || rest[1] !== CATALOG_CHECKOUT) return undefined;
+  const argv = rest.slice(2);
+  // A machine with no catalogue answers every one of these the way git does in a directory that is
+  // not a repository: it refuses, with the exit code it uses for a fatal.
+  if (f.catalogueBranch === undefined) return { out: "fatal: not a git repository", code: 128 };
+  if (argv[0] === "symbolic-ref") return { out: f.catalogueBranch, code: 0 };
+  if (argv[0] === "rev-parse") return { out: f.catalogueHead, code: 0 };
+  if (argv[0] === "fetch") {
+    return argv[1] === "origin" && argv[2] === f.catalogueBranch
+      ? { out: "", code: f.catalogueFetchExit }
+      : { out: `fatal: couldn't find remote ref ${argv[2] ?? ""}`, code: 128 };
+  }
+  if (argv[0] === "reset" && argv[1] === "--hard") {
+    if (argv[2] !== `origin/${f.catalogueBranch}`) return { out: `fatal: ambiguous argument '${argv[2] ?? ""}'`, code: 128 };
+    f.catalogueHead = f.catalogueRemoteHead;
+    return { out: `HEAD is now at ${f.catalogueHead}`, code: 0 };
   }
   return undefined;
 }

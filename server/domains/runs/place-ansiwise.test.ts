@@ -12,6 +12,7 @@ import {
   NAME_PLACEHOLDER, VERSION_PLACEHOLDER,
   type PlacementMachine,
 } from "./defs/place-ansiwise.ts";
+import { CATALOG_CHECKOUT } from "./defs/machine-state.ts";
 
 // place-ansiwise is the BOOTSTRAP, and what is held down here is that it is a file transfer and
 // nothing else. Everything a machine is given after this is given by a program of its own catalogue;
@@ -365,5 +366,89 @@ describe("the bootstrap with no manager behind it", () => {
     expect(again).toEqual({ version: ANSIWISE_PIN, placed: false });
     expect(hosts.files.slice(settled), "a settled machine was written to again").toHaveLength(0);
     expect(said.some((l) => l.includes("nothing to place"))).toBe(true);
+  });
+});
+
+// THE CATALOGUE ARRIVES WITH THE ENGINE, and the machine below is a machine and not a marker.
+//
+// `deploy-cluster`'s `require_cli_tool_versions` row asserts the placed engine against the version
+// stamped into the CATALOGUE on the machine, and the catalogue is refreshed by a row of a program —
+// which is itself read out of the catalogue. So on the first run after a pin move the machine
+// carried the new engine and the old programs, and the assertion failed on apps4 on every pin move
+// of 2026-08-27. The refresh now stands in the same step as the placement.
+//
+// TWO MACHINES, AND ONE MUST NOT BE TRADED FOR THE OTHER. One that already lives carries the
+// checkout and is brought forward; one that carries none is left exactly as it was, because putting
+// this into a program is what breaks the birth of a machine — that move was tried and reverted, and
+// the reason was an answer the client's first-master flow does not send. Nothing here asks a program
+// for anything.
+//
+// AND STILL NO SHELL. The refresh is six argument lists like every other act of this step, held
+// against the same guard, so the assertion the whole bootstrap turns on keeps covering it.
+describe("place-ansiwise: the catalogue the engine is judged by", () => {
+  it("brings an installed machine's catalogue forward in the same step that places the engine", async () => {
+    const hosts = scriptedHosts();
+    const h = await makeHarness({ hosts });
+    const said: string[] = [];
+    await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_cat1", said));
+
+    // READ OFF THE MACHINE: the head moved to what origin carried, which only a reset onto the
+    // fetched branch does. A step that fetched and stopped leaves it where it was.
+    expect(hosts.catalogueHead, "the catalogue was fetched and the tree never stood on it").toBe("bbb2222");
+    expect(said.some((l) => l.includes(`${CATALOG_CHECKOUT} brought forward on main, aaa1111..bbb2222`))).toBe(true);
+    // THE BRANCH CAME OFF THE MACHINE. The fetch and the reset name the branch the checkout stood
+    // on, so this manager can never move a machine's catalogue to a branch of its own choosing.
+    expect(commands(hosts)).toContain(`git -C ${CATALOG_CHECKOUT} fetch origin main`);
+    expect(commands(hosts)).toContain(`git -C ${CATALOG_CHECKOUT} reset --hard origin/main`);
+    // NOT RAISED, and that is the ownership rule doing the work rather than a convenience: the
+    // catalogue belongs to the account this manager reaches the machine as, so git takes the tree as
+    // its own. Raised, git would refuse it and everything the fetch wrote would come back root-owned.
+    for (const c of commands(hosts).filter((x) => x.includes(CATALOG_CHECKOUT))) expect(c).not.toContain("sudo");
+  });
+
+  it("leaves a machine that carries no catalogue exactly as it was, and says so", async () => {
+    // The bare machine. Not a failure and not a silent pass: the step says the machine carries none
+    // and names where a clone belongs, because only a program's row knows the origin and the
+    // credential by name. It asks that machine NOTHING else about the checkout.
+    const hosts = scriptedHosts({ catalogueBranch: undefined });
+    const h = await makeHarness({ hosts });
+    const said: string[] = [];
+    await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_cat2", said));
+
+    expect(said.some((l) => l.includes(`carries no catalogue at ${CATALOG_CHECKOUT}`))).toBe(true);
+    expect(commands(hosts).filter((c) => c.startsWith(`git -C ${CATALOG_CHECKOUT}`)), "a machine with no catalogue was asked about one anyway").toEqual([]);
+    // And the engine was still placed: a machine without a catalogue is one to bootstrap, not one to
+    // refuse.
+    expect(transferred(hosts).map((f) => f.path)).toEqual([ANSIWISE_TOOL, ANSIWISE_REST_TOOL]);
+  });
+
+  it("refuses a machine whose catalogue would not fetch, rather than driving programs out of a stale one", async () => {
+    const hosts = scriptedHosts({ catalogueFetchExit: 128 });
+    const h = await makeHarness({ hosts });
+    const run = placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_cat3", []));
+    await expect(run).rejects.toThrow(new RegExp(`could not fetch main into ${CATALOG_CHECKOUT}`));
+    expect(hosts.catalogueHead, "a machine whose fetch failed was reset onto something anyway").toBe("aaa1111");
+  });
+
+  it("refuses a catalogue standing on no branch, rather than guessing which one to bring it to", async () => {
+    // A detached HEAD names no branch, so there is no head to be brought to. The refusal says that
+    // rather than falling back to a branch this repository would have had to choose.
+    const hosts = scriptedHosts({ catalogueBranch: "" });
+    const h = await makeHarness({ hosts });
+    const run = placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_cat4", []));
+    await expect(run).rejects.toThrow(new RegExp(`${CATALOG_CHECKOUT} on s1 stands on no branch`));
+  });
+
+  // THE INNOCENT NEIGHBOUR: a machine already standing on the head of its branch is reported as
+  // such and the head does not move. Without it the first case would pass on a refresh that reports
+  // a change whatever the machine answered.
+  it("says nothing moved on a machine whose catalogue already stands on the head of its branch", async () => {
+    const hosts = scriptedHosts({ catalogueHead: "ccc3333", catalogueRemoteHead: "ccc3333" });
+    const h = await makeHarness({ hosts });
+    const said: string[] = [];
+    await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_cat5", said));
+
+    expect(hosts.catalogueHead).toBe("ccc3333");
+    expect(said.some((l) => l.includes("already stood on the head of main at ccc3333"))).toBe(true);
   });
 });
