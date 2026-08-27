@@ -5,7 +5,7 @@ import { readAnsiwisePin } from "../../inventory/ansiwise-pin.ts";
 import { loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { requireElevationPassword, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 import {
-  placeAnsiwise, installAnsiwiseService, isServiceAddress, assertWord,
+  placeAnsiwise, installAnsiwiseService, isServiceAddress, assertWord, handRunRoot,
   VERSION_PLACEHOLDER, NAME_PLACEHOLDER, ANSIWISE_SERVICE_PORT,
   type PlacementMachine, type BootstrapVerdict,
 } from "./place-ansiwise.ts";
@@ -79,7 +79,16 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
     run: async (ctx) => {
       const server = loadServer(ctx.db, target.serverId);
       const verdict = await runBootstrap(ctx, ports, server);
-      ctx.checkpoint(verdict);
+      // The other half of making a machine speakable, and it has to happen HERE: every program this
+      // manager drives runs through `ansiwise-rest` as the operator, and the first thing a run does
+      // is write its own record. deploy-host's own row keeps these two directories right afterwards;
+      // it cannot make them right the first time, because it is a program and the programs are what
+      // cannot start (hostyour-manager#68).
+      const handed = await handRunRoot(await placementMachine(ctx, server.name), {
+        account: server.sshUser,
+        elevationPassword: requireElevationPassword(ctx),
+      });
+      ctx.checkpoint({ ...verdict, ...handed });
     },
   };
 }

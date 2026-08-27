@@ -68,7 +68,11 @@ export function orphanedEndSuite(serve: () => ServeFixture, observer: () => Ansi
       expect(Date.now() - began, "the wait gave up on a run that had not ended, with nothing on the disk saying it had").toBeGreaterThanOrEqual(3_500);
     });
 
-    it("makes the ASSERTION say which file the end is standing in, instead of comparing an absence to zero", { timeout: 120_000 }, async () => {
+    // 180 seconds and not 120: this drives a WHOLE cluster-redeploy, and the master arm grew from four
+    // steps to six when the placement and deploy-host joined it — two more machine runs, each proven
+    // dry before it is run. Under the whole file it went over 120 and passed alone, which is a budget
+    // that no longer fits the run rather than a race.
+    it("makes the ASSERTION say which file the end is standing in, instead of comparing an absence to zero", { timeout: 180_000 }, async () => {
       const h = await liveMaster(serve());
       const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(uniqueEmail()));
       expect(getRun(h.db.db, runId)?.status).toBe("succeeded");

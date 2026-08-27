@@ -134,6 +134,75 @@ export const CATALOG_CONFIG = `${CATALOG_CHECKOUT}/ansiwise.yaml`;
  *  refresh feeds them and the tree they act on are one path stated once. */
 export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
 
+/** Where the engine keeps every run's record on a machine, and the directory above it.
+ *
+ *  ansiwise-core's `RunDirectory.defaultRoot` names the second, and its recorder creates the run's
+ *  own directory RECURSIVELY when a run begins (file_recorder.dart:41) — so both come into being on
+ *  a machine's first elevated run, belonging to root, and no program declares them. */
+export const ANSIWISE_STATE_ROOT = "/var/lib/ansiwise";
+
+/** See [ANSIWISE_STATE_ROOT]. */
+export const ANSIWISE_RUN_ROOT = `${ANSIWISE_STATE_ROOT}/runs`;
+
+/** One line break, named because it is written into a command's standard input and into the split of
+ *  what a command answered — two places a literal would be easy to lose. */
+const NEWLINE = "\n";
+
+/** Leaves the engine's own state belonging to the account this manager reaches the machine as.
+ *
+ *  WHY THE MANAGER DOES THIS AND NOT A PROGRAM. deploy-host names a `hand_directory_to_account` row
+ *  for exactly these two directories, and that row is what keeps them right afterwards. It cannot be
+ *  what makes them right the first time: the manager drives every program through `ansiwise-rest`,
+ *  which runs as the operator, and the FIRST thing a run does is write its own record — so a machine
+ *  whose run root belongs to root accepts the run, forks it, and the child dies before its first
+ *  step. The program that would repair it is the program that cannot start. Measured on apps4:
+ *  "machine run … was accepted but never wrote its record — it started and died before its first
+ *  step".
+ *
+ *  So this is the bootstrap half, and it belongs beside the placement for the same reason the
+ *  placement does: both are what make a machine able to be SPOKEN to at all, and neither is
+ *  something the machine can do for itself.
+ *
+ *  THE MODE IS UNTOUCHED. Only the owner moves. Root goes on writing whatever it likes — a machine's
+ *  own `sudo ansiwise` runs keep recording into the same root, and their records stay theirs.
+ *
+ *  IT READS FIRST, so a machine already right is reported as such rather than acted on again. */
+export async function handRunRoot(
+  machine: PlacementMachine,
+  req: { account: string; elevationPassword: string },
+): Promise<{ handed: boolean }> {
+  assertWord(req.account, "account a machine's engine state is handed to");
+  const paths = [ANSIWISE_STATE_ROOT, ANSIWISE_RUN_ROOT];
+  const owners = await machine.run(["stat", "-c", "%U", ...paths], { timeoutMs: COMMAND_TIMEOUT_MS });
+  const read = owners.stdout.split(NEWLINE).map((l) => l.trim()).filter((l) => l.length > 0);
+  if (read.length === paths.length && read.every((owner) => owner === req.account)) {
+    machine.log(`${machine.name}: ${ANSIWISE_STATE_ROOT} and ${ANSIWISE_RUN_ROOT} already belong to ${req.account} — nothing to hand over`);
+    return { handed: false };
+  }
+  const stdin = Buffer.from(req.elevationPassword + NEWLINE, "utf8");
+  // THREE COMMANDS AND NOT ONE, because each `sudo -S` reads the password itself and a value that
+  // would have to be quoted is refused by this module rather than escaped — so there is no one shell
+  // to put them in. `install -d` makes what is missing; the two `chown`s correct what was already
+  // standing, which on every machine this platform has installed is both of them.
+  for (const argv of [
+    ["sudo", "-S", "install", "-d", "-m", "755", "-o", req.account, "-g", req.account, ANSIWISE_RUN_ROOT],
+    ["sudo", "-S", "chown", `${req.account}:${req.account}`, ANSIWISE_STATE_ROOT],
+    ["sudo", "-S", "chown", `${req.account}:${req.account}`, ANSIWISE_RUN_ROOT],
+  ]) {
+    const done = await machine.run(argv, { timeoutMs: COMMAND_TIMEOUT_MS, stdin });
+    if (done.code !== 0) {
+      throw errValidation(
+        `${machine.name} would not hand ${argv.at(-1)} to ${req.account} (exit ${done.code}) — every run this manager ` +
+        `drives writes its record under ${ANSIWISE_RUN_ROOT}, and an account that cannot write there accepts a run and ` +
+        "dies before its first step. Read what the command wrote in the run log; the elevation password this run " +
+        "carries is what raises it",
+      );
+    }
+  }
+  machine.log(`${machine.name}: ${ANSIWISE_STATE_ROOT} and ${ANSIWISE_RUN_ROOT} now belong to ${req.account}`);
+  return { handed: true };
+}
+
 /** The name the service manager knows the resident surface by — the base name of the unit the
  *  serving binary carries and installs itself under (ansiwise-cli `lib/service_unit.dart`
  *  serviceUnitName). Named here only to ASK the machine about it and to restart it; what stands
