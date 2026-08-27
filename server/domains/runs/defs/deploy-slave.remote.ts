@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PLATFORM_CHECKOUT } from "./place-ansiwise.ts";
+import { PLATFORM_CHECKOUT, WORK_CHECKOUT } from "./machine-state.ts";
 
 // The REMOTE surface of the deploy-slave Run: the few shell scripts and kubectl commands the
 // steps still ship to the two hosts, plus the contracts they parse back. Everything that BUILDS
@@ -42,14 +42,6 @@ fi
 if [ -n "$ip" ]; then echo "DNS_WILDCARD $ip"; else echo "DNS_WILDCARD none"; fi
 `;
 }
-
-/** WHERE the master writes a SLAVE's branch — deploy-slave-branch cuts it here and
- *  regenerate-slave-branch merges the release tag into it here: a second checkout with the same
- *  origin, stood on the branch the program demands by the caller (the product branch for a cut, the
- *  slave's own branch for a regeneration). Working in the LIVE checkout would yank the machine's
- *  tree off the branch its reconciler and its installer stand on. Both programs name the path on
- *  their own rows; this constant is the caller's half of the same contract. */
-export const WORK_CHECKOUT = "/srv/hostyour-cloud-slave";
 
 // The refresh for the PLATFORM checkout at /srv/hostyour-cloud — the tree the deployment programs
 // act on and deliberately never fetch into themselves (a program acts on the tree it was pointed

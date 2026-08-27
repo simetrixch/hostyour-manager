@@ -11,9 +11,9 @@ import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./defs/place-ansiw
 import {
   installServiceArgv, assertWord,
   ANSIWISE_EXECUTABLES, ANSIWISE_REST_TOOL, ANSIWISE_SERVICE_UNIT, ANSIWISE_SERVICE_PORT,
-  BOOTSTRAP_HOME, CATALOG_CHECKOUT, CATALOG_CONFIG, CATALOG_PROGRAMS, EXECUTABLE_MODE,
-  INSTALL_SERVICE_PROGRAM, SERVICE_TOKEN_FILE,
+  BOOTSTRAP_HOME, EXECUTABLE_MODE, INSTALL_SERVICE_PROGRAM,
 } from "./defs/place-ansiwise.ts";
+import { CATALOG_CHECKOUT, CATALOG_CONFIG, CATALOG_PROGRAMS, SERVICE_TOKEN_FILE } from "./defs/machine-state.ts";
 
 afterEach(() => disposeHarnesses());
 

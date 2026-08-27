@@ -10,7 +10,7 @@ import { ATTEST_TARGET_STEP } from "../../../executor/guards.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
 import { clusterShortName } from "../../inventory/cluster-marking.ts";
 import { argoAppsCmd, parsePipeRows, refreshPlatformCheckoutScript, masterRegenerationCheckoutsScript } from "./deploy-slave.remote.ts";
-import { PLATFORM_CHECKOUT } from "./place-ansiwise.ts";
+import { PLATFORM_CHECKOUT } from "./machine-state.ts";
 import { loadServer, loadMaster, masterFqdnOf, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { requireElevationPassword } from "./ansiwise-run.kit.ts";
 

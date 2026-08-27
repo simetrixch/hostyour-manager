@@ -6,6 +6,7 @@ import { AnsiwiseClient } from "../../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../../../adapters/ansiwise/port.ts";
 import { isMasterRole, type Stage } from "../../../../shared/enums.ts";
 import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { CATALOG_CHECKOUT, CATALOG_PROGRAMS } from "./machine-state.ts";
 
 // Driving one ansiwise PROGRAM on a machine, through the machine's own REST surface — the step
 // that replaces `setup.sh --<stage>` on hosts whose machine layer is delivered by the
@@ -64,7 +65,7 @@ export function requireServeCommand(ports: AnsiwisePorts): string {
       "serving binary's SESSION door on the machine, and which command starts it (and so which catalogue checkout it " +
       "reads) is the installation's decision. It is a program of `ansiwise-rest` and not of `ansiwise`, which answers " +
       "`no program is called serve`. Set ANSIWISE_SERVE_COMMAND to the command that serves the surface on the session's " +
-      "stdio, e.g. `cd /srv/ansiwise-catalog && ~/ansiwise-rest serve --programs /srv/ansiwise-catalog/ansiwise/programs`",
+      `stdio, e.g. \`cd ${CATALOG_CHECKOUT} && ~/ansiwise-rest serve --programs ${CATALOG_PROGRAMS}\``,
     );
   }
   return ports.ansiwiseServeCommand;

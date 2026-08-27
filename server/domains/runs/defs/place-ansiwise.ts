@@ -1,4 +1,7 @@
 import { errValidation } from "../../../kernel/errors.ts";
+import {
+  ANSIWISE_RUN_ROOT, CATALOG_CONFIG, CATALOG_PROGRAMS, MANAGER_HANDS_OVER, SERVICE_TOKEN_FILE,
+} from "./machine-state.ts";
 
 // `place-ansiwise` — the BOOTSTRAP, and the whole of what this repository does to a machine with its
 // own hands. Everything a machine is afterwards given is given by a PROGRAM: a named row in the
@@ -130,51 +133,25 @@ export const BOOTSTRAP_HOME = "~/";
  *  one of them answers. */
 export const PATH_HOME = "/usr/local/bin/";
 
-/** WHERE the catalogue stands on the machine: the checkout the serving binary reads its programs and
- *  its `ansiwise.yaml` from. The machine's own path and not this module's invention — digita-deploy
- *  `ansiwise/programs/deploy-platform-services.yaml`'s `git_clone` row clones the catalogue repository to
- *  exactly this path, and the resident service is given `--programs` out of it. */
-export const CATALOG_CHECKOUT = "/srv/ansiwise-catalog";
-
-/** The program files inside that checkout — what `--programs` has to name, because the option's own
- *  default (`programs`, beside the working directory) is not where a catalogue keeps them. */
-export const CATALOG_PROGRAMS = `${CATALOG_CHECKOUT}/ansiwise/programs`;
-
-/** The file naming which plugins the installation turns on, inside the same checkout. It has to be
- *  named because the option's default is `ansiwise.yaml` RELATIVE to the directory the process runs
- *  in, and nothing here runs in the catalogue: see THE WORKING DIRECTORY IS NOT THE CATALOGUE at
- *  `installServiceArgv`. */
-export const CATALOG_CONFIG = `${CATALOG_CHECKOUT}/ansiwise.yaml`;
-
-/** WHERE the deployment programs read and write the platform tree — the MATERIAL. The programs
- *  (digita-deploy ansiwise/programs/) name this path on every `repository:` row, so the tree a
- *  refresh feeds them and the tree they act on are one path stated once. */
-export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
-
-/** Where the engine keeps every run's record on a machine, and the directory above it.
- *
- *  ansiwise-core's `RunDirectory.defaultRoot` names the second, and its recorder creates the run's
- *  own directory RECURSIVELY when a run begins (file_recorder.dart:41) — so both come into being on
- *  a machine's first elevated run, belonging to root, and no program declares them. */
-export const ANSIWISE_STATE_ROOT = "/var/lib/ansiwise";
-
-/** See [ANSIWISE_STATE_ROOT]. */
-export const ANSIWISE_RUN_ROOT = `${ANSIWISE_STATE_ROOT}/runs`;
-
 /** One line break, named because it is written into a command's standard input and into the split of
  *  what a command answered — two places a literal would be easy to lose. */
 const NEWLINE = "\n";
 
-/** Leaves the engine's own state belonging to the account this manager reaches the machine as.
+/** Leaves the machine state this manager's own bootstrap is answerable for belonging to the account
+ *  this manager reaches the machine as.
  *
- *  WHY THE MANAGER DOES THIS AND NOT A PROGRAM. deploy-host names a `hand_directory_to_account` row
- *  for exactly these two directories, and that row is what keeps them right afterwards. It cannot be
- *  what makes them right the first time: the manager drives every program through `ansiwise-rest`,
- *  which runs as the operator, and the FIRST thing a run does is write its own record — so a machine
- *  whose run root belongs to root accepts the run, forks it, and the child dies before its first
- *  step. The program that would repair it is the program that cannot start. Measured on apps4:
- *  "machine run … was accepted but never wrote its record — it started and died before its first
- *  step".
+ *  THE RULE IS NOT HERE, and that is the point: defs/machine-state.ts states in one sentence which
+ *  account owns what this platform leaves on a machine, and [MANAGER_HANDS_OVER] is the slice of it
+ *  this step has to make right. A place added there is handed over by this loop without this
+ *  function being touched, which is what keeps the rule from becoming a list somebody has to copy.
+ *
+ *  WHY THE MANAGER DOES THIS AND NOT A PROGRAM. A program's `hand_directory_to_account` row names
+ *  exactly these directories and is what keeps them right afterwards. It cannot be what makes them
+ *  right the first time: the manager drives every program through `ansiwise-rest`, which runs as the
+ *  operator, and the FIRST thing a run does is write its own record — so a machine whose run root
+ *  belongs to root accepts the run, forks it, and the child dies before its first step. The program
+ *  that would repair it is the program that cannot start. Measured on apps4: "machine run … was
+ *  accepted but never wrote its record — it started and died before its first step".
  *
  *  So this is the bootstrap half, and it belongs beside the placement for the same reason the
  *  placement does: both are what make a machine able to be SPOKEN to at all, and neither is
@@ -189,23 +166,26 @@ export async function handRunRoot(
   req: { account: string; elevationPassword: string },
 ): Promise<{ handed: boolean }> {
   assertWord(req.account, "account a machine's engine state is handed to");
-  const paths = [ANSIWISE_STATE_ROOT, ANSIWISE_RUN_ROOT];
+  const paths = MANAGER_HANDS_OVER.map((e) => e.path);
+  const named = paths.join(" and ");
   const owners = await machine.run(["stat", "-c", "%U", ...paths], { timeoutMs: COMMAND_TIMEOUT_MS });
   const read = owners.stdout.split(NEWLINE).map((l) => l.trim()).filter((l) => l.length > 0);
   if (read.length === paths.length && read.every((owner) => owner === req.account)) {
-    machine.log(`${machine.name}: ${ANSIWISE_STATE_ROOT} and ${ANSIWISE_RUN_ROOT} already belong to ${req.account} — nothing to hand over`);
+    machine.log(`${machine.name}: ${named} already belong to ${req.account} — nothing to hand over`);
     return { handed: false };
   }
   const stdin = Buffer.from(req.elevationPassword + NEWLINE, "utf8");
-  // THREE COMMANDS AND NOT ONE, because each `sudo -S` reads the password itself and a value that
-  // would have to be quoted is refused by this module rather than escaped — so there is no one shell
-  // to put them in. `install -d` makes what is missing; the two `chown`s correct what was already
-  // standing, which on every machine this platform has installed is both of them.
-  for (const argv of [
-    ["sudo", "-S", "install", "-d", "-m", "755", "-o", req.account, "-g", req.account, ANSIWISE_RUN_ROOT],
-    ["sudo", "-S", "chown", `${req.account}:${req.account}`, ANSIWISE_STATE_ROOT],
-    ["sudo", "-S", "chown", `${req.account}:${req.account}`, ANSIWISE_RUN_ROOT],
-  ]) {
+  // TWO COMMANDS PER PLACE AND NOT ONE COMPOSED LINE, because each `sudo -S` reads the password
+  // itself and a value that would have to be quoted is refused by this module rather than escaped —
+  // so there is no one shell to put them in. `install -d` makes what is missing; the `chown` corrects
+  // what was already standing, which on every machine this platform has installed is all of them.
+  // The registry's order is what makes this safe to run straight through: a parent stands before the
+  // directory inside it, so nothing is created under a parent that has not been corrected yet.
+  const argvs = MANAGER_HANDS_OVER.flatMap((e) => [
+    ["sudo", "-S", "install", "-d", "-m", "755", "-o", req.account, "-g", req.account, e.path],
+    ["sudo", "-S", "chown", `${req.account}:${req.account}`, e.path],
+  ]);
+  for (const argv of argvs) {
     const done = await machine.run(argv, { timeoutMs: COMMAND_TIMEOUT_MS, stdin });
     if (done.code !== 0) {
       throw errValidation(
@@ -216,7 +196,7 @@ export async function handRunRoot(
       );
     }
   }
-  machine.log(`${machine.name}: ${ANSIWISE_STATE_ROOT} and ${ANSIWISE_RUN_ROOT} now belong to ${req.account}`);
+  machine.log(`${machine.name}: ${named} now belong to ${req.account}`);
   return { handed: true };
 }
 
@@ -225,11 +205,6 @@ export async function handRunRoot(
  *  serviceUnitName). Named here only to ASK the machine about it and to restart it; what stands
  *  INSIDE the unit is install-service's alone. */
 export const ANSIWISE_SERVICE_UNIT = "ansiwise.service";
-
-/** The file the resident service reads its token out of, and the file install-service writes it to.
- *  The machine's own: digita-deploy `ansiwise/programs/deploy-platform-services.yaml`'s `file_from_vault` row
- *  writes this path out of the entry it mints at `<stage>/manager-host/ansiwise`. */
-export const SERVICE_TOKEN_FILE = "/etc/ansiwise/service-token";
 
 /** The port the resident surface stands on, on the machine's tailnet address. An installation-wide
  *  constant and not a per-machine value: the manager dials `<tailnet address>:<this>` and the unit
