@@ -1,9 +1,8 @@
 import { eq } from "drizzle-orm";
 import type { Step, StepCtx } from "../../../executor/types.ts";
-import type { SshSession } from "../../../adapters/ssh/port.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { errValidation } from "../../../kernel/errors.ts";
-import { remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
+import { execCapture, remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
 import { ClusterPlaneV0, SlaveKubeAccess } from "../../../../shared/plane.ts";
 import {
   APP_SYNC_POLL_MS, loadServer, loadMaster, masterFqdnOf, requireSlaveCluster,
@@ -13,6 +12,7 @@ import {
   argoAppsCmd, externalSecretsCmd, forceSyncExternalSecretsCmd,
   slaveDiagScript, SECRET_STORES_CMD, CERTS_CMD, promCheckScript, parsePipeRows,
 } from "./deploy-slave.remote.ts";
+import { requireElevationPassword } from "./ansiwise-run.kit.ts";
 
 // deploy-slave steps 6-7 (the last two steps): the
 // management-plane health gate and the terminal registration. Split out of deploy-slave.ts
@@ -48,22 +48,6 @@ export const VERIFY_SLAVE_TIMEOUT_MS = 30 * 60_000;
  *  readable in the run log. */
 export const VERIFY_DIAG_EVERY_MS = 60_000;
 export const ES_KICK_EVERY_MS = 2 * 60_000;
-
-/** One captured exec leg for the verify polls: streams to the run log (like the step-5
- *  wait) and returns the full stdout for parsing. */
-async function execCapture(ctx: StepCtx, session: SshSession, command: string, timeoutMs: number): Promise<{ code: number; out: string }> {
-  const lines: string[] = [];
-  const r = await session.exec(command, {
-    signal: ctx.signal,
-    timeoutMs,
-    onStdout: (l) => {
-      lines.push(l);
-      ctx.log("stdout", l);
-    },
-    onStderr: (l) => ctx.log("stderr", l),
-  });
-  return { code: r.code, out: lines.join("\n") };
-}
 
 /** Bounded, abortable convergence loop (step 6's retry window): the probe reports ok
  *  or a human-readable detail; an expired deadline turns the last detail into a HARD fail.
@@ -130,6 +114,7 @@ export function verifySlaveStep(target: SlaveTarget): Step {
       localTx(ctx, (tx) => tx.update(clusters).set({ planeState: "verifying" }).where(eq(clusters.id, cluster.id)).run());
       const mSession = await ctx.ssh(master.id);
       const slave = await ctx.ssh(); // the slave (the run's ownsHost target)
+      const elevation = requireElevationPassword(ctx); // what the Application read below is raised with
       const deadline = Date.now() + VERIFY_SLAVE_TIMEOUT_MS; // ONE window for all HARD gates
 
       // The shared master-side diagnostic bundle (rate-limited by pollUntil): conditions,
@@ -152,7 +137,7 @@ export function verifySlaveStep(target: SlaveTarget): Step {
       let extSecrets = 0;
       let lastKickAt = 0;
       await pollUntil(ctx, `${name} ExternalSecrets Ready (repo + cluster credentials)`, deadline, async () => {
-        const { code, out } = await execCapture(ctx, mSession, externalSecretsCmd(name), 30_000);
+        const { code, out } = await execCapture(ctx, mSession, externalSecretsCmd(name), { timeoutMs: 30_000 });
         if (code !== 0) return { ok: false, detail: `kubectl exit ${code} (ns ${name} not answering yet?)` };
         const rows = parsePipeRows(out);
         if (rows.length === 0) return { ok: false, detail: `no ExternalSecrets in ns ${name} yet (the ${name}-apps sync may still be applying)` };
@@ -162,7 +147,7 @@ export function verifySlaveStep(target: SlaveTarget): Step {
         if (Date.now() - lastKickAt >= ES_KICK_EVERY_MS) {
           lastKickAt = Date.now();
           ctx.log("meta", `force-sync annotating the ${name} ExternalSecrets (breaks a possible ESO error backoff)`);
-          await execCapture(ctx, mSession, forceSyncExternalSecretsCmd(name), 30_000);
+          await execCapture(ctx, mSession, forceSyncExternalSecretsCmd(name), { timeoutMs: 30_000 });
         }
         return { ok: false, detail: `${extSecrets - notReady.length}/${extSecrets} Ready — pending: ${notReady.slice(0, 5).map((r) => `${cell(r[0])} (${cell(r[2])})`).join(", ")}` };
       }, diagnose);
@@ -171,10 +156,12 @@ export function verifySlaveStep(target: SlaveTarget): Step {
       // ---- HARD 1: every Application in ns <name> is Synced AND Healthy. THE plane gate: the
       // slave-ArgoCD is up (ns <name>), reached the slave (the "<name>" cluster secret works),
       // and every app on the slave branch converged. Zero Applications = still generating ⇒ retry.
+      // The read is raised with the run's own elevation password — the same reading `argocd-follow`
+      // takes, over the same builder, so neither of them may stand on a rule an adoption wrote.
       let apps = 0;
       await pollUntil(ctx, `${name} applications Synced+Healthy`, deadline, async () => {
-        const { code, out } = await execCapture(ctx, mSession, argoAppsCmd(name), 30_000);
-        if (code !== 0) return { ok: false, detail: `kubectl exit ${code} (ns ${name} not answering yet?)` };
+        const { code, out } = await execCapture(ctx, mSession, argoAppsCmd(name), { timeoutMs: 30_000, elevation });
+        if (code !== 0) return { ok: false, detail: `kubectl exit ${code} reading ns ${name} — the run log above carries what it said` };
         const rows = parsePipeRows(out);
         if (rows.length === 0) return { ok: false, detail: `no Applications in ns ${name} yet (appset still generating)` };
         apps = rows.length;
@@ -189,7 +176,7 @@ export function verifySlaveStep(target: SlaveTarget): Step {
       // end to end, directly on the slave (reachable: the run owns the slave session).
       let stores = 0;
       await pollUntil(ctx, "slave ESO SecretStores Ready", deadline, async () => {
-        const { code, out } = await execCapture(ctx, slave, SECRET_STORES_CMD, 30_000);
+        const { code, out } = await execCapture(ctx, slave, SECRET_STORES_CMD, { timeoutMs: 30_000 });
         if (code !== 0) return { ok: false, detail: `kubectl exit ${code} on the slave` };
         const rows = parsePipeRows(out);
         if (rows.length === 0) return { ok: false, detail: "no SecretStores on the slave yet (external-secrets still rolling out)" };
@@ -211,7 +198,7 @@ export function verifySlaveStep(target: SlaveTarget): Step {
             : "soft: could not query the master's Prometheus — metrics check skipped (verify via Grafana)");
 
       // ---- SOFT 2: slave ingress certs issued (LE order/DNS can lag; a pending cert is a note).
-      const certCap = await execCapture(ctx, slave, CERTS_CMD, 30_000);
+      const certCap = await execCapture(ctx, slave, CERTS_CMD, { timeoutMs: 30_000 });
       const certRows = certCap.code === 0 ? parsePipeRows(certCap.out) : [];
       const certsReady = certRows.filter((r) => r[1] === "True").length;
       ctx.log("meta",

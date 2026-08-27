@@ -2,11 +2,11 @@ import { describe, it, expect, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { servers } from "../../db/schema/inventory.ts";
 import {
-  makeHarness, disposeHarnesses, scriptedHosts, hostsFactory, SLAVE_ID, ANSIWISE_PIN,
+  makeHarness, disposeHarnesses, scriptedHosts, hostsFactory, ELEVATION_PASSWORD, SLAVE_ID, ANSIWISE_PIN,
   type HostsScript,
 } from "./deploy-slave.fixture.ts";
 import { assetBytes, SCRIPTED_HOME } from "./deploy-slave.placement.fixture.ts";
-import { ELEVATION, ports, placeCtx, target, commands, transferred } from "./place-ansiwise.fixture.ts";
+import { ports, placeCtx, target, commands, transferred } from "./place-ansiwise.fixture.ts";
 import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./defs/place-ansiwise.step.ts";
 import {
   installServiceArgv, assertWord,
@@ -130,9 +130,9 @@ describe("enable-ansiwise-service", () => {
     // anywhere but on that command's standard input.
     const envelope = JSON.parse(installing[0]?.stdin?.toString("utf8") ?? "{}") as { answers: { service_token: string }; elevation_password: string };
     expect(envelope.answers.service_token).toBe(hosts.serviceToken);
-    expect(envelope.elevation_password).toBe(ELEVATION);
-    for (const act of hosts.log) expect(act.command).not.toContain(ELEVATION);
-    for (const f of hosts.files) expect(f.content).not.toContain(ELEVATION);
+    expect(envelope.elevation_password).toBe(ELEVATION_PASSWORD);
+    for (const act of hosts.log) expect(act.command).not.toContain(ELEVATION_PASSWORD);
+    for (const f of hosts.files) expect(f.content).not.toContain(ELEVATION_PASSWORD);
     // No shell reaches the machine here either: every command is words, and nothing is uploaded and
     // run. The composed script used to `cd`, pipe a `printf` into the installer and `sed`-escape the
     // password into JSON — three shell constructs in one act.

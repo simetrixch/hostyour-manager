@@ -159,11 +159,18 @@ export const MgmtCredsBlob = z.object({
 
 // ============================== the verify-slave remote surface ============================
 
-/** Every Application in the slave's ArgoCD namespace generated, one `name|sync|health` row
- *  per line (step 6 HARD gate 1). Runs on the MASTER — the slave-ArgoCD Application CRs live
- *  in namespace <name> there. */
+/** Every Application ArgoCD drives for a cluster, one `name|sync|health` row per line — the
+ *  `argocd-follow` step's whole reading, and verify-slave's HARD gate 1. WHERE it runs is the
+ *  caller's: a cluster carrying the master part operates its own ArgoCD in namespace `argocd` on
+ *  itself, while a pure slave's Application CRs live in namespace <name> on the master.
+ *
+ *  IT CARRIES NO `sudo` OF ITS OWN, and neither does anything else in this module that has to run as
+ *  root. `microk8s kubectl` reaches the cluster's API as root, and the caller raises it with the
+ *  elevation password the run already asked for at approve (executor/stepkit.ts `raised`). The other
+ *  route — `sudo -n`, answered by a standing sudoers rule the adoption writes — is a route only an
+ *  ADOPTED machine has, and a first master is installed by ansiwise-client and never adopted. */
 export function argoAppsCmd(name: string): string {
-  return `sudo -n microk8s kubectl -n ${name} get applications.argoproj.io -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.sync.status}{"|"}{.status.health.status}{"\\n"}{end}'`;
+  return `microk8s kubectl -n ${name} get applications.argoproj.io -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.sync.status}{"|"}{.status.health.status}{"\\n"}{end}'`;
 }
 
 /** Every ExternalSecret in the slave's ArgoCD namespace ON THE MASTER, one

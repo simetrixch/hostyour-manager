@@ -13,7 +13,7 @@ import { openChannel, programYaml, runRoot, type ServeFixture } from "../../adap
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
-import { makeHarness, scriptedHosts, logger, MASTER_ID, SLAVE_ID, type Harness } from "./deploy-slave.fixture.ts";
+import { makeHarness, scriptedHosts, logger, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID, type Harness } from "./deploy-slave.fixture.ts";
 import type { DbHandle } from "../../db/client.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -30,12 +30,12 @@ let stamp = 0;
 export const uniqueEmail = (): string => `op-${Date.now()}-${++stamp}@example.com`;
 
 export const approveSecrets = (email: string): Record<string, Buffer> => ({
-  [ANSIWISE_ELEVATION_SECRET]: Buffer.from("root-pw"),
+  [ANSIWISE_ELEVATION_SECRET]: Buffer.from(ELEVATION_PASSWORD),
   "activation-input:letsencrypt_email": Buffer.from(email),
   "activation-input:letsencrypt_server": Buffer.from(ACME_STAGING),
 });
 
-export const elevationOnly = (): Record<string, Buffer> => ({ [ANSIWISE_ELEVATION_SECRET]: Buffer.from("root-pw") });
+export const elevationOnly = (): Record<string, Buffer> => ({ [ANSIWISE_ELEVATION_SECRET]: Buffer.from(ELEVATION_PASSWORD) });
 
 /** What deploy-slave's approve carries: the elevation password, the machine-layer inputs, and the
  *  branch cut's committer identity. */
@@ -234,9 +234,18 @@ function seedChannelTable(h: Harness): void {
 }
 
 /** A harness whose master carries an ACTIVE cluster — the state redeploy and release act on.
- *  The channel table rides along because a release's attest checks the ceiling against it. */
+ *  The channel table rides along because a release's attest checks the ceiling against it.
+ *
+ *  THE MASTER HERE WAS NEVER ADOPTED, and that is the point rather than a convenience: a first
+ *  master is installed by ansiwise-client, which writes no sudoers drop-in, so the machine refuses
+ *  every `sudo -n` this manager might send it. Every master-arm journey in these suites therefore
+ *  runs against a machine on which the only way to root is the elevation password the run itself
+ *  carries — a step that reached for a standing rule instead is refused here the way it was refused
+ *  on a real first master. The SLAVE worlds below keep the adopted machine, which is what a slave
+ *  is: the one root command left on that route is the destructive microk8s reset, and a cleanup
+ *  runs on an abort that may already have discarded the password. */
 export async function liveMaster(serve: ServeFixture): Promise<Harness> {
-  const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
+  const hosts = scriptedHosts({ adopted: false, openConversation: async () => openChannel(serve) });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   seedChannelTable(h);
   h.db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, MASTER_ID)).run();

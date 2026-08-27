@@ -16,7 +16,7 @@ import { readServerTailnet } from "../../../shared/tailnet.ts";
 import { SLAVE_MACHINE_INPUTS } from "./defs/deploy-slave.ts";
 import {
   STEP_NAMES, REDEPLOY_STEP_NAMES, PARAMS, EMIT_ARGOCD_TOKEN, EMIT_REVIEWER_TOKEN, EMIT_CREDS_JSON,
-  disposeHarnesses, MASTER_ID, SLAVE_ID, MINT_AUTHKEY, ANSIWISE_PIN,
+  disposeHarnesses, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID, MINT_AUTHKEY, ANSIWISE_PIN,
 } from "./deploy-slave.fixture.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import { ANSIWISE_SERVICE_PORT } from "./defs/place-ansiwise.ts";
@@ -189,6 +189,31 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // machine layer.
     expect(h.platformRepo.commits).toHaveLength(0);
     expect(h.platformRepo.tags.size).toBe(0);
+  });
+
+  it("reads the master's cluster with the password the RUN carries — on a machine that grants no passwordless route at all", { timeout: 180_000 }, async () => {
+    // THE MACHINE THIS RUNS ON: /etc/sudoers.d/ holds nothing. That is what ansiwise-client leaves
+    // behind, so it is what a FIRST MASTER is — measured on one on 2026-08-27, a README and no
+    // rule — and the scripted host refuses every `sudo -n` on it exactly as that machine does.
+    // `argocd-follow` used to reach the cluster that way and was refused there while all five steps
+    // before it had gone green, with "sudo: interactive authentication is required" printed under a
+    // line telling the operator the cluster was not answering yet.
+    const h = await liveMaster(serve);
+    expect(h.hosts.adopted).toBe(false);
+
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(uniqueEmail()));
+    // The step's own error FIRST, because it names what the machine turned away — a bare status
+    // assertion would go red saying only that something did.
+    expect(stepColumn(h.db, runId, "argocd-follow", "error") ?? "").toBe("");
+    expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
+
+    // AND THE CLUSTER WAS REALLY READ, over the master's own session: a run that never reached the
+    // follow would pass both assertions above by doing nothing. The password rode on standard input
+    // and nowhere else — an argument list is readable by every process listing on the machine.
+    const reads = h.hosts.log.filter((l) => l.host === "m1.example.com" && l.command.includes("get applications.argoproj.io"));
+    expect(reads).not.toEqual([]);
+    expect(reads.filter((l) => l.stdin === undefined).map((l) => l.command)).toEqual([]);
+    expect(reads.some((l) => l.command.includes(ELEVATION_PASSWORD))).toBe(false);
   });
 
   it("PLANTED DEFECT (redeploy): a dry the machine judges red FAILS the step before anything is acted on — no run-mode machine run starts", { timeout: 60_000 }, async () => {

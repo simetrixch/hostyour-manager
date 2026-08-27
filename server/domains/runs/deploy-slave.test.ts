@@ -17,7 +17,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import type { AnyRunDefinition, Step, StepCtx, Cleanup } from "../../executor/types.ts";
 import {
   SLAVE_ID, MASTER_ID, PARAMS, STEP_NAMES, HEALTHY_SLAVE_PREFLIGHT, MASTER_MARKING_YAML,
-  scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx, bareStepCtx,
+  ELEVATION_PASSWORD, scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx, bareStepCtx,
   drainToVerifyDeadline, drainToNextTimer,
   type Harness,
 } from "./deploy-slave.fixture.ts";
@@ -34,7 +34,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   afterEach(disposeHarnesses);
 
   /** The one secret every approve needs now: the programs raise their commands to root with it. */
-  const elevationOnly = (): Record<string, Buffer> => ({ [ANSIWISE_ELEVATION_SECRET]: Buffer.from("root-pw") });
+  const elevationOnly = (): Record<string, Buffer> => ({ [ANSIWISE_ELEVATION_SECRET]: Buffer.from(ELEVATION_PASSWORD) });
 
   /** One step out of the def's own list, for driving it directly. */
   function stepOf(h: Harness, name: string): Step {

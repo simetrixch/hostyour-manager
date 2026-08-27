@@ -3,13 +3,40 @@
 // line-buffered stdout/stderr to ctx.log (the one run-output path) and thread ctx.signal
 // (no unabortable execs). Operates on any SshSession — the cached ctx.ssh() (key) or the
 // adopt ceremony's ctx.openPasswordSession() (password).
+//
+// A step that needs ROOT says so with `elevation` and hands over the password it holds; every
+// helper below then raises what it sends (see `raised`). Nothing here reaches root by assuming the
+// machine already grants something.
 import type { StepCtx } from "./types.ts";
 import type { SshSession, ExecResult } from "../adapters/ssh/port.ts";
 import type { Db } from "../db/client.ts";
 
-export interface RemoteOpts {
-  timeoutMs?: number;
-  stdin?: Buffer; // e.g. a sudo -S password — never logged (redactor covers echoes)
+/** What a remote helper takes beyond the command itself.
+ *
+ *  `stdin` AND `elevation` ARE THE SAME CHANNEL, so the type takes one or the other and never both:
+ *  a password reaches a command on its standard input and nowhere else, because an argument list is
+ *  readable by every process listing on the machine. A call that set both would silently lose
+ *  whichever the helper wrote second. */
+export type RemoteOpts = { timeoutMs?: number } & (
+  | { stdin?: Buffer; elevation?: undefined } // stdin the command itself reads — never logged (redactor covers echoes)
+  | { stdin?: undefined; elevation: string } // the password this command is raised to root with
+);
+
+/** Raise one command to root with a password the CALLER holds, instead of with a standing rule on
+ *  the machine. `-S` makes sudo read the password from standard input, `-p ''` keeps its prompt out
+ *  of the run log, and sudo consumes exactly one line and hands the rest of the input to the
+ *  command.
+ *
+ *  ONE `sudo -S` PER THING SENT, which is why an elevated SCRIPT is raised whole rather than line by
+ *  line: the first `sudo -S` inside it takes the password, and every later one reads an input that
+ *  is already at end of file and prompts a terminal that is not there.
+ *
+ *  The other form, `sudo -n`, answers only where the machine already carries a sudoers rule granting
+ *  that exact command without a password. A machine that carries no such rule refuses it with
+ *  "interactive authentication is required", which is a closed door and reads like a broken
+ *  service. */
+function raised(command: string, opts?: RemoteOpts): string {
+  return opts?.elevation === undefined ? command : `sudo -S -p '' ${command}`;
 }
 
 function execOpts(ctx: StepCtx, opts?: RemoteOpts): {
@@ -19,25 +46,47 @@ function execOpts(ctx: StepCtx, opts?: RemoteOpts): {
   timeoutMs?: number;
   stdin?: Buffer;
 } {
+  const stdin = opts?.elevation !== undefined ? Buffer.from(`${opts.elevation}\n`, "utf8") : opts?.stdin;
   return {
     signal: ctx.signal,
     onStdout: (line: string) => ctx.log("stdout", line),
     onStderr: (line: string) => ctx.log("stderr", line),
     ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
-    ...(opts?.stdin !== undefined ? { stdin: opts.stdin } : {}),
+    ...(stdin !== undefined ? { stdin } : {}),
   };
 }
 
 /** Run a command, stream it to the log, and THROW ExecFailed on a non-zero exit (mustExec).
  *  Use when a non-zero exit is a step failure. */
 export function remoteCmd(ctx: StepCtx, session: SshSession, command: string, opts?: RemoteOpts): Promise<ExecResult> {
-  return session.mustExec(command, execOpts(ctx, opts));
+  return session.mustExec(raised(command, opts), execOpts(ctx, opts));
 }
 
 /** Run a command, stream it to the log, and RETURN the result without throwing on non-zero —
  *  the caller inspects `.code` and controls its own pass/fail wording (exec, not mustExec). */
 export function remoteExec(ctx: StepCtx, session: SshSession, command: string, opts?: RemoteOpts): Promise<ExecResult> {
-  return session.exec(command, execOpts(ctx, opts));
+  return session.exec(raised(command, opts), execOpts(ctx, opts));
+}
+
+/** Run a command, stream it to the log like the two above, and return the FULL collected stdout —
+ *  for the steps that PARSE what a machine answered. `ExecResult.stdoutTail` is capped, so a caller
+ *  that reads rows out of an answer cannot use it and would otherwise collect the lines itself; it
+ *  stands here once because three convergence loops were each collecting them their own way. */
+export async function execCapture(
+  ctx: StepCtx,
+  session: SshSession,
+  command: string,
+  opts?: RemoteOpts,
+): Promise<{ code: number; out: string }> {
+  const lines: string[] = [];
+  const r = await session.exec(raised(command, opts), {
+    ...execOpts(ctx, opts),
+    onStdout: (line: string) => {
+      lines.push(line);
+      ctx.log("stdout", line);
+    },
+  });
+  return { code: r.code, out: lines.join("\n") };
 }
 
 /** Upload a script to /tmp (0700), run it via `bash`, stream it, then best-effort remove it.
@@ -53,7 +102,7 @@ export async function remoteScript(
   const path = `/tmp/dc-${name}-${ctx.runId}.sh`;
   await session.putFile(path, Buffer.from(script, "utf8"), 0o700, { signal: ctx.signal });
   try {
-    return await session.exec(`bash ${path}`, execOpts(ctx, opts));
+    return await session.exec(raised(`bash ${path}`, opts), execOpts(ctx, opts));
   } finally {
     try {
       await session.exec(`rm -f ${path}`, { signal: ctx.signal });
@@ -77,15 +126,12 @@ export async function remoteScriptCapture(
   await session.putFile(path, Buffer.from(script, "utf8"), 0o700, { signal: ctx.signal });
   const out: string[] = [];
   try {
-    const result = await session.exec(`bash ${path}`, {
-      signal: ctx.signal,
+    const result = await session.exec(raised(`bash ${path}`, opts), {
+      ...execOpts(ctx, opts),
       onStdout: (line: string) => {
         out.push(line);
         ctx.log("stdout", line);
       },
-      onStderr: (line: string) => ctx.log("stderr", line),
-      ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
-      ...(opts?.stdin !== undefined ? { stdin: opts.stdin } : {}),
     });
     return { result, stdout: out.join("\n") };
   } finally {

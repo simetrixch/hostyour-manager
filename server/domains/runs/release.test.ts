@@ -11,7 +11,7 @@ import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
 import { getRun } from "../../executor/read.ts";
 import {
-  makeHarness, disposeHarnesses, bareStepCtx, PARAMS, SLAVE_ID, MASTER_ID,
+  makeHarness, disposeHarnesses, bareStepCtx, ELEVATION_PASSWORD, PARAMS, SLAVE_ID, MASTER_ID,
   SLAVE_MARKING_YAML, MASTER_MARKING_YAML, REDEPLOY_STEP_NAMES,
 } from "./deploy-slave.fixture.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
@@ -187,7 +187,7 @@ describe("release — set-pin and the map-sourced answers", () => {
     const h = await liveMaster();
     const r = await h.executor.plan("cluster-release", { serverId: MASTER_ID, version: "1.0.0", channel: "alpha" });
     await h.executor.approve(r.runId, {
-      [ANSIWISE_ELEVATION_SECRET]: Buffer.from("root-pw"),
+      [ANSIWISE_ELEVATION_SECRET]: Buffer.from(ELEVATION_PASSWORD),
       ...Object.fromEntries(BUILD_PLANE_PATS.map((name) => [name, Buffer.from("github_pat_x")])),
     });
     await h.executor.settle(r.runId);
@@ -208,7 +208,7 @@ describe("release — set-pin and the map-sourced answers", () => {
     expect(r.plan.steps.map((s) => s.name).indexOf("require-programs"))
       .toBeLessThan(r.plan.steps.map((s) => s.name).indexOf("set-pin"));
     await h.executor.approve(r.runId, {
-      [ANSIWISE_ELEVATION_SECRET]: Buffer.from("root-pw"),
+      [ANSIWISE_ELEVATION_SECRET]: Buffer.from(ELEVATION_PASSWORD),
       ...Object.fromEntries(BUILD_PLANE_PATS.map((name) => [name, Buffer.from("github_pat_x")])),
     });
     await h.executor.settle(r.runId);

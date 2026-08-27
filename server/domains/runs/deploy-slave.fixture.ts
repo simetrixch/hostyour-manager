@@ -21,6 +21,7 @@ import type { SshFactory, SshSession, SshTarget, ExecOptions, ExecResult } from 
 import { answerPlacementCommand, ScriptedReleases } from "./deploy-slave.placement.fixture.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { VERIFY_SLAVE_TIMEOUT_MS } from "./defs/deploy-slave.verify.ts";
+import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 
 // The deploy-slave test fixture (shared by deploy-slave.test.ts — plan/guards/failure modes —
 // and redeploy.ansiwise.test.ts — the journeys over the REAL `ansiwise-rest serve`): a scripted
@@ -116,6 +117,15 @@ export const HEALTHY_SLAVE_PREFLIGHT = [
 // its FQDN — which lets the tests assert multi-target routing end to end. Every remote exec leg
 // of the steps has a scripted answer; the PROGRAM conversations go through openConversation.
 export interface HostsScript {
+  /** WHETHER THIS MACHINE CARRIES THE SUDOERS DROP-IN AN ADOPTION WRITES, which is the whole of what
+   *  a `sudo -n` this manager sends stands on. `false` is a machine that was never adopted — a FIRST
+   *  MASTER put there by ansiwise-client, whose /etc/sudoers.d/ holds nothing (measured on one on
+   *  2026-08-27: a README and no rule) — and it answers every `sudo -n` the way that machine does,
+   *  refusing it. A `sudo -S` is answered on either machine, and only when the elevation password
+   *  really rode on standard input: what authenticates the account is the password the RUN carries,
+   *  and a step that composed the elevation and then did not hand the password through would
+   *  otherwise be green here and refused on a real host. */
+  adopted: boolean;
   machineId: string;
   dnsOut: string;
   preflightOut: string;
@@ -187,8 +197,16 @@ export interface HostsScript {
   files: { host: string; path: string; content: string; mode: number }[];
 }
 
+/** The elevation password every approve in these suites carries, and the ONE the scripted machine
+ *  answers a `sudo -S` for. Written down once because two values would let a call site hand the
+ *  wrong buffer through and still be answered; deliberately unmistakable because the suites also
+ *  assert it appears in no command line and in no file the machine was written, and a value that
+ *  could occur by accident would make those assertions weaker than they read. */
+export const ELEVATION_PASSWORD = "elevation-password-SECRET-0007";
+
 export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript {
   return {
+    adopted: true,
     machineId: "abc123def4567890abc123def4567890",
     dnsOut: "DNS_WILDCARD 198.51.100.10",
     preflightOut: HEALTHY_SLAVE_PREFLIGHT,
@@ -243,6 +261,15 @@ export function hostsFactory(f: HostsScript): SshFactory {
         for (const l of s.split("\n")) o.onStdout?.(l);
       };
       const done = (code = 0): ExecResult => ({ code, stdoutTail: "", stderrTail: "" });
+      // HOW THIS MACHINE ANSWERS A ROOT COMMAND — asked before anything is matched on, because it is
+      // the machine's answer and not the manager's intention. See HostsScript.adopted.
+      if (command.startsWith("sudo -S ")) {
+        if (o.stdin?.toString("utf8") !== `${ELEVATION_PASSWORD}\n`) {
+          throw new Error(`sudo -S shipped without the run's elevation password on stdin: ${command}`);
+        }
+      } else if (command.startsWith("sudo -n ") && !f.adopted) {
+        return { code: 1, stdoutTail: "", stderrTail: "sudo: interactive authentication is required" };
+      }
       if (command === "cat /etc/machine-id") { emit(f.machineId); return done(); }
       if (command.includes("dc-dns-probe-")) { emit(f.dnsOut); return done(); }
       if (command.includes("dc-slave-preflight-")) { emit(f.preflightOut); return done(); }
@@ -463,7 +490,13 @@ export function bareStepCtx(db: DbHandle, store: CredentialStore): StepCtx {
     db: db.db,
     creds: store,
     params: { ...PARAMS, tier: "rehearsal" },
-    secrets: { get: () => undefined, wipe: () => undefined },
+    // The one secret every cluster run kind carries from approve through to its last step: the
+    // password its steps raise a root command with. A context answering nothing here would make
+    // every such step refuse before it ran, and the refusal would be about the fixture.
+    secrets: {
+      get: (name) => (name === ANSIWISE_ELEVATION_SECRET ? Buffer.from(ELEVATION_PASSWORD, "utf8") : undefined),
+      wipe: () => undefined,
+    },
     signal: new AbortController().signal,
     logger,
     ssh: () => Promise.reject(new Error("no ssh in bareStepCtx")),

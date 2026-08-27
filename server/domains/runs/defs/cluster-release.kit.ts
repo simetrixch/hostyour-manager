@@ -4,7 +4,7 @@ import type { Db } from "../../../db/client.ts";
 import type { SshSession } from "../../../adapters/ssh/port.ts";
 import { clusters, servers } from "../../../db/schema/inventory.ts";
 import { errValidation } from "../../../kernel/errors.ts";
-import { remoteScriptCapture } from "../../../executor/stepkit.ts";
+import { execCapture, remoteScriptCapture } from "../../../executor/stepkit.ts";
 import { attestMachineId } from "../../../executor/attest.ts";
 import { ATTEST_TARGET_STEP } from "../../../executor/guards.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
@@ -12,6 +12,7 @@ import { clusterShortName } from "../../inventory/cluster-marking.ts";
 import { argoAppsCmd, parsePipeRows, refreshPlatformCheckoutScript, masterRegenerationCheckoutsScript } from "./deploy-slave.remote.ts";
 import { PLATFORM_CHECKOUT } from "./place-ansiwise.ts";
 import { loadServer, loadMaster, masterFqdnOf, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { requireElevationPassword } from "./ansiwise-run.kit.ts";
 
 // The building blocks the two run kinds that rebuild or raise a live cluster share:
 //
@@ -152,34 +153,37 @@ export function prepareRegenerationStep(target: SlaveTarget): Step {
  *  of a cluster tracks that cluster's install branch, and the branch is the state the release
  *  regenerated from the tag — so "Synced" says the cluster runs the pinned revision, and there is
  *  nothing left for the run to claim on its own. Bounded and abortable; zero Applications means the
- *  appset has not generated yet and is retried, never read as "nothing to wait for". */
+ *  appset has not generated yet and is retried, never read as "nothing to wait for".
+ *
+ *  IT REACHES THE CLUSTER THE SAME WAY ITS FIVE NEIGHBOURS DO: with the elevation password the run
+ *  asked for at approve, which is what the three program steps raise every one of their commands
+ *  with. It used to ask for `sudo -n`, and that is a rule only the adoption puts on a machine — so
+ *  on a master installed by ansiwise-client, which is never adopted, the last step of a redeploy was
+ *  refused while every step before it had gone green. Measured on a first master on 2026-08-27:
+ *  /etc/sudoers.d/ held only a README, and the run said "sudo: interactive authentication is
+ *  required" under a line telling the operator the cluster was not answering yet. */
 export function argocdFollowStep(target: SlaveTarget): Step {
   return {
     name: "argocd-follow",
     title: "Follow ArgoCD until the cluster's applications are Synced and Healthy",
     run: async (ctx) => {
       const { session, namespace, where } = await argoSurface(ctx, target);
+      const elevation = requireElevationPassword(ctx);
       const deadline = Date.now() + ARGOCD_FOLLOW_TIMEOUT_MS;
       for (;;) {
-        const lines: string[] = [];
-        const r = await session.exec(argoAppsCmd(namespace), {
-          signal: ctx.signal,
-          timeoutMs: 60_000,
-          onStdout: (l) => {
-            lines.push(l);
-            ctx.log("stdout", l);
-          },
-          onStderr: (l) => ctx.log("stderr", l),
-        });
-        const rows = r.code === 0 ? parsePipeRows(lines.join("\n")) : [];
+        const read = await execCapture(ctx, session, argoAppsCmd(namespace), { timeoutMs: 60_000, elevation });
+        const rows = read.code === 0 ? parsePipeRows(read.out) : [];
         const pending = rows.filter((row) => row[1] !== "Synced" || row[2] !== "Healthy");
-        if (r.code === 0 && rows.length > 0 && pending.length === 0) {
+        if (read.code === 0 && rows.length > 0 && pending.length === 0) {
           ctx.checkpoint({ namespace, applications: rows.length });
           ctx.log("meta", `all ${rows.length} applications in ${where} are Synced + Healthy — the cluster runs the pinned state`);
           return;
         }
-        const detail = r.code !== 0
-          ? `kubectl exit ${r.code} (${where} not answering yet?)`
+        // A non-zero exit names the command and points at the log, and guesses at no cause: the
+        // reading that guessed "not answering yet?" was printed under a REFUSED elevation for as
+        // long as this step used `sudo -n`, and it sent the operator to look at the cluster.
+        const detail = read.code !== 0
+          ? `kubectl exit ${read.code} reading ${where} — the run log above carries what it said`
           : rows.length === 0
             ? "no Applications generated yet"
             : `${rows.length - pending.length}/${rows.length} ready — pending: ${pending.slice(0, 5).map((row) => `${row[0] ?? "?"} (${row[1] ?? "?"}/${row[2] ?? "?"})`).join(", ")}`;

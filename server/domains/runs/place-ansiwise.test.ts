@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
-  makeHarness, disposeHarnesses, scriptedHosts, hostsFactory,
+  makeHarness, disposeHarnesses, scriptedHosts, hostsFactory, ELEVATION_PASSWORD,
   ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, type HostsScript,
 } from "./deploy-slave.fixture.ts";
 import { assetBytes, ScriptedReleases, SCRIPTED_HOME } from "./deploy-slave.placement.fixture.ts";
-import { ELEVATION, ports, placeCtx, target, transferred, onPath, commands } from "./place-ansiwise.fixture.ts";
+import { ports, placeCtx, target, transferred, onPath, commands } from "./place-ansiwise.fixture.ts";
 import { placeAnsiwiseStep } from "./defs/place-ansiwise.step.ts";
 import {
   placeAnsiwise, downloadAddress, assertWord,
@@ -263,7 +263,7 @@ describe("the bootstrap with no manager behind it", () => {
   it("places both on a machine no inventory carries, and places nothing the second time", async () => {
     const hosts = scriptedHosts();
     const releases = new ScriptedReleases();
-    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION };
+    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION_PASSWORD };
     const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
 
     const first: string[] = [];
@@ -289,12 +289,12 @@ describe("the bootstrap with no manager behind it", () => {
     await placeAnsiwise(
       await sessionMachine(hosts, []),
       { read: (url) => releases.get(url, { signal: new AbortController().signal }) },
-      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION },
+      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION_PASSWORD },
     );
     for (const f of transferred(hosts)) expect(f.path.startsWith("/")).toBe(false);
     expect(commands(hosts)).toContain(`${BOOTSTRAP_HOME}${ANSIWISE_TOOL} --version`);
     expect(SCRIPTED_HOME.startsWith("/")).toBe(true);
-    expect(ELEVATION).not.toBe(""); // the bootstrap needs no credential at all — see the suite below
+    expect(ELEVATION_PASSWORD).not.toBe(""); // the bootstrap needs no credential at all — see the suite below
   });
 
   // THE TRANSFER STILL NEEDS NOTHING, and that is the half of this worth keeping: the bytes arrive
@@ -307,7 +307,7 @@ describe("the bootstrap with no manager behind it", () => {
     await placeAnsiwise(
       await sessionMachine(hosts, []),
       { read: (url) => releases.get(url, { signal: new AbortController().signal }) },
-      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION },
+      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION_PASSWORD },
     );
 
     for (const act of hosts.log) {
@@ -317,7 +317,7 @@ describe("the bootstrap with no manager behind it", () => {
     }
     // NEVER IN THE ARGUMENT LIST, wherever it does travel: a password there stands in the machine's
     // process listing for anyone on it to read.
-    for (const act of hosts.log) expect(act.command).not.toContain(ELEVATION);
+    for (const act of hosts.log) expect(act.command).not.toContain(ELEVATION_PASSWORD);
   });
 
   // THE STATE MEASURED ON apps4, planted exactly: the HOME carries the pin and the PATH carries
@@ -327,7 +327,7 @@ describe("the bootstrap with no manager behind it", () => {
     const hosts = scriptedHosts();
     const releases = new ScriptedReleases();
     const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
-    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION };
+    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION_PASSWORD };
 
     const machine = await sessionMachine(hosts, []);
     for (const name of ANSIWISE_EXECUTABLES) {
@@ -354,7 +354,7 @@ describe("the bootstrap with no manager behind it", () => {
     const hosts = scriptedHosts();
     const releases = new ScriptedReleases();
     const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
-    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION };
+    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION_PASSWORD };
 
     await placeAnsiwise(await sessionMachine(hosts, []), read, request);
     const settled = hosts.files.length;
