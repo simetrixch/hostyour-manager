@@ -215,6 +215,30 @@ const EnvSchema = z.object({
         "ANSIWISE_DOWNLOAD_URL must carry <name> where the executable's name goes — a release carries both ansiwise " +
         "and ansiwise-rest, and an address that names one of them can only ever place half an engine",
     }).optional(),
+  // WHERE this manager asks whether a slave is reporting metrics. The deploy-slave run ends with a
+  // SOFT probe that asks one question — is the new slave's obs-agent pushing? — as an instant query
+  // against the observability stack's Prometheus-compatible query API. This carries the BASE address
+  // and no path: the path grammar and the shape of the answer are one contract and stay with the
+  // code that parses it (adapters/metrics/metrics-http.ts). The manager chart sets it from
+  // metrics.queryUrl.
+  //
+  // OPTIONAL, and absent means the probe SAYS IT WAS SKIPPED — never that it passed. There is no
+  // default: a fallback address would produce a silent green on every installation that never
+  // configured one, and a manager that cannot reach a query API must report that fact at every
+  // deploy-slave rather than have one of its checks quietly stop measuring.
+  //
+  // AND `.min(1)` STANDS INSIDE THE OPTIONAL, which is the whole difference between a deliberate
+  // blank and an accident. Absent is a decision; a variable SET TO NOTHING is a deployment that
+  // meant to carry a value and rendered none, so it fails at boot naming this key instead of
+  // switching a check off where nobody would look. The chart renders the entry through a `with` for
+  // exactly this reason, so a blank there reaches this process as an absent variable.
+  // AND IT MUST BE AN ADDRESS THIS PROCESS CAN DIAL. `fetch` speaks http and https and nothing else,
+  // so a value carrying any other scheme is refused HERE rather than at the first deploy-slave —
+  // `.url()` alone accepts `observability-prometheus:9090`, reading the host as a scheme, which is
+  // exactly the shape somebody writes when they leave the scheme off.
+  METRICS_QUERY_URL: z.string().min(1).url()
+    .regex(/^https?:\/\//, "METRICS_QUERY_URL must be an http:// or https:// address — the probe dials it with an HTTP GET")
+    .optional(),
   // The pinned dbtools job image (<registry-host>/dbtools:<tag>) the relocation Jobs
   // run — mongodb tools, postgresql client, an S3 client and SSH for the staging area. The pin lives
   // as a builds[] entry in apps/manager/values-<stage>.yaml and the Deployment projects it here,
@@ -361,6 +385,10 @@ export interface Config {
    *  release's assets and `<version>` for the pinned version (place-ansiwise). Absent ⇒ the
    *  bootstrap step fails loud. */
   ansiwiseDownloadUrl?: string;
+  /** The BASE address of the Prometheus-compatible query API the deploy-slave run's soft metrics
+   *  probe asks (METRICS_QUERY_URL). Absent ⇒ that ONE check reports itself skipped, saying this
+   *  manager was given no address; every other check and every other run kind is untouched. */
+  metricsQueryUrl?: string;
 }
 
 export class ConfigError extends Error {
@@ -486,6 +514,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     ...(e.DBTOOLS_IMAGE ? { dbtoolsImage: e.DBTOOLS_IMAGE } : {}),
     ...(e.ANSIWISE_SERVE_COMMAND ? { ansiwiseServeCommand: e.ANSIWISE_SERVE_COMMAND } : {}),
     ...(e.ANSIWISE_DOWNLOAD_URL ? { ansiwiseDownloadUrl: e.ANSIWISE_DOWNLOAD_URL } : {}),
+    // The schema refuses an empty string outright, so this guard narrows the optional and can never
+    // be the place a blank is turned into an absent address.
+    ...(e.METRICS_QUERY_URL ? { metricsQueryUrl: e.METRICS_QUERY_URL } : {}),
   };
 }
 

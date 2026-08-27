@@ -14,11 +14,11 @@ import { deploySlaveSteps, SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
 import { registerStep } from "./defs/deploy-slave.verify.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import type { AnyRunDefinition, Step, StepCtx, Cleanup } from "../../executor/types.ts";
+import type { AnyRunDefinition, StepCtx, Cleanup } from "../../executor/types.ts";
 import {
   SLAVE_ID, MASTER_ID, PARAMS, STEP_NAMES, HEALTHY_SLAVE_PREFLIGHT, MASTER_MARKING_YAML,
   ELEVATION_PASSWORD, scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx, bareStepCtx,
-  drainToVerifyDeadline, drainToNextTimer,
+  drainToVerifyDeadline, drainToNextTimer, stepOf,
   type Harness,
 } from "./deploy-slave.fixture.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
@@ -35,14 +35,6 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   /** The one secret every approve needs now: the programs raise their commands to root with it. */
   const elevationOnly = (): Record<string, Buffer> => ({ [ANSIWISE_ELEVATION_SECRET]: Buffer.from(ELEVATION_PASSWORD) });
-
-  /** One step out of the def's own list, for driving it directly. */
-  function stepOf(h: Harness, name: string): Step {
-    const def = buildRunDefinitions({ db: h.db.db, platformRepo: h.platformRepo }).get("cluster-deploy-slave") as AnyRunDefinition;
-    const step = def.steps({ ...PARAMS, tier: "rehearsal" }).find((s) => s.name === name);
-    if (!step) throw new Error(`no step ${name}`);
-    return step;
-  }
 
   it("plans the program-driven step list over two declared targets with the declared locks, and asks for the elevation password + the answers nobody records", async () => {
     const { executor } = await makeHarness();
@@ -313,8 +305,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   /** A harness whose rows are where verify-slave finds them mid-run. */
   async function verifyWorld(hostsOver: Parameters<typeof scriptedHosts>[0] = {}): Promise<Harness> {
-    const hosts = scriptedHosts(hostsOver);
-    const h = await makeHarness({ hosts });
+    const h = await makeHarness({ hosts: scriptedHosts(hostsOver) });
     h.db.db.insert(clusters).values({
       id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
     }).run();
@@ -378,15 +369,6 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     }
     // The faulted poll was consumed and the verify still converged on the next cadence tick.
     expect(h.hosts.execFaults).toHaveLength(0);
-  });
-
-  it("verify-slave degrades gracefully on the SOFT checks: no metrics + no certs still succeed", async () => {
-    const h = await verifyWorld({ promOut: "PROM_CHECK empty", certsOut: "" });
-    const checkpoints: unknown[] = [];
-    await stepOf(h, "verify-slave").run(hostedStepCtx(h, { checkpoint: (d) => checkpoints.push(d) }));
-    // Three ExternalSecrets, because the gate counts what the instance's chart ships rather than a
-    // list of names it was told to expect: cluster-slave plus the two repository credentials.
-    expect(checkpoints.at(-1)).toEqual({ extSecrets: 3, apps: 2, secretStores: 2, prom: "empty", certsTotal: 0, certsReady: 0 });
   });
 
   // ---- register + the credential idioms -------------------------------------------------------

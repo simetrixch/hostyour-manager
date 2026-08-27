@@ -8,6 +8,7 @@ import { remoteCmd } from "../../../executor/stepkit.ts";
 import { MASTER_ROLES, type Stage, type ClusterTier } from "../../../../shared/enums.ts";
 import { errNotConfigured } from "../../../kernel/errors.ts";
 import type { PlatformRepo } from "../../../adapters/git/port.ts";
+import type { MetricsQuery } from "../../../adapters/metrics/port.ts";
 import { removeSlaveMarkingPart } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 
@@ -43,6 +44,14 @@ export interface DeploySlavePorts {
    *  all, and a step that needs this fails loud naming it rather than a whole run kind disappearing
    *  from the map. */
   platformOrigin?: string;
+  /** The Prometheus-compatible query API the verify step's SOFT metrics check asks, wired from
+   *  METRICS_QUERY_URL.
+   *
+   *  OPTIONAL, and its ABSENCE is one of the check's three outcomes rather than a feature switch: a
+   *  manager that was given no address reports the check as SKIPPED and says so, which is a
+   *  different fact from an address that answered nothing and must never be reported as the same
+   *  one. Every other check in that step, and every other run kind, is untouched by it. */
+  metricsQuery?: MetricsQuery;
 }
 
 /** WHICH run kind is driving the shared slave step list. The steps are the same either way — what

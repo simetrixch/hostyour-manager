@@ -33,7 +33,6 @@ import {
   forceSyncExternalSecretsCmd,
   masterCheckoutsScript,
   masterRegenerationCheckoutsScript,
-  promCheckScript,
   refreshPlatformCheckoutScript,
   slaveDiagScript,
 } from "./defs/deploy-slave.remote.ts";
@@ -73,7 +72,6 @@ export const REMOTE_SCRIPTS: readonly RemoteScript[] = [
   { symbol: "masterCheckoutsScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: masterCheckoutsScript({ masterFqdn: MASTER_FQDN, slaveFqdn: SLAVE_FQDN }) },
   { symbol: "masterRegenerationCheckoutsScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: masterRegenerationCheckoutsScript({ masterFqdn: MASTER_FQDN, slaveFqdn: SLAVE_FQDN }) },
   { symbol: "slaveDiagScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: slaveDiagScript(SLAVE_FQDN) },
-  { symbol: "promCheckScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: promCheckScript(SLAVE_FQDN) },
 ];
 
 /** The command LINES a run composes and sends over the session (remoteCmd / remoteExec /

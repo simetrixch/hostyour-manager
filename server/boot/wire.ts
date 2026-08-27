@@ -17,6 +17,7 @@ import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-de
 import { buildUnits } from "./wire-units.ts";
 import { createSshSession } from "../adapters/ssh/ssh2-session.ts";
 import { HttpReleaseDownloads } from "../adapters/downloads/downloads.ts";
+import { HttpMetricsQuery } from "../adapters/metrics/metrics-http.ts";
 import { SessionCodec } from "../domains/access/session.ts";
 import { LoginTxCodec } from "../domains/access/login-tx.ts";
 import { registerAuthRoutes } from "../domains/access/routes.ts";
@@ -86,6 +87,11 @@ export async function wire(): Promise<Wired> {
     // reading bytes off it is a capability of this process that nothing can turn off and nothing
     // should.
     releaseDownloads: new HttpReleaseDownloads(),
+    // The query API the deploy-slave run's SOFT metrics check asks. Behind the setting and not
+    // unconditional, because the ABSENCE of this port is what the check reports as "this manager was
+    // given no metrics query address" — a manager built with a client pointing nowhere would report
+    // the same skip as an unreachable address, and those are two different faults.
+    ...(config.metricsQueryUrl ? { metricsQuery: new HttpMetricsQuery(config.metricsQueryUrl) } : {}),
   }, units.defs);
   const executor = new Executor({
     db: db.db,

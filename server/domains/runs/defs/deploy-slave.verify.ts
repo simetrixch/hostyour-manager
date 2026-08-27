@@ -6,11 +6,11 @@ import { execCapture, remoteScriptCapture, localTx } from "../../../executor/ste
 import { ClusterPlaneV0, SlaveKubeAccess } from "../../../../shared/plane.ts";
 import {
   APP_SYNC_POLL_MS, loadServer, loadMaster, masterFqdnOf, requireSlaveCluster,
-  credLabels, newestCredId, sleepUnlessAborted, type SlaveTarget,
+  credLabels, newestCredId, sleepUnlessAborted, type DeploySlavePorts, type SlaveTarget,
 } from "./deploy-slave.kit.ts";
 import {
   argoAppsCmd, externalSecretsCmd, forceSyncExternalSecretsCmd,
-  slaveDiagScript, SECRET_STORES_CMD, CERTS_CMD, promCheckScript, parsePipeRows,
+  slaveDiagScript, SECRET_STORES_CMD, CERTS_CMD, parsePipeRows,
 } from "./deploy-slave.remote.ts";
 import { requireElevationPassword } from "./ansiwise-run.kit.ts";
 
@@ -101,7 +101,7 @@ function isChannelOpenFailure(e: unknown): boolean {
 const cell = (v: string | undefined): string => (v !== undefined && v !== "" ? v : "?");
 
 /** Step 6 `verify-slave` (stateless, re-runnable). */
-export function verifySlaveStep(target: SlaveTarget): Step {
+export function verifySlaveStep(target: SlaveTarget, ports: DeploySlavePorts): Step {
   return {
     name: "verify-slave",
     title: "Verify the slave (credentials, apps Synced/Healthy, ESO, metrics, cert)",
@@ -185,15 +185,9 @@ export function verifySlaveStep(target: SlaveTarget): Step {
       });
       ctx.log("meta", `slave ESO: all ${stores} SecretStores are Ready — the ${name} vault auth path is proven`);
 
-      // ---- SOFT 1: the slave's obs-agent is pushing (master Prometheus, promtool exec).
-      const promCap = await remoteScriptCapture(ctx, mSession, "prom-check", promCheckScript(domain), { timeoutMs: 60_000, elevation });
-      const prom = (promCap.result.code === 0 ? /^PROM_CHECK (\S+)/m.exec(promCap.stdout)?.[1] : undefined) ?? "skipped";
-      ctx.log("meta",
-        prom === "data"
-          ? `Prometheus sees up{cluster="${domain}"} — the slave's obs-agent is pushing`
-          : prom === "empty"
-            ? `soft: no up{cluster="${domain}"} series yet — the obs-agent push may still be warming up (check master Grafana)`
-            : "soft: could not query the master's Prometheus — metrics check skipped (verify via Grafana)");
+      // ---- SOFT 1: the slave's obs-agent is pushing, asked of the query API over plain HTTP.
+      const prom = await metricsVerdict(ports, domain, ctx.signal);
+      ctx.log("meta", metricsNote(prom, domain));
 
       // ---- SOFT 2: slave ingress certs issued (LE order/DNS can lag; a pending cert is a note).
       const certCap = await execCapture(ctx, slave, CERTS_CMD, { timeoutMs: 30_000, elevation });
@@ -208,9 +202,58 @@ export function verifySlaveStep(target: SlaveTarget): Step {
               ? `slave ingress certs: ${certsReady}/${certRows.length} Ready`
               : `soft: slave ingress certs still issuing — ${certsReady}/${certRows.length} Ready; pending: ${certRows.filter((r) => r[1] !== "True").slice(0, 5).map((r) => cell(r[0])).join(", ")}`);
 
-      ctx.checkpoint({ extSecrets, apps, secretStores: stores, prom, certsTotal: certRows.length, certsReady });
+      ctx.checkpoint({ extSecrets, apps, secretStores: stores, prom: prom.kind, certsTotal: certRows.length, certsReady });
     },
   };
+}
+
+
+/** WHICH SERIES ANSWERS THE QUESTION, and it is the STEP's to name and not the port's. `up` carries
+ *  the value 1 for every target a Prometheus is scraping, and a slave's obs-agent stamps
+ *  `cluster=<fqdn>` on everything it pushes — so one series under this selector is that machine
+ *  reporting, and none is that machine silent. */
+function upSeriesOf(domain: string): string {
+  return `up{cluster="${domain}"}`;
+}
+
+/** What this manager KNOWS about the new slave's metrics, in four states and never three.
+ *
+ *  `skipped` and `unanswered` MUST STAY APART. An address this manager was never given and an
+ *  address that answers nothing are different faults with different fixes — the first is an
+ *  installation that configured no query API, the second is one whose Service was renamed out from
+ *  under the address it did configure — and one marker for both would hide a rename behind a machine
+ *  that is simply not pushing yet. `empty` and `series` are the two the query itself decides.
+ *
+ *  A SKIPPED CHECK IS NOT A PASSED CHECK (rules.md section 0), which is why there is no fifth state
+ *  meaning "fine either way": whatever this answers is written into the run's record and said out
+ *  loud, and only `series` is a measurement. */
+type MetricsVerdict =
+  | { kind: "skipped" }
+  | { kind: "unanswered"; detail: string }
+  | { kind: "empty" }
+  | { kind: "series"; series: number };
+
+/** Ask the query API, or report that this manager was given no address to ask. */
+async function metricsVerdict(ports: DeploySlavePorts, domain: string, signal: AbortSignal): Promise<MetricsVerdict> {
+  if (!ports.metricsQuery) return { kind: "skipped" };
+  const answer = await ports.metricsQuery.instant(upSeriesOf(domain), { signal });
+  if (answer.kind === "unanswered") return { kind: "unanswered", detail: answer.detail };
+  return answer.series > 0 ? { kind: "series", series: answer.series } : { kind: "empty" };
+}
+
+/** The one line an operator reads about it. Every state says what was and was not measured, and the
+ *  two that measured nothing say WHY in their own words rather than sharing one sentence. */
+function metricsNote(verdict: MetricsVerdict, domain: string): string {
+  switch (verdict.kind) {
+    case "series":
+      return `the query API sees ${verdict.series} ${upSeriesOf(domain)} series — the slave's obs-agent is pushing`;
+    case "empty":
+      return `soft: no ${upSeriesOf(domain)} series yet — the obs-agent push may still be warming up (check master Grafana)`;
+    case "unanswered":
+      return `soft: the metrics query address this manager was given answered nothing usable — ${verdict.detail}. The check measured nothing; verify via Grafana`;
+    case "skipped":
+      return "soft: metrics check SKIPPED — this manager was given no metrics query address (METRICS_QUERY_URL), so nothing was asked and nothing was measured. Verify via Grafana";
+  }
 }
 
 /** Step 7 `register` (local tx only, overwrite-idempotent — overwrite-idempotent because register re-runs). */

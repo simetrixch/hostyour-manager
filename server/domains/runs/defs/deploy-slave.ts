@@ -414,7 +414,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // Application in ns <name> Synced/Healthy, every slave ESO SecretStore Ready (one bounded
     // retry window, with a rate-limited master-side diagnostic bundle while a gate fails);
     // SOFT — master Prometheus sees up{cluster="<fqdn>"}, slave ingress certs issued.
-    verifySlaveStep(target),
+    verifySlaveStep(target, ports),
     // register (local tx, overwrite-idempotent): cluster→active + provisionedAt + planeState
     // ready + planeJson (ClusterPlaneV0, shared/plane.ts); server→healthy; plane facts logged.
     registerStep(target),

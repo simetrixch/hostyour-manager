@@ -250,3 +250,42 @@ describe("Vault backend config", () => {
     expect(c.vault?.kvPrefix).toBe("elsewhere/cred");
   });
 });
+
+describe("the metrics query address (METRICS_QUERY_URL)", () => {
+  it("stays ABSENT with no value — the probe reports itself skipped and never passes", () => {
+    // No default of any kind. A fallback address would be a silent green on every installation that
+    // never configured one, which is the outcome rules.md section 0 forbids: a skipped check is not
+    // a passed check, and the run says which of the two it was.
+    expect(parseConfig(validEnv).metricsQueryUrl).toBeUndefined();
+  });
+
+  it("REFUSES AT BOOT a value that is set to nothing, rather than reading it as absent", () => {
+    // The whole difference between a decision and an accident. Absent is a deployment that chose to
+    // switch the probe off; a variable SET TO NOTHING is one that meant to carry an address and
+    // rendered none, and reading that as absent would switch a check off where nobody would look.
+    // The manager chart renders the entry through a `with` for exactly this reason.
+    expect(() => parseConfig({ ...validEnv, METRICS_QUERY_URL: "" })).toThrow(ConfigError);
+    try {
+      parseConfig({ ...validEnv, METRICS_QUERY_URL: "" });
+    } catch (e) {
+      expect((e as ConfigError).issues.join(" ")).toContain("METRICS_QUERY_URL");
+    }
+  });
+
+  it("carries a configured address through as the base the probe asks", () => {
+    const c = parseConfig({ ...validEnv, METRICS_QUERY_URL: "http://observability-prometheus.observability.svc.cluster.local:9090" });
+    expect(c.metricsQueryUrl).toBe("http://observability-prometheus.observability.svc.cluster.local:9090");
+  });
+
+  it("refuses an address this process cannot dial, naming the two schemes it can", () => {
+    // The shape somebody writes when they leave the scheme off: `.url()` alone accepts it, reading
+    // the host as a scheme, and the probe would then fail on every deploy-slave instead of the boot
+    // saying which key is wrong.
+    expect(() => parseConfig({ ...validEnv, METRICS_QUERY_URL: "observability-prometheus:9090" })).toThrow(ConfigError);
+    try {
+      parseConfig({ ...validEnv, METRICS_QUERY_URL: "observability-prometheus:9090" });
+    } catch (e) {
+      expect((e as ConfigError).issues.join(" ")).toContain("http://");
+    }
+  });
+});

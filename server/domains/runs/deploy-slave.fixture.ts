@@ -10,6 +10,7 @@ import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
 import { buildRunDefinitions } from "./run-definitions.ts";
+import type { AnyRunDefinition, Step } from "../../executor/types.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { ANSIWISE_PIN_PATH } from "../inventory/ansiwise-pin.ts";
@@ -19,6 +20,7 @@ import { meta } from "../../db/schema/meta.ts";
 import { ExecFailedError } from "../../adapters/ssh/port.ts";
 import type { SshFactory, SshSession, SshTarget, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
 import { answerPlacementCommand, ScriptedReleases } from "./deploy-slave.placement.fixture.ts";
+import { FakeMetricsQuery } from "../../adapters/metrics/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { VERIFY_SLAVE_TIMEOUT_MS } from "./defs/deploy-slave.verify.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
@@ -156,7 +158,6 @@ export interface HostsScript {
   diagOut: string;         // verify diagnostic bundle (master, runs only while a gate is failing)
   argoAppsOut: string;     // verify HARD gate 1 (master): `name|sync|health` rows in ns <name>
   secretStoresOut: string; // verify HARD gate 2 (slave): `ns/name|Ready` rows
-  promOut: string;         // verify SOFT (master): PROM_CHECK data|empty|skipped
   certsOut: string;        // verify SOFT (slave): `ns/name|Ready` rows
   // ---- what the machine carries of the BOOTSTRAP (place-ansiwise). Every one of these is written
   // by a file transfer or by the serving binary's own install-service and read back by asking the
@@ -249,7 +250,6 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     diagOut: "==== verify-slave diagnostics (ns s1) ====",
     argoAppsOut: "root-applications|Synced|Healthy\nplatform-apps-prod|Synced|Healthy",
     secretStoresOut: "external-secrets/vault-backend|True\nredis/vault-backend|True",
-    promOut: "PROM_CHECK data",
     certsOut: "redis/redis-tls|True",
     // A slave as deploy-slave meets it: adopted, and carrying neither executable yet. No surface of
     // its own, and the token file already there — enable-ansiwise-service stands AFTER
@@ -328,7 +328,6 @@ export function hostsFactory(f: HostsScript): SshFactory {
       if (command.includes("dc-slave-diag-")) { emit(f.diagOut); return done(); }
       if (command.includes("applications.argoproj.io")) { emit(f.argoAppsOut); return done(); }
       if (command.includes("secretstores.external-secrets.io")) { emit(f.secretStoresOut); return done(); }
-      if (command.includes("dc-prom-check-")) { emit(f.promOut); return done(); }
       if (command.includes("certificates.cert-manager.io")) { emit(f.certsOut); return done(); }
       // ---- cleanups
       if (command.includes("snap remove --purge microk8s")) return done();
@@ -368,6 +367,10 @@ export interface Harness {
   /** The release surface the bootstrap reads both executables off — every address it was asked for,
    *  and where a test puts something other than the asset an address names. */
   releases: ScriptedReleases;
+  /** The query API verify-slave's SOFT metrics check asks: every query it was ASKED, and where a
+   *  test says what comes back. undefined is a manager that was given NO address — the outcome that
+   *  must never read like an address that answered nothing (makeHarness `metrics: false`). */
+  metrics?: FakeMetricsQuery;
 }
 
 /** A slave's cluster map as mark-slave leaves it on the books branch — identity plus the slave
@@ -436,7 +439,7 @@ export function disposeHarnesses(): void {
 // FK-safe seeding (clusters.server_id → servers.id): servers + their ssh keys first.
 // keystore: "keyfile" opens the crypto gate for tests that need a SECOND plan of the same slave
 // (under plaintext the gate counts the first run's leftover planned row as a live slave).
-export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string; versionsYaml?: string } = {}): Promise<Harness> {
+export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string; versionsYaml?: string; metrics?: FakeMetricsQuery | false } = {}): Promise<Harness> {
   const hosts = opts.hosts ?? scriptedHosts();
   const dir = mkdtempSync(join(tmpdir(), "mgr-ds-"));
   dirs.push(dir);
@@ -453,6 +456,9 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   // pin that is missing or malformed seeds over this.
   platformRepo.seed(PRODUCT_BRANCH, ANSIWISE_PIN_PATH, opts.versionsYaml ?? VERSIONS_YAML);
   const releases = new ScriptedReleases();
+  // A manager that WAS given a query address, because that is every deployed one; `metrics: false`
+  // is the manager that was not, and its whole point is that the check says so rather than passing.
+  const metrics = opts.metrics === false ? undefined : opts.metrics ?? new FakeMetricsQuery();
   const executor = new Executor({
     db: db.db, creds: store, bus: new RunEventBus(), logger,
     runDefinitions: buildRunDefinitions({
@@ -463,6 +469,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
       ansiwiseDownloadUrl: ANSIWISE_DOWNLOAD_URL,
       releaseDownloads: releases,
       ...(opts.ansiwiseServeCommand !== undefined ? { ansiwiseServeCommand: opts.ansiwiseServeCommand } : {}),
+      ...(metrics ? { metricsQuery: metrics } : {}),
     }),
     sshFactory: hostsFactory(hosts), actor: () => "op_system",
   });
@@ -489,7 +496,22 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
     }).run();
     await store.seal({ kind: "ssh_key", label: "master key", plaintext: Buffer.from("fake-master-key"), fingerprint: "SHA256:master", serverId: MASTER_ID, publicKey: MASTER_PUBLIC_KEY });
   }
-  return { db, executor, store, hosts, platformRepo, releases };
+  return { db, executor, store, hosts, platformRepo, releases, ...(metrics ? { metrics } : {}) };
+}
+
+/** One step out of the deploy-slave definition's own list, for driving it directly.
+ *
+ *  BUILT WITH THE HARNESS'S OWN PORTS and not with a second, smaller set. A step built here without
+ *  the metrics port would report that check SKIPPED whatever the harness was given, and telling that
+ *  outcome apart from the others is exactly what the suites use this for. */
+export function stepOf(h: Harness, name: string): Step {
+  const def = buildRunDefinitions({
+    db: h.db.db, platformRepo: h.platformRepo,
+    ...(h.metrics ? { metricsQuery: h.metrics } : {}),
+  }).get("cluster-deploy-slave") as AnyRunDefinition;
+  const step = def.steps({ ...PARAMS, tier: "rehearsal" }).find((candidate: Step) => candidate.name === name);
+  if (!step) throw new Error(`no step ${name}`);
+  return step;
 }
 
 /** Under FAKE timers (vi.useFakeTimers must be active): yield microtasks until the run

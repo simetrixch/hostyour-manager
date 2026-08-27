@@ -249,22 +249,6 @@ export const SECRET_STORES_CMD = `microk8s kubectl get secretstores.external-sec
  *  can lag on DNS propagation / rate limits; a pending cert is a note, not a failure). */
 export const CERTS_CMD = `microk8s kubectl get certificates.cert-manager.io -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"\\n"}{end}'`;
 
-// The SOFT observability probe (step 6, master): is the slave's obs-agent pushing? Queries
-// the master's IN-CLUSTER Prometheus via promtool inside the prometheus container — no
-// ingress/port-forward assumption (the metrics API is deliberately not exposed on the host).
-// Best-effort BY DESIGN: any miss (no pod, no promtool, no data yet) prints a marker the
-// step downgrades to a meta note — the HARD gates already prove the management plane;
-// push-metric freshness at deploy time is an observability nicety, so step 6 treats it as
-// best-effort.
-export function promCheckScript(domain: string): string {
-  return `#!/usr/bin/env bash
-pod=$(microk8s kubectl -n observability get pod -l app.kubernetes.io/name=prometheus -o name 2>/dev/null | head -1)
-if [ -z "$pod" ]; then echo "PROM_CHECK skipped"; exit 0; fi
-res=$(microk8s kubectl -n observability exec "$pod" -c prometheus -- promtool query instant http://localhost:9090 'up{cluster="${domain}"}' 2>/dev/null || true)
-if [ -n "$res" ]; then echo "PROM_CHECK data"; else echo "PROM_CHECK empty"; fi
-`;
-}
-
 /** Parse `a|b|c` rows out of a kubectl jsonpath range dump, dropping blank lines. */
 export function parsePipeRows(out: string): string[][] {
   return out
