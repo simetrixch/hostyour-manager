@@ -113,6 +113,23 @@ export const EXECUTABLE_MODE = 0o755;
  *  resolves this the same way for the same account. */
 export const BOOTSTRAP_HOME = "~/";
 
+/** WHERE THE MACHINE FINDS THEM, which is not where the transfer can land them.
+ *
+ *  SFTP authenticates as the operating account and has no elevation to offer, so the bytes can only
+ *  arrive under [BOOTSTRAP_HOME]. But everything that later ASKS about the engine asks the one on the
+ *  path: `deploy-cluster`'s `require_cli_tool_versions` row reads it there, and so does every command
+ *  a person types on the machine. Until this module put them here as well, nothing wrote this
+ *  directory at all — deploy-cluster states in its own tool phase that the engine is asserted there
+ *  and fetched nowhere, on the belief that some other mechanism placed it — and what stood on a
+ *  machine was whatever its first installation had left, at whatever version that was. Measured on
+ *  apps4: the path carried 0.5.4 while the pin said 0.5.7, and the assertion failed the run.
+ *
+ *  The home copies stay, and they are not a second writer of this path: they are where the transfer
+ *  lands and what `deploymentToolBesideThis` looks beside. Both pairs are written from the same bytes
+ *  in the same act and are read back separately, so a machine can never be reported at a version only
+ *  one of them answers. */
+export const PATH_HOME = "/usr/local/bin/";
+
 /** WHERE the catalogue stands on the machine: the checkout the serving binary reads its programs and
  *  its `ansiwise.yaml` from. The machine's own path and not this module's invention — digita-deploy
  *  `ansiwise/programs/deploy-platform-services.yaml`'s `git_clone` row clones the catalogue repository to
@@ -357,6 +374,10 @@ export interface BootstrapRequest {
   /** WHERE a released executable is fetched from, carrying NAME_PLACEHOLDER and VERSION_PLACEHOLDER.
    *  Filled in here, so the address, the pin and the placed file can never state three things. */
   downloadUrl: string;
+  /** What raises the copy into [PATH_HOME] to root. That directory belongs to root and the account
+   *  this run authenticated as cannot write it, so without a password the machine keeps whatever
+   *  version stood there — which is the state this placement exists to end. */
+  elevationPassword: string;
 }
 
 /** What the bootstrap answers: the version both executables now answer with, read off the machine,
@@ -379,15 +400,22 @@ export async function placeAnsiwise(
 ): Promise<BootstrapVerdict> {
   const { version } = req;
   assertWord(version, "version");
-  const standing = await readVersions(machine);
+  // BOTH PLACES ARE READ, and a machine is only left alone when both answer the pin. Reading only
+  // the home is what let apps4 be reported as carrying 0.5.7 while every program on it ran 0.5.4:
+  // the transfer had nothing to do and the copy onto the path had never been made at all.
+  const standing = await readVersions(machine, BOOTSTRAP_HOME);
+  const onPath = await readVersions(machine, PATH_HOME);
   const missing = ANSIWISE_EXECUTABLES.filter((name) => standing[name] !== version);
-  if (missing.length === 0) {
+  const stale = ANSIWISE_EXECUTABLES.filter((name) => onPath[name] !== version);
+  if (missing.length === 0 && stale.length === 0) {
     machine.log(`${machine.name} already carries ${describeExecutables(version)} — nothing to place`);
     return { version, placed: false };
   }
-  machine.log(
-    `placing on ${machine.name}: ${missing.map((name) => `${name} ${version} (it carries ${standing[name] ?? "none"})`).join(", ")}`,
-  );
+  if (missing.length > 0) {
+    machine.log(
+      `placing on ${machine.name}: ${missing.map((name) => `${name} ${version} (it carries ${standing[name] ?? "none"})`).join(", ")}`,
+    );
+  }
 
   for (const name of missing) {
     const from = downloadAddress(req.downloadUrl, name, version);
@@ -417,7 +445,7 @@ export async function placeAnsiwise(
   // The second reading, and the only thing this reports off. `--version` runs the file that was just
   // written, so a truncated transfer, a release asset that is an error page and an architecture the
   // machine cannot execute are all one answer here: not the pin.
-  const after = await readVersions(machine);
+  const after = await readVersions(machine, BOOTSTRAP_HOME);
   for (const name of ANSIWISE_EXECUTABLES) {
     if (after[name] === version) continue;
     throw errValidation(
@@ -426,13 +454,44 @@ export async function placeAnsiwise(
       "Check that the release carries an asset under that name and that it is built for this machine's architecture",
     );
   }
+
+  // ONTO THE PATH, from the copy just proven rather than from the network a second time: the bytes
+  // that answered the pin are the bytes that go where everything else looks for them. `install`
+  // replaces a standing file by writing a new one and renaming it over, so a machine is never left
+  // with a half-written executable on its path.
+  const stdin = Buffer.from(req.elevationPassword + NEWLINE, "utf8");
+  for (const name of ANSIWISE_EXECUTABLES) {
+    const done = await machine.run(
+      ["sudo", "-S", "install", "-m", EXECUTABLE_MODE.toString(8), `${BOOTSTRAP_HOME}${name}`, `${PATH_HOME}${name}`],
+      { timeoutMs: COMMAND_TIMEOUT_MS, stdin },
+    );
+    if (done.code !== 0) {
+      throw errValidation(
+        `${machine.name} would not place ${name} ${version} in ${PATH_HOME} (exit ${done.code}) — that directory ` +
+        "belongs to root, and the elevation password this run carries is what raises the copy. Everything on this " +
+        "machine that asks about the engine asks the one standing there, so a machine that keeps an older copy runs " +
+        "programs written for a version it is not",
+      );
+    }
+  }
+
+  // READ BACK OFF THE PATH, for the reason the home copies are read back: an `install` that reported
+  // success and a directory that answers with something else are two different facts.
+  const onPathAfter = await readVersions(machine, PATH_HOME);
+  for (const name of ANSIWISE_EXECUTABLES) {
+    if (onPathAfter[name] === version) continue;
+    throw errValidation(
+      `${PATH_HOME}${name} on ${machine.name} answers ${onPathAfter[name] ?? "nothing"} after being placed, not the ` +
+      `pinned ${version} — something else on this machine writes that path`,
+    );
+  }
   machine.log(`${machine.name} carries ${describeExecutables(version)}`);
   return { version, placed: true };
 }
 
 /** The two executables and where they stand, in the words both the log line and the refusal use. */
 function describeExecutables(version: string): string {
-  return `${ANSIWISE_EXECUTABLES.map((name) => `${BOOTSTRAP_HOME}${name}`).join(" and ")} at ${version}`;
+  return `${ANSIWISE_EXECUTABLES.map((name) => `${PATH_HOME}${name}`).join(" and ")} at ${version}`;
 }
 
 /** What each executable answers when it is asked which release it is.
@@ -442,10 +501,13 @@ function describeExecutables(version: string): string {
  *  the placement had INTENDED and never what the file is. Both binaries answer their release tag on
  *  one line and nothing else on it (ansiwise-cli lib/installation.dart `answeredVersion`), and it is
  *  answered before a program is looked for, so it works on a machine carrying no catalogue at all. */
-async function readVersions(machine: PlacementMachine): Promise<Record<string, string | undefined>> {
+async function readVersions(
+  machine: PlacementMachine,
+  where: string,
+): Promise<Record<string, string | undefined>> {
   const answers: Record<string, string | undefined> = {};
   for (const name of ANSIWISE_EXECUTABLES) {
-    answers[name] = await readVersion(machine, `${BOOTSTRAP_HOME}${name}`);
+    answers[name] = await readVersion(machine, `${where}${name}`);
   }
   return answers;
 }

@@ -1,5 +1,6 @@
 import { DownloadFailed, type ReleaseDownloads } from "../../adapters/downloads/port.ts";
 import type { HostsScript } from "./deploy-slave.fixture.ts";
+import { PATH_HOME } from "./defs/place-ansiwise.ts";
 
 // THE SCRIPTED MACHINE'S BOOTSTRAP HALF: what it answers when it is asked which release each of its
 // two executables is, what a file transfer does to it, and what the serving binary's install-service
@@ -73,8 +74,16 @@ function executableNamed(word: string): string | undefined {
   for (const prefix of ["~/", `${SCRIPTED_HOME}/`]) {
     if (word.startsWith(prefix)) return word.slice(prefix.length);
   }
+  // The path a machine actually LOOKS on. It is kept as a file of its own and not aliased to the
+  // home copy: the two are written by two different acts — a transfer and an elevated install — and
+  // a fixture that made them one name could never show a machine whose home carries the pin while
+  // its path carries something older, which is exactly the state this platform was found in.
+  if (word.startsWith(PATH_HOME)) return `${ON_PATH}${word.slice(PATH_HOME.length)}`;
   return undefined;
 }
+
+/** How this fixture keeps a file that stands on the machine's path apart from the home copy. */
+export const ON_PATH = "path:";
 
 /** The scripted machine's answer to one bootstrap or service command, or undefined where the command
  *  is not one this half of the fixture knows — the exec table then goes on to the rest. */
@@ -92,6 +101,19 @@ export function answerPlacementCommand(
     if (named === undefined) return undefined;
     const version = versionOf(fileAt(f, host, named));
     return version === undefined ? { out: "", code: 127 } : { out: version, code: 0 };
+  }
+
+  // `sudo -S install -m <mode> <from> <to>` — the elevated copy of a proven executable onto the
+  // machine's path. Answered by actually copying, so the reading that follows reads what was put
+  // there rather than what the step meant to put there.
+  if (words[0] === "sudo" && words[1] === "-S" && words[2] === "install" && words.length === 7) {
+    const from = executableNamed(words[5] ?? "");
+    const to = executableNamed(words[6] ?? "");
+    if (from === undefined || to === undefined) return undefined;
+    const content = fileAt(f, host, from);
+    if (content === undefined) return { out: `install: cannot stat '${words[5]}'`, code: 1 };
+    f.files.push({ host, path: to, content, mode: Number.parseInt(words[4] ?? "755", 8) });
+    return { out: "", code: 0 };
   }
 
   if (command === "systemctl is-enabled ansiwise.service") {

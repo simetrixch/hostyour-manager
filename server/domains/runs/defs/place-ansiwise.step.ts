@@ -173,6 +173,9 @@ async function runBootstrap(
   const request = {
     version: await readAnsiwisePin(requirePlatformRepo(ports)),
     downloadUrl: requireDownloadUrl(ports),
+    // What raises the copy into /usr/local/bin, where everything that asks about the engine asks.
+    // Both steps that call this carry it: the run's approve requires it for the programs anyway.
+    elevationPassword: requireElevationPassword(ctx),
   };
   return placeAnsiwise(
     await placementMachine(ctx, server.name),

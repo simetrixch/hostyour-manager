@@ -4,11 +4,11 @@ import {
   ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, type HostsScript,
 } from "./deploy-slave.fixture.ts";
 import { assetBytes, ScriptedReleases, SCRIPTED_HOME } from "./deploy-slave.placement.fixture.ts";
-import { ELEVATION, ports, placeCtx, target, transferred, commands } from "./place-ansiwise.fixture.ts";
+import { ELEVATION, ports, placeCtx, target, transferred, onPath, commands } from "./place-ansiwise.fixture.ts";
 import { placeAnsiwiseStep } from "./defs/place-ansiwise.step.ts";
 import {
   placeAnsiwise, downloadAddress, assertWord,
-  ANSIWISE_EXECUTABLES, ANSIWISE_TOOL, ANSIWISE_REST_TOOL, EXECUTABLE_MODE, BOOTSTRAP_HOME,
+  ANSIWISE_EXECUTABLES, ANSIWISE_TOOL, ANSIWISE_REST_TOOL, EXECUTABLE_MODE, BOOTSTRAP_HOME, PATH_HOME,
   NAME_PLACEHOLDER, VERSION_PLACEHOLDER,
   type PlacementMachine,
 } from "./defs/place-ansiwise.ts";
@@ -54,7 +54,10 @@ describe("place-ansiwise", () => {
       `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`,
       `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_REST_TOOL}-${ANSIWISE_PIN}-linux-x64`,
     ]);
-    expect(first.some((l) => l.includes(`carries ${BOOTSTRAP_HOME}${ANSIWISE_TOOL} and ${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL} at ${ANSIWISE_PIN}`))).toBe(true);
+    // WHAT IT REPORTS IS WHERE THE MACHINE LOOKS. The home is where the transfer lands; the path is
+    // what every later reading asks, `require_cli_tool_versions` among them — so a line naming the
+    // home would say a machine carried a version that nothing on it would run.
+    expect(first.some((l) => l.includes(`carries ${PATH_HOME}${ANSIWISE_TOOL} and ${PATH_HOME}${ANSIWISE_REST_TOOL} at ${ANSIWISE_PIN}`))).toBe(true);
 
     // The same step again, over the machine the first run left. Nothing about the world is touched
     // in between: the second run reads what the first one wrote.
@@ -260,7 +263,7 @@ describe("the bootstrap with no manager behind it", () => {
   it("places both on a machine no inventory carries, and places nothing the second time", async () => {
     const hosts = scriptedHosts();
     const releases = new ScriptedReleases();
-    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL };
+    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION };
     const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
 
     const first: string[] = [];
@@ -286,7 +289,7 @@ describe("the bootstrap with no manager behind it", () => {
     await placeAnsiwise(
       await sessionMachine(hosts, []),
       { read: (url) => releases.get(url, { signal: new AbortController().signal }) },
-      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL },
+      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION },
     );
     for (const f of transferred(hosts)) expect(f.path.startsWith("/")).toBe(false);
     expect(commands(hosts)).toContain(`${BOOTSTRAP_HOME}${ANSIWISE_TOOL} --version`);
@@ -294,15 +297,73 @@ describe("the bootstrap with no manager behind it", () => {
     expect(ELEVATION).not.toBe(""); // the bootstrap needs no credential at all — see the suite below
   });
 
-  it("hands over no credential of any kind — a transfer into the account's own home needs none", async () => {
+  // THE TRANSFER STILL NEEDS NOTHING, and that is the half of this worth keeping: the bytes arrive
+  // over SFTP into the account's own home, with no credential anywhere. What the copy ONTO THE PATH
+  // needs is a different question with a different answer — /usr/local/bin belongs to root — and the
+  // two are held apart here so a credential can never quietly spread from the second to the first.
+  it("carries a credential only where the path is written, and never in the transfer", async () => {
     const hosts = scriptedHosts();
     const releases = new ScriptedReleases();
     await placeAnsiwise(
       await sessionMachine(hosts, []),
       { read: (url) => releases.get(url, { signal: new AbortController().signal }) },
-      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL },
+      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION },
     );
-    for (const act of hosts.log) expect(act.stdin, `${act.command} carried a credential`).toBeUndefined();
-    for (const act of hosts.log) expect(act.command).not.toContain("sudo");
+
+    for (const act of hosts.log) {
+      if (act.command.startsWith("sudo -S install ")) continue;
+      expect(act.stdin, `${act.command} carried a credential`).toBeUndefined();
+      expect(act.command).not.toContain("sudo");
+    }
+    // NEVER IN THE ARGUMENT LIST, wherever it does travel: a password there stands in the machine's
+    // process listing for anyone on it to read.
+    for (const act of hosts.log) expect(act.command).not.toContain(ELEVATION);
+  });
+
+  // THE STATE MEASURED ON apps4, planted exactly: the HOME carries the pin and the PATH carries
+  // nothing, because the transfer had already been done once and nothing had ever written the path.
+  // Read as one fact that machine looks placed — and every program on it ran the older engine.
+  it("places onto the path when the home already carries the pin and the path does not", async () => {
+    const hosts = scriptedHosts();
+    const releases = new ScriptedReleases();
+    const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
+    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION };
+
+    const machine = await sessionMachine(hosts, []);
+    for (const name of ANSIWISE_EXECUTABLES) {
+      await machine.putFile(name, assetBytes(name, ANSIWISE_PIN), EXECUTABLE_MODE);
+    }
+    const already = hosts.files.length;
+
+    const said: string[] = [];
+    const verdict = await placeAnsiwise(await sessionMachine(hosts, said), read, request);
+
+    // NOTHING WAS FETCHED — the home was right — and the path was written all the same.
+    expect(transferred(hosts, already), "the home carried the pin, so there was nothing to fetch").toHaveLength(0);
+    expect(releases.read, "nothing had to be read from the release host").toHaveLength(0);
+    expect(onPath(hosts).map((f) => f.path)).toEqual([ANSIWISE_TOOL, ANSIWISE_REST_TOOL]);
+    for (const f of onPath(hosts)) expect(f.content).toBe(assetBytes(f.path, ANSIWISE_PIN).toString("utf8"));
+    expect(verdict).toEqual({ version: ANSIWISE_PIN, placed: true });
+    expect(said.some((l) => l.includes(`carries ${PATH_HOME}${ANSIWISE_TOOL}`))).toBe(true);
+  });
+
+  // THE INNOCENT NEIGHBOUR: once BOTH answer the pin there is nothing left to do, and the second
+  // run must not write the path again. Without it the check above would pass on a placement that
+  // simply installs on every run.
+  it("leaves a machine alone once BOTH places answer the pin", async () => {
+    const hosts = scriptedHosts();
+    const releases = new ScriptedReleases();
+    const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
+    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION };
+
+    await placeAnsiwise(await sessionMachine(hosts, []), read, request);
+    const settled = hosts.files.length;
+
+    const said: string[] = [];
+    const again = await placeAnsiwise(await sessionMachine(hosts, said), read, request);
+
+    expect(again).toEqual({ version: ANSIWISE_PIN, placed: false });
+    expect(hosts.files.slice(settled), "a settled machine was written to again").toHaveLength(0);
+    expect(said.some((l) => l.includes("nothing to place"))).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import type { StepCtx } from "../../executor/types.ts";
+import { ON_PATH } from "./deploy-slave.placement.fixture.ts";
 import type { SshSession } from "../../adapters/ssh/port.ts";
 import {
   hostsFactory, logger, SLAVE_ID, PARAMS, ANSIWISE_DOWNLOAD_URL,
@@ -68,7 +69,22 @@ export const target = statedTarget(SLAVE_ID, PARAMS.domain, "prod");
  *  are skipped rather than cleared — clearing them would make the machine answer `--version` with
  *  nothing and turn every such test into a bare machine.  */
 export function transferred(hosts: HostsScript, from = 0): { path: string; content: string; mode: number }[] {
-  return hosts.files.slice(from).map((f) => ({ path: f.path, content: f.content, mode: f.mode }));
+  return hosts.files
+    .slice(from)
+    // What SFTP CARRIED, and not what an elevated `install` then copied out of it. The copy onto
+    // the machine's path writes a file too and the scripted machine records it as one, so without
+    // this every count of "what this run fetched" would double the moment the placement started
+    // putting the proven bytes where a machine looks for them.
+    .filter((f) => !f.path.startsWith(ON_PATH))
+    .map((f) => ({ path: f.path, content: f.content, mode: f.mode }));
+}
+
+/** Everything the machine keeps on its PATH, as the placement fixture records it. */
+export function onPath(hosts: HostsScript, from = 0): { path: string; content: string; mode: number }[] {
+  return hosts.files
+    .slice(from)
+    .filter((f) => f.path.startsWith(ON_PATH))
+    .map((f) => ({ path: f.path.slice(ON_PATH.length), content: f.content, mode: f.mode }));
 }
 
 /** Every command the step ran on the machine, in order. A bootstrap that composed a script would
