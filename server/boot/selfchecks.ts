@@ -4,6 +4,7 @@ import type { CredentialStore, KeystoreMode } from "../security/store.ts";
 import { registerSecret, unregisterScope, redact } from "../security/redact.ts";
 import type { RunEventBus } from "../executor/bus.ts";
 import type { RunDefinitions } from "../domains/runs/run-definitions.ts";
+import type { AnyRunDefinition } from "../executor/types.ts";
 import { assertGuardsArmed } from "../executor/guards.ts";
 import { RUN_FAMILY, RUN_KIND, type RunFamily, type RunKind } from "../../shared/enums.ts";
 import { reconcileLocks } from "../executor/locks.ts";
@@ -305,17 +306,29 @@ async function checkAnsiwisePinReadable(platformRepo: PlatformRepo | undefined):
   }
 }
 
-/** The run kind whose program order is held against the platform's declaration: the one that installs
- *  a slave, which is the only run kind of this manager that drives an installation's programs. */
-const SLAVE_KIND: RunKind = "cluster-deploy-slave";
-
 /** The programs one run kind drives, in the order its own step list drives them. Derived from the
  *  step names — `ansiwiseProgramStep` names every one of them `run-<program>` — so a program added to
  *  or taken out of that run is a program this check gains or loses, without anybody editing a list. */
-function programsOf(runDefinitions: RunDefinitions, kind: RunKind): string[] {
-  const def = runDefinitions.get(kind);
-  if (!def) return [];
+function programsOf(def: AnyRunDefinition): string[] {
   return def.steps({}).map((s) => s.name).filter((n) => n.startsWith(PROGRAM_STEP_PREFIX)).map((n) => n.slice(PROGRAM_STEP_PREFIX.length));
+}
+
+/** EVERY run kind this boot registered that drives at least one of the machine's programs, asked of
+ *  the definitions rather than listed here.
+ *
+ *  A list would be the third copy of the same fact — the two the declaration and the run definitions
+ *  already are — and it is the copy that decays in silence: a run kind that gains a program step is
+ *  simply not in it, and the check goes on reporting green over the kinds it does know. Measured
+ *  2026-08-27: five drive programs (`cluster-deploy-slave`, `cluster-redeploy`, `cluster-release`,
+ *  `cluster-tailnet-disconnect`, `cluster-tailnet-reconnect`) of the 37 this boot registers, and the
+ *  check that held only the first of them said in its own words that it was the only one. */
+function programDrivingKinds(runDefinitions: RunDefinitions): { kind: RunKind; programs: string[] }[] {
+  const driving: { kind: RunKind; programs: string[] }[] = [];
+  for (const [kind, def] of runDefinitions) {
+    const programs = programsOf(def);
+    if (programs.length > 0) driving.push({ kind, programs });
+  }
+  return driving;
 }
 
 /**
@@ -332,19 +345,34 @@ function programsOf(runDefinitions: RunDefinitions, kind: RunKind): string[] {
  * machine. So the run kind keeps its steps, and the declaration is held against them here: a row
  * changed on either side goes red at boot, with both orders named.
  *
+ * EVERY RUN KIND THAT DRIVES PROGRAMS IS HELD, not the slave install alone. The version of this check
+ * that shipped first held `cluster-deploy-slave` and stated in its own comment that it was the only
+ * run kind driving an installation's programs. It is not: `cluster-redeploy` drives deploy-host,
+ * deploy-cluster and deploy-platform-services, and `cluster-release` drives deploy-cluster and
+ * deploy-platform-services after a regeneration — the same programs of the same declaration, in lists
+ * of their own (redeploy.ts MASTER_ARM_PROGRAMS, release.ts MASTER_RELEASE_PROGRAMS and
+ * SLAVE_RELEASE_PROGRAMS). So the manager carries FOUR orderings of those programs and the reader
+ * held one of them, which is the state a declaration with a reader was supposed to end.
+ *
  * WHAT IT CANNOT HOLD, named rather than counted (a clean answer must not be able to mean nobody was
  * looking):
  *
- *   1. A program this run drives that the declaration does not state. The declaration states no slave
+ *   1. A program a run drives that the declaration does not state. The declaration states no slave
  *      sequence, on purpose — half of a slave's steps are this manager's own acts and a list of only
  *      the program rows would describe a shape nobody can follow. Such a program is reported BY NAME
- *      in the detail, green or red, and `deploy-slave-branch` is expected to be one.
+ *      in the detail, green or red; `deploy-slave-branch`, `regenerate-branch` and the two tailnet
+ *      programs are expected to be among them.
  *   2. The SET. This holds the ORDER of what the two sides share and nothing else, so a program
- *      DROPPED from this run stays green: the run legitimately drives a subset — three of the
+ *      DROPPED from a run stays green: a run legitimately drives a subset — a slave three of the
  *      master's five — and nothing here can tell a subset that is meant from one that lost a phase.
- *      Holding the set needs the declaration to state a slave sequence of its own, which it does not,
- *      and which is not this repository's to add. Measured: taking `deploy-host` out of the run keeps
- *      this check green.
+ *      Holding the set needs the declaration to state a sequence per role, which it does not, and
+ *      which is not this repository's to add. Measured: taking `deploy-host` out of the slave run
+ *      keeps this check green.
+ *   3. A program driven inside a step that is not a program step. `rejoinStep` (tailnet.kit.ts:188)
+ *      runs the mint on the master and the rejoin on the host inside ONE step named `rejoin`, so
+ *      neither shows up as `run-<program>` and neither is seen here. The declaration states neither
+ *      program, so nothing is silently green about them — but the ORDER of what that one step does is
+ *      out of this check's reach and stays there until it is two steps.
  *
  * DEGRADING, for the reason the two checks above it state: it reaches a REMOTE.
  */
@@ -358,18 +386,27 @@ async function checkInstallOrder(platformRepo: PlatformRepo | undefined, runDefi
       detail: "the platform repo is not configured on this manager — the stated program order could not be read, so nothing was compared",
     };
   }
-  const programs = programsOf(runDefinitions, SLAVE_KIND);
-  if (programs.length === 0) {
-    return { name, kind: "skipped", ok: false, detail: `the ${SLAVE_KIND} run kind drives no program step, so there is no order of this manager's to hold against the declaration` };
+  const driving = programDrivingKinds(runDefinitions);
+  if (driving.length === 0) {
+    return { name, kind: "skipped", ok: false, detail: "no run kind this boot registered drives a program step, so there is no order of this manager's to hold against the declaration" };
   }
   try {
     const stated = await readInstallOrder(platformRepo);
-    const verdict = holdsInstallOrder(programs, stated);
-    const covered = `held ${verdict.held.length} of the ${programs.length} program(s) ${SLAVE_KIND} drives against ${INSTALL_ORDER_PATH}` +
-      `${verdict.unstated.length > 0 ? `; the declaration states none of: ${verdict.unstated.join(", ")}` : ""}`;
-    return verdict.agrees
+    const verdicts = driving.map((d) => ({ ...d, verdict: holdsInstallOrder(d.programs, stated) }));
+    // How much was covered, per run kind and never as one number: a run kind that stops driving a
+    // program the declaration states drops out of this line, and that is the only place it shows.
+    const covered = `${INSTALL_ORDER_PATH} states ${stated.join(" -> ")}; held ` +
+      verdicts.map((v) => `${v.kind} ${v.verdict.held.length}/${v.programs.length}` +
+        `${v.verdict.unstated.length > 0 ? ` (unstated: ${v.verdict.unstated.join(", ")})` : ""}`).join(", ");
+    const disagreeing = verdicts.filter((v) => !v.verdict.agrees);
+    return disagreeing.length === 0
       ? { name, kind: "degrading", ok: true, detail: covered }
-      : { name, kind: "degrading", ok: false, detail: `${verdict.detail ?? "the two orders disagree"} — ${covered}` };
+      : {
+        name,
+        kind: "degrading",
+        ok: false,
+        detail: `${disagreeing.map((v) => `${v.kind}: ${v.verdict.detail ?? "drives the stated programs out of the stated order"}`).join("; ")} — ${covered}`,
+      };
   } catch (e) {
     return { name, kind: "degrading", ok: false, detail: messageOf(e) };
   }
