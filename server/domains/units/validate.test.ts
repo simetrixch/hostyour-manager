@@ -39,10 +39,10 @@ function target(over: Partial<OnboardTarget> = {}): OnboardTarget {
 
 function report(gate: GateResult, verdict: "pass" | "fail", manifest: ConsumerManifest | null = null): GateReport {
   return {
-    contractVersion: "1.4", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
+    contractVersion: "1.5", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
     requestedRef: "main", resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest,
     dependencies: [], gates: [gate],
-    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
+    sandbox: { mustFailTargets: [], mustFailTargetsDeclaredListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
     verdict, reportHash: "runner-hash",
   };
 }
@@ -69,7 +69,7 @@ class FakeAttestedBuilds implements AttestedBuildReader, AttestedFqdnReader {
 }
 
 function deps(repo: RepoReader, runner: GateRunner, over: Partial<ValidateDeps> = {}): ValidateDeps {
-  return { repo, runner, registrations: new FakeAttestedBuilds(), tenantSubdomains: async () => [], log: () => {}, signal: new AbortController().signal, attestListening: true, resolveQuota: (size, brings) => seedQuota(size, brings), ...over };
+  return { repo, runner, registrations: new FakeAttestedBuilds(), tenantSubdomains: async () => [], log: () => {}, signal: new AbortController().signal, declareListening: true, resolveQuota: (size, brings) => seedQuota(size, brings), ...over };
 }
 
 /** A manifest that declares `builds`, with a chart unless `chart` is false. */
@@ -114,6 +114,22 @@ describe("validateOnboard", () => {
     expect(lines.some((l) => l.startsWith("G1 pass"))).toBe(true);
     expect(lines.some((l) => l.startsWith("G18 pass"))).toBe(true);
     expect(lines.some((l) => l.includes("cloned"))).toBe(true);
+  });
+
+  // WHAT THE FENCE PROOF RESTS ON, on the record of a run that PASSED it. Three of the four legs of
+  // the sandbox attestation are probes the runner made from inside; the fourth — that the must-fail
+  // targets were listening — is the Manager's word and nothing measures it, so a denied connect to a
+  // target nobody proved was there proves nothing. A run that passed used to say none of that.
+  it("writes what the fence proof rests on into the run log, naming the target nothing measured", async () => {
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
+    const declared = "10.1.1.9:16443";
+    const passing = report(g1Pass, "pass", manifestWith(["acme-api"]));
+    const runner = new FakeGateRunner({ report: { ...passing, sandbox: { ...passing.sandbox, mustFailTargets: [declared] } } });
+    const lines: string[] = [];
+    await validateOnboard(req(), target(), deps(repo, runner, { log: (l) => lines.push(l) }));
+    // The target the fence was proven against is on the record, beside the fact that the Manager is
+    // the only thing that said it was there.
+    expect(lines.some((l) => l.includes(declared))).toBe(true);
   });
 
   it("emits G16 and G18 although the ref is NOT a release tag and the repo has never released", async () => {

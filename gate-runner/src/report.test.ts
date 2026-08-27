@@ -22,7 +22,7 @@ function gate(status: "pass" | "fail", severity: "hard" | "soft" = "hard"): Gate
 
 const greenSandbox: SandboxAttestation = {
   mustFailTargets: ["https://10.1.1.1:443/"],
-  mustFailTargetsConfirmedListening: true,
+  mustFailTargetsDeclaredListening: true,
   mustFailDenied: true,
   managerAddrDenied: true,
   mustPassReached: true,

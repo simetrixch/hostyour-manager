@@ -6,7 +6,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 function report(verdict: "pass" | "fail" = "pass"): GateReport {
   return {
-    contractVersion: "1.4",
+    contractVersion: "1.5",
     runnerVersion: "test",
     repoURL: "https://github.com/x/y.git",
     requestedRef: "main",
@@ -16,7 +16,7 @@ function report(verdict: "pass" | "fail" = "pass"): GateReport {
     manifest: null,
     dependencies: [],
     gates: [],
-    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
+    sandbox: { mustFailTargets: [], mustFailTargetsDeclaredListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
     verdict,
     reportHash: "h",
   };
@@ -31,7 +31,7 @@ function req(): GateJobRequest {
     requestedRef: "main",
     resolvedSha: "0".repeat(40),
     clusterValueFiles: [{ path: clusterMapPath("m1.example"), content: "global:\n  endpoints:\n    vault:\n      url: https://v:8200\n" }],
-    mustFailTargetsConfirmedListening: true,
+    mustFailTargetsDeclaredListening: true,
   };
 }
 

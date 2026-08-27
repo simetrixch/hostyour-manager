@@ -24,7 +24,7 @@ const TITLE = "sandbox fence";
 const SEVERITY = "hard" as const;
 const EXPECTED =
   "the runner's own egress self-probe proves the sandbox fence holds before any gate reads the repository: " +
-  "every must-fail target denied against the Manager's confirmed-listening attestation, the Manager's own address denied, " +
+  "every must-fail target denied against the Manager's DECLARATION that they were listening — a declaration no probe stands behind — the Manager's own address denied, " +
   "and the one allowed egress reached";
 
 /** The refusal row a run writes INSTEAD of its gates when the fence self-probe was not green.

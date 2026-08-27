@@ -45,7 +45,7 @@ export function checkStep(ports: OnboardPorts, p: OnboardParams): Step {
         target,
         {
           repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains,
-          log: (l) => ctx.log("stdout", l), signal: ctx.signal, attestListening: ports.attestListening,
+          log: (l) => ctx.log("stdout", l), signal: ctx.signal, declareListening: ports.declareListening,
           resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings),
         },
       );

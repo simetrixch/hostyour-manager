@@ -10,7 +10,7 @@
 import { createConnection } from "node:net";
 import type { SandboxAttestation } from "../../shared/gates.ts";
 
-/** The confirmed-listening attestation + the three probe roles the runner must verify. */
+/** The Manager's listening declaration + the three probe roles the runner must verify. */
 export interface FenceConfig {
   /** LAN targets that MUST be blocked (the mother's Traefik). Echoed verbatim into the report. */
   mustFailTargets: string[];
@@ -18,8 +18,9 @@ export interface FenceConfig {
   managerAddr: string;
   /** The one egress the job legitimately needs (github.com) — must be reachable. */
   mustPassTarget: string;
-  /** The Manager's attestation that the must-fail targets were confirmed listening; echoed. */
-  confirmedListening: boolean;
+  /** The Manager's DECLARATION that the must-fail targets were listening; echoed. Nothing measured
+   *  it — see shared/gates.ts SandboxAttestationSchema — so it is what a denied connect is worth. */
+  declaredListening: boolean;
   /** Per-connect budget; defaults to DEFAULT_TIMEOUT_MS when unset or non-positive. */
   timeoutMs?: number;
 }
@@ -153,7 +154,7 @@ export async function selfProbe(cfg: FenceConfig, connect: ConnectFn = defaultCo
 
   return {
     mustFailTargets,
-    mustFailTargetsConfirmedListening: cfg.confirmedListening === true,
+    mustFailTargetsDeclaredListening: cfg.declaredListening === true,
     // Every must-fail target must be denied. An EMPTY list proves nothing, so it is not a pass —
     // a deliberate fail-closed refinement of the plain `.every()` (which is vacuously true on []).
     mustFailDenied: denied.length > 0 && denied.every((d) => d),

@@ -27,7 +27,7 @@ export interface GateJobRequest {
   /** The target cluster's values chain, VERBATIM and in layering order — the render's only value
    *  source besides the chart's own values files. */
   clusterValueFiles: readonly ClusterValueFile[];
-  mustFailTargetsConfirmedListening: boolean; // the Manager's confirmed-listening attestation
+  mustFailTargetsDeclaredListening: boolean; // the Manager's WORD that they were listening — no probe
   repoCredentialId?: string; // read credential for a PRIVATE repo clone; omitted = public/anon
 }
 

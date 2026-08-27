@@ -19,6 +19,7 @@
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";
 import type { GateReport, GateResult } from "../../../shared/gates.ts";
+import { sandboxProvenance } from "../../../shared/gates.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { AppError } from "../../kernel/errors.ts";
@@ -104,8 +105,10 @@ export interface ValidateDeps {
   /** Gate-line sink -> events rows (append-only). Called once per gate as it lands. */
   log: (line: string) => void;
   signal: AbortSignal;
-  /** The Manager's confirmed-listening attestation for the must-fail probe targets. */
-  attestListening: boolean;
+  /** The Manager's DECLARATION that the must-fail probe targets were listening. Nothing measures it
+   *  (boot/wire-units.ts states it as a constant), which is why the report's leg is named for what it
+   *  is; `sandboxProvenance` is what puts that on the record of a run that passed. */
+  declareListening: boolean;
   /** The size table, bound to the Manager's own inventory by the caller — G24 needs the six figures
    *  a size resolves to for what the unit brings, and this module holds no db of its own. */
   resolveQuota: (size: UnitSize, brings: UnitComposition) => UnitQuota;
@@ -194,7 +197,7 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
       requestedRef: req.ref,
       resolvedSha: cloned.resolvedSha,
       clusterValueFiles: target.clusterValueFiles,
-      mustFailTargetsConfirmedListening: deps.attestListening,
+      mustFailTargetsDeclaredListening: deps.declareListening,
       ...(req.repoCredentialId ? { repoCredentialId: req.repoCredentialId } : {}),
     });
     let runnerReport: GateReport;
@@ -208,6 +211,11 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
       await deps.runner.cancel(jobId).catch(() => undefined);
       throw err;
     }
+    // WHAT THE FENCE PROOF RESTS ON, written onto the record of a run that PASSED it. The receipt-time
+    // refusal prints `sandboxFailures` when a leg did not hold; a run where every leg held printed
+    // nothing at all, so the one leg that is nobody's measurement left no trace on the run that
+    // relied on it. This line is that trace.
+    deps.log(sandboxProvenance(runnerReport.sandbox));
 
     // Read unconditionally: the unit's platform host is composed from its name whether or not the
     // manifest declares an extra fqdn, so the tenant-subdomain clause of G23 always has an object.

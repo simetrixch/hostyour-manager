@@ -503,7 +503,9 @@ export class TektonGateRunner implements GateRunner {
           p("must-fail-targets", this.cfg.fence.mustFailTargets.join(",")),
           p("manager-addr", this.cfg.fence.managerAddr),
           p("must-pass-target", this.cfg.fence.mustPassTarget),
-          p("confirmed-listening", req.mustFailTargetsConfirmedListening ? "true" : "false"),
+          // The PARAMETER keeps its name: the Pipeline that declares it stands in the platform
+          // repository and is not this repository's to rename. What it carries is a declaration.
+          p("confirmed-listening", req.mustFailTargetsDeclaredListening ? "true" : "false"),
           p("runner-version", this.cfg.runnerVersion),
           p("kube-version", this.cfg.kubeVersion),
           p("job-budget-ms", String(this.cfg.jobBudgetMs)),

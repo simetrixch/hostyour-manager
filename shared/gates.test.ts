@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { GateResultSchema, GateReportSchema, hardGatesPass, reportHashPayload, sandboxFailures, sandboxGreen, type GateResult, type SandboxAttestation } from "./gates.ts";
+import { GateResultSchema, GateReportSchema, hardGatesPass, reportHashPayload, sandboxFailures, sandboxGreen, sandboxProvenance, type GateResult, type SandboxAttestation } from "./gates.ts";
 
 // A valid passing gate; override fields per case.
 function gate(over: Record<string, unknown> = {}): unknown {
@@ -82,12 +82,12 @@ describe("hardGatesPass — the verdict's hard-gate leg", () => {
 describe("the verdict's sandbox leg — one predicate, read by the runner and the Manager", () => {
   const green: SandboxAttestation = {
     mustFailTargets: ["10.1.1.1:443"],
-    mustFailTargetsConfirmedListening: true,
+    mustFailTargetsDeclaredListening: true,
     mustFailDenied: true,
     managerAddrDenied: true,
     mustPassReached: true,
   };
-  const LEGS = ["mustFailTargetsConfirmedListening", "mustFailDenied", "managerAddrDenied", "mustPassReached"] as const;
+  const LEGS = ["mustFailTargetsDeclaredListening", "mustFailDenied", "managerAddrDenied", "mustPassReached"] as const;
 
   it("INNOCENT CASE: an attestation whose every leg holds is green and names no failure", () => {
     expect(sandboxGreen(green)).toBe(true);
@@ -122,10 +122,42 @@ describe("the verdict's sandbox leg — one predicate, read by the runner and th
   });
 });
 
+// WHAT THE FENCE PROOF RESTS ON. Three of the four legs are probes the runner made from inside the
+// sandbox; the fourth is the Manager's word, and `sandboxFailures` says nothing about it when
+// everything held — so a run that passed carried no record of the one leg nobody measured.
+describe("sandboxProvenance — the record a GREEN run leaves", () => {
+  const green: SandboxAttestation = {
+    mustFailTargets: ["10.1.1.9:16443", "10.1.1.9:8484"],
+    mustFailTargetsDeclaredListening: true,
+    mustFailDenied: true,
+    managerAddrDenied: true,
+    mustPassReached: true,
+  };
+
+  it("names EVERY target the fence was proven against, because that is what nothing measured", () => {
+    const said = sandboxProvenance(green);
+    for (const t of green.mustFailTargets) expect(said, t).toContain(t);
+  });
+
+  // The same shape sandboxFailures guards: with no target configured there is nothing to name, and a
+  // sentence naming an empty list would read as a target that was there.
+  it("says nothing was configured rather than naming an empty list", () => {
+    const said = sandboxProvenance({ ...green, mustFailTargets: [] });
+    expect(said).toContain("none configured");
+  });
+
+  // It is the GREEN path's record and does not repeat what sandboxFailures says: a leg that did not
+  // hold has its own sentence there, and two descriptions of one leg is how they come to disagree.
+  it("is the green path's line — a failed leg is stated by sandboxFailures and not here", () => {
+    expect(sandboxFailures(green)).toEqual([]);
+    expect(sandboxGreen(green)).toBe(true);
+  });
+});
+
 describe("GateReport — top-level shape", () => {
   it("validates a minimal well-formed report", () => {
     const report = {
-      contractVersion: "1.4",
+      contractVersion: "1.5",
       runnerVersion: "0.1.0",
       repoURL: "https://github.com/example/app.git",
       requestedRef: "main",
@@ -137,7 +169,7 @@ describe("GateReport — top-level shape", () => {
       gates: [gate()],
       sandbox: {
         mustFailTargets: ["https://10.1.1.1:443/"],
-        mustFailTargetsConfirmedListening: true,
+        mustFailTargetsDeclaredListening: true,
         mustFailDenied: true,
         managerAddrDenied: true,
         mustPassReached: true,
@@ -151,6 +183,22 @@ describe("GateReport — top-level shape", () => {
   it("rejects a report with a non-40-char resolvedSha", () => {
     const bad = { resolvedSha: "deadbeef" };
     expect(GateReportSchema.safeParse({ ...bad }).success).toBe(false);
+  });
+
+  // THE VERSION LITERAL, held to what it claims: a report written against the PREVIOUS contract is
+  // refused rather than read half-right. The runner and the Manager are separate images, and a pin
+  // rolled back by hand pairs a new Manager with a runner whose report spells the sandbox's fourth
+  // leg the old way — which would otherwise be read as undefined and therefore as not-green.
+  it("refuses a report written against the previous contract version", () => {
+    const wellFormed = {
+      contractVersion: "1.5", runnerVersion: "0.1.0", repoURL: "https://github.com/example/app.git",
+      requestedRef: "main", resolvedSha: "0".repeat(40), startedAt: 1, finishedAt: 2,
+      manifest: null, dependencies: [], gates: [gate()],
+      sandbox: { mustFailTargets: [], mustFailTargetsDeclaredListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
+      verdict: "pass", reportHash: "abc",
+    };
+    expect(GateReportSchema.safeParse(wellFormed).success).toBe(true);
+    expect(GateReportSchema.safeParse({ ...wellFormed, contractVersion: "1.4" }).success).toBe(false);
   });
 });
 

@@ -11,7 +11,7 @@ const BASE: FenceConfig = {
   mustFailTargets: ["10.1.1.1:443", "traefik.lan:80"],
   managerAddr: "manager.internal:8443",
   mustPassTarget: "github.com",
-  confirmedListening: true,
+  declaredListening: true,
 };
 
 /** A fake keyed on host: reachable() decides which hosts "connect". Records every call. */
@@ -33,7 +33,7 @@ describe("fence.selfProbe", () => {
     expect(att.mustFailDenied).toBe(true);
     expect(att.managerAddrDenied).toBe(true);
     expect(att.mustPassReached).toBe(true);
-    expect(att.mustFailTargetsConfirmedListening).toBe(true); // echoed from cfg
+    expect(att.mustFailTargetsDeclaredListening).toBe(true); // echoed from cfg
     expect(att.mustFailTargets).toEqual(["10.1.1.1:443", "traefik.lan:80"]); // echoed verbatim
     // The attestation must satisfy the shared report contract.
     expect(() => SandboxAttestationSchema.parse(att)).not.toThrow();
@@ -66,7 +66,7 @@ describe("fence.selfProbe", () => {
       mustFailTargets: ["https://10.1.1.1:443/"],
       managerAddr: "host:8443",
       mustPassTarget: "github.com",
-      confirmedListening: false,
+      declaredListening: false,
     };
     await selfProbe(cfg, fn);
 
@@ -102,7 +102,7 @@ describe("fence.selfProbe", () => {
         mustFailTargets: ["http://10.1.1.1", "http://traefik.lan:80"],
         managerAddr: "https://c.internal",
         mustPassTarget: "https://github.com",
-        confirmedListening: false,
+        declaredListening: false,
       },
       fn,
     );

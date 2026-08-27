@@ -214,7 +214,7 @@ export interface OnboardPorts {
    *  its sourceRepos allows the generated Application's hostyour-cloud sources ($values + the service
    *  sources) alongside the consumer's own chart repo (see renderConsumerAppProject). */
   platformRepoURL: string;
-  attestListening: boolean;
+  declareListening: boolean;
   /** Bound of the whole validation poll (validate.ts pollBudgetMs). The wiring sets it a margin
    *  above the gate-runner's sandbox job budget, so the in-pod budget fires first on a healthy run
    *  and this bound only catches a PipelineRun that never settles. */
@@ -539,7 +539,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         const outcome = await validateOnboard(
           { repoURL: req.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: req.consumerName, repoCredentialId: req.repoCredentialId, size: req.size },
           { domain: master.domain, stage, clusterValueFiles: [] },
-          { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, attestListening: ports.attestListening, resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings), ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
+          { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, declareListening: ports.declareListening, resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings), ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
         );
         if (outcome.verdict !== "pass" || outcome.builds === null) {
           const failed = outcome.report.gates.filter((g) => g.status !== "pass");
@@ -600,7 +600,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
       const outcome = await validateOnboard(
         { repoURL: req.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: req.consumerName, repoCredentialId: req.repoCredentialId, size: req.size },
         { ...r.target, clusterValueFiles },
-        { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, attestListening: ports.attestListening, resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings), ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
+        { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, declareListening: ports.declareListening, resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings), ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
       );
       if (outcome.verdict !== "pass" || outcome.builds === null) {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass");

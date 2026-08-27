@@ -90,9 +90,11 @@ export function parseEnv(env: NodeJS.ProcessEnv): CliInputs {
       mustFailTargets: csv(env.MUST_FAIL_TARGETS),
       managerAddr: req(env, "MANAGER_ADDR"),
       mustPassTarget: req(env, "MUST_PASS_TARGET"),
-      // The Manager attests it confirmed the must-fail targets are listening before dispatch;
-      // fail-closed default false so an unset flag never masquerades as a proven precondition.
-      confirmedListening: env.CONFIRMED_LISTENING === "true",
+      // The Manager's declaration that the must-fail targets are listening; fail-closed default
+      // false, so an unset flag never masquerades as a stated precondition. The ENV VAR keeps its
+      // name: it is the Tekton pipeline's parameter (clusters/inventories/gate-runner/templates/
+      // task-gate.yaml), which lives in the platform repository and is not this repository's to rename.
+      declaredListening: env.CONFIRMED_LISTENING === "true",
       timeoutMs: intEnv(env, "FENCE_TIMEOUT_MS", 3000),
     },
     jobBudgetMs: intEnv(env, "JOB_BUDGET_MS", 8 * 60_000),
@@ -100,15 +102,16 @@ export function parseEnv(env: NodeJS.ProcessEnv): CliInputs {
 }
 
 /** Prove the fence, then run the gates over the cloned workspace, returning the frozen report. If the
- *  fence self-probe is not green OR the Manager did not attest confirmed-listening, it REFUSES to
+ *  fence self-probe is not green OR the Manager declared no listening must-fail target, it REFUSES to
  *  read untrusted code and returns a report whose ONE gate row (G25) says the fence did not hold and
  *  names every sandbox gate that therefore did not run — the Manager's own sandbox re-check
  *  (sandboxGreen, at the gate-runner adapter's receipt) then refuses the run. `connect`/`now` are
  *  injectable for tests. */
 export async function runGateCli(inputs: CliInputs, connect?: ConnectFn, now: () => number = Date.now): Promise<GateReport> {
-  // Probe with the Manager's REAL confirmed-listening attestation: sandboxGreen requires it AND the
-  // three egress probes, so a missing attestation OR a fence that is not holding both fail closed below,
-  // and the refusing report carries the truthful (not-green) sandbox the Manager re-checks.
+  // Probe with the Manager's REAL declaration: sandboxGreen requires it AND the three egress probes,
+  // so a missing declaration OR a fence that is not holding both fail closed below, and the refusing
+  // report carries the truthful (not-green) sandbox the Manager re-checks. The declaration is the one
+  // leg of the four that no probe stands behind — see shared/gates.ts sandboxProvenance.
   const sandbox: SandboxAttestation = await selfProbe(inputs.fence, connect);
   // The report a refused run returns. It carries G25 and NOTHING else: a report whose `gates` were
   // empty said only "no gate failed", which read exactly like a repository nobody could fault, and

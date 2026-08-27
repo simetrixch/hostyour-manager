@@ -55,11 +55,25 @@ export const GateResultSchema = z
   });
 export type GateResult = z.infer<typeof GateResultSchema>;
 
-/** The sandbox self-probe attestation frozen into the report:
- *  the fence was proven live against confirmed-listening targets before the job ran. */
+/** The sandbox self-probe attestation frozen into the report: what the runner MEASURED about its own
+ *  egress fence from inside, before the job ran — plus the one leg nobody measured.
+ *
+ *  THREE OF THE FOUR LEGS ARE PROBES the runner made itself. The fourth,
+ *  `mustFailTargetsDeclaredListening`, is the Manager's WORD and no probe stands behind it: the
+ *  wiring states it as a constant. It used to be spelled `…ConfirmedListening`, which claimed a
+ *  measurement, and the difference is the whole of what a denied connect is worth — a target nothing
+ *  proved was listening is a target the sandbox may simply have been unable to reach, and a fence
+ *  that was never tested then reports as held. Measured on an installation whose `lan_host` answer
+ *  carried ANOTHER machine's address, 2026-08-26: the must-fail target was that other machine's API
+ *  server, the Manager could reach it over the public internet perfectly well and would have
+ *  declared it listening, while the sandbox's own vantage is a different one entirely.
+ *
+ *  WHICH VANTAGE SHOULD MEASURE IT is open and belongs to whoever owns the fence contract. What is
+ *  settled is that the record may not present the declaration as a confirmation — see
+ *  `sandboxProvenance`, which is what a run log says about it on a GREEN run. */
 export const SandboxAttestationSchema = z.object({
   mustFailTargets: z.array(z.string()), // rendered from config, never guessed
-  mustFailTargetsConfirmedListening: z.boolean(), // the Manager's attestation, echoed
+  mustFailTargetsDeclaredListening: z.boolean(), // the Manager's WORD — nothing measured it
   mustFailDenied: z.boolean(), // the runner observed its own connects blocked
   managerAddrDenied: z.boolean(), // the second must-fail probe (the Manager's own address)
   mustPassReached: z.boolean(),
@@ -83,7 +97,7 @@ export const GateReportSchema = z.object({
   // Manager with an old runner, and this line is what turns that into a named refusal at the first
   // gate-run instead of a field silently read as undefined. Bump it whenever a field is added,
   // removed or renamed here.
-  contractVersion: z.literal("1.4"),
+  contractVersion: z.literal("1.5"),
   runnerVersion: z.string(),
   repoURL: z.string(),
   requestedRef: z.string(),
@@ -189,7 +203,26 @@ export const SANDBOX_SIDE_GATE_IDS: readonly string[] = [SANDBOX_FENCE_GATE_ID];
  *  second copy would let "the fence held" come to mean two different things on the two sides. */
 export function sandboxGreen(s: SandboxAttestation): boolean {
   return (
-    s.mustFailTargetsConfirmedListening && s.mustFailDenied && s.managerAddrDenied && s.mustPassReached
+    s.mustFailTargetsDeclaredListening && s.mustFailDenied && s.managerAddrDenied && s.mustPassReached
+  );
+}
+
+/** WHAT THE FENCE PROOF RESTS ON, as one line a run log carries on a GREEN run.
+ *
+ *  `sandboxFailures` is the red path and says nothing when everything holds — so a run that passed
+ *  left no record at all of the fact that one of the four legs is nobody's measurement. This is that
+ *  record: it names the three the runner probed from inside the sandbox and the one the Manager
+ *  merely declared, so whoever reads the receipt can see which part rests on somebody's word.
+ *
+ *  It is written for the case where everything held. A leg that did NOT hold is stated by
+ *  `sandboxFailures`, in that leg's own sentence, and is not repeated here. */
+export function sandboxProvenance(s: SandboxAttestation): string {
+  const probed = "measured by the runner from inside the sandbox: the must-fail targets denied, the Manager's own address denied, the one allowed egress reached";
+  const declared = s.mustFailTargets.length > 0 ? s.mustFailTargets.join(", ") : "(none configured)";
+  return (
+    `the sandbox fence — three legs ${probed}; ONE leg measured by nobody: that ${declared} ` +
+    "was listening is the Manager's declaration, so a denied connect to it proves the fence held " +
+    "against a target no probe put there"
   );
 }
 
@@ -203,9 +236,9 @@ export function sandboxGreen(s: SandboxAttestation): boolean {
  *  more than the boolean carries. */
 export function sandboxFailures(s: SandboxAttestation): string[] {
   const out: string[] = [];
-  if (!s.mustFailTargetsConfirmedListening) {
+  if (!s.mustFailTargetsDeclaredListening) {
     out.push(
-      "the Manager did not attest that the must-fail probe targets were listening, so a blocked connect here would prove nothing about the fence",
+      "the Manager did not declare that the must-fail probe targets were listening, so a blocked connect here would prove nothing about the fence",
     );
   }
   if (!s.mustFailDenied) {

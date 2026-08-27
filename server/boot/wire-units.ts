@@ -433,9 +433,13 @@ function buildConsumerOnboarding(
     // The platform's own GitOps repo — the per-consumer AppProject must allow the generated
     // Application's hostyour-cloud sources ($values ref + image-guard) next to the consumer's chart repo.
     platformRepoURL: `https://github.com/${config.github.owner}/${config.github.repo}.git`,
-    // The gate-runner's own sandbox self-probe is the primary lock; a manager-side probe of the
-    // must-fail targets before each job is a follow-up, so this attestation is asserted for now.
-    attestListening: true,
+    // A CONSTANT, and the report says so rather than calling it a confirmation. Nothing here probes
+    // the must-fail targets: this is the Manager's word that they were listening, and the leg is
+    // named `…DeclaredListening` end to end so a receipt cannot be read as a measurement. What a
+    // measurement would be worth is a separate question, because the vantage that matters is the
+    // SANDBOX's and not this pod's — the Manager reaches addresses the gate pod cannot, so a probe
+    // from here can attest a target the fence never had to block.
+    declareListening: true,
     // The platform's OWN unit, by name, from the deployment. Present ⇒ that one unit may be
     // onboarded without a gate run, and only at the first installation in the master role
     // (domains/units/first-master.ts holds the other three conditions). Omitted when unset, so a

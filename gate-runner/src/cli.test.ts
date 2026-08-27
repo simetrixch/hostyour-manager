@@ -41,9 +41,9 @@ const ENV = {
   CONFIRMED_LISTENING: "true",
 } satisfies NodeJS.ProcessEnv;
 
-function inputs(sourceDir: string, confirmedListening = true): CliInputs {
+function inputs(sourceDir: string, declaredListening = true): CliInputs {
   const i = parseEnv({ ...ENV, SOURCE_DIR: sourceDir });
-  return { ...i, fence: { ...i.fence, confirmedListening } };
+  return { ...i, fence: { ...i.fence, declaredListening } };
 }
 
 // github reachable, everything internal blocked => fence green.

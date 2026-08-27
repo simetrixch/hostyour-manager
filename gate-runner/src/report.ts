@@ -51,7 +51,7 @@ export function assembleReport(input: ReportInput): GateReport {
   const verdict: "pass" | "fail" =
     hardGatesPass(input.gates) && sandboxGreen(input.sandbox) ? "pass" : "fail";
   const body = {
-    contractVersion: "1.4" as const,
+    contractVersion: "1.5" as const,
     runnerVersion: input.runnerVersion,
     repoURL: input.repoURL,
     requestedRef: input.requestedRef,

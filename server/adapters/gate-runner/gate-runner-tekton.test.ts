@@ -16,10 +16,10 @@ const CHAIN = [
 
 function report(verdict: "pass" | "fail" = "pass"): GateReport {
   const body = {
-    contractVersion: "1.4" as const, runnerVersion: "t", repoURL: "https://github.com/x/y.git", requestedRef: "main",
+    contractVersion: "1.5" as const, runnerVersion: "t", repoURL: "https://github.com/x/y.git", requestedRef: "main",
     resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest: null,
     dependencies: [], gates: [],
-    sandbox: { mustFailTargets: ["c:8080"], mustFailTargetsConfirmedListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
+    sandbox: { mustFailTargets: ["c:8080"], mustFailTargetsDeclaredListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
     verdict,
   };
   // The hash the runner's assembleReport authors — poll verifies it on receipt, so the fixture
@@ -31,7 +31,7 @@ function req(over: Partial<GateJobRequest> = {}): GateJobRequest {
   return {
     targetName: "y", stage: "prod", chartPath: "deploy/chart", repoURL: "https://github.com/x/y.git",
     requestedRef: "main", resolvedSha: SHA, clusterValueFiles: CHAIN,
-    mustFailTargetsConfirmedListening: true, ...over,
+    mustFailTargetsDeclaredListening: true, ...over,
   };
 }
 
@@ -287,7 +287,7 @@ describe("TektonGateRunner", () => {
   // 2026-08-26: a report attesting that the node's own API server and the Manager were both reachable
   // from inside the gate pod was accepted and composed into a verdict — the attestation was a field
   // and not a fence. Each leg is planted on its own, so a refusal cannot rest on one of them alone.
-  const LEGS = ["mustFailTargetsConfirmedListening", "mustFailDenied", "managerAddrDenied", "mustPassReached"] as const;
+  const LEGS = ["mustFailTargetsDeclaredListening", "mustFailDenied", "managerAddrDenied", "mustPassReached"] as const;
   for (const leg of LEGS) {
     it(`poll: a report whose sandbox attestation says ${leg} did not hold is refused, and the refusal is not a gate verdict`, async () => {
       const green = report("pass");

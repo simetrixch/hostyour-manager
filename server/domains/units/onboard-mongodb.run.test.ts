@@ -46,12 +46,12 @@ const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: clust
 
 function passReport(mongodb: MongodbMode): GateReport {
   return {
-    contractVersion: "1.4", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
+    contractVersion: "1.5", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
     requestedRef: "HEAD", resolvedSha: SHA, startedAt: 1, finishedAt: 2,
     manifest: { ...MANIFEST, mongodb },
     dependencies: [],
     gates: [{ id: "G1", title: "manifest present", severity: "hard", status: "pass", expected: "x", found: "y", reason: null, detail: "ok" }],
-    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
+    sandbox: { mustFailTargets: [], mustFailTargetsDeclaredListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
     verdict: "pass", reportHash: "h",
   };
 }
@@ -85,7 +85,7 @@ function ports(mongodb: MongodbMode, seeder?: RecordingSeeder): OnboardPorts {
     }),
     platformRepoURL: "https://github.com/x/hostyour-cloud.git",
     tenantSubdomains: async () => [],
-    attestListening: true,
+    declareListening: true,
     argoWatchTimeoutMs: 1000,
     releaseWorkflowTimeoutMs: 200,
     releaseBuildTimeoutMs: 200,

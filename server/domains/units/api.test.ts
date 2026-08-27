@@ -81,11 +81,11 @@ const CHART_PINS = 'builds:\n  - name: acme-api\n    image: acme-api\n    tag: "
 
 function passReport(): GateReport {
   return {
-    contractVersion: "1.4", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
+    contractVersion: "1.5", runnerVersion: "t", repoURL: "https://github.com/x/acme.git",
     requestedRef: "main", resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest: CONSUMER_MANIFEST,
     dependencies: [], gates: [{ id: "G1", title: "m", severity: "hard", status: "pass", expected: "x", found: "y", reason: null, detail: "ok" }],
     verdict: "pass", reportHash: "h",
-    sandbox: { mustFailTargets: [], mustFailTargetsConfirmedListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
+    sandbox: { mustFailTargets: [], mustFailTargetsDeclaredListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true },
   };
 }
 
@@ -125,7 +125,7 @@ function onboardPorts(): OnboardPorts {
     resolver: lifecycle.resolver,
     platformRepoURL: "https://github.com/x/hostyour-cloud.git",
     tenantSubdomains: async () => [],
-    attestListening: true,
+    declareListening: true,
     argoWatchTimeoutMs: 1000,
     releaseWorkflowTimeoutMs: 100,
     releaseBuildTimeoutMs: 100,
