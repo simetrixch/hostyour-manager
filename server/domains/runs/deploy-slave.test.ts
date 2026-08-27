@@ -170,9 +170,13 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(db.db.select().from(clusters).all()).toHaveLength(0);
   });
 
-  it("slave-preflight blocks on the HARD policy: a bound port 80 (a mere WARN at adopt time)", async () => {
+  // The whole refusal, end to end, in the shape the field produced it: a machine already serving
+  // ingress through a DNAT — nothing listening on 80, and a connection to its own address accepted.
+  // That is a WARN at adopt time and a hard refusal here, and it is the machine a second installation
+  // must not be laid over.
+  it("slave-preflight blocks on the HARD policy: port 80 served with no listener (a mere WARN at adopt time)", async () => {
     const hosts = scriptedHosts({
-      preflightOut: HEALTHY_SLAVE_PREFLIGHT.replace("CHECK port.80 PASS port 80 free", "CHECK port.80 WARN port 80 already bound"),
+      preflightOut: HEALTHY_SLAVE_PREFLIGHT.replace("PORT 80 listener=no connect=no", "PORT 80 listener=no connect=203.0.113.7"),
     });
     const { db, executor } = await makeHarness({ hosts });
     const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
@@ -458,7 +462,9 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
       "CHECK os.ubuntu PASS ubuntu 26.04",
       "CHECK cpu.count WARN 2 cores (>=4 recommended)",
       "CHECK disk.free FAIL 10 GB free (<25)",
-      "CHECK port.443 WARN port 443 already bound",
+      // The reading a machine already serving ingress produces: no listening socket, and a connection
+      // to its own address accepted anyway.
+      "PORT 443 listener=no connect=203.0.113.7",
       "CHECK snapd.present WARN snapd missing",
       "CHECK time.sync WARN clock not NTP-synced",
     ].join("\n")).checks;

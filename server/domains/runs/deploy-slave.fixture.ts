@@ -101,8 +101,10 @@ export const HEALTHY_SLAVE_PREFLIGHT = [
   "CHECK mem.total PASS 32 GiB",
   "CHECK disk.free PASS 900 GB free",
   "CHECK port.22 PASS sshd listening",
-  "CHECK port.80 PASS port 80 free",
-  "CHECK port.443 PASS port 443 free",
+  // The ingress ports ship their two readings and are judged in portCheck: nothing listening and
+  // every connection refused is the bare machine a slave may be deployed onto.
+  "PORT 80 listener=no connect=no",
+  "PORT 443 listener=no connect=no",
   "CHECK net.egress PASS github.com reachable",
   "CHECK snapd.present PASS snap present",
   "CHECK time.sync PASS clock synced",

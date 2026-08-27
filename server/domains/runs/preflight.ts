@@ -1,11 +1,18 @@
 // The adopt preflight checks. Two halves:
 //   1. PREFLIGHT_SCRIPT — a self-contained bash script of checks, uploaded + run over SSH (step 1).
 //      It emits one `CHECK <id> <PASS|WARN|FAIL> <detail>` line per check, one
-//      `NIC <iface> <addr>` line per global-scope IPv4 interface, plus a single
+//      `NIC <iface> <addr>` line per global-scope IPv4 interface, one
+//      `PORT <port> listener=<yes|no> connect=<address|no>` line per ingress port, plus a single
 //      `PUBLIC_IP <ip>` line (feeds dns.wildcard + the baseline step).
 //   2. parsePreflightOutput / makeCheck — turn those lines (and the runner-added checks
 //      sudo.ok / dns.wildcard / net.inbound) into typed PreflightChecks via one catalog.
 // Pure module (no ssh2, no db): unit-testable; the adopt run def wires it to a session.
+//
+// WHY THE INGRESS PORTS ARE THE ONE CHECK THE SCRIPT DOES NOT JUDGE. Every other check reaches its
+// verdict on the machine and ships the answer; `port.80` and `port.443` ship the two MEASUREMENTS and
+// are judged here, in `portCheck`. The verdict is what was wrong about them, and a verdict written in
+// the script is a verdict no test in this repository can plant a defect in — the script's first and
+// only reader is bash on somebody's host.
 import type { PreflightCheck, PreflightSeverity, PreflightStatus } from "../../../shared/preflight.ts";
 
 interface CatalogEntry {
@@ -23,8 +30,8 @@ export const PREFLIGHT_CATALOG: Record<string, CatalogEntry> = {
   "disk.free": { title: "Free disk space", severity: "soft", hint: "≥40 GB free recommended." },
   "sudo.ok": { title: "Sudo access", severity: "hard", hint: "Adopt as root, or grant the user sudo first." },
   "port.22": { title: "SSH port (22)", severity: "soft", hint: "sshd should be listening on :22." },
-  "port.80": { title: "Port 80 free", severity: "soft", hint: "Traefik will own :80 — free it or expect a clash." },
-  "port.443": { title: "Port 443 free", severity: "soft", hint: "Traefik will own :443 — free it or expect a clash." },
+  "port.80": { title: "Port 80 free", severity: "soft", hint: "Traefik will own :80 — free it, or take a machine that is not already serving ingress." },
+  "port.443": { title: "Port 443 free", severity: "soft", hint: "Traefik will own :443 — free it, or take a machine that is not already serving ingress." },
   "net.inbound": { title: "Inbound 80/443 reachable", severity: "soft", hint: "Open the firewall/SG: ufw allow 22,80,443/tcp." },
   "net.egress": { title: "Outbound internet", severity: "hard", hint: "The installer needs egress for the repo, snaps, and Let's Encrypt." },
   "dns.wildcard": { title: "DNS wildcard", severity: "soft", hint: "Add *.<domain> A <server-ip> (verified via 1.1.1.1)." },
@@ -48,12 +55,56 @@ export function makeCheck(id: string, status: PreflightStatus, detail: string): 
   return check;
 }
 
+// ---- the ingress ports: two measurements, one verdict -------------------------------------
+
+/** What the machine answered about one of the ingress ports.
+ *
+ *  `listener` is what `ss -Hltn` found: a process holding the port open in USERSPACE.
+ *  `answeredAt` is the address whose connection the machine accepted — its own loopback or one of
+ *  its own global addresses — and `undefined` when every one of them refused. */
+export interface PortReading {
+  port: number;
+  listener: boolean;
+  answeredAt: string | undefined;
+}
+
+/**
+ * IS THIS MACHINE ALREADY SERVING THE PORT? — which is not the same question as "is a socket
+ * listening on it", and the difference is what let a machine already carrying a whole installation
+ * pass the check that exists to keep a second one off it.
+ *
+ * Measured on a master installation of this platform, 2026-08-26: `ss -Hltn "sport = :443"` found
+ * nothing while a connection to the machine's own address on 443 was accepted and Traefik answered
+ * 404. The Traefik Service is `type: LoadBalancer` with NodePorts behind it, so what serves 443 is a
+ * DNAT programmed below the socket layer and there is no userspace listener for `ss` to find. The
+ * port came back PASS, and `SLAVE_FAIL_ON_WARN` — the policy that turns "already bound" into a hard
+ * refusal of a slave deploy — had nothing to promote.
+ *
+ * So a connection is what decides, and the socket reading is kept beside it rather than replaced: a
+ * listener the connection could not reach (bound to one address, or a local firewall in the way) is
+ * still something that owns the port. Either measurement finding the port taken is enough.
+ *
+ * THE DETAIL NAMES BOTH MEASUREMENTS, on a pass as much as on a warning. A card that said only "port
+ * 443 free" would be the same sentence whether both measurements were made or neither, and the
+ * machine that produced this finding is the one where those two readings disagree.
+ */
+export function portCheck(reading: PortReading): PreflightCheck {
+  const { port, listener, answeredAt } = reading;
+  const socket = listener ? "a socket is listening" : "no socket is listening";
+  const connect = answeredAt === undefined
+    ? "every connection to this machine's own addresses was refused"
+    : `a connection to ${answeredAt} was accepted`;
+  const taken = listener || answeredAt !== undefined;
+  return makeCheck(`port.${port}`, taken ? "warn" : "pass",
+    `port ${port} ${taken ? "is already served" : "is free"} — ${socket}, ${connect}`);
+}
+
 // ---- deploy-slave HARD policy (the slave must reach the master's Vault) --------------------
 // Additive: adopt keeps consuming the raw parsed checks; only the deploy-slave run maps
 // them through this policy.
 
 /** Preflight checks whose WARN outcome is fatal on a SLAVE deploy: Traefik must own
- *  80/443 (`ingress` addon) and MicroK8s arrives via snap, so "port already bound" /
+ *  80/443 (`ingress` addon) and MicroK8s arrives via snap, so "port already served" /
  *  "snapd missing" — mere warnings at adopt time — mean the box cannot be deployed. */
 export const SLAVE_FAIL_ON_WARN: ReadonlySet<string> = new Set(["port.80", "port.443", "snapd.present"]);
 
@@ -165,6 +216,16 @@ export function parsePreflightOutput(stdout: string): ParsedPreflight {
       nics[nicm[1]] = nicm[2];
       continue;
     }
+    // The two readings of one ingress port, judged HERE and not on the machine — see portCheck.
+    const portm = /^PORT (\d+) listener=(yes|no) connect=(\S+)$/.exec(line);
+    if (portm?.[1] && portm[2] && portm[3]) {
+      checks.push(portCheck({
+        port: Number(portm[1]),
+        listener: portm[2] === "yes",
+        answeredAt: portm[3] === "no" ? undefined : portm[3],
+      }));
+      continue;
+    }
     const m = /^CHECK (\S+) (PASS|WARN|FAIL) (.*)$/.exec(line);
     const id = m?.[1];
     const token = m?.[2];
@@ -240,9 +301,21 @@ else emit disk.free FAIL "$availgb GB free (<25)"; fi
 
 if ss -Hltn 'sport = :22' 2>/dev/null | grep -q .; then emit port.22 PASS "sshd listening"
 else emit port.22 WARN "nothing listening on :22"; fi
+
+# The ingress ports are MEASURED here and judged in portCheck. Two readings per port: a listening
+# socket, and a connection the machine makes to itself. The connection is the one that finds an
+# ingress served through a DNAT, which has no userspace socket for ss to see; it is tried against
+# loopback first and then every global address the machine carries, because that DNAT is programmed
+# against the address a client would use and not against 127.0.0.1.
+selfaddrs=$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
 for p in 80 443; do
-  if ss -Hltn "sport = :$p" 2>/dev/null | grep -q .; then emit "port.$p" WARN "port $p already bound"
-  else emit "port.$p" PASS "port $p free"; fi
+  listener=no
+  if ss -Hltn "sport = :$p" 2>/dev/null | grep -q .; then listener=yes; fi
+  answered=no
+  for a in 127.0.0.1 $selfaddrs; do
+    if timeout 2 bash -c "</dev/tcp/$a/$p" 2>/dev/null; then answered=$a; break; fi
+  done
+  echo "PORT $p listener=$listener connect=$answered"
 done
 
 if curl -4 -sI --max-time 8 https://github.com >/dev/null 2>&1; then emit net.egress PASS "github.com reachable"
