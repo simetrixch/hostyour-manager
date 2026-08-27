@@ -143,17 +143,22 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   // ================================ redeploy (master arm), end to end ================================
 
-  it("plan: the master arm composes attest → run-deploy-cluster → run-deploy-platform-services → argocd-follow and asks for the password + the missing answers", async () => {
+  it("plan: the master arm composes attest, the placement, the three machine programs and the argocd follow, and asks for the password + the missing answers", async () => {
     const h = await liveMaster(serve);
     const { plan } = await h.executor.plan("cluster-redeploy", { serverId: MASTER_ID });
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow"]);
+    // place-ansiwise and run-deploy-host stand here because a master could otherwise receive NO
+    // machine-layer change at all: the placement had one call site, in the slave install, and this
+    // arm ran only the two programs above GitOps (hostyour-manager#69).
+    expect(plan.steps.map((s) => s.name)).toEqual(
+      ["attest-target", "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow"],
+    );
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
       ["letsencrypt_email", "letsencrypt_server", "build_plane_fqdn", "lan_cidr", "storage_mount", "storage_subdirectory"],
     );
   });
 
-  it("INNOCENT CASE: the whole master arm runs green — both programs proven dry, then run, on the machine's own records; no pin moves", { timeout: 120_000 }, async () => {
+  it("INNOCENT CASE: the whole master arm runs green — all three programs proven dry, then run, on the machine's own records; no pin moves", { timeout: 180_000 }, async () => {
     const h = await liveMaster(serve);
     const email = uniqueEmail();
 
@@ -163,17 +168,18 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The run log carries the machine runs: both programs admitted by their own dry, both green.
     const events = JSON.stringify(readEvents(h.db.db, runId));
     expect(events).toContain("admitted by dry");
+    expect(events).toContain("deploy-host: dry ");
     expect(events).toContain("deploy-cluster: dry ");
     expect(events).toContain("deploy-platform-services: dry ");
     expect(events).toContain("machine run finished: exit 0");
     // The conversation went over the machine's serve surface, and the follow still read ArgoCD.
     const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
-    expect(onMaster.filter((c) => c === "ansiwise-rest serve")).toHaveLength(2); // one conversation per program step
+    expect(onMaster.filter((c) => c === "ansiwise-rest serve")).toHaveLength(3); // one conversation per program step
     expect(onMaster.some((c) => c.includes("-n argocd get applications.argoproj.io"))).toBe(true);
 
     // The machine's OWN records: dry + run per program, every one green. This is the record an
     // operator on the machine reads — the manager reported nothing the machine does not stand behind.
-    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-cluster", "deploy-platform-services"]);
+    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-host", "deploy-cluster", "deploy-platform-services"]);
 
     // The step's checkpoint carries both machine runs green — what a re-entry would skip on.
     const checkpoint = stepColumn(h.db, runId, "run-deploy-cluster", "checkpoint_json") ?? "";

@@ -132,8 +132,11 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "role", pattern: "^slave$" },
       { answer: "committer_email", pattern: "^[^@]+@[^@]+$" },
     ]),
+    // TWO run kinds run deploy-host as well — redeploy's master arm (m1/master) and deploy-slave's
+    // machine layer (s1/slave) — so the identity row takes either spelling, for the same reason
+    // deploy-cluster's does.
     "deploy-host": programYaml("deploy-host", [
-      { answer: "operator_user", pattern: "^ubuntu$" },
+      { answer: "operator_user", pattern: "^(m1|ubuntu)$" },
       { answer: "operator_public_key", pattern: "^ssh-ed25519 " },
     ]),
     "emit-cluster-credentials": programYaml("emit-cluster-credentials", [

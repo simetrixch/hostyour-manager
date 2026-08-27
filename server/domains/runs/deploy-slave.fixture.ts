@@ -56,6 +56,10 @@ export const REDEPLOY_STEP_NAMES = STEP_NAMES.filter(
 // off the newest ssh_key credential's stored public line.
 export const SLAVE_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5TESTKEY hostyour:s1";
 
+/** The same for the master, whose own machine layer the redeploy arm now runs too: its deploy-host
+ *  is owed the public half of the key this manager reaches it with, exactly as a slave's is. */
+export const MASTER_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5TESTKEY hostyour:m1";
+
 // The tailnet-mint-join-key program's credential (the master's key file, read + removed by the
 // rejoin step). A pre-auth key puts a machine of the holder's choosing on the private network, so
 // the redaction assertions check it appears NOWHERE in the persisted run surface — and it is
@@ -419,7 +423,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
       // master); the fake session reports "SHA256:fixture" as its host key.
       preflightJson: { hostKey: "SHA256:fixture" },
     }).run();
-    await store.seal({ kind: "ssh_key", label: "master key", plaintext: Buffer.from("fake-master-key"), fingerprint: "SHA256:master", serverId: MASTER_ID });
+    await store.seal({ kind: "ssh_key", label: "master key", plaintext: Buffer.from("fake-master-key"), fingerprint: "SHA256:master", serverId: MASTER_ID, publicKey: MASTER_PUBLIC_KEY });
   }
   return { db, executor, store, hosts, platformRepo, releases };
 }

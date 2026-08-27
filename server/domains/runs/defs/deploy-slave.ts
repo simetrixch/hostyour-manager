@@ -127,7 +127,7 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
  *  adopt (the newest ssh_key credential's stored public line). The program re-installs it
  *  idempotently and proves sshd would accept it. A row without one (an adopt from before the
  *  public line was stored) sends nothing, and the program refuses the missing answer by name. */
-function operatorKeyAnswer(serverId: string): ExtraAnswers {
+export function operatorKeyAnswer(serverId: string): ExtraAnswers {
   return async (ctx) => {
     const key = (await ctx.creds.list({ serverId, kind: "ssh_key" })).at(-1);
     return key?.publicKey !== undefined ? { operator_public_key: key.publicKey } : {};

@@ -4,7 +4,8 @@ import type { Step, RunDefinition } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { servers } from "../../../db/schema/inventory.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
-import { deploySlaveSteps, SLAVE_MACHINE_INPUTS } from "./deploy-slave.ts";
+import { deploySlaveSteps, SLAVE_MACHINE_INPUTS, operatorKeyAnswer } from "./deploy-slave.ts";
+import { placeAnsiwiseStep } from "./place-ansiwise.step.ts";
 import { activeClusterTarget, loadMaster, masterFqdnOf, type DeploySlavePorts } from "./deploy-slave.kit.ts";
 import { attestClusterStep, argocdFollowStep, loadActiveCluster } from "./cluster-release.kit.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
@@ -28,12 +29,23 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } fr
 //                     is armed: every one of them (purge MicroK8s, the remove-slave program, drop
 //                     the slave part of the cluster map) undoes a WORKING slave.
 //   master, master+   the machine layer as the deployment PROGRAMS deliver it, plus the ArgoCD
-//     slave           follow. deploy-cluster rebuilds the node below GitOps and deploy-platform-services raises
-//                     what hands the cluster to the reconciler; both run on the machine's own
-//                     `ansiwise-rest serve` surface, each proven by a dry run the machine's gate then
-//                     admits the real run against (ansiwise-run.kit.ts). A master has no master-side
-//                     registration to redo — it IS the master — so those two programs and the follow
-//                     are the whole machine layer here, minus the pin.
+//     slave           follow. The engine and the catalogue are placed first, then deploy-host makes the
+//                     box workable, deploy-cluster rebuilds the node below GitOps and
+//                     deploy-platform-services raises what hands the cluster to the reconciler; the
+//                     three programs run on the machine's own `ansiwise-rest serve` surface, each
+//                     proven by a dry run the machine's gate then admits the real run against
+//                     (ansiwise-run.kit.ts). A master has no master-side registration to redo — it IS
+//                     the master — so those three programs and the follow are the whole machine layer
+//                     here, minus the pin.
+//
+// THE PLACEMENT IS WHY A MASTER COULD NOT BE BROUGHT FORWARD AT ALL. `placeAnsiwiseStep` had ONE call
+// site, in the slave install, so every engine, catalogue and machine-layer program an installed master
+// carried was whatever ansiwise-client left there at its first installation, and no run moved any of
+// them again. That is not an ageing problem: `cluster-deploy-slave` runs deploy-slave-branch ON THE
+// MASTER through the master's own ansiwise-rest, so a slave deploy already depends on a master's
+// machine layer being current, and nothing could make it current (hostyour-manager#69). The step is
+// idempotent by measurement, which is what lets it run against a machine that already carries all
+// three.
 //
 // mutating: true ⇒ steps()[0].name === "attest-target" (guards.ts assertGuardsArmed), which both
 // arms satisfy: the slave arm through deploy-slave's own attest-target, the master arm through the
@@ -51,10 +63,14 @@ export interface RedeployPorts extends DeploySlavePorts, AnsiwisePorts {
   db: Db;
 }
 
-/** The programs the master arm runs, in the order the machine layer stands on them: the cluster
- *  below GitOps first, then what hands it over. The names are the catalogue's own
+/** The programs the master arm runs after deploy-host, in the order the machine layer stands on them:
+ *  the cluster below GitOps first, then what hands it over. The names are the catalogue's own
  *  (digita-deploy ansiwise/programs/); each step reads the program's declared answers off the
- *  machine, so nothing about their INSIDES is repeated here. */
+ *  machine, so nothing about their INSIDES is repeated here.
+ *
+ *  deploy-host is NOT in this list and stands beside it, for the same reason it stands beside the
+ *  slave's two (deploy-slave.ts:313): it is the one of the three owed an answer this manager holds
+ *  and the machine does not — the public half of the key the manager reaches it with. */
 const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-platform-services"] as const;
 
 /** The answers the inventory cannot state, asked for at approve and carried to the step as
@@ -82,6 +98,12 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
   }
   return [
     attestClusterStep(target),
+    // FIRST among the machine-side acts, and for the reason it is first in the slave install: the
+    // three programs below are read from a catalogue and spoken to through a binary, and this is
+    // what puts both at what clusters/platform/versions.yaml pins. A master whose engine drifted off
+    // that pin is the state this run kind exists to end.
+    placeAnsiwiseStep(target, ports),
+    ansiwiseProgramStep(target, "deploy-host", ports, { extra: operatorKeyAnswer(params.serverId) }),
     ...MASTER_ARM_PROGRAMS.map((program) => ansiwiseProgramStep(target, program, ports)),
     argocdFollowStep(target),
   ];
