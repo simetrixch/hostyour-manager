@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { abortOffer, readyToApprove, runOnScreen, runTenantPurgeTarget, secretsToSupply } from "./runScreen.ts";
+import { abortOffer, approvePayload, readyToApprove, runOnScreen, runTenantPurgeTarget, secretsToSupply } from "./runScreen.ts";
 import type { PurgeTenantTarget, RunTenantStateView, RunView } from "../../shared/api-types.ts";
 
 // The Run screen's honesty rules. All of them are about the same failure mode — the screen saying one
@@ -225,5 +225,41 @@ describe("secretsToSupply / readyToApprove", () => {
     // read on this same screen and neither is waiting for a password.
     expect(secretsToSupply({ ...slave(["ansiwise-elevation"]), status: "running" })).toEqual([]);
     expect(secretsToSupply({ ...slave(["ansiwise-elevation"]), deletedAt: 1 })).toEqual([]);
+  });
+});
+
+describe("approvePayload", () => {
+  // WHAT WENT MISSING. The slave ceremony was built to ask for the secrets a plan requires and
+  // asked for none of its INPUTS, so a deployment was approved without them and the machine-layer
+  // programs stopped eight steps later at `needs the answer "letsencrypt_email"` — after a branch
+  // had been cut and a machine given an engine (apps4, 2026-08-28).
+  const slave = (): RunView => ({
+    ...run("run_1", "cluster-deploy-slave", "planned"),
+    requiredSecrets: ["ansiwise-elevation"],
+    requiredInputs: [
+      { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to" },
+      { field: "lan_cidr", label: "The IPv4 range this machine shares" },
+    ],
+  });
+
+  it("carries the secrets under their names and every input under activation-input:", () => {
+    expect(approvePayload(slave(), { "ansiwise-elevation": "pw" }, { letsencrypt_email: "info@simetrix.ch" })).toEqual({
+      "ansiwise-elevation": "pw",
+      "activation-input:letsencrypt_email": "info@simetrix.ch",
+      // A BLANK IS SENT AS A BLANK: the server drops it and the program's own default, or its
+      // refusal by name, decides. Three of a slave's five inputs are meant to stay empty.
+      "activation-input:lan_cidr": "",
+    });
+  });
+
+  it("carries an input the plan declares even when nothing was typed into it", () => {
+    const keys = Object.keys(approvePayload(slave(), { "ansiwise-elevation": "pw" }, {}));
+    expect(keys).toContain("activation-input:letsencrypt_email");
+    expect(keys).toContain("activation-input:lan_cidr");
+  });
+
+  it("carries nothing of its own for a plan that declares neither", () => {
+    const bare = { ...run("run_1", "cluster-deploy-slave", "planned") };
+    expect(approvePayload(bare, {}, {})).toEqual({});
   });
 });

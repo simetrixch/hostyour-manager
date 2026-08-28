@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { RunView } from "../../../shared/api-types.ts";
-import { readyToApprove, secretsToSupply } from "../runScreen.ts";
+import { approvePayload, readyToApprove, secretsToSupply } from "../runScreen.ts";
 import { IconLock } from "./icons.tsx";
 
 /** The slave-deployment ceremony: the secrets the PLAN declares, asked for as it declares them, and the
@@ -15,6 +15,7 @@ export function DeploySlaveApproveForm(props: {
   onDelete: () => void;
 }): ReactNode {
   const [supplied, setSupplied] = useState<Record<string, string>>({});
+  const [stated, setStated] = useState<Record<string, string>>({});
   const { run } = props;
   const asked = secretsToSupply(run);
 
@@ -24,7 +25,7 @@ export function DeploySlaveApproveForm(props: {
       onSubmit={(e) => {
         e.preventDefault();
         if (!readyToApprove(run, supplied)) return;
-        props.onApprove(supplied);
+        props.onApprove(approvePayload(run, supplied, stated));
       }}
     >
       <div className="ceremony__head">
@@ -49,6 +50,23 @@ export function DeploySlaveApproveForm(props: {
             onChange={(e) => setSupplied((v) => ({ ...v, [key]: e.target.value }))}
             autoComplete="off"
           />
+        </label>
+      ))}
+      {/* WHAT THE PROGRAMS ASK OF A PERSON, and what a blank one means. These are not secrets: the
+          certificate authority's mailbox and its directory are read back out of the machine
+          afterwards. A blank is dropped at approve and the program's own default decides, or its
+          refusal names the answer — which is what happened when this form asked for none of them and
+          deploy-cluster stopped at `needs the answer "letsencrypt_email"`. */}
+      {run.requiredInputs.map((input) => (
+        <label className="field" key={input.field}>
+          <span className="field__label">{input.label}</span>
+          <input
+            type="text"
+            value={stated[input.field] ?? ""}
+            onChange={(e) => setStated((v) => ({ ...v, [input.field]: e.target.value }))}
+            autoComplete="off"
+          />
+          <span className="field__hint">Not a secret. Left blank, the program's own default decides — or it refuses and names this answer.</span>
         </label>
       ))}
       {asked.length > 0 && (
