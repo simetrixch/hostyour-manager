@@ -78,17 +78,10 @@ export type { DeploySlavePorts };
  *  one authority and the map had carried its answer since the master was installed. They come from
  *  slaveMachineAnswers now. What is left is what only THIS machine can say: the range it shares, and
  *  the storage bolted to it. */
-export const SLAVE_MACHINE_INPUTS = [
-  { field: "lan_cidr", label: "The IPv4 range this machine shares with the other clusters — blank when it shares none" },
-  { field: "storage_mount", label: "Where the machine's separate storage is mounted — blank when it has none" },
-  { field: "storage_subdirectory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default" },
-];
+export const SLAVE_MACHINE_INPUTS: { field: string; label: string }[] = [];
 
 /** deploy-slave's own inputs: the machine-layer set plus the one answer only the branch cut takes. */
-export const SLAVE_INSTALL_INPUTS = [
-  { field: "committer_email", label: "The mailbox the slave's generated branch commits are made under — blank for the program's own placeholder" },
-  ...SLAVE_MACHINE_INPUTS,
-];
+export const SLAVE_INSTALL_INPUTS = [...SLAVE_MACHINE_INPUTS];
 
 /** Register [cleanup] before the step runs — for a step whose body is a generic program step and
  *  cannot know which compensating action the RUN KIND arms around it. Registered before the first
@@ -152,6 +145,19 @@ export function dataDiskFrom(mountTable: string): { storage_mount: string; stora
   // the disk keeps a name of its own and what the cluster wrote is told apart from what else is
   // there — a mount pointed at directly is one nobody can put anything else on.
   return { storage_mount: shallowest, storage_subdirectory: `${shallowest}/microk8s-storage` };
+}
+
+/** WHO THE BRANCH CUT COMMITS AS. One thing on every machine of this platform: `installer@` and the
+ *  machine's own domain, which the run already holds — so it is composed rather than asked, and a
+ *  person is not offered a field whose only right answer is the one thing already known.
+ *
+ *  It reaches git_identity's `email_answer`, and what it decides is the address in the log of the
+ *  branch this run cuts. Nothing authenticates with it. */
+export function slaveBranchAnswers(target: SlaveTarget): ExtraAnswers {
+  return async (ctx) => {
+    const { domain } = target.resolve(ctx.db);
+    return { committer_email: `installer@${domain}` };
+  };
 }
 
 export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts): ExtraAnswers {
@@ -337,7 +343,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
       // The cut itself: two answers (the slave's domain and its stage, both the inventory's),
       // everything else read from the master's books by the program — a value typed a second time
       // is a value that can disagree with itself. The optional committer identity rides approve.
-      ansiwiseProgramStep(target, "deploy-slave-branch", ports, { onMaster: true }),
+      ansiwiseProgramStep(target, "deploy-slave-branch", ports, { onMaster: true, extra: slaveBranchAnswers(target) }),
     ] satisfies Step[])),
     {
       name: "mark-slave",

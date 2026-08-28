@@ -143,7 +143,7 @@ describe("release — plan", () => {
     // nothing a branch program run on the master writes — so the elevation password is the whole ask.
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
-      ["committer_email", "lan_cidr", "storage_mount", "storage_subdirectory"],
+      [],
     );
     // Planning writes nothing: the tag and the pin are set-pin's, three steps later.
     expect(h.platformRepo.tags.size).toBe(0);
