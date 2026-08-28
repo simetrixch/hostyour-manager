@@ -188,6 +188,6 @@ echo "release: ${NAME} ${TAG} (commit ${SHA7}) is on its way to ${STAGE}"
 echo "release: the platform builds these image tags, or skips the build when they already exist:"
 if [ -f "$MANIFEST" ]; then
   grep -E '^[[:space:]]*-[[:space:]]*name:' "$MANIFEST" \
-    | sed -E 's/^[[:space:]]*-[[:space:]]*name:[[:space:]]*//' \
+    | sed -E 's/^[[:space:]]*-[[:space:]]*name:[[:space:]]*//; s/[[:space:]]*#.*$//' \
     | while read -r b; do [ -n "$b" ] && echo "    ${b}:${TAG}-${SHA7}"; done
 fi
