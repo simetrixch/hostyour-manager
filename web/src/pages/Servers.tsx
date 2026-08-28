@@ -292,6 +292,19 @@ export function Servers() {
                     // ONE prominent next step: an open run owns it (approve/watch); otherwise
                     // the status decides (adopt → deploy → view live).
                     const showAdopt = !runIsOpen && lc.next === "adopt";
+                    // ADOPTING AGAIN IS OFFERED WHERE A MACHINE ALREADY LOOKS ADOPTED, because a
+                    // machine can lose what an adoption gave it. A restore puts back the disk the
+                    // snapshot was taken from, and the operator key this manager installed goes with
+                    // it: the row still says "ready" and the door answers "All configured
+                    // authentication methods failed" (apps4, 2026-08-29). Nothing else offered a way
+                    // back — the server could not be added again under its own name, and it could not
+                    // be deleted while its cluster row stood.
+                    //
+                    // It is SECONDARY and never the prominent step: on a machine that is merely
+                    // adopted, deploying is what comes next, and adopting again is the repair beside
+                    // it. The status `undeployed` already says "adopt it again to redeploy"; this is
+                    // the same sentence reachable from `ready`.
+                    const showAdoptAgain = !runIsOpen && s.status === "ready";
                     const showDeploy = !runIsOpen && lc.next === "deploy" && prov?.id !== s.id;
                     const showClusters = lc.next === "clusters";
                     // A LIVE cluster carries the two run kinds that act on one: redeploy rebuilds its
@@ -317,12 +330,17 @@ export function Servers() {
                           ))}
                         </ol>
                         <p className="servercard__state">{lc.state}</p>
-                        {(showAdopt || showDeploy || showClusters || showRedeploy || showRelease || showDelete ||
+                        {(showAdopt || showAdoptAgain || showDeploy || showClusters || showRedeploy || showRelease || showDelete ||
                           tnOffer.disconnect || tnOffer.reconnect || tnOffer.rejoin) && (
                           <div className="actions">
                             {showAdopt && (
                               <button type="button" className="btn btn--primary" onClick={() => void doAdopt(s.id)}>
                                 {s.hasPassword ? "Adopt this server" : "Adopt this server (enter password)"}
+                              </button>
+                            )}
+                            {showAdoptAgain && (
+                              <button type="button" className="btn" onClick={() => void doAdopt(s.id)}>
+                                {s.hasPassword ? "Adopt again" : "Adopt again (enter password)"}
                               </button>
                             )}
                             {showDeploy && (
