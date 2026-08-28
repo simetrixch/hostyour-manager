@@ -1,12 +1,15 @@
-# seed-images — the images of this repository on a registry an installation can reach before it can
-# build anything.
+# release-images — the images a release of this repository is made of, published where the platform
+# pulls them from.
 #
-# WHAT PROBLEM THIS ANSWERS. Every other unit of the platform is built in-cluster by the release
-# pipeline, which is rendered from a registration, which the Manager writes. This repository IS
-# the Manager, so on a machine where nothing has been installed yet there is no Manager to
-# write the registration, no pipeline to render, and therefore no image to start the Manager
-# from. The bytes have to come from outside that circle exactly once per release, and this is where
-# they come from.
+# WHAT IT IS FOR. The pins of this repository's builds compose their ref against
+# global.buildRegistry — ghcr.io — so what runs on a cluster is what this workflow published. That is
+# the ordinary case and not a special one, which is why the name says the ordinary thing.
+#
+# IT BEGAN AS A SEED, and the name it carried said so: every other unit of the platform is built
+# in-cluster by the release pipeline, which is rendered from a registration, which the Manager
+# writes — and this repository IS the Manager, so on a machine where nothing stands yet there is no
+# Manager to write the registration and no pipeline to render. Those bytes still have to come from
+# outside that circle. They just are not the exception any more.
 #
 # WHAT IT PUBLISHES. ghcr.io/<owner>/<build name> for every build declared in deploy/platform.yaml —
 # today manager, gate-runner and dbtools. The build names are read from that manifest rather than
@@ -36,7 +39,11 @@
 # has to be pullable without any. Package visibility on GHCR is set per package and is not inherited
 # from this repository; a package pushed for the first time starts out private and has to be turned
 # public once, by hand, in its package settings.
-name: seed-images
+name: release-images
+# WHAT THE RUN IS CALLED IN THE LIST. Without this a run is named after the head commit's
+# subject, and a list of releases then reads as a list of commit messages — the same reason
+# release.yml carries one.
+run-name: "release-images ${{ github.ref_name }}"
 
 on:
   push:
@@ -57,12 +64,14 @@ on:
       # characters carrying no `/` — which is what admits exactly one stage segment and not a path.
       # A ref matches only as a whole, so the fourteen spelled-out digit classes admit no fifteenth
       # digit and no suffix.
+      # THE RELEASE TAG ALONE, AND NOT THE DEPLOY REF. release.sh pushes both, and listing both here
+      # ran this twice for one release — two builds of the same bytes under the same image tag,
+      # because the tag is the last segment of either ref. Which is the same thing this file says
+      # about promotion below: an image belongs to a RELEASE and is built once. A deploy ref carries
+      # a release to a STAGE, and that is the build plane's business, not this one's.
       - '[0-9]+.[0-9]+.[0-9]+-alpha-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
       - '[0-9]+.[0-9]+.[0-9]+-beta-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
       - '[0-9]+.[0-9]+.[0-9]+-stable-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
-      - 'deploy/*/[0-9]+.[0-9]+.[0-9]+-alpha-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
-      - 'deploy/*/[0-9]+.[0-9]+.[0-9]+-beta-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
-      - 'deploy/*/[0-9]+.[0-9]+.[0-9]+-stable-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
 
 permissions:
   contents: read

@@ -93,7 +93,7 @@ export const GateReportSchema = z.object({
   // A LITERAL, so a report written against any other version of this shape is REFUSED rather than
   // read half-right: the runner writes it and the Manager parses it, and the two are separate
   // images. They cannot normally drift — one release tag builds both (.github/workflows/
-  // seed-images.yml) and one bump writes both pins — but a pin rolled back by hand can pair a new
+  // release-images.yml) and one bump writes both pins — but a pin rolled back by hand can pair a new
   // Manager with an old runner, and this line is what turns that into a named refusal at the first
   // gate-run instead of a field silently read as undefined. Bump it whenever a field is added,
   // removed or renamed here.
