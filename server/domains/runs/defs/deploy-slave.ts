@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
-import type { Step, Cleanup, RunDefinition } from "../../../executor/types.ts";
+import type { Step, StepCtx, Cleanup, RunDefinition } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { STAGE, CLUSTER_TIER } from "../../../../shared/enums.ts";
 import { errValidation, errNotConfigured } from "../../../kernel/errors.ts";
@@ -114,6 +114,46 @@ function armed(cleanup: Cleanup | undefined, step: Step): Step {
  *  Shared with release's slave arm, which drives the same two machine-layer programs against the same
  *  slave and owes them the same two answers — two readings of one map is how the run kinds would come
  *  to hand one slave different books. */
+/** What is asked of a machine to find the disk its volumes belong on. `findmnt` reads the kernel's
+ *  own mount table, so what comes back is what is mounted and not what somebody meant to mount. */
+/** The line separator, as a call rather than a literal. */
+function chr10(): string { return String.fromCharCode(10); }
+
+export const DATA_DISK_COMMAND = "findmnt -rno TARGET,SOURCE,FSTYPE";
+
+/** WHERE THE VOLUMES OF A CLUSTER BELONG: the machine's separate disk, if it carries one.
+ *
+ *  THIS WAS ASKED OF A PERSON AND THEREFORE FORGOTTEN. The three rows that place the volumes —
+ *  require_storage_mount, create_storage_directory, link_storage_path — each do nothing when the
+ *  answer is empty, and empty is what a form gets when nobody types a path. Measured on a master on
+ *  2026-08-29: 29 GB of cluster data on the 124 GB boot disk while a 1 TB disk sat mounted at
+ *  /mnt/data with 2.1 MB on it. Nothing reported it, because nothing had been asked.
+ *
+ *  WHAT COUNTS AS THAT DISK: a mount of a real block device that is neither the root filesystem nor
+ *  a place the system keeps for itself. The boot partition is not it, and neither are the mounts the
+ *  container runtime makes under a snap's tree — those are the cluster's own volumes appearing as
+ *  mounts, and taking one would point the storage at itself. The shallowest remaining one wins,
+ *  because a machine built with one data disk has exactly one and a nested mount is a part of it.
+ *
+ *  A MACHINE WITH NO SUCH DISK IS ANSWERED WITH NOTHING, and the three rows then skip exactly as
+ *  they did before this existed. */
+export function dataDiskFrom(mountTable: string): { storage_mount: string; storage_subdirectory: string } | undefined {
+  const candidates: string[] = [];
+  for (const line of mountTable.split(chr10())) {
+    const [target, source] = line.trim().split(/\s+/);
+    if (target === undefined || source === undefined) continue;
+    if (!source.startsWith("/dev/")) continue;
+    if (target === "/" || target.startsWith("/boot") || target.startsWith("/var/snap") || target.startsWith("/snap")) continue;
+    candidates.push(target);
+  }
+  if (candidates.length === 0) return undefined;
+  const shallowest = candidates.sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))[0]!;
+  // NAMED, NOT THE MOUNT ITSELF. The link the cluster follows points at a directory ON that disk, so
+  // the disk keeps a name of its own and what the cluster wrote is told apart from what else is
+  // there — a mount pointed at directly is one nobody can put anything else on.
+  return { storage_mount: shallowest, storage_subdirectory: `${shallowest}/microk8s-storage` };
+}
+
 export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts): ExtraAnswers {
   return async (ctx) => {
     const { domain } = target.resolve(ctx.db);
@@ -129,6 +169,7 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
       // by name, which is the sentence an operator can act on.
       ...(marking.letsencryptEmail !== undefined ? { letsencrypt_email: marking.letsencryptEmail } : {}),
       ...(marking.letsencryptServer !== undefined ? { letsencrypt_server: marking.letsencryptServer } : {}),
+      ...(await dataDisk(ctx)),
     };
   };
 }
@@ -524,4 +565,24 @@ export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): Run
       .run();
   },
 };
+}
+
+/** Asks the machine for its mount table and reads the data disk out of it. A machine that answers
+ *  nothing readable is treated as one with no such disk: this decides WHERE volumes go and never
+ *  WHETHER a run proceeds. */
+async function dataDisk(ctx: StepCtx): Promise<Record<string, string>> {
+  try {
+    const session = await ctx.ssh();
+    const seen = await session.exec(DATA_DISK_COMMAND, { signal: ctx.signal, timeoutMs: 30_000 });
+    if (seen.code !== 0) return {};
+    const disk = dataDiskFrom(seen.stdoutTail);
+    if (disk === undefined) {
+      ctx.log("meta", "this machine carries no separate data disk — the cluster's volumes stay where the snap puts them");
+      return {};
+    }
+    ctx.log("meta", `the cluster's volumes go on ${disk.storage_mount}, under ${disk.storage_subdirectory}`);
+    return disk;
+  } catch {
+    return {};
+  }
 }

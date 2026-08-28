@@ -10,7 +10,7 @@ import { hardenPreflightForSlave, parsePreflightOutput } from "./preflight.ts";
 import { hasHardFailure } from "../../../shared/preflight.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
 import { credLabels, sealTokenOnce, newestCredId, statedTarget } from "./defs/deploy-slave.kit.ts";
-import { deploySlaveSteps, SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
+import { dataDiskFrom, deploySlaveSteps, SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
 import { registerStep } from "./defs/deploy-slave.verify.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -473,5 +473,42 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     for (const key of ["buildPlane", "unitApex", "platformDomain", "alertRecipients", "catalogUrl"]) {
       expect(MASTER_MARKING_YAML).toContain(`${key}: `);
     }
+  });
+});
+
+describe("dataDiskFrom", () => {
+  // THE TABLE A MASTER ACTUALLY ANSWERED WITH, shortened only where it repeats. 29 GB of cluster
+  // data sat on /dev/sda2 while /dev/sdb1 held 2.1 MB, because the three rows that place the
+  // volumes each do nothing when the answer is empty and nobody had been asked for one
+  // (2026-08-29).
+  const APPS3 = [
+    "/ /dev/sda2 ext4",
+    "/boot/efi /dev/sda1 vfat",
+    "/mnt/data /dev/sdb1 ext4",
+    "/var/snap/microk8s/common/var/lib/kubelet/pods/1057/volume-subpaths/empty-dir/postgresql/0 /dev/sda2[/x] ext4",
+    "/var/snap/microk8s/common/var/lib/kubelet/pods/faf7/volume-subpaths/pvc-2671/postfix/0 /dev/sda2[/y] ext4",
+  ].join(String.fromCharCode(10));
+
+  it("finds the separate disk and names a directory on it", () => {
+    expect(dataDiskFrom(APPS3)).toEqual({
+      storage_mount: "/mnt/data",
+      storage_subdirectory: "/mnt/data/microk8s-storage",
+    });
+  });
+
+  it("never takes a mount the container runtime made, which is the cluster's own volumes", () => {
+    // THE DANGEROUS ONE. Those lines are on the BOOT disk and they are mounts, so a reading that
+    // asked only "is it a mount of a block device" would point the storage at what it stores.
+    const runtimeOnly = APPS3.split(String.fromCharCode(10)).filter((l) => !l.startsWith("/mnt")).join(String.fromCharCode(10));
+    expect(dataDiskFrom(runtimeOnly)).toBeUndefined();
+  });
+
+  it("answers nothing for a machine that carries one disk", () => {
+    expect(dataDiskFrom("/ /dev/sda2 ext4")).toBeUndefined();
+  });
+
+  it("takes the shallowest of several, because a nested mount is part of the disk above it", () => {
+    const nested = ["/ /dev/sda2 ext4", "/mnt/data/inner /dev/sdc1 ext4", "/mnt/data /dev/sdb1 ext4"].join(String.fromCharCode(10));
+    expect(dataDiskFrom(nested)?.storage_mount).toBe("/mnt/data");
   });
 });
