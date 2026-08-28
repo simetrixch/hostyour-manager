@@ -186,8 +186,12 @@ export function verifySlaveStep(target: SlaveTarget, ports: DeploySlavePorts): S
       ctx.log("meta", `slave ESO: all ${stores} SecretStores are Ready — the ${name} vault auth path is proven`);
 
       // ---- SOFT 1: the slave's obs-agent is pushing, asked of the query API over plain HTTP.
-      const prom = await metricsVerdict(ports, domain, ctx.signal);
-      ctx.log("meta", metricsNote(prom, domain));
+      const prom = await metricsVerdict(ports, domain, ctx);
+      // SILENCE IS SAID WHERE TROUBLE IS READ. The other three states are notes: two of them
+      // measured nothing and say so, and the fourth is a pass. Silence measured something — a whole
+      // window of it — and a run that buried that among its notes would let a policy which denies
+      // without saying so pass for a machine that is merely new.
+      ctx.log(prom.kind === "silent" ? "stderr" : "meta", metricsNote(prom, domain));
 
       // ---- SOFT 2: slave ingress certs issued (LE order/DNS can lag; a pending cert is a note).
       const certCap = await execCapture(ctx, slave, CERTS_CMD, { timeoutMs: 30_000, elevation });
@@ -230,15 +234,52 @@ function upSeriesOf(domain: string): string {
 type MetricsVerdict =
   | { kind: "skipped" }
   | { kind: "unanswered"; detail: string }
-  | { kind: "empty" }
-  | { kind: "series"; series: number };
+  | { kind: "silent"; waitedMs: number }
+  | { kind: "series"; series: number; waitedMs: number };
 
-/** Ask the query API, or report that this manager was given no address to ask. */
-async function metricsVerdict(ports: DeploySlavePorts, domain: string, signal: AbortSignal): Promise<MetricsVerdict> {
+/** How long a slave that has just been built is given to push its first series.
+ *
+ *  A machine deployed seconds ago has not pushed yet, and a check that asked once and reported
+ *  silence would say something is wrong about every healthy slave there is. Waiting is what turns
+ *  the answer into a measurement: at the end of this window, silence is no longer "not yet". */
+const METRICS_FIRST_SERIES_MS = 120_000;
+
+/** Ask the query API until it answers with a series, or until the window closes.
+ *
+ *  ASKED AGAIN AND NOT ONCE, and the difference is the whole point of this check. Prometheus serves
+ *  /api/v1/write only where the receiver is on, and reaching it from outside goes through Traefik
+ *  and through whatever NetworkPolicy stands in the observability namespace. Every one of those can
+ *  refuse WITHOUT SAYING SO — a network policy that misses a source denies in silence — and what a
+ *  reader then sees is a slave that reports nothing. One ask cannot tell that apart from a slave
+ *  that started a moment ago; a whole window can. */
+async function metricsVerdict(
+  ports: DeploySlavePorts,
+  domain: string,
+  ctx: StepCtx,
+): Promise<MetricsVerdict> {
   if (!ports.metricsQuery) return { kind: "skipped" };
-  const answer = await ports.metricsQuery.instant(upSeriesOf(domain), { signal });
-  if (answer.kind === "unanswered") return { kind: "unanswered", detail: answer.detail };
-  return answer.series > 0 ? { kind: "series", series: answer.series } : { kind: "empty" };
+  const began = Date.now();
+  const until = began + (ports.metricsFirstSeriesMs ?? METRICS_FIRST_SERIES_MS);
+  let lastUnanswered: string | undefined;
+  for (;;) {
+    const answer = await ports.metricsQuery.instant(upSeriesOf(domain), { signal: ctx.signal });
+    if (answer.kind === "unanswered") {
+      lastUnanswered = answer.detail;
+    } else if (answer.series > 0) {
+      return { kind: "series", series: answer.series, waitedMs: Date.now() - began };
+    } else {
+      lastUnanswered = undefined;
+    }
+    if (Date.now() >= until) break;
+    ctx.log("meta", `waiting for the slave's first ${upSeriesOf(domain)} series`);
+    // NEVER PAST THE WINDOW. A full cadence tick would carry the last wait beyond the deadline this
+    // check is bounded by, so the last sleep is only what is left of it.
+    await sleepUnlessAborted(Math.min(APP_SYNC_POLL_MS, until - Date.now()), ctx.signal);
+  }
+  // AN ADDRESS THAT ANSWERED NOTHING FOR THE WHOLE WINDOW IS STILL ITS OWN FAULT, and it is not
+  // silence: nothing was measured at all, which is a different thing to fix.
+  if (lastUnanswered !== undefined) return { kind: "unanswered", detail: lastUnanswered };
+  return { kind: "silent", waitedMs: Date.now() - began };
 }
 
 /** The one line an operator reads about it. Every state says what was and was not measured, and the
@@ -246,9 +287,13 @@ async function metricsVerdict(ports: DeploySlavePorts, domain: string, signal: A
 function metricsNote(verdict: MetricsVerdict, domain: string): string {
   switch (verdict.kind) {
     case "series":
-      return `the query API sees ${verdict.series} ${upSeriesOf(domain)} series — the slave's obs-agent is pushing`;
-    case "empty":
-      return `soft: no ${upSeriesOf(domain)} series yet — the obs-agent push may still be warming up (check master Grafana)`;
+      return `the query API sees ${verdict.series} ${upSeriesOf(domain)} series after ${Math.round(verdict.waitedMs / 1000)}s — the slave's obs-agent is pushing, `
+        + "which also proves the whole path it came over: Traefik carried it, Prometheus served the receiver, and this manager could ask";
+    case "silent":
+      return `THE SLAVE REPORTED NOTHING for ${Math.round(verdict.waitedMs / 1000)}s: the query API sees no ${upSeriesOf(domain)} series at all. `
+        + "Its agent pushes over the master's prom-push route, so what stands between them is Traefik, the basic-auth middleware on that route, "
+        + "and any NetworkPolicy in the observability namespace — a policy that misses a source denies in SILENCE, which looks exactly like this. "
+        + "Look at the master: is the Prometheus pod Ready, does a Grafana panel still render, and does the slave's push reach it";
     case "unanswered":
       return `soft: the metrics query address this manager was given answered nothing usable — ${verdict.detail}. The check measured nothing; verify via Grafana`;
     case "skipped":

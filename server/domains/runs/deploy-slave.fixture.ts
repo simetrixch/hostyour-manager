@@ -470,6 +470,9 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
       releaseDownloads: releases,
       ...(opts.ansiwiseServeCommand !== undefined ? { ansiwiseServeCommand: opts.ansiwiseServeCommand } : {}),
       ...(metrics ? { metricsQuery: metrics } : {}),
+      // A WINDOW A TEST CAN WATCH CLOSE. A deployment gives a fresh slave two minutes to
+      // push its first series; a test that waited them would be a test nobody runs.
+      metricsFirstSeriesMs: 20,
     }),
     sshFactory: hostsFactory(hosts), actor: () => "op_system",
   });
@@ -508,6 +511,7 @@ export function stepOf(h: Harness, name: string): Step {
   const def = buildRunDefinitions({
     db: h.db.db, platformRepo: h.platformRepo,
     ...(h.metrics ? { metricsQuery: h.metrics } : {}),
+    metricsFirstSeriesMs: 20,
   }).get("cluster-deploy-slave") as AnyRunDefinition;
   const step = def.steps({ ...PARAMS, tier: "rehearsal" }).find((candidate: Step) => candidate.name === name);
   if (!step) throw new Error(`no step ${name}`);

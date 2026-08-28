@@ -69,12 +69,45 @@ describe("verify-slave: the metrics probe over HTTP", () => {
     expect(log.some((l) => l.includes("metrics check SKIPPED"))).toBe(false);
   });
 
+  it("finds a slave that starts pushing a moment late, rather than calling it silent", async () => {
+    // ONE ASK CANNOT TELL A NEW MACHINE FROM A BLOCKED ONE. A slave built seconds ago has pushed
+    // nothing yet, and a check that asked once and reported silence would say something is wrong
+    // about every healthy slave there is.
+    const metrics = new FakeMetricsQuery({ kind: "answered", series: 1 });
+    metrics.answerFirst(1, { kind: "answered", series: 0 });
+    const h = await verifyWorld(metrics);
+    const said: Array<{ stream: string; text: string }> = [];
+
+    await stepOf(h, "verify-slave").run(hostedStepCtx(h, { log: (stream, text) => said.push({ stream, text }) }));
+
+    expect(said.some((l) => l.text.includes("the slave's obs-agent is pushing"))).toBe(true);
+    expect(said.some((l) => l.stream === "stderr")).toBe(false);
+    expect(metrics.asked.length).toBeGreaterThan(1);
+  });
+
+  it("says SILENCE on the stream trouble is read on, and names what stands between the two", async () => {
+    // THE WHOLE POINT OF THE CHANGE. Prometheus serves the push endpoint only where the receiver is
+    // on, and reaching it goes through Traefik and through whatever NetworkPolicy stands in the
+    // observability namespace. A policy that misses a source denies IN SILENCE, and a run that
+    // buried that among its notes would let it pass for a machine that is merely new.
+    const h = await verifyWorld(new FakeMetricsQuery({ kind: "answered", series: 0 }));
+    const said: Array<{ stream: string; text: string }> = [];
+
+    await stepOf(h, "verify-slave").run(hostedStepCtx(h, { log: (stream, text) => said.push({ stream, text }) }));
+
+    const shout = said.find((l) => l.text.includes("THE SLAVE REPORTED NOTHING"));
+    expect(shout, "silence is said out loud").toBeDefined();
+    expect(shout?.stream).toBe("stderr");
+    expect(shout?.text).toContain("NetworkPolicy");
+    expect(shout?.text).toContain("denies in SILENCE");
+  });
+
   it("verify-slave degrades gracefully on the SOFT checks: no metrics + no certs still succeed", async () => {
     const h = await verifyWorld(new FakeMetricsQuery({ kind: "answered", series: 0 }), { certsOut: "" });
     const checkpoints: unknown[] = [];
     await stepOf(h, "verify-slave").run(hostedStepCtx(h, { checkpoint: (d) => checkpoints.push(d) }));
     // Three ExternalSecrets, because the gate counts what the instance's chart ships rather than a
     // list of names it was told to expect: cluster-slave plus the two repository credentials.
-    expect(checkpoints.at(-1)).toEqual({ extSecrets: 3, apps: 2, secretStores: 2, prom: "empty", certsTotal: 0, certsReady: 0 });
+    expect(checkpoints.at(-1)).toEqual({ extSecrets: 3, apps: 2, secretStores: 2, prom: "silent", certsTotal: 0, certsReady: 0 });
   });
 });

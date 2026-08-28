@@ -18,8 +18,23 @@ export class FakeMetricsQuery implements MetricsQuery {
     this.answer = answer;
   }
 
+  /** What the first [asks] queries are answered with, before the standing answer takes over.
+   *
+   *  A slave that has just been built answers zero and then, a moment later, one — which is the
+   *  case the caller's waiting exists for, and a fake that can only hold one answer cannot stage
+   *  it. */
+  answerFirst(asks: number, answer: InstantAnswer): void {
+    this.early = { left: asks, answer };
+  }
+
+  private early?: { left: number; answer: InstantAnswer };
+
   async instant(query: string, _opts: { signal?: AbortSignal }): Promise<InstantAnswer> {
     this.asked.push(query);
+    if (this.early !== undefined && this.early.left > 0) {
+      this.early.left -= 1;
+      return this.early.answer;
+    }
     return this.answer;
   }
 }

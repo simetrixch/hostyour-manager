@@ -52,6 +52,13 @@ export interface DeploySlavePorts {
    *  different fact from an address that answered nothing and must never be reported as the same
    *  one. Every other check in that step, and every other run kind, is untouched by it. */
   metricsQuery?: MetricsQuery;
+  /** How long a slave that has just been built is given to push its first series, in milliseconds.
+   *
+   *  A machine deployed seconds ago has not pushed yet, so the check waits before it calls silence
+   *  silence. It stands here rather than as a constant because a test cannot wait two minutes to
+   *  watch a window close, and a window nobody can shorten is one nothing holds against its own
+   *  behaviour. Absent means the two minutes a real deployment is given. */
+  metricsFirstSeriesMs?: number;
 }
 
 /** WHICH run kind is driving the shared slave step list. The steps are the same either way — what
