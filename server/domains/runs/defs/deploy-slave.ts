@@ -68,14 +68,17 @@ export type DeploySlaveParams = z.infer<typeof DeploySlaveParams>;
 
 export type { DeploySlavePorts };
 
-/** The answers the machine-layer programs declare and neither the inventory nor the cluster map
- *  can state, asked for at approve and carried to the steps as `activation-input:<answer>`. The
- *  four optional ones may stay blank — a blank input is dropped at approve and the program's own
- *  default (or its refusal, by name) decides. Shared with redeploy's slave arm, which runs the
- *  same machine-layer programs. */
+/** The answers the machine-layer programs declare that neither the inventory nor the cluster map
+ *  can state, asked for at approve and carried to the steps as `activation-input:<answer>`. All
+ *  three may stay blank — a blank input is dropped at approve and the program's own default (or its
+ *  refusal, by name) decides. Shared with redeploy's slave arm, which runs the same programs.
+ *
+ *  WHAT THE MAP STATES IS NOT ASKED FOR. The certificate authority and its mailbox stood here until
+ *  2026-08-28 and were asked of a person for every machine, although one installation registers with
+ *  one authority and the map had carried its answer since the master was installed. They come from
+ *  slaveMachineAnswers now. What is left is what only THIS machine can say: the range it shares, and
+ *  the storage bolted to it. */
 export const SLAVE_MACHINE_INPUTS = [
-  { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to before a certificate expires" },
-  { field: "letsencrypt_server", label: "The ACME directory this installation registers with — the authority's production one; a staging directory is refused, because its root is in no machine's trust store" },
   { field: "lan_cidr", label: "The IPv4 range this machine shares with the other clusters — blank when it shares none" },
   { field: "storage_mount", label: "Where the machine's separate storage is mounted — blank when it has none" },
   { field: "storage_subdirectory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default" },
@@ -119,6 +122,13 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
     return {
       ...(books !== undefined ? { books_fqdn: books } : {}),
       build_plane_fqdn: marking.buildPlaneFqdn,
+      // THE INSTALLATION'S ANSWER AND NOT THIS MACHINE'S. One installation registers with one
+      // authority and gives it one mailbox; asking a person for them again per machine is asking
+      // for a second copy of something already written down, and two copies agree only until one is
+      // typed differently. A map that predates them carries neither, and then the program refuses
+      // by name, which is the sentence an operator can act on.
+      ...(marking.letsencryptEmail !== undefined ? { letsencrypt_email: marking.letsencryptEmail } : {}),
+      ...(marking.letsencryptServer !== undefined ? { letsencrypt_server: marking.letsencryptServer } : {}),
     };
   };
 }

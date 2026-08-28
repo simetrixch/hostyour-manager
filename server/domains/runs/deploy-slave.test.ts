@@ -56,7 +56,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.requiredInputs).toEqual(SLAVE_INSTALL_INPUTS);
     expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
-      ["committer_email", "letsencrypt_email", "letsencrypt_server", "lan_cidr", "storage_mount", "storage_subdirectory"],
+      ["committer_email", "lan_cidr", "storage_mount", "storage_subdirectory"],
     );
     expect(plan.summary).toContain("s1.example.com");
     expect(plan.summary).toContain("m1");
