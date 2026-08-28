@@ -52,6 +52,18 @@ export interface AnsiwisePorts {
    *  release surface an installation takes them from is its own decision; WHICH version is placed
    *  never is, and neither is which pair of names an engine is made of. */
   ansiwiseDownloadUrl?: string;
+  /** WHERE A CATALOGUE COMES FROM for a machine that has none, and what opens it.
+   *
+   *  A SLAVE IS BORN WITHOUT ONE. install-master clones the catalogue onto a first master; nothing
+   *  does it for a slave, and every program is read out of that checkout — so the machine's own
+   *  surface cannot even start, and what an operator saw was the serving binary's `cd` failing and
+   *  the socket hanging up. This manager holds the address and the credential already
+   *  (kernel/config.ts `catalog`), which is what lets it make the checkout itself rather than wait
+   *  for a program it cannot run.
+   *
+   *  Absent, the placing step says so and touches no tree: an installation that states no catalogue
+   *  is one where a machine's own checkout is the only one there is. */
+  catalogueOrigin?: { repoURL: string; token: string };
   /** WHERE those release assets are READ, which is over the manager's own network: the bootstrap
    *  hands a machine bytes rather than a download command, so a machine with no route out and no
    *  `curl` is still placeable (place-ansiwise.ts, THE TRANSFER). */

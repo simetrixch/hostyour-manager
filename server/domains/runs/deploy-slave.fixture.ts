@@ -196,6 +196,11 @@ export interface HostsScript {
    *  A machine with no catalogue answers no program at all, so this is deliberately not the default:
    *  it is the shape a bare machine has, and it is asserted by the test that is about a bare one. */
   catalogueBranch: string | undefined;
+  /** The branch a clone leaves the checkout standing on — the remote's own head, which is why this
+   *  manager names none: which branch a catalogue is read from belongs to the installation. */
+  catalogueClonesOnto: string;
+  /** What a clone exits with. Non-zero is a credential that does not open that repository. */
+  catalogueCloneExit: number;
   catalogueHead: string;
   catalogueRemoteHead: string;
   /** What `git fetch origin <branch>` answers in the catalogue — non-zero is a machine whose own
@@ -263,6 +268,8 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     serviceToken: "scripted-service-token",
     serviceStartsAfterInstall: true,
     catalogueBranch: "main",
+    catalogueClonesOnto: "main",
+    catalogueCloneExit: 0,
     catalogueHead: "aaa1111",
     catalogueRemoteHead: "bbb2222",
     catalogueFetchExit: 0,

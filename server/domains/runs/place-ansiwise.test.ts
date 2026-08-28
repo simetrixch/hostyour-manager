@@ -236,6 +236,10 @@ describe("what may stand in a command on the machine", () => {
 // only a session, two names and an address. A `placeAnsiwise` that reached for any of the rest could
 // not compile here.
 const FIRST_INSTALL_FQDN = "apps1.digitacloud.app";
+/** The catalogue this manager would clone, and the account a slave is reached as — the two the
+ *  clone is composed from, stated once so a test reads what a command carries. */
+const CATALOGUE_URL = "https://github.com/an-owner/a-catalogue.git";
+const OPERATOR = "ubuntu";
 
 /** The machine as a caller holding nothing but a session sees it. This is the whole of what a Dart
  *  client has to supply — everything else the bootstrap says itself. */
@@ -420,6 +424,42 @@ describe("place-ansiwise: the catalogue the engine is judged by", () => {
     // And the engine was still placed: a machine without a catalogue is one to bootstrap, not one to
     // refuse.
     expect(transferred(hosts).map((f) => f.path)).toEqual([ANSIWISE_TOOL, ANSIWISE_REST_TOOL]);
+  });
+
+  it("makes the catalogue a slave is born without, and leaves no credential of ours behind", async () => {
+    // A SLAVE IS BORN WITHOUT ONE. install-master clones the catalogue onto a first master and
+    // nothing does it for a slave, so the machine's own surface could not start at all: what an
+    // operator saw was the serving binary's `cd` failing and the socket hanging up, three systems
+    // from the missing tree (apps4, 2026-08-28).
+    const hosts = scriptedHosts({ catalogueBranch: undefined, catalogueRemoteHead: "ccc3333" });
+    const h = await makeHarness({ hosts });
+    const said: string[] = [];
+
+    await placeAnsiwiseStep(target, { ...ports(h), catalogueOrigin: { repoURL: CATALOGUE_URL, token: "read-me" } })
+      .run(placeCtx(h, hosts, "run_cat_clone", said));
+
+    expect(commands(hosts).some((c) => c.includes(`git clone --quiet ${CATALOGUE_URL} ${CATALOG_CHECKOUT}`))).toBe(true);
+    // MADE FOR THE ACCOUNT AND HANDED OVER: /srv is root's, so the directory is the one elevated act
+    // and the clone that follows is not — a tree cloned as root is one git refuses to the account
+    // that has to read it.
+    expect(commands(hosts).some((c) => c.startsWith(`sudo -S install -d -m 755 -o ${OPERATOR} -g ${OPERATOR} ${CATALOG_CHECKOUT}`))).toBe(true);
+    expect(commands(hosts).some((c) => c.includes(`git clone`) && c.includes("sudo"))).toBe(false);
+    expect(said.some((l) => l.includes(`cloned the catalogue into ${CATALOG_CHECKOUT}`))).toBe(true);
+  });
+
+  it("takes this manager's credential away again, on the path where the clone fails as well", async () => {
+    // THE TOKEN IS WRITE-CAPABLE ON THE CATALOGUE (kernel/config.ts CATALOG_WRITE_PAT). One left
+    // under /tmp is one on a machine, and the path a failure takes is the path nobody watches.
+    const hosts = scriptedHosts({ catalogueBranch: undefined, catalogueCloneExit: 128 });
+    const h = await makeHarness({ hosts });
+
+    await expect(
+      placeAnsiwiseStep(target, { ...ports(h), catalogueOrigin: { repoURL: CATALOGUE_URL, token: "read-me" } })
+        .run(placeCtx(h, hosts, "run_cat_clone_fail", [])),
+    ).rejects.toThrow(/could not clone the catalogue/);
+
+    const removed = commands(hosts).filter((c) => c.startsWith("rm -f ") && c.includes("manager-catalogue"));
+    expect(removed.length, "the credential was taken away although the clone failed").toBe(1);
   });
 
   it("refuses a machine whose catalogue would not fetch, rather than driving programs out of a stale one", async () => {

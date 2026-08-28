@@ -82,6 +82,7 @@ export async function wire(): Promise<Wired> {
     ...(config.github ? { platformOrigin: `${config.github.owner}/${config.github.repo}` } : {}),
     ...(config.ansiwiseServeCommand ? { ansiwiseServeCommand: config.ansiwiseServeCommand } : {}),
     ...(config.ansiwiseDownloadUrl ? { ansiwiseDownloadUrl: config.ansiwiseDownloadUrl } : {}),
+    ...(config.catalog ? { catalogueOrigin: { repoURL: config.catalog.repoURL, token: config.catalog.token } } : {}),
     // WHERE the bootstrap reads the two ansiwise executables. Unconditional and not behind a setting:
     // the address they are read FROM is the installation's (ANSIWISE_DOWNLOAD_URL above), while
     // reading bytes off it is a capability of this process that nothing can turn off and nothing

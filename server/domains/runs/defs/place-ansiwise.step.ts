@@ -99,7 +99,16 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
       // which is what keeps the birth of a machine out of this: putting the row into the first
       // program a machine runs was tried and reverted, because it needs an answer the client's
       // first-master flow does not send, and nothing here asks a program for anything.
-      const catalogue = await refreshCatalogue(await placementMachine(ctx, server.name));
+      const catalogue = await refreshCatalogue(
+        await placementMachine(ctx, server.name),
+        ports.catalogueOrigin === undefined
+          ? undefined
+          : {
+              ...ports.catalogueOrigin,
+              account: server.sshUser,
+              elevationPassword: requireElevationPassword(ctx),
+            },
+      );
       ctx.checkpoint({ ...verdict, ...handed, catalogue });
     },
   };
