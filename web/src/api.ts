@@ -97,9 +97,10 @@ function encodeSecrets(secrets?: Record<string, string>): { secrets: Record<stri
 export const approveRun = (id: string, secrets?: Record<string, string>): Promise<unknown> =>
   post(`/api/runs/${id}/approve`, encodeSecrets(secrets) ?? {});
 /** Soft-delete a run: it disappears from the runs list, while its row and complete log
- *  stay in the audit DB for retroactive inspection. The server refuses with 409 unless
- *  the run is planned, failed, or cancelled — a succeeded run is the permanent record of
- *  a live deployment and an in-flight run must settle first. */
+ *  stay in the audit DB for retroactive inspection. Any SETTLED run may go — planned, failed,
+ *  cancelled or succeeded; only an in-flight one is refused with 409 and must settle first.
+ *  Deleting tears nothing down: what a succeeded run built keeps its inventory row and its git
+ *  pointer and goes on running, and removing a thing is the separate offboard or remove run. */
 export const deleteRun = (id: string): Promise<unknown> => req(`/api/runs/${id}`, { method: "DELETE" });
 export const cancelRun = (id: string): Promise<unknown> => post(`/api/runs/${id}/cancel`);
 export const retryRun = (id: string, stepName?: string, secrets?: Record<string, string>): Promise<unknown> =>

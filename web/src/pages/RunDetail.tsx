@@ -328,14 +328,25 @@ export function RunDetail() {
         </div>
       )}
 
-      {run.status === "succeeded" && (
+      {run.deletedAt === null && run.status === "succeeded" && (
         <div className="actionbar">
-          <span className="actionbar__text">A completed deployment can&apos;t be deleted — this run is its permanent record.</span>
-          <span title="A completed deployment can't be deleted — this run is the permanent record of what it built.">
-            <button type="button" className="btn" disabled>
-              Delete run
-            </button>
+          {/* DELETING HIDES THE RUN AND TEARS NOTHING DOWN, which is what the executor states and
+              what this bar used to deny: a soft-deleted succeeded run keeps its inventory row and
+              its git pointer, so what it built goes on running, and its whole log stays readable in
+              the audit database (executor/executor.ts, deleteRun). Removing a thing is the separate
+              offboard or remove run and never a side effect of tidying a list.
+
+              IT WAS REFUSED HERE AND ALLOWED THERE, and what that cost was a machine nobody could
+              adopt again: apps4 was restored, the key its adopt had installed went with the
+              snapshot, and the run that recorded the adopt stood in the way of recording a new one
+              (2026-08-29). */}
+          <span className="actionbar__text">
+            This run finished. Deleting it hides it from the list — what it built keeps running, and its log stays in the audit
+            database.
           </span>
+          <button type="button" className="btn btn--danger" onClick={() => setConfirmDelete(true)}>
+            Delete run
+          </button>
         </div>
       )}
 
