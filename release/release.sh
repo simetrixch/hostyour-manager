@@ -98,6 +98,89 @@ DEPLOY_REF="refs/tags/deploy/${STAGE}/${TAG}"
 git push origin ":${DEPLOY_REF}" >/dev/null 2>&1 || true
 git push origin "${SHA}:${DEPLOY_REF}"
 
+# ── The build, waited for, and the pin it makes true ──────────────────────────────────────────
+#
+# THE TAG IS A NAME AND NOT A RELEASE UNTIL THE IMAGES EXIST. Pushing it starts the workflow that
+# builds them (.github/workflows/release-images.yml); until that is green there is nothing to pin a
+# cluster to, and a pin written earlier names an image a kubelet answers with ImagePullBackOff.
+# So this waits, and only then writes.
+#
+# WHY THE WRITE IS HERE AND NOT IN THE WORKFLOW. The pin lives in ANOTHER repository, and a
+# workflow's own token reaches only the one it runs in — a cross-repository write needs a credential
+# somebody has to make, hold and replace. This script runs on a machine that is already logged in to
+# both. The credential problem does not exist here, so neither does the credential.
+#
+# PLATFORM_REPO_DIR NAMES THE CHECKOUT, and without it this stops after the build with a line
+# saying so: a consumer's copy of this script releases into an installation whose platform tree it
+# has no business writing, and guessing a path would be the same mistake as guessing a credential.
+if command -v gh >/dev/null 2>&1; then
+  echo "release: waiting for the images of ${TAG} — the pin is written when they exist"
+  RUN_ID=""
+  for _ in $(seq 1 30); do
+    RUN_ID="$(gh run list --workflow release-images --branch "$TAG" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
+    [ -n "$RUN_ID" ] && break
+    sleep 4
+  done
+  if [ -z "$RUN_ID" ]; then
+    warn_no_run="release: no release-images run appeared for ${TAG} within two minutes — the images are unbuilt and no pin was written"
+    echo "$warn_no_run" >&2
+  elif ! gh run watch "$RUN_ID" --exit-status --interval 20 >/dev/null 2>&1; then
+    echo "release: the images of ${TAG} did not build — no pin was written. Read the run: gh run view ${RUN_ID} --log-failed" >&2
+    exit 75
+  else
+    echo "release: the images of ${TAG} are built"
+    if [ -z "${PLATFORM_REPO_DIR:-}" ]; then
+      echo "release: PLATFORM_REPO_DIR names no checkout, so nothing was pinned — a cluster runs what its platform tree says, and this release is not in it yet"
+    else
+      [ -d "${PLATFORM_REPO_DIR}/.git" ] || die "PLATFORM_REPO_DIR=${PLATFORM_REPO_DIR} is no git checkout" 66
+      git -C "$PLATFORM_REPO_DIR" fetch --quiet origin
+      git -C "$PLATFORM_REPO_DIR" checkout --quiet master
+      git -C "$PLATFORM_REPO_DIR" reset --quiet --hard origin/master
+      # THE PIN GRAMMAR AND NOTHING ELSE: builds[]{name,image,tag}, in the values file of the stage
+      # this release is going to. Read and written by name rather than by line, so a file whose
+      # entries are ordered differently is still pinned and a file that carries none is left alone.
+      PINNED="$(python3 - "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST" <<'PIN'
+import glob, os, re, sys
+tree, stage, image_tag, manifest = sys.argv[1:5]
+names = re.findall(r"^\s*-\s*name:\s*(\S+)", open(manifest, encoding="utf-8").read(), re.M)
+touched = []
+for path in glob.glob(os.path.join(tree, "clusters", "inventories", "*", "values-%s.yaml" % stage)):
+    text = open(path, encoding="utf-8", newline="").read()
+    out, image, changed = [], None, False
+    for line in text.split(chr(10)):
+        m = re.match(r"^(\s*)image:\s*(\S+)\s*$", line)
+        if m:
+            image = m.group(2)
+        t = re.match(r"^(\s*)tag:\s*\S+\s*$", line)
+        if t and image in names:
+            line = '%stag: "%s"' % (t.group(1), image_tag)
+            image, changed = None, True
+        out.append(line)
+    # WRITTEN ONLY WHERE A TAG MOVED. A file compared by its whole text is a file rewritten for a
+    # trailing newline, and a commit that names files it did not change is one nobody can read.
+    new = chr(10).join(out)
+    if changed:
+        with open(path + ".writing", "w", encoding="utf-8", newline=chr(10)) as f:
+            f.write(new)
+        os.replace(path + ".writing", path)
+        touched.append(os.path.relpath(path, tree).replace(os.sep, "/"))
+print(" ".join(touched))
+PIN
+)"
+      if [ -z "$PINNED" ]; then
+        echo "release: no values-${STAGE}.yaml in ${PLATFORM_REPO_DIR} carries a pin of this unit — nothing to write"
+      else
+        git -C "$PLATFORM_REPO_DIR" add -- $PINNED
+        git -C "$PLATFORM_REPO_DIR" commit --quiet -m "Pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME:-this unit}, once its images were built."
+        git -C "$PLATFORM_REPO_DIR" push --quiet origin master
+        echo "release: pinned ${STAGE} to ${TAG}-${SHA7} in ${PINNED}"
+      fi
+    fi
+  fi
+else
+  echo "release: gh is not on this path, so the build was not waited for and nothing was pinned" >&2
+fi
+
 NAME="$(grep -E '^name:' "$MANIFEST" 2>/dev/null | head -1 | sed -E 's/^name:[[:space:]]*//' || true)"
 NAME="${NAME:-<name>}"
 
