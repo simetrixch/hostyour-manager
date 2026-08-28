@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { abortOffer, runOnScreen, runTenantPurgeTarget } from "./runScreen.ts";
+import { abortOffer, readyToApprove, runOnScreen, runTenantPurgeTarget, secretsToSupply } from "./runScreen.ts";
 import type { PurgeTenantTarget, RunTenantStateView, RunView } from "../../shared/api-types.ts";
 
 // The Run screen's honesty rules. All of them are about the same failure mode — the screen saying one
@@ -183,5 +183,47 @@ describe("abortOffer", () => {
     for (const kind of ["consumer-onboard", "tenant-offboard", "tenant-purge", "tenant-add-app", "cluster-deploy-slave", "cluster-adopt"] as const) {
       expect(abortOffer(kind, null, null)).toEqual({ offered: true, tenant: null });
     }
+  });
+});
+
+describe("secretsToSupply / readyToApprove", () => {
+  // WHAT WENT WRONG ONCE, and what these hold shut. deploy-slave moved onto ansiwise programs, which run
+  // as root on the machine and so declare an elevation password; the ceremony on this screen still said
+  // "One click — nothing to fill in" and approved with an empty payload. Every attempt came back from the
+  // executor as `missing required secret: ansiwise-elevation`, and no field existed anywhere to satisfy
+  // it. The screen may therefore not know which secrets a kind needs — it reads the plan.
+  const slave = (requiredSecrets: string[]): RunView => ({
+    ...run("run_1", "cluster-deploy-slave", "planned"),
+    requiredSecrets,
+  });
+
+  it("asks for exactly what the plan requires, never a list kept beside it", () => {
+    expect(secretsToSupply(slave(["ansiwise-elevation"]))).toEqual(["ansiwise-elevation"]);
+    // A plan that grows a second requirement grows a second field, with nothing here to edit.
+    expect(secretsToSupply(slave(["ansiwise-elevation", "build-plane-pat"]))).toEqual([
+      "ansiwise-elevation",
+      "build-plane-pat",
+    ]);
+  });
+
+  it("holds the approve back until every required field carries something", () => {
+    const r = slave(["ansiwise-elevation"]);
+    expect(readyToApprove(r, {})).toBe(false);
+    // A BLANK IS NOT A VALUE: the server drops empty strings, so this approve would return the same
+    // refusal the field exists to prevent.
+    expect(readyToApprove(r, { "ansiwise-elevation": "   " })).toBe(false);
+    expect(readyToApprove(r, { "ansiwise-elevation": "hunter2" })).toBe(true);
+  });
+
+  it("still lets a plan that requires nothing through on one click", () => {
+    expect(secretsToSupply(slave([]))).toEqual([]);
+    expect(readyToApprove(slave([]), {})).toBe(true);
+  });
+
+  it("asks for nothing on a run that can no longer be approved", () => {
+    // The fields belong to the approve, not to the run: a run already going, and a deleted one, are
+    // read on this same screen and neither is waiting for a password.
+    expect(secretsToSupply({ ...slave(["ansiwise-elevation"]), status: "running" })).toEqual([]);
+    expect(secretsToSupply({ ...slave(["ansiwise-elevation"]), deletedAt: 1 })).toEqual([]);
   });
 });

@@ -8,6 +8,7 @@ import { IconLock } from "../components/icons.tsx";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SkipStepDialog } from "../components/SkipStepDialog.tsx";
 import { OnboardApproveForm } from "../components/OnboardApproveForm.tsx";
+import { DeploySlaveApproveForm } from "../components/DeploySlaveApproveForm.tsx";
 import { FailedRunActions } from "../components/FailedRunActions.tsx";
 import { FailedCreateTenantCallout } from "../components/FailedCreateTenantCallout.tsx";
 import { AnsiText, stripAnsi } from "../components/AnsiText.tsx";
@@ -217,37 +218,11 @@ export function RunDetail() {
       )}
 
       {run.deletedAt === null && run.status === "planned" && run.kind === "cluster-deploy-slave" && (
-        <form
-          className="ceremony"
-          onSubmit={(e) => {
-            e.preventDefault();
-            act(() => approveRun(runId));
-          }}
-        >
-          <div className="ceremony__head">
-            <span className="ceremony__icon" aria-hidden="true">
-              <IconLock />
-            </span>
-            <div>
-              <h3 className="ceremony__title">Ready to deploy</h3>
-              <p className="ceremony__sub">One click — nothing to fill in. Approving starts the steps listed below.</p>
-            </div>
-          </div>
-          <p className="ceremony__vault">✓ Repo access — auto-sourced from the platform Vault (GITOPS_REPO_PAT)</p>
-          <p className="ceremony__note">
-            The read-only repo PAT is fetched from the platform Vault during the run and used once to clone the
-            slave&apos;s install branch onto the new machine. It is never stored — not on disk, not in logs, not in the
-            audit trail.
-          </p>
-          <div className="actions">
-            <button type="submit" className="btn btn--primary">
-              Approve &amp; deploy
-            </button>
-            <button type="button" className="btn" onClick={() => setConfirmDelete(true)}>
-              Delete run
-            </button>
-          </div>
-        </form>
+        <DeploySlaveApproveForm
+          run={run}
+          onApprove={(payload) => act(() => approveRun(runId, payload))}
+          onDelete={() => setConfirmDelete(true)}
+        />
       )}
 
       {run.deletedAt === null &&

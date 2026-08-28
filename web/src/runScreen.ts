@@ -138,3 +138,29 @@ export function abortOffer(kind: RunKind, tenant: RunTenantStateView | null, ten
   }
   return { offered: true, tenant: runTenantPurgeTarget(tenant) };
 }
+
+/** WHICH secrets the approve on this screen must put a field on screen for: the plan's own, and never a
+ *  list this page keeps beside it.
+ *
+ *  DERIVED AND NOT ENUMERATED, because the two drift apart in silence and did. The slave ceremony was
+ *  written when a slave deployment asked the operator for nothing, said "One click — nothing to fill in",
+ *  and went on saying it after deploy-slave moved onto ansiwise programs — which run as root on the
+ *  machine and therefore declare an elevation password. The executor refuses an approve that arrives
+ *  without a secret the plan requires (executor/executor.ts), so what the operator met was a plan that
+ *  could not be approved at all, from a screen that offered no way to satisfy it.
+ *
+ *  Only a PLANNED run that is still there can be approved; anything else needs no field, whatever its
+ *  plan once asked for. */
+export function secretsToSupply(run: RunView): string[] {
+  return run.deletedAt === null && run.status === "planned" ? run.requiredSecrets : [];
+}
+
+/** Whether the approve may be sent yet: every field the plan asked for carries something.
+ *
+ *  A BLANK IS NOT A VALUE. The server drops empty strings before the executor is reached (domains/runs/
+ *  api.ts), precisely so that an empty one surfaces as the missing-secret refusal rather than as a run
+ *  that starts and then fails deep inside a program — which means an approve sent with a blank field
+ *  comes back as the very refusal the field exists to prevent. */
+export function readyToApprove(run: RunView, supplied: Record<string, string>): boolean {
+  return secretsToSupply(run).every((name) => (supplied[name] ?? "").trim().length > 0);
+}
