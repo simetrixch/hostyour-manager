@@ -168,8 +168,11 @@ export interface ClusterMarking {
   unitApex?: string;
   /** Carried, never read here. */
   platformDomain?: string;
-  /** Carried, never read here. */
-  alertRecipients?: string;
+  /** Carried, never read here — and carried as a LIST, which is the shape the map template writes
+   *  and the shape the alert route iterates. Joined to one string it became one mailbox that is
+   *  several, and the render of the whole observability application stopped at
+   *  `range can't iterate over ...`. */
+  alertRecipients?: string[];
   /** Carried, never read here. */
   mailUrl?: string;
   /** Carried, never read here. */
@@ -239,8 +242,13 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
     ...(g.apiPort !== undefined ? { apiPort: g.apiPort } : {}),
     ...(g.unitApex !== undefined ? { unitApex: g.unitApex } : {}),
     ...(g.platformDomain !== undefined ? { platformDomain: g.platformDomain } : {}),
+    // A LIST STAYS A LIST. It used to be joined on a comma here and written back as a plain scalar,
+    // so the first rewrite of a map turned ['a@x', 'b@x'] into `a@x,b@x` — one mailbox that is two,
+    // and a value the alert route cannot range over at all. A scalar is still accepted, because a
+    // map may have been written that way before this, and it is split on the same comma.
     ...(g.alertRecipients !== undefined
-      ? { alertRecipients: Array.isArray(g.alertRecipients) ? g.alertRecipients.join(",") : g.alertRecipients }
+      ? { alertRecipients: (Array.isArray(g.alertRecipients) ? g.alertRecipients : g.alertRecipients.split(","))
+          .map((m) => m.trim()).filter((m) => m.length > 0) }
       : {}),
     ...(mailUrl !== undefined ? { mailUrl } : {}),
     ...(catalogRepo ? { catalogRepo } : {}),
@@ -420,7 +428,9 @@ function serializeMarking(m: ClusterMarking): string {
     ...(m.booksCluster !== undefined ? ([["booksCluster", m.booksCluster]] as [string, string][]) : []),
     ...(m.release !== undefined ? ([["release", m.release]] as [string, string][]) : []),
   ];
-  const globals: [string, string | number][] = [
+  // A value the caller has already written AS YAML — `scalar` below would quote it into a string.
+  const asYaml = (yaml: string): { yaml: string } => ({ yaml });
+  const globals: [string, string | number | { yaml: string }][] = [
     ["domain", m.fqdn],
     ["buildPlane", m.buildPlaneFqdn],
     ...(m.booksCluster !== undefined ? ([["booksCluster", m.booksCluster]] as [string, string][]) : []),
@@ -429,7 +439,13 @@ function serializeMarking(m: ClusterMarking): string {
     ...(m.apiPort !== undefined ? ([["apiPort", m.apiPort]] as [string, number][]) : []),
     ...(m.unitApex !== undefined ? ([["unitApex", m.unitApex]] as [string, string][]) : []),
     ...(m.platformDomain !== undefined ? ([["platformDomain", m.platformDomain]] as [string, string][]) : []),
-    ...(m.alertRecipients !== undefined ? ([["alertRecipients", m.alertRecipients]] as [string, string][]) : []),
+    // NOT through `scalar` below: this one is a LIST, in the flow shape the map template writes it
+    // in, so the two writers of this file put the same value down the same way. Single-quoted for
+    // the reason the template states — a mailbox is one word to YAML only by accident, and a plain
+    // scalar beginning with # is a comment.
+    ...(m.alertRecipients !== undefined && m.alertRecipients.length > 0
+      ? ([["alertRecipients", asYaml(`[${m.alertRecipients.map((r) => `'${r.replaceAll("'", "''")}'`).join(", ")}]`)]] as [string, { yaml: string }][])
+      : []),
     ...(m.catalogRepo !== undefined
       ? ([["catalogUrl", `https://github.com/${m.catalogRepo}.git`]] as [string, string][])
       : []),
@@ -446,8 +462,9 @@ function serializeMarking(m: ClusterMarking): string {
   // A colon alone is fine in a YAML plain scalar (https://... is the case that matters here); what
   // makes it ambiguous is ": " — the key separator — or a " #" comment start. Anything else, or a
   // value not starting alphanumeric, is quoted rather than reasoned about.
-  const scalar = (v: string | number): string =>
-    typeof v === "number" || (/^[A-Za-z0-9]/.test(v) && !/: | #/.test(v)) ? String(v) : JSON.stringify(v);
+  const scalar = (v: string | number | { yaml: string }): string =>
+    typeof v === "object" ? v.yaml
+      : typeof v === "number" || (/^[A-Za-z0-9]/.test(v) && !/: | #/.test(v)) ? String(v) : JSON.stringify(v);
   // EVERYTHING ELSE THE BLOCK CARRIED, given back as it came. Nested values - the endpoints, the
   // servicesLocal flags - are handed to the YAML writer rather than assembled here: the
   // fixed-order emission above exists so a SCALAR cannot carry a colon into its neighbour, and
@@ -472,8 +489,9 @@ function serializeMarking(m: ClusterMarking): string {
   // how to edit it.
   const yaml = m.header === undefined ? body : `${m.header}\n${body}`;
   const reparsed = foldMarking(clusterMapPath(m.fqdn), parseYaml(yaml), yaml);
-  if (!sameMarking(reparsed, m)) {
-    throw new AppError("INTERNAL", `cluster map serialize round-trip diverged for ${m.fqdn}`);
+  const differing = markingDifferences(reparsed, m);
+  if (differing.length > 0) {
+    throw new AppError("INTERNAL", `cluster map serialize round-trip diverged for ${m.fqdn} on ${differing.join("; ")}`);
   }
   return yaml;
 }
@@ -482,12 +500,25 @@ function serializeMarking(m: ClusterMarking): string {
  *  have been assigned in: the round-trip guard asks whether the file reads back as the marking it was
  *  built from, and a key's insertion order is not part of that question. Letting it be one makes a
  *  perfectly correct write fail the moment a field is added anywhere but at the end of the object. */
-function sameMarking(a: ClusterMarking, b: ClusterMarking): boolean {
-  // `header` is out: it is the file's own explanation, not a fact about the cluster, and the
-  // round-trip below reparses a body that carries no comments — comparing it would fail every write.
-  const canon = (m: ClusterMarking): string =>
-    JSON.stringify(Object.entries(m).filter(([k]) => k !== "header").sort(([x], [y]) => x.localeCompare(y)));
-  return canon(a) === canon(b);
+/** The fields on which a marking and its reparse disagree, each with both sides — empty when they
+ *  agree.
+ *
+ *  IT NAMES THEM because the guard that uses it used to say only that a map "diverged", and a
+ *  writer reading that has to bisect the serializer to find out which of seventeen keys moved.
+ *
+ *  `header` is out: it is the file's own explanation, not a fact about the cluster, and the
+ *  round-trip reparses a body that carries no comments — comparing it would fail every write. */
+function markingDifferences(a: ClusterMarking, b: ClusterMarking): string[] {
+  const of = (m: ClusterMarking): Map<string, string> =>
+    new Map(Object.entries(m).filter(([k]) => k !== "header").map(([k, v]) => [k, JSON.stringify(v)]));
+  const [left, right] = [of(a), of(b)];
+  const differing: string[] = [];
+  for (const key of new Set([...left.keys(), ...right.keys()])) {
+    if (left.get(key) !== right.get(key)) {
+      differing.push(`${key}: written ${right.get(key) ?? "(absent)"}, read back ${left.get(key) ?? "(absent)"}`);
+    }
+  }
+  return differing.sort();
 }
 
 /** What a map write commits, so both writers below produce the same shape. */
@@ -581,7 +612,7 @@ export async function writeClusterMarking(
     ...(current?.release !== undefined ? { release: current.release } : {}),
     ...(current?.mailUrl !== undefined && marking.mailUrl === undefined ? { mailUrl: current.mailUrl } : {}),
   };
-  if (current && sameMarking(current, next)) return { changed: false };
+  if (current && markingDifferences(current, next).length === 0) return { changed: false };
   await commitMarking(repo, {
     marking: next,
     message: `deploy(clusters): mark ${next.name} (${next.role}, ${next.stage}) [${runId}]`,

@@ -242,6 +242,26 @@ describe("setClusterRelease", () => {
       "tale.m1.example.com", "servicesLocal",
     ]) expect(after, `the pin dropped ${kept}`).toContain(kept);
     expect(after).toContain(`release: ${TAG}`);
+    // THE ONE THAT GOT AWAY. It was joined on a comma while reading and written back as a plain
+    // scalar, so this pin turned ['ops@example.com'] into `alertRecipients: ops@example.com` — and
+    // the alert route ranges over that value, which is why the whole observability application then
+    // stopped rendering at `range can't iterate over ops@example.com`. It stood outside the list
+    // above, so the case that exists to catch exactly this could not see it.
+    expect(after, "the recipients stay a list").toContain("alertRecipients: ['ops@example.com']");
+  });
+
+  it("keeps SEVERAL mailboxes as several, which one comma-joined scalar cannot say", async () => {
+    // The shape is not cosmetic: a list of two written back as `a@x,b@x` is one mailbox whose name
+    // contains a comma, and nothing downstream can tell it from a mailbox that really is called
+    // that. The map template writes the flow list, and this writer now puts the same value down the
+    // same way.
+    const two = FULL_MAP.replace("['ops@example.com']", "['ops@example.com', 'oncall@example.com']");
+    const repo = repoWith({ [MASTER]: two });
+    await setClusterRelease(repo, MASTER, TAG, "run_1");
+
+    const after = repo.read(repo.booksBranch, clusterMapPath(MASTER)) ?? "";
+    expect(after).toContain("alertRecipients: ['ops@example.com', 'oncall@example.com']");
+    expect(after, "and never as one joined word").not.toContain("ops@example.com,oncall@example.com");
   });
 
 

@@ -237,9 +237,9 @@ describe("release — set-pin and the map-sourced answers", () => {
     });
   });
 
-  it("markingAnswers splits a multi-mailbox recipients list on the map's own comma grammar", async () => {
+  it("markingAnswers carries every mailbox of a multi-recipient map, in the map's own list shape", async () => {
     const h = await liveMaster({
-      marking: MASTER_MARKING_YAML.replace("  alertRecipients: ops@example.com", "  alertRecipients: ops@example.com, oncall@example.com"),
+      marking: MASTER_MARKING_YAML.replace("  alertRecipients: ['ops@example.com']", "  alertRecipients: ['ops@example.com', 'oncall@example.com']"),
     });
     const answers = await markingAnswers(activeClusterTarget(MASTER_ID), { platformRepo: h.platformRepo })(bareStepCtx(h.db, h.store));
     expect(answers.alert_recipients).toEqual(["ops@example.com", "oncall@example.com"]);

@@ -213,9 +213,7 @@ export function markingAnswers(target: SlaveTarget, ports: DeploySlavePorts): Ex
       build_plane_fqdn: marking.buildPlaneFqdn,
       ...(marking.unitApex !== undefined ? { unit_apex: marking.unitApex } : {}),
       ...(marking.platformDomain !== undefined ? { platform_domain: marking.platformDomain } : {}),
-      ...(marking.alertRecipients !== undefined
-        ? { alert_recipients: marking.alertRecipients.split(",").map((m) => m.trim()).filter((m) => m.length > 0) }
-        : {}),
+      ...(marking.alertRecipients !== undefined ? { alert_recipients: marking.alertRecipients } : {}),
       ...(marking.catalogRepo !== undefined ? { catalog_repo: marking.catalogRepo } : {}),
       ...(marking.mailUrl !== undefined ? { mail_url: marking.mailUrl } : {}),
     };

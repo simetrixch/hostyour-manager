@@ -47,7 +47,7 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
       "booksCluster: m1.example.com",
       "  apiHost: 100.64.0.11", "  apiPort: 16443", "  buildPlane: m1.example.com",
       "  unitApex: example.com", "  platformDomain: example.com",
-      "  alertRecipients: ops@example.com", "  catalogUrl: https://github.com/acme/acme-catalog.git",
+      "  alertRecipients: ['ops@example.com']", "  catalogUrl: https://github.com/acme/acme-catalog.git",
     ]) expect(map).toContain(want);
     // The short name is DERIVED from the fqdn — never stored.
     expect(map).not.toContain("name:");
