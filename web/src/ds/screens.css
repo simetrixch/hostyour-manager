@@ -425,7 +425,29 @@
     display: grid;
     grid-template-columns: 17rem minmax(0, 1fr);
     gap: var(--sp-5);
-    align-items: start;
+  }
+
+  /* THE TWO COLUMNS END TOGETHER. The steps list grows with the run — seventeen of them on a slave
+     deployment — while the log carried a height of its own, so the terminal stopped a long way
+     above the last step and the space beside it stood empty. `align-items: start` was what let the
+     shorter one keep its own height; without it both stretch to the row, which is the default.
+
+     THE LOG SCROLLS INSIDE ITS PANEL RATHER THAN GROWING THE PAGE: the head stays put and the
+     `<pre>` takes what is left, which is what `min-height: 0` on a flex child is for — without it
+     a scrollable child refuses to shrink below its content and pushes the panel open instead.
+
+     The floor is for the other direction: a run with three steps would otherwise leave a terminal
+     three steps tall. */
+  .log-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 22rem;
+  }
+
+  .log-panel > .log {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
   }
 }
 
