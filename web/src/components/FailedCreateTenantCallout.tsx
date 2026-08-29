@@ -10,7 +10,7 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /** What a FAILED create-tenant run left behind, rendered by RunDetail for exactly
  *  that case and nothing else — the tenant-specific concern lives HERE so the run screen itself stays
- *  kind-agnostic (the same factoring as OnboardApproveForm).
+ *  kind-agnostic (the same factoring as RunApproveForm).
  *
  *  WHY this exists: a failed create-tenant CAN leave the tenant standing in GitOps and on the cluster —
  *  a fan-out, an isolation AppProject, a namespace, a Tenant CR — and purge is the only run kind that removes

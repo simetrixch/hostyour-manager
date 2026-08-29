@@ -1,13 +1,18 @@
 import { useState, type ReactNode } from "react";
-import type { OperatorInput } from "../../../shared/api-types.ts";
+import { approveIsComplete, type OperatorInput } from "../../../shared/approve.ts";
 import { IconLock } from "./icons.tsx";
 
-/** The onboard approve ceremony: operator-supplied REQUIRED secrets (masked, seeded into the consumer's
- *  Vault entry) and/or NON-secret activation inputs (plaintext — sent with the post-onboard
- *  activation call, never sealed). Owns its own field state and hands `onApprove` the merged payload —
- *  secrets under their `consumer-secret:` keys, inputs under `activation-input:<field>`. Rendered only
- *  when the plan asks for at least one of the two; split out of RunDetail to keep that page lean. */
-export function OnboardApproveForm(props: {
+/** What a person supplies before a run may start: CREDENTIALS the machine does not hold (masked —
+ *  the password its programs raise their commands to root with, and any write credential a program
+ *  asks for) and ANSWERS its programs declare that neither the inventory nor the cluster map can
+ *  state (plaintext — an answer is not a secret). Owns its own field state and hands `onApprove` the
+ *  merged payload: credentials under their own keys, answers under `activation-input:<field>`.
+ *  Rendered only where the plan asks for at least one of the two.
+ *
+ *  IT SAID "CONSUMER" AND NO RUN THAT REACHES IT IS ONE. Every value in RUN_KIND (shared/enums.ts)
+ *  acts on a CLUSTER, and RunDetail is its only caller — so the panel described a Vault seeding that
+ *  does not happen to the values typed into it. */
+export function RunApproveForm(props: {
   requiredSecrets: string[];
   requiredInputs: OperatorInput[];
   onApprove: (payload: Record<string, string>) => void;
@@ -18,7 +23,7 @@ export function OnboardApproveForm(props: {
   const { requiredSecrets, requiredInputs } = props;
   const hasSecrets = requiredSecrets.length > 0;
   const hasInputs = requiredInputs.length > 0;
-  const allFilled = requiredSecrets.every((k) => secretVals[k]?.trim()) && requiredInputs.every((i) => inputVals[i.field]?.trim());
+  const allFilled = approveIsComplete({ requiredSecrets, requiredInputs, secrets: secretVals, inputs: inputVals });
 
   return (
     <form
@@ -42,10 +47,10 @@ export function OnboardApproveForm(props: {
           <h3 className="ceremony__title">Before you approve</h3>
           <p className="ceremony__sub">
             {hasSecrets && hasInputs
-              ? "This consumer needs operator secrets (seeded into its Vault entry) and post-onboard activation details. Approving supplies both and starts the steps below."
+              ? "This run needs two things the machine does not hold: credentials only you can supply, and answers its programs ask of a person. Approving hands over both and starts the steps below."
               : hasSecrets
-                ? "This consumer declares secrets only you can supply (its manifest lists them as required, no generate). Approving seeds them into the consumer's Vault entry and starts the steps below."
-                : "This consumer declares a post-onboard activation. Supply its details below — they are sent with the final activation call once the app is serving, and never stored."}
+                ? "This run needs credentials only you can supply — the password its programs raise their commands to root with, and any write credential the machine is asked for. Approving hands them over and starts the steps below."
+                : "This run needs answers its programs ask of a person. Supply them below — they ride the run and are never stored."}
           </p>
         </div>
       </div>
@@ -60,16 +65,16 @@ export function OnboardApproveForm(props: {
           <span className="field__label">{inp.label}</span>
           {/* Plaintext (type=text), never a password field: an activation input is not a secret. */}
           <input type="text" value={inputVals[inp.field] ?? ""} onChange={(e) => setInputVals((s) => ({ ...s, [inp.field]: e.target.value }))} autoComplete="off" />
-          <span className="field__hint">Not a secret and not stored — sent with the post-onboard activation call once the app is serving.</span>
+          <span className="field__hint">{inp.optional === true ? "Optional — a blank is the answer here, and the machine reads it as \"this cluster has none\"." : "Not a secret and not stored — it rides the run and reaches the program that declares it."}</span>
         </label>
       ))}
       <p className="ceremony__note">
-        {hasSecrets ? "Secrets are sent once over TLS, seeded into the consumer's Vault entry, and discarded from memory — never written to disk, logs, or the audit trail. " : ""}
-        Activation details are sent only with the final activation call and are never sealed or persisted.
+        {hasSecrets ? "Credentials are sent once over TLS, held in memory for the length of the run, and sent with each request the run makes — never written to disk, to a log, or to the audit trail. " : ""}
+        The answers above are not secrets: they ride the run and are never sealed or persisted.
       </p>
       <div className="actions">
         <button type="submit" className="btn btn--primary" disabled={!allFilled}>
-          Approve &amp; deploy
+          Approve and start
         </button>
         <button type="button" className="btn" onClick={props.onDelete}>
           Delete run

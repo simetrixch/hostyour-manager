@@ -121,9 +121,9 @@ const RELEASE_INPUTS = [
   { field: "committer_email", label: "The mailbox the regenerated branch's commits are made under" },
   { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to before a certificate expires" },
   { field: "letsencrypt_server", label: "The ACME directory this installation registers with — the authority's production one; a staging directory is refused, because its root is in no machine's trust store" },
-  { field: "lan_cidr", label: "The IPv4 range this machine shares with the other clusters — blank when it shares none" },
-  { field: "storage_mount", label: "Where the machine's separate storage is mounted — blank when it has none" },
-  { field: "storage_subdirectory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default" },
+  { field: "lan_cidr", label: "The IPv4 range this machine shares with the other clusters — blank when it shares none", optional: true },
+  { field: "storage_mount", label: "Where the machine's separate storage is mounted — blank when it has none", optional: true },
+  { field: "storage_subdirectory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default", optional: true },
 ];
 
 /** The three credentials regenerate-branch demands exactly where the machine IS the build plane

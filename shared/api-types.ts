@@ -7,6 +7,7 @@ import type {
   Stage, TenantStatus, AppStatus, ArgoSync, ArgoHealth, DriftVerdict,
 } from "./enums.ts";
 import type { ReleaseChannel } from "./release.ts";
+import type { OperatorInput } from "./approve.ts";
 
 export type ApiErrorCode =
   | "VALIDATION"
@@ -256,14 +257,6 @@ export interface StepView {
   endedAt: number | null;
 }
 
-/** One operator-supplied NON-secret input a plan asks for at approve (a manifest-declared
- *  activation's dynamic arg, e.g. the first-admin email). Unlike requiredSecrets these are not
- *  credentials: the approve ceremony renders them as plaintext fields (never masked) and they are
- *  never sealed. The field name is the request-body key; label is the human prompt. */
-export interface OperatorInput {
-  field: string;
-  label: string;
-}
 
 export interface RunView {
   id: string;

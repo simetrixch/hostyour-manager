@@ -7,7 +7,7 @@ import { abortOffer, runOnScreen } from "../runScreen.ts";
 import { IconLock } from "../components/icons.tsx";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SkipStepDialog } from "../components/SkipStepDialog.tsx";
-import { OnboardApproveForm } from "../components/OnboardApproveForm.tsx";
+import { RunApproveForm } from "../components/RunApproveForm.tsx";
 import { DeploySlaveApproveForm } from "../components/DeploySlaveApproveForm.tsx";
 import { FailedRunActions } from "../components/FailedRunActions.tsx";
 import { FailedCreateTenantCallout } from "../components/FailedCreateTenantCallout.tsx";
@@ -263,7 +263,7 @@ export function RunDetail() {
             </div>
           </form>
         ) : run.requiredSecrets.length > 0 || run.requiredInputs.length > 0 ? (
-          <OnboardApproveForm
+          <RunApproveForm
             requiredSecrets={run.requiredSecrets}
             requiredInputs={run.requiredInputs}
             onApprove={(payload) => act(() => approveRun(runId, payload))}
