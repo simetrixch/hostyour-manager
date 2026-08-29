@@ -254,6 +254,53 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(checkpoints.at(-1)).toEqual({ branch: PARAMS.domain, apiHost: "100.64.0.11", changed: false });
   });
 
+  it("gives a slave the installation it belongs to, and only its own facts over it", async () => {
+    // WHAT A SLAVE USED TO GET. Its map was built from a handful of fields copied by name, so of
+    // the seventeen keys a master carries it had ten — and what was missing were the things every
+    // program on that machine reads. Its own machine layer stopped at "is not on this host" asking
+    // for the address of the secret store (apps4, 2026-08-29).
+    const h = await makeHarness({ marking: false });
+    h.db.db.insert(clusters).values({
+      id: "cls_s2", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+    }).run();
+    await stepOf(h, "mark-slave").run(hostedStepCtx(h));
+
+    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)) ?? "";
+    // INHERITED, because they describe the installation and not the machine.
+    for (const want of [
+      "letsencryptEmail: ops@example.com",
+      "letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
+      "registryPullUser: puller",
+      "registryPushUser: pusher",
+      "url: https://vault.m1.example.com",
+    ]) expect(map, `a slave must inherit ${want}`).toContain(want);
+
+    // ITS OWN, because they tell one cluster of an installation from another.
+    expect(map).toContain("clusterName: s1");
+    expect(map).not.toContain("clusterName: m1");
+    expect(map).toContain("vaultKubernetesAuthPath: kubernetes-s1");
+    // AND WHAT FOLLOWS FROM WHERE THE BUILD PLANE IS: this one builds elsewhere, so its registry
+    // is not local and it pulls from the cluster that does.
+    expect(map).toContain("registry: false");
+  });
+
+  it("puts that map on the machine's own branch as well, which is the one its checkout stands on", async () => {
+    // The books branch is where an installation keeps its maps and where one cluster reads about
+    // another. A machine reads ITS OWN out of the tree beside it — deploy-platform-services asks
+    // the file, not a branch it does not stand on.
+    const h = await makeHarness({ marking: false });
+    h.db.db.insert(clusters).values({
+      id: "cls_s3", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+    }).run();
+    await stepOf(h, "mark-slave").run(hostedStepCtx(h));
+
+    const own = h.platformRepo.read(PARAMS.domain, clusterMapPath(PARAMS.domain));
+    const books = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain));
+    expect(own, "the machine's own branch carries its map").not.toBeNull();
+    // ONE MAP AND NOT TWO: written from one value in one act, so the branches cannot come to say
+    // different things about one cluster.
+    expect(own).toBe(books);
+  });
   it("mark-slave keeps what another writer recorded: a standing release pin survives the rewrite", async () => {
     const h = await makeHarness({
       marking: [

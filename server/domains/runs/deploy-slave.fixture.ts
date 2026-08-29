@@ -411,6 +411,25 @@ export const MASTER_MARKING_YAML = [
   "  platformDomain: example.com",
   "  alertRecipients: ops@example.com",
   "  catalogUrl: https://github.com/acme/acme-catalog.git",
+  // WHAT A REAL MASTER'S MAP CARRIES BESIDE THE NAMES ABOVE. It stood without these, and a fixture
+  // that carries less than the thing it stands for cannot fail when the code drops something: a
+  // slave was composed from a handful of copied fields and came out with ten of a master's
+  // seventeen keys, while every test passed (2026-08-29).
+  //
+  // Two of them are the machine's OWN and a slave must not inherit them — the short name everything
+  // per cluster carries, and the auth mount that tells two clusters of one installation apart when
+  // they log in. The rest belong to the installation and must arrive untouched.
+  "  clusterName: m1",
+  "  letsencryptEmail: ops@example.com",
+  "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
+  "  vaultKubernetesAuthPath: kubernetes-m1",
+  "  registryPullUser: puller",
+  "  registryPushUser: pusher",
+  "  endpoints:",
+  "    vault:",
+  "      url: https://vault.m1.example.com",
+  "  servicesLocal:",
+  "    registry: true",
 ].join("\n") + "\n";
 
 /** The version clusters/platform/versions.yaml pins for the binary, and the file that carries it — the ONE

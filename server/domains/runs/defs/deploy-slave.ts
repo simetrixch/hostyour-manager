@@ -23,7 +23,7 @@ import { masterCheckoutsScript, SLAVE_API_PORT } from "./deploy-slave.remote.ts"
 import { refreshCheckoutStep } from "./cluster-release.kit.ts";
 import { rejoinStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
-import { clusterShortName, resolveClusterMarking, writeClusterMarking, type ClusterMarking } from "../../inventory/cluster-marking.ts";
+import { clusterShortName, resolveClusterMarking, writeClusterMarking, type ClusterMarking, writeClusterMarkingOnBranch } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
@@ -112,7 +112,14 @@ function armed(cleanup: Cleanup | undefined, step: Step): Step {
 /** The line separator, as a call rather than a literal. */
 function chr10(): string { return String.fromCharCode(10); }
 
-export const DATA_DISK_COMMAND = "findmnt -rno TARGET,SOURCE,FSTYPE";
+/** THE MACHINE DOES THE DISCARDING, AND THAT IS NOT AN OPTIMISATION. What comes back of a command
+ *  is its TAIL, and a cluster's own mount table runs to hundreds of lines — every pod subpath the
+ *  container runtime binds appears in it. Asked unfiltered, the one line that matters sits at the
+ *  top and scrolls out: the same machine answered "/mnt/data" before its cluster was installed and
+ *  "no separate data disk" minutes later, with the disk still mounted (apps4, 2026-08-29). What is
+ *  left here is short whatever the machine runs, and the reading below judges it again. */
+export const DATA_DISK_COMMAND =
+  "findmnt -rno TARGET,SOURCE | grep ' /dev/' | grep -v -e '^/ ' -e '^/boot' -e '^/snap' -e '^/var/snap' | head -20";
 
 /** WHERE THE VOLUMES OF A CLUSTER BELONG: the machine's separate disk, if it carries one.
  *
@@ -373,28 +380,48 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         if (!/^[a-z0-9._:-]+$/i.test(apiHost)) {
           throw errValidation(`server ${server.name} has a malformed API address "${apiHost}" — fix the inventory row (tailnetHost, lanHost or host)`);
         }
+        // THE INSTALLATION, WITH THIS MACHINE'S FACTS OVER IT. A slave's map used to be built from
+        // a handful of fields copied by name, and everything not named was simply absent: of the
+        // seventeen keys a master's map carries, a slave's had ten. What went missing were the
+        // things every program on that machine reads — the address of the secret store among them,
+        // which is why its own machine layer stopped at "is not on this host" (apps4, 2026-08-29).
+        //
+        // So the master's map is the ground and the overrides below are the whole of what differs.
+        // A key added to a master's map from now on reaches a slave without anybody remembering to
+        // copy it, which is the property a list of names could never have.
+        // A RELEASE PIN IS NOT INHERITED: it says which release THAT cluster stands on, and this
+        // machine stands on none until one is put there. Taken off here rather than overwritten,
+        // because an optional property set to undefined is not the same as one that is not there.
+        const { release: _theMastersRelease, ...installation } = masterMarking;
+        const inherited = masterMarking.globalRest ?? {};
+        const shortName = clusterShortName(domain);
+        const holdsBuildPlane = masterMarking.buildPlaneFqdn === domain;
         const slaveMarking: ClusterMarking = {
+          ...installation,
+          // WHAT THIS MACHINE IS, and nothing else.
           fqdn: domain,
-          // Derived, never stored — the same rule the module states for every map.
-          name: clusterShortName(domain),
+          name: shortName,
           stage,
           role: "slave",
-          // The slaves ApplicationSet SELECTS on this key — a slave map without it is invisible
-          // to the generator, and the handoff below would wait on an Application that never comes.
           booksCluster: masterFqdn,
-          // A slave pulls its images from wherever its master does. `buildPlane` is the derived
-          // "is that me?", which for a slave whose build plane is its master is false — and true in
-          // the one case the master IS the build plane and this slave shares its machine under a
-          // second fqdn, where the two fqdns are still different names.
-          buildPlane: masterMarking.buildPlaneFqdn === domain,
+          buildPlane: holdsBuildPlane,
           buildPlaneFqdn: masterMarking.buildPlaneFqdn,
           master: masterFqdn,
           apiHost,
           apiPort: SLAVE_API_PORT,
-          ...(masterMarking.unitApex !== undefined ? { unitApex: masterMarking.unitApex } : {}),
-          ...(masterMarking.platformDomain !== undefined ? { platformDomain: masterMarking.platformDomain } : {}),
-          ...(masterMarking.alertRecipients !== undefined ? { alertRecipients: masterMarking.alertRecipients } : {}),
-          ...(masterMarking.catalogRepo !== undefined ? { catalogRepo: masterMarking.catalogRepo } : {}),
+          globalRest: {
+            ...inherited,
+            // Per cluster, both of them: the short name everything named per cluster carries, and
+            // the secret store's auth mount, which is what tells two clusters of one installation
+            // apart when they log in.
+            clusterName: shortName,
+            vaultKubernetesAuthPath: `kubernetes-${shortName}`,
+            // WHICH SERVICES STAND HERE follows from where the build plane is, and for a slave that
+            // is somewhere else — it pulls from that cluster's registry rather than its own.
+            ...(typeof inherited["servicesLocal"] === "object" && inherited["servicesLocal"] !== null
+              ? { servicesLocal: { ...(inherited["servicesLocal"] as Record<string, unknown>), registry: holdsBuildPlane } }
+              : {}),
+          },
         };
         // Armed BEFORE the write. Dropping the slave part again is the inverse: it takes the
         // cluster out of the master's slaves ApplicationSet, whose finalizer then cascades the
@@ -402,6 +429,12 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         // LIVE slave is exactly what must not happen.
         if (!redeploying) ctx.registerCleanup(removeSlaveMarkingCleanup(ports));
         const { changed } = await writeClusterMarking(repo, slaveMarking, ctx.runId);
+        // AND ON THE MACHINE'S OWN BRANCH, which is the one its checkout stands on. The books branch
+        // is where an installation keeps its maps and where one cluster reads about another; a
+        // machine reads ITS OWN out of the tree beside it, and a slave's was on the books alone —
+        // its machine layer stopped at "is not on this host" asking for the secret store's address
+        // (apps4, 2026-08-29). One map, written twice, from one value in one act.
+        await writeClusterMarkingOnBranch(repo, slaveMarking, domain, ctx.runId);
         ctx.log("meta", changed
           ? `${clusterMapPath(domain)} on ${repo.booksBranch} now marks ${slaveMarking.name}: role slave, stage ${stage}, ${apiHost}:${SLAVE_API_PORT}, build plane ${slaveMarking.buildPlaneFqdn}`
           : `${clusterMapPath(domain)} already states this marking — nothing to commit`);

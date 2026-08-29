@@ -433,6 +433,11 @@ function serializeMarking(m: ClusterMarking): string {
     ...(m.catalogRepo !== undefined
       ? ([["catalogUrl", `https://github.com/${m.catalogRepo}.git`]] as [string, string][])
       : []),
+    // READ AND THEREFORE WRITTEN. A key this module names but does not emit is a key that survives
+    // being read and vanishes on the next write — and the round-trip below is what caught it, which
+    // is the whole reason that check stands here.
+    ...(m.letsencryptEmail !== undefined ? ([["letsencryptEmail", m.letsencryptEmail]] as [string, string][]) : []),
+    ...(m.letsencryptServer !== undefined ? ([["letsencryptServer", m.letsencryptServer]] as [string, string][]) : []),
   ];
   // PLAIN scalars, the shape the map template emits — the other writer of this file. Quoting
   // parses identically but shows every line as changed in the diff of a map's first release, which
@@ -489,15 +494,51 @@ function sameMarking(a: ClusterMarking, b: ClusterMarking): boolean {
 interface MarkingCommit {
   marking: ClusterMarking;
   message: string;
+  /** Which branch the map is written on. Absent, the books — the one an installation keeps its maps
+   *  on, and the only one another cluster's map is ever read from. */
+  branch?: string;
 }
 
 async function commitMarking(repo: PlatformRepo, c: MarkingCommit): Promise<{ commit: string }> {
-  return repo.withBranch(repo.booksBranch, (books) =>
+  return repo.withBranch(c.branch ?? repo.booksBranch, (books) =>
     books.commit({
       message: c.message,
       write: [{ path: clusterMapPath(c.marking.fqdn), content: serializeMarking(c.marking) }],
     }),
   );
+}
+
+/** Put a cluster's map on the cluster's OWN install branch as well as on the books.
+ *
+ *  WHY BOTH. The books branch is where an installation's maps are kept and read from — that is what
+ *  makes one cluster able to say something about another. But a machine reads ITS OWN map out of the
+ *  checkout standing on ITS OWN branch: deploy-platform-services asks for the address of the
+ *  installation's secret store, and asks the file beside it rather than a branch it does not stand
+ *  on. A master has it there because the program that generates a master's branch writes it; a slave
+ *  had it only on the books, and its own machine layer stopped at `is not on this host` (apps4,
+ *  2026-08-29).
+ *
+ *  IT IS THE SAME MAP AND NOT A SECOND ONE. Written from one value in one act, so the two cannot
+ *  come to say different things: what differs between the branches is only which of them a reader
+ *  happens to stand on. */
+export async function writeClusterMarkingOnBranch(
+  repo: PlatformRepo,
+  marking: ClusterMarking,
+  branch: string,
+  runId: string,
+): Promise<{ changed: boolean }> {
+  const content = serializeMarking(marking);
+  const path = clusterMapPath(marking.fqdn);
+  return repo.withBranch(branch, async (scope) => {
+    // COMPARED BEFORE IT IS WRITTEN. Every redeploy of a machine passes here, and a commit that
+    // changes nothing is a commit somebody has to read past to find the one that did.
+    if ((await scope.readFile(path)) === content) return { changed: false };
+    await scope.commit({
+      message: `deploy(clusters): mark ${marking.name} (${marking.role}, ${marking.stage}) on its own branch [${runId}]`,
+      write: [{ path, content }],
+    });
+    return { changed: true };
+  });
 }
 
 /** Write the release pin: the cluster now stands on `tag`. The ONE declarative place the platform
