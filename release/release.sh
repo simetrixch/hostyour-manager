@@ -144,14 +144,14 @@ else
   [ -n "$PLATFORM_REPO" ] \
     || die "the manifest ${MANIFEST} states no platformRepo, so there is no tree to pin this release into — add the repository that carries this unit's values-<stage>.yaml files"
   PLATFORM_REPO_DIR="$(mktemp -d)"
-  trap 'rm -rf "$PLATFORM_REPO_DIR"' EXIT
+  PINNER="${PLATFORM_REPO_DIR}.pin.py"
+  trap 'rm -rf "$PLATFORM_REPO_DIR" "$PINNER"' EXIT
   git clone --quiet "https://github.com/${PLATFORM_REPO}.git" "$PLATFORM_REPO_DIR" \
     || die "the platform tree ${PLATFORM_REPO} could not be cloned — nothing was pinned"
-  git -C "$PLATFORM_REPO_DIR" checkout --quiet master
   # THE PIN GRAMMAR AND NOTHING ELSE: builds[]{name,image,tag}, in the values file of the stage
   # this release is going to. Read and written by name rather than by line, so a file whose
   # entries are ordered differently is still pinned and a file that carries none is left alone.
-  PINNED="$(python3 - "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST" <<'PIN'
+  cat > "$PINNER" <<'PIN'
 import glob, os, re, sys
 tree, stage, image_tag, manifest = sys.argv[1:5]
 names = re.findall(r"^\s*-\s*name:\s*(\S+)", open(manifest, encoding="utf-8").read(), re.M)
@@ -178,16 +178,46 @@ for path in glob.glob(os.path.join(tree, "clusters", "inventories", "*", "values
         touched.append(os.path.relpath(path, tree).replace(os.sep, "/"))
 print(" ".join(touched))
 PIN
-)"
-  if [ -z "$PINNED" ]; then
-    die "no values-${STAGE}.yaml in ${PLATFORM_REPO} carries a pin of ${NAME} — the images are built and no stage reads them, so this release reaches nothing"
-  else
-    git -C "$PLATFORM_REPO_DIR" add -- $PINNED
+
+  # EVERY BRANCH A CLUSTER ACTUALLY READS, and the trunk they are cut from.
+  #
+  # A cluster's ArgoCD tracks its own INSTALL BRANCH — the root application's targetRevision is the
+  # cluster's domain, not the default branch and not a tag — so a pin written only on the trunk is a
+  # pin no machine ever sees. It is written on the trunk as well, because an install branch that is
+  # regenerated later takes what stands there.
+  #
+  # WHICH INSTALL BRANCHES: the ones whose own cluster map says `role: master`. A branch states its
+  # role in clusters/active/<branch>.yaml, which is read here without checking the branch out. A
+  # cluster holding the slave part runs no copy of this unit, so pinning its branch would move a
+  # value nothing reads.
+  pin_branch() {
+    branch="$1"
+    git -C "$PLATFORM_REPO_DIR" checkout --quiet "$branch" || die "the platform tree has no branch ${branch} — nothing further was pinned"
+    git -C "$PLATFORM_REPO_DIR" reset --quiet --hard "origin/${branch}"
+    pinned="$(python3 "$PINNER" "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST")"
+    if [ -z "$pinned" ]; then
+      echo "release: ${branch} carries no values-${STAGE}.yaml pin of ${NAME} — left as it stands"
+      return 0
+    fi
+    git -C "$PLATFORM_REPO_DIR" add -- $pinned
     git -C "$PLATFORM_REPO_DIR" commit --quiet -m "Pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME}, once its images were built."
-    git -C "$PLATFORM_REPO_DIR" push --quiet origin master \
-      || die "the pin of ${STAGE} to ${TAG}-${SHA7} could not be pushed to ${PLATFORM_REPO} — the images are built and no stage reads them"
-    echo "release: pinned ${STAGE} to ${TAG}-${SHA7} in ${PINNED}"
-  fi
+    git -C "$PLATFORM_REPO_DIR" push --quiet origin "$branch" \
+      || die "the pin of ${STAGE} to ${TAG}-${SHA7} could not be pushed to ${branch} of ${PLATFORM_REPO}"
+    echo "release: pinned ${branch} to ${TAG}-${SHA7} in ${pinned}"
+    PINNED_ANY=1
+  }
+
+  PINNED_ANY=0
+  pin_branch master
+  for ref in $(git -C "$PLATFORM_REPO_DIR" for-each-ref --format='%(refname:strip=3)' refs/remotes/origin); do
+    [ "$ref" = "master" ] && continue
+    [ "$ref" = "HEAD" ] && continue
+    role="$(git -C "$PLATFORM_REPO_DIR" show "origin/${ref}:clusters/active/${ref}.yaml" 2>/dev/null | grep -m1 -E '^role:' | sed -E 's/^role:[[:space:]]*//' || true)"
+    [ "$role" = "master" ] || continue
+    pin_branch "$ref"
+  done
+  [ "$PINNED_ANY" = "1" ] \
+    || die "no branch of ${PLATFORM_REPO} carries a values-${STAGE}.yaml pin of ${NAME} — the images are built and no cluster reads them, so this release reaches nothing"
 fi
 
 echo "release: ${NAME} ${TAG} (commit ${SHA7}) is on its way to ${STAGE}"
