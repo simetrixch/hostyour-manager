@@ -147,12 +147,20 @@ describe("tailnetRunKindOffer — which repair run kinds a card may offer", () =
     }
   });
 
-  it("offers none where no run has seen a client — there is nothing on the host to drive", () => {
-    for (const state of ["no-client", "unknown"] as const) {
-      expect(tailnetRunKindOffer(server(state, { kind: "none" }), live), state).toEqual({
-        disconnect: false, reconnect: false, rejoin: false,
-      });
-    }
+  it("offers NOTHING where a run looked and found no client — there is nothing to drive", () => {
+    expect(tailnetRunKindOffer(server("no-client", { kind: "none" }), live)).toEqual({
+      disconnect: false, reconnect: false, rejoin: false,
+    });
+  });
+
+  it("offers the REJOIN on a row nothing has looked at, and only the rejoin", () => {
+    // The three do not rest on a reading the same way. Disconnect and reconnect act on a membership
+    // somebody established; a rejoin establishes one from nothing, which is exactly the repair for a
+    // host whose membership is not known. A machine this manager never adopted has no reading and no
+    // way to get one, so withholding the rejoin locks out the one host that needs it.
+    expect(tailnetRunKindOffer(server("unknown", { kind: "none" }), live)).toEqual({
+      disconnect: false, reconnect: false, rejoin: true,
+    });
   });
 
   it("offers the master everything but the DISCONNECT, which is the line the plan draws", () => {
@@ -171,11 +179,11 @@ describe("tailnetRunKindOffer — which repair run kinds a card may offer", () =
     });
   });
 
-  it("offers a master nothing where no run has read a client on it", () => {
+  it("offers a master the REJOIN where no run has read a client on it", () => {
     // The offer rests on a reading, not on the role: a host nothing has looked at gives the card
     // nothing to base an offer on, and that holds for the master as much as for a slave.
     const master: ServerView = { ...server("unknown", { kind: "none" }), role: "master" };
-    expect(tailnetRunKindOffer(master, live)).toEqual({ disconnect: false, reconnect: false, rejoin: false });
+    expect(tailnetRunKindOffer(master, live)).toEqual({ disconnect: false, reconnect: false, rejoin: true });
   });
 
   it("withholds only REJOIN without a live cluster — the credential is minted per slave", () => {

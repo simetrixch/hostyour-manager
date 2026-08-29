@@ -174,5 +174,20 @@ const CLIENT_SEEN: ReadonlySet<ServerTailnetState> = new Set<ServerTailnetState>
  */
 export function tailnetRunKindOffer(server: ServerView, o: { liveCluster: boolean }): TailnetRunKindOffer {
   const seen = CLIENT_SEEN.has(server.tailnetState);
-  return { disconnect: seen && !isMasterRole(server.role), reconnect: seen, rejoin: seen && o.liveCluster };
+  // A REJOIN IS OFFERED ON AN UNREAD ROW, and the other two are not. The three run kinds do not rest
+  // on a reading the same way. Disconnect and reconnect act on a membership somebody has established
+  // — one takes it away, the other picks the credential the host already holds back up — so offering
+  // either where no run has ever looked is a guess. A rejoin establishes one from nothing: it mints
+  // a fresh credential and joins with it, which is precisely the repair for a host whose membership
+  // is not known. Hiding it until a reading exists locks out the only host that needs it — a machine
+  // this manager never adopted has no reading and no way to get one.
+  //
+  // What DOES withhold it is a run that looked and found no client at all: the join's first row
+  // requires the client, so there would be nothing to join with.
+  const clientAbsent = server.tailnetState === "no-client";
+  return {
+    disconnect: seen && !isMasterRole(server.role),
+    reconnect: seen,
+    rejoin: !clientAbsent && o.liveCluster,
+  };
 }
