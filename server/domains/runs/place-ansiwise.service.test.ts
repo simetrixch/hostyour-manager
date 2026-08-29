@@ -216,11 +216,11 @@ describe("enable-ansiwise-service", () => {
     h.db.db.update(servers).set({ tailnetHost: null }).where(eq(servers.id, SLAVE_ID)).run();
     await expect(enableAnsiwiseServiceStep(target, ports(h)).run(placeCtx(h, hosts, "run_svc6", [])))
       .rejects.toThrow(/carries no tailnet address/);
-    // And it says where the value comes from. The column is written when the server is created and by
-    // nothing else, so a refusal pointing at the join or the membership reading sends the operator to
-    // a repair that cannot fill it.
+    // And it says where the value comes from. One step writes this column — declare-tailnet-address,
+    // which asks the coordinator — so an empty column here means that reading did not happen, and the
+    // refusal has to send the operator there rather than to the join or the membership reading.
     await expect(enableAnsiwiseServiceStep(target, ports(h)).run(placeCtx(h, hosts, "run_svc6b", [])))
-      .rejects.toThrow(/TYPED on the inventory row/);
+      .rejects.toThrow(/declare-tailnet-address/);
     expect(commands(hosts), "it reached the machine before finding out where the surface would stand").toHaveLength(0);
   });
 

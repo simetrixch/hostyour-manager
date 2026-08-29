@@ -130,10 +130,13 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
  *  WHY IT IS A SECOND STEP AND NOT THE FIRST ONE, and the reason is about the MACHINE and not about
  *  the row. A machine cannot bind an address it does not hold, and it holds no tailnet address until
  *  the rejoin above put it on the network; the binary refuses every other one (`--listen` outside
- *  100.64.0.0/10). Nothing about the ROW changes in between: `tailnetHost` is typed on the inventory
- *  row when the server is created and is never probed (inventory/write.ts, "Stated here, never
- *  probed"), and `read-membership` writes `tailnetState` and `tailnetJson` and nothing else
- *  (runs/tailnet-probe.ts `recordTailnetReading`).
+ *  100.64.0.0/10). What changes about the ROW in between is exactly one column, written by exactly
+ *  one step: `declare-tailnet-address` (deploy-slave.address.ts) asks the COORDINATOR which address
+ *  it gave this machine and puts that in `tailnetHost` — the coordinator assigned it, so the value
+ *  is still the platform's own statement and not the host's account of itself. `read-membership`
+ *  writes `tailnetState` and `tailnetJson` and nothing else (runs/tailnet-probe.ts
+ *  `recordTailnetReading`), and those stay a READING: the address in them is what the machine says,
+ *  which is the one thing this column may not be.
  *
  *  THE ADDRESS IS THE ONE THE MANAGER WILL DIAL, stated here and bound there: the server row's
  *  tailnetHost with ANSIWISE_SERVICE_PORT after it, which is exactly what an `{ kind: "address" }`
@@ -150,9 +153,10 @@ export function enableAnsiwiseServiceStep(target: SlaveTarget, ports: DeploySlav
       if (!server.tailnetHost) {
         throw errValidation(
           `server ${server.name} carries no tailnet address, and the resident ansiwise service may stand on no other ` +
-          "one — the manager presents its token in a plain HTTP header. tailnetHost is TYPED on the inventory row when " +
-          "the server is created and no run ever writes it, so re-running the join or the membership reading cannot " +
-          `fill it: put ${server.name}'s address in 100.64.0.0/10 on its row, then start this again`,
+          "one — the manager presents its token in a plain HTTP header. The step before this one (declare-tailnet-address) " +
+          "asks the coordinator which address it gave this machine and writes exactly this column, so an empty column " +
+          "here means that reading did not happen: run this deployment from a plan that carries that step, or put " +
+          `${server.name}'s address in 100.64.0.0/10 on its row by hand if the coordinator cannot be reached at all`,
         );
       }
       // The shape, refused HERE because this is where the field is, and the field carries none of its

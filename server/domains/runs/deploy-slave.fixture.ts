@@ -29,6 +29,7 @@ import { HOST_ADDRESS_COMMAND } from "./defs/deploy-slave.ts";
 export { SLAVE_MARKING_YAML, MASTER_MARKING_YAML } from "./cluster-maps.fixture.ts";
 import { SLAVE_MARKING_YAML, MASTER_MARKING_YAML, SLAVE_FQDN, FIXTURE_STAGE } from "./cluster-maps.fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
+import { clusterShortName } from "../inventory/cluster-marking.ts";
 
 // The deploy-slave test fixture (shared by deploy-slave.test.ts — plan/guards/failure modes —
 // and redeploy.ansiwise.test.ts — the journeys over the REAL `ansiwise-rest serve`): a scripted
@@ -59,8 +60,8 @@ export const STEP_NAMES = [
   "attest-target", "slave-preflight", "prepare-checkouts", "run-deploy-slave-branch", "mark-slave",
   "place-ansiwise", "run-deploy-host", "refresh-checkout", "place-input", "run-deploy-cluster",
   "run-deploy-platform-services", "drop-input",
-  "rejoin", "read-membership", "enable-ansiwise-service", "create-mgmt", "gitops-handoff",
-  "verify-slave", "register",
+  "rejoin", "read-membership", "declare-tailnet-address", "enable-ansiwise-service", "create-mgmt",
+  "gitops-handoff", "verify-slave", "register",
 ];
 /** The redeploy slave arm: the same list minus the two birth acts (the branch cut with its
  *  checkout preparation, and the tailnet join with its membership read). */
@@ -166,6 +167,12 @@ export interface HostsScript {
   mintedKeyOut: string;   // the join (master): what `cat` of the mint program's key file answers
   mintedKeyExit: number;
   tailnetProbeOut: string; // read-membership (slave): what the joined client reports back
+  /** WHAT `headscale nodes list -o json` PRINTS ON THE MASTER — declare-tailnet-address reads the
+   *  address it puts on the row out of this, and out of nothing on the slave. The default lists the
+   *  fixture slave under its own name with the address the slave row carries, so every suite that
+   *  drives the whole list keeps the address it already leaned on. */
+  coordinatorNodesOut: string;
+  coordinatorNodesExit: number;
   appSyncOut: string;      // "Synced" ends gitops-handoff's wait immediately
   externalSecretsOut: string; // verify HARD gate 0 (master): `name|Ready|reason` rows in ns <name>
   diagOut: string;         // verify diagnostic bundle (master, runs only while a gate is failing)
@@ -273,6 +280,15 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     mintedKeyOut: MINT_AUTHKEY,
     mintedKeyExit: 0,
     tailnetProbeOut: TAILNET_PROBE_JOINED,
+    coordinatorNodesOut: JSON.stringify([{
+      id: 1,
+      name: clusterShortName(SLAVE_FQDN),
+      given_name: clusterShortName(SLAVE_FQDN),
+      user: { id: 1, name: clusterShortName(SLAVE_FQDN), created_at: { seconds: 1, nanos: 0 } },
+      ip_addresses: ["100.64.0.11", "fd7a:115c:a1e0::11"],
+      online: true,
+    }]),
+    coordinatorNodesExit: 0,
     appSyncOut: "Synced",
     externalSecretsOut: "cluster-slave|True|SecretSynced\nrepo-platform|True|SecretSynced\nrepo-catalog|True|SecretSynced",
     diagOut: "==== verify-slave diagnostics (ns s1) ====",
@@ -357,6 +373,9 @@ export function hostsFactory(f: HostsScript): SshFactory {
       if (command.startsWith("cat ") && command.includes("ansiwise-tailnet-join-key-")) { emit(f.mintedKeyOut); return done(f.mintedKeyExit); }
       if (command.includes("ansiwise-tailnet-join-key-")) return done();
       if (command.includes("dc-tailnet-probe-")) { emit(f.tailnetProbeOut); return done(); }
+      // ---- declare-tailnet-address's one reading, and it answers on the MASTER: the coordinator is
+      // a workload of the master's cluster, and the machine being deployed is never asked.
+      if (command.includes("headscale") && command.includes("nodes list")) { emit(f.coordinatorNodesOut); return done(f.coordinatorNodesExit); }
       // ---- gitops-handoff
       if (command.includes("get application ")) { emit(f.appSyncOut); return done(); }
       // ---- verify-slave (three HARD gates + diagnostics + two SOFT checks)

@@ -30,9 +30,13 @@ export const CreateServerInput = z.object({
   host: z.string().min(1),
   lanHost: z.string().min(1).optional(),
   /** The address the master's in-cluster components will dial this machine's kube-apiserver on once
-   *  it is a slave — the cluster map's apiHost. Stated here, never probed: deploy-slave writes the
-   *  cluster map two steps before the host joins the private network, so there is nothing to read
-   *  off the host at the moment the address is needed. */
+   *  it is a slave — the cluster map's apiHost. OPTIONAL, and on a first deployment it is normally
+   *  left empty: the address is assigned when the machine registers at the coordinator, which is a
+   *  step of the deployment itself, so nobody can state it here beforehand. `declare-tailnet-address`
+   *  (runs/defs/deploy-slave.address.ts) fills it from the coordinator's own node list. Stated here
+   *  it still wins until that reading runs, which is what an installation with addresses of its own
+   *  choosing wants — and mark-slave, which writes the cluster map two steps before the host joins,
+   *  reads whatever stands here at that moment (deploy-slave.kit.ts `slaveApiHost`). */
   tailnetHost: z.string().min(1).optional(),
   sshPort: z.number().int().min(1).max(65535).optional(),
   sshUser: z.string().min(1),

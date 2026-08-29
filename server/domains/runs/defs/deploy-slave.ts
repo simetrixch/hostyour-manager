@@ -19,6 +19,7 @@ import {
   type AnsiwisePorts, type ExtraAnswers,
 } from "./ansiwise-run.kit.ts";
 import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
+import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
 import { masterCheckoutsScript, SLAVE_API_PORT } from "./deploy-slave.remote.ts";
 import { refreshCheckoutStep } from "./cluster-release.kit.ts";
 import { placeInputStep, dropInputStep, dropInputCleanup } from "./deploy-slave.input.ts";
@@ -558,6 +559,10 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
       // reading about the machine the master's ArgoCD and Vault are talking to.
       readMembershipStep(sid),
     ]),
+    // Which address that is, asked of the one that handed it out. It is OUTSIDE the guard above
+    // because a redeploy does not join again and is still the run that has to notice an address
+    // that moved — and it is before the step below because that step is the first thing to dial it.
+    declareTailnetAddressStep(target, sid),
     // The machine's own surface, switched on. It stands HERE and not beside the placement at the
     // head of the list because the address it binds is the one the join above gave the machine —
     // and on a redeploy the machine already holds it, so the step measures a standing service and

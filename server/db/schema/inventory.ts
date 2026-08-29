@@ -31,8 +31,16 @@ export const servers = sqliteTable("servers", {
   // Its own column and NOT lan_host, because lan_host answers a different question and two readers
   // depend on that answer: the pod-CIDR guard derives the cluster LAN as the /24 around it, and the
   // boot seed reconciles the master's row from MASTER_LAN_HOST on every start. It is also not
-  // tailnet_json.address below — that is a READING taken off the host's own client, and this is
-  // what the platform DECLARES, stated before the host has joined anything.
+  // tailnet_json.address below — that is a READING taken off the host's own CLIENT, and the whole
+  // point of this column is that it is not the machine's account of itself: the manager dials this
+  // address with its token in a plain HTTP header.
+  //
+  // WHO STATES IT. A person may, when the server row is created (inventory/write.ts). Where nobody
+  // did, the run asks the COORDINATOR — `declare-tailnet-address` (runs/defs/deploy-slave.address.ts)
+  // reads the node list on the master and writes what the coordinator gave this machine. That is
+  // still the platform declaring the address, by the component that assigned it, and it is the only
+  // way the column can be right on a first deployment: headscale 0.29.2 cannot be told an address in
+  // advance, so the value does not exist until the machine registers, which happens in the run.
   tailnetHost: text("tailnet_host"),
   sshPort: integer("ssh_port").notNull().default(22),
   sshUser: text("ssh_user").notNull(),
