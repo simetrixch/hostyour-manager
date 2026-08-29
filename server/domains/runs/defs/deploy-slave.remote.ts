@@ -95,6 +95,19 @@ git -C "${WORK_CHECKOUT}" reset --hard
 git -C "${WORK_CHECKOUT}" checkout -B master origin/master
 git -C "${WORK_CHECKOUT}" clean -fd
 git -C "${WORK_CHECKOUT}" branch -D "${o.slaveFqdn}" >/dev/null 2>&1 || true
+# A BRANCH THAT IS ALREADY PUBLISHED IS THE ONE THIS MACHINE CUT BEFORE, and the cut has to grow
+# from it rather than beside it. Cut fresh from master every time, the new tip shares no history
+# with what stands on the remote, and the push at the last row is refused as a non-fast-forward —
+# after the branch was cut, the files stamped and the commit made (apps4, three attempts on
+# 2026-08-29, each one an operator deleting a branch by hand to get past it).
+#
+# So where one exists, this stands on it and merges today's master in. git_branch then finds the
+# branch checked out and is a no-op, the rows re-stamp what an installation is described by, and
+# the commit lands on top of what is published — which is what a push can carry.
+if git -C "${WORK_CHECKOUT}" ls-remote --exit-code --heads origin "${o.slaveFqdn}" >/dev/null 2>&1; then
+  git -C "${WORK_CHECKOUT}" checkout -B "${o.slaveFqdn}" "origin/${o.slaveFqdn}"
+  git -C "${WORK_CHECKOUT}" merge --no-edit origin/master
+fi
 echo "WORK_HEAD $(git -C "${WORK_CHECKOUT}" rev-parse --short HEAD)"
 `;
 }
