@@ -1,27 +1,17 @@
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
-import type { ClusterReleaseRead, ServerView } from "../../../shared/api-types.ts";
+import type { ServerView } from "../../../shared/api-types.ts";
 import { MASTER_ROLES, isMasterRole } from "../../../shared/enums.ts";
 import { readServerTailnet } from "../../../shared/tailnet.ts";
 import { readServerPasswordLogin } from "../../../shared/password-login.ts";
 import { readServerAuthorizedKeys } from "../../../shared/operator-keys.ts";
-import { clusterReleaseRead, type ClusterReleases } from "./cluster-marking.ts";
 
 /** Per-server credential presence (never values). Computed in the API layer from the store
  *  (only-store-writes-creds forbids inventory touching the credentials schema). */
 export interface ServerCredFlags {
   hasPassword: boolean;
   hasKey: boolean;
-}
-
-/** A machine that carries no cluster row stands on no release and never did — a freshly added server,
- *  the ordinary state, and the ONE case a server projection adds to the map read. Every other answer
- *  comes from clusterReleaseRead, which the release surface reads through as well, so the two can
- *  never word the same situation differently. */
-function releaseOf(domain: string | undefined, releases: ClusterReleases): ClusterReleaseRead {
-  if (domain === undefined) return { kind: "no-cluster" };
-  return clusterReleaseRead(domain, releases);
 }
 
 /**
@@ -44,22 +34,14 @@ function releaseOf(domain: string | undefined, releases: ClusterReleases): Clust
  * bodies. A fingerprint is this codebase's public, non-secret identifier for a key; the browser is
  * where the operator finds out that a machine lets somebody in, so withholding the reading would
  * defeat the only surface the question has.
- *
- * `releases` is the ONE git read this projection depends on and the caller makes it, once for the
- * whole list: the cluster maps are one file per cluster on one branch, and reading them per row would
- * be one fetch per server. It is a parameter rather than something read here because that read is IO
- * against the platform repo, and this module is the DB projection.
  */
-export function listServers(db: Db, flags: Map<string, ServerCredFlags> | undefined, releases: ClusterReleases): ServerView[] {
+export function listServers(db: Db, flags: Map<string, ServerCredFlags> | undefined): ServerView[] {
   return db
-    // LEFT join: a server is registered before it is ever a cluster, and those rows must still be
-    // projected. The null domain is what releaseOf reads as "not a cluster yet".
-    .select({ s: servers, domain: clusters.domain })
+    .select()
     .from(servers)
-    .leftJoin(clusters, eq(clusters.serverId, servers.id))
     .all()
     .map(
-      ({ s: r, domain }): ServerView => ({
+      (r): ServerView => ({
         id: r.id,
         name: r.name,
         host: r.host,
@@ -75,7 +57,6 @@ export function listServers(db: Db, flags: Map<string, ServerCredFlags> | undefi
         passwordLogin: readServerPasswordLogin(r.passwordLoginJson),
         authorizedKeysState: r.authorizedKeysState,
         authorizedKeys: readServerAuthorizedKeys(r.authorizedKeysJson),
-        release: releaseOf(domain ?? undefined, releases),
         createdAt: r.createdAt.getTime(),
         adoptedAt: r.adoptedAt ? r.adoptedAt.getTime() : null,
         hasPassword: flags?.get(r.id)?.hasPassword ?? false,
@@ -86,8 +67,8 @@ export function listServers(db: Db, flags: Map<string, ServerCredFlags> | undefi
 }
 
 /** One server's wire projection, or undefined. Same trust-boundary rules as listServers. */
-export function getServer(db: Db, id: string, flags: Map<string, ServerCredFlags> | undefined, releases: ClusterReleases): ServerView | undefined {
-  return listServers(db, flags, releases).find((s) => s.id === id);
+export function getServer(db: Db, id: string, flags: Map<string, ServerCredFlags> | undefined): ServerView | undefined {
+  return listServers(db, flags).find((s) => s.id === id);
 }
 
 /** The master's FQDN, derived — never typed (derive-dont-type). Authoritative source is the

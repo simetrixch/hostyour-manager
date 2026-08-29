@@ -6,13 +6,12 @@ describe("enums (single source of truth)", () => {
     expect(RUN_KIND).toContain("noop");
   });
 
-  it("RUN_KIND names the three distinguishable cluster run kinds beside cluster-deploy-slave", () => {
+  it("RUN_KIND names the two distinguishable cluster run kinds beside cluster-deploy-slave", () => {
     // cluster-adopt takes a bare machine into service, cluster-deploy-slave turns an adopted server into
-    // a live slave, cluster-redeploy rebuilds a live cluster's machine layer, cluster-release raises the
-    // platform version it stands on. Four separate literals, because each answers a different question —
-    // a boolean on another run kind hides that, and hiding it is how the redeploy once lived inside
-    // cluster-deploy-slave's params.
-    for (const kind of ["cluster-adopt", "cluster-deploy-slave", "cluster-redeploy", "cluster-release"] as const) expect(RUN_KIND).toContain(kind);
+    // a live slave, cluster-redeploy rebuilds a live cluster's machine layer. Separate literals, because
+    // each answers a different question — a boolean on another run kind hides that, and hiding it is how
+    // the redeploy once lived inside cluster-deploy-slave's params.
+    for (const kind of ["cluster-adopt", "cluster-deploy-slave", "cluster-redeploy"] as const) expect(RUN_KIND).toContain(kind);
   });
 
   it("RUN_KIND names the three tailnet repair run kinds, and the cluster family owns all three", () => {

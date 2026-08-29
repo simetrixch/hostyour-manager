@@ -28,11 +28,9 @@
 //                build plane?" and "whose registry do I pull from?" — a cluster that builds
 //                elsewhere names that other cluster here.
 //   release      the platform release tag this cluster stands on, in the one release grammar
-//                (shared/release.ts). THE pin: the install branch is regenerated from exactly this
-//                tag, so the field and the branch state are one statement, and "this cluster runs
-//                platform X" is a question with an answer. Absent on a cluster that has never had a
-//                release run against it — the map is written at install time, the pin at release
-//                time, and the two are separate events.
+//                (shared/release.ts). Nothing in this process reads or writes it: it is written
+//                outside this manager and read by the catalogue's branch regeneration program.
+//                Declared and validated here so a map rewrite carries it instead of deleting it.
 //   master       the managing master's FQDN. Present exactly for a cluster carrying the slave part.
 //   apiHost      the address the master's IN-CLUSTER components dial the slave's kube-apiserver
 //   apiPort      on, and its port. Present only on a pure slave. It is the slave's tailnet address
@@ -70,7 +68,6 @@ import { writeAudit } from "../../db/audit-writer.ts";
 import { AppError, errValidation } from "../../kernel/errors.ts";
 import { SERVER_ROLE, STAGE, type ServerRole, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_TAG_RE } from "../../../shared/release.ts";
-import type { ClusterReleaseRead } from "../../../shared/api-types.ts";
 import { CLUSTER_MAP_DIR, clusterMapPath } from "../../../shared/cluster-values.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 
@@ -89,7 +86,7 @@ export function clusterShortName(fqdn: string): string {
  *
  *  STRICT, and that is the load-bearing part. Zod's default is to STRIP a key it does not declare;
  *  serializeMarking then regenerates the whole file from what survived, so an undeclared key is
- *  silently deleted from git by the next release run — a write nobody asked for, on a file whose
+ *  silently deleted from git by the next map write — a write nobody asked for, on a file whose
  *  own header documents it as hand-editable. Strict turns that into an error naming the file and the key, which is
  *  also the whole migration path for a renamed field: a map still carrying the retired `lanHost` is
  *  refused out loud instead of quietly losing the only git-side record of where the master dials the
@@ -101,8 +98,9 @@ const ClusterMarkingFileSchema = z.object({
   // Optional because maps predating the key are still valid markings; every map the deployment
   // programs write (cluster-map.tpl) and every slave map mark-slave writes carries it.
   booksCluster: z.string().min(1).optional(),
-  // Checked against the release grammar rather than accepted as free text: the field IS the pin, and
-  // a value the grammar does not recognise names no state anything can be regenerated from.
+  // Carried, never read or written by this process — the catalogue's branch regeneration program
+  // reads it. Checked against the release grammar rather than accepted as free text: the field IS a
+  // pin, and a value the grammar does not recognise names no state anything can be regenerated from.
   release: z.string().regex(RELEASE_TAG_RE, "must be a release tag <x.y.z>-<channel>-<ts14>").optional(),
   // THE TOP LEVEL IS WHAT THE GENERATORS SELECT ON, and it is strict for that reason: a key that
   // does not belong there is a key nothing selects on, and a selector matching nothing produces no
@@ -145,7 +143,7 @@ export const CLUSTER_MARKING_FILE_KEYS = Object.keys(ClusterMarkingFileSchema.sh
 export interface ClusterMarking {
   /** The comment block the file opens with, VERBATIM, so a rewrite gives it back. The map
    *  template writes a header above the fields — what the file is and who writes it — and the file
-   *  is hand-editable. Without carrying this, the first release pin would delete the only thing
+   *  is hand-editable. Without carrying this, the first map rewrite would delete the only thing
    *  that says how to edit it. NOT identity: sameMarking ignores it. */
   header?: string;
   fqdn: string;
@@ -159,7 +157,8 @@ export interface ClusterMarking {
   buildPlane: boolean;
   /** The FQDN of the cluster that builds this one's images (own fqdn when buildPlane). */
   buildPlaneFqdn: string;
-  /** The platform release tag the cluster stands on. Absent until a release run has pinned one. */
+  /** The platform release tag the cluster stands on. Carried, never read or written here — it is
+   *  written outside this manager and read by the catalogue's branch regeneration program. */
   release?: string;
   master?: string;
   apiHost?: string;
@@ -185,9 +184,9 @@ export interface ClusterMarking {
   /** Everything `global` carried that this module does not name, carried VERBATIM. The schema lets
    *  the block through on purpose, so a chart may add a value without failing every map read on the
    *  release that introduces it - but a writer that emits only what it understands turns that
-   *  permission into DATA LOSS the moment anything rewrites the file, and the first thing that
-   *  rewrites it is the first release pin. Every endpoint, every servicesLocal flag, the cluster's
-   *  short name and its Vault auth path travel here. */
+   *  permission into DATA LOSS the moment anything rewrites the file, and mark-slave rewrites it on
+   *  every deploy. Every endpoint, every servicesLocal flag, the cluster's short name and its Vault
+   *  auth path travel here. */
   globalRest?: Record<string, unknown>;
 }
 
@@ -285,53 +284,6 @@ async function indexMarkings(repo: PlatformRepo): Promise<{ byFqdn: Map<string, 
   }
   return { byFqdn, byName };
   });
-}
-
-/** Every cluster map of this installation, or the reason there is none to show.
- *
- *  resolveClusterMarking answers for ONE cluster and THROWS when it cannot — right for a run, wrong
- *  for a surface that is merely listing every cluster: one unreadable map would take the whole page
- *  down, and a page that renders nothing says less than one that renders the rows and names what it
- *  could not read. So the failure is RETURNED, and every consumer states it beside the row it belongs
- *  to instead of inventing a release for it. */
-export type ClusterReleases =
-  | { ok: true; byFqdn: ReadonlyMap<string, ClusterMarking> }
-  | { ok: false; reason: string };
-
-/** Read the maps for that surface. `repo` is absent on a Manager whose platform repo is not
- *  configured — there is then no books branch to read and no map anywhere, which is a reason and not
- *  an error. Everything else that goes wrong (a branch that will not fetch, a map that fails the
- *  strict schema, two maps deriving one short name) arrives as the message the read threw with. */
-export async function readClusterReleases(repo: PlatformRepo | undefined): Promise<ClusterReleases> {
-  if (!repo) {
-    return {
-      ok: false,
-      reason: "there is no platform repo to read — it is built only where GitHub is configured AND a books branch is named (server/boot/wire-units.ts:204), and the cluster maps that state which release a cluster stands on live on that branch",
-    };
-  }
-  try {
-    const { byFqdn } = await indexMarkings(repo);
-    return { ok: true, byFqdn };
-  } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-/** The ONE derivation of "which release does this cluster stand on" out of a maps read. THREE ways
- *  there is no answer and each says which it was: the maps could not be read, no map stands for this
- *  FQDN, or the map stands and carries no release key — the last being every cluster no release run
- *  has touched yet. None of them resolves to a version: this file is the only statement of a
- *  cluster's release, so a version reported from anywhere else would be invented. */
-export function clusterReleaseRead(fqdn: string, releases: ClusterReleases): ClusterReleaseRead {
-  if (!releases.ok) return { kind: "unknown", reason: releases.reason };
-  const marking = releases.byFqdn.get(fqdn);
-  if (!marking) {
-    return { kind: "unknown", reason: `no cluster map for ${fqdn} — expected ${clusterMapPath(fqdn)} on the books branch, which is where every cluster is marked when it is installed` };
-  }
-  if (marking.release === undefined) {
-    return { kind: "unknown", reason: `${clusterMapPath(fqdn)} carries no release key — no release run has pinned ${fqdn} yet` };
-  }
-  return { kind: "pinned", tag: marking.release };
 }
 
 /** Resolve ONE cluster's marking, named either by its FQDN (`s1.example.com`) or by its
@@ -456,7 +408,7 @@ function serializeMarking(m: ClusterMarking): string {
     ...(m.letsencryptServer !== undefined ? ([["letsencryptServer", m.letsencryptServer]] as [string, string][]) : []),
   ];
   // PLAIN scalars, the shape the map template emits — the other writer of this file. Quoting
-  // parses identically but shows every line as changed in the diff of a map's first release, which
+  // parses identically but shows every line as changed in the diff of a map's first rewrite, which
   // hides the one line that did change. A value that would not survive plain (a leading indicator, a
   // "key: value" ambiguity) is quoted instead, and the round-trip below proves the choice per value.
   // A colon alone is fine in a YAML plain scalar (https://... is the case that matters here); what
@@ -485,8 +437,8 @@ function serializeMarking(m: ClusterMarking): string {
     "\n" +
     nested;
   // The file's own explanation, given back — the map template writes a header above the fields and
-  // the file is hand-editable; without this the first release pin deletes the only thing that says
-  // how to edit it.
+  // the file is hand-editable; without this the first rewrite deletes the only thing that says how
+  // to edit it.
   const yaml = m.header === undefined ? body : `${m.header}\n${body}`;
   const reparsed = foldMarking(clusterMapPath(m.fqdn), parseYaml(yaml), yaml);
   const differing = markingDifferences(reparsed, m);
@@ -572,32 +524,11 @@ export async function writeClusterMarkingOnBranch(
   });
 }
 
-/** Write the release pin: the cluster now stands on `tag`. The ONE declarative place the platform
- *  version of a cluster is stated, so the branch regeneration that follows has a single thing to read.
- *  Returns the marking as it stands afterwards, and `changed:false` when the map already carried this
- *  exact tag — a resumed run then re-reads its own pin instead of committing over it. */
-export async function setClusterRelease(
-  repo: PlatformRepo,
-  fqdn: string,
-  tag: string,
-  runId: string,
-): Promise<{ marking: ClusterMarking; changed: boolean }> {
-  const current = await resolveClusterMarking(repo, fqdn);
-  if (current.release === tag) return { marking: current, changed: false };
-  const pinned: ClusterMarking = { ...current, release: tag };
-  await commitMarking(repo, {
-    marking: pinned,
-    message: `release(clusters): pin ${current.name} to ${tag} [${runId}]`,
-  });
-  return { marking: pinned, changed: true };
-}
-
 /** Write ONE cluster's whole map onto the books branch — deploy-slave's mark-slave step, the
  *  writer that puts a slave into the slaves ApplicationSet's world. What the caller does not
  *  state is KEPT from the standing file: the header (the file's own explanation), the release pin
- *  (set-pin's field, written by a different run kind) and the mail service's address
- *  (install-time), so marking a slave
- *  again never deletes what another writer recorded. Commits only when the marking actually
+ *  (a key this manager never writes) and the mail service's address (install-time), so marking a
+ *  slave again never deletes what another writer recorded. Commits only when the marking actually
  *  changed, so a redeploy re-running the step converges instead of committing over itself. */
 export async function writeClusterMarking(
   repo: PlatformRepo,

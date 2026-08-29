@@ -16,7 +16,7 @@ export const FIXTURE_STAGE = "prod";
 
 /** A slave's cluster map as mark-slave leaves it on the books branch — identity plus the slave
  *  part that makes the master's slaves ApplicationSet able to dial it. Seeded by tests that start
- *  from a slave that ALREADY IS one (redeploy, release's slave arm); a fresh deploy writes its own. */
+ *  from a slave that ALREADY IS one (redeploy); a fresh deploy writes its own. */
 export const SLAVE_MARKING_YAML = [
   `stage: ${FIXTURE_STAGE}`,
   "role: slave",
@@ -101,9 +101,8 @@ export const MASTER_MARKING_YAML = [
   "    registry:",
   "      host: zot.m1.example.com",
   // NO `mail` HERE ON PURPOSE. It is optional in the template — an installation running no mail
-  // service has none — and release.test.ts proves the absent-optional path off this very map: the
-  // answer rides nowhere rather than being invented. The present case is proven where the round
-  // trip is, in cluster-marking.test.ts's FULL_MAP.
+  // service has none. The present case is proven where the round trip is, in
+  // cluster-marking.test.ts's FULL_MAP.
   "    vault:",
   "      url: https://vault.m1.example.com",
   "    idp:",

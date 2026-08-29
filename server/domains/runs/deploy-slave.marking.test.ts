@@ -178,7 +178,7 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     }).run();
     await stepOf(h, "mark-slave").run(hostedStepCtx(h));
     const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)) ?? "";
-    expect(map).toContain("release: 1.0.0-stable-20260801120000"); // set-pin's field, not this step's
+    expect(map).toContain("release: 1.0.0-stable-20260801120000"); // a field this manager never writes
     expect(map).toContain("  unitApex: example.com");             // the inheritance still landed
   });
 

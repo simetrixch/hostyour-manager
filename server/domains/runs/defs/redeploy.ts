@@ -7,14 +7,14 @@ import { isMasterRole } from "../../../../shared/enums.ts";
 import { deploySlaveSteps, SLAVE_MACHINE_INPUTS, hostAnswers } from "./deploy-slave.ts";
 import { placeAnsiwiseStep } from "./place-ansiwise.step.ts";
 import { activeClusterTarget, loadMaster, masterFqdnOf, type DeploySlavePorts } from "./deploy-slave.kit.ts";
-import { attestClusterStep, argocdFollowStep, loadActiveCluster } from "./cluster-release.kit.ts";
+import { attestClusterStep, argocdFollowStep, loadActiveCluster } from "./live-cluster.kit.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 
 // `redeploy` — rebuild the MACHINE LAYER of a cluster that is already live. One of the three
 // distinguishable cluster run kinds: adopt takes a bare machine into service, deploy-slave turns an
 // adopted server into a live slave, redeploy rebuilds what is under GitOps on a cluster that is
-// already running, and release raises the platform version. Nothing here moves a pin — a machine
-// layer is restorable without a version change, and that is exactly what this run kind is for.
+// already running. Nothing here moves the cluster to another platform version — a machine layer is
+// restorable without a version change, and that is exactly what this run kind is for.
 //
 // It takes only the server. The FQDN and the stage are NOT the operator's to state: they are what the
 // active cluster row on that server already says, and asking for them again is how a redeploy could be
@@ -36,7 +36,7 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } fr
 //                     proven by a dry run the machine's gate then admits the real run against
 //                     (ansiwise-run.kit.ts). A master has no master-side registration to redo — it IS
 //                     the master — so those three programs and the follow are the whole machine layer
-//                     here, minus the pin.
+//                     here.
 //
 // THE PLACEMENT IS WHY A MASTER COULD NOT BE BROUGHT FORWARD AT ALL. `placeAnsiwiseStep` had ONE call
 // site, in the slave install, so every engine, catalogue and machine-layer program an installed master

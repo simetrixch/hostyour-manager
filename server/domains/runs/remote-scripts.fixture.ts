@@ -32,7 +32,6 @@ import {
   externalSecretsCmd,
   forceSyncExternalSecretsCmd,
   masterCheckoutsScript,
-  masterRegenerationCheckoutsScript,
   refreshPlatformCheckoutScript,
   slaveDiagScript,
 } from "./defs/deploy-slave.remote.ts";
@@ -70,7 +69,6 @@ export const REMOTE_SCRIPTS: readonly RemoteScript[] = [
   { symbol: "dnsProbeScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: dnsProbeScript(SLAVE_FQDN) },
   { symbol: "refreshPlatformCheckoutScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: refreshPlatformCheckoutScript(MASTER_FQDN) },
   { symbol: "masterCheckoutsScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: masterCheckoutsScript({ masterFqdn: MASTER_FQDN, slaveFqdn: SLAVE_FQDN }) },
-  { symbol: "masterRegenerationCheckoutsScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: masterRegenerationCheckoutsScript({ masterFqdn: MASTER_FQDN, slaveFqdn: SLAVE_FQDN }) },
   { symbol: "slaveDiagScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: slaveDiagScript(SLAVE_FQDN) },
 ];
 

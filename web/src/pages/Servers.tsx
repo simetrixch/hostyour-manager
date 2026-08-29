@@ -4,7 +4,7 @@ import type { RunView, ServerView } from "../../../shared/api-types.ts";
 import { isMasterRole } from "../../../shared/enums.ts";
 import type { ServerStatus } from "../../../shared/enums.ts";
 import {
-  listServers, listRuns, createServer, deleteServerById, adoptServer, deploySlave, redeploySlave, releaseCluster,
+  listServers, listRuns, createServer, deleteServerById, adoptServer, deploySlave, redeploySlave,
   disconnectTailnet, reconnectTailnet, rejoinTailnet, disablePasswordLogin, enablePasswordLogin,
   readAuthorizedKeys,
 } from "../api.ts";
@@ -13,7 +13,6 @@ import { addressLines } from "../serverDialAddress.ts";
 import { OPEN_RUN, relevantRun, runLine } from "../serverRuns.ts";
 import { IconShield } from "../components/icons.tsx";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
-import { ClusterReleaseForm } from "../components/ClusterReleaseForm.tsx";
 import { SlaveDeployForm } from "../components/SlaveDeployForm.tsx";
 import { TailnetActions } from "../components/TailnetActions.tsx";
 import { MasterActions } from "../components/MasterActions.tsx";
@@ -68,10 +67,6 @@ export function Servers() {
   const [formKey, setFormKey] = useState(0);
   // The open deploy mini-form (one at a time): serverId + the two Run params.
   const [prov, setProv] = useState<{ id: string; domain: string; stage: string } | null>(null);
-  // The open release mini-form (one at a time). The operator names version + channel and nothing
-  // else: which cluster the release lands on, and the stage its channel is checked against, are what
-  // the server's own cluster row and cluster map already state.
-  const [rel, setRel] = useState<{ id: string; version: string; channel: string } | null>(null);
   // The server pending a delete confirmation (ConfirmDialog replaces window.confirm).
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
@@ -149,18 +144,6 @@ export function Servers() {
     setError(null);
     try {
       const { runId } = await redeploySlave(id);
-      nav(`/runs/${runId}`);
-    } catch (err) {
-      setError(msg(err));
-    }
-  }
-
-  async function doRelease(e: FormEvent): Promise<void> {
-    e.preventDefault();
-    if (!rel) return;
-    setError(null);
-    try {
-      const { runId } = await releaseCluster(rel.id, { version: rel.version.trim(), channel: rel.channel });
       nav(`/runs/${runId}`);
     } catch (err) {
       setError(msg(err));
@@ -289,25 +272,18 @@ export function Servers() {
                 )}
                 {/* THE MASTER'S OWN ROW. The block below is the SLAVE lifecycle — its stages and every
                     sentence in LIFECYCLE are written about a machine becoming a slave, so a master's
-                    card cannot show it. What a master does carry is the two run kinds that act on the
-                    cluster it already is: `release` raises the platform version this installation
-                    stands on, and the tailnet pair puts its membership of the private network back.
-                    Both admit a master in the plan (defs/release.ts, defs/tailnet.kit.ts); until this
-                    row existed neither was reachable from any screen. */}
-                {isMasterRole(s.role) &&
-                  (() => {
-                    const live = LIFECYCLE[s.status].next === "clusters";
-                    return (
-                      <MasterActions
-                        showRelease={live && rel?.id !== s.id}
-                        offer={tailnetRunKindOffer(s, { liveCluster: live })}
-                        onRelease={() => setRel({ id: s.id, version: "", channel: "stable" })}
-                        onDisconnect={() => void planServerRunKind(() => disconnectTailnet(s.id))}
-                        onReconnect={() => void planServerRunKind(() => reconnectTailnet(s.id))}
-                        onRejoin={() => void planServerRunKind(() => rejoinTailnet(s.id))}
-                      />
-                    );
-                  })()}
+                    card cannot show it. What a master does carry is the tailnet run kinds, which act
+                    on the cluster it already is: they put its membership of the private network back.
+                    They admit a master in the plan (defs/tailnet.kit.ts); until this row existed none
+                    was reachable from any screen. */}
+                {isMasterRole(s.role) && (
+                  <MasterActions
+                    offer={tailnetRunKindOffer(s, { liveCluster: LIFECYCLE[s.status].next === "clusters" })}
+                    onDisconnect={() => void planServerRunKind(() => disconnectTailnet(s.id))}
+                    onReconnect={() => void planServerRunKind(() => reconnectTailnet(s.id))}
+                    onRejoin={() => void planServerRunKind(() => rejoinTailnet(s.id))}
+                  />
+                )}
                 {!isMasterRole(s.role) &&
                   (() => {
                     const lc = LIFECYCLE[s.status];
@@ -329,11 +305,9 @@ export function Servers() {
                     const showAdoptAgain = !runIsOpen && s.status === "ready";
                     const showDeploy = !runIsOpen && lc.next === "deploy" && prov?.id !== s.id;
                     const showClusters = lc.next === "clusters";
-                    // A LIVE cluster carries the two run kinds that act on one: redeploy rebuilds its
-                    // machine layer in place at the release it already stands on, release raises that
-                    // release. Both are distinct from the destructive Delete.
+                    // A LIVE cluster carries the run kind that acts on one: redeploy rebuilds its
+                    // machine layer in place, distinct from the destructive Delete.
                     const showRedeploy = lc.next === "clusters";
-                    const showRelease = lc.next === "clusters" && rel?.id !== s.id;
                     const showDelete = s.status === "bare";
                     // The tailnet repair run kinds are offered on their own rule (tailnetState.ts), not
                     // on the lifecycle: they act on the host's membership of the private network,
@@ -352,7 +326,7 @@ export function Servers() {
                           ))}
                         </ol>
                         <p className="servercard__state">{lc.state}</p>
-                        {(showAdopt || showAdoptAgain || showDeploy || showClusters || showRedeploy || showRelease || showDelete ||
+                        {(showAdopt || showAdoptAgain || showDeploy || showClusters || showRedeploy || showDelete ||
                           tnOffer.disconnect || tnOffer.reconnect || tnOffer.rejoin) && (
                           <div className="actions">
                             {showAdopt && (
@@ -384,19 +358,9 @@ export function Servers() {
                                 type="button"
                                 className="btn"
                                 onClick={() => void doRedeploy(s.id)}
-                                title="Rebuild the machine layer in place (idempotent), at the release this cluster already stands on — no version change. Brief kube-apiserver blip while kubelite restarts."
+                                title="Rebuild the machine layer in place (idempotent) — no version change. Brief kube-apiserver blip while kubelite restarts."
                               >
                                 Redeploy
-                              </button>
-                            )}
-                            {showRelease && (
-                              <button
-                                type="button"
-                                className="btn"
-                                onClick={() => setRel({ id: s.id, version: "", channel: "stable" })}
-                                title="Raise the platform version this cluster stands on: pin the cluster map to the release, re-run the installer over SSH, then wait for ArgoCD."
-                              >
-                                Release
                               </button>
                             )}
                             <TailnetActions
@@ -422,14 +386,6 @@ export function Servers() {
                     onChange={(next) => setProv({ ...prov, ...next })}
                     onSubmit={doDeploy}
                     onCancel={() => setProv(null)}
-                  />
-                )}
-                {rel?.id === s.id && (
-                  <ClusterReleaseForm
-                    value={rel}
-                    onChange={(next) => setRel({ ...rel, ...next })}
-                    onSubmit={doRelease}
-                    onCancel={() => setRel(null)}
                   />
                 )}
               </li>

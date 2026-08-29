@@ -11,9 +11,7 @@ import {
   buildPlaneFqdnFromMarkings,
   projectClusterMarking,
   removeSlaveMarkingPart,
-  setClusterRelease,
-  readClusterReleases,
-  clusterReleaseRead,
+  writeClusterMarkingOnBranch,
   CLUSTER_MARKING_FILE_KEYS,
 } from "./cluster-marking.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -193,16 +191,18 @@ describe("removeSlaveMarkingPart", () => {
   });
 });
 
-describe("setClusterRelease", () => {
+describe("map rewrite — a writer keeps every value the map carried", () => {
   const TAG = "1.2.0-stable-20260728120000";
 
   // THE MAP AS THE TEMPLATE ACTUALLY WRITES IT (digita-deploy ansiwise/templates/cluster-map.tpl),
   // not the four fields this module happens to name. The schema lets `global` through on purpose,
   // so a chart can add a value without failing every map read — but a writer that emits only what
   // it understands turns that permission into DATA LOSS the moment anything rewrites the file, and
-  // the first thing that rewrites it is the first release pin.
+  // mark-slave rewrites a map on every deploy. Driven through writeClusterMarkingOnBranch, the
+  // rewrite every deploy makes onto the cluster's own branch — the same serializeMarking every
+  // writer of this file goes through.
   const FULL_MAP = [
-    "stage: prod", "role: master", "booksCluster: m1.example.com", "",
+    "stage: prod", "role: master", "booksCluster: m1.example.com", `release: ${TAG}`, "",
     "global:",
     "  domain: m1.example.com",
     "  clusterName: m1",
@@ -237,10 +237,11 @@ describe("setClusterRelease", () => {
 
   it("keeps every value the map carried, including the ones this module does not name", async () => {
     const repo = repoWith({ [MASTER]: FULL_MAP });
-    await setClusterRelease(repo, MASTER, TAG, "run_1");
-    const after = repo.read(repo.booksBranch, clusterMapPath(MASTER)) ?? "";
+    const marking = await resolveClusterMarking(repo, MASTER);
+    await writeClusterMarkingOnBranch(repo, marking, MASTER, "run_1");
+    const after = repo.read(MASTER, clusterMapPath(MASTER)) ?? "";
 
-    // Each of these is read by a chart. A pin that drops one leaves an installation whose charts
+    // Each of these is read by a chart. A rewrite that drops one leaves an installation whose charts
     // render against a value that is simply gone, and nothing between here and the render says so.
     for (const kept of [
       "clusterName: m1", "vaultKubernetesAuthPath: kubernetes-m1",
@@ -256,10 +257,12 @@ describe("setClusterRelease", () => {
       "letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
       "nodeCidrs:", "203.0.113.7/32",
       "post.example.com",
-    ]) expect(after, `the pin dropped ${kept}`).toContain(kept);
-    expect(after).toContain(`release: ${TAG}`);
+      // The release pin is a key this manager never writes, so a rewrite that lost it would erase
+      // the only statement of which platform release the cluster stands on.
+      `release: ${TAG}`,
+    ]) expect(after, `the rewrite dropped ${kept}`).toContain(kept);
     // THE ONE THAT GOT AWAY. It was joined on a comma while reading and written back as a plain
-    // scalar, so this pin turned ['ops@example.com'] into `alertRecipients: ops@example.com` — and
+    // scalar, so a rewrite turned ['ops@example.com'] into `alertRecipients: ops@example.com` — and
     // the alert route ranges over that value, which is why the whole observability application then
     // stopped rendering at `range can't iterate over ops@example.com`. It stood outside the list
     // above, so the case that exists to catch exactly this could not see it.
@@ -269,110 +272,21 @@ describe("setClusterRelease", () => {
   it("keeps SEVERAL mailboxes as several, which one comma-joined scalar cannot say", async () => {
     // The shape is not cosmetic: a list of two written back as `a@x,b@x` is one mailbox whose name
     // contains a comma, and nothing downstream can tell it from a mailbox that really is called
-    // that. The map template writes the flow list, and this writer now puts the same value down the
+    // that. The map template writes the flow list, and this writer puts the same value down the
     // same way.
     const two = FULL_MAP.replace("['ops@example.com']", "['ops@example.com', 'oncall@example.com']");
     const repo = repoWith({ [MASTER]: two });
-    await setClusterRelease(repo, MASTER, TAG, "run_1");
+    const marking = await resolveClusterMarking(repo, MASTER);
+    await writeClusterMarkingOnBranch(repo, marking, MASTER, "run_1");
 
-    const after = repo.read(repo.booksBranch, clusterMapPath(MASTER)) ?? "";
+    const after = repo.read(MASTER, clusterMapPath(MASTER)) ?? "";
     expect(after).toContain("alertRecipients: ['ops@example.com', 'oncall@example.com']");
     expect(after, "and never as one joined word").not.toContain("ops@example.com,oncall@example.com");
   });
 
-
-  it("states the pin without disturbing anything else the map says", async () => {
-    const repo = repoWith({ [SLAVE]: `${slaveMap}  apiHost: 100.64.0.11\n  apiPort: 16443\n` });
-    expect((await resolveClusterMarking(repo, "s1")).release).toBeUndefined();
-
-    const { marking, changed } = await setClusterRelease(repo, SLAVE, TAG, "run_1");
-    expect(changed).toBe(true);
-    expect(marking.release).toBe(TAG);
-    expect(repo.commits[0]?.message).toContain(`pin s1 to ${TAG} [run_1]`);
-
-    // Read back off the committed bytes: the pin stands, and role/stage/build plane/slave part all do.
-    const after = await resolveClusterMarking(repo, "s1");
-    expect(after).toMatchObject({ release: TAG, role: "slave", stage: "prod", buildPlaneFqdn: MASTER, apiHost: "100.64.0.11", apiPort: 16443 });
-  });
-
-  it("keeps the fields this module decides nothing with — a pin write must not delete them", async () => {
-    // A pin regenerates the WHOLE file, so anything the schema does not carry is gone from git.
-    // set-role.sh refuses to stamp a cluster whose map has no unit-apex, so losing it here would
-    // break the very branch regeneration the pin exists to drive.
-    const repo = repoWith({ [SLAVE]: `${slaveMap}  unitApex: example.com\n  platformDomain: example.com\n  endpoints:\n    mail:\n      url: https://mail.example.com\n` });
-    await setClusterRelease(repo, SLAVE, TAG, "run_1");
-
-    const after = await resolveClusterMarking(repo, "s1");
-    expect(after).toMatchObject({ release: TAG, unitApex: "example.com", platformDomain: "example.com", mailUrl: "https://mail.example.com" });
-    const bytes = repo.read(repo.booksBranch, clusterMapPath(SLAVE));
-    expect(bytes).toContain('unitApex: example.com');
-    expect(bytes).toContain('platformDomain: example.com');
-    expect(bytes).toContain('url: https://mail.example.com');
-  });
-
-  it("re-pinning the SAME tag commits nothing — a resumed run reads its own pin back", async () => {
-    const repo = repoWith({ [SLAVE]: slaveMap });
-    await setClusterRelease(repo, SLAVE, TAG, "run_1");
-    const second = await setClusterRelease(repo, SLAVE, TAG, "run_1");
-    expect(second.changed).toBe(false);
-    expect(second.marking.release).toBe(TAG);
-    expect(repo.commits).toHaveLength(1);
-  });
-
-  it("refuses to read a map whose pin is not a release tag — the field IS the pin, so free text names nothing", async () => {
+  it("refuses to read a map whose release is not a release tag — the field IS a pin, so free text names nothing", async () => {
     const repo = repoWith({ [SLAVE]: `${slaveMap}release: latest\n` });
     await expect(resolveClusterMarking(repo, "s1")).rejects.toThrow(/must be a release tag/);
-  });
-});
-
-describe("readClusterReleases + clusterReleaseRead — a version is reported ONLY where a map states one", () => {
-  const TAG = "1.2.0-stable-20260728120000";
-
-  it("reports the pinned tag for a cluster whose map carries one", async () => {
-    const releases = await readClusterReleases(repoWith({ [MASTER]: `${masterMap}release: ${TAG}\n` }));
-    expect(releases.ok).toBe(true);
-    expect(clusterReleaseRead(MASTER, releases)).toEqual({ kind: "pinned", tag: TAG });
-  });
-
-  it("a map that carries NO release key reads unknown, and says that no release run has pinned it", async () => {
-    // The counter-probe of this whole surface: `masterMap` has no release key, which is every
-    // cluster between its install and its first release. Nothing here may substitute a version —
-    // there is no second statement of a cluster's release to substitute FROM.
-    const releases = await readClusterReleases(repoWith({ [MASTER]: masterMap }));
-    const read = clusterReleaseRead(MASTER, releases);
-    expect(read.kind).toBe("unknown");
-    expect(read).not.toHaveProperty("tag");
-    expect(JSON.stringify(read)).not.toContain(TAG);
-    if (read.kind === "unknown") expect(read.reason).toMatch(/carries no release key.*no release run has pinned/);
-  });
-
-  it("does not lend one cluster's pin to another — two maps, one pinned, and the other stays unknown", async () => {
-    const releases = await readClusterReleases(
-      repoWith({ [MASTER]: `${masterMap}release: ${TAG}\n`, [SLAVE]: slaveMap }),
-    );
-    expect(clusterReleaseRead(MASTER, releases)).toEqual({ kind: "pinned", tag: TAG });
-    expect(clusterReleaseRead(SLAVE, releases).kind).toBe("unknown");
-    expect(JSON.stringify(clusterReleaseRead(SLAVE, releases))).not.toContain(TAG);
-  });
-
-  it("a cluster with no map at all reads unknown and names the file that would state it", () => {
-    const read = clusterReleaseRead(SLAVE, { ok: true, byFqdn: new Map() });
-    expect(read).toEqual({ kind: "unknown", reason: expect.stringContaining(clusterMapPath(SLAVE)) });
-  });
-
-  it("RETURNS the failure instead of throwing — one unreadable map must not blank a whole page", async () => {
-    // resolveClusterMarking throws here (right for a run, wrong for a list). A map whose release is
-    // free text is the case that reaches it, since the strict schema refuses the whole read.
-    const releases = await readClusterReleases(repoWith({ [MASTER]: `${masterMap}release: latest\n` }));
-    expect(releases.ok).toBe(false);
-    const read = clusterReleaseRead(MASTER, releases);
-    expect(read.kind).toBe("unknown");
-    if (read.kind === "unknown") expect(read.reason).toMatch(/must be a release tag/);
-  });
-
-  it("names the missing configuration when there is no platform repo to read maps from", async () => {
-    const releases = await readClusterReleases(undefined);
-    expect(releases).toEqual({ ok: false, reason: expect.stringContaining("wire-units.ts:204") });
   });
 });
 

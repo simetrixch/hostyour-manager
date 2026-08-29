@@ -8,11 +8,6 @@ import { parseConfig } from "../../kernel/config.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { createServer, deleteServer, openBootstrapPassword, serverCredFlags, CreateServerInput } from "./write.ts";
 import { getServer, listServers } from "./read.ts";
-import type { ClusterReleases } from "./cluster-marking.ts";
-
-/** These cases are about the server rows alone: no cluster map is read for them, and no server
- *  they create is a cluster, so every projection's release reads "not a cluster yet". */
-const NO_MAPS: ClusterReleases = { ok: false, reason: "this test reads no cluster map" };
 
 const logger = createLogger(
   parseConfig({
@@ -42,7 +37,7 @@ describe("inventory server CRUD", () => {
     const view = await createServer(db, store, "op_system", { name: "s5", host: "10.1.1.11", sshUser: "hostyour1", notes: "internal" });
     expect(view).toMatchObject({ name: "s5", host: "10.1.1.11", sshUser: "hostyour1", role: "slave", status: "bare", hasPassword: false, hasKey: false });
     expect(view).not.toHaveProperty("notes");
-    expect(getServer(db, view.id, undefined, NO_MAPS)?.name).toBe("s5");
+    expect(getServer(db, view.id, undefined)?.name).toBe("s5");
   });
 
   it("stores a bootstrap password → hasPassword true, value never surfaces, round-trips for adopt", async () => {
@@ -52,7 +47,7 @@ describe("inventory server CRUD", () => {
     expect(JSON.stringify(view)).not.toContain("shared-secret-xyz");
 
     const flags = await serverCredFlags(store);
-    expect(listServers(db, flags, NO_MAPS).find((s) => s.id === view.id)?.hasPassword).toBe(true);
+    expect(listServers(db, flags).find((s) => s.id === view.id)?.hasPassword).toBe(true);
 
     const pw = await openBootstrapPassword(store, view.id, "run_x");
     expect(pw?.toString("utf8")).toBe("shared-secret-xyz");
@@ -62,7 +57,7 @@ describe("inventory server CRUD", () => {
     const { db, store } = setup();
     const view = await createServer(db, store, "op_system", { name: "s5", host: "10.1.1.11", sshUser: "hostyour1", password: "pw" });
     await deleteServer(db, store, "op_system", view.id);
-    expect(getServer(db, view.id, undefined, NO_MAPS)).toBeUndefined();
+    expect(getServer(db, view.id, undefined)).toBeUndefined();
     expect(await serverCredFlags(store)).toEqual(new Map());
   });
 

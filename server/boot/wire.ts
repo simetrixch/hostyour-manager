@@ -191,13 +191,11 @@ export async function wire(): Promise<Wired> {
     registerAuth: (a) => registerAuthRoutes(a, { config, oidc, session, loginTx, db: db.db, logger }),
     registerProtected: (a) => {
       registerRunRoutes(a, { executor, db: db.db, bus, config, logger });
-      registerClustersRoutes(a, { db: db.db, storeMode: () => (store.mode() === "plaintext" ? "plaintext" : "sealed"), logger, ...(platformRepo ? { platformRepo } : {}) });
-      registerServerRoutes(a, { db: db.db, creds: store, executor, actor: runActor, ...(platformRepo ? { platformRepo } : {}) });
+      registerClustersRoutes(a, { db: db.db, storeMode: () => (store.mode() === "plaintext" ? "plaintext" : "sealed"), logger });
+      registerServerRoutes(a, { db: db.db, creds: store, executor, actor: runActor });
       registerBranchRoutes(a, { db: db.db, config, ...(github ? { github } : {}) });
-      // Which release each installation stands on, and which version each of its platform apps runs.
-      // The app half rides the pin search bound above; the cluster half reads the maps through the
-      // same platform repo port every registration write goes through.
-      registerReleaseRoutes(a, { db: db.db, ...(platformRepo ? { platformRepo } : {}), ...(readPlatformAppPins ? { readPlatformAppPins } : {}) });
+      // Which version each of an installation's platform apps runs, riding the pin search bound above.
+      registerReleaseRoutes(a, { db: db.db, ...(readPlatformAppPins ? { readPlatformAppPins } : {}) });
       // Consumer onboarding routes. The read path (the consumer list) is always live; the mutating
       // triggers answer 501 NOT_CONFIGURED unless the onboarding Run family is wired (buildUnits
       // above registered it with its real git/kube/vault/gate-runner adapters).

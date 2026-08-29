@@ -18,12 +18,12 @@ import type { RunKind } from "../../shared/enums.ts";
 describe("crypto gate", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
-  function fresh(mode = "plaintext"): DbHandle {
+  function fresh(): DbHandle {
     const dir = mkdtempSync(join(tmpdir(), "mgr-gd-"));
     dirs.push(dir);
     const h = openDb(join(dir, "manager.db"));
     handles.push(h);
-    h.sqlite.prepare("INSERT INTO meta (key, value) VALUES ('keystore.mode', ?)").run(mode);
+    h.sqlite.prepare("INSERT INTO meta (key, value) VALUES ('keystore.mode', 'plaintext')").run();
     return h;
   }
   afterEach(() => {
@@ -111,12 +111,6 @@ describe("crypto gate", () => {
     const { db } = fresh();
     expect(KIND_GUARDS["cluster-redeploy"]).toHaveLength(0);
     await expect(runGuards("cluster-redeploy", { serverId: "srv_x" }, { db })).resolves.toBeUndefined();
-  });
-
-  it("cluster-release carries no crypto gate either — the regenerate-branch program exists, and the one shape still without a regeneration (a slave) is the def's own plan-time refusal", async () => {
-    const { db } = fresh("keyfile");
-    expect(KIND_GUARDS["cluster-release"]).toHaveLength(0);
-    await expect(runGuards("cluster-release", { serverId: "srv_x" }, { db })).resolves.toBeUndefined();
   });
 
   it("assertGuardsArmed rejects a runDefinitions once tenant-create's gate is disarmed", () => {

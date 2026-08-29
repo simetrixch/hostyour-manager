@@ -1,10 +1,9 @@
 import type { FormEvent } from "react";
 import { STAGE } from "../../../shared/enums.ts";
 
-// The deploy-slave mini-form on an adopted server's card, beside ClusterReleaseForm and built the
-// same way: props only, no fetching of its own, so the page keeps the one open form and the one
-// error line. The operator names the slave's FQDN and its stage; everything else the run needs it
-// reads off the inventory.
+// The deploy-slave mini-form on an adopted server's card: props only, no fetching of its own, so
+// the page keeps the one open form and the one error line. The operator names the slave's FQDN and
+// its stage; everything else the run needs it reads off the inventory.
 //
 // `placeholderName` is only the example inside the domain field — the server's own name, so the
 // operator sees the shape `<name>.<domain>` rather than a generic one.

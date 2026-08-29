@@ -45,9 +45,9 @@ if [ -n "$ip" ]; then echo "DNS_WILDCARD $ip"; else echo "DNS_WILDCARD none"; fi
 
 // The refresh for the PLATFORM checkout at /srv/hostyour-cloud — the tree the deployment programs
 // act on and deliberately never fetch into themselves (a program acts on the tree it was pointed
-// at; which state that tree stands on is the caller's to establish). `fetch --tags` because a
-// release needs two refs the local clone does not have yet: the pin commit the manager pushed onto
-// the install branch, and the release tag it minted on the trunk. Idempotent fetch + reset --hard +
+// at; which state that tree stands on is the caller's to establish). `fetch --tags` so the tree
+// carries every ref the catalogue's own programs may need: its branch regeneration merges a release
+// tag out of this same tree. Idempotent fetch + reset --hard +
 // checkout -B; `checkout -B` also HEALS a wrong-branch checkout (name AND content), not just a
 // stale one. stdout contract: one `CHECKOUT_HEAD <old> <new>` line (short HEADs — secret-free).
 export function refreshPlatformCheckoutScript(branch: string): string {
@@ -108,48 +108,6 @@ if git -C "${WORK_CHECKOUT}" ls-remote --exit-code --heads origin "${o.slaveFqdn
   git -C "${WORK_CHECKOUT}" checkout -B "${o.slaveFqdn}" "origin/${o.slaveFqdn}"
   git -C "${WORK_CHECKOUT}" merge --no-edit origin/master
 fi
-echo "WORK_HEAD $(git -C "${WORK_CHECKOUT}" rev-parse --short HEAD)"
-`;
-}
-
-// prepare-regeneration (the step before regenerate-slave-branch), run over the MASTER's session —
-// the same two checkouts as the cut above, stood on what a REGENERATION reads instead of what a cut
-// reads, and it is a separate script because all three differences would otherwise be a mode flag:
-//
-//   1. `fetch --tags`, on BOTH checkouts — one flag standing on two different needs. The WORK
-//      checkout is the one that merges: the program's git_merge_ref row names
-//      /srv/hostyour-cloud-slave and takes refs/tags/<tag>, which the release minted on the trunk
-//      moments ago, so without the tag that row has nothing to merge. The LIVE checkout merges
-//      nothing — what it needs is the pin COMMIT on the books branch, which a plain `fetch origin`
-//      already delivers, exactly as masterCheckoutsScript above fetches that same tree. The cut
-//      needs no tag at all.
-//   2. the LIVE checkout on the head of the master's own install branch, which is the books branch:
-//      it carries the SLAVE's cluster map, where the pin the manager just committed stands, and
-//      the master's own map, which the program copies for the installation-wide values.
-//   3. the WORK checkout STANDING on the SLAVE's branch, not on the product branch. The program's
-//      git_merge_ref row refuses a checkout standing on any other branch rather than moving it, and
-//      the branch already exists — this is a cluster that was cut once and is being brought forward.
-//      No local branch is deleted here: `checkout -B` off origin/<slave> heals a stale or wrong
-//      local branch (name AND content), and deleting one would throw away nothing a merge needs.
-//
-// stdout contract: `LIVE_HEAD <short>` + `WORK_HEAD <short>` (secret-free) — the cut's own contract,
-// because both steps assert the same two facts.
-export function masterRegenerationCheckoutsScript(o: { masterFqdn: string; slaveFqdn: string }): string {
-  return `#!/usr/bin/env bash
-set -euo pipefail
-[ -d "${PLATFORM_CHECKOUT}/.git" ] || { echo "no platform checkout at ${PLATFORM_CHECKOUT} on the master — the machine's installation puts it there" >&2; exit 3; }
-git -C "${PLATFORM_CHECKOUT}" fetch origin --tags
-git -C "${PLATFORM_CHECKOUT}" reset --hard
-git -C "${PLATFORM_CHECKOUT}" checkout -B "${o.masterFqdn}" "origin/${o.masterFqdn}"
-echo "LIVE_HEAD $(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)"
-if [ ! -d "${WORK_CHECKOUT}/.git" ]; then
-  origin=$(git -C "${PLATFORM_CHECKOUT}" remote get-url origin)
-  git clone "$origin" "${WORK_CHECKOUT}"
-fi
-git -C "${WORK_CHECKOUT}" fetch origin --tags
-git -C "${WORK_CHECKOUT}" reset --hard
-git -C "${WORK_CHECKOUT}" checkout -B "${o.slaveFqdn}" "origin/${o.slaveFqdn}"
-git -C "${WORK_CHECKOUT}" clean -fd
 echo "WORK_HEAD $(git -C "${WORK_CHECKOUT}" rev-parse --short HEAD)"
 `;
 }

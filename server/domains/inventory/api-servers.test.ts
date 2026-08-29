@@ -14,19 +14,17 @@ import { buildRunDefinitions } from "../runs/run-definitions.ts";
 import { runActor } from "../../kernel/actor.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerServerRoutes } from "./api.ts";
-import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { serverCredFlags } from "./write.ts";
 import { getRun } from "../../executor/read.ts";
-import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { ApiError, OperatorKeyView, ServerView } from "../../../shared/api-types.ts";
 
-// registerServerRoutes (api.ts:79) — the seven routes the server inventory screen is made of, driven
+// registerServerRoutes (api.ts) — the seven routes the server inventory screen is made of, driven
 // through the real app so the chokepoint and the CSRF guard are in the path. The neighbouring
 // registerClustersRoutes is covered in api.test.ts and shares the ServerView projection; what is
 // exercised HERE is the half that projection never sees: the credential flags GET /api/servers folds
-// in (api.ts:83, serverCredFlags), the writes, and the adopt trigger that plans and approves a run.
+// in (api.ts, serverCredFlags), the writes, and the adopt trigger that plans and approves a run.
 
 const config = parseConfig({
   PUBLIC_URL: "https://m1.example",
@@ -45,7 +43,6 @@ const logger = createLogger(config);
 // adopt therefore fails on its first remote step (defs/adopt.ts:145), which is what settle() waits for.
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh in this harness"));
 
-const PINNED = "1.2.0-stable-20260728120000";
 const MASTER = "m1.example.com";
 const SLAVE = "s1.example.com";
 
@@ -63,7 +60,7 @@ describe("server inventory API", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
 
-  async function make(platformRepo?: FakePlatformRepo): Promise<Harness> {
+  async function make(): Promise<Harness> {
     const dir = mkdtempSync(join(tmpdir(), "mgr-servers-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
@@ -90,7 +87,7 @@ describe("server inventory API", () => {
       session,
       registerAuth: () => undefined,
       registerProtected: (a) =>
-        registerServerRoutes(a, { db: db.db, creds: store, executor, actor: runActor, ...(platformRepo ? { platformRepo } : {}) }),
+        registerServerRoutes(a, { db: db.db, creds: store, executor, actor: runActor }),
     });
     const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
     return { app, db, store, executor, cookie };
@@ -119,19 +116,6 @@ describe("server inventory API", () => {
     return ((await res.json()) as { servers: ServerView[] }).servers;
   }
 
-  /** One cluster map as the platform repo carries it (clusters/active/<fqdn>.yaml). `release` is
-   *  absent on a cluster no release run has pinned yet. */
-  const map = (fqdn: string, role: string, release?: string): string =>
-    `stage: prod\nrole: ${role}\n\nglobal:\n  domain: ${fqdn}\n  buildPlane: ${MASTER}\n${release ? `release: ${release}\n` : ""}`;
-
-  /** The master pinned, the slave never released — the two states standing side by side. */
-  function bothMaps(): FakePlatformRepo {
-    const repo = new FakePlatformRepo({ booksBranch: MASTER });
-    repo.seed(MASTER, clusterMapPath(MASTER), map(MASTER, "master", PINNED));
-    repo.seed(MASTER, clusterMapPath(SLAVE), map(SLAVE, "slave"));
-    return repo;
-  }
-
   /** A master and a slave, both registered as clusters, plus a bare machine that is no cluster. */
   function seedThree(db: DbHandle): void {
     for (const [id, name, role, cls, domain] of [
@@ -151,7 +135,7 @@ describe("server inventory API", () => {
     });
 
     it("carries the MASTER row, which /api/clusters withholds from its servers array", async () => {
-      // buildClustersView (api.ts:59) filters the master out of ClustersView.servers because the
+      // buildClustersView (api.ts) filters the master out of ClustersView.servers because the
       // manager does not manage itself. This route is the inventory and lists every row, so the
       // master is here — sorted first (read.ts:85).
       const h = await make();
@@ -159,30 +143,6 @@ describe("server inventory API", () => {
       const servers = await listServersOverHttp(h);
       expect(servers.map((s) => s.id)).toEqual(["srv_m", "srv_b", "srv_s"]);
       expect(servers[0]?.role).toBe("master");
-    });
-
-    it("reads the release off each server's cluster map, and never borrows one for a server that has none", async () => {
-      const h = await make(bothMaps());
-      seedThree(h.db);
-      const byId = new Map((await listServersOverHttp(h)).map((s) => [s.id, s]));
-
-      expect(byId.get("srv_m")?.release).toEqual({ kind: "pinned", tag: PINNED });
-      // The slave's map stands in the same directory as the master's and carries no release key.
-      // Anything but "unknown" here is a version somebody guessed.
-      expect(byId.get("srv_s")?.release.kind).toBe("unknown");
-      expect(byId.get("srv_s")?.release).not.toHaveProperty("tag");
-      // b1 is no cluster at all — a state a surface paints differently from an unreadable release.
-      expect(byId.get("srv_b")?.release).toEqual({ kind: "no-cluster" });
-      expect(JSON.stringify([byId.get("srv_s"), byId.get("srv_b")])).not.toContain(PINNED);
-    });
-
-    it("with no platform repo wired, every clustered server says WHY its release is unknown", async () => {
-      const h = await make();
-      seedThree(h.db);
-      for (const id of ["srv_m", "srv_s"]) {
-        const release = (await listServersOverHttp(h)).find((s) => s.id === id)?.release;
-        expect(release).toEqual({ kind: "unknown", reason: expect.stringContaining("there is no platform repo to read") });
-      }
     });
 
     it("folds in the credential flags — a stored bootstrap password shows, and its value never crosses", async () => {
@@ -224,8 +184,6 @@ describe("server inventory API", () => {
       expect(res.status).toBe(201);
       const { server } = (await res.json()) as { server: ServerView };
       expect(server).toMatchObject({ name: "s5", host: "10.1.1.11", sshUser: "hostyour1", role: "slave", status: "bare" });
-      // A machine is registered before it is ever a cluster (write.ts:119).
-      expect(server.release).toEqual({ kind: "no-cluster" });
       expect((await listServersOverHttp(h)).map((s) => s.id)).toEqual([server.id]);
     });
 
