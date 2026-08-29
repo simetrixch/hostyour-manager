@@ -159,10 +159,14 @@ const CLIENT_SEEN: ReadonlySet<ServerTailnetState> = new Set<ServerTailnetState>
  * stale number decide what the operator may attempt. Each run kind reads the live state on the host and
  * returns saying so when there is nothing to do.
  *
- * Two conditions stand on their own. The MASTER is offered none of them — it runs the coordinator
- * the others log in to, so taking it off its own network is not a repair, and the plan refuses it
- * too (server/domains/runs/defs/tailnet.kit.ts). REJOIN additionally needs a live cluster, because
- * the credential is minted per slave against the coordinator under that cluster's FQDN and stage.
+ * Two conditions stand on their own. The MASTER is offered none of them from this card — the page
+ * renders these actions inside the slave lifecycle block (pages/Servers.tsx), which a master's
+ * card does not have, so an offer here would name buttons that card never shows. The plan itself
+ * draws a finer line (server/domains/runs/defs/tailnet.kit.ts): it refuses a master for the
+ * DISCONNECT only — the master's in-cluster components reach every slave over the private network
+ * a disconnect would cut — and admits reconnect and rejoin, which put a membership back. REJOIN
+ * additionally needs a live cluster, because the credential is minted per machine against the
+ * coordinator under that cluster's FQDN and stage.
  */
 export function tailnetRunKindOffer(server: ServerView, o: { liveCluster: boolean }): TailnetRunKindOffer {
   const seen = !isMasterRole(server.role) && CLIENT_SEEN.has(server.tailnetState);

@@ -191,11 +191,21 @@ export function fixturePrograms(): Record<string, string> {
     // green, which is exactly the composition contract on a host that may carry no cluster row.
     "tailnet-disconnect": clientRunKindYaml("tailnet-disconnect", "leave"),
     "tailnet-reconnect": clientRunKindYaml("tailnet-reconnect", "up"),
+    // slave_fqdn takes either machine's domain: the credential is minted per MACHINE, and the
+    // rejoin of the master itself mints under the master's own domain (the program's key_file
+    // contract names the first DNS label either way).
     "tailnet-mint-join-key": programYaml("tailnet-mint-join-key", [
       { answer: "stage", pattern: "^prod$" },
-      { answer: "slave_fqdn", pattern: "^s1\\.example\\.com$" },
+      { answer: "slave_fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
     ]),
     "tailnet-rejoin": programYaml("tailnet-rejoin", [
+      { answer: "login_server", pattern: "^https://tale\\.m1\\.example\\.com$" },
+      { answer: "auth_key", pattern: "^dc-tailnet-preauth-" },
+    ]),
+    // The master's own join: the same two rows, because the manager owes it the same composition.
+    // What differs is on the MACHINE — the real program carries no certificate stamp — which is the
+    // catalogue's fact, not a composition this fixture could measure.
+    "tailnet-join-master": programYaml("tailnet-join-master", [
       { answer: "login_server", pattern: "^https://tale\\.m1\\.example\\.com$" },
       { answer: "auth_key", pattern: "^dc-tailnet-preauth-" },
     ]),

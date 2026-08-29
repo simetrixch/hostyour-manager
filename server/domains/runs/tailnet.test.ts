@@ -132,11 +132,42 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
     }
   });
 
-  it("refuses the master: it runs the coordinator, so taking it off its own network is no repair", async () => {
+  it("refuses the master for the DISCONNECT only, naming what a disconnect would sever", async () => {
     const db = setup();
-    for (const def of Object.values(DEFS)) {
-      await expect(def.plan({ serverId: MASTER_ID }, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
-    }
+    // A disconnect takes a host off the private network and LEAVES it off — and the master's
+    // in-cluster components reach every slave's kube-apiserver over exactly that network.
+    await expect(DEFS["cluster-tailnet-disconnect"].plan({ serverId: MASTER_ID }, { db: db.db })).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: expect.stringMatching(/carries the master part[\s\S]*every slave's kube-apiserver/),
+    });
+    // The two kinds that PUT a membership back admit a master like any other machine of the
+    // infrastructure. Reconnect needs no cluster row on a master, exactly as it needs none on a
+    // slave — the master here carries none.
+    await expect(DEFS["cluster-tailnet-reconnect"].plan({ serverId: MASTER_ID }, { db: db.db })).resolves.toBeTruthy();
+  });
+
+  it("admits the master to a rejoin: ONE target — its own, public — and a plan that claims no certificate work", async () => {
+    const db = setup();
+    // The rejoin's live-cluster guard resolves against the master's own cluster row.
+    db.db.insert(clusters).values({
+      id: "cls_m", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com", status: "active",
+    }).run();
+    const plan = await DEFS["cluster-tailnet-rejoin"].plan({ serverId: MASTER_ID }, { db: db.db });
+    expect(plan.steps.map((s) => s.name)).toEqual([ATTEST_TARGET_STEP, "rejoin", "read-membership"]);
+    // ONE entry for the one server. The aux master entry every slave rejoin declares would here be
+    // a SECOND entry for the same server, and the executor keys ONE transport per server
+    // (executor/context.ts `declared`) — the second entry would override the public transport this
+    // plan states, and every session would quietly open on the LAN address.
+    expect(plan.targets).toHaveLength(1);
+    expect(plan.targets?.[0]).toMatchObject({ serverId: MASTER_ID, ownsHost: true, transport: "public" });
+    expect(deriveServerLocks(plan.targets ?? [])).toEqual([{ resource: "server", key: MASTER_ID }]);
+    // The summary and the warnings say what a MASTER's rejoin does: the tailnet-join-master
+    // program, on the public address, with no certificate re-sign — the stamp is the slave's half.
+    expect(plan.summary).toContain("tailnet-join-master");
+    expect(plan.summary).toContain("198.51.100.4");
+    expect(plan.summary).not.toContain("10.1.1.1:");
+    expect(plan.summary).not.toContain("certificate work");
+    expect(plan.warnings.join(" ")).not.toContain("re-signs");
   });
 
   it("refuses a rejoin on a host with no live cluster — the credential is minted per slave", async () => {

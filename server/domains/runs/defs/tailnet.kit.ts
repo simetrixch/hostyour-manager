@@ -38,9 +38,17 @@ import {
  *  is read off. */
 export interface TailnetPorts extends DeploySlavePorts, AnsiwisePorts {}
 
-/** The two programs a rejoin drives, by the catalogue's own names. */
+/** The programs a rejoin drives, by the catalogue's own names: the mint on the master, then ONE
+ *  join program on the target — which one is the target's ROLE to say. tailnet-rejoin ends by
+ *  stamping the fresh address into the machine's MicroK8s serving certificate, the second half of
+ *  joining a SLAVE: the master dials a slave's kube-apiserver at that address over verified TLS.
+ *  Nothing dials a MASTER's kube-apiserver at a tailnet address — the master is the machine doing
+ *  the dialling — so a master joins with tailnet-join-master, the same act without the stamp,
+ *  whose re-sign would restart the apiserver under the coordinator and this manager for a
+ *  certificate name nothing verifies. */
 const MINT_PROGRAM = "tailnet-mint-join-key";
 const REJOIN_PROGRAM = "tailnet-rejoin";
+const JOIN_MASTER_PROGRAM = "tailnet-join-master";
 
 /** The run kinds this kit builds — every RUN_KIND literal in the tailnet family, named by the family
  *  rather than listed, so a fourth one cannot be added to the enum without the maps below refusing
@@ -183,16 +191,23 @@ async function readMintedKey(ctx: StepCtx, session: SshSession, domain: string, 
  *  start a second one.
  *
  *  EXPORTED because deploy-slave's join is the same act: a fresh slave holds no credential, so the
- *  shape that mints, carries and spends in one step is the first join too — and the rejoin
- *  program's deliberate logout-first is a no-op on a machine that was never on the network. */
+ *  shape that mints, carries and spends in one step is the first join too — and the join
+ *  program's deliberate logout-first is a no-op on a machine that was never on the network.
+ *
+ *  WHICH join program runs is the target's role's to say (the program names above): a slave's is
+ *  tailnet-rejoin, a master's is tailnet-join-master. When the target IS the master, the mint and
+ *  the join meet on one machine: both ctx.ssh calls resolve to the same cached session
+ *  (executor/context.ts keys sessions per host and address), and the two serve conversations run
+ *  on it one after the other. */
 export function rejoinStep(target: SlaveTarget, serverId: string, ports: TailnetPorts): Step {
   return {
     name: "rejoin",
     title: "Mint on the master, then log the host out and join it again (one program run)",
     run: async (ctx) => {
       const { domain } = target.resolve(ctx.db);
+      const joinProgram = isMasterRole(loadServer(ctx.db, serverId).role) ? JOIN_MASTER_PROGRAM : REJOIN_PROGRAM;
       const password = requireElevationPassword(ctx);
-      const cp = ctx.readCheckpoint<ProgramCheckpoint>() ?? { program: REJOIN_PROGRAM };
+      const cp = ctx.readCheckpoint<ProgramCheckpoint>() ?? { program: joinProgram };
       const save = (): void => ctx.checkpoint(cp);
       // A finished RED machine run is a settled verdict, not a state to re-attach to: this step IS
       // the repair, so a retry tries the repair AGAIN — fresh credential, fresh proof, new machine
@@ -245,22 +260,22 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
         const session = await ctx.ssh();
         const conversation = await openServeConversation(ctx, session, ports, signal);
         try {
-          const answers = await composeAnswers(ctx, conversation.client, REJOIN_PROGRAM, target, signal, async () => fresh);
-          const dry = await programPhase(ctx, conversation.client, cp, "dry", { program: REJOIN_PROGRAM, answers, password, signal, save });
+          const answers = await composeAnswers(ctx, conversation.client, joinProgram, target, signal, async () => fresh);
+          const dry = await programPhase(ctx, conversation.client, cp, "dry", { program: joinProgram, answers, password, signal, save });
           if (dry.exitCode !== 0) {
             throw errValidation(
-              `the DRY run of ${REJOIN_PROGRAM} on the host is not green (run ${dry.id}, exit ${dry.exitCode}) — ` +
+              `the DRY run of ${joinProgram} on the host is not green (run ${dry.id}, exit ${dry.exitCode}) — ` +
               "nothing was acted on and the host is still where it was; fix what the machine named, then retry the step (it mints again and proves the fresh input)",
             );
           }
-          const live = await programPhase(ctx, conversation.client, cp, "run", { program: REJOIN_PROGRAM, answers, password, signal, save });
+          const live = await programPhase(ctx, conversation.client, cp, "run", { program: joinProgram, answers, password, signal, save });
           if (live.exitCode !== 0) {
             throw errValidation(
-              `the ${REJOIN_PROGRAM} run on the host failed (run ${live.id}, exit ${live.exitCode}) — the run log says ` +
+              `the ${joinProgram} run on the host failed (run ${live.id}, exit ${live.exitCode}) — the run log says ` +
               "how far it came; the logout may have landed without the join, leaving the host on NO network until a retry of this step repairs it (fresh mint, new machine run)",
             );
           }
-          ctx.log("meta", `${REJOIN_PROGRAM}: dry ${dry.id} proved it, run ${live.id} performed it — logout, join and the certificate work in one machine run, green on the host's own record`);
+          ctx.log("meta", `${joinProgram}: dry ${dry.id} proved it, run ${live.id} performed it — ${joinProgram === REJOIN_PROGRAM ? "logout, join and the certificate work" : "logout and join"} in one machine run, green on the host's own record`);
         } catch (err) {
           // The one step that can leave a host somewhere its stored reading does not describe — so
           // the reading is taken here before the failure propagates: the card would otherwise go on
@@ -318,7 +333,7 @@ export function tailnetSteps(kind: TailnetKind, serverId: string, ports: Tailnet
   return [attestTargetStep(serverId), ansiwiseProgramStep(target, PROGRAM[kind], ports), readMembershipStep(serverId)];
 }
 
-const SUMMARY: Record<TailnetMode, (o: { name: string; steps: number; host: string; master: string }) => string> = {
+const SUMMARY: Record<TailnetMode, (o: { name: string; steps: number; host: string; master: string; masterIsTarget: boolean }) => string> = {
   disconnect: (o) =>
     `Take "${o.name}" off the tailnet: ${o.steps} steps, reaching it on its public address ${o.host} — the ` +
     `tailnet-disconnect program on the host's own ansiwise surface, proven by a dry run first. ` +
@@ -326,20 +341,27 @@ const SUMMARY: Record<TailnetMode, (o: { name: string; steps: number; host: stri
   reconnect: (o) =>
     `Put "${o.name}" back on the tailnet with the credential it already holds: ${o.steps} steps, reaching it on its ` +
     `public address ${o.host} — the tailnet-reconnect program on the host's own ansiwise surface. ` +
-    `Nothing is minted and the master is not touched.`,
+    `Nothing is minted${o.masterIsTarget ? "" : " and the master is not touched"}.`,
   rejoin: (o) =>
-    `Log "${o.name}" out of the tailnet and join it again with a credential the tailnet-mint-join-key program mints ` +
-    `on the master "${o.master}": ${o.steps} steps — the host on its public address ${o.host} (the tailnet-rejoin ` +
-    `program does the logout, the join and the certificate work in one machine run), the master on its usual one.`,
+    o.masterIsTarget
+      ? `Log "${o.name}" out of the tailnet and join it again with a credential the tailnet-mint-join-key program mints ` +
+        `on this same host — it carries the master part: ${o.steps} steps, everything over its public address ${o.host} ` +
+        `(the tailnet-join-master program does the logout and the join in one machine run; the serving certificate is ` +
+        `not touched, because nothing dials a master's kube-apiserver at a tailnet address).`
+      : `Log "${o.name}" out of the tailnet and join it again with a credential the tailnet-mint-join-key program mints ` +
+        `on the master "${o.master}": ${o.steps} steps — the host on its public address ${o.host} (the tailnet-rejoin ` +
+        `program does the logout, the join and the certificate work in one machine run), the master on its usual one.`,
 };
 
-const WARNINGS: Record<TailnetMode, string[]> = {
-  disconnect: ["The host belongs to no private network afterwards, until a reconnect or a rejoin puts it back."],
-  reconnect: ["A host whose credential is gone cannot re-establish this way — the run fails, and tailnet-rejoin is the run kind that mints a fresh one."],
-  rejoin: [
+const WARNINGS: Record<TailnetMode, (o: { masterIsTarget: boolean }) => string[]> = {
+  disconnect: () => ["The host belongs to no private network afterwards, until a reconnect or a rejoin puts it back."],
+  reconnect: () => ["A host whose credential is gone cannot re-establish this way — the run fails, and tailnet-rejoin is the run kind that mints a fresh one."],
+  rejoin: (o) => [
     "The host is logged out before it joins again, so it is on no network for the length of this run.",
     "The mint is create-only: a stored credential the coordinator still accepts is handed back rather than replaced.",
-    "The join hands the host a fresh private address and re-signs its serving certificate to it — the run waits for the node to come back ready.",
+    o.masterIsTarget
+      ? "The join hands the host a fresh private address; its serving certificate is not touched — nothing dials a master's kube-apiserver at a tailnet address."
+      : "The join hands the host a fresh private address and re-signs its serving certificate to it — the run waits for the node to come back ready.",
   ],
 };
 
@@ -357,33 +379,47 @@ const WARNINGS: Record<TailnetMode, string[]> = {
  *    failed deploy-slave these run kinds exist for — holds no lock to be blocked by: every terminal
  *    path in the executor releases them (finishRun / failRun), whatever the outcome. The master,
  *    when a rejoin needs one, is not owned: the run drives its programs, it does not own the box.
+ *  - a master IS a valid target for reconnect and for rejoin — only the disconnect refuses it
+ *    (below). When the target itself carries the master part, the master is NOT declared a second
+ *    time: RunContext keys ONE transport per server (executor/context.ts `declared`), so a second
+ *    entry for the same server would override the public transport this plan states with the
+ *    default one, and every session would quietly open on the LAN address. One server, one target
+ *    entry — the mint then runs over the same public-address session as the join.
  */
 export function tailnetPlan(kind: TailnetKind, serverId: string, db: Db, ports: TailnetPorts): Plan {
   const mode = MODE[kind];
   const server = loadServer(db, serverId);
-  if (isMasterRole(server.role)) {
+  const masterIsTarget = isMasterRole(server.role);
+  // ONLY the disconnect refuses a master. The master's in-cluster components dial every slave's
+  // kube-apiserver over the private network, so taking the master off it and LEAVING it off severs
+  // the whole platform's management path at once. The other two kinds put a membership back, and a
+  // master needs them like any other machine of the infrastructure.
+  if (mode === "disconnect" && masterIsTarget) {
     throw errValidation(
-      `refusing: "${server.name}" carries the master part, and the master runs the tailnet coordinator — taking it off its own network is not a repair`,
+      `refusing: "${server.name}" carries the master part — a disconnect takes a host off the private network and ` +
+      "leaves it off, and the master's in-cluster components (its per-slave ArgoCD, Vault, the shared dashboard, " +
+      "this manager's kube client) dial every slave's kube-apiserver over exactly that network. Disconnecting the " +
+      "master severs them all at once; tailnet-reconnect and tailnet-rejoin put a membership back and stay open to it",
     );
   }
   const resolved = resolveTransport(server, "public");
   const steps = tailnetSteps(kind, serverId, ports);
   const master = mode === "rejoin" ? loadMaster(db) : undefined;
-  // A rejoin needs the FQDN of a cluster that is LIVE, because the credential is minted per slave
-  // under that name. Resolved here and not only inside the steps: being refused at plan time beats
-  // being refused after approval.
+  // A rejoin needs the FQDN of a cluster that is LIVE, because the credential is minted per
+  // machine under that name. Resolved here and not only inside the steps: being refused at plan
+  // time beats being refused after approval.
   if (mode === "rejoin") activeClusterTarget(serverId).resolve(db);
   return {
     kind,
     targetKind: "server",
     targetId: serverId,
-    summary: SUMMARY[mode]({ name: server.name, steps: steps.length, host: `${resolved.host}:${server.sshPort}`, master: master?.name ?? "" }),
+    summary: SUMMARY[mode]({ name: server.name, steps: steps.length, host: `${resolved.host}:${server.sshPort}`, master: master?.name ?? "", masterIsTarget }),
     steps: steps.map((s) => ({ name: s.name, title: s.title })),
     targets: [
       { serverId, ownsHost: true, label: `${server.name} (over its ${VIA_LABEL[resolved.via]})`, transport: "public" },
-      ...(master ? [{ serverId: master.id, ownsHost: false, label: `${master.name} (master)` }] : []),
+      ...(master && !masterIsTarget ? [{ serverId: master.id, ownsHost: false, label: `${master.name} (master)` }] : []),
     ],
-    warnings: WARNINGS[mode],
+    warnings: WARNINGS[mode]({ masterIsTarget }),
     // The programs raise their commands to root with a password the CALLER hands over per run
     // (the installation's ansiwise.yaml: password_from_caller) — collected at approve, held in
     // memory, sent with each POST /runs, persisted nowhere.

@@ -93,8 +93,8 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       expect(programs.map((p) => p.name).sort()).toEqual([
         "deploy-cluster", "deploy-host", "deploy-platform-services", "deploy-slave-branch",
         "emit-cluster-credentials", "regenerate-branch", "regenerate-slave-branch", "register-slave",
-        "remove-slave", "tailnet-disconnect", "tailnet-mint-join-key", "tailnet-reconnect",
-        "tailnet-rejoin",
+        "remove-slave", "tailnet-disconnect", "tailnet-join-master", "tailnet-mint-join-key",
+        "tailnet-reconnect", "tailnet-rejoin",
       ]);
       expect(programs.find((p) => p.name === "deploy-cluster")?.answers.map((a) => a.name)).toContain("letsencrypt_email");
 
@@ -373,6 +373,37 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The reading on the row is this run's.
     const row = h.db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
     expect((row?.tailnetJson as { runId?: string } | null)?.runId).toBe(r.runId);
+  });
+
+  it("INNOCENT CASE (tailnet-join-master): a rejoin whose target IS the master mints and joins on ONE machine — and its join drives tailnet-join-master, never tailnet-rejoin", { timeout: 120_000 }, async () => {
+    const h = await liveMaster(serve);
+
+    const r = await h.executor.plan("cluster-tailnet-rejoin", { serverId: MASTER_ID });
+    expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", "rejoin", "read-membership"]);
+    await h.executor.approve(r.runId, elevationOnly());
+    await h.executor.settle(r.runId);
+    expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
+
+    // The machine's OWN records: dry + run per program, all green — and the join is the master's
+    // program. Not one tailnet-rejoin record in this run's window: that program ends by stamping
+    // the fresh address into the serving certificate and restarting the apiserver, which on the
+    // machine under the coordinator and this manager buys a name nothing verifies.
+    const all = await observer.runs();
+    expectProven(serve, h.db, r.runId, all, ["tailnet-mint-join-key", "tailnet-join-master"]);
+    expect(recordWindow(all, startedRuns(h.db, r.runId)).filter((x) => x.program === "tailnet-rejoin")).toHaveLength(0);
+
+    // ONE machine, on the address the plan froze: both serve conversations went to m1, and the
+    // key file was read and removed there — the same host the join then ran on.
+    const serves = h.hosts.log.filter((l) => l.command === "ansiwise-rest serve").map((l) => l.host);
+    expect(serves).toEqual(["m1.example.com", "m1.example.com"]);
+    expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "cat /tmp/ansiwise-tailnet-join-key-m1")).toBe(true);
+    expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "rm -f /tmp/ansiwise-tailnet-join-key-m1")).toBe(true);
+
+    // The credential appears NOWHERE in the persisted run surface, and the reading on the
+    // master's row is this run's.
+    expect(JSON.stringify(readEvents(h.db.db, r.runId))).not.toContain(MINT_AUTHKEY);
+    const mrow = h.db.db.select().from(servers).where(eq(servers.id, MASTER_ID)).get();
+    expect((mrow?.tailnetJson as { runId?: string } | null)?.runId).toBe(r.runId);
   });
 
   it("PLANTED DEFECT (tailnet-rejoin): a coordinator address the machine's dry run judges red fails the step BEFORE the logout — no run-mode rejoin starts, and the membership was still re-read", { timeout: 60_000 }, async () => {
