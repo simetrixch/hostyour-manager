@@ -425,29 +425,35 @@
     display: grid;
     grid-template-columns: 17rem minmax(0, 1fr);
     gap: var(--sp-5);
+    align-items: start;
   }
 
-  /* THE TWO COLUMNS END TOGETHER. The steps list grows with the run — seventeen of them on a slave
-     deployment — while the log carried a height of its own, so the terminal stopped a long way
-     above the last step and the space beside it stood empty. `align-items: start` was what let the
-     shorter one keep its own height; without it both stretch to the row, which is the default.
+  /* THE TERMINAL IS AS TALL AS THE NAVIGATION BESIDE IT AND NO TALLER. The steps list grows with
+     the run — nineteen of them on a slave deployment — and a log that took its height from that
+     column grew with it, so the window kept getting longer instead of scrolling.
 
-     THE LOG SCROLLS INSIDE ITS PANEL RATHER THAN GROWING THE PAGE: the head stays put and the
-     `<pre>` takes what is left, which is what `min-height: 0` on a flex child is for — without it
-     a scrollable child refuses to shrink below its content and pushes the panel open instead.
+     It ends where the rail ends: the rail is `position: sticky; top: 0; height: 100vh` (shell.css),
+     so a panel of the same height, stuck the same way, ends at the same edge of the screen. The
+     content column's own padding is taken off both ends so the two line up rather than the terminal
+     running under the edge.
 
-     The floor is for the other direction: a run with three steps would otherwise leave a terminal
-     three steps tall. */
+     STUCK, so it stays there while the steps scroll past it: the run is read by watching the log,
+     and a terminal that scrolled away with the list would have to be scrolled back to. */
   .log-panel {
+    position: sticky;
+    top: var(--sp-4);
     display: flex;
+    height: calc(100vh - 2 * var(--sp-4));
     flex-direction: column;
-    min-height: 22rem;
   }
 
+  /* The head stays put and the lines take what is left. `min-height: 0` is what lets a scrollable
+     flex child shrink below its content instead of pushing the panel open; without it the panel
+     grows and the fixed height above means nothing. */
   .log-panel > .log {
+    max-height: none;
     flex: 1;
     min-height: 0;
-    max-height: none;
   }
 }
 
