@@ -48,6 +48,9 @@ export const MASTER_MARKING_YAML = [
   // see that the first rewrite of a real map turned its recipients into one mailbox that is several.
   "  alertRecipients: ['ops@example.com']",
   "  catalogUrl: https://github.com/acme/acme-catalog.git",
+  // THE SAME REPOSITORY AS owner/name. A cluster cutting a SLAVE's branch reads it from the map,
+  // because catalogUrl is the wrong shape for what the argocd files stamp.
+  "  catalogRepo: acme/acme-catalog",
   // WHAT A REAL MASTER'S MAP CARRIES BESIDE THE NAMES ABOVE. It stood without these, and a fixture
   // that carries less than the thing it stands for cannot fail when the code drops something: a
   // slave was composed from a handful of copied fields and came out with ten of a master's
@@ -72,6 +75,10 @@ export const MASTER_MARKING_YAML = [
   "  endpoints:",
   "    registry:",
   "      host: zot.m1.example.com",
+  // NO `mail` HERE ON PURPOSE. It is optional in the template — an installation running no mail
+  // service has none — and release.test.ts proves the absent-optional path off this very map: the
+  // answer rides nowhere rather than being invented. The present case is proven where the round
+  // trip is, in cluster-marking.test.ts's FULL_MAP.
   "    vault:",
   "      url: https://vault.m1.example.com",
   "    idp:",

@@ -212,6 +212,13 @@ describe("setClusterRelease", () => {
     "  platformDomain: example.com",
     "  alertRecipients: ['ops@example.com']",
     "  catalogUrl: https://github.com/acme/acme-catalog.git",
+    // THE SAME REPOSITORY AS owner/name, which is a different thing to read: every argocd file of
+    // the platform stamps the bare owner/name into a URL of its own, so the map states both and a
+    // writer that dropped this one would leave the next slave's branch cut with nothing to stamp.
+    "  catalogRepo: acme/acme-catalog",
+    "  letsencryptEmail: ops@example.com",
+    "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
+    "  nodeCidrs: [203.0.113.7/32]",
     "  vaultKubernetesAuthPath: kubernetes-m1",
     "  registryPullUser: acme-pull",
     "  registryPushUser: acme-push",
@@ -240,6 +247,15 @@ describe("setClusterRelease", () => {
       "registryPullUser: acme-pull", "registryPushUser: acme-push",
       "host: zot.m1.example.com", "vault.m1.example.com", "idp.m1.example.com",
       "tale.m1.example.com", "servicesLocal",
+      // FULL_MAP above states every key the map template writes, so this list can name every one
+      // of them — which is the whole point of the case. Two were lost in exactly this way before
+      // anybody thought to look: letsencryptEmail and letsencryptServer were read and never
+      // written, and alertRecipients was written in the wrong shape.
+      "catalogRepo: acme/acme-catalog",
+      "letsencryptEmail: ops@example.com",
+      "letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
+      "nodeCidrs:", "203.0.113.7/32",
+      "post.example.com",
     ]) expect(after, `the pin dropped ${kept}`).toContain(kept);
     expect(after).toContain(`release: ${TAG}`);
     // THE ONE THAT GOT AWAY. It was joined on a comma while reading and written back as a plain
