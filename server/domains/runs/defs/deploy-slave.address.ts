@@ -1,5 +1,4 @@
 import { eq } from "drizzle-orm";
-import { z } from "zod";
 import type { Step, StepCtx } from "../../../executor/types.ts";
 import { servers } from "../../../db/schema/inventory.ts";
 import { errValidation } from "../../../kernel/errors.ts";
@@ -9,7 +8,7 @@ import {
 } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { loadMaster, loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
-import type { Stage } from "../../../../shared/enums.ts";
+import { coordinatorNodesOf, describeNode, ipv4Of } from "./tailnet.coordinator.ts";
 
 // THE ADDRESS THE MANAGER WILL DIAL, taken from the one that handed it out.
 //
@@ -36,50 +35,6 @@ import type { Stage } from "../../../../shared/enums.ts";
 // address (digita-deploy ansiwise/programs/tailnet-rejoin.yaml says so in its own head), and a row
 // still carrying the previous one points everything the master does at a machine that stopped
 // answering there.
-
-/** The coordinator, addressed exactly as the catalogue addresses it — the invocation is a copy of
- *  the `headscale:` argv in digita-deploy ansiwise/programs/tailnet-mint-join-key.yaml, and the two
- *  are one spelling on purpose: a manager that reached the coordinator its own way would keep
- *  working while the program that mints against it had already broken.
- *
- *  THE STAGE IS THE TARGET'S, which is the same one the mint is answered with: the program declares
- *  a `stage` answer and composeAnswers (ansiwise-run.kit.ts) fills it from `target.resolve`. It reads
- *  as the master's stage — the coordinator is a workload of the master's cluster — and it is not,
- *  because an installation runs ONE stage and a slave is part of the installation; the mint program's
- *  own answer says so ("Which of the product's three stages this installation runs"). Taking it from
- *  anywhere else would be a second spelling that agrees until it does not. */
-function coordinatorCommand(stage: Stage): string {
-  return `microk8s kubectl exec -n headscale deploy/headscale-${stage}-app -- headscale`;
-}
-
-/** One node as the coordinator lists it. Only the fields this reading needs are named, and every
- *  one of them is optional: `nodes list -o json` is the coordinator's own shape and not ours, so a
- *  field that moves must surface as "the coordinator lists no address for X" and never as a crash. */
-const CoordinatorNode = z.object({
-  name: z.string().optional(),
-  given_name: z.string().optional(),
-  user: z.object({ name: z.string().optional() }).optional(),
-  ip_addresses: z.array(z.string()).optional(),
-});
-
-/** The listing. NULLABLE because that is what the tool answers for an empty one — the same `null`
- *  its `users list` gives, which is an answer and not a failure. */
-const CoordinatorNodes = z.array(CoordinatorNode).nullable();
-
-type Node = z.infer<typeof CoordinatorNode>;
-
-/** How a node is named in a refusal: the name a person sees at the coordinator, with its addresses
- *  after it, so a listing of two says which two. */
-function describe(node: Node): string {
-  const name = node.given_name ?? node.name ?? "(unnamed)";
-  return `${name} [${(node.ip_addresses ?? []).join(", ") || "no addresses"}]`;
-}
-
-/** This machine's IPv4 among the addresses the coordinator gave it. Chosen by SHAPE and not by
- *  position: the listing happens to put IPv4 first today, and the service binds four numbers. */
-function ipv4Of(node: Node): string | undefined {
-  return (node.ip_addresses ?? []).find((address) => !address.includes(":"));
-}
 
 /** The map's `apiHost`, brought to the address the coordinator gave.
  *
@@ -137,43 +92,10 @@ export function declareTailnetAddressStep(target: SlaveTarget, serverId: string,
       // `first_dns_label_of`). Filing and reading are one name or neither works.
       const owner = clusterShortName(domain);
       const master = loadMaster(ctx.db);
-      const command = `${coordinatorCommand(stage)} nodes list -o json`;
-
-      // ON THE MASTER, because that is where the coordinator runs — this is the one reading of the
-      // step, and it deliberately never touches the machine being deployed.
+      // ON THE MASTER, because that is where the coordinator runs — this step deliberately never
+      // touches the machine being deployed.
       const session = await ctx.ssh(master.id);
-      const out: string[] = [];
-      const read = await session.exec(command, {
-        signal: ctx.signal,
-        timeoutMs: 60_000,
-        onStdout: (line) => out.push(line),
-        onStderr: (line) => ctx.log("stderr", line),
-      });
-      if (read.code !== 0) {
-        throw errValidation(
-          `the coordinator's node list could not be read on the master ${master.name} (exit ${read.code}) — the ` +
-          `reading runs \`${command}\`, the same invocation the catalogue's tailnet-mint-join-key uses, so a master ` +
-          "whose coordinator cannot be addressed that way is what to fix",
-        );
-      }
-
-      let listed: unknown;
-      try {
-        listed = JSON.parse(out.join("\n"));
-      } catch {
-        throw errValidation(
-          `the coordinator answered the node list with something that is not JSON — the reading asks for \`-o json\`, ` +
-          "so output that is not its own document means the invocation reached something else",
-        );
-      }
-      const parsed = CoordinatorNodes.safeParse(listed);
-      if (!parsed.success) {
-        throw errValidation(
-          "the coordinator's node list is not in the shape this reading knows — it is the tool's own document and " +
-          "not this platform's, so a version that lists nodes differently has to be read differently",
-        );
-      }
-      const mine = (parsed.data ?? []).filter((node) => node.user?.name === owner);
+      const mine = await coordinatorNodesOf(ctx, session, stage, owner);
 
       // NO NODE. The join is what creates it, and it stands earlier in this same run — so this is a
       // machine whose registration did not land, not a row waiting to be filled in.
@@ -188,7 +110,7 @@ export function declareTailnetAddressStep(target: SlaveTarget, serverId: string,
       // something else that joined under the same name.
       if (mine.length > 1) {
         throw errValidation(
-          `the coordinator lists ${mine.length} nodes owned by "${owner}": ${mine.map(describe).join(" and ")}. This ` +
+          `the coordinator lists ${mine.length} nodes owned by "${owner}": ${mine.map(describeNode).join(" and ")}. This ` +
           "manager presents its token at the address on the row, so it may not choose between them — delete the node " +
           "that is not this machine at the coordinator, then run this step again",
         );
@@ -196,7 +118,7 @@ export function declareTailnetAddressStep(target: SlaveTarget, serverId: string,
       const address = ipv4Of(mine[0]!);
       if (address === undefined) {
         throw errValidation(
-          `the coordinator lists ${describe(mine[0]!)} for "${owner}" but no IPv4 among its addresses — the resident ` +
+          `the coordinator lists ${describeNode(mine[0]!)} for "${owner}" but no IPv4 among its addresses — the resident ` +
           "ansiwise service binds four numbers and nothing else, so there is no address here to declare",
         );
       }

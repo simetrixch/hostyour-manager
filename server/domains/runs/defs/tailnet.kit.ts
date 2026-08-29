@@ -10,6 +10,7 @@ import { isMasterRole, type RunKind } from "../../../../shared/enums.ts";
 import { registerSecret } from "../../../security/redact.ts";
 import { recordTailnetReading } from "../tailnet-probe.ts";
 import { clusterShortName } from "../../inventory/cluster-marking.ts";
+import { dropCoordinatorNodes } from "./tailnet.coordinator.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { activeClusterTarget, loadMaster, loadServer, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import {
@@ -231,6 +232,17 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
           const loginServer = await readLoginServer(ports, domain);
           const master = loadMaster(ctx.db);
           const mSession = await ctx.ssh(master.id);
+          // WHAT AN EARLIER LIFE OF THIS MACHINE LEFT AT THE COORDINATOR, taken away before a fresh
+          // credential is minted for it. A registration lives in the coordinator's own database on
+          // the master, so it survives everything done to the machine: a restore puts back a disk
+          // that has forgotten its node key while the coordinator still lists the node it belonged
+          // to. The join below discards that key as its first act, so the standing node is about to
+          // be dead either way — and what would be left of it is a SECOND node under one name, which
+          // nothing downstream may choose between (deploy-slave.address.ts refuses exactly that).
+          //
+          // The coordinator's USER for this machine stays, with its keys: the mint is idempotent
+          // against a standing credential, and destroying the user would mint a fresh one every run.
+          await dropCoordinatorNodes(ctx, mSession, target.resolve(ctx.db).stage, clusterShortName(domain));
           const mint = await openServeConversation(ctx, mSession, ports, signal);
           try {
             const mintCp: ProgramCheckpoint = { program: MINT_PROGRAM };

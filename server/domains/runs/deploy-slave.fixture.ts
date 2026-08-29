@@ -173,6 +173,11 @@ export interface HostsScript {
    *  drives the whole list keeps the address it already leaned on. */
   coordinatorNodesOut: string;
   coordinatorNodesExit: number;
+  /** WHAT `headscale nodes delete` ANSWERS ON THE MASTER. A join clears what an earlier life of the
+   *  machine left at the coordinator before it mints, so this is the second thing that invocation is
+   *  asked. Non-zero is the case where the coordinator will not let go — the run has to stop there,
+   *  because joining anyway puts a second node under one name. */
+  coordinatorDeleteExit: number;
   appSyncOut: string;      // "Synced" ends gitops-handoff's wait immediately
   externalSecretsOut: string; // verify HARD gate 0 (master): `name|Ready|reason` rows in ns <name>
   diagOut: string;         // verify diagnostic bundle (master, runs only while a gate is failing)
@@ -289,6 +294,7 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
       online: true,
     }]),
     coordinatorNodesExit: 0,
+    coordinatorDeleteExit: 0,
     appSyncOut: "Synced",
     externalSecretsOut: "cluster-slave|True|SecretSynced\nrepo-platform|True|SecretSynced\nrepo-catalog|True|SecretSynced",
     diagOut: "==== verify-slave diagnostics (ns s1) ====",
@@ -376,6 +382,7 @@ export function hostsFactory(f: HostsScript): SshFactory {
       // ---- declare-tailnet-address's one reading, and it answers on the MASTER: the coordinator is
       // a workload of the master's cluster, and the machine being deployed is never asked.
       if (command.includes("headscale") && command.includes("nodes list")) { emit(f.coordinatorNodesOut); return done(f.coordinatorNodesExit); }
+      if (command.includes("headscale") && command.includes("nodes delete")) return done(f.coordinatorDeleteExit);
       // ---- gitops-handoff
       if (command.includes("get application ")) { emit(f.appSyncOut); return done(); }
       // ---- verify-slave (three HARD gates + diagnostics + two SOFT checks)
