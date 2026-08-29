@@ -21,6 +21,7 @@ import {
 import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
 import { masterCheckoutsScript, SLAVE_API_PORT } from "./deploy-slave.remote.ts";
 import { refreshCheckoutStep } from "./cluster-release.kit.ts";
+import { placeInputStep, dropInputStep, dropInputCleanup } from "./deploy-slave.input.ts";
 import { rejoinStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
 import { clusterShortName, resolveClusterMarking, writeClusterMarking, type ClusterMarking, writeClusterMarkingOnBranch } from "../../inventory/cluster-marking.ts";
@@ -533,11 +534,18 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // what brings the slave's checkout onto the branch the cut just pushed. The checkout itself was
     // placed above; this step is what moves it onto that branch's head.
     refreshCheckoutStep(target),
+    // The two values a cluster keeping no books reads off its machine, composed out of what this
+    // manager already holds and put there for the length of the run. It stands HERE because the
+    // first row that reads one of them is deploy-cluster's containerd mirror; drop-input below
+    // takes it away once the last one has run.
+    placeInputStep(target, ports),
     armed(redeploying ? undefined : microk8sResetSlaveCleanup,
       ansiwiseProgramStep(target, "deploy-cluster", ports, { extra: machineAnswers })),
     // deploy-platform-services also declares elevation_password — the ENGINE fills that one from the
     // password the POST carries beside the answers; sending it as an answer is refused.
     ansiwiseProgramStep(target, "deploy-platform-services", ports, { extra: machineAnswers }),
+    // Both programs that read them have run.
+    dropInputStep(target),
     ...(redeploying ? [] : [
       // The join: mint on the master, carry the credential over the session, spend it in ONE
       // program run on the slave — the tailnet kit's own step, because a first join is the same
@@ -665,14 +673,15 @@ export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): Run
   // The compensating actions the install steps register (resolved by NAME from the persisted
   // __cleanups, run in reverse registration order on an explicit abort-with-cleanup):
   // remove-slave (armed by the join, before the first master-side per-slave state) →
-  // microk8s-reset-slave (deploy-cluster) → remove-slave-marking (mark-slave, armed first and so
+  // microk8s-reset-slave (deploy-cluster) → drop-input (place-input, which takes the two placed
+  // values off a machine whose run died before drop-input could) → remove-slave-marking (mark-slave, armed first and so
   // run last — by then remove-slave has already dropped the map's slave part itself, FIRST, which
   // is that program's own contract, so the last cleanup finds nothing left to drop). attest-target,
   // slave-preflight and the checkout steps arm nothing: the install branch on the remote is the
   // operator's to keep, and the binary, the catalogue and the checkout place-ansiwise puts on the
   // machine are what a retry resumes onto — a cleanup that removed them would buy a second download
   // and two more clones.
-  cleanups: () => [microk8sResetSlaveCleanup, removeSlaveCleanup(ports), removeSlaveMarkingCleanup(ports)],
+  cleanups: () => [microk8sResetSlaveCleanup, removeSlaveCleanup(ports), removeSlaveMarkingCleanup(ports), dropInputCleanup],
   onTerminal: (status, { db, params }) => {
     if (status === "succeeded") return; // the register step set the terminal states
     const sid = String(params.serverId);

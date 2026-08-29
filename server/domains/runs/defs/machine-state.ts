@@ -94,6 +94,21 @@ export const ANSIWISE_RUN_ROOT = `${ANSIWISE_STATE_ROOT}/runs`;
  *  the entry at `<stage>/manager-host/ansiwise`. */
 export const SERVICE_TOKEN_FILE = "/etc/ansiwise/service-token";
 
+/** WHERE AN INSTALLATION'S HAND-FILLED INPUT STANDS ON A MACHINE, per stage.
+ *
+ *  On the cluster that keeps the books it is written by that cluster's own branch program and stays
+ *  — this manager never writes it there. On a cluster that keeps none it is PLACED for the length of
+ *  one deployment and taken away again (deploy-slave.input.ts), because two rows of the machine's
+ *  own programs read a value out of it and the file cannot reach such a machine any other way: it is
+ *  gitignored, so no branch carries it.
+ *
+ *  Inside the platform checkout, so it belongs to the account that owns the checkout and the write
+ *  needs nothing raised. It is deliberately absent from MACHINE_STATE below: that list is what this
+ *  platform leaves on a machine, and this is the one thing it takes back. */
+export function inputFile(stage: string): string {
+  return `${PLATFORM_CHECKOUT}/secrets/secrets.${stage}`;
+}
+
 /** Which account a path belongs to. `operator` is the account the manager reaches the machine as —
  *  the rule's answer, and the answer for everything this platform creates a place for. `root` is
  *  written out only where a program that READS the path refuses any other owner, and the row says

@@ -9,7 +9,7 @@ import { parseConfig } from "../../kernel/config.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
-import { buildRunDefinitions } from "./run-definitions.ts";
+import { buildRunDefinitions, type RunDefinitionsPorts } from "./run-definitions.ts";
 import type { AnyRunDefinition, Step } from "../../executor/types.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -48,9 +48,17 @@ export const logger = createLogger(
 export const SLAVE_ID = "srv_slave1";
 export const MASTER_ID = "srv_master1";
 export const PARAMS = { serverId: SLAVE_ID, stage: FIXTURE_STAGE, domain: SLAVE_FQDN };
+/** What the manager holds and place-input puts on a machine — a catalogue credential and the auth of
+ *  its own pull document. Both are secrets: every case that reads the run's surface asserts they are
+ *  nowhere in it, which is only a statement if they are recognisable strings. */
+export const CATALOGUE_ORIGIN_URL = "https://github.com/acme/acme-catalog.git";
+export const CATALOGUE_TOKEN = "ghp_catalogue_token_the_manager_holds";
+export const PULL_AUTH = "cHVsbGVyOnB1bGwtcGFzc3dvcmQ=";
+
 export const STEP_NAMES = [
   "attest-target", "slave-preflight", "prepare-checkouts", "run-deploy-slave-branch", "mark-slave",
-  "place-ansiwise", "run-deploy-host", "refresh-checkout", "run-deploy-cluster", "run-deploy-platform-services",
+  "place-ansiwise", "run-deploy-host", "refresh-checkout", "place-input", "run-deploy-cluster",
+  "run-deploy-platform-services", "drop-input",
   "rejoin", "read-membership", "enable-ansiwise-service", "create-mgmt", "gitops-handoff",
   "verify-slave", "register",
 ];
@@ -171,6 +179,9 @@ export interface HostsScript {
    *  over the other two. */
   hostAddressesOut: string;
   hostAddressesExit: number;
+  /** What `cat` of the placed input answers on this machine. Empty is a machine carrying none,
+   *  which is every machine before place-input has run on it. */
+  inputOut: string;
   // ---- what the machine carries of the BOOTSTRAP (place-ansiwise). Every one of these is written
   // by a file transfer or by the serving binary's own install-service and read back by asking the
   // file — so a second run of a step measures what the first one left, and a double-run assertion is
@@ -274,6 +285,7 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
       "4: cni0    inet 10.1.32.1/24 brd 10.1.32.255 scope global cni0",
     ].join(String.fromCharCode(10)),
     hostAddressesExit: 0,
+    inputOut: "",
     // A slave as deploy-slave meets it: adopted, and carrying neither executable yet. No surface of
     // its own, and the token file already there — enable-ansiwise-service stands AFTER
     // run-deploy-platform-services in the list, and that program's file_from_vault row is what writes it.
@@ -358,6 +370,9 @@ export function hostsFactory(f: HostsScript): SshFactory {
       // because that is where the step reads it: a measurement is read back whole, not followed line
       // by line as a program run is.
       if (command === HOST_ADDRESS_COMMAND) return { code: f.hostAddressesExit, stdoutTail: f.hostAddressesOut, stderrTail: "" };
+      // ---- the input the manager places for the length of a run. Answered on stdoutTail, because
+      // that is where the step reads it back to decide whether it has anything to write.
+      if (command.startsWith("cat ") && command.includes("secrets/secrets")) { emit(f.inputOut); return done(); }
       // ---- cleanups
       if (command.includes("snap remove --purge microk8s")) return done();
       return done();
@@ -393,6 +408,9 @@ export interface Harness {
   hosts: HostsScript;
   /** The platform repo the run reads the master's map from and writes the slave's onto (mark-slave). */
   platformRepo: FakePlatformRepo;
+  /** The ports the executor was given, so a step driven directly (stepOf) is driven through the
+   *  same ones — a step built from a narrower set proves a manager nobody ships. */
+  runPorts: RunDefinitionsPorts;
   /** The release surface the bootstrap reads both executables off — every address it was asked for,
    *  and where a test puts something other than the asset an address names. */
   releases: ScriptedReleases;
@@ -436,7 +454,7 @@ export function disposeHarnesses(): void {
 // FK-safe seeding (clusters.server_id → servers.id): servers + their ssh keys first.
 // keystore: "keyfile" opens the crypto gate for tests that need a SECOND plan of the same slave
 // (under plaintext the gate counts the first run's leftover planned row as a live slave).
-export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string; versionsYaml?: string; metrics?: FakeMetricsQuery | false } = {}): Promise<Harness> {
+export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string; versionsYaml?: string; metrics?: FakeMetricsQuery | false; withoutCarriedValues?: boolean } = {}): Promise<Harness> {
   const hosts = opts.hosts ?? scriptedHosts();
   const dir = mkdtempSync(join(tmpdir(), "mgr-ds-"));
   dirs.push(dir);
@@ -456,21 +474,34 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   // A manager that WAS given a query address, because that is every deployed one; `metrics: false`
   // is the manager that was not, and its whole point is that the check says so rather than passing.
   const metrics = opts.metrics === false ? undefined : opts.metrics ?? new FakeMetricsQuery();
+  // THE PORT SET, built once and kept on the harness: a step driven directly (stepOf) has to be
+  // driven through the same ports the executor was given, or a test proves a manager nobody ships.
+  const runPorts = {
+    db: db.db, platformRepo,
+    // What deploy-host's git_clone row is answered with, as the composition root builds it from
+    // GITHUB_OWNER + GITHUB_REPO. A machine cannot read it off a checkout that does not exist yet.
+    platformOrigin: PLATFORM_ORIGIN,
+    ansiwiseDownloadUrl: ANSIWISE_DOWNLOAD_URL,
+    releaseDownloads: releases,
+    ...(opts.ansiwiseServeCommand !== undefined ? { ansiwiseServeCommand: opts.ansiwiseServeCommand } : {}),
+    ...(metrics ? { metricsQuery: metrics } : {}),
+    // A WINDOW A TEST CAN WATCH CLOSE. A deployment gives a fresh slave two minutes to
+    // push its first series; a test that waited them would be a test nobody runs.
+    metricsFirstSeriesMs: 20,
+    // WHAT A MACHINE THAT KEEPS NO BOOKS IS GIVEN, out of what this manager holds: the credential it
+    // clones a catalogue with, and its own pull document narrowed to one address. Both are the
+    // composition root's (wire.ts). `withoutCarriedValues` is the manager that holds NEITHER, whose
+    // whole point is that place-input refuses naming both rather than letting the machine's own
+    // programs refuse by file and key three steps later.
+    ...(opts.withoutCarriedValues ? {} : {
+      catalogueOrigin: { repoURL: CATALOGUE_ORIGIN_URL, token: CATALOGUE_TOKEN },
+      pullConfiguration: async (registryHost: string) =>
+        Buffer.from(JSON.stringify({ auths: { [registryHost]: { auth: PULL_AUTH } } }), "utf8").toString("base64"),
+    }),
+  };
   const executor = new Executor({
     db: db.db, creds: store, bus: new RunEventBus(), logger,
-    runDefinitions: buildRunDefinitions({
-      db: db.db, platformRepo,
-      // What deploy-host's git_clone row is answered with, as the composition root builds it from
-      // GITHUB_OWNER + GITHUB_REPO. A machine cannot read it off a checkout that does not exist yet.
-      platformOrigin: PLATFORM_ORIGIN,
-      ansiwiseDownloadUrl: ANSIWISE_DOWNLOAD_URL,
-      releaseDownloads: releases,
-      ...(opts.ansiwiseServeCommand !== undefined ? { ansiwiseServeCommand: opts.ansiwiseServeCommand } : {}),
-      ...(metrics ? { metricsQuery: metrics } : {}),
-      // A WINDOW A TEST CAN WATCH CLOSE. A deployment gives a fresh slave two minutes to
-      // push its first series; a test that waited them would be a test nobody runs.
-      metricsFirstSeriesMs: 20,
-    }),
+    runDefinitions: buildRunDefinitions(runPorts),
     sshFactory: hostsFactory(hosts), actor: () => "op_system",
   });
   if (opts.keystore) {
@@ -496,7 +527,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
     }).run();
     await store.seal({ kind: "ssh_key", label: "master key", plaintext: Buffer.from("fake-master-key"), fingerprint: "SHA256:master", serverId: MASTER_ID, publicKey: MASTER_PUBLIC_KEY });
   }
-  return { db, executor, store, hosts, platformRepo, releases, ...(metrics ? { metrics } : {}) };
+  return { db, executor, store, hosts, platformRepo, releases, runPorts, ...(metrics ? { metrics } : {}) };
 }
 
 /** One step out of the deploy-slave definition's own list, for driving it directly.
@@ -505,11 +536,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
  *  the metrics port would report that check SKIPPED whatever the harness was given, and telling that
  *  outcome apart from the others is exactly what the suites use this for. */
 export function stepOf(h: Harness, name: string): Step {
-  const def = buildRunDefinitions({
-    db: h.db.db, platformRepo: h.platformRepo,
-    ...(h.metrics ? { metricsQuery: h.metrics } : {}),
-    metricsFirstSeriesMs: 20,
-  }).get("cluster-deploy-slave") as AnyRunDefinition;
+  const def = buildRunDefinitions(h.runPorts).get("cluster-deploy-slave") as AnyRunDefinition;
   const step = def.steps({ ...PARAMS, tier: "rehearsal" }).find((candidate: Step) => candidate.name === name);
   if (!step) throw new Error(`no step ${name}`);
   return step;

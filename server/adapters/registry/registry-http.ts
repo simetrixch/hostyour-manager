@@ -33,6 +33,51 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  * a missing pull vs push secret is told apart. Read FRESH per call because kubelet refreshes
  * secret-volume files in a running pod (an ESO resync lands without a restart).
  */
+/** Where the Deployment mounts the manager-registry-pull dockerconfigjson (hostyour-cloud
+ *  clusters/inventories/manager/templates/deployment.yaml, volume `registry-pull`) — the SAME pull
+ *  credential the pod's imagePullSecrets reference. A platform constant of the chart.
+ *
+ *  It stands HERE, beside the two functions that open it, and not beside one of its callers: a
+ *  second caller had to name the same file, and a path known in two places is one that can be
+ *  changed in one. */
+export const REGISTRY_PULL_DOCKERCONFIG_PATH = "/etc/manager/registry-pull/.dockerconfigjson";
+
+/** The mounted pull document, narrowed to ONE registry address and encoded the way a container
+ *  runtime is configured with it: base64 of `{"auths":{"<host>":{…}}}`.
+ *
+ *  NARROWED AND NOT HANDED OVER WHOLE. The mounted document may carry an entry for more than one
+ *  address — the place this manager's own image comes from among them — and a machine being given
+ *  the right to pull through the installation's registry is being given that and nothing else.
+ *
+ *  Read FRESH per call, like every other read of this file: kubelet refreshes a secret volume in a
+ *  running pod, so an ExternalSecret resync lands without a restart. Fail-closed on an unreadable
+ *  file, invalid JSON, or no entry for the address — naming the address and what the file does
+ *  carry, never what stands under either. */
+export async function readPullConfiguration(dockerConfigPath: string, registryHost: string): Promise<string> {
+  let raw: string;
+  try {
+    raw = await readFile(dockerConfigPath, "utf8");
+  } catch (e) {
+    throw upstream(`could not read the mounted manager-registry-pull dockerconfigjson at ${dockerConfigPath} (is its ExternalSecret synced?): ${errMsg(e)}`);
+  }
+  let auths: Record<string, unknown>;
+  try {
+    auths = (JSON.parse(raw) as { auths?: Record<string, unknown> }).auths ?? {};
+  } catch (e) {
+    throw upstream(`the dockerconfigjson at ${dockerConfigPath} is not valid JSON: ${errMsg(e)}`);
+  }
+  const entry = auths[registryHost];
+  if (entry === undefined || entry === null) {
+    const carried = Object.keys(auths);
+    throw upstream(
+      `the dockerconfigjson at ${dockerConfigPath} carries no entry for ${registryHost} ` +
+      `(it carries: ${carried.length ? carried.join(", ") : "none"}) — a machine is given the right to pull ` +
+      "through the installation's own registry, so the manager's own pull credential has to cover that address",
+    );
+  }
+  return Buffer.from(JSON.stringify({ auths: { [registryHost]: entry } }), "utf8").toString("base64");
+}
+
 async function readDockerConfigAuth(dockerConfigPath: string, registryHost: string, credentialLabel: string): Promise<string> {
   let raw: string;
   try {

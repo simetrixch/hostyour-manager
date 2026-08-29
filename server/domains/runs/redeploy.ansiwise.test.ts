@@ -535,8 +535,9 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(run?.status).toBe("cancelled");
     const cleanupSteps = run?.steps.filter((s) => s.name.startsWith("cleanup:")) ?? [];
     expect(cleanupSteps.map((s) => s.name)).toEqual([
-      "cleanup:remove-slave", "cleanup:microk8s-reset-slave", "cleanup:remove-slave-marking",
-    ]); // reverse registration order — the map cleanup was armed FIRST (mark-slave), so it runs LAST
+      "cleanup:remove-slave", "cleanup:microk8s-reset-slave", "cleanup:drop-input", "cleanup:remove-slave-marking",
+    ]); // reverse registration order — the map cleanup was armed FIRST (mark-slave), so it runs LAST,
+    // and drop-input stands where place-input armed it: after the map, before deploy-cluster
     expect(cleanupSteps.every((s) => s.status === "ok")).toBe(true);
 
     // The map keeps the cluster's identity and loses ONLY the slave part — dropped by the

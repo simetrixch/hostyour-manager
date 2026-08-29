@@ -64,6 +64,23 @@ export interface AnsiwisePorts {
    *  Absent, the placing step says so and touches no tree: an installation that states no catalogue
    *  is one where a machine's own checkout is the only one there is. */
   catalogueOrigin?: { repoURL: string; token: string };
+  /** THE INSTALLATION'S PULL CONFIGURATION FOR ONE REGISTRY ADDRESS, as the encoded document a
+   *  container runtime is configured with — base64 of `{"auths":{"<host>":{…}}}`.
+   *
+   *  A CLUSTER PULLS ITS IMAGES THROUGH THE INSTALLATION'S OWN REGISTRY, and the row that writes
+   *  that mirror is answered from a file. On the cluster that keeps the books that file is the
+   *  installation's hand-filled input; a cluster that keeps none has no such file and never can —
+   *  it is gitignored, so it cannot travel on a branch, and the branch programs that write it are
+   *  the books-keeper's. Without the credential the row is SATISFIED and writes no mirror at all,
+   *  so the machine pulls from docker.io instead and nothing says so.
+   *
+   *  THIS MANAGER ALREADY HOLDS IT: the same mounted manager-registry-pull document its own image
+   *  is pulled with, templated in the manager chart against `common.registryHost` — the very
+   *  address the mirror is written for. So the value is carried out of this process rather than
+   *  copied from another machine's secrets, and the entry for one host is all that leaves.
+   *
+   *  Fail-closed: a mounted document carrying no entry for the address throws naming both. */
+  pullConfiguration?: (registryHost: string) => Promise<string>;
   /** WHERE those release assets are READ, which is over the manager's own network: the bootstrap
    *  hands a machine bytes rather than a download command, so a machine with no route out and no
    *  `curl` is still placeable (place-ansiwise.ts, THE TRANSFER). */

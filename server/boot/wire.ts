@@ -34,6 +34,7 @@ import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
 import type { AppEnv } from "../http/app-env.ts";
+import { readPullConfiguration, REGISTRY_PULL_DOCKERCONFIG_PATH } from "../adapters/registry/registry-http.ts";
 import type { ReadyzView } from "../../shared/api-types.ts";
 
 export interface Wired {
@@ -83,6 +84,11 @@ export async function wire(): Promise<Wired> {
     ...(config.ansiwiseServeCommand ? { ansiwiseServeCommand: config.ansiwiseServeCommand } : {}),
     ...(config.ansiwiseDownloadUrl ? { ansiwiseDownloadUrl: config.ansiwiseDownloadUrl } : {}),
     ...(config.catalog ? { catalogueOrigin: { repoURL: config.catalog.repoURL, token: config.catalog.token } } : {}),
+    // The mounted manager-registry-pull document, narrowed to one address — what a machine that
+    // keeps no books is given so it pulls through the installation's own registry rather than
+    // silently from docker.io. Unconditional: the path is where this manager's own chart mounts it,
+    // and a manager whose file is not there fails naming the file rather than the setting.
+    pullConfiguration: (registryHost: string) => readPullConfiguration(REGISTRY_PULL_DOCKERCONFIG_PATH, registryHost),
     // WHERE the bootstrap reads the two ansiwise executables. Unconditional and not behind a setting:
     // the address they are read FROM is the installation's (ANSIWISE_DOWNLOAD_URL above), while
     // reading bytes off it is a capability of this process that nothing can turn off and nothing

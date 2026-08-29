@@ -89,7 +89,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const { db } = await makeHarness();
     const def = buildRunDefinitions({ db: db.db }).get("cluster-deploy-slave") as AnyRunDefinition;
     const names = (def.cleanups?.({ ...PARAMS, tier: "rehearsal" }) ?? []).map((c) => c.name);
-    expect(names.sort()).toEqual(["microk8s-reset-slave", "remove-slave", "remove-slave-marking"]);
+    expect(names.sort()).toEqual(["drop-input", "microk8s-reset-slave", "remove-slave", "remove-slave-marking"]);
   });
 
   it("hard-fails attest-target when the server name is not the domain's first label (the split-brain guard)", async () => {

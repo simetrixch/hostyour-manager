@@ -28,6 +28,31 @@ export const SLAVE_MARKING_YAML = [
   "  master: m1.example.com",
   "  apiHost: 100.64.0.11",
   "  apiPort: 16443",
+  // AND WHAT MARK-SLAVE COMPOSES OUT OF THE MASTER'S: a slave's map inherits the installation, and
+  // this fixture stands for a slave that HAS been marked. It carried five keys while the thing it
+  // stands for carries seventeen, which is a fixture that cannot fail when a reader finds one
+  // missing — the address of the registry this machine pulls through among them.
+  "  clusterName: s1",
+  "  unitApex: example.com",
+  "  platformDomain: example.com",
+  "  letsencryptEmail: ops@example.com",
+  "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
+  "  vaultKubernetesAuthPath: kubernetes-s1",
+  "  nodeCidrs: [198.51.100.11/32]",
+  "  endpoints:",
+  "    registry:",
+  "      host: zot.m1.example.com",
+  "    vault:",
+  "      url: https://vault.m1.example.com",
+  "    idp:",
+  "      url: https://idp.m1.example.com",
+  "    tailnet:",
+  "      url: https://tale.m1.example.com",
+  // A slave keeps no books and, here, does not build: all three false is what mark-slave writes.
+  "  servicesLocal:",
+  "    registry: false",
+  "    vault: false",
+  "    observability: false",
 ].join("\n") + "\n";
 
 /** The MASTER's own cluster map: written when the master installed itself. mark-slave reads it to

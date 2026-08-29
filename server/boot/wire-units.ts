@@ -20,7 +20,7 @@ import { booksBranch } from "../domains/inventory/read.ts";
 import { makeClusterKubeResolver } from "../domains/units/cluster-kube.ts";
 import type { ClusterKubeResolver } from "../adapters/kube/port.ts";
 import { TektonGateRunner } from "../adapters/gate-runner/gate-runner-tekton.ts";
-import { HttpRegistryProbe } from "../adapters/registry/registry-http.ts";
+import { HttpRegistryProbe, REGISTRY_PULL_DOCKERCONFIG_PATH } from "../adapters/registry/registry-http.ts";
 import { TektonBuildPlane } from "../adapters/build-plane/build-plane-tekton.ts";
 import { VaultSelfSeeder } from "../adapters/vault/vault-self-seeder.ts";
 import type { VaultSeeder } from "../adapters/vault/seeder-port.ts";
@@ -94,11 +94,6 @@ const RELEASE_BUILD_TIMEOUT_MS = 30 * 60_000;
 // A whole tenant fan-out (base + trio + N per-app stacks) has more to converge than a single consumer
 // app, so it gets a longer budget before the set-watch fails loudly.
 const TENANT_WATCH_TIMEOUT_MS = 15 * 60_000;
-// Where the Deployment mounts the manager-registry-pull dockerconfigjson (hostyour-cloud
-// apps/manager/templates/deployment.yaml, volume `registry-pull`) — the SAME pull credential the
-// pod's imagePullSecrets reference; the RegistryProbe parses its basic auth for the /v2 manifest
-// probes. A platform constant of the chart, like the gate-runner namespace/SA names below.
-const REGISTRY_PULL_DOCKERCONFIG_PATH = "/etc/manager/registry-pull/.dockerconfigjson";
 
 export interface UnitsWiring {
   defs: AnyRunDefinition[];
