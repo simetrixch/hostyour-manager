@@ -1,11 +1,14 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import type { Step } from "../../../executor/types.ts";
+import type { Step, StepCtx } from "../../../executor/types.ts";
 import { servers } from "../../../db/schema/inventory.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import { localTx } from "../../../executor/stepkit.ts";
-import { clusterShortName } from "../../inventory/cluster-marking.ts";
-import { loadMaster, loadServer, type SlaveTarget } from "./deploy-slave.kit.ts";
+import {
+  clusterShortName, resolveClusterMarking, writeClusterMarking, writeClusterMarkingOnBranch,
+} from "../../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../../shared/cluster-values.ts";
+import { loadMaster, loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import type { Stage } from "../../../../shared/enums.ts";
 
 // THE ADDRESS THE MANAGER WILL DIAL, taken from the one that handed it out.
@@ -78,14 +81,51 @@ function ipv4Of(node: Node): string | undefined {
   return (node.ip_addresses ?? []).find((address) => !address.includes(":"));
 }
 
+/** The map's `apiHost`, brought to the address the coordinator gave.
+ *
+ *  WHY THE MAP NEEDS A SECOND WRITE AT ALL. `mark-slave` composes the whole map eight steps before
+ *  the machine joins, and takes `apiHost` from `slaveApiHost` — `tailnetHost ?? lanHost ?? host`.
+ *  On a first deployment the column it reads is still empty, because the address does not exist
+ *  until the join, so the map is written with the machine's LAN or public name. What consumes it is
+ *  the master's own ArgoCD entry for this cluster: the slaves ApplicationSet feeds `slave.apiHost`
+ *  into clusters/slaves/slave/templates/externalsecret-cluster-slave.yaml, which renders
+ *  `server: "https://<apiHost>:<apiPort>"` with verification on. The machine's serving certificate
+ *  carries its addresses as IP entries and never its domain name, so the name the map was written
+ *  with is a name that dial cannot verify.
+ *
+ *  IT IS THE SAME VALUE IN THE SAME ACT. This step is where the address becomes known, so it is
+ *  where both places that state it are brought to it — the inventory row the manager dials, and the
+ *  map the master's reconciler dials. Written on the books branch and on the machine's own, the two
+ *  `mark-slave` writes, because those are the two trees that carry a map.
+ *
+ *  A REJOIN IS THE OTHER HALF. It hands a machine a FRESH address, and a map left on the previous
+ *  one points the master's reconciler at something that has stopped answering there. */
+async function alignMapAddress(ctx: StepCtx, ports: DeploySlavePorts, domain: string, address: string): Promise<boolean> {
+  const repo = requirePlatformRepo(ports);
+  const marking = await resolveClusterMarking(repo, domain);
+  if (marking.apiHost === address) {
+    ctx.log("meta", `${clusterMapPath(domain)} already states apiHost ${address} — nothing to write`);
+    return false;
+  }
+  const corrected = { ...marking, apiHost: address };
+  await writeClusterMarking(repo, corrected, ctx.runId);
+  await writeClusterMarkingOnBranch(repo, corrected, domain, ctx.runId);
+  ctx.log(
+    "meta",
+    `${clusterMapPath(domain)} now states apiHost ${address}, was ${marking.apiHost ?? "unset"} — the address the ` +
+    "coordinator gave this machine, on the books branch and on the machine's own",
+  );
+  return true;
+}
+
 /** `declare-tailnet-address`: ask the coordinator which address it gave this slave, and put that on
- *  the slave's row.
+ *  the slave's row and in its cluster map.
  *
  *  It stands between the join and `enable-ansiwise-service`, and OUTSIDE the redeploy guard the
  *  rejoin sits in: a redeploy does not join again, but it is the run that has to notice a row whose
  *  address went stale — and on a machine deployed before this step existed it is the run that fills
  *  the column for the first time. */
-export function declareTailnetAddressStep(target: SlaveTarget, serverId: string): Step {
+export function declareTailnetAddressStep(target: SlaveTarget, serverId: string, ports: DeploySlavePorts): Step {
   return {
     name: "declare-tailnet-address",
     title: "Declare the address the coordinator gave this machine",
@@ -161,23 +201,26 @@ export function declareTailnetAddressStep(target: SlaveTarget, serverId: string)
         );
       }
 
-      if (server.tailnetHost === address) {
-        ctx.log("meta", `${server.name} already declares ${address}, which is what the coordinator gave it — nothing to write`);
-        ctx.checkpoint({ address, written: false });
-        return;
-      }
-      // The previous value is SAID and not silently replaced: on a rejoin this is the moment the old
-      // address stops being the one anything should dial, and that is worth reading in the log of
-      // the run that changed it.
       const before = server.tailnetHost;
-      localTx(ctx, (tx) => tx.update(servers).set({ tailnetHost: address }).where(eq(servers.id, serverId)).run());
-      ctx.log(
-        "meta",
-        before === null
-          ? `${server.name} now declares ${address} — the address the coordinator gave it at the join above`
-          : `${server.name} now declares ${address}, replacing ${before} — the coordinator hands a fresh address at every join`,
-      );
-      ctx.checkpoint({ address, written: true, replaced: before });
+      if (before === address) {
+        ctx.log("meta", `${server.name} already declares ${address}, which is what the coordinator gave it — nothing to write`);
+      } else {
+        // The previous value is SAID and not silently replaced: on a rejoin this is the moment the
+        // old address stops being the one anything should dial, and that is worth reading in the log
+        // of the run that changed it.
+        localTx(ctx, (tx) => tx.update(servers).set({ tailnetHost: address }).where(eq(servers.id, serverId)).run());
+        ctx.log(
+          "meta",
+          before === null
+            ? `${server.name} now declares ${address} — the address the coordinator gave it at the join above`
+            : `${server.name} now declares ${address}, replacing ${before} — the coordinator hands a fresh address at every join`,
+        );
+      }
+      // The row and the map state the same address or the master's reconciler and this manager dial
+      // two different machines. Done after the row, so a map write that fails leaves the row already
+      // right and the step retryable from a state that is closer, not further.
+      const map = await alignMapAddress(ctx, ports, domain, address);
+      ctx.checkpoint({ address, written: before !== address, replaced: before, map });
     },
   };
 }

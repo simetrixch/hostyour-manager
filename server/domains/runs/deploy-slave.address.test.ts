@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { servers } from "../../db/schema/inventory.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import {
   SLAVE_ID, PARAMS,
   scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx, stepOf, type Harness,
@@ -105,6 +106,38 @@ describe("the address the coordinator gave this machine", () => {
 
     expect(declared(h)).toBe("100.64.0.11");
     expect(said.join(" ")).toContain("nothing to write");
+  });
+
+  it("brings the cluster map's apiHost to it, on the books branch and on the machine's own", async () => {
+    // What consumes the map is the master's own ArgoCD entry for this cluster: the slaves
+    // ApplicationSet feeds slave.apiHost into externalsecret-cluster-slave.yaml, which renders
+    // `server: "https://<apiHost>:<apiPort>"` with verification on. mark-slave wrote that field
+    // eight steps before the machine had an address, so it carries the machine's LAN or public name
+    // — and the machine's serving certificate names its ADDRESSES and never its domain.
+    const hosts = coordinator(listing([{ name: OWNER, owner: OWNER, ips: ["100.64.0.7"] }]));
+    const h = await world(hosts);
+    const path = clusterMapPath(PARAMS.domain);
+
+    await stepOf(h, "declare-tailnet-address").run(hostedStepCtx(h));
+
+    for (const branch of [h.platformRepo.booksBranch, PARAMS.domain]) {
+      expect(h.platformRepo.read(branch, path) ?? "", `${branch} states the coordinator's address`)
+        .toContain("apiHost: 100.64.0.7");
+    }
+  });
+
+  it("leaves the map alone when it already states that address", async () => {
+    // A map rewritten for a value that did not move is a commit nobody can read, and on a redeploy
+    // this step runs against a machine whose address has not changed.
+    const hosts = coordinator(listing([{ name: OWNER, owner: OWNER, ips: ["100.64.0.11"] }]));
+    const h = await world(hosts);
+    const before = h.platformRepo.commits.length;
+    const said: string[] = [];
+
+    await stepOf(h, "declare-tailnet-address").run(hostedStepCtx(h, { log: (_s, text) => said.push(text) }));
+
+    expect(h.platformRepo.commits).toHaveLength(before);
+    expect(said.join(" ")).toContain(`${clusterMapPath(PARAMS.domain)} already states apiHost 100.64.0.11`);
   });
 
   it("refuses where the coordinator lists no node for this machine", async () => {

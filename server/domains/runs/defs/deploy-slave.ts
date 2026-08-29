@@ -562,7 +562,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // Which address that is, asked of the one that handed it out. It is OUTSIDE the guard above
     // because a redeploy does not join again and is still the run that has to notice an address
     // that moved — and it is before the step below because that step is the first thing to dial it.
-    declareTailnetAddressStep(target, sid),
+    declareTailnetAddressStep(target, sid, ports),
     // The machine's own surface, switched on. It stands HERE and not beside the placement at the
     // head of the list because the address it binds is the one the join above gave the machine —
     // and on a redeploy the machine already holds it, so the step measures a standing service and
