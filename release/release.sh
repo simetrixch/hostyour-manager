@@ -110,36 +110,48 @@ git push origin "${SHA}:${DEPLOY_REF}"
 # somebody has to make, hold and replace. This script runs on a machine that is already logged in to
 # both. The credential problem does not exist here, so neither does the credential.
 #
-# PLATFORM_REPO_DIR NAMES THE CHECKOUT, and without it this stops after the build with a line
-# saying so: a consumer's copy of this script releases into an installation whose platform tree it
-# has no business writing, and guessing a path would be the same mistake as guessing a credential.
-if command -v gh >/dev/null 2>&1; then
-  echo "release: waiting for the images of ${TAG} — the pin is written when they exist"
-  RUN_ID=""
-  for _ in $(seq 1 30); do
-    RUN_ID="$(gh run list --workflow release-images --branch "$TAG" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
-    [ -n "$RUN_ID" ] && break
-    sleep 4
-  done
-  if [ -z "$RUN_ID" ]; then
-    warn_no_run="release: no release-images run appeared for ${TAG} within two minutes — the images are unbuilt and no pin was written"
-    echo "$warn_no_run" >&2
-  elif ! gh run watch "$RUN_ID" --exit-status --interval 20 >/dev/null 2>&1; then
-    echo "release: the images of ${TAG} did not build — no pin was written. Read the run: gh run view ${RUN_ID} --log-failed" >&2
-    exit 75
-  else
-    echo "release: the images of ${TAG} are built"
-    if [ -z "${PLATFORM_REPO_DIR:-}" ]; then
-      echo "release: PLATFORM_REPO_DIR names no checkout, so nothing was pinned — a cluster runs what its platform tree says, and this release is not in it yet"
-    else
-      [ -d "${PLATFORM_REPO_DIR}/.git" ] || die "PLATFORM_REPO_DIR=${PLATFORM_REPO_DIR} is no git checkout" 66
-      git -C "$PLATFORM_REPO_DIR" fetch --quiet origin
-      git -C "$PLATFORM_REPO_DIR" checkout --quiet master
-      git -C "$PLATFORM_REPO_DIR" reset --quiet --hard origin/master
-      # THE PIN GRAMMAR AND NOTHING ELSE: builds[]{name,image,tag}, in the values file of the stage
-      # this release is going to. Read and written by name rather than by line, so a file whose
-      # entries are ordered differently is still pinned and a file that carries none is left alone.
-      PINNED="$(python3 - "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST" <<'PIN'
+# THE MANIFEST NAMES THE TREE, so no person has to remember one. `platformRepo` in the manifest
+# beside this script says which repository carries this unit's pins; a consumer's copy names its own
+# there and can reach no other. A manifest that names none stops the release rather than guessing a
+# path, which would be the same mistake as guessing a credential.
+#
+# THE TREE IS CLONED FRESH for the write. Nothing here depends on where a checkout happens to sit on
+# the machine, and nothing here can touch one: this used to `reset --hard` whatever tree it was
+# pointed at, which discards uncommitted work in a repository the release has no business changing.
+#
+# EVERY PATH THAT DOES NOT PIN ENDS THE RUN. A release that says it is on its way to a stage while
+# the tree that stage reads still names the previous images is telling the operator something that
+# is not so, and the machine is where they find out.
+NAME="$(grep -E '^name:' "$MANIFEST" 2>/dev/null | head -1 | sed -E 's/^name:[[:space:]]*//' || true)"
+[ -n "$NAME" ] || die "the manifest ${MANIFEST} states no name — it is what the pin and the release line are written under"
+PLATFORM_REPO="$(grep -E '^platformRepo:' "$MANIFEST" 2>/dev/null | head -1 | sed -E 's/^platformRepo:[[:space:]]*//; s/[[:space:]]*#.*$//' || true)"
+command -v gh >/dev/null 2>&1 \
+  || die "gh is not on this path, so the build cannot be waited for and nothing can be pinned — the tag is pushed and the images may still build, but this release is not on any stage"
+echo "release: waiting for the images of ${TAG} — the pin is written when they exist"
+RUN_ID=""
+for _ in $(seq 1 30); do
+  RUN_ID="$(gh run list --workflow release-images --branch "$TAG" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
+  [ -n "$RUN_ID" ] && break
+  sleep 4
+done
+if [ -z "$RUN_ID" ]; then
+  die "no release-images run appeared for ${TAG} within two minutes — the images are unbuilt and nothing was pinned"
+elif ! gh run watch "$RUN_ID" --exit-status --interval 20 >/dev/null 2>&1; then
+  echo "release: the images of ${TAG} did not build — no pin was written. Read the run: gh run view ${RUN_ID} --log-failed" >&2
+  exit 75
+else
+  echo "release: the images of ${TAG} are built"
+  [ -n "$PLATFORM_REPO" ] \
+    || die "the manifest ${MANIFEST} states no platformRepo, so there is no tree to pin this release into — add the repository that carries this unit's values-<stage>.yaml files"
+  PLATFORM_REPO_DIR="$(mktemp -d)"
+  trap 'rm -rf "$PLATFORM_REPO_DIR"' EXIT
+  git clone --quiet "https://github.com/${PLATFORM_REPO}.git" "$PLATFORM_REPO_DIR" \
+    || die "the platform tree ${PLATFORM_REPO} could not be cloned — nothing was pinned"
+  git -C "$PLATFORM_REPO_DIR" checkout --quiet master
+  # THE PIN GRAMMAR AND NOTHING ELSE: builds[]{name,image,tag}, in the values file of the stage
+  # this release is going to. Read and written by name rather than by line, so a file whose
+  # entries are ordered differently is still pinned and a file that carries none is left alone.
+  PINNED="$(python3 - "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST" <<'PIN'
 import glob, os, re, sys
 tree, stage, image_tag, manifest = sys.argv[1:5]
 names = re.findall(r"^\s*-\s*name:\s*(\S+)", open(manifest, encoding="utf-8").read(), re.M)
@@ -167,22 +179,16 @@ for path in glob.glob(os.path.join(tree, "clusters", "inventories", "*", "values
 print(" ".join(touched))
 PIN
 )"
-      if [ -z "$PINNED" ]; then
-        echo "release: no values-${STAGE}.yaml in ${PLATFORM_REPO_DIR} carries a pin of this unit — nothing to write"
-      else
-        git -C "$PLATFORM_REPO_DIR" add -- $PINNED
-        git -C "$PLATFORM_REPO_DIR" commit --quiet -m "Pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME:-this unit}, once its images were built."
-        git -C "$PLATFORM_REPO_DIR" push --quiet origin master
-        echo "release: pinned ${STAGE} to ${TAG}-${SHA7} in ${PINNED}"
-      fi
-    fi
+  if [ -z "$PINNED" ]; then
+    die "no values-${STAGE}.yaml in ${PLATFORM_REPO} carries a pin of ${NAME} — the images are built and no stage reads them, so this release reaches nothing"
+  else
+    git -C "$PLATFORM_REPO_DIR" add -- $PINNED
+    git -C "$PLATFORM_REPO_DIR" commit --quiet -m "Pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME}, once its images were built."
+    git -C "$PLATFORM_REPO_DIR" push --quiet origin master \
+      || die "the pin of ${STAGE} to ${TAG}-${SHA7} could not be pushed to ${PLATFORM_REPO} — the images are built and no stage reads them"
+    echo "release: pinned ${STAGE} to ${TAG}-${SHA7} in ${PINNED}"
   fi
-else
-  echo "release: gh is not on this path, so the build was not waited for and nothing was pinned" >&2
 fi
-
-NAME="$(grep -E '^name:' "$MANIFEST" 2>/dev/null | head -1 | sed -E 's/^name:[[:space:]]*//' || true)"
-NAME="${NAME:-<name>}"
 
 echo "release: ${NAME} ${TAG} (commit ${SHA7}) is on its way to ${STAGE}"
 echo "release: the platform builds these image tags, or skips the build when they already exist:"

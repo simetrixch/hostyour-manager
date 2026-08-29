@@ -3,6 +3,11 @@ kind: ConsumerManifest
 name: hostyour-manager
 owner: platform@simetrixch
 envs: [dev, test, prod]
+# The repository whose clusters/inventories/*/values-<stage>.yaml carry this unit's image pins.
+# release/release.sh reads it here and writes the pin itself once the images are built, so putting a
+# release on a stage is one act and not an act plus something somebody has to remember. A copy of
+# this manifest in another unit names ITS platform tree and can reach no other.
+platformRepo: simetrixch/hostyour-cloud
 
 # `name` is the UNIT name: it must equal basename(repoURL) and the registration directory
 # (hostyour-cloud/registrations/hostyour-manager/build.yaml). The release pipeline compares the two
