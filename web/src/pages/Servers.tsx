@@ -16,6 +16,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { ClusterReleaseForm } from "../components/ClusterReleaseForm.tsx";
 import { SlaveDeployForm } from "../components/SlaveDeployForm.tsx";
 import { TailnetActions } from "../components/TailnetActions.tsx";
+import { MasterActions } from "../components/MasterActions.tsx";
 import { ServerReadings } from "../components/ServerReadings.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -286,6 +287,27 @@ export function Servers() {
                     <Link to={`/runs/${run.id}`}>{runLine(run)} →</Link>
                   </p>
                 )}
+                {/* THE MASTER'S OWN ROW. The block below is the SLAVE lifecycle — its stages and every
+                    sentence in LIFECYCLE are written about a machine becoming a slave, so a master's
+                    card cannot show it. What a master does carry is the two run kinds that act on the
+                    cluster it already is: `release` raises the platform version this installation
+                    stands on, and the tailnet pair puts its membership of the private network back.
+                    Both admit a master in the plan (defs/release.ts, defs/tailnet.kit.ts); until this
+                    row existed neither was reachable from any screen. */}
+                {isMasterRole(s.role) &&
+                  (() => {
+                    const live = LIFECYCLE[s.status].next === "clusters";
+                    return (
+                      <MasterActions
+                        showRelease={live && rel?.id !== s.id}
+                        offer={tailnetRunKindOffer(s, { liveCluster: live })}
+                        onRelease={() => setRel({ id: s.id, version: "", channel: "stable" })}
+                        onDisconnect={() => void planServerRunKind(() => disconnectTailnet(s.id))}
+                        onReconnect={() => void planServerRunKind(() => reconnectTailnet(s.id))}
+                        onRejoin={() => void planServerRunKind(() => rejoinTailnet(s.id))}
+                      />
+                    );
+                  })()}
                 {!isMasterRole(s.role) &&
                   (() => {
                     const lc = LIFECYCLE[s.status];

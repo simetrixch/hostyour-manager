@@ -155,8 +155,26 @@ describe("tailnetRunKindOffer — which repair run kinds a card may offer", () =
     }
   });
 
-  it("offers none on the master, which runs the coordinator the others log in to", () => {
+  it("offers the master everything but the DISCONNECT, which is the line the plan draws", () => {
+    // The master's in-cluster components — its per-slave ArgoCD, Vault on every ESO login, the
+    // manager's own kube client — reach every slave over the private network a disconnect would cut,
+    // so taking the master off it is not a repair. Putting it back on is: a master that is not a
+    // member cannot dial the address its slaves are registered under.
     const master: ServerView = { ...server("joined", facts()), role: "master" };
+    expect(tailnetRunKindOffer(master, live)).toEqual({ disconnect: false, reconnect: true, rejoin: true });
+  });
+
+  it("withholds the master's REJOIN without a live cluster, the same rule as any other host", () => {
+    const master: ServerView = { ...server("joined", facts()), role: "master" };
+    expect(tailnetRunKindOffer(master, { liveCluster: false })).toEqual({
+      disconnect: false, reconnect: true, rejoin: false,
+    });
+  });
+
+  it("offers a master nothing where no run has read a client on it", () => {
+    // The offer rests on a reading, not on the role: a host nothing has looked at gives the card
+    // nothing to base an offer on, and that holds for the master as much as for a slave.
+    const master: ServerView = { ...server("unknown", { kind: "none" }), role: "master" };
     expect(tailnetRunKindOffer(master, live)).toEqual({ disconnect: false, reconnect: false, rejoin: false });
   });
 
