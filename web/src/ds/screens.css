@@ -421,35 +421,49 @@
 }
 
 @media (width >= 1024px) {
-  .run-body {
-    display: grid;
-    grid-template-columns: 17rem minmax(0, 1fr);
-    gap: var(--sp-5);
-    align-items: start;
-  }
+  /* THE RUN SCREEN IS EXACTLY ONE VIEWPORT TALL and does not scroll as a page. The header takes what
+     it needs, the two columns take the rest, and each of them scrolls inside itself — so the
+     terminal ends where the navigation beside it ends, at the bottom of the screen, and stays there
+     however long the run gets.
 
-  /* THE TERMINAL IS AS TALL AS THE NAVIGATION BESIDE IT AND NO TALLER. The steps list grows with
-     the run — nineteen of them on a slave deployment — and a log that took its height from that
-     column grew with it, so the window kept getting longer instead of scrolling.
+     TWO ATTEMPTS BEFORE THIS ONE MISSED IT. Capping the log at `min(38rem, 70vh)` left it stopping
+     short of the steps; tying it to the steps column made it GROW with the run — nineteen steps on
+     a slave deployment — which is the opposite of what a live log is for. Neither is a height: one
+     was a guess, the other was the other column's.
 
-     It ends where the rail ends: the rail is `position: sticky; top: 0; height: 100vh` (shell.css),
-     so a panel of the same height, stuck the same way, ends at the same edge of the screen. The
-     content column's own padding is taken off both ends so the two line up rather than the terminal
-     running under the edge.
-
-     STUCK, so it stays there while the steps scroll past it: the run is read by watching the log,
-     and a terminal that scrolled away with the list would have to be scrolled back to. */
-  .log-panel {
-    position: sticky;
-    top: var(--sp-4);
+     The height NAMES the two tokens .content pads with (shell.css, at 768px up), so the screen ends
+     where its own padding ends rather than at a number picked to look like it. */
+  .page--run {
     display: flex;
-    height: calc(100vh - 2 * var(--sp-4));
+    height: calc(100vh - var(--sp-6) - var(--sp-7));
     flex-direction: column;
   }
 
-  /* The head stays put and the lines take what is left. `min-height: 0` is what lets a scrollable
-     flex child shrink below its content instead of pushing the panel open; without it the panel
-     grows and the fixed height above means nothing. */
+  .run-body {
+    display: grid;
+    flex: 1;
+    grid-template-columns: 17rem minmax(0, 1fr);
+    gap: var(--sp-5);
+
+    /* WHAT MAKES THEM SCROLL INSTEAD OF GROW. A flex child's min-height is `auto`, so a row holding
+       four hundred log lines refuses to be shorter than them and pushes the screen open; this is
+       what lets it be as short as the space it was given. */
+    min-height: 0;
+  }
+
+  /* Each column scrolls itself. The steps and the log are two readings of one run, and a single
+     scrollbar would make seeing the last step cost sight of the last line. */
+  .steps-panel {
+    overflow-y: auto;
+  }
+
+  .log-panel {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+  }
+
+  /* The head stays put and the lines take what is left — `min-height: 0` again, same reason. */
   .log-panel > .log {
     max-height: none;
     flex: 1;

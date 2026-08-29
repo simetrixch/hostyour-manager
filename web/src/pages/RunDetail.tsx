@@ -197,7 +197,7 @@ export function RunDetail() {
   }
 
   return (
-    <section className="page">
+    <section className="page page--run">
       <header className="runhead">
         <div className="runhead__row">
           <h2 className="runhead__title">{run.kind}</h2>
