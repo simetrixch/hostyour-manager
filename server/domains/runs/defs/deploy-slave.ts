@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import type { Step, StepCtx, Cleanup, RunDefinition } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
-import { STAGE, CLUSTER_TIER } from "../../../../shared/enums.ts";
+import { STAGE, CLUSTER_TIER, isMasterRole } from "../../../../shared/enums.ts";
 import { errValidation, errNotConfigured } from "../../../kernel/errors.ts";
 import { execCapture, remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
@@ -25,7 +25,7 @@ import { refreshCheckoutStep } from "./live-cluster.kit.ts";
 import { placeInputStep, dropInputStep, dropInputCleanup } from "./deploy-slave.input.ts";
 import { rejoinStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
-import { clusterShortName, resolveClusterMarking, writeClusterMarking, type ClusterMarking, writeClusterMarkingOnBranch } from "../../inventory/cluster-marking.ts";
+import { clusterShortName, resolveClusterMarking, writeClusterMarking, projectClusterMarking, type ClusterMarking, writeClusterMarkingOnBranch } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
@@ -459,13 +459,20 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
             `${domain} lists no address of its own (\`${HOST_ADDRESS_COMMAND}\`), and global.nodeCidrs is what the gate sandbox draws its fence from — a map written without it would fence nothing`,
           );
         }
+        // EVERY PART THE MACHINE CARRIES, never one of them. This run adds the slave part; a
+        // machine that already carries the master part therefore becomes "master+slave" — the
+        // union SERVER_ROLE declares for one server doing both jobs. A flat "slave" here would
+        // demote the books-keeping cluster in its own map, and the projection below would then
+        // write that word onto the server row, where every reader keyed on MASTER_ROLES stops
+        // finding the master.
+        const role = isMasterRole(server.role) ? "master+slave" as const : "slave" as const;
         const slaveMarking: ClusterMarking = {
           ...installation,
           // WHAT THIS MACHINE IS, and nothing else.
           fqdn: domain,
           name: shortName,
           stage,
-          role: "slave",
+          role,
           booksCluster: masterFqdn,
           buildPlane: holdsBuildPlane,
           buildPlaneFqdn: masterMarking.buildPlaneFqdn,
@@ -511,8 +518,13 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         // its machine layer stopped at "is not on this host" asking for the secret store's address
         // (apps4, 2026-08-29). One map, written twice, from one value in one act.
         await writeClusterMarkingOnBranch(repo, slaveMarking, domain, ctx.runId);
+        // THE ROW FOLLOWS THE MAP. The map is the writable place and the inventory columns are the
+        // copy every role and stage decision in this process queries, so the act that rewrites the
+        // map moves the copy in the same step — this is the code path that puts "master+slave" on
+        // a server row when the slave part lands on a machine already carrying the master part.
+        projectClusterMarking(ctx.db, slaveMarking, { actor: "system", runId: ctx.runId });
         ctx.log("meta", changed
-          ? `${clusterMapPath(domain)} on ${repo.booksBranch} now marks ${slaveMarking.name}: role slave, stage ${stage}, ${apiHost}:${SLAVE_API_PORT}, build plane ${slaveMarking.buildPlaneFqdn}`
+          ? `${clusterMapPath(domain)} on ${repo.booksBranch} now marks ${slaveMarking.name}: role ${role}, stage ${stage}, ${apiHost}:${SLAVE_API_PORT}, build plane ${slaveMarking.buildPlaneFqdn}`
           : `${clusterMapPath(domain)} already states this marking — nothing to commit`);
         ctx.checkpoint({ branch: domain, apiHost, changed });
       },

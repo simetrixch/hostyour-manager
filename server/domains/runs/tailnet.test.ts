@@ -161,13 +161,17 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
     expect(plan.targets).toHaveLength(1);
     expect(plan.targets?.[0]).toMatchObject({ serverId: MASTER_ID, ownsHost: true, transport: "public" });
     expect(deriveServerLocks(plan.targets ?? [])).toEqual([{ resource: "server", key: MASTER_ID }]);
-    // The summary and the warnings say what a MASTER's rejoin does: the tailnet-join-master
-    // program, on the public address, with no certificate re-sign — the stamp is the slave's half.
-    expect(plan.summary).toContain("tailnet-join-master");
+    // A MASTER RUNS THE SAME PROGRAM AS EVERY OTHER HOST, certificate work included. Measured on
+    // apps3 on 2026-08-29: adding a tailnet address made MicroK8s's own apiserver-kicker log "cert
+    // change detected", re-issue the serving certificate and restart the control plane seven seconds
+    // after the join — which restarted Vault, brought it back SEALED, and degraded every workload
+    // that reads a secret. The certificate step is what does that deliberately and waits for the node
+    // to come back, instead of leaving it to happen after the run has reported success.
+    expect(plan.summary).toContain("tailnet-rejoin");
     expect(plan.summary).toContain("198.51.100.4");
     expect(plan.summary).not.toContain("10.1.1.1:");
-    expect(plan.summary).not.toContain("certificate work");
-    expect(plan.warnings.join(" ")).not.toContain("re-signs");
+    expect(plan.summary).toContain("certificate work");
+    expect(plan.warnings.join(" ")).toContain("re-signs");
   });
 
   it("refuses a rejoin on a host with no live cluster — the credential is minted per slave", async () => {

@@ -1,12 +1,13 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { clusters } from "../../db/schema/inventory.ts";
+import { eq } from "drizzle-orm";
+import { clusters, servers } from "../../db/schema/inventory.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { HOST_ADDRESS_COMMAND, hostAddressesFrom } from "./defs/deploy-slave.ts";
 import { statedTarget } from "./defs/deploy-slave.kit.ts";
 import { deploySlaveSteps } from "./defs/deploy-slave.ts";
 import type { Cleanup } from "../../executor/types.ts";
 import {
-  SLAVE_ID, PARAMS, MASTER_MARKING_YAML,
+  SLAVE_ID, MASTER_ID, PARAMS, MASTER_MARKING_YAML,
   scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx, stepOf,
 } from "./deploy-slave.fixture.ts";
 
@@ -59,6 +60,31 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     await stepOf(h, "mark-slave").run(ctx);
     expect(h.platformRepo.commits).toHaveLength(commits);
     expect(checkpoints.at(-1)).toEqual({ branch: PARAMS.domain, apiHost: "100.64.0.11", changed: false });
+  });
+
+  it("writes the UNION role where the machine already carries the master part, and moves the server row onto it", async () => {
+    // Deploying the slave part onto the books-keeping machine must not demote it: the map''s role
+    // is what the slaves ApplicationSet matches EXACTLY (role: slave) and what the projection
+    // writes onto the server row, so a flat "slave" here takes the master out of its own
+    // management the moment either reader acts on it. "master+slave" is the union SERVER_ROLE
+    // declares for one server doing both jobs, and this step is the code path that writes it.
+    const h = await makeHarness({ marking: false });
+    h.db.db.insert(clusters).values({
+      id: "cls_m1", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com", status: "provisioning",
+    }).run();
+    const steps = deploySlaveSteps(
+      { target: statedTarget(MASTER_ID, "m1.example.com", "prod"), mode: "deploy" },
+      { platformRepo: h.platformRepo },
+    );
+    await steps.find((s) => s.name === "mark-slave")?.run(hostedStepCtx(h));
+
+    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath("m1.example.com")) ?? "";
+    expect(map).toContain("role: master+slave");
+    expect(map).not.toContain("role: slave");
+    // The union map stays out of the slaves ApplicationSet (matchLabels role: slave) and in the
+    // platform selection, which is where the slave part of a self-managing machine renders.
+    // The row follows the map — the combined role is reachable on a server row through this path.
+    expect(h.db.db.select().from(servers).where(eq(servers.id, MASTER_ID)).get()?.role).toBe("master+slave");
   });
 
   it("gives a slave the installation it belongs to, and only its own facts over it", async () => {

@@ -28,7 +28,7 @@ import { tailnetPlan, tailnetSteps, type TailnetPorts } from "./tailnet.kit.ts";
 //                       manager carries the credential across, and the tailnet-rejoin program does
 //                       the logout, the join and the certificate work in one machine run. A MASTER
 //                       target is one host doing both halves: the mint runs on it, and its join is
-//                       the tailnet-join-master program — logout and join without the certificate
+//                       the tailnet-rejoin program — logout, join and the certificate work
 //                       work, because nothing dials a master's kube-apiserver at a tailnet address.
 //
 // All three are `mutating`, so the executor pins attest-target as step 0 and makes it

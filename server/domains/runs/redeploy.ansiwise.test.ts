@@ -92,7 +92,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       expect(programs.map((p) => p.name).sort()).toEqual([
         "deploy-cluster", "deploy-host", "deploy-platform-services", "deploy-slave-branch",
         "emit-cluster-credentials", "register-slave",
-        "remove-slave", "tailnet-disconnect", "tailnet-join-master", "tailnet-mint-join-key",
+        "remove-slave", "tailnet-disconnect", "tailnet-mint-join-key",
         "tailnet-reconnect", "tailnet-rejoin",
       ]);
       expect(programs.find((p) => p.name === "deploy-cluster")?.answers.map((a) => a.name)).toContain("letsencrypt_email");
@@ -373,7 +373,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect((row?.tailnetJson as { runId?: string } | null)?.runId).toBe(r.runId);
   });
 
-  it("INNOCENT CASE (tailnet-join-master): a rejoin whose target IS the master mints and joins on ONE machine — and its join drives tailnet-join-master, never tailnet-rejoin", { timeout: 120_000 }, async () => {
+  it("INNOCENT CASE (master rejoin): a rejoin whose target IS the master mints and joins on ONE machine, with the same program every other host runs", { timeout: 120_000 }, async () => {
     const h = await liveMaster(serve);
 
     const r = await h.executor.plan("cluster-tailnet-rejoin", { serverId: MASTER_ID });
@@ -382,13 +382,14 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     await h.executor.settle(r.runId);
     expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
 
-    // The machine's OWN records: dry + run per program, all green — and the join is the master's
-    // program. Not one tailnet-rejoin record in this run's window: that program ends by stamping
-    // the fresh address into the serving certificate and restarting the apiserver, which on the
-    // machine under the coordinator and this manager buys a name nothing verifies.
+    // The machine's OWN records: dry + run per program, all green — and the join is the SAME program
+    // every other host runs. A master had a stamp-free variant for one evening, on the reasoning that
+    // nothing dials a master's kube-apiserver at a tailnet address. The restart it was meant to avoid
+    // happened anyway: MicroK8s re-issues its own serving certificate when an address it has not
+    // issued one for appears, and it took the secret store down with it because nothing was waiting.
     const all = await observer.runs();
-    expectProven(serve, h.db, r.runId, all, ["tailnet-mint-join-key", "tailnet-join-master"]);
-    expect(recordWindow(all, startedRuns(h.db, r.runId)).filter((x) => x.program === "tailnet-rejoin")).toHaveLength(0);
+    expectProven(serve, h.db, r.runId, all, ["tailnet-mint-join-key", "tailnet-rejoin"]);
+    expect(recordWindow(all, startedRuns(h.db, r.runId)).filter((x) => x.program === "tailnet-join-master")).toHaveLength(0);
 
     // ONE machine, on the address the plan froze: both serve conversations went to m1, and the
     // key file was read and removed there — the same host the join then ran on.

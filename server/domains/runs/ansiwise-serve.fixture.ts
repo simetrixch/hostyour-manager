@@ -49,7 +49,7 @@ export const deploySecrets = (email: string): Record<string, Buffer> => ({
 export const composedAnswers = (email: string): Record<string, string> => ({
   fqdn: "m1.example.com",
   stage: "prod",
-  role: "master",
+  role: "master+slave",
   operator_user: "m1",
   letsencrypt_email: email,
   letsencrypt_server: ACME_STAGING,
@@ -81,15 +81,17 @@ const clientRunKindYaml = (name: string, word: string): string => [
  *  declared. */
 export function fixturePrograms(): Record<string, string> {
   return {
-    // TWO run kinds run deploy-cluster — redeploy's master arm (m1/master) and deploy-slave's machine
-    // layer (s1/slave) — so the identity rows take either spelling; books_fqdn and build_plane_fqdn
+    // TWO run kinds run deploy-cluster — redeploy's master arm (m1, whose harness row carries the
+    // union role master+slave and whose composition must send it WHOLE, never flattened to
+    // "master") and deploy-slave's machine layer (s1/slave) — so the identity rows take either
+    // spelling; books_fqdn and build_plane_fqdn
     // carry the master's domain as their fallback, because the master arm legitimately sends
     // neither (the real program defaults them to the machine's own domain) while a slave that
     // sent its OWN domain goes red.
     "deploy-cluster": programYaml("deploy-cluster", [
       { answer: "fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
       { answer: "stage", pattern: "^prod$" },
-      { answer: "role", pattern: "^(master|slave)$" },
+      { answer: "role", pattern: "^(master\\+slave|slave)$" },
       { answer: "operator_user", pattern: "^(m1|ubuntu)$" },
       { answer: "letsencrypt_email", pattern: "^[^@]+@[^@]+$" },
       { answer: "letsencrypt_server", pattern: "^https://" },
@@ -107,7 +109,7 @@ export function fixturePrograms(): Record<string, string> {
     "deploy-platform-services": programYaml("deploy-platform-services", [
       { answer: "fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
       { answer: "stage", pattern: "^prod$" },
-      { answer: "role", pattern: "^(master|slave)$" },
+      { answer: "role", pattern: "^(master\\+slave|slave)$" },
       { answer: "books_fqdn", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
     ]),
     // The deploy-slave family. The branch cut takes the slave's two facts and the committer
@@ -160,13 +162,6 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "slave_fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
     ]),
     "tailnet-rejoin": programYaml("tailnet-rejoin", [
-      { answer: "login_server", pattern: "^https://tale\\.m1\\.example\\.com$" },
-      { answer: "auth_key", pattern: "^dc-tailnet-preauth-" },
-    ]),
-    // The master's own join: the same two rows, because the manager owes it the same composition.
-    // What differs is on the MACHINE — the real program carries no certificate stamp — which is the
-    // catalogue's fact, not a composition this fixture could measure.
-    "tailnet-join-master": programYaml("tailnet-join-master", [
       { answer: "login_server", pattern: "^https://tale\\.m1\\.example\\.com$" },
       { answer: "auth_key", pattern: "^dc-tailnet-preauth-" },
     ]),

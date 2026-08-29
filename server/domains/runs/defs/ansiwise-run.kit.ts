@@ -4,7 +4,7 @@ import type { ReleaseDownloads } from "../../../adapters/downloads/port.ts";
 import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { AnsiwiseClient } from "../../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../../../adapters/ansiwise/port.ts";
-import { isMasterRole, type Stage } from "../../../../shared/enums.ts";
+import type { Stage } from "../../../../shared/enums.ts";
 import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { CATALOG_CHECKOUT, CATALOG_PROGRAMS } from "./machine-state.ts";
 
@@ -262,7 +262,12 @@ export async function composeAnswers(
     switch (name) {
       case "fqdn": return resolved().domain;
       case "stage": return resolved().stage;
-      case "role": return isMasterRole(server.role) ? "master" : "slave";
+      // The row's role, WHOLE. This used to flatten "master+slave" to "master", and that flattening
+      // is what kept the combined role unreachable downstream: the branch programs stamp the
+      // ApplicationSet selection and rewrite the cluster map from exactly this answer, so a machine
+      // carrying both parts was stamped as a pure master and never rendered the slave part's
+      // workloads. The catalogue's programs allow the combined word on their role answers.
+      case "role": return server.role;
       case "operator_user": return server.sshUser;
       default: return undefined;
     }
