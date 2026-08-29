@@ -10,11 +10,10 @@ import { hardenPreflightForSlave, parsePreflightOutput } from "./preflight.ts";
 import { hasHardFailure } from "../../../shared/preflight.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
 import { credLabels, sealTokenOnce, newestCredId, statedTarget } from "./defs/deploy-slave.kit.ts";
-import { dataDiskFrom, deploySlaveSteps, SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
+import { dataDiskFrom, SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
 import { registerStep } from "./defs/deploy-slave.verify.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
-import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import type { AnyRunDefinition, StepCtx, Cleanup } from "../../executor/types.ts";
+import type { AnyRunDefinition, StepCtx } from "../../executor/types.ts";
 import {
   SLAVE_ID, MASTER_ID, PARAMS, STEP_NAMES, HEALTHY_SLAVE_PREFLIGHT, MASTER_MARKING_YAML,
   ELEVATION_PASSWORD, scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx, bareStepCtx,
@@ -214,122 +213,6 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     // parked by onTerminal with its ordinal kept.
     expect(hosts.log.filter((l) => l.command.includes("ansiwise"))).toHaveLength(0);
     expect(db.db.select().from(clusters).get()?.status).toBe("planned");
-  });
-
-  // ---- mark-slave, driven directly (the map write is the manager's own git act) ------------
-
-  it("mark-slave composes the slave's map FROM the master's and writes it onto the books branch — one address for the map and the handshake", async () => {
-    const h = await makeHarness({ marking: false }); // a fresh deploy: no slave map yet
-    h.db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
-    }).run();
-    const armed: Cleanup[] = [];
-    const checkpoints: unknown[] = [];
-    const ctx = hostedStepCtx(h, { registerCleanup: (c) => armed.push(c), checkpoint: (d) => checkpoints.push(d) });
-    await stepOf(h, "mark-slave").run(ctx);
-
-    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)) ?? "";
-    // The slave part (what makes the slaves-appset dial it), the identity, and the inheritance —
-    // every installation-wide value is the MASTER's, never asked a second time.
-    for (const want of [
-      // The identity is `global.domain`; the file is named for the cluster, so no `fqdn` key.
-      "stage: prod", "role: slave", "  domain: s1.example.com", "  master: m1.example.com",
-      // booksCluster is the slaves ApplicationSet's SELECTOR key, and a selector matches FLAT
-      // top-level keys only — so it stands at the top, where a map without it is invisible to
-      // the generator.
-      "booksCluster: m1.example.com",
-      "  apiHost: 100.64.0.11", "  apiPort: 16443", "  buildPlane: m1.example.com",
-      "  unitApex: example.com", "  platformDomain: example.com",
-      "  alertRecipients: ops@example.com", "  catalogUrl: https://github.com/acme/acme-catalog.git",
-    ]) expect(map).toContain(want);
-    // The short name is DERIVED from the fqdn — never stored.
-    expect(map).not.toContain("name:");
-    expect(armed.map((c) => c.name)).toEqual(["remove-slave-marking"]);
-    expect(checkpoints.at(-1)).toEqual({ branch: PARAMS.domain, apiHost: "100.64.0.11", changed: true });
-
-    // Idempotent: the same composition commits nothing the second time.
-    const commits = h.platformRepo.commits.length;
-    await stepOf(h, "mark-slave").run(ctx);
-    expect(h.platformRepo.commits).toHaveLength(commits);
-    expect(checkpoints.at(-1)).toEqual({ branch: PARAMS.domain, apiHost: "100.64.0.11", changed: false });
-  });
-
-  it("gives a slave the installation it belongs to, and only its own facts over it", async () => {
-    // WHAT A SLAVE USED TO GET. Its map was built from a handful of fields copied by name, so of
-    // the seventeen keys a master carries it had ten — and what was missing were the things every
-    // program on that machine reads. Its own machine layer stopped at "is not on this host" asking
-    // for the address of the secret store (apps4, 2026-08-29).
-    const h = await makeHarness({ marking: false });
-    h.db.db.insert(clusters).values({
-      id: "cls_s2", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
-    }).run();
-    await stepOf(h, "mark-slave").run(hostedStepCtx(h));
-
-    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)) ?? "";
-    // INHERITED, because they describe the installation and not the machine.
-    for (const want of [
-      "letsencryptEmail: ops@example.com",
-      "letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
-      "registryPullUser: puller",
-      "registryPushUser: pusher",
-      "url: https://vault.m1.example.com",
-    ]) expect(map, `a slave must inherit ${want}`).toContain(want);
-
-    // ITS OWN, because they tell one cluster of an installation from another.
-    expect(map).toContain("clusterName: s1");
-    expect(map).not.toContain("clusterName: m1");
-    expect(map).toContain("vaultKubernetesAuthPath: kubernetes-s1");
-    // AND WHAT FOLLOWS FROM WHERE THE BUILD PLANE IS: this one builds elsewhere, so its registry
-    // is not local and it pulls from the cluster that does.
-    expect(map).toContain("registry: false");
-  });
-
-  it("puts that map on the machine's own branch as well, which is the one its checkout stands on", async () => {
-    // The books branch is where an installation keeps its maps and where one cluster reads about
-    // another. A machine reads ITS OWN out of the tree beside it — deploy-platform-services asks
-    // the file, not a branch it does not stand on.
-    const h = await makeHarness({ marking: false });
-    h.db.db.insert(clusters).values({
-      id: "cls_s3", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
-    }).run();
-    await stepOf(h, "mark-slave").run(hostedStepCtx(h));
-
-    const own = h.platformRepo.read(PARAMS.domain, clusterMapPath(PARAMS.domain));
-    const books = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain));
-    expect(own, "the machine's own branch carries its map").not.toBeNull();
-    // ONE MAP AND NOT TWO: written from one value in one act, so the branches cannot come to say
-    // different things about one cluster.
-    expect(own).toBe(books);
-  });
-  it("mark-slave keeps what another writer recorded: a standing release pin survives the rewrite", async () => {
-    const h = await makeHarness({
-      marking: [
-        "stage: prod", "role: slave", "release: 1.0.0-stable-20260801120000",
-        "", "global:", "  domain: s1.example.com", "  buildPlane: m1.example.com",
-        "  master: m1.example.com", "  apiHost: 100.64.0.11", "  apiPort: 16443",
-      ].join("\n") + "\n",
-    });
-    h.db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
-    }).run();
-    await stepOf(h, "mark-slave").run(hostedStepCtx(h));
-    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)) ?? "";
-    expect(map).toContain("release: 1.0.0-stable-20260801120000"); // set-pin's field, not this step's
-    expect(map).toContain("  unitApex: example.com");             // the inheritance still landed
-  });
-
-  it("mark-slave in REDEPLOY mode arms NO cleanup — dropping the map part of a live slave cascades its teardown", async () => {
-    const h = await makeHarness();
-    h.db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "active", slaveId: 1,
-    }).run();
-    const steps = deploySlaveSteps(
-      { target: statedTarget(SLAVE_ID, PARAMS.domain, "prod"), mode: "redeploy" },
-      { platformRepo: h.platformRepo },
-    );
-    const armed: Cleanup[] = [];
-    await steps.find((s) => s.name === "mark-slave")?.run(hostedStepCtx(h, { registerCleanup: (c) => armed.push(c) }));
-    expect(armed).toEqual([]);
   });
 
   it("slaveCryptoGate: a real-tier slave is refused under the plaintext keystore", async () => {

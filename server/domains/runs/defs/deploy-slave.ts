@@ -154,6 +154,54 @@ export function dataDiskFrom(mountTable: string): { storage_mount: string; stora
   return { storage_mount: shallowest, storage_subdirectory: `${shallowest}/microk8s-storage` };
 }
 
+/** WHERE THIS MACHINE CAN BE REACHED, each address on its own as a `/32`.
+ *
+ *  THE MASTER'S ADDRESSES USED TO STAND IN A SLAVE'S MAP. `global.nodeCidrs` is what the gate
+ *  sandbox draws its fence from, and a slave's whole map is composed from the master's — so the
+ *  fence around a slave named the master's machine and left the slave's own outside it. Nothing
+ *  reported it: the list was not empty, so the reader that refuses to render on an empty list had
+ *  something to render.
+ *
+ *  THE SAME READING measure_host_addresses takes on a master, because the two write one file and a
+ *  second lifting of the same fact must not read it a second way: every global-scope IPv4 address
+ *  the kernel lists, as a `/32` and not as the prefix it was configured with, minus loopback and
+ *  minus the interfaces a container network makes and renumbers on its own schedule.
+ *
+ *  A /32 and not the interface's prefix: a node configured 10.1.1.7/24 shares that /24 with every
+ *  other host on the wire, and what a boundary needs is the machine, not the segment. */
+export const HOST_ADDRESS_COMMAND = "ip -4 -o addr show scope global";
+
+/** The beginnings of the names of interfaces that are not the machine's — the same nine
+ *  deploy-branch's own measure_host_addresses row passes over. Matched as PREFIXES, because every
+ *  one of these families numbers or hashes its own. */
+export const NOT_THE_MACHINES_INTERFACES = [
+  "cali", "vxlan.calico", "tunl", "flannel", "cni", "docker", "br-", "veth", "kube-ipvs",
+];
+
+/** The `/32`s in a listing, in the order the kernel gave them.
+ *
+ *  Read by POSITION FROM THE `inet` MARKER and not by a fixed index, because the fields in front of
+ *  it differ between an interface with a label and one without. */
+export function hostAddressesFrom(listing: string): string[] {
+  const found: string[] = [];
+  for (const line of listing.split(chr10())) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 2) continue;
+    const at = fields.indexOf("inet");
+    if (at < 0 || at + 1 >= fields.length) continue;
+    const device = fields[1]!;
+    if (NOT_THE_MACHINES_INTERFACES.some((prefix) => device.startsWith(prefix))) continue;
+    const address = fields[at + 1]!.split("/")[0]!;
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) continue;
+    // Loopback is every host's own and identifies none of them, so a fence that carved it out would
+    // carve out the caller's too.
+    if (address.startsWith("127.")) continue;
+    const cidr = `${address}/32`;
+    if (!found.includes(cidr)) found.push(cidr);
+  }
+  return found;
+}
+
 /** WHO THE BRANCH CUT COMMITS AS. One thing on every machine of this platform: `installer@` and the
  *  machine's own domain, which the run already holds — so it is composed rather than asked, and a
  *  person is not offered a field whose only right answer is the one thing already known.
@@ -396,6 +444,19 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         const inherited = masterMarking.globalRest ?? {};
         const shortName = clusterShortName(domain);
         const holdsBuildPlane = masterMarking.buildPlaneFqdn === domain;
+        // THIS MACHINE'S OWN ADDRESSES, read off this machine. Everything else below is inherited,
+        // and this is the one global key that is a fact about the box rather than about the
+        // installation — inherited, it drew the fence around the master.
+        const seen = await (await ctx.ssh()).exec(HOST_ADDRESS_COMMAND, { signal: ctx.signal, timeoutMs: 30_000 });
+        const nodeCidrs = seen.code === 0 ? hostAddressesFrom(seen.stdoutTail) : [];
+        // AN EMPTY READING IS NOT A READING. A machine carries at least one address or nothing
+        // reached it — and a fence that names nothing to keep out reports itself drawn while
+        // standing open, which is worse than a run that stops here saying so.
+        if (nodeCidrs.length === 0) {
+          throw errValidation(
+            `${domain} lists no address of its own (\`${HOST_ADDRESS_COMMAND}\`), and global.nodeCidrs is what the gate sandbox draws its fence from — a map written without it would fence nothing`,
+          );
+        }
         const slaveMarking: ClusterMarking = {
           ...installation,
           // WHAT THIS MACHINE IS, and nothing else.
@@ -416,11 +477,23 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
             // apart when they log in.
             clusterName: shortName,
             vaultKubernetesAuthPath: `kubernetes-${shortName}`,
-            // WHICH SERVICES STAND HERE follows from where the build plane is, and for a slave that
-            // is somewhere else — it pulls from that cluster's registry rather than its own.
-            ...(typeof inherited["servicesLocal"] === "object" && inherited["servicesLocal"] !== null
-              ? { servicesLocal: { ...(inherited["servicesLocal"] as Record<string, unknown>), registry: holdsBuildPlane } }
-              : {}),
+            // Measured above, never inherited.
+            nodeCidrs,
+            // WHICH OF THE SHARED SERVICES STAND HERE. Two of the three follow from who keeps the
+            // books, and a slave keeps none: one installation has ONE Vault and ONE observability
+            // stack, both on the books-keeping cluster, and a chart reads its own key here to decide
+            // whether to reach in-cluster or over `endpoints`. Inherited from a master they both said
+            // `true`, which sent every such chart on a slave looking for a service that is not there
+            // — the address beside them in `endpoints` was right the whole time and unread. The
+            // third follows from where the build plane is, which may be this machine.
+            servicesLocal: {
+              ...(typeof inherited["servicesLocal"] === "object" && inherited["servicesLocal"] !== null
+                ? (inherited["servicesLocal"] as Record<string, unknown>)
+                : {}),
+              registry: holdsBuildPlane,
+              vault: false,
+              observability: false,
+            },
           },
         };
         // Armed BEFORE the write. Dropping the slave part again is the inverse: it takes the

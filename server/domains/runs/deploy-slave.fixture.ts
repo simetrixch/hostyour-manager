@@ -23,6 +23,11 @@ import { answerPlacementCommand, ScriptedReleases } from "./deploy-slave.placeme
 import { FakeMetricsQuery } from "../../adapters/metrics/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { VERIFY_SLAVE_TIMEOUT_MS } from "./defs/deploy-slave.verify.ts";
+import { HOST_ADDRESS_COMMAND } from "./defs/deploy-slave.ts";
+// The maps this harness seeds, beside the harness rather than inside it — a fixture map is read
+// by suites that never touch a harness, and it is the one thing here that states a real file.
+export { SLAVE_MARKING_YAML, MASTER_MARKING_YAML } from "./cluster-maps.fixture.ts";
+import { SLAVE_MARKING_YAML, MASTER_MARKING_YAML, SLAVE_FQDN, FIXTURE_STAGE } from "./cluster-maps.fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 
 // The deploy-slave test fixture (shared by deploy-slave.test.ts — plan/guards/failure modes —
@@ -42,7 +47,7 @@ export const logger = createLogger(
 
 export const SLAVE_ID = "srv_slave1";
 export const MASTER_ID = "srv_master1";
-export const PARAMS = { serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com" };
+export const PARAMS = { serverId: SLAVE_ID, stage: FIXTURE_STAGE, domain: SLAVE_FQDN };
 export const STEP_NAMES = [
   "attest-target", "slave-preflight", "prepare-checkouts", "run-deploy-slave-branch", "mark-slave",
   "place-ansiwise", "run-deploy-host", "refresh-checkout", "run-deploy-cluster", "run-deploy-platform-services",
@@ -159,6 +164,13 @@ export interface HostsScript {
   argoAppsOut: string;     // verify HARD gate 1 (master): `name|sync|health` rows in ns <name>
   secretStoresOut: string; // verify HARD gate 2 (slave): `ns/name|Ready` rows
   certsOut: string;        // verify SOFT (slave): `ns/name|Ready` rows
+  /** WHAT `ip -4 -o addr show scope global` PRINTS ON THIS MACHINE — what mark-slave reads the
+   *  machine's own addresses from, and the one global key of a slave's map that is not inherited.
+   *  The default carries three lines on purpose: the machine's own, the loopback every host has,
+   *  and an address a container network made — so the reading is proven to take the first and pass
+   *  over the other two. */
+  hostAddressesOut: string;
+  hostAddressesExit: number;
   // ---- what the machine carries of the BOOTSTRAP (place-ansiwise). Every one of these is written
   // by a file transfer or by the serving binary's own install-service and read back by asking the
   // file — so a second run of a step measures what the first one left, and a double-run assertion is
@@ -256,6 +268,12 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     argoAppsOut: "root-applications|Synced|Healthy\nplatform-apps-prod|Synced|Healthy",
     secretStoresOut: "external-secrets/vault-backend|True\nredis/vault-backend|True",
     certsOut: "redis/redis-tls|True",
+    hostAddressesOut: [
+      "1: lo    inet 127.0.0.1/8 scope host lo",
+      "2: eth0    inet 198.51.100.11/24 brd 198.51.100.255 scope global eth0",
+      "4: cni0    inet 10.1.32.1/24 brd 10.1.32.255 scope global cni0",
+    ].join(String.fromCharCode(10)),
+    hostAddressesExit: 0,
     // A slave as deploy-slave meets it: adopted, and carrying neither executable yet. No surface of
     // its own, and the token file already there — enable-ansiwise-service stands AFTER
     // run-deploy-platform-services in the list, and that program's file_from_vault row is what writes it.
@@ -336,6 +354,10 @@ export function hostsFactory(f: HostsScript): SshFactory {
       if (command.includes("applications.argoproj.io")) { emit(f.argoAppsOut); return done(); }
       if (command.includes("secretstores.external-secrets.io")) { emit(f.secretStoresOut); return done(); }
       if (command.includes("certificates.cert-manager.io")) { emit(f.certsOut); return done(); }
+      // ---- mark-slave's own reading of the machine. Answered on stdoutTail and not through `emit`,
+      // because that is where the step reads it: a measurement is read back whole, not followed line
+      // by line as a program run is.
+      if (command === HOST_ADDRESS_COMMAND) return { code: f.hostAddressesExit, stdoutTail: f.hostAddressesOut, stderrTail: "" };
       // ---- cleanups
       if (command.includes("snap remove --purge microk8s")) return done();
       return done();
@@ -380,57 +402,6 @@ export interface Harness {
   metrics?: FakeMetricsQuery;
 }
 
-/** A slave's cluster map as mark-slave leaves it on the books branch — identity plus the slave
- *  part that makes the master's slaves ApplicationSet able to dial it. Seeded by tests that start
- *  from a slave that ALREADY IS one (redeploy, release's slave arm); a fresh deploy writes its own. */
-export const SLAVE_MARKING_YAML = [
-  `stage: ${PARAMS.stage}`,
-  "role: slave",
-  "booksCluster: m1.example.com",
-  "",
-  "global:",
-  `  domain: ${PARAMS.domain}`,
-  "  buildPlane: m1.example.com",
-  "  master: m1.example.com",
-  "  apiHost: 100.64.0.11",
-  "  apiPort: 16443",
-].join("\n") + "\n";
-
-/** The MASTER's own cluster map: written when the master installed itself. mark-slave reads it to
- *  compose the SLAVE's map — a slave belongs to the same installation, so its build plane, unit
- *  apex, platform domain, alert recipients and catalog repository are the master's. */
-export const MASTER_MARKING_YAML = [
-  "stage: prod",
-  "role: master",
-  "booksCluster: m1.example.com",
-  "",
-  "global:",
-  "  domain: m1.example.com",
-  "  buildPlane: m1.example.com",
-  "  unitApex: example.com",
-  "  platformDomain: example.com",
-  "  alertRecipients: ops@example.com",
-  "  catalogUrl: https://github.com/acme/acme-catalog.git",
-  // WHAT A REAL MASTER'S MAP CARRIES BESIDE THE NAMES ABOVE. It stood without these, and a fixture
-  // that carries less than the thing it stands for cannot fail when the code drops something: a
-  // slave was composed from a handful of copied fields and came out with ten of a master's
-  // seventeen keys, while every test passed (2026-08-29).
-  //
-  // Two of them are the machine's OWN and a slave must not inherit them — the short name everything
-  // per cluster carries, and the auth mount that tells two clusters of one installation apart when
-  // they log in. The rest belong to the installation and must arrive untouched.
-  "  clusterName: m1",
-  "  letsencryptEmail: ops@example.com",
-  "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
-  "  vaultKubernetesAuthPath: kubernetes-m1",
-  "  registryPullUser: puller",
-  "  registryPushUser: pusher",
-  "  endpoints:",
-  "    vault:",
-  "      url: https://vault.m1.example.com",
-  "  servicesLocal:",
-  "    registry: true",
-].join("\n") + "\n";
 
 /** The version clusters/platform/versions.yaml pins for the binary, and the file that carries it — the ONE
  *  source place-ansiwise reads. Every harness seeds it on the trunk, because without it the step
