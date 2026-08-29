@@ -95,9 +95,10 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     // WHAT INHERITING THE WHOLE MAP GOT WRONG. `servicesLocal` is the predicate a chart reads to
     // decide whether to reach a shared service IN-CLUSTER or over the address beside it in
     // `endpoints` — and one installation has ONE Vault and ONE observability stack, both on the
-    // cluster that keeps the books. Copied off a master they both said `true`, so every such chart
-    // on a slave looked for something that does not run there while the right address stood one key
-    // away, unread.
+    // cluster that keeps the books. Copied off a master both said `true`. What that reaches today
+    // is one reader, the CoreDNS hairpin, and the rewrite it then emits names a hostname of this
+    // slave that nothing dials — so the wrong flag costs nothing YET. It is held here anyway: the
+    // map is what says what a cluster runs, and this said it ran a store it does not.
     const h = await makeHarness({ marking: false });
     h.db.db.insert(clusters).values({
       id: "cls_s4", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
@@ -116,10 +117,12 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
   });
 
   it("draws the fence around THIS machine, from this machine's own addresses", async () => {
-    // `global.nodeCidrs` is what the gate sandbox draws its fence from, and it is the one global key
-    // that is a fact about the box rather than about the installation. Inherited with the rest, a
-    // slave's map named the MASTER's machine — the fence let the master in and left the slave's own
-    // address outside, and nothing reported it because the list was not empty.
+    // `global.nodeCidrs` is the one global key that is a fact about the box rather than about the
+    // installation, and inherited with the rest a slave's map named the MASTER's machine. Its only
+    // reader is the gate sandbox fence, whose chart carries `runsOn: master` and therefore renders
+    // on no slave — so this is held for what the file IS and not for what breaks: the map is the
+    // ONE place an installation's answers are written down, and a wrong address there is wrong
+    // wherever it is next read from.
     const h = await makeHarness({ marking: false });
     h.db.db.insert(clusters).values({
       id: "cls_s5", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,

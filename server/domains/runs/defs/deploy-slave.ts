@@ -446,7 +446,11 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         const holdsBuildPlane = masterMarking.buildPlaneFqdn === domain;
         // THIS MACHINE'S OWN ADDRESSES, read off this machine. Everything else below is inherited,
         // and this is the one global key that is a fact about the box rather than about the
-        // installation — inherited, it drew the fence around the master.
+        // installation. Its one reader is the gate sandbox's fence, and that chart carries
+        // `runsOn: master` — the app generator matches it against the cluster's ROLE, so nothing on
+        // a slave reads this key today and the wrong list cost nothing yet. What it did cost is the
+        // truth of the file: clusters/active/<fqdn>.yaml is the ONE place an installation's answers
+        // are written down, and a slave's said where the MASTER can be reached.
         const seen = await (await ctx.ssh()).exec(HOST_ADDRESS_COMMAND, { signal: ctx.signal, timeoutMs: 30_000 });
         const nodeCidrs = seen.code === 0 ? hostAddressesFrom(seen.stdoutTail) : [];
         // AN EMPTY READING IS NOT A READING. A machine carries at least one address or nothing
@@ -481,11 +485,12 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
             nodeCidrs,
             // WHICH OF THE SHARED SERVICES STAND HERE. Two of the three follow from who keeps the
             // books, and a slave keeps none: one installation has ONE Vault and ONE observability
-            // stack, both on the books-keeping cluster, and a chart reads its own key here to decide
-            // whether to reach in-cluster or over `endpoints`. Inherited from a master they both said
-            // `true`, which sent every such chart on a slave looking for a service that is not there
-            // — the address beside them in `endpoints` was right the whole time and unread. The
-            // third follows from where the build plane is, which may be this machine.
+            // stack, both on the books-keeping cluster. Inherited from a master both said `true`,
+            // and what that reaches today is the CoreDNS hairpin, which then emits a rewrite of
+            // `vault.<this slave>` to this cluster's own Traefik — a name nothing dials, so the
+            // wrong flag sits latent. It is still a map saying this cluster runs a store it does
+            // not run, and the key exists so a chart can decide from it where to dial. The third
+            // follows from where the build plane is, which may be this machine.
             servicesLocal: {
               ...(typeof inherited["servicesLocal"] === "object" && inherited["servicesLocal"] !== null
                 ? (inherited["servicesLocal"] as Record<string, unknown>)
