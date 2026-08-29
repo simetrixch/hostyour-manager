@@ -70,14 +70,10 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   noop: [],
   "cluster-adopt": [],
   "cluster-deploy-slave": [slaveCryptoGate],
-  // cluster-redeploy and cluster-release both act on a cluster that is ALREADY live, and neither harvests a new
-  // cluster access key — so the crypto gate has nothing to protect. Gating them would strand exactly the
-  // running cluster they exist to reconcile on a plaintext-keystore install (purge's reasoning).
-  // cluster-release also carried an unconditional gate while nothing regenerated an install branch; the
-  // regenerate-branch and regenerate-slave-branch programs do now, one per arm, so every cluster a
-  // release can name has a regeneration behind it (release.ts).
+  // cluster-redeploy acts on a cluster that is ALREADY live and harvests no new cluster access key —
+  // so the crypto gate has nothing to protect. Gating it would strand exactly the running cluster it
+  // exists to reconcile on a plaintext-keystore install (purge's reasoning).
   "cluster-redeploy": [],
-  "cluster-release": [],
   // The tailnet repair run kinds act on a host that is ALREADY deployed and harvest no cluster access
   // key, so the crypto gate has nothing to protect — and arming it would strand exactly the host they
   // exist to put back on the private network (purge's reasoning).

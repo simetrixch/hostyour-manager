@@ -319,9 +319,8 @@ function programsOf(def: AnyRunDefinition): string[] {
  *  A list would be the third copy of the same fact — the two the declaration and the run definitions
  *  already are — and it is the copy that decays in silence: a run kind that gains a program step is
  *  simply not in it, and the check goes on reporting green over the kinds it does know. Measured
- *  2026-08-27: five drive programs (`cluster-deploy-slave`, `cluster-redeploy`, `cluster-release`,
- *  `cluster-tailnet-disconnect`, `cluster-tailnet-reconnect`) of the 37 this boot registers, and the
- *  check that held only the first of them said in its own words that it was the only one. */
+ *  2026-08-27: five run kinds drove programs while the check that held only `cluster-deploy-slave`
+ *  said in its own words that it was the only one. */
 function programDrivingKinds(runDefinitions: RunDefinitions): { kind: RunKind; programs: string[] }[] {
   const driving: { kind: RunKind; programs: string[] }[] = [];
   for (const [kind, def] of runDefinitions) {
@@ -348,11 +347,10 @@ function programDrivingKinds(runDefinitions: RunDefinitions): { kind: RunKind; p
  * EVERY RUN KIND THAT DRIVES PROGRAMS IS HELD, not the slave install alone. The version of this check
  * that shipped first held `cluster-deploy-slave` and stated in its own comment that it was the only
  * run kind driving an installation's programs. It is not: `cluster-redeploy` drives deploy-host,
- * deploy-cluster and deploy-platform-services, and `cluster-release` drives deploy-cluster and
- * deploy-platform-services after a regeneration — the same programs of the same declaration, in lists
- * of their own (redeploy.ts MASTER_ARM_PROGRAMS, release.ts MASTER_RELEASE_PROGRAMS and
- * SLAVE_RELEASE_PROGRAMS). So the manager carries FOUR orderings of those programs and the reader
- * held one of them, which is the state a declaration with a reader was supposed to end.
+ * deploy-cluster and deploy-platform-services — the same programs of the same declaration, in a list
+ * of its own (redeploy.ts MASTER_ARM_PROGRAMS). So the manager carries several orderings of those
+ * programs and the reader held one of them, which is the state a declaration with a reader was
+ * supposed to end.
  *
  * WHAT IT CANNOT HOLD, named rather than counted (a clean answer must not be able to mean nobody was
  * looking):
@@ -360,8 +358,8 @@ function programDrivingKinds(runDefinitions: RunDefinitions): { kind: RunKind; p
  *   1. A program a run drives that the declaration does not state. The declaration states no slave
  *      sequence, on purpose — half of a slave's steps are this manager's own acts and a list of only
  *      the program rows would describe a shape nobody can follow. Such a program is reported BY NAME
- *      in the detail, green or red; `deploy-slave-branch`, `regenerate-branch` and the two tailnet
- *      programs are expected to be among them.
+ *      in the detail, green or red; `deploy-slave-branch` and the two tailnet programs are expected
+ *      to be among them.
  *   2. The SET. This holds the ORDER of what the two sides share and nothing else, so a program
  *      DROPPED from a run stays green: a run legitimately drives a subset — a slave three of the
  *      master's five — and nothing here can tell a subset that is meant from one that lost a phase.

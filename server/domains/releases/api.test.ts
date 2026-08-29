@@ -9,15 +9,14 @@ import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerReleaseRoutes } from "./api.ts";
-import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { searchPlatformApps } from "../registry-cleanup/search.ts";
 import { FakeCarrierRepo, pinFile } from "../registry-cleanup/carriers.fixture.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { ReleasesView } from "../../../shared/api-types.ts";
 
-// The question this surface exists for is "which release does this cluster stand on, and which
-// version does each of its apps run" — so what these cases guard is that every number in the answer
-// came out of THAT installation's own files, and that a missing statement stays missing.
+// The question this surface exists for is "which version does each of an installation's apps run" —
+// so what these cases guard is that every number in the answer came out of THAT installation's own
+// files, and that a missing statement stays missing.
 
 const config = parseConfig({
   PUBLIC_URL: "https://m1.example.com",
@@ -34,19 +33,12 @@ const logger = createLogger(config);
 const MASTER = "m1.example.com";
 const SLAVE = "s1.example.com";
 const LONELY = "s2.example.com"; // registered, install branch never cut
-const MASTER_TAG = "1.2.0-stable-20260728120000";
 
-const map = (fqdn: string, stage: string, role: string, release?: string): string =>
-  `stage: ${stage}\nrole: ${role}\n${release ? `release: ${release}\n` : ""}\nglobal:\n  domain: ${fqdn}\n  buildPlane: ${MASTER}\n`;
-
-/** The platform repo of an installation whose master is pinned and whose slave is not. Both branches
- *  carry app pins at BOTH stages, which is what a real install branch looks like — the trunk renders
- *  every stage's values file and only the cluster's own stage is deployed. */
+/** The platform repo of an installation. The master's branch carries app pins at BOTH stages, which
+ *  is what a real install branch looks like — the trunk renders every stage's values file and only
+ *  the cluster's own stage is deployed. */
 function seededCloud(): FakeCarrierRepo {
   const cloud = new FakeCarrierRepo({ booksBranch: MASTER });
-  cloud.seed(MASTER, clusterMapPath(MASTER), map(MASTER, "prod", "master", MASTER_TAG));
-  cloud.seed(MASTER, clusterMapPath(SLAVE), map(SLAVE, "dev", "slave"));
-  cloud.seed(MASTER, clusterMapPath(LONELY), map(LONELY, "dev", "slave"));
   cloud.seed(MASTER, "clusters/inventories/manager/values-prod.yaml", pinFile([["manager", "1.2.0-stable-20260728120000-abc1234"]]));
   cloud.seed(MASTER, "clusters/inventories/manager/values-dev.yaml", pinFile([["manager", "9.9.9-alpha-20260101000000-dddddd1"]]));
   cloud.seed(MASTER, "clusters/inventories/auth/values-prod.yaml", pinFile([["auth", "1.1.0-stable-20260701000000-bbb2222"]]));
@@ -89,7 +81,6 @@ describe("GET /api/releases — which release an installation stands on, and whi
       registerProtected: (a) =>
         registerReleaseRoutes(a, {
           db: db.db,
-          ...(cloud ? { platformRepo: cloud } : {}),
           // The pins come from THE pin search's platform-app class, exactly as boot/wire.ts binds it.
           ...(deps.readPins ? { readPlatformAppPins: deps.readPins } : cloud ? { readPlatformAppPins: () => searchPlatformApps(cloud) } : {}),
         }),
@@ -100,23 +91,10 @@ describe("GET /api/releases — which release an installation stands on, and whi
   const get = async (app: Hono<AppEnv>, cookie: string): Promise<ReleasesView> =>
     (await (await app.request("/api/releases", { headers: { cookie: `${SESSION_COOKIE}=${cookie}` } })).json()) as ReleasesView;
 
-  it("reports the release each cluster's OWN map pins", async () => {
+  it("answers one row per registered cluster, with the server it runs on", async () => {
     const { app, cookie } = await make({ cloud: seededCloud() });
-    const view = await get(app, cookie);
-    const master = view.installations.find((i) => i.branch === MASTER);
-    expect(master?.release).toEqual({ kind: "pinned", tag: MASTER_TAG });
+    const master = view(await get(app, cookie), MASTER);
     expect(master).toMatchObject({ serverId: "srv_m", name: "m1", stage: "prod", role: "master" });
-  });
-
-  it("a cluster whose map carries no release reads UNKNOWN — never the tag of the cluster beside it", async () => {
-    // THE counter-probe of this surface. s1's map has no release key, and m1's stands one line away
-    // in the same directory; the only honest answer for s1 is that nothing states one.
-    const { app, cookie } = await make({ cloud: seededCloud() });
-    const slave = view(await get(app, cookie), SLAVE);
-    expect(slave.release.kind).toBe("unknown");
-    expect(slave.release).not.toHaveProperty("tag");
-    expect(JSON.stringify(slave.release)).not.toContain(MASTER_TAG);
-    if (slave.release.kind === "unknown") expect(slave.release.reason).toMatch(/carries no release key/);
   });
 
   it("an installation's apps are read off ITS branch at ITS stage — not the trunk's, not another stage's", async () => {
@@ -164,12 +142,14 @@ describe("GET /api/releases — which release an installation stands on, and whi
 
   it("a branch that exists and pins no app carries an EMPTY list — the opposite fact from the one above", async () => {
     const cloud = seededCloud();
-    cloud.seed(LONELY, clusterMapPath("unused.example.com"), map("unused.example.com", "dev", "slave"));
+    // Any seeded file makes the branch exist (FakeCarrierRepo); the cluster map is what a real
+    // install branch always carries even when it pins nothing.
+    cloud.seed(LONELY, `clusters/active/${LONELY}.yaml`, `stage: dev\nrole: slave\n\nglobal:\n  domain: ${LONELY}\n  buildPlane: ${MASTER}\n`);
     const { app, cookie } = await make({ cloud });
     expect(view(await get(app, cookie), LONELY).apps).toEqual([]);
   });
 
-  it("a pin search that cannot run sets `error` and nulls every apps list — the release pins still answer", async () => {
+  it("a pin search that cannot run sets `error` and nulls every apps list — the rows still answer", async () => {
     const cloud = seededCloud();
     const { app, cookie } = await make({
       cloud,
@@ -178,22 +158,17 @@ describe("GET /api/releases — which release an installation stands on, and whi
     const answer = await get(app, cookie);
     expect(answer.error).toMatch(/branch listing truncated/);
     expect(answer.installations.map((i) => i.apps)).toEqual([null, null, null]);
-    expect(view(answer, MASTER).release).toEqual({ kind: "pinned", tag: MASTER_TAG });
+    expect(view(answer, MASTER)).toMatchObject({ serverId: "srv_m", name: "m1" });
   });
 
-  it("an unconfigured platform repo answers the rows, says WHY there are no versions, and invents none", async () => {
+  it("an unconfigured pin search answers the rows, says WHY there are no versions, and invents none", async () => {
     const { app, cookie } = await make();
     const answer = await get(app, cookie);
     expect(answer.reason).toBe("onboarding-not-configured");
     expect(answer.installations).toHaveLength(3);
     for (const i of answer.installations) {
       expect(i.apps).toBeNull();
-      expect(i.release.kind).toBe("unknown");
     }
-    expect(view(answer, MASTER).release).toEqual({
-      kind: "unknown",
-      reason: expect.stringContaining("wire-units.ts:204"),
-    });
   });
 
   it("unauthenticated → 401", async () => {

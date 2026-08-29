@@ -2,16 +2,14 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { ClustersView, ReleasesView } from "../../../shared/api-types.ts";
 import { getClusters, getReleases } from "../api.ts";
-import { appsEmpty, appsUnavailable, releaseChip } from "../clusterRelease.ts";
+import { appsEmpty, appsUnavailable } from "../appReleases.ts";
 import { IconChevronRight } from "../components/icons.tsx";
 
 export function Clusters() {
   const [clusters, setClusters] = useState<ClustersView | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The release surface loads BESIDE the clusters snapshot rather than inside it, so a repository
-  // that is slow over every install branch's pin files does not hold the rest of the page. It buys
-  // less than it looks like: the snapshot itself reads the cluster maps too, at
-  // server/domains/inventory/api.ts:53, so a repository that fails outright still reaches both.
+  // that is slow over every install branch's pin files does not hold the rest of the page.
   const [releases, setReleases] = useState<ReleasesView | null>(null);
   const [releasesError, setReleasesError] = useState<string | null>(null);
 
@@ -100,7 +98,7 @@ export function Clusters() {
         {!releases && !releasesError && (
           <div className="loading">
             <span className="spinner" aria-hidden="true" />
-            Reading the cluster maps and the install branches…
+            Reading the install branches…
           </div>
         )}
         {releases?.installations.length === 0 && (
@@ -111,7 +109,6 @@ export function Clusters() {
         {releases && releases.installations.length > 0 && (
           <ul className="rows">
             {releases.installations.map((i) => {
-              const chip = releaseChip(i.release);
               return (
                 <li key={i.branch}>
                   <div className="row">
@@ -119,10 +116,8 @@ export function Clusters() {
                     <span className="row__meta">
                       {i.branch} · {i.stage} · {i.role}
                     </span>
-                    <span className="row__end">{chip && <span className={chip.className}>{chip.label}</span>}</span>
                   </div>
                   <div className="releases__detail">
-                    {chip && <p className="releases__why">{chip.detail}</p>}
                     {i.apps === null ? (
                       <p className="releases__why">{appsUnavailable(releases, i.branch)}</p>
                     ) : i.apps.length === 0 ? (

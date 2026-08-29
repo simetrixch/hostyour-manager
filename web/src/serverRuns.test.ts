@@ -43,7 +43,7 @@ describe("runLine — what the card calls the run", () => {
   });
 
   it("falls back to '<kind> run' for a run kind whose name is already a noun phrase", () => {
-    expect(runLine(run({ kind: "cluster-release", status: "planned" }))).toBe("A cluster-release run is planned — approve it");
+    expect(runLine(run({ kind: "cluster-redeploy", status: "planned" }))).toBe("A cluster-redeploy run is planned — approve it");
   });
 
   it("picks the article from the noun, so a vowel does not read as 'A adoption'", () => {

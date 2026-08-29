@@ -11,7 +11,6 @@ import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseRunRecord } from "../../adapters/ansiwise/port.ts";
 import { openChannel, programYaml, runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
-import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeHarness, scriptedHosts, logger, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID, type Harness } from "./deploy-slave.fixture.ts";
 import type { DbHandle } from "../../db/client.ts";
@@ -42,18 +41,6 @@ export const elevationOnly = (): Record<string, Buffer> => ({ [ANSIWISE_ELEVATIO
 export const deploySecrets = (email: string): Record<string, Buffer> => ({
   ...approveSecrets(email),
   "activation-input:committer_email": Buffer.from(email),
-});
-
-/** What a release's approve carries: the elevation password, the two deploy-cluster inputs, the
- *  regenerate-branch committer identity, and the three build-plane PATs the master's own map
- *  demands (MASTER_MARKING_YAML names m1 as its own build plane). The fixture programs declare
- *  none of the PAT answers, so the values ride approve and are never sent — exactly the
- *  composition contract: only what a program declares reaches it. */
-export const releaseSecrets = (email: string): Record<string, Buffer> => ({
-  ...deploySecrets(email),
-  "activation-input:build_hostyour_cloud_repo_pat": Buffer.from("github_pat_cloud"),
-  "activation-input:build_hostyour_manager_repo_pat": Buffer.from("github_pat_manager"),
-  "activation-input:build_catalog_repo_pat": Buffer.from("github_pat_catalog"),
 });
 
 /** What the step composes for deploy-cluster on the fixture master — mirrored ONLY so a test can
@@ -160,32 +147,6 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "stage", pattern: "^prod$" },
       { answer: "slave_fqdn", pattern: "^s1\\.example\\.com$" },
     ]),
-    // The release's regeneration: the MAP-sourced answers (markingAnswers reads them off
-    // clusters/active/m1.example.com.yaml — the harness seeds MASTER_MARKING_YAML) and the approve
-    // input each have a row. alert_recipients is deliberately NOT declared here: the program
-    // declares it text_list, and the REST door does not take a list yet (see the handover finding
-    // on ansiwise-rest) — its composition is proven at the unit level in release.test.ts.
-    "regenerate-branch": programYaml("regenerate-branch", [
-      { answer: "fqdn", pattern: "^m1\\.example\\.com$" },
-      { answer: "stage", pattern: "^prod$" },
-      { answer: "role", pattern: "^master$" },
-      { answer: "build_plane_fqdn", pattern: "^m1\\.example\\.com$" },
-      { answer: "unit_apex", pattern: "^example\\.com$" },
-      { answer: "platform_domain", pattern: "^example\\.com$" },
-      { answer: "catalog_repo", pattern: "^acme/acme-catalog$" },
-      { answer: "committer_email", pattern: "^[^@]+@[^@]+$" },
-    ]),
-    // The SLAVE release's regeneration, which runs on the MASTER's surface and is handed nothing out
-    // of any cluster map: the real program reads the master's map off the machine itself, so what
-    // the manager owes it is the slave's two facts, the pinned role, and the committer identity from
-    // approve. A row for build_plane_fqdn or unit_apex here would measure a composition this program
-    // deliberately does not take.
-    "regenerate-slave-branch": programYaml("regenerate-slave-branch", [
-      { answer: "fqdn", pattern: "^s1\\.example\\.com$" },
-      { answer: "stage", pattern: "^prod$" },
-      { answer: "role", pattern: "^slave$" },
-      { answer: "committer_email", pattern: "^[^@]+@[^@]+$" },
-    ]),
     // The tailnet family. The two client run kinds' real programs declare NO answers, so their
     // fixtures declare one DEFAULTED row: the manager must send nothing at all for the run to go
     // green, which is exactly the composition contract on a host that may carry no cluster row.
@@ -230,21 +191,7 @@ export function serveConversation(serve: ServeFixture): Conversation {
 
 // ---- the worlds the run kinds run in, each wired to reach the real serve on every host ----
 
-/** The ceiling table a release's attest reads, on the branch it reads it from — seeded by every
- *  world a release runs in, because that check is the one thing both arms do before anything else. */
-function seedChannelTable(h: Harness): void {
-  h.platformRepo.seed(CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH, [
-    "global:",
-    "  channelStages:",
-    "    alpha: [dev]",
-    "    beta: [dev, test]",
-    "    stable: [dev, test, prod]",
-    "",
-  ].join("\n"));
-}
-
-/** A harness whose master carries an ACTIVE cluster — the state redeploy and release act on.
- *  The channel table rides along because a release's attest checks the ceiling against it.
+/** A harness whose master carries an ACTIVE cluster — the state redeploy's master arm acts on.
  *
  *  Its machine carries no sudoers drop-in, like every other world here — see HostsScript.adopted.
  *  A first master is installed by ansiwise-client and never adopted, so on a real one the only way
@@ -252,7 +199,6 @@ function seedChannelTable(h: Harness): void {
 export async function liveMaster(serve: ServeFixture): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
-  seedChannelTable(h);
   h.db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, MASTER_ID)).run();
   h.db.db.insert(clusters).values({
     id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com",
@@ -307,16 +253,6 @@ export async function liveSlaveWorld(serve: ServeFixture): Promise<Harness> {
     id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1, planeState: "ready",
   }).run();
   h.db.db.update(servers).set({ status: "healthy" }).where(eq(servers.id, SLAVE_ID)).run();
-  return h;
-}
-
-/** The same live slave, plus the ceiling table — release's slave arm acts on this. The MASTER is
- *  left as the plain `master` the harness inserts and carries no cluster row of its own, which is
- *  the ordinary one-master-one-slave installation: the pin and the books stand on that master's
- *  branch, named by its own host name, and the regeneration runs over its session. */
-export async function releaseSlaveWorld(serve: ServeFixture): Promise<Harness> {
-  const h = await liveSlaveWorld(serve);
-  seedChannelTable(h);
   return h;
 }
 

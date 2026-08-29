@@ -21,7 +21,7 @@ import {
 import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
 import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
 import { masterCheckoutsScript, SLAVE_API_PORT } from "./deploy-slave.remote.ts";
-import { refreshCheckoutStep } from "./cluster-release.kit.ts";
+import { refreshCheckoutStep } from "./live-cluster.kit.ts";
 import { placeInputStep, dropInputStep, dropInputCleanup } from "./deploy-slave.input.ts";
 import { rejoinStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
@@ -104,11 +104,7 @@ function armed(cleanup: Cleanup | undefined, step: Step): Step {
  *  cluster map — the record mark-slave wrote earlier in the same run (and re-reads on a redeploy).
  *  books_fqdn is the master's domain (deploy-cluster/-gitops default it to the machine's own,
  *  which for a slave would install a second books keeper); build_plane_fqdn is the map's, whose
- *  self-naming form the programs read the same way as "this machine".
- *
- *  Shared with release's slave arm, which drives the same two machine-layer programs against the same
- *  slave and owes them the same two answers — two readings of one map is how the run kinds would come
- *  to hand one slave different books. */
+ *  self-naming form the programs read the same way as "this machine". */
 /** What is asked of a machine to find the disk its volumes belong on. `findmnt` reads the kernel's
  *  own mount table, so what comes back is what is mounted and not what somebody meant to mount. */
 /** The line separator, as a call rather than a literal. */

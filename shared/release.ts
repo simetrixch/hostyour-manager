@@ -49,11 +49,9 @@ export const RELEASE_VERSION_RE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0
 
 /** Compose a tag from its parts, stamping `at` as the UTC ts14.
  *
- *  A UNIT release does NOT come through here: its own repo carries the release script, which mints (or
- *  reuses) the tag repo-side, and the manager only reads back what that script minted. A CLUSTER
- *  release has no such script to call — the platform GitOps repo is configuration, there is nothing in
- *  it to build — so the manager's set-pin step is the minting point, and this is where it composes
- *  the tag it is about to mint. */
+ *  A UNIT release does NOT come through here: its own repo carries the release script, which mints
+ *  (or reuses) the tag repo-side, and the manager only reads back what that script minted. Nothing
+ *  calls this today — the cluster-release run kind that minted through it was removed. */
 export function composeReleaseTag(version: string, channel: ReleaseChannel, at: Date): string {
   const ts14 = at.toISOString().replace(/[-:T]/g, "").slice(0, 14);
   const tag = `${version}-${channel}-${ts14}`;

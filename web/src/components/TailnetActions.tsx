@@ -1,6 +1,6 @@
 import type { TailnetRunKindOffer } from "../tailnetState.ts";
 
-// The three tailnet repair run kinds on a server's card. Props-only, like ClusterReleaseForm: WHICH of
+// The three tailnet repair run kinds on a server's card. Props-only, like SlaveDeployForm: WHICH of
 // them this server may be offered is decided by tailnetRunKindOffer (tailnetState.ts, a pure module a
 // test can reach), and what each one does is decided by the run it plans — this renders buttons.
 //

@@ -347,11 +347,10 @@ export type CredentialKind = (typeof CREDENTIAL_KIND)[number];
 export const RUN_KIND = [
   "noop",                                                       // permanent resume-proof fixture
   // The cluster run kinds. `cluster-adopt` takes a bare machine into service, `cluster-deploy-slave`
-  // turns an adopted server into a live slave, `cluster-redeploy` rebuilds the machine layer of a
-  // cluster that is already live, and `cluster-release` raises the platform version the cluster stands
-  // on. Distinct on purpose: each answers a different question, and a boolean on another run kind
-  // hides that.
-  "cluster-adopt", "cluster-deploy-slave", "cluster-redeploy", "cluster-release",
+  // turns an adopted server into a live slave, and `cluster-redeploy` rebuilds the machine layer of a
+  // cluster that is already live. Distinct on purpose: each answers a different question, and a
+  // boolean on another run kind hides that.
+  "cluster-adopt", "cluster-deploy-slave", "cluster-redeploy",
   // The tailnet repair run kinds, on a host that is already deployed. Three acts, not one with a
   // switch: `cluster-tailnet-disconnect` takes the host off the private network and leaves it there,
   // `cluster-tailnet-reconnect` puts it back with the credential the host still holds, and
@@ -420,7 +419,7 @@ export type RunKind = (typeof RUN_KIND)[number];
 export const RUN_FAMILY = {
   fixture: ["noop"],
   cluster: [
-    "cluster-adopt", "cluster-deploy-slave", "cluster-redeploy", "cluster-release",
+    "cluster-adopt", "cluster-deploy-slave", "cluster-redeploy",
     "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin",
     "cluster-password-login-disable", "cluster-password-login-enable",
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",

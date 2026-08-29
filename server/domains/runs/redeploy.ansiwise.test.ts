@@ -25,11 +25,10 @@ import {
   fixturePrograms, serveConversation, liveMaster, tailnetHost, deployWorld, liveSlaveWorld,
   recordWindow, startedRuns, expectProven, expectAbsent, settled, recordAppeared, observerStart, observerEnded, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
-import { releaseSuite } from "./release.ansiwise.suite.ts";
 import { orphanedEndSuite } from "./orphaned-end.ansiwise.suite.ts";
 
 // EVERY run kind that drives the machine's deployment programs, on the REAL `ansiwise-rest serve`:
-// redeploy (both arms), release, the tailnet repair run kinds, deploy-slave, and the transport
+// redeploy (both arms), the tailnet repair run kinds, deploy-slave, and the transport
 // underneath them all. Nothing here mocks the machine's surface: the serve fixture starts the
 // actual binary on a minimal installation whose programs are pure measurements
 // (require_answer_matches), so the gate, the answers validation, the detached run records and the
@@ -38,7 +37,7 @@ import { orphanedEndSuite } from "./orphaned-end.ansiwise.suite.ts";
 // ONE FILE ON PURPOSE: the engine's run root is per-drive ('/var/lib/ansiwise/runs'), so two
 // test files each running a serve fixture in parallel would share records and collide. Everything
 // that starts machine runs lives here, sequentially; the programs, the worlds and the plumbing
-// live in ansiwise-serve.fixture.ts, and the release's own suites in release.ansiwise.suite.ts —
+// live in ansiwise-serve.fixture.ts, and the orphaned-end suite in orphaned-end.ansiwise.suite.ts —
 // registered INTO this file's describe rather than collected as a second file, for that same reason.
 //
 // TWO RUNS IN ONE SECOND USED TO BE ONE RUN. The machine named a run by second + pid, so a service
@@ -92,7 +91,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       const programs = await client.programs();
       expect(programs.map((p) => p.name).sort()).toEqual([
         "deploy-cluster", "deploy-host", "deploy-platform-services", "deploy-slave-branch",
-        "emit-cluster-credentials", "regenerate-branch", "regenerate-slave-branch", "register-slave",
+        "emit-cluster-credentials", "register-slave",
         "remove-slave", "tailnet-disconnect", "tailnet-join-master", "tailnet-mint-join-key",
         "tailnet-reconnect", "tailnet-rejoin",
       ]);
@@ -307,10 +306,9 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect((await observer.runs()).filter((x) => x.fingerprint === dry.fingerprint)).toHaveLength(mine.length);
   });
 
-  // ================================ the release, end to end ================================
-  // Registered from release.ansiwise.suite.ts — the one serve fixture this file starts, the release's
-  // own tests in their own file. That module says why the split is of the FILE and not the process.
-  releaseSuite(() => serve, () => observer);
+  // Registered from orphaned-end.ansiwise.suite.ts — the one serve fixture this file starts, the
+  // suite's own tests in their own file. That module says why the split is of the FILE and not the
+  // process.
   orphanedEndSuite(() => serve, () => observer);
 
   // ================================ the tailnet run kinds, end to end ================================

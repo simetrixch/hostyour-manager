@@ -66,7 +66,7 @@ export interface CatalogueVerdict {
 }
 
 /** One command's wall clock. A fetch of one repository over the machine's own network, the same
- *  budget the platform tree's refresh is given (cluster-release.kit.ts). */
+ *  budget the platform tree's refresh is given (live-cluster.kit.ts). */
 const COMMAND_TIMEOUT_MS = 2 * 60_000;
 
 /** Where the credential lives for as long as one clone takes. Under /tmp and not in the checkout,

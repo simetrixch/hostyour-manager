@@ -318,7 +318,7 @@ describe("boot self-checks", () => {
    *  the check derives its own list from the definitions, so a list composed the same way could not
    *  disagree with it. Measured 2026-08-27 against the definitions a fully wired boot builds. */
   const KINDS_DRIVING_PROGRAMS = [
-    "cluster-deploy-slave", "cluster-redeploy", "cluster-release",
+    "cluster-deploy-slave", "cluster-redeploy",
     "cluster-tailnet-disconnect", "cluster-tailnet-reconnect",
   ];
 
@@ -349,35 +349,6 @@ describe("boot self-checks", () => {
     expect(check?.detail).toContain(swapped.join(" -> "));
     expect(() => assertBlockingChecksPass(results)).not.toThrow();
     expect(readinessOf(results).checks).toContainEqual({ name: "install-order.agrees", ok: false });
-  });
-
-  // THE COUNTER-PROBE FOR THE RUN KINDS THE SLAVE INSTALL DOES NOT COVER, and the reason this check
-  // holds all of them: `regenerate-branch` is a program only `cluster-release` drives, so a
-  // declaration stating it AFTER the two machine-layer programs is a disagreement no reading of the
-  // slave install could ever see. The slave install stays green here — that is the point of the case.
-  it("install-order.agrees is RED for cluster-release alone when the declaration states its regeneration last", async () => {
-    const { db, runDefinitions } = fresh();
-    const lateRegeneration = [...STATED_MASTER, "regenerate-branch"];
-    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: declaring(lateRegeneration) });
-    const check = results.find((r) => r.name === "install-order.agrees");
-    expect(check?.ok).toBe(false);
-    expect(check?.detail).toContain("cluster-release: this run drives deploy-cluster after regenerate-branch");
-    // The run kind the old check held is green on this declaration, so a check that still read only
-    // that one would report a pass here.
-    expect(check?.detail).not.toContain("cluster-deploy-slave: this run drives");
-  });
-
-  // THE INNOCENT NEIGHBOUR to the case above: the same program stated where the release really drives
-  // it — before the machine layer — and every run kind agrees. Without this, the red above could mean
-  // the check simply goes red on any declaration that names `regenerate-branch` at all.
-  it("install-order.agrees is GREEN when the declaration states the regeneration where the release drives it", async () => {
-    const { db, runDefinitions } = fresh();
-    const early = ["deploy-host", "regenerate-branch", "deploy-branch", "deploy-cluster", "deploy-platform-services", "onboard-manager"];
-    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: declaring(early) });
-    const check = results.find((r) => r.name === "install-order.agrees");
-    expect(check?.ok).toBe(true);
-    // Held rather than skipped past: the release's regeneration is one of the programs it measured.
-    expect(check?.detail).toContain("cluster-release 3/3");
   });
 
   it("install-order.agrees is RED when the trunk carries no such declaration at all", async () => {

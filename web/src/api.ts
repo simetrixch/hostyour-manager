@@ -71,9 +71,9 @@ const put = <T>(path: string, body: Record<string, unknown>): Promise<T> =>
 export const getHealth = (): Promise<HealthView> => req<HealthView>("/healthz");
 
 export const getClusters = (): Promise<ClustersView> => req<ClustersView>("/api/clusters");
-/** Which release each installation stands on, and which version each of its platform apps runs. The
- *  app half is fed by the SAME pin search that builds the registry reaper's protected floor, so a
- *  version shown here is a version retention refuses to delete. */
+/** Which version each of an installation's platform apps runs. Fed by the SAME pin search that
+ *  builds the registry reaper's protected floor, so a version shown here is a version retention
+ *  refuses to delete. */
 export const getReleases = (): Promise<ReleasesView> => req<ReleasesView>("/api/releases");
 export const listRuns = (): Promise<RunView[]> => req<RunView[]>("/api/runs");
 export const getRun = (id: string): Promise<RunView> => req<RunView>(`/api/runs/${id}`);
@@ -140,11 +140,6 @@ export const deploySlave = (serverId: string, opts: { stage: string; domain: str
  *  the FQDN and the stage are what that server's active cluster row already says, so there is nothing
  *  for the operator to re-state and nothing to get wrong. */
 export const redeploySlave = (serverId: string): Promise<{ runId: string }> => planRun("cluster-redeploy", { serverId });
-/** Raise the platform version a live cluster stands on: pin the cluster map, re-run the installer over
- *  SSH, then wait for ArgoCD. The operator names version + channel; the run stamps the timestamp and
- *  mints the tag. The channel ceiling is checked against the cluster's marked stage before the pin. */
-export const releaseCluster = (serverId: string, opts: { version: string; channel: string }): Promise<{ runId: string }> =>
-  planRun("cluster-release", { serverId, version: opts.version, channel: opts.channel });
 
 // The three tailnet repair run kinds. Each takes ONLY the server: the address they reach it on is the
 // public one and the plan states it, and a rejoin reads the FQDN and the stage off the server's own

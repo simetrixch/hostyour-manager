@@ -6,7 +6,6 @@ import { adoptDef } from "./defs/adopt.ts";
 import { makeDeploySlaveDef, type DeploySlavePorts } from "./defs/deploy-slave.ts";
 import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
-import { makeReleaseDef } from "./defs/release.ts";
 import { makeTailnetDisconnectDef, makeTailnetReconnectDef, makeTailnetRejoinDef } from "./defs/tailnet.ts";
 import { passwordLoginDisableDef, passwordLoginEnableDef } from "./defs/password-login.ts";
 import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from "./defs/operator-key.ts";
@@ -34,12 +33,10 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   const runDefinitions: RunDefinitions = new Map();
   register(runDefinitions, noopDef);
   // The cluster run kinds: adopt takes a bare machine into service, deploy-slave turns an adopted
-  // server into a live slave, redeploy rebuilds the machine layer of a cluster that is already live,
-  // and release raises the platform version that cluster stands on.
+  // server into a live slave, redeploy rebuilds the machine layer of a cluster that is already live.
   register(runDefinitions, adoptDef);
   register(runDefinitions, makeDeploySlaveDef(ports));
   register(runDefinitions, makeRedeployDef(ports));
-  register(runDefinitions, makeReleaseDef(ports));
   // The tailnet repair run kinds, on a host that is already deployed: leave the private network, come
   // back with the credential the host holds, or be logged out and joined again with one the master
   // mints. Every act is a program of the machine's own catalogue driven over `ansiwise-rest serve`, so
