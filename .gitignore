@@ -43,3 +43,7 @@ Thumbs.db
 # tracked: they are ours, and this repository is meant to be cloned and used by anybody.
 CLAUDE.md
 AGENTS.md
+
+# The agent worktree container. Tooling state, never product — and a worktree committed into
+# the tree it is a worktree OF is a loop nobody unpicks.
+.claude/
