@@ -165,6 +165,14 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
     const { domain } = target.resolve(ctx.db);
     const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
     const books = marking.booksCluster ?? marking.master;
+    // THE INSTALLATION'S ANSWERS STAND IN THE BOOKS-KEEPING CLUSTER'S MAP, not in this machine's.
+    // A slave's map is written by mark-slave and says what THIS machine is; what the installation
+    // registers with is written once, by the program that generated the master. Read off the slave it
+    // was not there, and the machine layer was refused by name one step from the end of its work
+    // (apps4, 2026-08-29).
+    const installation = books !== undefined && books !== domain
+      ? await resolveClusterMarking(requirePlatformRepo(ports), books).catch(() => undefined)
+      : marking;
     return {
       ...(books !== undefined ? { books_fqdn: books } : {}),
       build_plane_fqdn: marking.buildPlaneFqdn,
@@ -173,8 +181,8 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
       // for a second copy of something already written down, and two copies agree only until one is
       // typed differently. A map that predates them carries neither, and then the program refuses
       // by name, which is the sentence an operator can act on.
-      ...(marking.letsencryptEmail !== undefined ? { letsencrypt_email: marking.letsencryptEmail } : {}),
-      ...(marking.letsencryptServer !== undefined ? { letsencrypt_server: marking.letsencryptServer } : {}),
+      ...(installation?.letsencryptEmail !== undefined ? { letsencrypt_email: installation.letsencryptEmail } : {}),
+      ...(installation?.letsencryptServer !== undefined ? { letsencrypt_server: installation.letsencryptServer } : {}),
       ...(await dataDisk(ctx)),
     };
   };
