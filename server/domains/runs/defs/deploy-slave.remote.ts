@@ -63,6 +63,52 @@ echo "CHECKOUT_HEAD $old $new"
 `;
 }
 
+// THE TWO TREES THE BRANCH CUT RE-STAMPS WHOLE, and the reason a merge conflict inside them is not
+// a question for a person. deploy-slave-branch writes every placeholder of this installation into
+// `clusters/argocd` and `clusters/bootstrap` immediately after the merge below (its
+// stamp_placeholder_in_tracked_files rows name those two trees and no other; the single row that
+// walks the whole repository replaces `example.invalid` and nothing else). So whatever a branch
+// carries there is the STAMPED form of an older trunk, and the trunk's own version is what the
+// stamping expects to find — taking it is not a choice between two decisions, it is restoring the
+// input the next step reads.
+//
+// This is the same rule the catalogue's regenerate-branch program states as `toward_ref`, and its
+// absence here is what a slave hit: a branch stamped at 20:28 met a trunk that had rewritten the
+// ApplicationSet's role selector at 22:26, and git — which cannot know that `- slave` is the stamped
+// form of the two markers now standing there — stopped on it. Three run attempts ended in an
+// operator deleting the branch.
+//
+// EVERY OTHER PATH STILL STOPS THE RUN, and that is the whole point of naming the two rather than
+// merging with a strategy: `clusters/active/<branch>.yaml`, `configs/config.<stage>` and
+// `installation/values/*` are written on the branch and exist nowhere on the trunk, so a conflict
+// there is two decisions meeting and only a person can say which one stands.
+/** The merge of `trunkRef` into the branch checked out at `repo`, with a conflict inside the
+ *  re-stamped trees resolved toward the trunk and a conflict anywhere else left to a person.
+ *  Takes the path so a test can run it against a repository that is not /srv. */
+export function mergeTrunkScript(repo: string, trunkRef: string): string {
+  return `if ! git -C "${repo}" merge --no-edit ${trunkRef}; then
+  conflicted=$(git -C "${repo}" diff --name-only --diff-filter=U)
+  if [ -z "$conflicted" ]; then
+    git -C "${repo}" merge --abort >/dev/null 2>&1 || true
+    echo "the merge of ${trunkRef} into $(git -C "${repo}" rev-parse --abbrev-ref HEAD) stopped without naming a conflicted path, so there is nothing here to resolve — the checkout was not clean, or the merge itself was refused" >&2
+    exit 5
+  fi
+  outside=$(printf '%s\\n' "$conflicted" | grep -v -E '^clusters/(argocd|bootstrap)/' || true)
+  if [ -n "$outside" ]; then
+    git -C "${repo}" merge --abort
+    echo "the merge of ${trunkRef} stopped on $(printf '%s' "$outside" | tr '\\n' ' ') — these are written on the branch and stand nowhere on the trunk, so both sides decided something and only a person can say which stands. Nothing was changed." >&2
+    exit 6
+  fi
+  printf '%s\\n' "$conflicted" | while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    git -C "${repo}" checkout --theirs -- "$f"
+    git -C "${repo}" add -- "$f"
+  done
+  git -C "${repo}" commit --no-edit >/dev/null
+  echo "MERGE_RESOLVED $(printf '%s' "$conflicted" | tr '\\n' ' ')"
+fi`;
+}
+
 // prepare-checkouts (the step before deploy-slave-branch), run over the MASTER's session — the two
 // git states that program reads and refuses to establish itself:
 //
@@ -106,7 +152,7 @@ git -C "${WORK_CHECKOUT}" branch -D "${o.slaveFqdn}" >/dev/null 2>&1 || true
 # the commit lands on top of what is published — which is what a push can carry.
 if git -C "${WORK_CHECKOUT}" ls-remote --exit-code --heads origin "${o.slaveFqdn}" >/dev/null 2>&1; then
   git -C "${WORK_CHECKOUT}" checkout -B "${o.slaveFqdn}" "origin/${o.slaveFqdn}"
-  git -C "${WORK_CHECKOUT}" merge --no-edit origin/master
+${mergeTrunkScript(WORK_CHECKOUT, "origin/master")}
 fi
 echo "WORK_HEAD $(git -C "${WORK_CHECKOUT}" rev-parse --short HEAD)"
 `;
