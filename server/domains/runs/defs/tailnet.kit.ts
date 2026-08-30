@@ -12,7 +12,7 @@ import { recordTailnetReading } from "../tailnet-probe.ts";
 import { clusterShortName } from "../../inventory/cluster-marking.ts";
 import { dropCoordinatorNodes } from "./tailnet.coordinator.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
-import { activeClusterTarget, loadMaster, loadServer, masterFqdnOf, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { activeClusterTarget, loadMaster, loadServer, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import {
   ansiwiseProgramStep, composeAnswers, openServeConversation, programPhase, requireElevationPassword,
   ANSIWISE_ELEVATION_SECRET, ANSIWISE_PROGRAM_TIMEOUT_MS, type AnsiwisePorts, type ProgramCheckpoint,
@@ -247,8 +247,7 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
           // The coordinator's USER for this machine stays, with its keys: the mint is idempotent
           // against a standing credential, and destroying the user would mint a fresh one every run.
           await dropCoordinatorNodes(ctx, mSession, target.resolve(ctx.db).stage, clusterShortName(domain));
-          const mint = await openServeConversation(ctx, mSession, ports, signal,
-            { role: loadMaster(ctx.db).role, fqdn: masterFqdnOf(ctx.db, loadMaster(ctx.db)) });
+          const mint = await openServeConversation(ctx, mSession, ports, signal);
           try {
             const mintCp: ProgramCheckpoint = { program: MINT_PROGRAM };
             const nosave = (): void => undefined;
@@ -275,8 +274,7 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
           fresh["login_server"] = loginServer;
         }
         const session = await ctx.ssh();
-        const conversation = await openServeConversation(ctx, session, ports, signal,
-          { role: loadServer(ctx.db, serverId).role, fqdn: domain });
+        const conversation = await openServeConversation(ctx, session, ports, signal);
         try {
           const answers = await composeAnswers(ctx, conversation.client, REJOIN_PROGRAM, target, signal, async () => fresh);
           const dry = await programPhase(ctx, conversation.client, cp, "dry", { program: REJOIN_PROGRAM, answers, password, signal, save });

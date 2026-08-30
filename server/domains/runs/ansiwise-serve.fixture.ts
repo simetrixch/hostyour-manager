@@ -171,13 +171,6 @@ export function fixturePrograms(): Record<string, string> {
 /** A real sshd whose "ansiwise-rest serve" exec spawns the binary so its own standard input and output
  *  ARE the connection — exactly what an SSH exec channel hands a process. No token on this door: a
  *  session is authenticated by sshd, and a machine at its first installation has no token yet. */
-/** Whether a command opened a serve conversation, whatever the machine on the far end IS. The
- *  command carries `--role` (and a master's `--fqdn`) because the serving binary defaults the role
- *  to `master`: a serve started without it makes a slave claim to be a master, and the first program
- *  declared for a slave is then thrown out of Runner.run before it writes one event. The prefix says
- *  WHICH conversation this was; what it told the machine about itself is asserted where measured. */
-export const isServe = (command: string): boolean => command.startsWith("ansiwise-rest serve");
-
 export function serveConversation(serve: ServeFixture): Conversation {
   return (stream) => {
     const child = spawn(serve.exe, ["serve", "--programs", "programs", "--config", "ansiwise.yaml"], { cwd: serve.dir });
