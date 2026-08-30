@@ -8,8 +8,10 @@ import { startFakeSshServer, type FakeSshServer } from "../../adapters/ssh/testi
 import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused } from "../../adapters/ansiwise/port.ts";
 import { ansiwiseBinaries, NO_BINARY, startServe, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
+import { isServe } from "./ansiwise-serve.fixture.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
+
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
 import { readServerTailnet } from "../../../shared/tailnet.ts";
@@ -173,7 +175,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(events).toContain("machine run finished: exit 0");
     // The conversation went over the machine's serve surface, and the follow still read ArgoCD.
     const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
-    expect(onMaster.filter((c) => c === "ansiwise-rest serve")).toHaveLength(3); // one conversation per program step
+    expect(onMaster.filter(isServe)).toHaveLength(3); // one conversation per program step
     expect(onMaster.some((c) => c.includes("-n argocd get applications.argoproj.io"))).toBe(true);
 
     // The machine's OWN records: dry + run per program, every one green. This is the record an
@@ -360,7 +362,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // Two surfaces: the mint conversation on the MASTER (its usual address), the rejoin on the
     // host's PUBLIC one; the key file was read and removed on the master.
-    const serves = h.hosts.log.filter((l) => l.command === "ansiwise-rest serve").map((l) => l.host).sort();
+    const serves = h.hosts.log.filter((l) => isServe(l.command)).map((l) => l.host).sort();
     expect(serves).toEqual(["m1.example.com", "s1.example.com"]);
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "cat /tmp/ansiwise-tailnet-join-key-s1")).toBe(true);
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "rm -f /tmp/ansiwise-tailnet-join-key-s1")).toBe(true);
@@ -393,7 +395,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // ONE machine, on the address the plan froze: both serve conversations went to m1, and the
     // key file was read and removed there — the same host the join then ran on.
-    const serves = h.hosts.log.filter((l) => l.command === "ansiwise-rest serve").map((l) => l.host);
+    const serves = h.hosts.log.filter((l) => isServe(l.command)).map((l) => l.host);
     expect(serves).toEqual(["m1.example.com", "m1.example.com"]);
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "cat /tmp/ansiwise-tailnet-join-key-m1")).toBe(true);
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "rm -f /tmp/ansiwise-tailnet-join-key-m1")).toBe(true);
@@ -432,7 +434,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // Not one machine run started, on either surface — no serve conversation was even opened.
     expect(startedRuns(h.db, runId)).toEqual([]);
-    expect(h.hosts.log.filter((l) => l.command === "ansiwise-rest serve")).toHaveLength(0);
+    expect(h.hosts.log.filter((l) => isServe(l.command))).toHaveLength(0);
   });
 
   // ================================ deploy-slave, end to end ================================
@@ -468,9 +470,16 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // checkouts were stood up BEFORE its first conversation.
     const master = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
     const slave = h.hosts.log.filter((l) => l.host === "10.1.1.11").map((l) => l.command);
-    expect(master.filter((c) => c === "ansiwise-rest serve")).toHaveLength(3);
-    expect(slave.filter((c) => c === "ansiwise-rest serve")).toHaveLength(5);
-    expect(master.findIndex((c) => c.includes("dc-prepare-checkouts-"))).toBeLessThan(master.indexOf("ansiwise-rest serve"));
+    expect(master.filter(isServe)).toHaveLength(3);
+    expect(slave.filter(isServe)).toHaveLength(5);
+    // WHAT EACH MACHINE WAS TOLD IT IS, which is the fact a serve cannot default. Without it the
+    // slave's serve claims `master`, and emit-cluster-credentials — the first program in this run
+    // kind declared for a slave — is thrown out of Runner.run before it writes one event, leaving
+    // the caller on a stream that never carries anything. The role is the inventory row's, sent as
+    // it stands: a row naming both parts is sent whole, because the engine reads a role's PARTS and
+    // a program declared for either one applies (appliesTo, ansiwise-core program.dart).
+    for (const [cmds, want] of [[slave, "--role slave"], [master, "--role master --fqdn m1.example.com"]] as const) for (const c of cmds.filter(isServe)) expect(c, c).toContain(want);
+    expect(master.findIndex((c) => c.includes("dc-prepare-checkouts-"))).toBeLessThan(master.findIndex(isServe));
 
     // THE ONE-ADDRESS LAW, on the record: the map the run committed carries the same spelling the
     // emit and the register were given as their answer — the fixture's api_server_url/ca_data rows

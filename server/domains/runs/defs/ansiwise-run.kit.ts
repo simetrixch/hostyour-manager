@@ -5,7 +5,7 @@ import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { AnsiwiseClient } from "../../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../../../adapters/ansiwise/port.ts";
 import type { Stage } from "../../../../shared/enums.ts";
-import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { loadServer, loadMaster, masterFqdnOf, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { CATALOG_CHECKOUT, CATALOG_PROGRAMS } from "./machine-state.ts";
 
 // Driving one ansiwise PROGRAM on a machine, through the machine's own REST surface — the step
@@ -97,7 +97,58 @@ export function requireServeCommand(ports: AnsiwisePorts): string {
       `stdio, e.g. \`cd ${CATALOG_CHECKOUT} && ~/ansiwise-rest serve --programs ${CATALOG_PROGRAMS}\``,
     );
   }
+  if (/(^|\s)--(role|fqdn)(\s|=)/.test(ports.ansiwiseServeCommand)) {
+    throw errNotConfigured(
+      "ANSIWISE_SERVE_COMMAND names --role or --fqdn, and those two are not the installation's to state: one command " +
+      "serves every machine this manager reaches, while what a machine IS differs per machine and is written on its " +
+      "inventory row. This manager appends both from that row — take them out of the configured command",
+    );
+  }
   return ports.ansiwiseServeCommand;
+}
+
+/** What the machine on the far end of a session IS, as the inventory states it.
+ *
+ *  WHY IT IS SAID AT ALL. A program declares which machines it applies to (`roles:`), and the
+ *  engine holds a run against that. `ansiwise` defaults `--role` to `master` and `--fqdn` to the
+ *  empty text, so a serve started without them makes EVERY machine claim to be a master carrying no
+ *  domain — and the first program that applies to a slave is refused there. Measured on the first
+ *  slave: `emit-cluster-credentials applies to slave, and this machine is master`, thrown out of
+ *  Runner.run as an unhandled exception, so the child died before it could write one event and the
+ *  caller waited on a stream that would never carry anything. Every program before it in that
+ *  deployment applies to both parts, which is why fifteen steps passed first.
+ *
+ *  IT IS THE MANAGER'S TO STATE and not the installation's: one configured command serves every
+ *  machine, and only the caller knows which one this session reached. */
+export interface ServeMachine {
+  /** The `role` column of the machine's inventory row — `master`, `slave`, or both parts. */
+  role: string;
+  /** The domain the machine's cluster is known by. */
+  fqdn: string;
+}
+
+/** `--role X --fqdn Y`, refused rather than quoted where either is not one plain word. The command
+ *  is a shell line on the machine, and a value that cannot stand in one is a value this must not
+ *  send — the same rule place-ansiwise.ts states for every word it composes. */
+export function serveIdentity(machine: ServeMachine): string {
+  const word = (what: string, value: string): string => {
+    if (!/^[A-Za-z0-9._+-]+$/.test(value)) {
+      throw errValidation(
+        `the machine's ${what} is "${value}", and this is written into the command that starts the serving binary on ` +
+        "it — a value that is not one plain word cannot be sent as one, and quoting it here would make this a shell " +
+        "composer. Correct the inventory row",
+      );
+    }
+    return value;
+  };
+  // THE ROLE IS ALWAYS SAID AND THE DOMAIN ONLY WHERE THERE IS ONE. A host reached for a repair
+  // carries no cluster at all — the two tailnet run kinds that put a membership back state in their
+  // own words that they need none — so demanding a domain there would refuse the very hosts those
+  // runs exist for. Left unsaid it stays the binary's own default, the empty text, which is what
+  // every such run has always been given; the role is the fact that was missing.
+  const parts = [`--role ${word("role", machine.role)}`];
+  if (machine.fqdn.length > 0) parts.push(`--fqdn ${word("fqdn", machine.fqdn)}`);
+  return parts.join(" ");
 }
 
 /** One phase's progress, persisted so a re-entry re-attaches instead of re-starting. `seen` is
@@ -139,8 +190,9 @@ export async function openServeConversation(
   session: SshSession,
   ports: AnsiwisePorts,
   signal: AbortSignal,
+  machine: ServeMachine,
 ): Promise<ServeConversation> {
-  const serveCommand = requireServeCommand(ports);
+  const serveCommand = `${requireServeCommand(ports)} ${serveIdentity(machine)}`;
   const channel = await session.openChannel(serveCommand, {
     signal,
     onStderr: (line) => ctx.log("stderr", `serve: ${line}`),
@@ -195,8 +247,17 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
       const budget = AbortSignal.timeout(ANSIWISE_PROGRAM_TIMEOUT_MS);
       const signal = AbortSignal.any([ctx.signal, budget]);
 
-      const session = opts.onMaster ? await ctx.ssh(loadMaster(ctx.db).id) : await ctx.ssh();
-      const conversation = await openServeConversation(ctx, session, ports, signal);
+      const master = opts.onMaster ? loadMaster(ctx.db) : undefined;
+      const session = master ? await ctx.ssh(master.id) : await ctx.ssh();
+      // THE ROLE COMES OFF THE SERVER ROW, WHICH ALWAYS STANDS; the domain is only stated for the
+      // master, whose own is a fact of the installation. A step's target may carry no cluster at all
+      // — the two tailnet repairs say so in their own words — so resolving one here to name a domain
+      // would refuse the very hosts those runs exist for. Unsaid, it stays the binary's default,
+      // which is what every run has been given until now.
+      const machine: ServeMachine = master
+        ? { role: master.role, fqdn: masterFqdnOf(ctx.db, master) }
+        : { role: loadServer(ctx.db, target.serverId).role, fqdn: "" };
+      const conversation = await openServeConversation(ctx, session, ports, signal, machine);
       try {
         const answers = await composeAnswers(ctx, conversation.client, program, target, signal, opts.extra);
         const password = requireElevationPassword(ctx);
