@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { Step, StepCtx } from "../../../executor/types.ts";
 import type { servers } from "../../../db/schema/inventory.ts";
 import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
@@ -5,12 +6,13 @@ import { readAnsiwisePin } from "../../inventory/ansiwise-pin.ts";
 import { loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { requireElevationPassword, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 import {
-  placeAnsiwise, installAnsiwiseService, isServiceAddress, assertWord, handRunRoot,
+  placeAnsiwise, installAnsiwiseService, ensureServiceToken, isServiceAddress, assertWord, handRunRoot,
   VERSION_PLACEHOLDER, NAME_PLACEHOLDER, ANSIWISE_SERVICE_PORT,
   type PlacementMachine, type BootstrapVerdict,
 } from "./place-ansiwise.ts";
 import type { ReleaseDownloads } from "../../../adapters/downloads/port.ts";
 import { refreshCatalogue } from "./machine-catalogue.ts";
+import { isMasterRole } from "../../../../shared/enums.ts";
 
 // The manager's half of the BOOTSTRAP: the two steps deploy-slave and redeploy run, and the
 // resolution only a manager can do. The bootstrap itself (place-ansiwise.ts) takes a machine and
@@ -175,15 +177,63 @@ export function enableAnsiwiseServiceStep(target: SlaveTarget, ports: DeploySlav
         );
       }
       const bootstrap = await runBootstrap(ctx, ports, server);
-      const placed = await installAnsiwiseService(await placementMachine(ctx, server.name), {
+      const machine = await placementMachine(ctx, server.name);
+      // A machine carrying the master part has the file already — its own deploy-platform-services
+      // wrote it out of the books cluster's Vault, and this manager may not write a second value
+      // over one that entry stands behind. Everywhere else nothing writes it at all.
+      const token = isMasterRole(server.role)
+        ? { placed: false }
+        : await ensureServiceToken(machine, requireElevationPassword(ctx), () => serviceTokenFor(ctx, server));
+      const placed = await installAnsiwiseService(machine, {
         version: bootstrap.version,
         listen,
         elevationPassword: requireElevationPassword(ctx),
         replaced: bootstrap.placed,
       });
-      ctx.checkpoint({ ...bootstrap, service: true, installed: placed });
+      ctx.checkpoint({ ...bootstrap, service: true, installed: placed, tokenPlaced: token.placed });
     },
   };
+}
+
+/** What a sealed service token is filed under, one per server row. */
+const SERVICE_TOKEN_FP = "ansiwise-service-token";
+
+/** The token THIS manager holds for a machine's resident surface: the one it sealed before, or a
+ *  fresh one sealed now.
+ *
+ *  READ BEFORE MINTED, and that ordering is the whole of it. The surface authenticates one value and
+ *  the manager presents one value, so a second mint for a machine that already has a sealed token
+ *  would leave the two disagreeing — and the disagreement would show up as a surface that refuses
+ *  its own manager. A machine whose file was lost is therefore given back what this manager already
+ *  holds, not something new.
+ *
+ *  ONE PER SERVER, never one per installation. The books cluster's own entry at
+ *  `<stage>/manager-host/ansiwise` is a single value because a single machine reads it; carrying that
+ *  value onto every slave would make each machine's file a credential for every other machine's
+ *  program surface. Sealed against the server row, the blast radius of a file somebody reads is the
+ *  machine it stands on. */
+async function serviceTokenFor(ctx: StepCtx, server: typeof servers.$inferSelect): Promise<string> {
+  const held = (await ctx.creds.list({ serverId: server.id, kind: "other", excludeRotated: true }))
+    .find((c) => c.fingerprint === SERVICE_TOKEN_FP);
+  if (held) {
+    const known = await ctx.creds.withOpened(
+      held.id,
+      { purpose: "cluster-deploy-slave:service-token", runId: ctx.runId },
+      (plain) => Promise.resolve(plain.toString("utf8").trim()),
+    );
+    if (known.length > 0) return known;
+  }
+  // base64url, so every character is one WORD_RE admits and nothing has to be quoted to reach the
+  // machine — 32 bytes, the length the surface's own token check takes without an opinion.
+  const minted = randomBytes(32).toString("base64url");
+  await ctx.creds.seal({
+    kind: "other",
+    label: `resident ansiwise surface token for ${server.name}`,
+    plaintext: Buffer.from(minted, "utf8"),
+    fingerprint: SERVICE_TOKEN_FP,
+    serverId: server.id,
+  });
+  return minted;
 }
 
 /** The bootstrap's manager half: the pin and the address resolved out of this installation, and the

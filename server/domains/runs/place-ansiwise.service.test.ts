@@ -183,16 +183,64 @@ describe("enable-ansiwise-service", () => {
     expect(log.some((l) => l.includes("serves")), "it announced a machine that serves nothing").toBe(false);
   });
 
-  it("refuses a machine that carries no token file, naming the run that mints it", async () => {
-    // The one thing install-service cannot invent. A machine that has not been through deploy-platform-services
-    // has no minted token, and a unit enabled without one comes up failed at every boot with nothing
-    // but a journal saying so — so the refusal comes BEFORE install-service is run at all.
+  it("gives a machine whose own programs never mint one a token of this manager's, and holds the same value", async () => {
+    // The two rows of deploy-platform-services that mint and materialize this value are gated on the
+    // books being here, so on a cluster that keeps none the program runs green and the file never
+    // comes into being. Until the first slave every machine deployed here kept the books, which is
+    // why nothing had ever asked — and a unit enabled without a token comes up failed at every boot
+    // with nothing but a journal saying so.
     const hosts = scriptedHosts({ serviceToken: undefined });
     const h = await makeHarness({ hosts });
     await placedMachine(hosts);
-    const run = enableAnsiwiseServiceStep(target, ports(h)).run(placeCtx(h, hosts, "run_svc5", []));
+    await enableAnsiwiseServiceStep(target, ports(h)).run(placeCtx(h, hosts, "run_svc5", []));
+
+    const placed = hosts.serviceToken;
+    expect(placed, "the machine carries no token after a run that was supposed to place one").toBeTruthy();
+    assertWord(placed ?? "", "the placed token"); // reaches the machine as one plain word or not at all
+    expect(hosts.serviceEnabled).toBe(true);
+
+    // THE MANAGER HOLDS THE SAME VALUE. A surface authenticates one token and the manager presents
+    // one; a copy that lived only on the machine would be a credential nobody here could ever use.
+    const held = (await h.store.list({ serverId: SLAVE_ID, kind: "other" }))
+      .filter((c) => c.fingerprint === "ansiwise-service-token");
+    expect(held).toHaveLength(1);
+    const sealed = await h.store.withOpened(held[0]!.id, { purpose: "test" }, (b) => Promise.resolve(b.toString("utf8")));
+    expect(sealed).toBe(placed);
+
+    // AND IT NEVER STOOD IN AN ARGUMENT LIST, where every account on the machine reads it.
+    expect(commands(hosts).some((c) => c.includes(placed ?? "no-token")), "the token stood in a command").toBe(false);
+  });
+
+  it("gives back what it already holds rather than minting a second value for one machine", async () => {
+    // A machine whose file was lost is not a machine that needs a new credential: the surface will
+    // authenticate the value this manager presents, and two mints would leave those two disagreeing.
+    const hosts = scriptedHosts({ serviceToken: undefined });
+    const h = await makeHarness({ hosts });
+    await placedMachine(hosts);
+    await enableAnsiwiseServiceStep(target, ports(h)).run(placeCtx(h, hosts, "run_svc5a1", []));
+    const first = hosts.serviceToken;
+
+    hosts.serviceToken = undefined; // the machine loses the file; the manager still holds the value
+    await enableAnsiwiseServiceStep(target, ports(h)).run(placeCtx(h, hosts, "run_svc5a2", []));
+    expect(hosts.serviceToken).toBe(first);
+    expect(await h.store.list({ serverId: SLAVE_ID, kind: "other" })).toHaveLength(1);
+  });
+
+  it("PLANTED DEFECT: a machine carrying the MASTER part is refused instead, and nothing is written over its own", async () => {
+    // There the books cluster's own program wrote the file out of a Vault entry, and the catalogue
+    // states that replacing that value means deleting the file AND the entry and running again. A
+    // second value written here would leave the manager's copy and that entry disagreeing, so the
+    // step refuses exactly as it always did — and says which run mints it.
+    const hosts = scriptedHosts({ serviceToken: undefined });
+    // `master: false` because the inventory admits exactly one row carrying that part
+    // (servers_one_master_uq), and what this case is about is the machine the step is pointed at.
+    const h = await makeHarness({ hosts, master: false });
+    h.db.db.update(servers).set({ role: "master" }).where(eq(servers.id, SLAVE_ID)).run();
+    await placedMachine(hosts);
+    const run = enableAnsiwiseServiceStep(target, ports(h)).run(placeCtx(h, hosts, "run_svc5b0", []));
     await expect(run).rejects.toThrow(new RegExp(`answers nothing readable at ${SERVICE_TOKEN_FILE}`));
     await expect(run).rejects.toThrow(/deploy-platform-services/);
+    expect(hosts.serviceToken, "it wrote over a value the books cluster's Vault entry stands behind").toBeUndefined();
     expect(hosts.serviceEnabled, "it enabled a unit that cannot read its own credential").toBe(false);
     expect(commands(hosts).some((c) => c.includes(INSTALL_SERVICE_PROGRAM))).toBe(false);
   });

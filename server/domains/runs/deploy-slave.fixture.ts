@@ -352,7 +352,12 @@ export function hostsFactory(f: HostsScript): SshFactory {
       // `startsWith`, because a `sudo -n` can stand inside a compound line and the machine judges it
       // there just the same. See HostsScript.adopted.
       if (command.includes("sudo -S ")) {
-        if (o.stdin?.toString("utf8") !== `${ELEVATION_PASSWORD}\n`) {
+        // THE FIRST LINE AND ONLY THE FIRST LINE. `sudo -S` reads the password up to the first
+        // newline and hands everything after it to the command it raises, which is how a value can
+        // reach a root-owned file without standing in an argument list every account on the machine
+        // could read. So the check is the one sudo itself makes; demanding that nothing follows would
+        // refuse the one shape that keeps a credential off a command line.
+        if (!o.stdin?.toString("utf8").startsWith(`${ELEVATION_PASSWORD}\n`)) {
           throw new Error(`sudo -S shipped without the run's elevation password on stdin: ${command}`);
         }
       } else if (command.includes("sudo -n ") && !f.adopted) {
@@ -365,7 +370,7 @@ export function hostsFactory(f: HostsScript): SshFactory {
       // ---- the bootstrap every program act stands on, and the machine's own resident surface. Every
       // answer is read off what the file transfer actually wrote (deploy-slave.placement.fixture.ts),
       // so a step that transferred nothing is answered by a machine carrying nothing.
-      const placement = answerPlacementCommand(f, host, command);
+      const placement = answerPlacementCommand(f, host, command, o.stdin?.toString("utf8"));
       if (placement !== undefined) {
         emit(placement.out);
         return done(placement.code);

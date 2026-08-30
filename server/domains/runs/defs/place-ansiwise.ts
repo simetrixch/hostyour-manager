@@ -694,6 +694,63 @@ async function readServiceToken(machine: PlacementMachine, elevationPassword: st
   return token;
 }
 
+/** Put a service token on a machine whose own programs never write one, and leave a machine that
+ *  already carries one exactly as it stands.
+ *
+ *  WHY A MACHINE CAN HAVE NONE. The token is minted and materialized by two rows of
+ *  deploy-platform-services, and both carry `when: [secret_store_enabled, books_here_in_config]` —
+ *  the secret store is the books cluster's, and a cluster that keeps no books has neither. So on a
+ *  slave those rows are SKIPPED, the program still reports green, and SERVICE_TOKEN_FILE never comes
+ *  into being. machine-state.ts records that file as handed over `elsewhere`, which was true of every
+ *  machine this manager had deployed until the first slave: there, nothing writes it at all, and the
+ *  resident surface could not be switched on.
+ *
+ *  WHAT THIS DOES NOT DO is decide the value. `provide` is the caller's, because where a token comes
+ *  from is a question about this manager's credential store and not about the machine — and it is
+ *  asked only when the machine has none, so a value already sealed for a machine is written once and
+ *  read back for ever after.
+ *
+ *  A MACHINE THAT ALREADY ANSWERS IS NOT TOUCHED, and that is the whole guard against a second mint:
+ *  the catalogue states that replacing this value means deleting the file AND the entry and running
+ *  again, never minting beside it. Overwriting a file the books cluster's own Vault entry stands
+ *  behind would leave the manager's copy and the machine's copy two different values.
+ *
+ *  THE VALUE REACHES THE MACHINE ON STANDARD INPUT and touches no unprivileged path on the way: it
+ *  is written straight to a root-owned 0600 file by `install`, whose `-D` makes the directory. The
+ *  alternative — putFile into the operating account's home and move it — would leave a standing
+ *  credential for the machine's whole program surface readable by that account, which is the exact
+ *  thing SERVICE_TOKEN_FILE's ownership exists to prevent. */
+export async function ensureServiceToken(
+  machine: PlacementMachine,
+  elevationPassword: string,
+  provide: () => Promise<string>,
+): Promise<{ placed: boolean }> {
+  const standing = await machine.run(["sudo", "-S", "cat", SERVICE_TOKEN_FILE], {
+    timeoutMs: COMMAND_TIMEOUT_MS,
+    stdin: Buffer.from(`${elevationPassword}
+`, "utf8"),
+  });
+  if (standing.code === 0 && standing.stdout.trim().length > 0) {
+    return { placed: false };
+  }
+  const token = await provide();
+  assertWord(token, `the token for ${machine.name}'s resident surface`);
+  const written = await machine.run(
+    ["sudo", "-S", "install", "-D", "-m", "600", "-o", "root", "-g", "root", "/dev/stdin", SERVICE_TOKEN_FILE],
+    { timeoutMs: COMMAND_TIMEOUT_MS, stdin: Buffer.from(`${elevationPassword}
+${token}`, "utf8") },
+  );
+  if (written.code !== 0) {
+    throw errValidation(
+      `${machine.name} carries no ${SERVICE_TOKEN_FILE} and would not take one: ${written.stdout.trim() || `install exited ${written.code}`}. ` +
+      "The file belongs to root and the resident surface reads it as root, so this run raises the write with the " +
+      "elevation password it already carries — a machine that refuses it here refuses every other elevated step too",
+    );
+  }
+  machine.log(`placed the resident surface's token at ${SERVICE_TOKEN_FILE} — root, 0600, the value this manager holds for ${machine.name}`);
+  return { placed: true };
+}
+
 /** One word of a command, refused rather than quoted. See WHAT MAY STAND IN A COMMAND'S ARGUMENT
  *  LIST — the guard is what lets this module say it composes no shell, so it is applied to every
  *  value that arrives from outside this process. */

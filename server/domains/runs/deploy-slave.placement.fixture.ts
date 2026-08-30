@@ -92,6 +92,7 @@ export function answerPlacementCommand(
   f: HostsScript,
   host: string,
   command: string,
+  stdin?: string,
 ): { out: string; code: number } | undefined {
   const words = command.split(" ");
 
@@ -136,6 +137,17 @@ export function answerPlacementCommand(
     return f.serviceToken === undefined
       ? { out: "", code: 1 }
       : { out: f.serviceToken, code: 0 };
+  }
+
+  // The manager writing a token onto a machine whose own programs never mint one. What lands in the
+  // file is what stood on standard input AFTER the line sudo took for the password — the machine
+  // splits it exactly where sudo splits it, so a caller that put the value anywhere else writes
+  // nothing here. Remembered, so the `cat` above reads back what was actually written.
+  if (command === "sudo -S install -D -m 600 -o root -g root /dev/stdin /etc/ansiwise/service-token") {
+    const payload = (stdin ?? "").split("\n").slice(1).join("\n");
+    if (payload.length === 0) return { out: "install: reading /dev/stdin: no bytes", code: 1 };
+    f.serviceToken = payload;
+    return { out: "", code: 0 };
   }
 
   if (command === "sudo -S systemctl restart ansiwise.service") {
