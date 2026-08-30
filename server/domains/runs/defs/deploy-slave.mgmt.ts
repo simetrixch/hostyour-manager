@@ -137,7 +137,8 @@ export function createMgmtStep(target: SlaveTarget, ports: DeploySlavePorts & An
         const fresh: Record<string, string> = {};
         if (cp.live === undefined) {
           const slave = await ctx.ssh(); // the run's ownsHost target
-          const emit = await openServeConversation(ctx, slave, ports, signal);
+          const emit = await openServeConversation(ctx, slave, ports, signal,
+            { role: loadServer(ctx.db, target.serverId).role, fqdn: domain });
           try {
             const emitCp: ProgramCheckpoint = { program: EMIT_PROGRAM };
             const nosave = (): void => undefined;
@@ -186,7 +187,8 @@ export function createMgmtStep(target: SlaveTarget, ports: DeploySlavePorts & An
         }
 
         const mSession = await ctx.ssh(master.id); // the AUX target — declared in `targets`
-        const conversation = await openServeConversation(ctx, mSession, ports, signal);
+        const conversation = await openServeConversation(ctx, mSession, ports, signal,
+          { role: master.role, fqdn: masterFqdnOf(ctx.db, master) });
         try {
           const answers = await composeAnswers(ctx, conversation.client, REGISTER_PROGRAM, target, signal,
             async () => ({ slave_fqdn: domain, master_fqdn: masterFqdnOf(ctx.db, loadMaster(ctx.db)), api_server_url: apiServerUrl, ...fresh }));
@@ -246,7 +248,8 @@ export function removeSlaveCleanup(ports: DeploySlavePorts & AnsiwisePorts): Cle
       const session = await ctx.ssh(master.id);
       const budget = AbortSignal.timeout(ANSIWISE_PROGRAM_TIMEOUT_MS);
       const signal = AbortSignal.any([ctx.signal, budget]);
-      const conversation = await openServeConversation(ctx, session, ports, signal);
+      const conversation = await openServeConversation(ctx, session, ports, signal,
+        { role: master.role, fqdn: masterFqdnOf(ctx.db, master) });
       try {
         // The cluster row may already be gone or parked — the answers need only what the params
         // state, so the target is the stated one, never the active-cluster lookup.
