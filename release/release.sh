@@ -40,6 +40,23 @@ set -euo pipefail
 
 die() { echo "release: $*" >&2; exit 1; }
 
+# THE COMMIT A TAG SITS ON DECLARES THE VERSION THE TAG NAMES. The build reads the version out of
+# the tag, so a package.json still declaring an older number labels the artifact with a version
+# nobody released. The write happens BEFORE the tag is created: a tag placed first would point at
+# the commit that still carries the old number, and a release does not move a tag afterwards.
+# Only the FIRST "version" line is touched. That is the manifest's own; a version further down
+# belongs to a dependency and is not this release's to move.
+stamp_manifest_version() {
+  file="$ROOT/package.json"
+  grep -qE '^[[:space:]]*"version":[[:space:]]*"' "$file" ||
+    die "package.json declares no version, so this release has nothing to stamp"
+  sed -i '0,/^\([[:space:]]*\)"version":[[:space:]]*"[^"]*"/s//\1"version": "'"$VERSION"'"/' "$file"
+  git diff --quiet -- "$file" && return 0
+  git add -- "$file"
+  git commit --quiet -m "release: $TAG" || die "the version bump to $VERSION could not be committed"
+  echo "release: package.json declares ${VERSION}"
+}
+
 VERSION="${1:-}"
 CHANNEL="${2:-}"
 STAGE="${3:-}"
@@ -82,6 +99,7 @@ if [ -n "$EXISTING" ]; then
 else
   TS14="$(date -u +%Y%m%d%H%M%S)"
   TAG="${VERSION}-${CHANNEL}-${TS14}"
+  stamp_manifest_version
   git tag -a "$TAG" -m "release $TAG"
   git push origin HEAD
   git push origin "refs/tags/${TAG}"

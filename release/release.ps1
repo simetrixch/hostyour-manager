@@ -102,6 +102,26 @@ function Publish-BranchPin {
   $script:pinnedAny = $true
 }
 
+# THE COMMIT A TAG SITS ON DECLARES THE VERSION THE TAG NAMES. The build reads the version out of
+# the tag, so a package.json still declaring an older number labels the artifact with a version
+# nobody released. The write happens BEFORE the tag is created: a tag placed first would point at
+# the commit that still carries the old number, and a release does not move a tag afterwards.
+# Only the FIRST "version" line is touched. That is the manifest's own; a version further down
+# belongs to a dependency and is not this release's to move.
+function Set-ManifestVersion($Root, $Version, $Tag) {
+  $file = Join-Path $Root 'package.json'
+  $text = [System.IO.File]::ReadAllText($file)
+  $rx = [regex]'(?m)^(\s*)"version":\s*"[^"]*"'
+  if (-not $rx.IsMatch($text)) { Die "package.json declares no version, so this release has nothing to stamp" }
+  $bumped = $rx.Replace($text, '$1"version": "' + $Version + '"', 1)
+  if ($bumped -eq $text) { return }
+  [System.IO.File]::WriteAllText($file, $bumped)
+  git add -- $file
+  git commit --quiet -m "release: $Tag"
+  if ($LASTEXITCODE -ne 0) { Die "the version bump to $Version could not be committed" }
+  Write-Host "release: package.json declares $Version"
+}
+
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
   Die "version must be x.y.z with no leading zeros (got '$Version')"
 }
@@ -135,6 +155,7 @@ if ($existing.Count -gt 0) {
 else {
   $ts14 = (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss')
   $tag = "$Version-$Channel-$ts14"
+  Set-ManifestVersion $root $Version $tag
   git tag -a $tag -m "release $tag"
   git push origin HEAD
   git push origin "refs/tags/$tag"
