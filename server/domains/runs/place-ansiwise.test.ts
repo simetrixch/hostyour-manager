@@ -427,7 +427,7 @@ describe("place-ansiwise: the catalogue the engine is judged by", () => {
   });
 
   it("makes the catalogue a slave is born without, and leaves no credential of ours behind", async () => {
-    // A SLAVE IS BORN WITHOUT ONE. install-master clones the catalogue onto a first master and
+    // A SLAVE IS BORN WITHOUT ONE. The installer clones the catalogue onto a first master and
     // nothing does it for a slave, so the machine's own surface could not start at all: what an
     // operator saw was the serving binary's `cd` failing and the socket hanging up, three systems
     // from the missing tree (apps4, 2026-08-28).

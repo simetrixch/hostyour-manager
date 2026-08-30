@@ -54,7 +54,7 @@ export interface AnsiwisePorts {
   ansiwiseDownloadUrl?: string;
   /** WHERE A CATALOGUE COMES FROM for a machine that has none, and what opens it.
    *
-   *  A SLAVE IS BORN WITHOUT ONE. install-master clones the catalogue onto a first master; nothing
+   *  A SLAVE IS BORN WITHOUT ONE. The installer clones the catalogue onto a first master; nothing
    *  does it for a slave, and every program is read out of that checkout — so the machine's own
    *  surface cannot even start, and what an operator saw was the serving binary's `cd` failing and
    *  the socket hanging up. This manager holds the address and the credential already
