@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import type { RunView, RunEventView, RunTenantStateView } from "../../../shared/api-types.ts";
 import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
 import { getRun, approveRun, deleteRun, cancelRun, retryRun, skipRun, abortRun, getRunTenantState } from "../api.ts";
+import { coalesced, RUN_REFRESH_WINDOW_MS } from "../coalesce.ts";
 import { abortOffer, runOnScreen } from "../runScreen.ts";
 import { IconLock } from "../components/icons.tsx";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
@@ -71,14 +72,21 @@ export function RunDetail() {
     setLines([]);
     refresh();
     const es = new EventSource(`/api/runs/${runId}/events`);
+    // ONE READ FOR A BURST OF REASONS. A meta line means the run's status has likely moved, which is
+    // true while a run is happening and misleading the moment this screen opens: the stream REPLAYS
+    // from the first line, so a run that wrote 1734 meta lines would ask for the run 1734 times in
+    // one tick. Past its own queue limit a browser abandons those requests with a network error, and
+    // the screen then renders "Failed to fetch" over a run whose every byte is readable — which is
+    // how the first slave deployment became the one run in the list that could not be opened.
+    const reread = coalesced(refresh, RUN_REFRESH_WINDOW_MS);
     const onEvent = (e: Event) => {
       const ev = JSON.parse((e as MessageEvent).data as string) as RunEventView;
       setLines((prev) => [...prev, ev]);
-      if (ev.stream === "meta") refresh(); // a meta line means the run status likely moved
+      if (ev.stream === "meta") reread.call();
     };
     for (const s of STREAMS) es.addEventListener(s, onEvent);
     es.onerror = () => es.close(); // the server closes the stream once the run is terminal
-    return () => es.close();
+    return () => { reread.cancel(); es.close(); };
   }, [runId]);
 
   useEffect(() => {
