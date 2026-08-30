@@ -328,8 +328,13 @@ export interface PlacementMachine {
   /** Write `content` at `remotePath` with `mode`. A RELATIVE path is the account's own home. */
   putFile(remotePath: string, content: Buffer, mode: number): Promise<void>;
   /** Run one command and answer its status and its WHOLE standard output. `stdin` is what the
-   *  command reads — it may reach no file and no argument list. */
-  run(argv: readonly string[], o: { timeoutMs: number; stdin?: Buffer }): Promise<CommandOutcome>;
+   *  command reads — it may reach no file and no argument list.
+   *
+   *  `secretOutput` says the command ANSWERS with a credential, and it is the caller's to set: a
+   *  run's record keeps every line a machine writes, so `sudo cat` of a token file puts that token
+   *  into the record, onto the screen, and into whatever an operator pastes out of it. The value
+   *  still reaches the caller — only the log is spared. */
+  run(argv: readonly string[], o: { timeoutMs: number; stdin?: Buffer; secretOutput?: boolean }): Promise<CommandOutcome>;
   /** Where a line an operator reads goes. */
   log(line: string): void;
 }
@@ -675,6 +680,7 @@ async function readServiceToken(machine: PlacementMachine, elevationPassword: st
   const read = await machine.run(["sudo", "-S", "cat", SERVICE_TOKEN_FILE], {
     timeoutMs: COMMAND_TIMEOUT_MS,
     stdin: Buffer.from(`${elevationPassword}\n`, "utf8"),
+    secretOutput: true,
   });
   const token = read.stdout.trim();
   if (read.code !== 0 || token.length === 0) {
@@ -727,8 +733,8 @@ export async function ensureServiceToken(
 ): Promise<{ placed: boolean }> {
   const standing = await machine.run(["sudo", "-S", "cat", SERVICE_TOKEN_FILE], {
     timeoutMs: COMMAND_TIMEOUT_MS,
-    stdin: Buffer.from(`${elevationPassword}
-`, "utf8"),
+    stdin: Buffer.from(`${elevationPassword}\n`, "utf8"),
+    secretOutput: true,
   });
   if (standing.code === 0 && standing.stdout.trim().length > 0) {
     return { placed: false };
@@ -737,8 +743,7 @@ export async function ensureServiceToken(
   assertWord(token, `the token for ${machine.name}'s resident surface`);
   const written = await machine.run(
     ["sudo", "-S", "install", "-D", "-m", "600", "-o", "root", "-g", "root", "/dev/stdin", SERVICE_TOKEN_FILE],
-    { timeoutMs: COMMAND_TIMEOUT_MS, stdin: Buffer.from(`${elevationPassword}
-${token}`, "utf8") },
+    { timeoutMs: COMMAND_TIMEOUT_MS, stdin: Buffer.from(`${elevationPassword}\n${token}`, "utf8") },
   );
   if (written.code !== 0) {
     throw errValidation(

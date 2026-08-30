@@ -192,7 +192,8 @@ describe("enable-ansiwise-service", () => {
     const hosts = scriptedHosts({ serviceToken: undefined });
     const h = await makeHarness({ hosts });
     await placedMachine(hosts);
-    await enableAnsiwiseServiceStep(target, ports(h)).run(placeCtx(h, hosts, "run_svc5", []));
+    const log: string[] = [];
+    await enableAnsiwiseServiceStep(target, ports(h)).run(placeCtx(h, hosts, "run_svc5", log));
 
     const placed = hosts.serviceToken;
     expect(placed, "the machine carries no token after a run that was supposed to place one").toBeTruthy();
@@ -207,8 +208,12 @@ describe("enable-ansiwise-service", () => {
     const sealed = await h.store.withOpened(held[0]!.id, { purpose: "test" }, (b) => Promise.resolve(b.toString("utf8")));
     expect(sealed).toBe(placed);
 
-    // AND IT NEVER STOOD IN AN ARGUMENT LIST, where every account on the machine reads it.
+    // AND IT NEVER STOOD IN AN ARGUMENT LIST, where every account on the machine reads it — nor in
+    // the run's own record. A run keeps every line a machine writes, and this value is read back off
+    // the machine with `sudo cat`: without the read saying its output is a credential, the token
+    // stands in the log an operator reads, copies and pastes. It did, once.
     expect(commands(hosts).some((c) => c.includes(placed ?? "no-token")), "the token stood in a command").toBe(false);
+    expect(log.some((l) => l.includes(placed ?? "no-token")), "the token stood in the run's log").toBe(false);
   });
 
   it("gives back what it already holds rather than minting a second value for one machine", async () => {

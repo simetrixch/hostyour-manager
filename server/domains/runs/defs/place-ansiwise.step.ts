@@ -279,7 +279,10 @@ async function placementMachine(ctx: StepCtx, name: string): Promise<PlacementMa
         timeoutMs: o.timeoutMs,
         onStdout: (line) => {
           out.push(line);
-          ctx.log("stdout", line);
+          // WHAT A MACHINE ANSWERS GOES INTO THE RUN'S RECORD, and a command answering a credential
+          // would put it there for ever — on the screen, in the record, and in whatever an operator
+          // pastes out of it. The value still reaches the caller through `out`.
+          if (o.secretOutput !== true) ctx.log("stdout", line);
         },
         onStderr: (line) => ctx.log("stderr", line),
         ...(o.stdin !== undefined ? { stdin: o.stdin } : {}),
