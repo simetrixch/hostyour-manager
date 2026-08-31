@@ -7,21 +7,28 @@ envs: [dev, test, prod]
 # release/release.sh reads it here and writes the pin itself once the images are built, so putting a
 # release on a stage is one act and not an act plus something somebody has to remember. A copy of
 # this manifest in another unit names ITS platform tree and can reach no other.
+#
+# DECLARING IT IS WHAT MAKES A RELEASE WAIT AND PIN. The two release scripts are one script that
+# every consumer receives, and this key is the only thing that tells the two shapes apart: a
+# manifest that declares it belongs to a unit whose images are built by its own repository and
+# whose pins only a machine may write, so the release waits for the build and writes them. A
+# customer manifest declares none, and there the build plane builds and pins on the deploy ref
+# alone — the release script says so and stops.
 platformRepo: simetrixch/hostyour-cloud
 
 # `name` is the UNIT name: it must equal basename(repoURL) and the registration directory
 # (hostyour-cloud/registrations/hostyour-manager/build.yaml). The release pipeline compares the two
 # and fails the run on a mismatch, so a rename here without the registration blocks every release.
 #
-# NO `chart:` — BUILD-ONLY. The manager is the control plane itself and cannot validate, pin or
-# seed its own deploy, so that stays bootstrap-owned in hostyour-cloud/apps/manager. This file
-# exists so the three IMAGES build through the same release pipeline as every other unit.
+# NO `chart:` — BUILD-ONLY. The manager is the control plane itself and cannot validate, pin or seed
+# its own deploy, so that stays bootstrap-owned in hostyour-cloud/clusters/inventories/manager. This
+# file exists so the three IMAGES build through the same release pipeline as every other unit.
 #
 # The build names are FLAT image names, not paths: each one IS the repo it pushes to in the central
-# registry, is what hostyour-cloud/apps/manager/values-<stage>.yaml carries as `builds[].image`,
-# and is what the registration attests. Renaming a build points it at a different repo and makes it
-# invisible to the release bump's search over those pins, so the running chart would silently stay
-# on the old image.
+# registry, is what hostyour-cloud/clusters/inventories/*/values-<stage>.yaml carries as
+# `builds[].image`, and is what the registration attests. Renaming a build points it at a different
+# repo and makes it invisible to the release bump's search over those pins, so the running chart
+# would silently stay on the old image.
 builds:
   - name: manager                  # the in-cluster app
     containerfile: Containerfile   # repo root

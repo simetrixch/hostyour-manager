@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { injectReleaseKitStep, removeReleaseKit } from "./onboard-release-kit.ts";
 import { DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
@@ -80,6 +81,31 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
 
     expect(consumerRepo.commits).toHaveLength(0); // nothing differs → commitPush never called
     expect(logs.some((l) => l.includes("already carry the current kit"))).toBe(true);
+  });
+
+  it("takes NOTHING away from THIS repository's release/ — onboarding the manager as a consumer of itself", async () => {
+    // The manager is a consumer unit of itself, so an onboarding runs this step over its own
+    // release/ directory. Seeded with the bytes that actually stand in this repository — read off
+    // disk, not off the assets — so the assertion measures the two copies rather than restating one.
+    const consumerRepo = new FakeConsumerRepo();
+    for (const path of ["release/release.sh", "release/release.ps1"]) {
+      consumerRepo.seed(REPO_URL, path, readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8"));
+    }
+    const logs: string[] = [];
+    await step({ consumerRepo }).run(ctx(logs));
+
+    // The one file this repository does not carry (it builds its images in its own workflow) is
+    // written; neither release script is, because there is nothing in them the kit would replace.
+    const written = consumerRepo.commits[0]?.write?.map((w) => w.path) ?? [];
+    expect(written).toEqual([".github/workflows/release.yml"]);
+    const files = consumerRepo.filesFor(REPO_URL);
+    for (const marker of ["stamp_manifest_version", "gh run watch", 'git -C "$PLATFORM_REPO_DIR" push --quiet origin "$branch"']) {
+      expect(files["release/release.sh"]).toContain(marker);
+    }
+    for (const marker of ["Set-ManifestVersion", "gh run watch", "git -C $platformRepoDir push --quiet origin $Branch"]) {
+      expect(files["release/release.ps1"]).toContain(marker);
+    }
+    expect(consumerRepo.commits[0]?.remove).toEqual([]);
   });
 
   it("REPLACES a divergent copy with the current asset bytes — the kit is platform-owned, and the trigger runs exactly these bytes", async () => {
