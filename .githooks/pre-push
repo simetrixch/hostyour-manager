@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# THE CHECKS RUN HERE, ON THIS MACHINE, BEFORE ANYTHING LEAVES IT.
+#
+# A check somebody else's machine runs is a check the person who wrote the code does not watch: they
+# push, they walk away, and the failure arrives later addressed to nobody. So the whole of
+# scripts/check.sh runs at the push, and a red one keeps the commits local.
+#
+# THE MESSAGES ARE READ TOO. Work here stays on master, so a commit carries its own reference: the
+# issue number stands anywhere in the message, subject or body. Four things are let through without
+# one, and each is a case where no issue exists to name — a release stamp, a commit that only
+# explains, and a commit that says in a `No-issue:` trailer who asked for it.
+#
+# WHAT IS JUDGED is only what is being pushed: the commits between what the remote already has and
+# what is going to it, merges left out. A branch the remote does not have yet has no "before", so
+# every commit of it is read. A ref being deleted carries no commit and is counted out, and a push
+# that only deletes runs no checks at all.
+
+set -uo pipefail
+
+root="$(git rev-parse --show-toplevel)" || exit 1
+cd "$root" || exit 1
+
+# The sibling checkouts stand beside the MAIN checkout, and this hook also runs from a worktree,
+# whose own parent directory holds no sibling at all. The common git directory is the main
+# checkout's `.git` from either place, so it is what the neighbourhood is measured from.
+common="$(git rev-parse --git-common-dir)" || exit 1
+case "$common" in
+  /*|[A-Za-z]:*) ;;
+  *) common="$root/$common" ;;
+esac
+main_checkout="$(cd "$common/.." && pwd)" || exit 1
+
+head_sha="$(git rev-parse HEAD)" || exit 1
+pushed=0
+refused=""
+
+# Is this commit's message allowed to name no issue?
+message_stands() {
+  sha="$1"
+  message="$(git log -1 --format=%B "$sha")"
+  subject="$(git log -1 --format=%s "$sha")"
+
+  # The issue number, anywhere in the message.
+  printf '%s' "$message" | grep -Eq '#[0-9]+' && return 0
+
+  # A release stamp names no issue because a release is not one.
+  case "$subject" in release:*) return 0 ;; esac
+
+  # A commit that says who asked for it instead.
+  printf '%s\n' "$message" | grep -Eq '^No-issue:[[:space:]]*[^[:space:]]' && return 0
+
+  # A commit that only explains. An empty change is not one of those, so an empty file list is not
+  # allowed through here: it would be a commit that touches nothing and answers to nobody.
+  files="$(git show --pretty=format: --name-only "$sha" | sed '/^$/d')"
+  [ -n "$files" ] || return 1
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    base="${file##*/}"
+    case "$base" in
+      *.md|LICENSE*) ;;
+      *) return 1 ;;
+    esac
+  done <<EOF
+$files
+EOF
+  return 0
+}
+
+# Git writes one line per ref being pushed: local ref, local sha, remote ref, remote sha.
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -n "${local_ref:-}" ] || continue
+
+  # An all-zero local sha is a ref being deleted. There is no commit to check.
+  case "$local_sha" in
+    *[!0]*) ;;
+    *) continue ;;
+  esac
+  pushed=$((pushed + 1))
+
+  if [ "$local_sha" != "$head_sha" ]; then
+    echo "REFUSED: $local_ref is not the checked-out commit, so the checks below would measure a different tree."
+    echo "Check that commit out and push again."
+    exit 1
+  fi
+
+  # An all-zero remote sha is a ref the remote does not have yet: there is no "before", so every
+  # commit reachable from what is being pushed is read.
+  case "$remote_sha" in
+    *[!0]*) range="$remote_sha..$local_sha" ;;
+    *) range="$local_sha" ;;
+  esac
+
+  for sha in $(git rev-list --no-merges "$range" 2>/dev/null); do
+    message_stands "$sha" && continue
+    refused="$refused
+  $(git log -1 --format='%h %s' "$sha")"
+  done
+done
+
+if [ -n "$refused" ]; then
+  echo "REFUSED: a commit names the issue it belongs to — #<number>, anywhere in the message."
+  echo "These name none, and are not a release stamp, do not only explain, and carry no No-issue: trailer:$refused"
+  echo "Reword them, then push again."
+  exit 1
+fi
+
+if [ "$pushed" -eq 0 ]; then
+  echo "pre-push: nothing to check, no commits are being pushed."
+  exit 0
+fi
+
+# NO PUSH WITHOUT THE THREE TEAM MODES (the language rules). The check lives in the issue tooling
+# beside the main checkout, found by name whatever letter case the checkout carries. A push whose
+# modes cannot be checked does not leave the machine: an unverifiable answer is not a green one.
+modes_check=""
+for sibling in "$main_checkout"/../*/; do
+  case "$(basename "$sibling" | tr '[:upper:]' '[:lower:]')" in
+    simetrix-gh) modes_check="${sibling%/}/bin/team-modes-check.sh" ;;
+  esac
+done
+if [ -z "$modes_check" ]; then
+  echo "REFUSED: the issue tooling (simetrix-gh) is not beside $main_checkout, so the team modes cannot be checked."
+  exit 1
+fi
+if [ ! -f "$modes_check" ]; then
+  echo "REFUSED: $modes_check is missing, so the team modes cannot be checked."
+  exit 1
+fi
+bash "$modes_check" || {
+  echo "REFUSED: the team modes are missing; the lines above say which and how to install them."
+  exit 1
+}
+
+echo "pre-push: scripts/check.sh runs here — the type check, the linter, the boundary law, the CSS tokens, the SPA build and every suite."
+bash scripts/check.sh || { echo "REFUSED: scripts/check.sh went red; the line above says at which step."; exit 1; }
+
+echo "pre-push: every check passed."

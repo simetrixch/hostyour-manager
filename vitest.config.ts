@@ -31,6 +31,18 @@ export default defineConfig({
         },
       },
       {
+        // The fitness checks read the tree as text and start nothing, so they run in the first
+        // group beside the in-process suites. They are plain .mjs because they share their detector
+        // with the recorder beside them, and that one is run straight by node
+        // (`node fitness/record-known.mjs`), with no TypeScript loader in front of it.
+        test: {
+          name: "fitness",
+          include: ["fitness/**/*.test.mjs"],
+          environment: "node",
+          sequence: { groupOrder: 0 },
+        },
+      },
+      {
         test: {
           name: "real-serve",
           include: ["server/**/*.ansiwise.test.ts"],
