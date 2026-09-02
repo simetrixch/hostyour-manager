@@ -49,11 +49,11 @@ export const logger = createLogger(
 export const SLAVE_ID = "srv_slave1";
 export const MASTER_ID = "srv_master1";
 export const PARAMS = { serverId: SLAVE_ID, stage: FIXTURE_STAGE, domain: SLAVE_FQDN };
-/** What the manager holds and place-input puts on a machine — a catalogue credential and the auth of
- *  its own pull document. Both are secrets: every case that reads the run's surface asserts they are
- *  nowhere in it, which is only a statement if they are recognisable strings. */
-export const CATALOGUE_ORIGIN_URL = "https://github.com/acme/acme-catalog.git";
-export const CATALOGUE_TOKEN = "ghp_catalogue_token_the_manager_holds";
+/** The deployment programs this manager clones a machine's catalogue from, and the auth of its own
+ *  pull document. The pull auth is a secret: every case that reads the run's surface asserts it is
+ *  nowhere in it, which is only a statement if it is a recognisable string. The origin is not one —
+ *  the repository it names is public. */
+export const CATALOGUE_ORIGIN_URL = "https://github.com/acme/acme-deploy.git";
 export const PULL_AUTH = "cHVsbGVyOnB1bGwtcGFzc3dvcmQ=";
 
 export const STEP_NAMES = [
@@ -234,7 +234,8 @@ export interface HostsScript {
   /** The branch a clone leaves the checkout standing on — the remote's own head, which is why this
    *  manager names none: which branch a catalogue is read from belongs to the installation. */
   catalogueClonesOnto: string;
-  /** What a clone exits with. Non-zero is a credential that does not open that repository. */
+  /** What a clone exits with. Non-zero is a machine with no route to the repository, or an address
+   *  that names none — the repository itself is public, so there is no credential to be wrong. */
   catalogueCloneExit: number;
   catalogueHead: string;
   catalogueRemoteHead: string;
@@ -519,13 +520,13 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
     // A WINDOW A TEST CAN WATCH CLOSE. A deployment gives a fresh slave two minutes to
     // push its first series; a test that waited them would be a test nobody runs.
     metricsFirstSeriesMs: 20,
-    // WHAT A MACHINE THAT KEEPS NO BOOKS IS GIVEN, out of what this manager holds: the credential it
-    // clones a catalogue with, and its own pull document narrowed to one address. Both are the
-    // composition root's (wire.ts). `withoutCarriedValues` is the manager that holds NEITHER, whose
-    // whole point is that place-input refuses naming both rather than letting the machine's own
-    // programs refuse by file and key three steps later.
+    // WHAT THIS MANAGER HOLDS FOR A MACHINE THAT KEEPS NO BOOKS: the address it clones a catalogue
+    // from, and its own pull document narrowed to one address. Both are the composition root's
+    // (wire.ts). `withoutCarriedValues` is the manager that holds neither, whose whole point is that
+    // place-input refuses by name rather than letting the machine's own programs refuse by file and
+    // key three steps later.
     ...(opts.withoutCarriedValues ? {} : {
-      catalogueOrigin: { repoURL: CATALOGUE_ORIGIN_URL, token: CATALOGUE_TOKEN },
+      catalogueOrigin: { repoURL: CATALOGUE_ORIGIN_URL },
       pullConfiguration: async (registryHost: string) =>
         Buffer.from(JSON.stringify({ auths: { [registryHost]: { auth: PULL_AUTH } } }), "utf8").toString("base64"),
     }),

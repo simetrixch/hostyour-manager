@@ -16,10 +16,10 @@ import {
 // RunRecorder.save). On this platform that rename fails while another process has run.json open and
 // it carries no retry, so the exit code is left standing in run.json.writing while run.json keeps
 // the header the run began with. Two surfaces meet that state — the WAIT that follows a machine run
-// and the ASSERTION that judges it afterwards — and both used to answer without naming it: the wait
-// spent the caller's whole budget and vitest reported a bare timeout pointing at the it() line, and
-// the assertion compared an absent exit_code against 0 and printed `expected undefined to be +0`.
-// Neither said which file the answer was in.
+// and the ASSERTION that judges it afterwards — and neither may answer without naming it. A wait
+// that does spends the caller's whole budget and vitest reports a bare timeout pointing at the it()
+// line; an assertion that does compares an absent exit_code against 0 and prints
+// `expected undefined to be +0`. Neither says which file the answer is in.
 //
 // IT IS NOT A TEST FILE OF ITS OWN, for the reason redeploy.ansiwise.test.ts states for itself: the
 // engine's run root is per-DRIVE and a serve fixture's close() removes the whole of it, so a second
@@ -68,10 +68,10 @@ export function orphanedEndSuite(serve: () => ServeFixture, observer: () => Ansi
       expect(Date.now() - began, "the wait gave up on a run that had not ended, with nothing on the disk saying it had").toBeGreaterThanOrEqual(3_500);
     });
 
-    // 180 seconds and not 120: this drives a WHOLE cluster-redeploy, and the master arm grew from four
-    // steps to six when the placement and deploy-host joined it — two more machine runs, each proven
-    // dry before it is run. Under the whole file it went over 120 and passed alone, which is a budget
-    // that no longer fits the run rather than a race.
+    // 180 seconds and not 120: this drives a WHOLE cluster-redeploy, whose master arm carries the
+    // placement and deploy-host as well — machine runs, each proven dry before it is run. Under the
+    // whole file it goes over 120 while passing alone, which is a budget that does not fit the run
+    // rather than a race.
     it("makes the ASSERTION say which file the end is standing in, instead of comparing an absence to zero", { timeout: 180_000 }, async () => {
       const h = await liveMaster(serve());
       const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(uniqueEmail()));

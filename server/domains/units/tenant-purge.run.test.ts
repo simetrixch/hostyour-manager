@@ -182,8 +182,8 @@ describe("tenant-purge plan", () => {
     // (read.ts toRunView / shared api-types), so a warning would be a write-only second copy of a fact
     // the operator must actually read. The dialog that confirms the purge states it too.
     expect(plan.warnings).toEqual([]);
-    // The LAST thing the operator reads before approving. It used to end "safe to re-run, and safe on a
-    // healthy tenant", which meant "the steps will not error" and read as "if this is live, nothing bad
+    // The LAST thing the operator reads before approving. Ending it "safe to re-run, and safe on a
+    // healthy tenant" means "the steps will not error" and reads as "if this is live, nothing bad
     // happens" — beside a sentence saying the Tenant CR delete drops the Mongo databases and the Vault
     // path. Idempotence is claimed for the re-run alone; the live case is stated as the destruction it is.
     expect(plan.summary).not.toMatch(/safe on a healthy tenant/);

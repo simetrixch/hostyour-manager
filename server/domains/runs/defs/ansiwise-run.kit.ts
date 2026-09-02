@@ -10,7 +10,7 @@ import { CATALOG_CHECKOUT, CATALOG_PROGRAMS } from "./machine-state.ts";
 
 // Driving one ansiwise PROGRAM on a machine, through the machine's own REST surface — the step
 // that replaces `setup.sh --<stage>` on hosts whose machine layer is delivered by the
-// deploy-cluster / deploy-platform-services programs (digita-deploy ansiwise/programs/) instead of shell.
+// deploy-cluster / deploy-platform-services programs (hostyour-deploy ansiwise/programs/) instead of shell.
 //
 // THE SHAPE IS: prove, then act, and never re-implement the proof. `dry` first, asserted green
 // off the machine's own record; then `run`, which the machine's gate only admits against a green
@@ -52,18 +52,21 @@ export interface AnsiwisePorts {
    *  release surface an installation takes them from is its own decision; WHICH version is placed
    *  never is, and neither is which pair of names an engine is made of. */
   ansiwiseDownloadUrl?: string;
-  /** WHERE A CATALOGUE COMES FROM for a machine that has none, and what opens it.
+  /** WHERE A CATALOGUE COMES FROM for a machine that has none.
    *
    *  A SLAVE IS BORN WITHOUT ONE. The installer clones the catalogue onto a first master; nothing
    *  does it for a slave, and every program is read out of that checkout — so the machine's own
    *  surface cannot even start, and what an operator saw was the serving binary's `cd` failing and
-   *  the socket hanging up. This manager holds the address and the credential already
-   *  (kernel/config.ts `catalog`), which is what lets it make the checkout itself rather than wait
-   *  for a program it cannot run.
+   *  the socket hanging up. This manager holds the address already (kernel/config.ts
+   *  `deployProgramsRepoUrl`), which is what lets it make the checkout itself rather than wait for a
+   *  program it cannot run.
    *
-   *  Absent, the placing step says so and touches no tree: an installation that states no catalogue
-   *  is one where a machine's own checkout is the only one there is. */
-  catalogueOrigin?: { repoURL: string; token: string };
+   *  AN ADDRESS AND NOTHING ELSE, because the deployment programs are a public repository: a clone
+   *  of it is answered without a credential, so there is none to carry in and none to leave behind.
+   *
+   *  Absent is a manager that was BUILT without one — boot/wire.ts states it unconditionally, so no
+   *  setting an operator left blank produces this. The placing step then says so and touches no tree. */
+  catalogueOrigin?: { repoURL: string };
   /** THE INSTALLATION'S PULL CONFIGURATION FOR ONE REGISTRY ADDRESS, as the encoded document a
    *  container runtime is configured with — base64 of `{"auths":{"<host>":{…}}}`.
    *

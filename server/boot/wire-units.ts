@@ -130,8 +130,8 @@ export interface UnitsWiring {
    *  result with a reason. */
   tenantRegistrations?: TenantRegistrations;
   /** Bring the catalog's books branch into being at boot. The tenant ApplicationSet's git generator
-   *  reads that branch from the moment the installation is deployed, and until this ran it came into
-   *  being only on the first tenant registration — so a correct fresh installation showed the
+   *  reads that branch from the moment the installation is deployed, and without this it comes into
+   *  being only on the first tenant registration — so a correct fresh installation shows the
    *  ApplicationSet, and the root Application above it, in error. Undefined when tenant onboarding is
    *  not configured; there is then no catalog to write into. */
   ensureBooksBranch?: () => Promise<void>;
@@ -405,7 +405,7 @@ function buildConsumerOnboarding(
     ...(config.kubeconfigPath !== undefined ? { kubeconfigPath: config.kubeconfigPath } : {}),
   });
 
-  // The runs no longer carry the master trio directly — they resolve the RIGHT kube clients + ArgoCD
+  // The runs do not carry the master trio directly — they resolve the RIGHT kube clients + ArgoCD
   // namespace per target cluster (slave vs the master) through the resolver at run time.
   const onboardPorts: OnboardPorts = {
     repo,

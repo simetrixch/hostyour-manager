@@ -32,7 +32,7 @@ import { coordinatorNodesOf, describeNode, ipv4Of } from "./tailnet.coordinator.
 // rejoin step of the very run that then needs it.
 //
 // IT READS ON EVERY DEPLOYMENT, not only after a first join: a rejoin hands the machine a FRESH
-// address (digita-deploy ansiwise/programs/tailnet-rejoin.yaml says so in its own head), and a row
+// address (hostyour-deploy ansiwise/programs/tailnet-rejoin.yaml says so in its own head), and a row
 // still carrying the previous one points everything the master does at a machine that stopped
 // answering there.
 

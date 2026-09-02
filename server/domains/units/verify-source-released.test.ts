@@ -42,8 +42,8 @@ describe("verify-source-released (step level)", () => {
     // The tenant handle is its fan-out: the repoint flips the registration's cluster field, the source
     // appset stops matching, and ArgoCD prunes one Application per member. A member still standing is a
     // source that has not let go, and continuing would put two live copies of one tenant on two
-    // clusters. It used to watch the source Tenant CR instead — an object nothing holds, so the check
-    // always passed.
+    // clusters. Watching the source Tenant CR instead rests on an object nothing holds, so such a
+    // check always passes.
     seedClusters(db);
     seedTenantRows(db);
     const f = makeFakes();

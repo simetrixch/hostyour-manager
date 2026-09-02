@@ -19,7 +19,7 @@ import type { Logger } from "../../kernel/logger.ts";
 // kube/vault clients, so the harness stays tiny. The removal takes fewer of those still: it matches the
 // EventListener path and therefore names no host.
 //
-// The fixture is the case the platform allows and the old composition got wrong: the unit is onboarded
+// The fixture is the case the platform allows and a one-cluster composition gets wrong: the unit is onboarded
 // to s1.example, whose map names a DIFFERENT cluster as its build plane (cluster-map.fixture.ts).
 // The EventListener stands only on that other cluster, so every address below is the build plane's,
 // never the unit's own target cluster's.

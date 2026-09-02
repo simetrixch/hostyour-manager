@@ -15,7 +15,7 @@ import { mergeTrunkScript } from "./deploy-slave.remote.ts";
 // The scenario is the recorded one: a branch cut from a trunk whose ApplicationSet selected by one
 // role word and stamped with `slave`, meeting a trunk that has since rewritten that selector into
 // two markers. git cannot know that `- slave` IS the stamped form of what now stands there, and
-// stops — which is what three deploy attempts hit on 2026-08-29.
+// stops — which is what a deploy attempt against such a trunk meets.
 
 const SHELL = process.platform === "win32"
   ? { file: "wsl", args: ["-e", "sh", "-c"] }

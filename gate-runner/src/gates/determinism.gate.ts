@@ -165,10 +165,9 @@ export const determinismGate: CheckGate = {
     // AND SAY WHICH OF THE TWO THINGS IS ACTUALLY KNOWN. `chartPath` is the RUN's dispatch parameter
     // and `manifest` is what the repository declares, and this gate runs at pipeline.ts before the
     // `manifest !== null` guard — so on a run whose G1 failed, nothing here has read the repository
-    // at all. One sentence for both cases claimed the manifest declares no chart on a report whose
-    // manifest is null, which is the same defect apps3 met from the other side: a row reporting on
-    // the repository from an input it does not have, and reporting it as a PASS, which reads exactly
-    // like a gate that looked.
+    // at all. One sentence for both cases would claim the manifest declares no chart on a report
+    // whose manifest is null: a row reporting on the repository from an input it does not have, and
+    // reporting it as a PASS, which reads exactly like a gate that looked.
     if (ctx.chartPath === null) {
       const found =
         ctx.manifest === null

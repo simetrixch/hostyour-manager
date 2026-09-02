@@ -12,7 +12,7 @@
 // dependency in as many words: "the single-replica deployment (RWO sqlite ⇒ no cross-pod
 // concurrency)". A second pod writing it is not merely awkward, it is excluded by the storage.
 //
-// The alternative was a CronJob calling the API, which needs a machine-to-machine credential this
+// The alternative IS a CronJob calling the API, which needs a machine-to-machine credential this
 // product does not have. Adding one would be a new way into an API that provisions tenants and holds
 // every cluster credential — a large decision to take for a timer.
 //

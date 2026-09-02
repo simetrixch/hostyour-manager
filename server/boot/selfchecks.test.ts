@@ -249,7 +249,7 @@ describe("boot self-checks", () => {
   //
   // THE PATH IS A LITERAL HERE, never the constant under test: seeding from ANSIWISE_PIN_PATH is
   // exactly what let the drift through, so this fixture states where the platform repository really
-  // carries the file (measured in simetrixch/hostyour-cloud, 2026-08-26).
+  // carries the file (measured in the platform repository).
   const PIN_FILE = "clusters/platform/versions.yaml";
   const PINNED = 'cliTools:\n  ansiwise:\n    version: "0.4.2"\n  yq:\n    version: "v4.53.3"\n';
   const platformRepoPinning = (path: string, text: string): FakePlatformRepo => {
@@ -302,8 +302,8 @@ describe("boot self-checks", () => {
   });
 
   // THE PLATFORM'S DECLARATION OF THE PROGRAM ORDER, held against the order this manager really
-  // drives. The declaration had no reader at all, and a declaration nothing consumes looks exactly
-  // like one that is obeyed — three of its own sentences were false for days before a person noticed.
+  // drives. A declaration nothing consumes looks exactly
+  // like one that is obeyed, and its own sentences can be false without anyone noticing.
   //
   // The stated order is a LITERAL here, taken off the platform repository's own file, never composed
   // from what the run happens to do: a fixture derived from the subject cannot disagree with it.
@@ -316,7 +316,7 @@ describe("boot self-checks", () => {
 
   /** EVERY run kind this manager registers that drives one of the machine's programs, as a LITERAL —
    *  the check derives its own list from the definitions, so a list composed the same way could not
-   *  disagree with it. Measured 2026-08-27 against the definitions a fully wired boot builds. */
+   *  disagree with it. Measured against the definitions a fully wired boot builds. */
   const KINDS_DRIVING_PROGRAMS = [
     "cluster-deploy-slave", "cluster-redeploy",
     "cluster-tailnet-disconnect", "cluster-tailnet-reconnect",

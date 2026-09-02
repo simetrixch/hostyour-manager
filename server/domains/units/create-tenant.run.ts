@@ -120,12 +120,11 @@ export interface TenantOnboardPorts {
 
 const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely
 
-/** The reset nonce a fresh tenant starts at, in its registration. It used to ride the Tenant CR's
- *  operator.hostyour.cloud/reset annotation as well, where a CHANGED value told the reconciler to drop the
- *  tenant's databases and restart its pods so the boot-seeds repopulate. That reconciler is gone and
- *  the CR with it, so the field is written and nothing acts on a change to it — a data reset has no
- *  mechanism today. The field stays because it is a mandatory part of the registration schema and
- *  whatever answers "what is a data reset" will key on it. */
+/** The reset nonce a fresh tenant starts at, in its registration. Nothing acts on a change to it: the
+ *  Tenant CR's operator.hostyour.cloud/reset annotation — where a CHANGED value would tell a reconciler
+ *  to drop the tenant's databases and restart its pods so the boot-seeds repopulate — has no
+ *  reconciler serving it, so a data reset has no mechanism. The field stays because it is a mandatory
+ *  part of the registration schema and whatever answers "what is a data reset" will key on it. */
 const INITIAL_RESET_NONCE = "1";
 
 // Mirror of shared/tenant.ts:subdomain (not exported) — a bounded, zero-PII public DNS-subdomain
@@ -302,11 +301,11 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
       name: "record-provisional",
       title: "Record the tenant as provisioning (before anything is deployed)",
       run: async (ctx) => {
-        // THE ROOT-CAUSE FIX. The tenants row used to be written LAST, so it
-        // recorded SUCCESS while git and the cluster had already been mutated several steps earlier: a
-        // failure in between left a tenant that exists in GitOps + ArgoCD but has NO tenants row, and
+        // RECORD INTENT, NOT SUCCESS. A tenants row written LAST
+        // records SUCCESS while git and the cluster have already been mutated several steps earlier: a
+        // failure in between leaves a tenant that exists in GitOps + ArgoCD but has NO tenants row, and
         // EVERY removal run kind resolves its target BY that row (lifecycle.ts loadTenantCluster throws
-        // NOT_FOUND) — so the tenant was not merely broken, it was unreachable through the product.
+        // NOT_FOUND) — so such a tenant is not merely broken, it is unreachable through the product.
         // Recording INTENT here, right after the attest and the subdomain belt (both read-only) and
         // therefore before ANY git or kube mutation (the replace teardowns git-rm pointers,
         // ensure-images creates PipelineRuns),

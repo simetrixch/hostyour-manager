@@ -260,12 +260,12 @@ export async function liveSlaveWorld(serve: ServeFixture): Promise<Harness> {
 
 // ---- reading the machine's own records ----
 
-// WHICH RECORDS BELONG TO THE RUN UNDER TEST, and why this is not a diff over time. These assertions
-// used to take the records that appeared between two `observer.runs()` readings. The machine's record
+// WHICH RECORDS BELONG TO THE RUN UNDER TEST, and why this is not a diff over time. Taking the
+// records that appear between two `observer.runs()` readings does not work. The machine's record
 // store is one directory shared by every `ansiwise-rest serve` the suite starts, and a run is a
 // DETACHED child: it writes its record when it finishes, which can be after the test that started it
-// has ended. So a record belonging to an earlier test landed inside a later test's two readings and
-// was counted as that test's — the later test then saw a program it never ran, or saw one of its own
+// has ended. So a record belonging to an earlier test lands inside a later test's two readings and
+// is counted as that test's — the later test then sees a program it never ran, or sees one of its own
 // programs twice. Neither emptying the store between tests nor filtering on the record id's stamp
 // closes that: the id's stamp reaches seconds, and the stray shares the second.
 //
@@ -471,7 +471,7 @@ function rest(ms: number, signal: AbortSignal): Promise<void> {
  *
  *  THIS READS THE RENAME'S SOURCE AND NEVER ITS TARGET, and that is the whole reason it reads one
  *  file instead of two. The state below is produced by a rename that fails while a reader holds the
- *  target open, so a detector that opened run.json every poll turn was raising the rate of the very
+ *  target open, so a detector that opened run.json every poll turn would raise the rate of the very
  *  thing it measures. Measured on this platform, 300 renames per row, the renaming process and the
  *  reading process separate, the reader spinning as fast as it can read:
  *

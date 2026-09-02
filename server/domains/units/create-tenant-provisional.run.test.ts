@@ -28,19 +28,20 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
-// THE ROOT-CAUSE FIX of the orphan-tenant defect, on its own two axes:
+// THE TWO AXES THAT KEEP A TENANT FROM BEING ORPHANED:
 //
-//   RECORD INTENT, NOT SUCCESS. The tenants row used to be written LAST, so it recorded
-//   SUCCESS while git and the cluster had been mutated several steps earlier — and a failure in between
-//   left a tenant every removal run kind was structurally unable to name. record-provisional now writes it
+//   RECORD INTENT, NOT SUCCESS. A tenants row written LAST records
+//   SUCCESS while git and the cluster have been mutated several steps earlier — and a failure in between
+//   leaves a tenant every removal run kind is structurally unable to name. record-provisional writes it
 //   FIRST, at status "provisioning"; record-inventory only settles it to "active". The load-bearing
 //   asymmetry these tests pin is that "provisioning" is INSERT-ONLY: a resumed run must never demote a
 //   row record-inventory already lifted to "active".
 //
-//   ONE TEARDOWN PATH. create-tenant's abort-with-cleanup used to be a private pair that
-//   deleted the isolation AppProject WITHOUT waiting for the fan-out to prune and swallowed every error
-//   in a bare catch. It is now the SHARED tenant-teardown.ts steps — the same four the replace,
-//   tenant-offboard and tenant-purge run — armed as ONE registration from record-provisional.
+//   ONE TEARDOWN PATH. A private abort-with-cleanup pair that
+//   deletes the isolation AppProject WITHOUT waiting for the fan-out to prune and swallows every error
+//   in a bare catch is what create-tenant must not have. It arms the SHARED tenant-teardown.ts steps —
+//   the same ones the replace, tenant-offboard and tenant-purge run — as ONE registration from
+//   record-provisional.
 //
 //   PROBE, DON'T FOLD. create-tenant's one "does a pointer stand here?" question — the guid-mint
 //   collision check — asks it through the registrations's TOLERANT scan, like every other probe in the
@@ -429,9 +430,9 @@ describe("create-tenant's abort-with-cleanup IS the shared teardown", () => {
 describe("the guid mint probes with the TOLERANT scan", () => {
   it("a pointer the strict fold chokes on cannot wedge a create-tenant plan", async () => {
     // mintFreeGuid asks ONE question of each candidate: does registrations/<guid>/<stage>.yaml stand?
-    // It used to ask through readTenant, which folds all five files and THROWS on a drifted
-    // auth/jobs/report/reset.yaml — so a candidate landing on such a directory failed the whole plan
-    // instead of being discarded, and no tenant could be created at that stage until someone repaired
+    // Asking through readTenant instead, which folds all five files and THROWS on a drifted
+    // auth/jobs/report/reset.yaml, makes a candidate landing on such a directory fail the whole plan
+    // instead of being discarded, and no tenant can be created at that stage until someone repairs
     // the file by hand. The candidate guid is CSPRNG-minted and cannot be planted in advance, so the
     // strict fold's throw is injected on the registrations itself: the scan-grade probe never calls it, while
     // "absent" — the one answer that means the guid is FREE — still comes from the real scan.

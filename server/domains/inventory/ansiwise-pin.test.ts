@@ -20,10 +20,10 @@ const VERSIONS = [
 
 /** WHERE THE PLATFORM REPOSITORY REALLY CARRIES THE FILE, as a literal and never as the constant
  *  under test. Seeding the fake from ANSIWISE_PIN_PATH makes the fixture agree with the reader
- *  whatever that repository holds, which is exactly how this path went on naming
- *  `platform/versions.yaml` through the rename that moved it under `clusters/`: green here, and a
- *  slave's engine placement dying on the machine with a message that named a file nobody had moved.
- *  Measured in simetrixch/hostyour-cloud on 2026-08-26 — `master:clusters/platform/versions.yaml`
+ *  whatever that repository holds, which is exactly how such a path goes on naming
+ *  `platform/versions.yaml` after a rename moves it under `clusters/`: green here, and a
+ *  slave's engine placement dying on the machine with a message naming a file nobody had moved.
+ *  Measured in the platform repository — `master:clusters/platform/versions.yaml`
  *  exists, `master:platform/versions.yaml` does not. */
 const PIN_FILE_ON_THE_PLATFORM_REPO = "clusters/platform/versions.yaml";
 

@@ -261,7 +261,7 @@ describe("G26 manifest input (hard)", () => {
     // Each named gate is carried as its own evidence row, so the card lists them rather than a count.
     expect(g.evidence?.map((e) => e.name)).toEqual([...MANIFEST_FED_GATE_IDS]);
 
-    // The sentence G18 used to produce from an absent manifest, and the one this row must never
+    // The sentence G18 produces from an absent manifest, and the one this row must never
     // repeat: it is a claim about a file nothing opened.
     expect(g.found).not.toContain("no build declared");
   });

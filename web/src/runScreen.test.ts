@@ -50,13 +50,13 @@ describe("runOnScreen", () => {
 
 describe("runTenantPurgeTarget", () => {
   // The rule has to answer for EVERY member of RunTenantStateView, because the callout renders one branch
-  // per member and the server can send any of them. The member that was once missing from the browser
-  // entirely is "not-deployed": a create-tenant whose attest-target refused — a deploy-state mismatch, an
-  // unreachable slave — froze a guid and then deployed NOTHING, so it carries a target and no `row`. Back
-  // when the browser kept its own copy of this union it simply never learned that member, the answer fell
+  // per member and the server can send any of them. The member easiest to miss in the browser
+  // is "not-deployed": a create-tenant whose attest-target refused — a deploy-state mismatch, an
+  // unreachable slave — froze a guid and then deployed NOTHING, so it carries a target and no `row`. A
+  // browser keeping its own copy of this union never learns that member, the answer falls
   // through to the last arm of the callout's chain (the offboarded arm), and that arm reads
-  // `tenant.row.status`: the whole Run screen threw on the single most ordinary create-tenant failure.
-  // The union is now declared once (shared/api-types.ts) and returned by the server's own
+  // `tenant.row.status`: the whole Run screen throws on the single most ordinary create-tenant failure.
+  // The union is declared once (shared/api-types.ts) and returned by the server's own
   // resolveRunTenantState, so a new member cannot arrive unannounced — and this table keeps the RULE
   // honest about the members that exist: an unanswered one fails the switch's exhaustiveness.
   const cases: [RunTenantStateView, PurgeTenantTarget | null][] = [
@@ -128,20 +128,20 @@ describe("abortOffer", () => {
     expect(abortOffer("tenant-create", none, null)).toEqual({ offered: true, tenant: null });
   });
 
-  // THE defect an operator hit end to end on this screen: a
+  // THE defect an operator meets end to end on this screen: a
   // create-tenant fails, the operator purges the tenant it left behind, then returns to the failed run —
-  // where "Abort (cleanup)" was still ENABLED, directly above the callout's own sentence that no removal
+  // where "Abort (cleanup)" is still ENABLED, directly above the callout's own sentence that no removal
   // is offered on that tenant anywhere, because there is nothing left to reap. Two adjacent elements
-  // asserting opposites. Confirming ran the create-tenant's rollback (settledStatus "offboarded",
-  // tenantId null): every step no-opped, and its record step re-resolved the row by (clusterId, guid) and
-  // DOWNGRADED a purged tenant to "offboarded" with the create-tenant's run id — putting a deprovisioned
-  // tenant back on the "Offboarded tenants" panel, advertising the purge that had already run, with a
+  // asserting opposites. Confirming runs the create-tenant's rollback (settledStatus "offboarded",
+  // tenantId null): every step no-ops, and its record step re-resolves the row by (clusterId, guid) and
+  // DOWNGRADES a purged tenant to "offboarded" with the create-tenant's run id — putting a deprovisioned
+  // tenant back on the "Offboarded tenants" panel, advertising the purge that already ran, with a
   // detail page telling the operator its namespace, Tenant CR, Vault path and Mongo databases still
-  // stood. The server refuses that write now (shared/enums.ts atLeastAsSettledAs) and is the guard; this
+  // stand. The server refuses that write (shared/enums.ts atLeastAsSettledAs) and is the guard; this
   // is the surface that stops offering it.
   //
-  // These two expectations previously asserted `{ offered: true, tenant: null }` — a test pinning the
-  // defect, not a contract: "the confirmation names no tenant" was read as licence to still offer the
+  // Asserting `{ offered: true, tenant: null }` here would pin the
+  // defect and not a contract: "the confirmation names no tenant" read as licence to still offer the
   // abort, when the very reason no tenant can be named is that a removal already took it down. Both
   // settled states are refused, and the refusal says which removal ran, since what survived it differs.
   it("REFUSES the abort on a tenant a removal has already settled", () => {
@@ -229,10 +229,10 @@ describe("secretsToSupply / readyToApprove", () => {
 });
 
 describe("approvePayload", () => {
-  // WHAT WENT MISSING. The slave ceremony was built to ask for the secrets a plan requires and
-  // asked for none of its INPUTS, so a deployment was approved without them and the machine-layer
-  // programs stopped eight steps later at `needs the answer "letsencrypt_email"` — after a branch
-  // had been cut and a machine given an engine (apps4, 2026-08-28).
+  // WHAT MUST NOT GO MISSING. A slave ceremony that asks for the secrets a plan requires and for
+  // none of its INPUTS lets a deployment be approved without them, and the machine-layer
+  // programs stop eight steps later at `needs the answer "letsencrypt_email"` — after a branch
+  // has been cut and a machine given an engine. Measured on a real machine.
   const slave = (): RunView => ({
     ...run("run_1", "cluster-deploy-slave", "planned"),
     requiredSecrets: ["ansiwise-elevation"],

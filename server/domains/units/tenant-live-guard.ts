@@ -69,10 +69,10 @@ import type { TenantRegistrations } from "./tenant-registrations.ts";
 /** The two row states that mean the tenant is DEPLOYED and expected to serve. Named as a POSITIVE set
  *  rather than written as `!== "provisioning" && !== "offboarded"`, because the negative form classifies
  *  any status added to TENANT_STATUS later as live and would therefore refuse run kinds on it sight unseen —
- *  which is how a re-purge of an already-purged tenant would have been refused the moment "purged"
- *  existed. The set is the other trade, and it is the one taken knowingly: a new status is ALLOWED until
+ *  which is how a re-purge of an already-purged tenant gets refused the moment a status like "purged"
+ *  is added. The set is the other trade, and it is the one taken knowingly: a new status is ALLOWED until
  *  this list says otherwise, so every addition to TENANT_STATUS owes this rule a decision, recorded in the
- *  header's bullets above ("purged" is the most recent). "suspended" belongs here:
+ *  header's bullets above. "suspended" belongs here:
  *  suspend prunes the fan-out but KEEPS the Tenant CR, the namespace, the Vault path and the Mongo
  *  databases, and the tenant is one tenant-resume away from serving again — nothing about it is leftover
  *  state. */

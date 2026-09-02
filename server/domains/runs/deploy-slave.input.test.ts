@@ -3,21 +3,21 @@ import { clusters } from "../../db/schema/inventory.ts";
 import { inputFile } from "./defs/machine-state.ts";
 import { KEYS_A_SLAVE_READS } from "./defs/deploy-slave.input.ts";
 import {
-  SLAVE_ID, PARAMS, CATALOGUE_TOKEN, PULL_AUTH,
+  SLAVE_ID, PARAMS, PULL_AUTH,
   scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx, stepOf, type Harness,
 } from "./deploy-slave.fixture.ts";
 
-// THE TWO VALUES A CLUSTER THAT KEEPS NO BOOKS READS OFF ITS MACHINE, and the file they stand in
-// for the length of one run.
+// THE VALUE A CLUSTER THAT KEEPS NO BOOKS READS OFF ITS MACHINE, and the file it stands in for the
+// length of one run.
 //
 // secrets/secrets.<stage> is the one hand-filled input of an installation, and it belongs to the
 // cluster that keeps the books: gitignored, so no branch carries it, and written by that cluster's
-// own branch programs and by nothing else. Two rows of the machine's own programs still read a
-// value out of it on every cluster — the containerd mirror in deploy-cluster and the catalogue
-// clone in deploy-platform-services — and neither can be gated away without breaking the machine.
+// own branch programs and by nothing else. One row of the machine's own programs still reads a value
+// out of it on every cluster — the containerd mirror in deploy-cluster — and it cannot be gated away
+// without breaking the machine.
 //
-// So the manager composes those two out of what it already holds and puts them there, and takes
-// them away again. Nothing is copied off another machine, and nothing is left behind.
+// So the manager composes that value out of what it already holds and puts it there, and takes it
+// away again. Nothing is copied off another machine, and nothing is left behind.
 
 const PATH = inputFile(PARAMS.stage);
 
@@ -43,10 +43,10 @@ function written(h: Harness): { content: string; mode: number } | undefined {
   return put ? { content: put.content, mode: put.mode } : undefined;
 }
 
-describe("the two values a machine keeping no books reads", () => {
+describe("the value a machine keeping no books reads", () => {
   afterEach(disposeHarnesses);
 
-  it("places both, out of what this manager holds and not off another machine", async () => {
+  it("places it, out of what this manager holds and not off another machine", async () => {
     const h = await world();
     const said: string[] = [];
 
@@ -55,9 +55,8 @@ describe("the two values a machine keeping no books reads", () => {
     const file = written(h);
     expect(file, `nothing was written to ${PATH}`).toBeDefined();
     for (const key of KEYS_A_SLAVE_READS) expect(file?.content, `${key} is not in the file`).toContain(`${key}=`);
-    // The catalogue credential is the manager's own (catalogueOrigin), and the pull entry comes out
-    // of its own mounted document — narrowed to the one address this cluster's map names.
-    expect(file?.content).toContain(CATALOGUE_TOKEN);
+    // The pull entry comes out of this manager's own mounted document — narrowed to the one address
+    // this cluster's map names.
     expect(Buffer.from(file?.content.match(/REGISTRY_PULL_DOCKERCONFIGJSON="([^"]+)"/)?.[1] ?? "", "base64").toString("utf8"))
       .toContain(PULL_AUTH);
     // 0600, the mode the books-keeper's own input carries.
@@ -70,8 +69,8 @@ describe("the two values a machine keeping no books reads", () => {
   });
 
   it("says which keys it placed and never what they are", async () => {
-    // A run's surface is read by people and kept. The names are the useful half; the values are a
-    // code host's token and a registry's password.
+    // A run's surface is read by people and kept. The names are the useful half; the value is a
+    // registry's password.
     const h = await world();
     const said: string[] = [];
 
@@ -128,17 +127,17 @@ describe("the two values a machine keeping no books reads", () => {
     expect(armed).toEqual(["drop-input"]);
   });
 
-  it("refuses NAMED where this manager holds neither value", async () => {
-    // A manager built without a catalogue credential cannot give a machine one, and a machine that
-    // keeps no books has no other source. Better to say so here than to let the machine's own
-    // programs refuse by file and key three steps later.
+  it("refuses NAMED where this manager holds no pull configuration of its own", async () => {
+    // A manager built without one cannot give a machine one, and a machine that keeps no books has
+    // no other source. Better to say so here than to let the machine's own programs refuse by file
+    // and key three steps later.
     const h = await makeHarness({ withoutCarriedValues: true });
     h.db.db.insert(clusters).values({
       id: "cls_in2", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
     }).run();
 
     await expect(stepOf(h, "place-input").run(hostedStepCtx(h)))
-      .rejects.toThrow(/neither a catalogue credential nor its own pull configuration/);
+      .rejects.toThrow(/no pull configuration of its own/);
     expect(h.hosts.files.filter((f) => f.path === PATH), "and writes nothing").toHaveLength(0);
   });
 });

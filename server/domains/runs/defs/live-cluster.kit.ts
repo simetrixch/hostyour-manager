@@ -111,11 +111,11 @@ export function refreshCheckoutStep(target: SlaveTarget): Step {
  *  abortable; zero Applications means the appset has not generated yet and is retried, never read as
  *  "nothing to wait for".
  *
- *  IT REACHES THE CLUSTER THE SAME WAY ITS FIVE NEIGHBOURS DO: with the elevation password the run
- *  asked for at approve, which is what the three program steps raise every one of their commands
- *  with. It used to ask for `sudo -n`, and that is a rule only the adoption puts on a machine — so
- *  on a master installed by ansiwise-client, which is never adopted, the last step of a redeploy was
- *  refused while every step before it had gone green. Measured on a first master on 2026-08-27:
+ *  IT REACHES THE CLUSTER THE SAME WAY ITS NEIGHBOURS DO: with the elevation password the run
+ *  asked for at approve, which is what the program steps raise every one of their commands
+ *  with. Asking for `sudo -n` instead rests on a rule only the adoption puts on a machine — so
+ *  on a master installed by ansiwise-client, which is never adopted, the last step of a redeploy is
+ *  refused while every step before it has gone green. Measured on a first master:
  *  /etc/sudoers.d/ held only a README, and the run said "sudo: interactive authentication is
  *  required" under a line telling the operator the cluster was not answering yet. */
 export function argocdFollowStep(target: SlaveTarget): Step {

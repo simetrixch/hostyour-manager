@@ -114,8 +114,8 @@ export function createEmergencyApp(deps: EmergencyDeps): Hono {
  * needs only write permission on the file. Nothing here is reachable over any network — AF_UNIX
  * has no address a peer off the machine can name, and no browser can open one.
  *
- * WHAT THAT BOUNDARY LETS IN, exactly, because "host access on the master" is what it used to be
- * called and that was never true of the code. Three sets can reach these routes and no fourth: the
+ * WHAT THAT BOUNDARY LETS IN, exactly, because "host access on the master" is a loose description
+ * of it that the code does not match. Three sets can reach these routes and no fourth: the
  * account this process runs as, which owns the inode; every account in the inode's GROUP, where the
  * mode grants the group — which is how an account on the machine outside this container is admitted
  * at all; and root, which the permission check does not apply to. Anyone else gets EACCES from

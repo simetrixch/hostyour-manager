@@ -111,8 +111,8 @@ export const clusters = sqliteTable("clusters", {
   planeState: text("plane_state", { enum: PLANE_STATE }).notNull().default("absent"),
   // ClusterPlaneV0 (shared/plane.ts). TWO steps of the deploy-slave Run write it: create-mgmt folds
   // in the harvested kube access, register writes the whole plane. planeState above has THREE
-  // writers (create-mgmt, verify-slave, register). Stated because the comment here used to claim a
-  // single writer, and a reader who believes that reasons about the column as if it settled once.
+  // writers (create-mgmt, verify-slave, register). Stated out loud because a reader who believes
+  // there is a single writer reasons about the column as if it settled once.
   planeJson: text("plane_json", { mode: "json" }),
   provisionedAt: integer("provisioned_at", { mode: "timestamp_ms" }),
 }, (t) => [

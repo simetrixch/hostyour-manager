@@ -134,7 +134,7 @@ const ClusterMarkingFileSchema = z.object({
 }).strict();
 
 /** Every key the strict schema accepts — its whole surface. The deployment programs' map template
- *  (digita-deploy ansiwise/templates/cluster-map.tpl) is the OTHER writer, so the test suite
+ *  (hostyour-deploy ansiwise/templates/cluster-map.tpl) is the OTHER writer, so the test suite
  *  compares this list against the keys that template emits: a field the template gains fails ONE
  *  test naming the key, instead of failing every map read on the next fresh installation. */
 export const CLUSTER_MARKING_FILE_KEYS = Object.keys(ClusterMarkingFileSchema.shape);

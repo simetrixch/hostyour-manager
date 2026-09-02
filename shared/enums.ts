@@ -109,9 +109,9 @@ export type TenantStatus = (typeof TENANT_STATUS)[number];
  *  domain ask the same question — "does this row still stand for a tenant that is out there?" — of
  *  tenants.status (the orphan scan, the teardown-target resolver, the create-tenant replace-target
  *  lookup) and of tenant_apps.status (the fan-out watch set, the live reconciliation read, the two
- *  teardown record steps). Every one of them used to spell it `!== "offboarded"`, and every one of them
- *  would have fallen silently on the permissive side the moment "purged" existed: a fully deprovisioned
- *  tenant would have been read as a tenant that still stands. A named set makes a future terminal state
+ *  teardown record steps). Every one of them spelling it `!== "offboarded"` falls silently on the
+ *  permissive side the moment a status like "purged" is added: a fully deprovisioned
+ *  tenant reads as a tenant that still stands. A named set makes a future terminal state
  *  one edit here instead of a hunt through those modules.
  *
  *  It is NOT the inverse of the server's TENANT_LIVE_STATUS (tenant-live-guard.ts): "provisioning" is
@@ -220,12 +220,11 @@ export type DriftVerdict = (typeof DRIFT_VERDICT)[number];
 //                    attested against the live cluster, never gate-validated by that run. Consumer-only
 //                    — there is no adopt run kind for a tenant.
 //
-// Two literals, not three. The consumer onboard and the tenant writer once had a word each for the
-// same act — one wrote "imported", the other wrote the word this list now spells "manager" — so a
-// reader of either concluded they meant different things, and a query for one answered about one unit
-// kind while silently leaving out the other. "imported" also had a declared second meaning, a consumer
-// taken over from a cluster this platform did not build, reserved for a connect-cluster run kind that
-// is in no RUN_KIND; nothing ever wrote it under that meaning either.
+// Two literals, not three. One act gets ONE word: a consumer onboard and a tenant writer spelling the
+// same act differently — "imported" against "manager" — make a reader of either conclude they mean
+// different things, and a query for one then answers about one unit kind while silently leaving out
+// the other. Nor is there a literal for a consumer taken over from a cluster this platform did not
+// build: that belongs to a connect-cluster run kind, which is in no RUN_KIND, so nothing writes it.
 //
 // The word is the PRODUCT's name, and this is the surface an operator reads it on: the consumer and
 // tenant lists render the stored value straight into a chip (web/src/pages/Consumers.tsx,
@@ -244,13 +243,12 @@ export const CLUSTER_TIER = ["rehearsal", "real"] as const; // default "rehearsa
 export type ClusterTier = (typeof CLUSTER_TIER)[number];
 
 // Lifecycle of a slave's master-side management plane (the per-slave namespaced
-// ArgoCD + Vault surface — see shared/plane.ts). Formerly TRIO_STATE; "trio" is
-// dropped terminology and the column is clusters.plane_state.
+// ArgoCD + Vault surface — see shared/plane.ts). The column is clusters.plane_state.
 //
-// Four literals, not five: "removing" was declared here and no step ever wrote it — there is no
-// plane-removal path in the product at all — so every reader that handled it handled a state the
-// platform could not reach. The column is plain SQLite text with no CHECK constraint, so dropping
-// a literal is a TypeScript-side narrowing only; nothing stored has to change.
+// Four literals, not five: there is no plane-removal path in the product at all, so a "removing"
+// literal would name a state the platform cannot reach, and any reader handling it would be
+// handling nothing. The column is plain SQLite text with no CHECK constraint, so this list is a
+// TypeScript-side narrowing only; nothing stored depends on it.
 export const PLANE_STATE = ["absent", "creating", "verifying", "ready"] as const;
 
 // Whether a SERVER is a member of the tailnet — the private network between the master and its

@@ -306,7 +306,7 @@ describe("GET /api/tenants/runs/:runId/tenant-state (the run's tenant, as invent
     // the seeded slave cluster is s2.example while its deploy-state reports s1.example, so
     // attest-target (assertDeployState) refuses — the "deploy-state mismatch / unreachable slave" case.
     // record-provisional is the FIRST step after it and the only step before any mutation, so nothing was
-    // deployed and no cleanup was armed. Read as "orphan" (the state a bare "no row" used to yield) the
+    // deployed and no cleanup was armed. Read as "orphan" (the state a bare "no row" yields) the
     // screen would tell the operator the run "failed after it had started deploying" and that a fan-out,
     // an isolation AppProject, a namespace and a Tenant CR may still stand — none of which ever existed —
     // and the abort beside it would promise a teardown of a pointer that was never written.

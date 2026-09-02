@@ -7,8 +7,8 @@ import {
   makeAppCatalogProvider,
 } from "./app-catalog.ts";
 
-/** The engine chart the fixture product declares — the catalog reads it out of the manifest now, so
- *  the test states it rather than importing a constant the module no longer owns. */
+/** The engine chart the fixture product declares — the catalog reads it out of the manifest, so
+ *  the test states it rather than importing a constant the module does not own. */
 const ENGINE_CHART = "charts/example-engine";
 
 // One catalog fixture: values.yaml (the chart base) + the per-stage overlays + three real

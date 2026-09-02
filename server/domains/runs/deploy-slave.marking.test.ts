@@ -88,10 +88,10 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
   });
 
   it("gives a slave the installation it belongs to, and only its own facts over it", async () => {
-    // WHAT A SLAVE USED TO GET. Its map was built from a handful of fields copied by name, so of
-    // the seventeen keys a master carries it had ten — and what was missing were the things every
-    // program on that machine reads. Its own machine layer stopped at "is not on this host" asking
-    // for the address of the secret store (apps4, 2026-08-29).
+    // WHAT A SLAVE MUST NOT GET. A map built from a handful of fields copied by name leaves out
+    // keys a master carries — and what goes missing is the things every
+    // program on that machine reads. Its own machine layer then stops at "is not on this host"
+    // asking for the address of the secret store, measured on a real machine.
     const h = await makeHarness({ marking: false });
     h.db.db.insert(clusters).values({
       id: "cls_s2", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,

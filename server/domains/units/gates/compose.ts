@@ -330,13 +330,14 @@ export const MANIFEST_FED_GATE_IDS: readonly string[] = ["G16", "G18", "G19", "G
 
 /** G26 manifest input (HARD). What the manager-side gates are given, judged before they judge
  *  anything. MANIFEST_FED_GATE_IDS read the manifest the sandbox parsed; when the report carries
- *  `manifest: null` they have no input, and the defect this gate exists to end is what they used to
- *  do with that: read the absence as an empty declaration and report it as the repository's fault.
+ *  `manifest: null` they have no input, and the defect this gate exists to prevent is what they
+ *  would otherwise do with that: read the absence as an empty declaration and report it as the
+ *  repository's fault.
  *
- *  Measured on apps3 on 2026-08-26: a report whose sandbox never ran carried no manifest, and G18
+ *  Measured on a real installation: a report whose sandbox never ran carried no manifest, and G18
  *  rejected the onboarding with "no build declared in deploy/platform.yaml" about a file that
  *  declares three. The person that sentence is written for works in the customer's repository and
- *  never opens this source; it sent them to fix something that was not broken.
+ *  never opens this source; it sends them to fix something that is not broken.
  *
  *  IT IS A FAIL, and that is the decision: a run nothing could judge is not a run that passed. The
  *  onboarding writes a namespace, a Vault path, databases and a build pipeline, and the four gates

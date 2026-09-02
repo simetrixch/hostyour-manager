@@ -44,8 +44,8 @@ import { errValidation } from "../../kernel/errors.ts";
  *  `<member>-<n>` when it has several. A member with two sources produces two renders that share the
  *  ONE Application <guid>-<member>-<stage>, so the render set and the watch set differ.
  *
- *  There is no kind. It used to be `"standing" | "engine" | "front"` — before that, the three member
- *  names of one product — and nothing outside the tests read it: a render is a chart in a namespace
+ *  There is no kind — no `"standing" | "engine" | "front"`, and no member names of one product.
+ *  Nothing outside the tests would read one: a render is a chart in a namespace
  *  whatever the product calls it. */
 export interface FanoutMember {
   name: string;
@@ -64,7 +64,7 @@ export interface AppRef {
  *  caller that needs THAT member rather than the set can name it: the bootstrap-token Secret lives in
  *  its namespace, and its Application is the tenant's deployed-revision anchor.
  *
- *  Resolved from the spec, never a constant. `AUTH_MEMBER = "auth"` used to stand here, which is the
+ *  Resolved from the spec, never a constant. An `AUTH_MEMBER = "auth"` standing here would be the
  *  cloud base knowing what one product calls its IdP. TenantSpecSchema enforces that exactly one
  *  member declares the flag, so this cannot come back empty for a spec that parsed. */
 export function identityProviderMember(spec: TenantSpec): string {
@@ -89,7 +89,7 @@ export function memberAppProject(guid: string, member: string): string {
 /** ONE member's ArgoCD Application: <guid>-<member>-<stage>. */
 /** The label every namespace and every Application of one tenant carries — the selector the fan-out
  *  watches filter by and the teardown reaps namespaces by. Declared here, with the rest of the tenant's
- *  naming, since the object it used to sit beside (the Tenant CR renderer) is gone. */
+ *  naming. */
 export const TENANT_LABEL_KEY = "platform/tenant";
 
 export function memberApplication(guid: string, member: string, stage: Stage): string {
@@ -99,8 +99,8 @@ export function memberApplication(guid: string, member: string, stage: Stage): s
 /** Every namespace of a tenant — what a teardown reaps and a move carries.
  *
  *  Takes the tenant's member NAMES, which every caller holds already: the tenant's row, its
- *  registration, or the run's frozen params. They used to be the standing names plus the apps, and
- *  before that a constant — three names of one product living in the platform. */
+ *  registration, or the run's frozen params. Never a constant, which would be names of one product
+ *  living in the platform. */
 export function tenantNamespaces(members: readonly string[], guid: string): string[] {
   return members.map((m) => memberNamespace(guid, m));
 }
@@ -110,9 +110,9 @@ export function tenantNamespaces(members: readonly string[], guid: string): stri
  *  `example-engine-{app}`, `{ ingress: { engineService: "example-engine-{app}" } }`.
  *
  *  The token exists because a per-app chart's file names and its resource names are the product's own
- *  convention, and the platform must not compose them: `values-<app>.yaml` and `example-ui-<app>-tls`
- *  used to be built in the appsets, out of literals no schema could see. The product writes the whole
- *  string and the platform only fills in which app this is. */
+ *  convention, and the platform must not compose them: building `values-<app>.yaml` and
+ *  `example-ui-<app>-tls` in the appsets composes them out of literals no schema could see. The
+ *  product writes the whole string and the platform only fills in which app this is. */
 function substituteApp(source: TenantSource, app: string | undefined): TenantSourceRecord {
   // A standing member has no app, so nothing is substituted for it — a `{app}` left in a standing
   // member's source is the product's own mistake and reaches the chart as written, where it fails
@@ -136,9 +136,9 @@ function substituteApp(source: TenantSource, app: string | undefined): TenantSou
 /** The sources ONE app renders: the engine, then the front — the front replaced wholesale when the
  *  product's override map names this app.
  *
- *  The map is keyed by app name, so the lookup IS the selection. This used to test `app === "web"`
- *  first and only then consult the map — a constant naming one app of one product, guarding a map
- *  that already answered for it. */
+ *  The map is keyed by app name, so the lookup IS the selection. Testing `app === "web"`
+ *  first and only then consulting the map would put a constant naming one app of one product in
+ *  front of a map that already answers for it. */
 function appSources(spec: TenantSpec, app: string): TenantSourceRecord[] {
   const front = spec.perApp.front.override?.[app] ?? spec.perApp.front;
   return [substituteApp(spec.perApp.engine, app), substituteApp(front, app)];

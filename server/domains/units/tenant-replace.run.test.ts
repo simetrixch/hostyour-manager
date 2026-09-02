@@ -441,8 +441,8 @@ describe("resolveTeardownTarget resolves ONE guid, with or without an inventory 
     // `cluster` is the cluster short name (the pointer's own field, the appset destination and the
     // AppProject pin), and it is what the run log and the tenant-purge PLAN tell the operator the tenant
     // lives on — on the very screen where a purge that drops Mongo databases is approved. With the
-    // pointer gone (the failed-offboard state above) it used to fall back to the row's cls_-prefixed
-    // clusterId, printing "cls_1" where the schema promises a cluster name. It is derived from the
+    // pointer gone (the failed-offboard state above), falling back to the row's cls_-prefixed
+    // clusterId prints "cls_1" where the schema promises a cluster name. It is derived from the
     // cluster row's domain instead, through the SAME clusterShortName the two other producers honour —
     // and no stored field, in the plane or on the server row, can override it.
     seedClusters();

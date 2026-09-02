@@ -94,13 +94,13 @@ describe("onboard run definition", () => {
 
   // THE RACE await-build-namespace ENDS, and it is why that step is in the chain above.
   //
-  // Measured on apps3 on 2026-08-26, on the first consumer this platform ever onboarded:
-  // write-registration ended at 1787773736850 and provision-build-rbac started at 1787773736876 —
-  // twenty-six milliseconds later — and failed with `namespaces "hostyour-manager-build" not found`.
+  // Measured on a real installation, on the first consumer this platform ever onboarded:
+  // provision-build-rbac started twenty-six milliseconds after write-registration ended, and failed
+  // with `namespaces "hostyour-manager-build" not found`.
   // The namespace is rendered by the per-unit build Application, which an ApplicationSet generates
   // FROM the registration that first step had just committed; ArgoCD had not seen the commit and
-  // could not have. Reproduced independently on apps4 the same evening. A unit's FIRST onboarding
-  // always failed and its second always succeeded, which reads like a flake and is not.
+  // could not have. Reproduced independently on a second machine. Without the wait, a unit's FIRST
+  // onboarding always fails and its second always succeeds, which reads like a flake and is not.
   //
   // The scripted reader is what the LIVE watch answers for an Application its ApplicationSet has not
   // generated: every expected name reads Missing. The assertion is the OUTCOME — the run stops at

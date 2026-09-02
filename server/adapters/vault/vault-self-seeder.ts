@@ -19,7 +19,7 @@ import { KV_MOUNT, VaultError } from "./port.ts";
 //    seed, delete on secret/metadata/<stage>/consumer/+/app for the offboard delete, and the
 //    same pair on secret/{data,metadata}/<stage>/tenants/+ for the tenant crypto entry,
 //    — the calls here fail closed (403) until they are. That policy is IMPERATIVE (the
-//    deploy-platform-services program's vault seed, digita-deploy ansiwise/programs/), not ArgoCD-owned, so
+//    deploy-platform-services program's vault seed, hostyour-deploy ansiwise/programs/), not ArgoCD-owned, so
 //    merging hostyour-cloud does not ship it: re-run deploy-platform-services on the master to widen it.
 
 /** The Manager's own Vault login facts (kubernetes-auth) — config.vault, the same surface the

@@ -19,14 +19,13 @@ import { loadServer } from "./deploy-slave.kit.ts";
 // looking. The switch is a run because only a run can write the drop-in, validate it, reload the
 // daemon and read back what the daemon resolved.
 //
-// FOUR RULES EVERY SCRIPT BELOW KEEPS. The first is the one that has already gone wrong once, on
-// the only host this platform has; the other three are what keeps the act from producing a machine
-// nobody can reach.
+// FOUR RULES EVERY SCRIPT BELOW KEEPS. The first is the one that goes wrong in practice; the other
+// three are what keeps the act from producing a machine nobody can reach.
 //   1. ONE drop-in, and it SORTS FIRST. sshd takes the FIRST occurrence of a keyword and reads
 //      /etc/ssh/sshd_config.d in alphabetical order. A file named `99-disable-passwords.conf`,
-//      saying `PasswordAuthentication no` on its face, therefore did nothing for three weeks while
-//      `50-cloud-init.conf` said `yes` before it — and it was worse than nothing, because the next
-//      reader saw the filename and stopped looking. A `00-` file wins over every drop-in in both
+//      saying `PasswordAuthentication no` on its face, therefore does nothing while
+//      `50-cloud-init.conf` says `yes` before it — and it is worse than nothing, because the next
+//      reader sees the filename and stops looking. A `00-` file wins over every drop-in in both
 //      directions, including the one cloud-init rewrites on every boot, which is why the fix
 //      belongs here rather than in editing cloud-init's file.
 //   2. VALIDATE BEFORE RELOADING, and RELOAD rather than restart. `sshd -t` refuses a
@@ -34,8 +33,8 @@ import { loadServer } from "./deploy-slave.kit.ts";
 //      established sessions alone, so a mistake does not disconnect the operator — or this run —
 //      mid-change.
 //   3. THE VERDICT IS `sshd -T`, never the file just written. Only the daemon knows what every
-//      Include and every ordering rule resolved to. A script that trusted its own write would
-//      report success on exactly the host described above.
+//      Include and every ordering rule resolved to. A script that trusts its own write
+//      reports success on exactly the host described above.
 //   4. THE KEY DOOR IS PROVEN OPEN BEFORE THE PASSWORD DOOR SHUTS. A host that refuses both
 //      answers nobody, and shutting the password door is the change that can produce that. Two
 //      keywords decide it and both are read: `pubkeyauthentication`, and `authenticationmethods`,
@@ -119,7 +118,7 @@ const SURVIVES = `survives_without_passwords() {
  *  under matches the whole argument string, so a rule carrying `*` where a pattern belongs lets the
  *  account put `-f /etc/shadow` there instead — grep reads its patterns from a file only root may
  *  read and prints the lines that match. Two fixed `-e` patterns leave the rule with no wildcard at
- *  all, and the anchoring the ERE used to do runs afterwards over grep's own `file:line:text`
+ *  all, and the anchoring an ERE would do runs afterwards over grep's own `file:line:text`
  *  output, where it needs no elevation. `-H` is what makes that output shape a fact rather than a
  *  coincidence: grep prints the file name only when it was given more than one operand, so a host
  *  without /etc/ssh/sshd_config.d would otherwise print bare `line:text` and the anchor would drop

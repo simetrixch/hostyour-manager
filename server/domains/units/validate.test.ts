@@ -119,7 +119,7 @@ describe("validateOnboard", () => {
   // WHAT THE FENCE PROOF RESTS ON, on the record of a run that PASSED it. Three of the four legs of
   // the sandbox attestation are probes the runner made from inside; the fourth — that the must-fail
   // targets were listening — is the Manager's word and nothing measures it, so a denied connect to a
-  // target nobody proved was there proves nothing. A run that passed used to say none of that.
+  // target nobody proved was there proves nothing. Without this line a run that passed says none of that.
   it("writes what the fence proof rests on into the run log, naming the target nothing measured", async () => {
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
     const declared = "10.1.1.9:16443";
@@ -165,8 +165,8 @@ describe("validateOnboard", () => {
     expect(g18?.status).toBe("pass");
     expect(g18?.found).toContain("build-only — no chart to check");
     // The gate-run is dispatched with NO chart directory at all, and the absence is what the runner
-    // reads. It used to travel as an empty string, which the runner's CLI took for an unset required
-    // input and refused — killing every build-only run before a gate could look at anything.
+    // reads. Travelling as an empty string makes the runner's CLI take it for an unset required
+    // input and refuse — killing every build-only run before a gate could look at anything.
     expect(runner.submitted[0]!.chartPath).toBeUndefined();
     expect("chartPath" in runner.submitted[0]!).toBe(false);
     expect(outcome.verdict).toBe("pass");
@@ -270,7 +270,7 @@ describe("validateOnboard", () => {
   });
 
   // A MANAGER-SIDE GATE MUST NOT JUDGE A REPOSITORY FROM AN INPUT THE REPORT NEVER CARRIED.
-  // Measured on apps3 on 2026-08-26: the report carried manifest null, and G16/G18/G19/G24 read that
+  // Measured on a real installation: the report carried manifest null, and G16/G18/G19/G24 read that
   // as an empty declaration. G18 rejected the onboarding with "no build declared in
   // deploy/platform.yaml" about a file that declares three builds, and the person that sentence is
   // written for works in the customer's repository and never opens this source.

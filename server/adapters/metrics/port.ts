@@ -1,10 +1,11 @@
 // Asking a Prometheus-compatible query API one instant query, as a port the run steps depend on.
 //
 // WHY THIS EXISTS AT ALL. The deploy-slave run ends with a soft probe that asks one question — is
-// the new slave's obs-agent pushing? It used to ask it by exec'ing into the Prometheus container on
-// the master and running promtool against localhost, and `pods/exec` hands the run that pod's own
-// ServiceAccount token and its filesystem on a cluster that carries pods whose ServiceAccount is
-// cluster-admin. The same question is answered by a plain HTTP GET with no Kubernetes right at all.
+// the new slave's obs-agent pushing? Asking it by exec'ing into the Prometheus container on the
+// master and running promtool against localhost is the alternative, and `pods/exec` hands the run
+// that pod's own ServiceAccount token and its filesystem on a cluster that carries pods whose
+// ServiceAccount is cluster-admin. The same question is answered by a plain HTTP GET with no
+// Kubernetes right at all.
 //
 // THE PORT KNOWS THE TOOL AND NOT THE APPLICATION. What is here is the query API's own grammar — an
 // instant query, and what a Prometheus-shaped answer contains. Which SERIES is worth asking about,

@@ -17,7 +17,7 @@ const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024;
 
 /** How long any git may run before it is killed. Same budget the helm renderer and the ssh exec
  *  give a child that talks to something outside this process, for the same reason: prompts-off
- *  turns a git WAITING FOR INPUT into a failure, and nothing turned a git waiting for a REMOTE
+ *  turns a git WAITING FOR INPUT into a failure, and nothing turns a git waiting for a REMOTE
  *  into one. A network that black-holes rather than refuses, an authenticating proxy, a host whose
  *  route is gone — git waits on all three without a bound of its own. */
 const DEFAULT_TIMEOUT_MS = 120_000;

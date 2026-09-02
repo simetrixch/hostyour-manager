@@ -20,7 +20,7 @@ import {
 
 // The shared half of the three tailnet repair run kinds (defs/tailnet.ts): the steps they are composed
 // of and the one plan builder they all state their targets in. The ACTS themselves are the tailnet
-// PROGRAMS of the machine's own catalogue (digita-deploy ansiwise/programs/), each driven over the
+// PROGRAMS of the machine's own catalogue (hostyour-deploy ansiwise/programs/), each driven over the
 // machine's `ansiwise-rest serve` surface and proven by a dry run the machine's gate then admits the
 // real run against — nothing here ships a script to a host any more.
 //

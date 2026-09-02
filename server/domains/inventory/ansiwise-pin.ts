@@ -20,7 +20,7 @@ import type { PlatformRepo } from "../../adapters/git/port.ts";
 /** The file the pin lives in, on the platform repo. It is the platform repository's path and not
  *  this repository's to choose, so its own test seeds a LITERAL rather than this constant: a fixture
  *  that seeds what the reader reads agrees with the reader whatever the platform repository holds,
- *  and that is how this path went on naming `platform/versions.yaml` for a whole rename — green here,
+ *  and that is how such a path goes on naming `platform/versions.yaml` through a rename — green here,
  *  and a slave's engine placement dying on the machine. */
 export const ANSIWISE_PIN_PATH = "clusters/platform/versions.yaml";
 

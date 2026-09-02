@@ -65,14 +65,12 @@ function requireDownloads(ports: AnsiwisePorts): ReleaseDownloads {
  *  the address off the installation's settings, each refused BY NAME while nothing has been asked of
  *  the machine yet.
  *
- *  WHAT THIS STEP NO LONGER PLACES is written out in place-ansiwise.ts, with where each of them went:
- *  the packages are deploy-host's `install_packages` row, and both checkouts are `git_clone` rows.
- *  MAKING one is still a program's, and REFRESHING the catalogue is this step's (machine-catalogue.ts)
- *  — the difference is a credential: a clone needs an origin and a read credential the row holds by
- *  name, and a refresh runs on a checkout that already carries both. A machine that reaches the first
- *  program step without a catalogue is answered by that step, in the words of a binary that finds no
- *  program of that name — which is a better sentence than any this step could invent about a tree it
- *  cannot create.
+ *  WHAT THIS STEP DOES NOT PLACE is written out in place-ansiwise.ts, with what does place each of
+ *  them: the packages are deploy-host's `install_packages` row, and the platform tree is that same
+ *  program's `git_clone` row, whose credential — where a repository ever needs one — is a value only
+ *  such a row may hold. The CATALOGUE is this step's, both to make and to bring forward
+ *  (machine-catalogue.ts): the deployment programs are a public repository, so making one asks
+ *  nothing of this step that bringing one forward does not.
  *
  *  A machine at its FIRST installation stands in no server row, so it cannot start THIS step. Keeping
  *  the resolution out here is what makes the bootstrap itself demand nothing such a machine cannot

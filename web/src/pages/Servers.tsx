@@ -294,9 +294,9 @@ export function Servers() {
                     // machine can lose what an adoption gave it. A restore puts back the disk the
                     // snapshot was taken from, and the operator key this manager installed goes with
                     // it: the row still says "ready" and the door answers "All configured
-                    // authentication methods failed" (apps4, 2026-08-29). Nothing else offered a way
-                    // back — the server could not be added again under its own name, and it could not
-                    // be deleted while its cluster row stood.
+                    // authentication methods failed", measured on a real machine. Nothing else offers
+                    // a way back — the server cannot be added again under its own name, and it cannot
+                    // be deleted while its cluster row stands.
                     //
                     // It is SECONDARY and never the prominent step: on a machine that is merely
                     // adopted, deploying is what comes next, and adopting again is the repair beside

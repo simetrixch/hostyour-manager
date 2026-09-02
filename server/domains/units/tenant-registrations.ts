@@ -32,7 +32,7 @@ import { guid as guidSchema, TenantRegistrationSchema, type TenantMemberRecord, 
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 // The scan's skipped-registration shape is a WIRE shape: the orphan scan (tenant-orphans.ts) hands these
 // to the browser verbatim, so it is declared once in shared/api-types.ts and used here rather than
-// declared here and mirrored there — see that file's tenants section for what a mirror cost us.
+// declared here and mirrored there — see that file's tenants section for what a mirror costs.
 import type { SkippedTenantPointerView } from "../../../shared/api-types.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";

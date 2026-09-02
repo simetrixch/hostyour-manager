@@ -131,9 +131,9 @@ describe("manager DB reset (db/reset.ts)", () => {
     expect(() => db.sqlite.prepare("DELETE FROM events").run()).toThrow(/append-only/);
   });
 
-  // A table with a RESTRICTing reference to servers and a row in it is exactly the shape that made
-  // the wipe throw after the install branches were already deleted: WIPE_ORDER did not name it, so
-  // DELETE FROM servers hit the child row.
+  // A table with a RESTRICTing reference to servers and a row in it is exactly the shape that makes
+  // the wipe throw after the install branches are already deleted: WIPE_ORDER not naming it means
+  // DELETE FROM servers hits the child row.
   function seedUnnamedChildTable(db: DbHandle): void {
     db.sqlite.exec("CREATE TABLE stragglers (id TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id))");
     db.sqlite.prepare("INSERT INTO stragglers (id, server_id) VALUES ('str_1','srv_s')").run();

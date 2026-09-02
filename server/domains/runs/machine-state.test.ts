@@ -13,9 +13,9 @@ import {
 // YET.
 //
 // defs/machine-state.ts states in one sentence which account owns what this platform leaves on a
-// machine. Four places were repaired one at a time before that sentence existed, and each repair
-// only uncovered the next: a check that listed those four would be a fifth copy of the same list and
-// would say nothing at all about the fifth place. So neither half below knows the four. One holds a
+// machine. Such places get repaired one at a time and each repair only uncovers the next: a check
+// that listed the known ones would be another copy of the same list and
+// would say nothing at all about the next place. So neither half below knows a list. One holds a
 // NEIGHBOURHOOD — a literal under a directory this platform makes its state in comes from the
 // registry or the tree is red — and the other holds the SURFACE, so a path this manager sends to a
 // machine that the registry cannot answer is red wherever it was written.

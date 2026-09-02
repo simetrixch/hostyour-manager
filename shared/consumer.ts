@@ -85,7 +85,7 @@ export const TenantMemberSchema = TenantSourceSchema.extend({
    *  relocation path resolve the IdP through this flag instead of through a hardcoded name. */
   identityProvider: z.boolean().optional(),
   /** Extra labels this member's namespace carries beyond the ones every tenant namespace gets — the
-   *  data behind what used to be an `if member == auth` in the appset (a redis consumer label). */
+   *  data behind what would otherwise be an `if member == auth` in the appset (a redis consumer label). */
   namespaceLabels: z.record(z.string(), z.string()).optional(),
 });
 
@@ -106,7 +106,7 @@ export const TenantSpecSchema = z.object({
     }),
   }),
 }).superRefine((spec, ctx) => {
-  // Two invariants the list form has to carry that the old key form carried for free.
+  // Two invariants the list form has to carry that a keyed map would carry for free.
   const names = spec.members.map((m) => m.name);
   const dup = names.find((n, i) => names.indexOf(n) !== i);
   if (dup !== undefined) {
@@ -324,8 +324,8 @@ export function consumerArgocdUrl(masterFqdn: string | null, argoNamespace: stri
   return `https://${host}/applications/${appName}`;
 }
 
-/** registrations/<unit>/{<stage>|build}.yaml — what the platform REGISTERS about a unit. Three owners
- *  used to share one file; this one carries only OURS. The consumer's own pin (its commit SHA, its
+/** registrations/<unit>/{<stage>|build}.yaml — what the platform REGISTERS about a unit. It carries
+ *  only OURS, never three owners' worth in one file. The consumer's own pin (its commit SHA, its
  *  image tags) is not here at all — the Application follows the delivery branch `deploy/<stage>` as a
  *  literal, and the cluster's own values reach every chart from its values chain.
  *

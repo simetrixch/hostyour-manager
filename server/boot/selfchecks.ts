@@ -226,9 +226,8 @@ export function runSelfChecks(deps: {
     // Degrading, not blocking: dev boots without a build (the SPA route then answers 503).
     if (spaBytes() === 0) throw new Error("SPA bundle not built (run npm run build:web)");
   });
-  // session.roundtrip is async → runAsyncSelfChecks (jose). (A kubeconfig-readable check was once
-  // planned here; it died with the mounted-kubeconfig design — kube access is in-cluster via the
-  // pod ServiceAccount now, with nothing to probe at boot.)
+  // session.roundtrip is async → runAsyncSelfChecks (jose). (No kubeconfig-readable check belongs
+  // here: kube access is in-cluster via the pod ServiceAccount, with nothing to probe at boot.)
   return results;
 }
 
@@ -318,9 +317,9 @@ function programsOf(def: AnyRunDefinition): string[] {
  *
  *  A list would be the third copy of the same fact — the two the declaration and the run definitions
  *  already are — and it is the copy that decays in silence: a run kind that gains a program step is
- *  simply not in it, and the check goes on reporting green over the kinds it does know. Measured
- *  2026-08-27: five run kinds drove programs while the check that held only `cluster-deploy-slave`
- *  said in its own words that it was the only one. */
+ *  simply not in it, and the check goes on reporting green over the kinds it does know. Measured on
+ *  a real installation: five run kinds drove programs while a check holding only
+ *  `cluster-deploy-slave` said in its own words that it was the only one. */
 function programDrivingKinds(runDefinitions: RunDefinitions): { kind: RunKind; programs: string[] }[] {
   const driving: { kind: RunKind; programs: string[] }[] = [];
   for (const [kind, def] of runDefinitions) {
@@ -344,13 +343,12 @@ function programDrivingKinds(runDefinitions: RunDefinitions): { kind: RunKind; p
  * machine. So the run kind keeps its steps, and the declaration is held against them here: a row
  * changed on either side goes red at boot, with both orders named.
  *
- * EVERY RUN KIND THAT DRIVES PROGRAMS IS HELD, not the slave install alone. The version of this check
- * that shipped first held `cluster-deploy-slave` and stated in its own comment that it was the only
- * run kind driving an installation's programs. It is not: `cluster-redeploy` drives deploy-host,
+ * EVERY RUN KIND THAT DRIVES PROGRAMS IS HELD, not the slave install alone. `cluster-deploy-slave` is
+ * not the only run kind driving an installation's programs: `cluster-redeploy` drives deploy-host,
  * deploy-cluster and deploy-platform-services — the same programs of the same declaration, in a list
- * of its own (redeploy.ts MASTER_ARM_PROGRAMS). So the manager carries several orderings of those
- * programs and the reader held one of them, which is the state a declaration with a reader was
- * supposed to end.
+ * of its own (redeploy.ts MASTER_ARM_PROGRAMS). The manager therefore carries several orderings of
+ * those programs, and a check holding one of them leaves the rest unread, which is exactly the state
+ * a declaration with a reader exists to end.
  *
  * WHAT IT CANNOT HOLD, named rather than counted (a clean answer must not be able to mean nobody was
  * looking):
@@ -366,7 +364,7 @@ function programDrivingKinds(runDefinitions: RunDefinitions): { kind: RunKind; p
  *      Holding the set needs the declaration to state a sequence per role, which it does not, and
  *      which is not this repository's to add. Measured: taking `deploy-host` out of the slave run
  *      keeps this check green.
- *   3. A program driven inside a step that is not a program step. `rejoinStep` (tailnet.kit.ts:188)
+ *   3. A program driven inside a step that is not a program step. `rejoinStep` (tailnet.kit.ts)
  *      runs the mint on the master and the rejoin on the host inside ONE step named `rejoin`, so
  *      neither shows up as `run-<program>` and neither is seen here. The declaration states neither
  *      program, so nothing is silently green about them — but the ORDER of what that one step does is

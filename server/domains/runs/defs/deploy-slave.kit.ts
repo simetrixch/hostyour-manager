@@ -27,7 +27,7 @@ import { clusterMapPath } from "../../../../shared/cluster-values.ts";
  *  port used to carry the address a MACHINE clones the platform tree from, because place-ansiwise
  *  cloned it with composed bash. Nothing in this manager clones a tree onto a machine any more — a
  *  clone is a `git_clone` row of a program, which reads its origin and its credential out of the
- *  machine's own settings files by NAME (digita-deploy ansiwise/programs/deploy-platform-services.yaml) rather
+ *  machine's own settings files by NAME (hostyour-deploy ansiwise/programs/deploy-platform-services.yaml) rather
  *  than taking either through a caller. */
 export interface DeploySlavePorts {
   platformRepo?: PlatformRepo;
@@ -36,7 +36,7 @@ export interface DeploySlavePorts {
    *  checkout is what the row establishes.
    *
    *  IT IS THIS INSTALLATION'S FACT AND NOT THE CATALOGUE'S. A repository written into a program
-   *  file would be one installation's shipped to every installation (digita-deploy
+   *  file would be one installation's shipped to every installation (hostyour-deploy
    *  ansiwise/programs/deploy-host.yaml says so in its own header), and the manager already holds
    *  it: GITHUB_REPO and GITHUB_OWNER are what its own platform repo is built from.
    *

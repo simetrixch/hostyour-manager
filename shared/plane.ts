@@ -39,8 +39,8 @@ import { z } from "zod";
  *  writer of one datum with nothing reading it. `caData` is the
  *  base64 CA bundle (kubeconfig `certificate-authority-data`) — a public cert, not a secret.
  *  Together with the sealed cluster bearer (credentialIds.clusterBearer) they are exactly the
- *  kube adapter's ClusterKubeInput {server, token, caData}. caData was previously DROPPED at
- *  adopt; persisting it here lets a per-cluster client be built without re-reading the
+ *  kube adapter's ClusterKubeInput {server, token, caData}. Persisting caData here lets a
+ *  per-cluster client be built without re-reading the
  *  master's cluster-slave Secret cross-namespace. */
 export const SlaveKubeAccess = z.object({
   server: z.string().url(),

@@ -186,8 +186,8 @@ describe("reap — the floor IS the pin search, over all three carrier classes",
 
 describe("reap — an empty floor can never reach a delete plan", () => {
   it("REFUSES the run when the search found no pin at all — nothing is listed, nothing is deleted", async () => {
-    // Every carrier is readable and every one of them is simply empty. This is what the floor looked
-    // like the moment the tree it used to walk was gone: absent-is-empty, and every aged tag of every
+    // Every carrier is readable and every one of them is simply empty. This is what the floor looks
+    // like the moment the tree the search walks is gone: absent-is-empty, and every aged tag of every
     // repository on the delete plan.
     const registry = new FakeRegistryMaintenance({ manager: catalogRepo("manager", 12, []) });
     const logger = makeLogger();

@@ -40,7 +40,7 @@ const logger = createLogger(config);
 
 // No machine exists for these cases, so every SSH connection is refused. The routes under test START
 // runs; carrying one out is the executor's business and is covered in runs/adopt.test.ts. An approved
-// adopt therefore fails on its first remote step (defs/adopt.ts:145), which is what settle() waits for.
+// adopt therefore fails on its first remote step (defs/adopt.ts, connect-password), which is what settle() waits for.
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh in this harness"));
 
 const MASTER = "m1.example.com";
@@ -207,12 +207,12 @@ describe("server inventory API", () => {
 
     it("a body that fails CreateServerInput answers 500 INTERNAL and names no field — see the note", async () => {
       // What the operator SEES today: typing 70000 into the Port field returns a generic red banner.
-      // That field carries no max (web/src/pages/Servers.tsx:223) and Servers.tsx:99 passes
-      // Number(form.sshPort) straight through, so 70000 reaches CreateServerInput's .max(65535)
+      // That field carries no max (web/src/pages/Servers.tsx, the sshPort input) and the same file's
+      // submit handler passes Number(form.sshPort) straight through, so 70000 reaches CreateServerInput's .max(65535)
       // (write.ts:37). CreateServerInput.parse (api.ts:87) throws a ZodError, and error-shape.ts:13
       // redacts every non-AppError to INTERNAL, so which field was wrong never reaches the browser.
-      // The "Slave_5!" body below is not browser-reachable: web/src/pages/Servers.tsx:207 and
-      // web/src/pages/AdoptWizard.tsx:62 both carry pattern="[a-z0-9][a-z0-9-]*" required inside a
+      // The "Slave_5!" body below is not browser-reachable: the name input in web/src/pages/Servers.tsx
+      // and the one in web/src/pages/AdoptWizard.tsx both carry pattern="[a-z0-9][a-z0-9-]*" required inside a
       // form with no noValidate, so that name is stopped before submit. Asserted as it stands
       // rather than as it should be — this case is the record that the hole is real.
       const h = await make();
@@ -276,7 +276,7 @@ describe("server inventory API", () => {
       expect(res.status).toBe(201);
       const { key } = (await res.json()) as { key: OperatorKeyView };
       expect(key).toMatchObject({ label: "pat", type: "ssh-ed25519", onServerIds: [] });
-      // The key BODY is not part of the view — nothing in the browser reads one (api-types.ts:171).
+      // The key BODY is not part of the view — nothing in the browser reads one (api-types.ts OperatorKeyView).
       expect(key).not.toHaveProperty("publicKey");
 
       const listed = (await (await h.app.request("/api/operator-keys", authed(h.cookie))).json()) as { keys: OperatorKeyView[] };
@@ -332,7 +332,7 @@ describe("server inventory API", () => {
       await h.executor.settle(runId);
       expect(getRun(h.db.db, runId)?.status).toBe("failed");
       expect(getRun(h.db.db, runId)?.kind).toBe("cluster-adopt");
-      // onTerminal put the machine back (defs/adopt.ts:462).
+      // onTerminal put the machine back (defs/adopt.ts adoptDef.onTerminal).
       expect((await listServersOverHttp(h)).find((s) => s.id === server.id)?.status).toBe("bare");
     });
 
@@ -366,9 +366,9 @@ describe("server inventory API", () => {
       await h.executor.settle(runId);
       expect(getRun(h.db.db, runId)?.status).toBe("failed"); // it RAN — a still-planned run was never approved
       // The intended domain rides into the frozen params. Nothing consumes it: AdoptParams declares
-      // it at defs/adopt.ts:45 and the only reader is defs/adopt.ts:438, where its ABSENCE pushes
+      // it (defs/adopt.ts AdoptParams) and the only reader is adoptDef's own plan, where its ABSENCE pushes
       // the plan warning "DNS wildcard check will be skipped — no domain chosen yet." Passing it
-      // therefore suppresses that warning and nothing else — the preflight step (defs/adopt.ts:165)
+      // therefore suppresses that warning and nothing else — the preflight step (defs/adopt.ts)
       // runs PREFLIGHT_SCRIPT and touches neither DNS nor intendedDomain.
       expect(h.db.sqlite.prepare("SELECT params_json AS p FROM runs WHERE id = ?").get(runId)).toEqual({
         p: JSON.stringify({ serverId: server.id, intendedDomain: SLAVE }),

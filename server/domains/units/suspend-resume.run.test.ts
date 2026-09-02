@@ -87,7 +87,7 @@ describe("suspend run", () => {
     const plan = await makeSuspendDef(ports(reg, { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" })).plan({ appId: "app_1" }, { db: db.db });
     expect(plan.targetKind).toBe("app");
     // The row moves BEFORE the commit: from the flip onward the inventory and the registration
-    // state the same thing, where the old order left minutes in which they disagreed.
+    // state the same thing, where moving the row last leaves minutes in which they disagree.
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "record-suspended", "suspend-registration", "watch-converged"]);
     // The BOOKS branch first, exactly as onboard/offboard/purge/backup/restore/migrate claim it: the
     // suspended flip commits there, and a lock keyed only on the consumer's cluster would let a

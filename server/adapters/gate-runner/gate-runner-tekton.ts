@@ -289,9 +289,9 @@ export class TektonGateRunner implements GateRunner {
     // Settled (succeeded or failed): the report is the source of truth, not the exit status — a gate
     // FAIL is a completed run whose report carries verdict "fail".
     //
-    // The TaskRun statuses are captured FIRST, before the reap. Measured on apps3 (2026-08-26): the
-    // reap ran one line before the parse, so a gate task that died took its own TaskRun status with
-    // it and the operator was left with schema violations about a report that was never written. The
+    // The TaskRun statuses are captured FIRST, before the reap. Measured on a real installation: a
+    // reap one line before the parse means a gate task that died takes its own TaskRun status with
+    // it and the operator is left with schema violations about a report that was never written. The
     // TaskRuns are the only place the cause of a dead gate task exists, and they fall with the
     // PipelineRun the reap deletes.
     const evidence = await this.captureTaskRuns(jobId);
@@ -344,8 +344,8 @@ export class TektonGateRunner implements GateRunner {
       );
     }
     // The SANDBOX leg, and it is enforced here for the same reason the two above are: this line is
-    // where the report crosses out of the sandbox and into the Manager. Measured on apps3
-    // (2026-08-26): a report whose attestation said the node's own API server and the Manager were
+    // where the report crosses out of the sandbox and into the Manager. Measured on a real
+    // installation: a report whose attestation said the node's own API server and the Manager were
     // both reachable from inside the gate pod was accepted, composed with the manager-side gates and
     // rejected for an unrelated reason — nothing anywhere refused because of those two booleans, so
     // the attestation was a field and not a fence.

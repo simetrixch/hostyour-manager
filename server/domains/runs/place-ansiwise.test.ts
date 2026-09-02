@@ -426,7 +426,7 @@ describe("place-ansiwise: the catalogue the engine is judged by", () => {
     expect(transferred(hosts).map((f) => f.path)).toEqual([ANSIWISE_TOOL, ANSIWISE_REST_TOOL]);
   });
 
-  it("makes the catalogue a slave is born without, and leaves no credential of ours behind", async () => {
+  it("makes the catalogue a slave is born without", async () => {
     // A SLAVE IS BORN WITHOUT ONE. The installer clones the catalogue onto a first master and
     // nothing does it for a slave, so the machine's own surface could not start at all: what an
     // operator saw was the serving binary's `cd` failing and the socket hanging up, three systems
@@ -435,7 +435,7 @@ describe("place-ansiwise: the catalogue the engine is judged by", () => {
     const h = await makeHarness({ hosts });
     const said: string[] = [];
 
-    await placeAnsiwiseStep(target, { ...ports(h), catalogueOrigin: { repoURL: CATALOGUE_URL, token: "read-me" } })
+    await placeAnsiwiseStep(target, { ...ports(h), catalogueOrigin: { repoURL: CATALOGUE_URL } })
       .run(placeCtx(h, hosts, "run_cat_clone", said));
 
     expect(commands(hosts).some((c) => c.includes(`git clone --quiet ${CATALOGUE_URL} ${CATALOG_CHECKOUT}`))).toBe(true);
@@ -447,19 +447,20 @@ describe("place-ansiwise: the catalogue the engine is judged by", () => {
     expect(said.some((l) => l.includes(`cloned the catalogue into ${CATALOG_CHECKOUT}`))).toBe(true);
   });
 
-  it("takes this manager's credential away again, on the path where the clone fails as well", async () => {
-    // THE TOKEN IS WRITE-CAPABLE ON THE CATALOGUE (kernel/config.ts CATALOG_WRITE_PAT). One left
-    // under /tmp is one on a machine, and the path a failure takes is the path nobody watches.
+  it("refuses a clone that failed, having put nothing of this manager's on the machine to make it", async () => {
+    // The deployment programs are a public repository, so the clone carries nothing of ours: no file
+    // under /tmp for a later reader to find, and no environment in front of the command. The path a
+    // failure takes is the path nobody watches, so it is the one this asserts on.
     const hosts = scriptedHosts({ catalogueBranch: undefined, catalogueCloneExit: 128 });
     const h = await makeHarness({ hosts });
 
     await expect(
-      placeAnsiwiseStep(target, { ...ports(h), catalogueOrigin: { repoURL: CATALOGUE_URL, token: "read-me" } })
+      placeAnsiwiseStep(target, { ...ports(h), catalogueOrigin: { repoURL: CATALOGUE_URL } })
         .run(placeCtx(h, hosts, "run_cat_clone_fail", [])),
     ).rejects.toThrow(/could not clone the catalogue/);
 
-    const removed = commands(hosts).filter((c) => c.startsWith("rm -f ") && c.includes("manager-catalogue"));
-    expect(removed.length, "the credential was taken away although the clone failed").toBe(1);
+    expect(transferred(hosts).map((f) => f.path).filter((p) => p.startsWith("/tmp")), "a file of this manager's was left on the machine").toEqual([]);
+    expect(commands(hosts).filter((c) => c.includes("git clone") && c.startsWith("env ")), "the clone was given an environment of ours").toEqual([]);
   });
 
   it("refuses a machine whose catalogue would not fetch, rather than driving programs out of a stale one", async () => {

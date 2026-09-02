@@ -32,8 +32,8 @@ export interface ReportInput {
   finishedAt: number;
   /** What the sandbox parsed out of the repository's manifest, or null where nothing parsed it.
    *
-   *  NULL IS NO LONGER ONE EVENT. It was "G1 failed" and that sentence is what the report schema
-   *  used to carry too, one file away in shared/gates.ts, until 7ede920 corrected it there: the
+   *  NULL IS NOT ONE EVENT, and never simply "G1 failed" (the report schema states the same, one
+   *  file away in shared/gates.ts): the
    *  fence-refusal path fills this field with null WITHOUT G1 having run at all, and the two are
    *  told apart by the rows in `gates` — a G1 row that failed is the repository's answer, a G25 row
    *  is the platform's. A reader that took null for "G1 failed" would go looking in a repository

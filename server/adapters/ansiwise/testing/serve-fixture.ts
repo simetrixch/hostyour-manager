@@ -208,12 +208,12 @@ let sweptRunRoot = false;
  * default root, `/var/lib/ansiwise/runs`), so it is ONE directory shared by every fixture on the
  * drive and no fixture can be given a root of its own. `close()` removes it, but a run's children are
  * DETACHED: one that writes its record after the removal leaves it standing, and nothing afterwards
- * owns it. Measured on 2026-08-26: 36 records from two days earlier were standing in that directory
- * on a machine whose every fixture had closed.
+ * owns it. Measured on a real machine: 36 records from two days earlier were standing in that
+ * directory on a machine whose every fixture had closed.
  *
  * WHAT THIS IS NOT. It is not a fix for the intermittent failures of the suite that uses this
- * fixture. Those were measured on a swept root as well — three green runs and one red in a row of
- * four — so whatever produces them is not this leak, and a sweep that were sold as their cure would
+ * fixture. Those are measured on a swept root as well — three green runs and one red in a row of
+ * four — so whatever produces them is not this leak, and a sweep sold as their cure would
  * be a green answer nobody could rely on.
  */
 function clearLeakedRunRecords(dir: string): void {

@@ -122,8 +122,8 @@ export function serializePointer<T extends object>(schema: z.ZodType<T>, entry: 
  *  written by hand, with comments and block-style lists, still folds.
  *
  *  ONE registration is always written by hand. `registrations/hostyour-manager/build.yaml` is
- *  rendered from `ansiwise/templates/platform-build-registration.tpl` by the installation
- *  repository's `ansiwise/programs/deploy-branch.yaml:695-701` on a first installation, because the
+ *  rendered from the deployment programs' `ansiwise/templates/platform-build-registration.tpl` by
+ *  their `ansiwise/programs/deploy-branch.yaml:695-701` on a first installation, because the
  *  unit it registers is the one whose image this process runs — nothing is up yet that could write
  *  it. Under the flat reader that file failed on its first comment line, and listAttestedBuildNames
  *  throws where the stage scan skips, so gate G16 (validate.ts:234) refuses EVERY OTHER consumer's

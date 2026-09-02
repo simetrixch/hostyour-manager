@@ -1,11 +1,11 @@
 // THE CLUSTER MAPS THE FIXTURES STAND ON — clusters/active/<fqdn>.yaml as the two writers of that
 // file leave it: the map template on a master, and the manager's own mark-slave on a slave.
 //
-// A FIXTURE MAP THAT CARRIES LESS THAN A REAL ONE CANNOT FAIL when the code drops something. The
-// master's below stood for a while with six of the seventeen keys a real one has, and a slave
-// composed from it came out with ten while every test passed — the missing ones were what its own
-// programs read, and its machine layer stopped at "is not on this host" asking for the address of
-// the secret store (apps4, 2026-08-29). Every key here is one a real map states.
+// A FIXTURE MAP THAT CARRIES LESS THAN A REAL ONE CANNOT FAIL when the code drops something. A
+// master's map holding only part of what a real one carries lets a slave composed from it come out
+// short while every test passes — the missing keys are what its own
+// programs read, so its machine layer stops at "is not on this host" asking for the address of
+// the secret store, measured on a real machine. Every key here is one a real map states.
 
 /** THE NAMES THESE MAPS ARE WRITTEN FOR, stated HERE and read by the harness that seeds them —
  *  a map names the cluster it is about, so the name belongs beside the map and not the other way
@@ -76,10 +76,10 @@ export const MASTER_MARKING_YAML = [
   // THE SAME REPOSITORY AS owner/name. A cluster cutting a SLAVE's branch reads it from the map,
   // because catalogUrl is the wrong shape for what the argocd files stamp.
   "  catalogRepo: acme/acme-catalog",
-  // WHAT A REAL MASTER'S MAP CARRIES BESIDE THE NAMES ABOVE. It stood without these, and a fixture
+  // WHAT A REAL MASTER'S MAP CARRIES BESIDE THE NAMES ABOVE. A fixture
   // that carries less than the thing it stands for cannot fail when the code drops something: a
-  // slave was composed from a handful of copied fields and came out with ten of a master's
-  // seventeen keys, while every test passed (2026-08-29).
+  // slave composed from a handful of copied fields comes out short of a master's keys while every
+  // test passes.
   //
   // Two of them are the machine's OWN and a slave must not inherit them — the short name everything
   // per cluster carries, and the auth mount that tells two clusters of one installation apart when

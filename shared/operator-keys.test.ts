@@ -114,10 +114,10 @@ describe("classifying a key line", () => {
     managerFingerprints: ["SHA256:mine"],
     operatorKeys: [{ label: "pat", fingerprint: "SHA256:pat" }],
     // classifyAuthorizedKey does not read this field, and that is the point of stating it: the
-    // classification USED to vouch for any line whose comment equalled the marker, and a fixture
-    // without the field would let that branch come back — by a merge, a revert, an edit — with the
-    // stranger case below still green, because `comment === undefined` is false for every real
-    // comment. With the marker present, restoring the branch fails that case loudly.
+    // classification must never vouch for a line merely because its comment equals the marker, and a
+    // fixture without the field would let such a branch land — by a merge, a revert, an edit — with
+    // the stranger case below still green, because `comment === undefined` is false for every real
+    // comment. With the marker present, such a branch fails that case loudly.
     managerMarker: managerKeyMarker("s1"),
   };
 

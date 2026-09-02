@@ -35,12 +35,12 @@ export interface CommitInput {
  *  PlatformRepo.withBranch and valid only for its duration.
  *
  *  Every operation is BOUND to the directory the turn holds, and the directory's path is not among
- *  them. That is the whole point. The port used to hand back a bare `workdir` string from
- *  `fetchResetBranch`, which the caller then passed to readFile/listDir/commitPush/mintTag — a
- *  shared, mutable directory owned by nobody. Two callers could hold it at once, and the reader's
- *  `reset --hard` + `clean -qfd` wiped the writer's staged index between its `git add` and its
- *  `diff --cached`; commitPush then read the empty diff as "a previous attempt already did this" and
- *  returned the PRE-WRITE HEAD as a valid-looking commit SHA. Reproduced at 10 iterations: five lost
+ *  them. That is the whole point. A port handing back a bare `workdir` string from
+ *  `fetchResetBranch`, which the caller then passes to readFile/listDir/commitPush/mintTag, is a
+ *  shared, mutable directory owned by nobody. Two callers can hold it at once, and the reader's
+ *  `reset --hard` + `clean -qfd` wipes the writer's staged index between its `git add` and its
+ *  `diff --cached`; commitPush then reads the empty diff as "a previous attempt already did this" and
+ *  returns the PRE-WRITE HEAD as a valid-looking commit SHA. Reproduced at 10 iterations: five lost
  *  the registration outright, five returned a SHA that was not their commit, and the run reported
  *  success either way.
  *

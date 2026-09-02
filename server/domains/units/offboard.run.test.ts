@@ -328,7 +328,7 @@ describe("offboard run definition", () => {
     await step.run(ctx("remove-app-secrets", logs));
 
     // The CONSUMER tier (<stage>/consumer/<name>/app), not the app tier — a different Vault path
-    // from remove-repo-pat's, which is the whole reason the old offboard missed it. toEqual is exact:
+    // from remove-repo-pat's, which is the whole reason an offboard deleting only that one misses it. toEqual is exact:
     // the step passes the stage and the name and nothing else, because there is one Vault and one
     // identity — the seeder logs in as the Manager itself.
     expect(seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]);

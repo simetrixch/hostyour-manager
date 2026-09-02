@@ -31,7 +31,7 @@ import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
 
 // "cluster-deploy-slave" — the Run that turns a READY (adopted) server into a live slave, over the
-// deployment PROGRAMS of the machine's own catalogue (digita-deploy ansiwise/programs/), each
+// deployment PROGRAMS of the machine's own catalogue (hostyour-deploy ansiwise/programs/), each
 // driven over `ansiwise-rest serve` and proven by a dry run the machine's gate then admits the real run
 // against. Two hosts: the MASTER cuts the slave's install branch (deploy-slave-branch) and takes
 // its registration (register-slave); the SLAVE is built by the same three machine-layer programs

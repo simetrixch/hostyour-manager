@@ -71,7 +71,7 @@ describe("parseEnv", () => {
   });
 });
 
-// A REFUSED RUN READS NOTHING, AND THE REPORT HAS TO SAY SO. Measured on apps3 on 2026-08-26: the
+// A REFUSED RUN READS NOTHING, AND THE REPORT HAS TO SAY SO. Measured on a real installation: the
 // refusal returned a schema-valid report whose `gates` were empty and whose `manifest` was null, and
 // the Manager composed its own gates on top and rejected the onboarding with "no build declared in
 // deploy/platform.yaml" about a file declaring three. An empty gate list says only "no gate failed".
@@ -101,14 +101,14 @@ describe("runGateCli fail-closed", () => {
     expect(report.gates.map((g) => g.id)).toEqual([SANDBOX_FENCE_GATE_ID]);
   });
 
-  // THE OUTCOME THAT MATTERS, and the one the apps3 report failed: a refused run's report cannot be
+  // THE OUTCOME THAT MATTERS: a refused run's report cannot be
   // made to say ANYTHING about the repository. A tree that would fail G1 and a tree that would pass
   // it produce the identical rows, so nothing downstream can read a repository fault out of one.
   it("says the same thing about a repository whose manifest is fine and one that has no manifest at all", async () => {
     const good = await runGateCli(buildOnlyInputs(await buildOnlyRepo()), managerReachable);
     const empty = await runGateCli(buildOnlyInputs(await ws()), managerReachable);
-    // THE LIST IS HELD NON-EMPTY FIRST, and that is not belt and braces. With gates: [] — the exact
-    // apps3 shape — both `map` calls answer [] and both `gates[0]?.found` answer undefined, so every
+    // THE LIST IS HELD NON-EMPTY FIRST, and that is not belt and braces. With gates: [] — the shape
+    // a refused run leaves — both `map` calls answer [] and both `gates[0]?.found` answer undefined, so every
     // comparison below holds on the very report this check exists to refuse. An assertion that
     // passes on the defect it is written against is not the one that catches it.
     expect(good.gates.length).toBeGreaterThan(0);
@@ -143,9 +143,9 @@ describe("runGateCli green path", () => {
 // platform's own manager and the tenant fan-out repo are both build-only, so this is the shape a
 // from-zero master runs first. It has no chart directory, so the run carries no chart path at all.
 //
-// What used to happen: the empty string the Manager sent for "no chart" was read as an unset required
-// input, the CLI threw before a single gate ran, and the whole PipelineRun died with a wiring
-// complaint. What must happen now is that the absence is a form the gates know and REPORT.
+// An empty string for "no chart" reads as an unset required input: the CLI throws before a single
+// gate runs, and the whole PipelineRun dies with a wiring complaint. What must happen instead is
+// that the absence is a form the gates know and REPORT.
 const BUILD_ONLY_MANIFEST = [
   "apiVersion: hostyour.cloud/v1",
   "kind: ConsumerManifest",

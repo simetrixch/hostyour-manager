@@ -68,7 +68,7 @@ describe("splitTenantRows", () => {
   // The other half of the client rule: the purged tenant leaves the page. It must
   // land on NEITHER of the two rendered lists — not the cards (nothing runs) and above all not `settled`,
   // whose panel is titled "Offboarded tenants" and offers the purge, which is exactly where a finished
-  // purge used to sit looking like nothing had happened.
+  // purge would otherwise sit looking like nothing had happened.
   it("routes a purged tenant off the page — neither the cards nor the offboarded panel", () => {
     const purgedRow = row("tnt_purged", "purged");
     const lists = splitTenantRows([row("tnt_live", "active"), row("tnt_gone", "offboarded"), purgedRow]);

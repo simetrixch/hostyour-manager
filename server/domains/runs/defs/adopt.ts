@@ -133,9 +133,9 @@ export interface ElevatedCommand {
  *  IT RETURNS NOTHING TODAY: every row below fixes its command AND its argument string. That is not
  *  the same as a boundary, and the paragraph below says what is left after it.
  *
- *  THE SSHD DROP-IN IS PINNED NOW, AND WHAT REMAINS IS THE CONTENT ALONE. The write used to be a
- *  copier — `install SRC DEST` with a `*` where SRC stands, because mktemp picks that name — and a
- *  copier reads: the account owns whatever path the pattern allows and can point a symlink from it
+ *  THE SSHD DROP-IN IS PINNED, AND WHAT REMAINS IS THE CONTENT ALONE. A write that is a
+ *  copier — `install SRC DEST` with a `*` where SRC stands, because mktemp picks that name — is a
+ *  copier that reads: the account owns whatever path the pattern allows and can point a symlink from it
  *  at /etc/shadow or a private key, which install follows as root into a destination of mode 0644
  *  that `cat` is granted on. No sudoers form permits that write and refuses that read. So the write
  *  names no source path at all (password-login.kit write_drop_in): `install /dev/null <drop-in>`
@@ -258,8 +258,8 @@ export const SUDO_ALREADY_BLANKET =
 
 /** And whether the answer above is THIS PRODUCT'S OWN DOING — the blanket line every adoption
  *  before this one left behind. The two questions are not the same question, and reading only the
- *  first is how the leftover cemented itself: a re-adoption saw a machine that already granted
- *  everything, wrote nothing, and left its predecessor's grant standing for good.
+ *  first is how the leftover cements itself: a re-adoption sees a machine that already grants
+ *  everything, writes nothing, and leaves its predecessor's grant standing for good.
  *
  *  ASKED ONLY WHERE THE MACHINE ALREADY GRANTS EVERY COMMAND, which is what lets `sudo -n` reach
  *  root here with no rule for `cat` on the machine and no password. Both call sites stand behind
@@ -320,8 +320,8 @@ function adoptSteps(params: AdoptParams): Step[] {
       run: async (ctx) => {
         const server = loadServer(ctx.db, sid);
         // The ADDRESS is not named here: openPasswordSession resolves it from the plan's target
-        // (server/executor/transport.ts) and logs the one it actually dials. This line used to name
-        // server.host while the session went to lanHost whenever the row carried one.
+        // (server/executor/transport.ts) and logs the one it actually dials. Naming server.host on
+        // this line is wrong whenever the row carries a lanHost, which is where the session goes.
         ctx.log("meta", `Target: server "${server.name}", user ${server.sshUser} — connecting with the one-time password (redacted)`);
         // choreography: bare -> adopting on the first step (onTerminal resets on failure).
         localTx(ctx, (tx) => tx.update(servers).set({ status: "adopting" }).where(eq(servers.id, sid)).run());
@@ -438,7 +438,7 @@ function adoptSteps(params: AdoptParams): Step[] {
           return;
         }
         const session = await ctx.openPasswordSession();
-        // TWO QUESTIONS, NOT ONE, and asking only the first is the defect this step used to carry.
+        // TWO QUESTIONS, NOT ONE, and asking only the first is the defect this step exists to avoid.
         // A cloud image commonly grants the first account `ALL=(ALL) NOPASSWD:ALL` from its own
         // configuration, and a machine adopted before carries the blanket line an earlier adoption
         // wrote into our own drop-in. Both answer the first question the same way, and they are
@@ -471,8 +471,8 @@ function adoptSteps(params: AdoptParams): Step[] {
         // else, which is why it needs no elevation of its own.
         await remoteCmd(ctx, session, `/usr/sbin/visudo -cf ${tmp} >/dev/null`);
         // Register the teardown BEFORE the mutation it takes back, so a drop-in that is in place
-        // when anything later fails is always removed (a failed install used to leave the file —
-        // and any leaked secret in it — on the box).
+        // when anything later fails is always removed (a failed install would otherwise leave the
+        // file — and any leaked secret in it — on the box).
         ctx.registerCleanup(removeSudoersCleanup);
         try {
           // `install` sets owner/group/mode atomically and does NOT read stdin, so the
@@ -641,7 +641,7 @@ function passwordUses(sshUser: string): string {
  *  reads before approving. Plan.warnings is not that record: the executor's read path projects no
  *  `warnings` onto RunView (server/executor/read.ts toRunView) and RunView has no such member
  *  (shared/api-types.ts), so a warning string is frozen into plan_json and rendered on no screen;
- *  the summary is what the approve card shows (web/src/pages/RunDetail.tsx:207).
+ *  the summary is what the approve card shows (web/src/pages/RunDetail.tsx renders run.summary).
  *
  *  It says what the grant is NOT as plainly as what it is: `openArgumentsSentence()` names every
  *  command whose arguments the file leaves open, so a row added with one cannot be left out of what

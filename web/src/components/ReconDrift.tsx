@@ -4,16 +4,16 @@ import { PINNED, DEPLOYED, sha7, driftReadout } from "../reconVocabulary.ts";
 /** The revision half of a live reconciliation card, rendered ONCE for BOTH the Consumers page and the
  *  Tenants page. It exists as one component for the same reason the server builds the block in one
  *  function (driftOf, server/domains/units/api.ts): the two cards answer the same question about
- *  two unit kinds, and when they were written twice they gave different answers to the same situation —
- *  the tenant card stopped comparing the Manager's record at all while the consumer card went
- *  on pinning against it and cried "Drift" at converged consumers.
+ *  two unit kinds, and written twice they give different answers to the same situation —
+ *  one card stops comparing the Manager's record at all while the other goes
+ *  on pinning against it and cries "Drift" at converged consumers.
  *
  *  ONE row — the deployment question, and the only one worth a badge: what the Application TARGETS vs
- *  what the cluster RUNS. A second "Record" row once sat here (the Manager's own recorded revision
- *  vs that target), but that column goes stale the moment a unit takes a single GitOps release after
- *  onboarding — so it was lit on almost every card and warned of nothing, and the owner removed the
- *  display. The consumer record still feeds the server's fallback for a Missing Application (driftOf);
- *  it is simply no longer a row of its own here.
+ *  what the cluster RUNS. There is no second "Record" row (the Manager's own recorded revision
+ *  vs that target): that column goes stale the moment a unit takes a single GitOps release after
+ *  onboarding, so it would be lit on almost every card and warn of nothing. The consumer record
+ *  still feeds the server's fallback for a Missing Application (driftOf);
+ *  it is simply not a row of its own here.
  *
  *  This component states NO rule of its own — not the verdict, not the words, not the tones. It hands the
  *  server's answer to reconVocabulary.ts and prints what comes back. The neutral badges matter as much as

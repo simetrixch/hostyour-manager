@@ -6,14 +6,14 @@ import {
   type Harness,
 } from "./deploy-slave.fixture.ts";
 
-// VERIFY-SLAVE'S SOFT METRICS CHECK, and the whole of what it is now: one question asked of a
+// VERIFY-SLAVE'S SOFT METRICS CHECK, and the whole of what it is: one question asked of a
 // Prometheus-compatible query API over plain HTTP.
 //
-// It used to exec into the Prometheus container on the master and run promtool there, and
-// `pods/exec` hands the run that pod's own ServiceAccount token and its filesystem on a cluster
-// carrying pods whose ServiceAccount is cluster-admin. The same question is answered by a GET with
-// no Kubernetes right at all, so what is held here is that the exec is GONE and that the check still
-// tells its four states apart.
+// Exec'ing into the Prometheus container on the master and running promtool there is the
+// alternative, and `pods/exec` hands the run that pod's own ServiceAccount token and its filesystem
+// on a cluster carrying pods whose ServiceAccount is cluster-admin. The same question is answered by
+// a GET with no Kubernetes right at all, so what is held here is that NO exec is made and that the
+// check still tells its four states apart.
 //
 // FOUR STATES AND NOT TWO, and the pair that must never merge is `skipped` and `unanswered`: an
 // address this manager was never given and an address that answers nothing are different faults with
@@ -41,7 +41,7 @@ describe("verify-slave: the metrics probe over HTTP", () => {
 
     expect(h.metrics?.asked).toEqual([`up{cluster="${PARAMS.domain}"}`]);
     expect(log.some((l) => l.includes("the query API sees 1 up{cluster=") && l.includes("the slave's obs-agent is pushing"))).toBe(true);
-    // The right this check used to need, read off what actually reached the machines.
+    // The right this check must not need, read off what actually reached the machines.
     for (const entry of h.hosts.log) expect(entry.command).not.toContain("exec");
     for (const entry of h.hosts.log) expect(entry.command).not.toContain("promtool");
   });

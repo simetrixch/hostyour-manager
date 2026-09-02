@@ -231,10 +231,10 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
     ];
 
     // THE MANIFEST DECIDES WHETHER THE REST OF THE MANAGER-SIDE GATES RUN AT ALL. Below this branch
-    // every read is `manifest.x`, never `manifest?.x ?? <empty>`: the empty default is what let four
-    // gates judge a repository from an input the report never carried, and G18 then reported "no
-    // build declared in deploy/platform.yaml" about a file declaring three (measured on apps3,
-    // 2026-08-26). The absent input is reported as absent instead, and the run is rejected.
+    // every read is `manifest.x`, never `manifest?.x ?? <empty>`: the empty default is what lets the
+    // manifest-fed gates judge a repository from an input the report never carried, and G18 then
+    // reports "no build declared in deploy/platform.yaml" about a file declaring three (measured on
+    // a real installation). The absent input is reported as absent instead, and the run is rejected.
     const manifest = runnerReport.manifest;
     if (manifest === null) {
       managerGates.push(gateManifestInput(MANIFEST_FED_GATE_IDS));

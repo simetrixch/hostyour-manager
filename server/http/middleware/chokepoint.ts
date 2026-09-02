@@ -31,8 +31,7 @@ function presentedSession(c: Context, config: Config): { carrier: AuthCarrier; v
  * THE authentication chokepoint. Runs after the public /auth, /healthz,
  * /readyz and 403-stylesheet routes, in front of everything else. The three gate outcomes get three distinct
  * responses — a valid-but-forbidden session is answered 403 (document) / 403 (API), NEVER a
- * redirect to login. That is the structural reason the old console's redirect loop cannot
- * recur here.
+ * redirect to login. That is the structural reason a redirect loop cannot exist here.
  *
  * It gates both carriers. Nothing below it is reachable without a session, whichever header
  * carried one, and a bearer earns exactly the membership its sealed claims already carry — a

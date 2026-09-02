@@ -4,7 +4,7 @@
 // anything the repository ships (fence.ts selfProbe); when that proof does not come back green it
 // runs NO check gate at all, and this row is what says so in the report.
 //
-// Without it the refusal is invisible. Measured on apps3 on 2026-08-26: the report carried thirteen
+// Without it the refusal is invisible. Measured on a real installation: the report carried thirteen
 // valid fields, a verifying reportHash and a truthful attestation, and `gates: []` with
 // `manifest: null` — a shape indistinguishable from a run whose gates all looked and found nothing.
 // The Manager then composed its own gates on top and rejected the onboarding with "no build declared

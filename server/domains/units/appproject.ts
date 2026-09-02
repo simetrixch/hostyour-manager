@@ -80,7 +80,7 @@ export function renderConsumerAppProject(input: { name: string; namespace: strin
  *  fenced by the member's own ValidatingAdmissionPolicy (renderTenantMemberAdmissionPolicy,
  *  admission-policy.ts), applied beside this project and deleted with it: the member may create only
  *  the namespace it IS, carrying no platform label beyond the pairs the tenant ApplicationSets
- *  stamp — so cross-tenant namespace safety no longer rests on the sole-renderer property alone
+ *  stamp — so cross-tenant namespace safety does not rest on the sole-renderer property alone
  *  (the platform renders the fan-out; the tenant never authors these). Same fence-4 blacklist so a
  *  tenant chart can never mint an Application/AppProject/Role/RoleBinding. */
 export function renderTenantAppProject(input: { guid: string; member: string; argoNamespace: string; catalogRepoUrl: string; platformRepoURL: string; cluster: string }): AppProjectManifest {

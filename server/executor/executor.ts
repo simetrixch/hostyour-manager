@@ -320,11 +320,11 @@ export class Executor {
    *  for one route. It is asked only on the path that HAS compensations, because that is the only path
    *  that mutates anything.
    *
-   *  (2) PARAMS ARE PARSED ONLY WHERE THEY ARE NEEDED. paramsSchema.parse used to be the FIRST thing this
-   *  method did, which made a run that never got a usable plan un-abortable: a run that failed while still
+   *  (2) PARAMS ARE PARSED ONLY WHERE THEY ARE NEEDED. paramsSchema.parse as the FIRST thing this
+   *  method does would make a run that never got a usable plan un-abortable: a run that failed while still
    *  `planning` carries only the operator's RAW request (beginStreamingPlan persists it verbatim and only
-   *  the settled plan overwrites it) and has no step rows at all, so the parse threw a ZodError at the
-   *  operator instead of settling the run cancelled — a guaranteed-failing button on a run that had
+   *  the settled plan overwrites it) and has no step rows at all, so the parse throws a ZodError at the
+   *  operator instead of settling the run cancelled — a guaranteed-failing button on a run that has
    *  nothing to clean up in the first place. The params feed the definition's cleanups + precondition, so
    *  they are parsed there and nowhere else.
    *

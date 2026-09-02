@@ -76,8 +76,8 @@ export function resolveMasterCluster(db: Db): { clusterId: string; domain: strin
  *  naming the files that were read.
  *
  *  `registry`, not `registrations`. The charts read `global.endpoints.registry.host` and nothing on
- *  an install branch has ever carried the other spelling, so this fold used to find nothing and
- *  refuse every tenant plan. `registrations` in this platform is the directory of unit registration
+ *  an install branch carries the other spelling, so a fold looking for it finds nothing and
+ *  refuses every tenant plan. `registrations` in this platform is the directory of unit registration
  *  files, which is a different thing entirely. */
 export function registryHostFromChain(files: readonly ClusterValueFile[]): string {
   let found: string | null = null;

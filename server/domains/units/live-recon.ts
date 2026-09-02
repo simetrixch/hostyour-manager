@@ -147,8 +147,8 @@ export async function probeConsumerLive(
 
   // The high-value comparison: what the POINTER pins vs what the cluster actually RUNS — both halves
   // read off the Application and nowhere else. Comparing against a Manager-side column is exactly
-  // what made this card flag example-auth and example-post as "Drift" while both were perfectly correct
-  //: only a Manager RUN ever advanced that column, while the pin moved through
+  // what makes this card flag perfectly correct consumers as "Drift": only a Manager RUN advances
+  // that column, while the pin moves through
   // GitOps. A consumer whose Application is absent — a finished suspend, a half-finished resume — earns
   // the NEUTRAL "not-deployed" and never "converged": nothing was compared (deploymentVerdict).
   const drift = driftOf({ targeted, deployed, argoRead: argoRes.status === "fulfilled" });
@@ -164,7 +164,7 @@ export async function probeConsumerLive(
  *
  *  Fail-SOFT, unlike the offboard orphan scan which makes the same read and must fail closed: this
  *  answers a card, so an unreadable chain yields null and the card shows no address at all. A composed
- *  guess would be a link to a name nothing serves, which is what this replaced. */
+ *  guess would be a link to a name nothing serves. */
 export async function readUnitHost(
   registrations: { readClusterValueFiles(domain: string, stage: Stage): Promise<readonly ClusterValueFile[]> } | undefined,
   name: string,

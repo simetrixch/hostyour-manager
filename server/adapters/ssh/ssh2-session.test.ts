@@ -82,9 +82,9 @@ describe("ssh2 session against a real in-process ssh2.Server", () => {
   });
 
   it("putFile releases its SFTP channel: repeated putFile+exec cycles under a MaxSessions cap all pass (the verify-slave channel-exhaustion regression)", async () => {
-    // Before the fix, every putFile leaked its SFTP session channel; with sshd's
-    // MaxSessions-style cap this refused the 3rd/4th channel open ("(SSH) Channel open
-    // failure") — how a long verify-slave (a diagnostic-script upload per minute) died on
+    // A putFile that leaks its SFTP session channel meets sshd's
+    // MaxSessions-style cap and is refused at the 3rd/4th channel open ("(SSH) Channel open
+    // failure") — which is how a long verify-slave (a diagnostic-script upload per minute) dies on
     // its final poll. 8 cycles against a cap of 3 stay green only if each putFile
     // end()s its channel.
     const srv = await start({ acceptPassword: "pw", maxSessions: 3, execTable: { "echo ok": { stdout: "ok\n", code: 0 } } });

@@ -194,7 +194,7 @@ describe("removeSlaveMarkingPart", () => {
 describe("map rewrite — a writer keeps every value the map carried", () => {
   const TAG = "1.2.0-stable-20260728120000";
 
-  // THE MAP AS THE TEMPLATE ACTUALLY WRITES IT (digita-deploy ansiwise/templates/cluster-map.tpl),
+  // THE MAP AS THE TEMPLATE ACTUALLY WRITES IT (hostyour-deploy ansiwise/templates/cluster-map.tpl),
   // not the four fields this module happens to name. The schema lets `global` through on purpose,
   // so a chart can add a value without failing every map read — but a writer that emits only what
   // it understands turns that permission into DATA LOSS the moment anything rewrites the file, and
@@ -291,14 +291,14 @@ describe("map rewrite — a writer keeps every value the map carried", () => {
 });
 
 describe("map-writer contract", () => {
-  // The deployment programs write a master's map from ONE template — digita-deploy
+  // The deployment programs write a master's map from ONE template — hostyour-deploy
   // ansiwise/templates/cluster-map.tpl — and this module reads every map with a STRICT schema.
   // The two repos ship separately, so nothing forces them to agree — this test does. It parses
   // the actual template out of the sibling checkout (ci.sh runs the repos mounted side by side,
   // the same layout as a dev machine) and asserts every key the template emits is a key the
   // schema declares. Without it, a field the template gains is invisible here until a fresh
   // installation's map fails every read.
-  const mapTpl = fileURLToPath(new URL("../../../../../digitaplatform/digita-deploy/ansiwise/templates/cluster-map.tpl", import.meta.url));
+  const mapTpl = fileURLToPath(new URL("../../../../hostyour-deploy/ansiwise/templates/cluster-map.tpl", import.meta.url));
 
   it.skipIf(!existsSync(mapTpl))("every key the map template writes is declared in the schema", () => {
     const text = readFileSync(mapTpl, "utf8");

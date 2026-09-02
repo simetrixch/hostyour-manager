@@ -161,9 +161,9 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
     expect(plan.targets).toHaveLength(1);
     expect(plan.targets?.[0]).toMatchObject({ serverId: MASTER_ID, ownsHost: true, transport: "public" });
     expect(deriveServerLocks(plan.targets ?? [])).toEqual([{ resource: "server", key: MASTER_ID }]);
-    // A MASTER RUNS THE SAME PROGRAM AS EVERY OTHER HOST, certificate work included. Measured on
-    // apps3 on 2026-08-29: adding a tailnet address made MicroK8s's own apiserver-kicker log "cert
-    // change detected", re-issue the serving certificate and restart the control plane seven seconds
+    // A MASTER RUNS THE SAME PROGRAM AS EVERY OTHER HOST, certificate work included. Measured on a
+    // real machine: adding a tailnet address made MicroK8s's own apiserver-kicker log "cert
+    // change detected", re-issue the serving certificate and restart the control plane seconds
     // after the join — which restarted Vault, brought it back SEALED, and degraded every workload
     // that reads a secret. The certificate step is what does that deliberately and waits for the node
     // to come back, instead of leaving it to happen after the run has reported success.

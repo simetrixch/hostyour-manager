@@ -92,10 +92,10 @@ describe("CredentialStore (plaintext pass-through)", () => {
   });
 
   it("the same fingerprint may be sealed on more than one row (correlator, not a key)", async () => {
-    // The live create-mgmt incident class: a slave's STABLE long-lived token re-sealed under
-    // a renamed label collided with the old global credentials_fingerprint_uq (migration
-    // 0005 dropped it). Same shape: the constant "bootstrap-password" marker fingerprint
-    // shared by every server with a stored adopt password.
+    // The create-mgmt shape: a slave's STABLE long-lived token re-sealed under a renamed
+    // label carries the fingerprint the first seal carries, which a global unique index over
+    // that column would refuse. Same shape: the constant "bootstrap-password" marker
+    // fingerprint shared by every server with a stored adopt password.
     const { store } = fresh();
     const a = await store.seal({ kind: "kubeconfig", label: "edge1 cluster bearer (argocd-manager) — s1", plaintext: Buffer.from("stable-token"), fingerprint: "sha256:same" });
     const b = await store.seal({ kind: "kubeconfig", label: "s1 cluster bearer (argocd-manager)", plaintext: Buffer.from("stable-token"), fingerprint: "sha256:same" });

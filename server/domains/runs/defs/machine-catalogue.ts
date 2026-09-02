@@ -13,13 +13,11 @@ import { CATALOG_CHECKOUT } from "./machine-state.ts";
 // move that evening: "ansiwise is at 0.5.7-alpha-20260827121634 and the program pins
 // 0.5.3-alpha-20260826225248".
 //
-// IT REFRESHES AND NEVER CLONES, and that is what makes it need no credential of ours. A machine
-// that already lives carries the checkout with its own origin and its own read credential, put there
-// by the `git_clone` row that made it — so the fetch here authenticates with what the MACHINE holds,
-// and this manager composes no credential into anything. A machine that carries no catalogue is left
-// exactly as it was and says so: cloning one is a program's row and stays one, because only that row
-// knows the origin and the credential by name, and it reads both out of files rather than off a
-// command line.
+// NO CREDENTIAL PASSES THROUGH THIS MODULE. The refresh authenticates with what the MACHINE holds —
+// a machine that already lives carries the checkout with its own origin, put there by the
+// `git_clone` row that made it — and the clone below reaches a repository that turns nobody away,
+// because the deployment programs are public. So neither command is given an environment of ours,
+// and there is nothing of ours on the machine afterwards to take off it.
 //
 // AND IT STANDS ON NO BRANCH OF OUR CHOOSING. The branch is read OFF the machine and the fetch and
 // the reset are made onto that same branch, so this brings a machine's catalogue to the head of the
@@ -39,20 +37,17 @@ import { CATALOG_CHECKOUT } from "./machine-state.ts";
 
 /** What the machine's catalogue was brought from and to. `branch` absent is a machine that carries
  *  no catalogue at all — the one outcome that is neither a change nor a fault. */
-/** WHERE A CATALOGUE COMES FROM WHEN A MACHINE HAS NONE, and what opens it.
+/** WHERE A CATALOGUE COMES FROM WHEN A MACHINE HAS NONE.
  *
- *  THE CREDENTIAL STAYS WITH THIS MANAGER AND IS NEVER LEFT ON THE MACHINE. It rides in for the one
- *  command that needs it and the two files carrying it are removed in the same act, so a slave holds
- *  no token of ours afterwards — the one this manager has is write-capable on the catalogue
- *  (kernel/config.ts, CATALOG_WRITE_PAT), and a write credential on every machine of an installation
- *  is a widening nobody asked for. The price is that a machine cannot bring its own catalogue
- *  forward, which is the same thing said the other way round: bringing it forward is this manager's
- *  act, and it can perform it whenever it is asked to. */
+ *  AN ADDRESS AND NO CREDENTIAL. The deployment programs live in a repository of their own and that
+ *  repository is PUBLIC (kernel/config.ts, DEPLOY_PROGRAMS_REPO), so the clone is answered without
+ *  one — nothing of this manager's rides onto the machine and nothing has to be taken off it again.
+ *  The two values beside the address are about the MACHINE and not about the repository: /srv belongs
+ *  to root, so the directory the clone goes into is made elevated and handed to the account that will
+ *  read it. */
 export interface CatalogueOrigin {
   /** The repository, as an address git can clone. */
   repoURL: string;
-  /** A credential that may read it. */
-  token: string;
   /** The account the checkout is to belong to — /srv is root's, so it is made FOR that account. */
   account: string;
   /** What raises the one command that makes a directory under /srv. */
@@ -68,28 +63,6 @@ export interface CatalogueVerdict {
 /** One command's wall clock. A fetch of one repository over the machine's own network, the same
  *  budget the platform tree's refresh is given (live-cluster.kit.ts). */
 const COMMAND_TIMEOUT_MS = 2 * 60_000;
-
-/** Where the credential lives for as long as one clone takes. Under /tmp and not in the checkout,
- *  because what is written into the checkout stays there and this must not. */
-const ASKPASS = "/tmp/.manager-catalogue-askpass";
-const TOKEN_FILE = "/tmp/.manager-catalogue-token";
-
-/** git asks this for a username and a password, one at a time, and it answers from the file beside
- *  it. The token is never an argument of a command, so it stands in no process list. */
-const ASKPASS_SCRIPT = [
-  "#!/bin/sh",
-  "case \"$1\" in",
-  "  Username*) printf 'x-access-token' ;;",
-  `  *) cat ${TOKEN_FILE} ;;`,
-  "esac",
-  "",
-].join("\n");
-
-/** The words that put this manager's credential in front of ONE git command, or nothing at all where
- *  the caller holds none — a machine whose own checkout carries a credential needs neither. */
-function reading(origin: CatalogueOrigin | undefined): string[] {
-  return origin === undefined ? [] : ["env", `GIT_ASKPASS=${ASKPASS}`, "GIT_TERMINAL_PROMPT=0"];
-}
 
 /** How long one clone of the catalogue may take. A fetch is a delta and the clone is the whole tree,
  *  so it is given more than the commands around it. */
@@ -117,14 +90,15 @@ async function cloneCatalogue(machine: PlacementMachine, origin: CatalogueOrigin
   }
 
   const cloned = await machine.run(
-    [...reading(origin), "git", "clone", "--quiet", origin.repoURL, CATALOG_CHECKOUT],
+    ["git", "clone", "--quiet", origin.repoURL, CATALOG_CHECKOUT],
     { timeoutMs: CLONE_TIMEOUT_MS },
   );
   if (cloned.code !== 0) {
     throw errValidation(
       `${machine.name} could not clone the catalogue from ${origin.repoURL} into ${CATALOG_CHECKOUT} (exit ` +
       `${cloned.code}) — every program this run drives is read out of that checkout. Read what git wrote in the run ` +
-      "log: a credential that does not open that repository, and a machine with no route to it, are the two it says",
+      "log: the repository is public, so a machine with no route to it and an address that names no such repository " +
+      "are the two it says",
     );
   }
   machine.log(`${machine.name}: cloned the catalogue into ${CATALOG_CHECKOUT} from ${origin.repoURL}`);
@@ -138,31 +112,17 @@ const CATALOG_GIT = `${CATALOG_CHECKOUT}/.git`;
  *  machine carries none.
  *
  *  Every failure is NAMED rather than left inside an exit code: what the caller has to know is which
- *  of the four machines it is looking at — one with no catalogue, one on a detached HEAD, one whose
- *  origin its own credential no longer opens, and one whose tree belongs to root. */
+ *  of the four machines it is looking at — one with no catalogue, one on a detached HEAD, one that
+ *  cannot reach the origin its own checkout carries, and one whose tree belongs to root. */
 export async function refreshCatalogue(machine: PlacementMachine, origin?: CatalogueOrigin): Promise<CatalogueVerdict> {
-  if (origin !== undefined) {
-    await machine.putFile(ASKPASS, Buffer.from(ASKPASS_SCRIPT, "utf8"), 0o700);
-    await machine.putFile(TOKEN_FILE, Buffer.from(origin.token, "utf8"), 0o600);
-  }
-  try {
-    return await broughtForward(machine, origin);
-  } finally {
-    // BOTH FILES GO, on every path out. A token left under /tmp is a token on a machine, and this
-    // one is write-capable on the catalogue.
-    if (origin !== undefined) await machine.run(["rm", "-f", ASKPASS, TOKEN_FILE], { timeoutMs: COMMAND_TIMEOUT_MS });
-  }
-}
-
-/** The act itself, with the credential already standing where git will ask for it. */
-async function broughtForward(machine: PlacementMachine, origin: CatalogueOrigin | undefined): Promise<CatalogueVerdict> {
   const present = await machine.run(["test", "-d", CATALOG_GIT], { timeoutMs: COMMAND_TIMEOUT_MS });
   if (present.code !== 0) {
     if (origin === undefined) {
       machine.log(
-        `${machine.name} carries no catalogue at ${CATALOG_CHECKOUT} and this manager holds no address to clone one ` +
-        "from — set CATALOG_REPO and CATALOG_WRITE_PAT, which is the pair it clones the catalogue with everywhere " +
-        "else, and this step makes the checkout every program of this run is read out of",
+        `${machine.name} carries no catalogue at ${CATALOG_CHECKOUT} and this manager was built holding no address to ` +
+        "clone one from — boot/wire.ts states that address unconditionally out of DEPLOY_PROGRAMS_REPO, so this is a " +
+        "wiring fault and not a setting to fill in, and this step makes the checkout every program of this run is " +
+        "read out of",
       );
       return {};
     }
@@ -183,13 +143,13 @@ async function broughtForward(machine: PlacementMachine, origin: CatalogueOrigin
   assertWord(branch, `branch ${CATALOG_CHECKOUT} stands on`);
 
   const before = await machine.run(["git", "-C", CATALOG_CHECKOUT, "rev-parse", "--short", "HEAD"], { timeoutMs: COMMAND_TIMEOUT_MS });
-  const fetched = await machine.run([...reading(origin), "git", "-C", CATALOG_CHECKOUT, "fetch", "origin", branch], { timeoutMs: COMMAND_TIMEOUT_MS });
+  const fetched = await machine.run(["git", "-C", CATALOG_CHECKOUT, "fetch", "origin", branch], { timeoutMs: COMMAND_TIMEOUT_MS });
   if (fetched.code !== 0) {
     throw errValidation(
       `${machine.name} could not fetch ${branch} into ${CATALOG_CHECKOUT} (exit ${fetched.code}) — the programs this run ` +
       "drives are read out of that checkout, and the version it stamps is what the cluster program asserts the placed " +
-      "engine against. The fetch authenticates with the credential the machine's own checkout carries, so read what git " +
-      "wrote in the run log: an origin that credential no longer opens, and a tree that belongs to root rather than to " +
+      "engine against. The fetch is made with what the machine's own checkout carries, so read what git wrote in the run " +
+      "log: an origin that checkout cannot reach, and a tree that belongs to root rather than to " +
       `${machine.name}'s operating account, are the two it says out loud`,
     );
   }

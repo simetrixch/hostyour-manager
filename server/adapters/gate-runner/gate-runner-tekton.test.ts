@@ -79,7 +79,7 @@ class FakeCluster implements GateRunCluster {
   listConfigMapNames(): Promise<string[]> { return Promise.resolve([]); }
 }
 
-/** The three TaskRuns a gate-run has, ended the way apps3 measured them: the gate step was OOM-killed
+/** The three TaskRuns a gate-run has, ended the way a real installation measured them: the gate step was OOM-killed
  *  before it could write a report, and the finally task still published. */
 const OOM_TASKRUNS: TaskRunOutcome[] = [
   { pipelineTaskName: "clone", succeeded: true, reason: "Succeeded", message: "All Steps have completed executing" },
@@ -188,7 +188,7 @@ describe("TektonGateRunner", () => {
   });
 
   it("poll: a ConfigMap carrying incomplete.json raises the gate-did-not-complete failure with its reason, NOT a schema complaint", async () => {
-    // Measured on apps3 (2026-08-26): the gate task died, publish-report wrote a synthetic object,
+    // Measured on a real installation: the gate task died, publish-report wrote a synthetic object,
     // and the operator got thirteen zod violations about GateReportSchema and never learned the gate
     // had died. The incomplete key is never parsed as a report, so none of that text can appear.
     const c = new FakeCluster({
@@ -283,8 +283,8 @@ describe("TektonGateRunner", () => {
     await expect(rejected).rejects.toThrow(/reportHash does not verify/);
   });
 
-  // THE SANDBOX LEG, enforced on the same line as the schema and the hash. Measured on apps3 on
-  // 2026-08-26: a report attesting that the node's own API server and the Manager were both reachable
+  // THE SANDBOX LEG, enforced on the same line as the schema and the hash. Measured on a real
+  // installation: a report attesting that the node's own API server and the Manager were both reachable
   // from inside the gate pod was accepted and composed into a verdict — the attestation was a field
   // and not a fence. Each leg is planted on its own, so a refusal cannot rest on one of them alone.
   const LEGS = ["mustFailTargetsDeclaredListening", "mustFailDenied", "managerAddrDenied", "mustPassReached"] as const;
@@ -342,8 +342,8 @@ describe("TektonGateRunner", () => {
   });
 
   it("poll: a refusal on a report carrying no fence row says the row is missing, rather than nothing", async () => {
-    // A runner older than the row that says which gates were skipped writes gates: [] — the exact
-    // apps3 shape. The refusal must state that the report does not say, instead of falling silent
+    // A runner older than the row that says which gates were skipped writes gates: [] — the shape a
+    // refused run leaves. The refusal must state that the report does not say, instead of falling silent
     // and reading as a refusal with nothing behind it.
     const green = report("pass");
     const silent = { ...green, verdict: "fail" as const, manifest: null, gates: [], sandbox: { ...green.sandbox, mustFailDenied: false } };

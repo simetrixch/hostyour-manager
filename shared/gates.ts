@@ -60,11 +60,11 @@ export type GateResult = z.infer<typeof GateResultSchema>;
  *
  *  THREE OF THE FOUR LEGS ARE PROBES the runner made itself. The fourth,
  *  `mustFailTargetsDeclaredListening`, is the Manager's WORD and no probe stands behind it: the
- *  wiring states it as a constant. It used to be spelled `…ConfirmedListening`, which claimed a
+ *  wiring states it as a constant. Spelling it `…ConfirmedListening` would claim a
  *  measurement, and the difference is the whole of what a denied connect is worth — a target nothing
  *  proved was listening is a target the sandbox may simply have been unable to reach, and a fence
  *  that was never tested then reports as held. Measured on an installation whose `lan_host` answer
- *  carried ANOTHER machine's address, 2026-08-26: the must-fail target was that other machine's API
+ *  carried ANOTHER machine's address: the must-fail target was that other machine's API
  *  server, the Manager could reach it over the public internet perfectly well and would have
  *  declared it listening, while the sandbox's own vantage is a different one entirely.
  *

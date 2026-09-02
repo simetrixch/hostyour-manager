@@ -38,9 +38,9 @@ function buildOnlyManifest(): GateContext["manifest"] {
 
 // WHAT THIS GATE MAY CLAIM ON A RUN THAT READ NOTHING. G2 runs at pipeline.ts:87, BEFORE the
 // `manifest !== null` guard at :90, so a report whose G1 failed reaches it with `chartPath` — the
-// RUN's dispatch parameter — set and `manifest` null. One sentence for both cases said "the manifest
-// declares no chart" about a report that carries no manifest: a PASS row reporting on the repository
-// from an input it does not have, which is the apps3 defect from the other side.
+// RUN's dispatch parameter — set and `manifest` null. One sentence for both cases would say "the
+// manifest declares no chart" about a report that carries no manifest: a PASS row reporting on the
+// repository from an input it does not have.
 describe("determinismGate on a build-only dispatch", () => {
   it("says the manifest declares no chart only when a manifest was actually parsed", () => {
     const r = determinismGate.check(makeCtx({}, null, buildOnlyManifest()));
@@ -131,8 +131,9 @@ describe("determinismGate determinism", () => {
   });
 
   // Regression (1): the lookup reaches helm only via `{{ tpl .Values.dyn . }}`; the lookup itself
-  // lives in values.yaml (outside templates/). The old raw-templates/ scan missed it entirely because
-  // the action in the template file has no forbidden token; scanning values*.yaml actions catches it.
+  // lives in values.yaml (outside templates/). A scan of raw templates/ alone misses it entirely
+  // because the action in the template file has no forbidden token; scanning values*.yaml actions
+  // catches it.
   it("fails when a lookup lives in a value that a template feeds through tpl", () => {
     const ctx = makeCtx({
       "deploy/chart/templates/cm.yaml": "data:\n  x: {{ tpl .Values.dyn . }}\n",
@@ -146,8 +147,9 @@ describe("determinismGate determinism", () => {
     expect((r.evidence ?? []).some((e) => e.file === "deploy/chart/values.yaml")).toBe(true);
   });
 
-  // Regression (2): a subchart template under charts/*/templates/** was outside the old root-only
-  // templates/ prefix, so its lookup was missed. It is now in scope (under <chartPath>/).
+  // Regression (2): a subchart template under charts/*/templates/** falls outside a root-only
+  // templates/ prefix, so a scan bounded that way misses its lookup. The scan is bounded by
+  // <chartPath>/ instead, which takes it in.
   it("fails when a subchart template uses lookup", () => {
     const ctx = makeCtx({
       "deploy/chart/charts/util/templates/job.yaml":

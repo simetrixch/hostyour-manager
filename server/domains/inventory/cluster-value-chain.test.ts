@@ -51,9 +51,9 @@ describe("readClusterValueChain", () => {
   });
 
   it("a branch the fixture materialized reads a COMPLETE chain — the fixture cannot drift off the reader", async () => {
-    // The guard on the way this broke last time: the fake used to spell the chain as string
-    // literals, so it served whatever the reader asked for and the two agreed with each other about
-    // a layout that existed nowhere. This asserts the fixture against the reader rather than against
+    // The guard on the way this breaks: a fake that spells the chain as string
+    // literals serves whatever the reader asks for, and the two agree with each other about
+    // a layout that exists nowhere. This asserts the fixture against the reader rather than against
     // a second copy of the list.
     const repo = new FakePlatformRepo();
     const files = await readClusterValueChain(repo, "fresh.example", "dev");

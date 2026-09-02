@@ -46,8 +46,9 @@ import { STAGE, TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 // The wire shapes this module ANSWERS IN, declared once in shared/api-types.ts and consumed unchanged by
 // the browser (web/src/api.ts + the run/tenant screens). Both functions below return one of them by
 // declared type, which is the whole compile-time link: a member added to RunTenantStateView, or a field
-// added to a target, lands on both ends of the wire in the same typecheck. They used to be declared here
-// AND hand-mirrored in the browser — see the section header in shared/api-types.ts for what that cost.
+// added to a target, lands on both ends of the wire in the same typecheck. Declaring them here AND
+// hand-mirroring them in the browser is the alternative — see the section header in
+// shared/api-types.ts for what that costs.
 import type {
   OrphanScan, OrphanTenantView, PurgeTenantTarget, RunTenantStateView, SkippedTenantPointerView,
 } from "../../../shared/api-types.ts";

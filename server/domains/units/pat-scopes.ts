@@ -8,10 +8,10 @@
 //                      a workflow file without it)
 //   admin:repo_hook  — create the build webhook (push → Tekton)
 //
-// This module is the SINGLE source of truth for that set. Before the preflight-scopes gate, the scopes
-// were discovered REACTIVELY — the run failed at setup-webhook for a missing admin:repo_hook, then (once
-// fixed) at inject-release-kit for a missing workflow — and every miss cost a fresh token round-trip
-// with the consumer (a classic PAT's scopes cannot be edited after creation). The gate reads a token's
+// This module is the SINGLE source of truth for that set. Without the preflight-scopes gate the scopes
+// are discovered REACTIVELY — the run fails at setup-webhook for a missing admin:repo_hook, then (once
+// that is fixed) at inject-release-kit for a missing workflow — and every miss costs a fresh token
+// round-trip with the consumer (a classic PAT's scopes cannot be edited after creation). The gate reads a token's
 // granted scopes once, up front, and reports the COMPLETE missing set in a single message.
 //
 // Pure: no IO. The adapter reads the raw X-OAuth-Scopes list; this module decides what is required.

@@ -139,7 +139,7 @@ describe("serializePointer (deep-equal round-trip)", () => {
   });
 });
 
-// THE HAND-SEEDED BOOTSTRAP REGISTRATION, as the installation repository renders it:
+// THE HAND-SEEDED BOOTSTRAP REGISTRATION, as the deployment programs render it:
 // registrations/hostyour-manager/build.yaml from ansiwise/templates/platform-build-registration.tpl
 // through deploy-branch.yaml:695-701 — the one registration nothing running can write, because the
 // unit it registers is the one whose image the Manager runs. Ordinary YAML: comment block, bare

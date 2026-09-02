@@ -157,7 +157,7 @@ describe("tenant-suspend run", () => {
   it("NEVER waits for a prune: a fan-out that went Missing is a suspend that destroyed something", async () => {
     // A prune deletes the member charts' ServiceClaims, whose deprovision finalizer drops the user AND
     // the databases on ANY claim deletion. So a suspend that observed Missing must FAIL, not succeed —
-    // the exact inverse of what the old prune-watch asserted.
+    // the exact inverse of what a prune-watch would assert.
     seedTenant();
     const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
@@ -313,10 +313,10 @@ describe("tenant-offboard run", () => {
   });
 
   it("removes the pointer of a tenant whose registration is CORRUPT — only ABSENT skips, never unreadable", async () => {
-    // remove-tenant asks ONE question — "is this pointer already gone?" — and it used to ask it through
-    // the strict readTenant, which THROWS on a body that fails its schema. A live tenant whose
-    // registration carries a malformed field therefore failed AT THIS STEP, identically on every retry:
-    // no removal was ever committed, the pointer stayed in catalog and the whole fan-out kept
+    // remove-tenant asks ONE question — "is this pointer already gone?" — and asking it through
+    // the strict readTenant, which THROWS on a body that fails its schema, makes a live tenant whose
+    // registration carries a malformed field fail AT THIS STEP, identically on every retry:
+    // no removal is ever committed, the pointer stays in catalog and the whole fan-out keeps
     // serving. That would break the one NON-destructive removal run kind — the one api.ts deliberately keeps
     // open on a still-provisioning tenant because it is the clean way OUT — and leave tenant-purge, which
     // deletes the Tenant CR and with it the tenant's Mongo databases and Vault path, as the only way to

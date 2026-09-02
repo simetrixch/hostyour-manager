@@ -37,7 +37,7 @@
   --term-err: hsl(4deg 90% 70%);
 
   /* stderr is a STREAM, not an error: tools write INFO there (git/ssh/vault
-     "login", progress, banners). Amber (not the red-orange it used to be) so it
+     "login", progress, banners). Amber, never red-orange, so it
      never reads as an error — red is reserved for --term-err (✗ lines). */
   --term-stderr: hsl(40deg 70% 68%);
 

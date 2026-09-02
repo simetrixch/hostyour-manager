@@ -17,12 +17,12 @@ import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
  *  out by an ApplicationSet whose generator reads the registration `write-registration` commits two
  *  steps earlier. A second writer here would put the Manager on an object GitOps owns.
  *
- *  WHAT IT ENDS. Measured on apps3 on 2026-08-26, on the first consumer this platform ever
- *  onboarded: `write-registration` ended at 1787773736850 and `provision-build-rbac` started at
- *  1787773736876 — twenty-six milliseconds — and failed with `namespaces "hostyour-manager-build"
- *  not found`. ArgoCD had not seen the commit; it could not have. A unit's FIRST onboarding
- *  therefore always failed and its second always succeeded, which reads like a flake and is not.
- *  Reproduced independently on apps4 the same evening.
+ *  WHAT IT ENDS. Measured on a real installation, on the first consumer this platform ever
+ *  onboarded: `provision-build-rbac` started twenty-six milliseconds after `write-registration`
+ *  ended, and failed with `namespaces "hostyour-manager-build"
+ *  not found`. ArgoCD had not seen the commit; it could not have. Without this step a unit's FIRST
+ *  onboarding always fails and its second always succeeds, which reads like a flake and is not.
+ *  Reproduced independently on a second machine.
  *
  *  THE NAMESPACE IS WATCHED THROUGH ITS APPLICATION and not by polling for the namespace, because
  *  the Application arriving Synced+Healthy is the statement that everything in it stands — the

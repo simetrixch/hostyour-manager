@@ -20,10 +20,9 @@
 // every unit this Manager gates, and the chart's own files always sit BETWEEN the platform pair and
 // the cluster's own map — which is why the order below is not a flat list but a split one.
 //
-// `clusters/active/<fqdn>.yaml` is the cluster's own map. It ABSORBED the file that used to be
-// called installation/profile.yaml, whose six answers it carried a second time in a second
-// spelling; the map's own header records that. It layers LAST and therefore wins, which is what
-// makes a per-cluster answer able to override a platform default.
+// `clusters/active/<fqdn>.yaml` is the cluster's own map, and it carries the installation's own
+// answers outright rather than leaving them to a second file in a second spelling. It layers LAST
+// and therefore wins, which is what makes a per-cluster answer able to override a platform default.
 import { z } from "zod";
 import type { Stage } from "./enums.ts";
 

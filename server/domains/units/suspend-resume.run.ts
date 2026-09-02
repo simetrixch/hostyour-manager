@@ -61,16 +61,16 @@ function suspendSteps(ports: LifecyclePorts, params: SuspendResumeParams): Step[
   const appId = params.appId;
   return [
     attestTargetStep(ports, appId),
-    // The ROW MOVES FIRST, before the GitOps commit. It used to move last, after the convergence
-    // watch, which left a window — often minutes — in which the registration said suspended and the
-    // inventory said active. Anything reading the inventory in that window read a consumer that is
-    // serving, while the render was already taking it down.
+    // The ROW MOVES FIRST, before the GitOps commit. Moving it last, after the convergence
+    // watch, leaves a window — often minutes — in which the registration says suspended and the
+    // inventory says active. Anything reading the inventory in that window reads a consumer that is
+    // serving, while the render is already taking it down.
     //
     // Writing it first cannot produce that disagreement: from the commit onward both say the same
     // thing. A crash in between leaves a row that states the intent and a registration that has not
     // caught up yet, which is the direction a resume repairs — the run re-runs its remaining steps
-    // and the world converges onto what the row already says. The reverse order left a row nobody
-    // would ever correct, because the run had already passed the step that would have.
+    // and the world converges onto what the row already says. The reverse order leaves a row nobody
+    // would ever correct, because the run has already passed the step that would have.
     {
       name: "record-suspended",
       title: "Record the consumer as suspended",

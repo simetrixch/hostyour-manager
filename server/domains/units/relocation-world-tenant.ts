@@ -143,10 +143,10 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         // ServiceClaim naming that member's databases, the flip prunes the member Applications, and
         // the resources-finalizer takes those claims with them — so without this mark the move's own
         // repoint drops the databases it is moving.
-        // There used to be a second mark, on the Tenant CR, for what a reconciler would have
-        // deprovisioned. Nothing reconciles that CR and it no longer exists; the Vault entry it stood
-        // for is untouched by a move anyway (one shared KV mount), and the databases were never its to
-        // save — this mark is what saves them, and always was.
+        // A second mark on the Tenant CR, for what a reconciler would deprovision, saves nothing:
+        // nothing reconciles that CR, the Vault entry it would stand
+        // for is untouched by a move anyway (one shared KV mount), and the databases are not its to
+        // save — this mark is what saves them.
         // The member namespace stays readable for that decision even while the cascade deletes it: a
         // namespace cannot finish terminating while a claim inside it still holds the provisioner's
         // finalizer.
@@ -180,10 +180,10 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         // cluster's appset from the registration — so the release IS those Applications being pruned,
         // which the repoint sets off by flipping the registration's cluster field.
         //
-        // It used to watch the source Tenant CR instead. That was a weak check even while a reconciler
-        // existed (the Manager deleted the CR itself one line earlier, so the watch confirmed its
+        // Watching the source Tenant CR instead is a weak check even where a reconciler
+        // exists (the Manager deletes the CR itself one line earlier, so the watch confirms its
         // own delete) and an empty one without: nothing holds the object, so it vanishes at once and
-        // the watch always passed. The member Applications are what the source actually stops
+        // the watch always passes. The member Applications are what the source actually stops
         // producing.
         const names = [...tc.members, ...apps].map((m) => memberApplication(tc.guid, m, tc.stage));
         const { argoReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);

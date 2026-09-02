@@ -8,10 +8,10 @@
 //    deploy-slave; or the pod SA's in-cluster access for the master); smoke-reads a namespace on the target cluster
 //    and reads the deploy-state ConfigMap that attest-target checks fail-closed. It ALSO carries the
 //    teardown writes on the TARGET cluster: deleteNamespace (ArgoCD's CreateNamespace=true never
-//    removes the namespace on prune, so the offboard Run must). A tenant deprovision USED to be one
-//    delete: a cluster-scoped Tenant CR whose finalizer a reconciler released once everything was
-//    gone. No reconciler serves that CR, so the CR and the three port methods that drove it are gone,
-//    and each thing the cascade did is now deprovisioned by whoever created it — the Vault entry by
+//    removes the namespace on prune, so the offboard Run must). A tenant deprovision is NOT one
+//    delete: no reconciler serves a cluster-scoped Tenant CR, so there is no finalizer to release
+//    once everything is gone,
+//    and each thing such a cascade would do is deprovisioned by whoever created it — the Vault entry by
 //    tenant-purge's delete-tenant-crypto through the same seeder create-tenant wrote it with, the
 //    databases by the ServiceClaim finalizers that fire when the member namespaces are reaped.
 //    It lists namespaces by label, which is how a
@@ -285,8 +285,8 @@ export interface ClusterReader {
    *  finalizers still holding it) or "active".
    *
    *  deleteNamespace above returns the moment the API accepts the delete, so its `deleted: true` means
-   *  "asked", never "gone". Three surfaces used to state a purged tenant's namespace as gone on that
-   *  basis — and a single stuck finalizer on any namespaced resource leaves it Terminating with
+   *  "asked", never "gone". A surface stating a purged tenant's namespace as gone on that
+   *  basis says more than it knows — a single stuck finalizer on any namespaced resource leaves it Terminating with
    *  everything still in it, while the run reports success. This read is what lets the run say which
    *  of the three it actually is. */
   namespacePhase(name: string): Promise<"absent" | "terminating" | "active">;
@@ -322,8 +322,8 @@ export interface ClusterReader {
   /** A namespace's current annotations, or null when the namespace is absent. The read half of
    *  annotateNamespace, and what tenant-purge asks before it reaps: a member namespace carrying
    *  {@link CLAIM_RELOCATING_ANNOTATION} belongs to a move in flight, and purging it would drop the
-   *  databases that mark exists to keep. It used to ask the Tenant CR's own relocating annotation
-   *  instead; nothing reconciles that CR any more and this is where the mark that ACTS lives. */
+   *  databases that mark exists to keep. The namespace is where the mark that ACTS lives: nothing
+   *  reconciles the Tenant CR, so its own relocating annotation moves nothing. */
   readNamespaceAnnotations(namespace: string): Promise<Record<string, string> | null>;
 }
 

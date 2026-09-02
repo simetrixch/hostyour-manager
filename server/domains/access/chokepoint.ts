@@ -1,8 +1,8 @@
 import type { OperatorSession } from "./session.ts";
 
-// The tri-state gate. The three outcomes are DISTINCT — the old console
-// collapsed unauthenticated + forbidden into one redirect branch, which is *why* a redirect
-// loop could exist. Here a valid-but-forbidden session can never be answered with a redirect
+// The tri-state gate. The three outcomes are DISTINCT — collapsing unauthenticated + forbidden
+// into one redirect branch is *how* a redirect
+// loop comes to exist. Here a valid-but-forbidden session can never be answered with a redirect
 // to login; the http middleware maps each outcome (G2), and the invariant is testable.
 export type GateResult =
   | { kind: "ok"; operator: OperatorSession }

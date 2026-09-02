@@ -9,8 +9,8 @@ import { serveIdentity, requireServeCommand } from "./defs/ansiwise-run.kit.ts";
 // label an operator later notices: the engine THROWS on the mismatch out of Runner.run, so the run's
 // process dies before it writes one event, no record is left, and the caller waits on an event
 // stream that will never carry anything. Measured on the first slave this platform deployed —
-// `emit-cluster-credentials applies to slave, and this machine is master`, fifteen steps after the
-// deployment began, because every program before it applies to both parts.
+// `emit-cluster-credentials applies to slave, and this machine is master`, well into the
+// deployment, because every program before it applies to both parts.
 
 describe("serveIdentity — the two facts a serve cannot default", () => {
   it("says the role and the domain, in the form the binary takes", () => {

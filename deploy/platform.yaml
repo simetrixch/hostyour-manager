@@ -38,7 +38,7 @@ builds:
   # mongosh, pg_dumpall, rclone, ssh. It is the tooling THIS manager runs
   # (server/domains/units/relocation.ts), so it builds where its caller
   # lives. Its two database client versions are stamped into the Dockerfile by
-  # digita-deploy's sync-versions program, because the servers they talk to are
+  # hostyour-deploy's sync-versions program, because the servers they talk to are
   # pinned in hostyour-cloud/platform/versions.yaml.
   - name: dbtools
     containerfile: docker/dbtools.Dockerfile

@@ -65,7 +65,7 @@ export interface RedeployPorts extends DeploySlavePorts, AnsiwisePorts {
 
 /** The programs the master arm runs after deploy-host, in the order the machine layer stands on them:
  *  the cluster below GitOps first, then what hands it over. The names are the catalogue's own
- *  (digita-deploy ansiwise/programs/); each step reads the program's declared answers off the
+ *  (hostyour-deploy ansiwise/programs/); each step reads the program's declared answers off the
  *  machine, so nothing about their INSIDES is repeated here.
  *
  *  deploy-host is NOT in this list and stands beside it, for the same reason it stands beside the

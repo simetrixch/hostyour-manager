@@ -191,6 +191,24 @@ const EnvSchema = z.object({
   STORAGE_BOX_HOST: z.string().min(1).optional(),
   STORAGE_BOX_USER: z.string().min(1).optional(),
   STORAGE_BOX_PASSWORD: z.string().min(1).optional(),
+  // WHERE THE DEPLOYMENT PROGRAMS COME FROM — the repository cloned to /srv/ansiwise-catalog on a
+  // machine that carries none, and the tree the serving binary reads every program and its
+  // ansiwise.yaml out of. It is `owner/name`, and the URL is composed the same way every other
+  // repository's is (https, never with embedded credentials).
+  //
+  // IT DEFAULTS, AND CATALOG_REPO ABOVE DELIBERATELY DOES NOT. CATALOG_REPO names the INSTALLATION's
+  // own repository, where one installation's name is another installation's mistake, so a default
+  // there would bind a tenant family to somebody else's books. This one names the PRODUCT's own
+  // repository: every installation of this platform runs the same deployment programs, the way every
+  // installation runs the same manager image, so the name is a platform constant and standing it here
+  // is what spares an installation from having to know it. An operator overrides it to run a fork of
+  // the programs.
+  //
+  // AND IT CARRIES NO CREDENTIAL, which is why it is one key and not a pair. The programs repository
+  // is PUBLIC, so a clone of it authenticates with nothing and there is no partner secret to demand:
+  // pairing it with a PAT the way GITHUB_REPO and CATALOG_REPO are paired would make an installation
+  // mint a credential for a repository that turns nobody away.
+  DEPLOY_PROGRAMS_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'DEPLOY_PROGRAMS_REPO must be "owner/repo"').default("simetrixch/hostyour-deploy"),
   // The machine-side deployment programs. The redeploy master arm drives deploy-cluster /
   // deploy-platform-services through the serving binary's SESSION door on the target machine; this is the
   // command that starts that surface over the run's SSH session — and so names WHICH catalogue
@@ -377,6 +395,11 @@ export interface Config {
   };
   /** The pinned dbtools job image the relocation Jobs run. Absent ⇒ those steps fail loud. */
   dbtoolsImage?: string;
+  /** The deployment programs repository as a URL git can clone (DEPLOY_PROGRAMS_REPO) — what a
+   *  machine's /srv/ansiwise-catalog is made from when it carries none. Always present: the
+   *  repository is the product's own and the setting defaults to it, and it carries no credential
+   *  because the repository is public. */
+  deployProgramsRepoUrl: string;
   /** The command that starts the serving binary's session door (`ansiwise-rest serve`) on a target
    *  machine over the run's SSH session — the door to the machine's deployment programs (redeploy
    *  master arm). Absent ⇒ the program steps fail loud. */
@@ -512,6 +535,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
       ? { storageBox: { host: e.STORAGE_BOX_HOST, user: e.STORAGE_BOX_USER, password: e.STORAGE_BOX_PASSWORD } }
       : {}),
     ...(e.DBTOOLS_IMAGE ? { dbtoolsImage: e.DBTOOLS_IMAGE } : {}),
+    // Unconditional, because the setting has a default and the repository is public: there is no
+    // partner credential whose absence could turn this into a state the process has to describe.
+    deployProgramsRepoUrl: `https://github.com/${e.DEPLOY_PROGRAMS_REPO}.git`,
     ...(e.ANSIWISE_SERVE_COMMAND ? { ansiwiseServeCommand: e.ANSIWISE_SERVE_COMMAND } : {}),
     ...(e.ANSIWISE_DOWNLOAD_URL ? { ansiwiseDownloadUrl: e.ANSIWISE_DOWNLOAD_URL } : {}),
     // The schema refuses an empty string outright, so this guard narrows the optional and can never

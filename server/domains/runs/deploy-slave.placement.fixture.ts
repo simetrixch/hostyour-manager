@@ -170,16 +170,16 @@ export function answerPlacementCommand(
  *
  *  Undefined for every command that is not about the catalogue, so the table above goes on. */
 function answerCatalogueCommand(f: HostsScript, words: string[]): { out: string; code: number } | undefined {
-  // THE CREDENTIAL RIDES IN FRONT OF THE COMMAND, so the command is read past it. `env NAME=value`
-  // is how one git call is given this manager's askpass without the token becoming an argument, and
-  // a table that matched on the first word alone would see `env` and answer nothing about git.
+  // A LEADING `env NAME=value` IS READ PAST, so a command given an environment is still matched on
+  // the command itself: a table that looked at the first word alone would see `env` and answer
+  // nothing about git.
   const bare = words[0] === "env" ? words.slice(1).filter((w) => !w.includes("=")) : words;
   const [head, ...rest] = bare;
   // A CLONE MAKES THE MACHINE ONE. What the caller does next is what it does to a machine that
   // carries a catalogue, so the script starts carrying one from here.
   if (head === "git" && rest[0] === "clone" && rest.at(-1) === CATALOG_CHECKOUT) {
     if (f.catalogueBranch !== undefined) return { out: `fatal: destination path '${CATALOG_CHECKOUT}' already exists`, code: 128 };
-    if (f.catalogueCloneExit !== 0) return { out: "fatal: could not read Username", code: f.catalogueCloneExit };
+    if (f.catalogueCloneExit !== 0) return { out: "fatal: repository not found", code: f.catalogueCloneExit };
     f.catalogueBranch = f.catalogueClonesOnto;
     f.catalogueHead = f.catalogueRemoteHead;
     return { out: "", code: 0 };

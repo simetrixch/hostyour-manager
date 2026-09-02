@@ -59,10 +59,10 @@ export class FakeCarrierRepo implements CarrierRepo {
 
 /** WHERE THE PLATFORM'S OWN CHARTS AND THEIR IMAGE PINS STAND on hostyour-cloud, as a LITERAL and
  *  never as the constant the search uses. A fixture that seeds from that constant agrees with the
- *  reader whatever the platform repository holds, which is how the walk went on reading `apps/`
- *  through the rename that gathered every chart under `clusters/` — green here, while the release
- *  surface reported no app versions and the reaper's keep floor silently lost the class that protects
- *  the platform's own images. Measured in simetrixch/hostyour-cloud on 2026-08-26: no branch of that
+ *  reader whatever the platform repository holds, which is how such a walk goes on reading `apps/`
+ *  after a rename gathers every chart under `clusters/` — green here, while the release
+ *  surface reports no app versions and the reaper's keep floor silently loses the class that protects
+ *  the platform's own images. Measured in the platform repository: no branch of that
  *  repository carries `apps/`, and `clusters/inventories/` is where the release bump writes the tags
  *  (clusters/inventories/consumer-build/templates/pipeline-release.yaml globs exactly that path). */
 export const PLATFORM_APPS_DIR = "clusters/inventories";

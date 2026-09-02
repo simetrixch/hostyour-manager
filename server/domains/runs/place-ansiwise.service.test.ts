@@ -21,9 +21,9 @@ afterEach(() => disposeHarnesses());
 // The unit and the switch stay the BINARY's own act — what stands here is a caller for it that is not
 // a person, and the one line of the act that is still this repository's: the restart.
 //
-// WHAT REACHES THE MACHINE IS AN ARGUMENT LIST. install-service used to be invoked out of a composed
-// script — a `cd`, a pipeline into it, a `sed` escaping a password into JSON. All of that is gone:
-// what is sent is words, and the envelope rides standard input where it always did.
+// WHAT REACHES THE MACHINE IS AN ARGUMENT LIST, never a composed script — no `cd`, no pipeline into
+// it, no `sed` escaping a password into JSON. What is sent is words, and the envelope rides
+// standard input.
 
 /** A machine that has been through everything before this step in the list: both executables at the
  *  pin, and the token file run-deploy-platform-services writes. */
@@ -70,7 +70,7 @@ describe("enable-ansiwise-service", () => {
     // command is unchanged, `--version` on that path now answers the NEW release, and the process
     // serving is still the old code. install-service ends at `systemctl enable --now`, which does
     // nothing to a unit that is already running. Only the restart moves it, and no step of the
-    // framework restarts a unit (simetrixch/ansiwise-plugins#141).
+    // framework restarts a unit (ansiwise-plugins#141).
     const hosts = scriptedHosts();
     const h = await makeHarness({ hosts });
     const already = await placedMachine(hosts, "0.0.1-old");
@@ -134,7 +134,7 @@ describe("enable-ansiwise-service", () => {
     for (const act of hosts.log) expect(act.command).not.toContain(ELEVATION_PASSWORD);
     for (const f of hosts.files) expect(f.content).not.toContain(ELEVATION_PASSWORD);
     // No shell reaches the machine here either: every command is words, and nothing is uploaded and
-    // run. The composed script used to `cd`, pipe a `printf` into the installer and `sed`-escape the
+    // run. A composed script would `cd`, pipe a `printf` into the installer and `sed`-escape the
     // password into JSON — three shell constructs in one act.
     for (const command of commands(hosts)) {
       for (const word of command.split(" ")) expect(() => assertWord(word, "word"), command).not.toThrow();
@@ -142,11 +142,11 @@ describe("enable-ansiwise-service", () => {
     }
   });
 
-  it("names install-service's own options, and states the two the working directory no longer answers for", () => {
+  it("names install-service's own options, and states the two the working directory does not answer for", () => {
     // install-service composes the unit's ExecStart out of the options it was itself given, so what
     // reaches the machine has to be a CALL and never a unit. --config and --programs are named
-    // ABSOLUTELY because the installer no longer runs in the catalogue: the script that reached the
-    // machine used to `cd` there first, and a `cd` followed by a command is a shell composing two out
+    // ABSOLUTELY because the installer does not run in the catalogue: getting it there means a `cd`
+    // before the command, and a `cd` followed by a command is a shell composing two out
     // of one line. --runs stays unnamed — its own default is already absolute and already right.
     const argv = installServiceArgv({ executable: `${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`, listen: "100.64.0.11:9953" });
     expect(argv[0]).toBe(`${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`);

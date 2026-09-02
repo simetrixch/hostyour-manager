@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // A census over the WORD, beside the census over the run kind list in run-definitions-census.test.ts.
-// shared/enums.ts:343 names the type RunKind and every literal in RUN_KIND; "verb" is borrowed from
+// shared/enums.ts names the type RunKind and every literal in RUN_KIND; "verb" is borrowed from
 // grammar and names nothing in this codebase. Under the two patterns below it stood 562 times across
 // 128 files before #15, which removed 379 of them across 91 — measured with this census, because the
 // figure #15's own ticket carried was produced by a different pattern and does not reproduce.
@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 // matches `deleteServerById`, whose letters v-e-r-B are a case-insensitive substring search's false
 // positive rather than the word.
 //
-// KUBE'S WORD IS NOT OURS. server/adapters/kube/port.ts:464 declares `verbs: string[]` because that
+// KUBE'S WORD IS NOT OURS. server/adapters/kube/port.ts declares `verbs: string[]` on RoleManifest because that
 // is the name the Kubernetes RBAC API gives the field, and kube-rbac.ts:65 assigns RoleManifest to
 // the client's V1Role, whose V1PolicyRule requires it — a rename there does not compile. The four
 // files that carry kube's word are named one by one below instead of matched by a pattern, so a new
@@ -36,7 +36,7 @@ const SELF = "server/domains/runs/run-kind-word-census.test.ts";
 /** The files carrying the Kubernetes RBAC field `verbs` and kube's own noun for one grant in a
  *  RoleManifest. Every other file in the tree says "run kind" for a RunKind.
  *
- *  THESE FOUR ARE EXEMPT FROM THE BAN, NOT MERELY FROM THE PATTERN: the word in them is a foreign
+ *  THESE FILES ARE EXEMPT FROM THE BAN, NOT MERELY FROM THE PATTERN: the word in them is a foreign
  *  API's own name and MUST stay. A file that stops carrying it is a failure of its own — the test
  *  below asserts each still does, because an allowlist entry for a file that no longer needs one
  *  would silently cover a future misuse. */

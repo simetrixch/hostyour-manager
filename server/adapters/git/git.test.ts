@@ -327,12 +327,12 @@ describe("GitPlatformRepo", () => {
     async () => {
       // THE defect this port shape exists to remove. Both callers of a branch share one persistent
       // worktree directory (worktreeDir keys on the branch name), and a turn ends with fetch +
-      // `reset --hard` + `clean -qfd`. Before turns were exclusive, a read starting between a
-      // writer's `git add` and its `diff --cached` wiped the staged index; commitPush then read the
-      // empty diff as "a previous attempt already landed this" and returned the PRE-WRITE HEAD as a
-      // valid-looking commit SHA. The write was gone and the run reported success.
+      // `reset --hard` + `clean -qfd`. Without exclusive turns, a read starting between a
+      // writer's `git add` and its `diff --cached` wipes the staged index; commitPush then reads the
+      // empty diff as "a previous attempt already landed this" and returns the PRE-WRITE HEAD as a
+      // valid-looking commit SHA. The write is gone and the run reports success.
       //
-      // Driven against a real origin, ten times, because the old failure was a race and a single
+      // Driven against a real origin, ten times, because the failure is a race and a single
       // pass could miss it. Removing the queue from withBranch turns this test red every run: the
       // two turns tear the same directory apart, and what surfaces first depends on timing — a
       // staged index lost behind a successful-looking SHA, or git itself failing on a worktree the
@@ -355,7 +355,7 @@ describe("GitPlatformRepo", () => {
             main.commit({ message: `write ${i} [run_${i}]`, write: [{ path, content: `n: ${i}
 ` }] }),
           ),
-          // The unlocked reader of the old world: GET /api/consumers/detected reaches the same
+          // The unlocked reader: GET /api/consumers/detected reaches the same
           // worktree with no run lock (domains/units/api.ts -> registrations.listConsumerRegistrations).
           repo.withBranch("main", (main) => main.listDir("registrations")),
         ]);

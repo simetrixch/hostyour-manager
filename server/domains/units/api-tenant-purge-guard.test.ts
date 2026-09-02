@@ -302,9 +302,9 @@ describe("the same refusal is BELTED in attest-target, so approving a stale plan
     // when the run is approved is admitted and torn down exactly as planned. Through the real route and
     // the real executor.
     //
-    // The run SUCCEEDS. It used to end failed, because the last step before the row flip was a
-    // verify-deprovision that refused by design while nothing deprovisioned a tenant. The crypto entry
-    // has an owner now (delete-tenant-crypto), so the purge completes and the rows settle.
+    // The run SUCCEEDS. The crypto entry has an owner (delete-tenant-crypto), so the purge completes
+    // and the rows settle — where a verify-deprovision standing before the row flip with nothing
+    // deprovisioning a tenant refuses by design and ends the run failed.
     seedCluster();
     seedTenantRow("provisioning");
     const { app, executor, cookie, registrations, cluster } = await makeTenant();
@@ -318,7 +318,7 @@ describe("the same refusal is BELTED in attest-target, so approving a stale plan
     expect(getRun(db.db, runId)?.status).toBe("succeeded");
     expect(await registrations.readTenant("prod", GUID)).toBeNull();
     // The backstop reap deletes ONE namespace per member (the trio + the tenant's apps) — never a bare
-    // <guid> namespace, which no longer exists under the per-member model.
+    // <guid> namespace, which does not exist under the per-member model.
     const members = [...TEST_MEMBERS, ...reg.apps.map((a) => a.name)];
     expect(cluster.deletedNamespaces).toEqual(members.map((m) => memberNamespace(GUID, m)));
     // The rows moved, and only at the END: the record step is the last one, after every reap and after

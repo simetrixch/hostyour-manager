@@ -1,7 +1,7 @@
 // The enable-gates of buildUnits (wire-units.ts). The load-bearing regression here: kube
 // access NEVER gates a family — the clients default to the pod ServiceAccount's in-cluster
-// credentials, so onboarding must come up WITHOUT a KUBECONFIG_PATH (the old Vault-mounted
-// kubeconfig design required one and 501'd without it). Constructing the real adapters is safe in
+// credentials, so onboarding must come up WITHOUT a KUBECONFIG_PATH (a mounted-kubeconfig design
+// would require one and 501 without it). Constructing the real adapters is safe in
 // a unit test: every kube loader only populates the KubeConfig object — no cluster IO happens
 // until a Run actually calls out.
 import { describe, it, expect, afterEach } from "vitest";

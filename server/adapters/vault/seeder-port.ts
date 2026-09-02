@@ -21,12 +21,12 @@
 //
 // CREATE-ONLY by policy (seed only): the app entry is written with KV-v2 check-and-set `cas: 0`,
 // i.e. "write only if this entry does not exist yet". This is what makes seed-secrets genuinely
-// idempotent — the property the 9-step onboard claims but did NOT have: every `generate:` key is
-// re-minted on each run (secret-mint.ts mints unconditionally), so a blind overwrite meant a
-// RE-RUN silently rotated a LIVE consumer's JWT signing keys + bootstrap token underneath its
-// running pods, which read their env once at container start and never see the new values. That
-// is not hypothetical: it is exactly how example-auth's pods ended up holding a bootstrap token
-// that no longer matched Vault (2026-07-17).
+// idempotent — the property the 9-step onboard claims and a blind overwrite does NOT give it: every
+// `generate:` key is re-minted on each run (secret-mint.ts mints unconditionally), so a blind
+// overwrite lets a RE-RUN silently rotate a LIVE consumer's JWT signing keys + bootstrap token
+// underneath its running pods, which read their env once at container start and never see the new
+// values. That is not hypothetical: it is exactly how a consumer's pods end up holding a bootstrap
+// token that does not match Vault.
 // cas=0 is deliberately a WRITE, not a read-then-write: read-before-write would need `read` on the
 // consumer tier and would forfeit the write-only property above. Vault decides existence
 // server-side; the seeder still never learns the stored value.
@@ -59,8 +59,8 @@ export interface BuildRepoPatDeleteInput {
  *  secret/<stage>/consumer/<consumerName>/app (ALL versions).
  *
  *  WHY this exists — it is the precondition that makes the cas=0 create-only seed above CORRECT
- *  rather than a trap. Offboard used to delete only the app-tier repo-pat and left this entry in
- *  Vault forever, which was merely untidy while the seed still overwrote. Under cas=0 it is a
+ *  rather than a trap. An offboard that deleted only the app-tier repo-pat would leave this entry in
+ *  Vault forever, which is merely untidy where the seed overwrites. Under cas=0 it is a
  *  correctness bug: an offboard -> re-onboard finds the SURVIVING entry, Vault refuses the write,
  *  seed reports `created: false` ("left untouched"), and the supposedly fresh consumer silently
  *  INHERITS the offboarded one's JWT signing keys, bootstrap token and TOTP key — no error is

@@ -1,9 +1,9 @@
 // The onboard `preflight-scopes` step. Onboarding TAKES three rights into the
 // consumer's own repo — repo (clone + push scripts), workflow (write .github/workflows/release.yml),
-// admin:repo_hook (create the build webhook). Before this step those were discovered REACTIVELY: the
-// run failed at setup-webhook for a missing admin:repo_hook, then — once fixed — at inject-release-kit
-// for a missing workflow, and each miss cost a fresh token round-trip with the consumer (a classic
-// PAT's scopes cannot be edited after creation). This step verifies ALL THREE in one shot, at the very
+// admin:repo_hook (create the build webhook). Without this step they are discovered REACTIVELY: the
+// run fails at setup-webhook for a missing admin:repo_hook, then — once that is fixed — at
+// inject-release-kit for a missing workflow, and each miss costs a fresh token round-trip with the
+// consumer (a classic PAT's scopes cannot be edited after creation). This step verifies ALL THREE in one shot, at the very
 // start of the run (before the check and every seed/mutation), and
 // fails with the COMPLETE missing set — never one scope at a time.
 //

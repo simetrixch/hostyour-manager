@@ -51,7 +51,7 @@
 export const PLATFORM_STATE_ROOTS = ["/srv/", "/var/lib/"] as const;
 
 /** WHERE the deployment programs read and write the platform tree — the MATERIAL. The programs
- *  (digita-deploy ansiwise/programs/) name this path on every `repository:` row, so the tree a
+ *  (hostyour-deploy ansiwise/programs/) name this path on every `repository:` row, so the tree a
  *  refresh feeds them and the tree they act on are one path stated once. */
 export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
 

@@ -523,7 +523,7 @@ export type LiveArgoView =
  *  at all (painting "couldn't read ArgoCD" as "has drifted" would turn a FACT panel into a liar), and
  *  "not-deployed" when nothing is pinned AND nothing runs, i.e. when no comparison happened at all.
  *  "converged" is a statement ABOUT a comparison, so it may only be given when one actually took place —
- *  and the state it used to be given for is reachable BOTH by a finished suspend and by a lifecycle run
+ *  and the state a green claim would rest on is reachable BOTH by a finished suspend and by a lifecycle run
  *  that died half-way (see driftOf), which is exactly why the honest answer there is the one that asserts
  *  nothing. */
 export interface LiveDriftView {

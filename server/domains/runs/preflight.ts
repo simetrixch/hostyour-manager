@@ -70,10 +70,10 @@ export interface PortReading {
 
 /**
  * IS THIS MACHINE ALREADY SERVING THE PORT? — which is not the same question as "is a socket
- * listening on it", and the difference is what let a machine already carrying a whole installation
- * pass the check that exists to keep a second one off it.
+ * listening on it", and the difference is what lets a machine already carrying a whole installation
+ * pass a check that exists to keep a second one off it.
  *
- * Measured on a master installation of this platform, 2026-08-26: `ss -Hltn "sport = :443"` found
+ * Measured on a master installation of this platform: `ss -Hltn "sport = :443"` found
  * nothing while a connection to the machine's own address on 443 was accepted and Traefik answered
  * 404. The Traefik Service is `type: LoadBalancer` with NodePorts behind it, so what serves 443 is a
  * DNAT programmed below the socket layer and there is no userspace listener for `ss` to find. The

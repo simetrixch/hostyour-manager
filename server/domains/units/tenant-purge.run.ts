@@ -76,10 +76,10 @@ import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 // together with its user, however the claim dies. delete-tenant-crypto destroys the tenant's Vault
 // entry <stage>/tenants/<guid> through the SAME seeder create-tenant wrote it with — a metadata delete,
 // all versions, so a tenant minted later with this guid can never inherit the purged one's signing key.
-// It used to be ONE delete: a cluster-scoped Tenant CR carried a finalizer that a reconciler released
-// only once all of that was gone, so deleting the CR WAS the cascade. That reconciler is parked and no
-// manager serves the CR, so what remained of the design was a step verifying a cascade nobody ran —
-// it refused every time and no tenant could reach "purged". The CR and both of its steps are gone.
+// It is NOT one delete. A cluster-scoped Tenant CR carrying a finalizer that a reconciler releases
+// only once all of that is gone would make deleting the CR the whole cascade, but no manager serves
+// that CR — so a step verifying a cascade nobody runs refuses every time and no tenant reaches
+// "purged".
 // THE OBJECT-STORAGE BUCKET AND ITS DATA ARE DELIBERATELY KEPT — the plan SUMMARY says so plainly, and
 // so does the purge dialog the operator confirms in, because someone approving a "purge" must not
 // believe the tenant's stored objects went with it. It is deliberately NOT also stated as a
@@ -227,9 +227,9 @@ function loadPurgeCluster(db: Db, p: TenantPurgeRequest): TenantPurgeCluster {
  *  the guid ALONE, so the purge still reaps them. Nothing to git-rm (the remove step skips an absent
  *  registration) and no fan-out to wait for (watchNames []).
  *
- *  `members` is EMPTY, because nothing here knows them. It used to be a hardcoded trio, which was only
- *  ever true of one product's tenants — a purge of a tenant of any other would have named three
- *  members it does not have and missed every one it does. Emptiness is the honest answer and it costs
+ *  `members` is EMPTY, because nothing here knows them. A hardcoded trio is only
+ *  ever true of one product's tenants — a purge of a tenant of any other would name three
+ *  members it does not have and miss every one it does. Emptiness is the honest answer and it costs
  *  nothing that matters: the namespace reap asks the CLUSTER by label, which finds every member
  *  namespace including the ones no source names.
  *  The subdomain is likewise unknowable — only the registration or the row carries it — so it is left
@@ -286,8 +286,8 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
         // deleteNamespace returns when the API ACCEPTS the delete, not when the namespace is gone —
         // a finalizer on any namespaced resource in it leaves it Terminating with everything still
         // inside. Reading each one back is what separates "asked" from "gone", so the run states the
-        // one it can prove. Three surfaces used to report the namespace as gone on the strength of
-        // the accepted delete alone.
+        // one it can prove. A surface reporting the namespace as gone on the strength of
+        // the accepted delete alone says more than it knows.
         const stuck: string[] = [];
         for (const ns of namespaces) {
           if ((await clusterReader.namespacePhase(ns)) === "terminating") stuck.push(ns);
@@ -311,9 +311,8 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
       name: "delete-tenant-crypto",
       title: "Destroy the tenant's crypto entry in Vault",
       run: async (ctx) => {
-        // The inverse of create-tenant's seed-tenant-crypto, and the step that replaced this run's
-        // refusal. It used to be a reconciler's finalizer that removed <stage>/tenants/<guid> when the
-        // Tenant CR was deleted; that CR is gone, so the entry is destroyed HERE by the
+        // The inverse of create-tenant's seed-tenant-crypto. No reconciler's finalizer removes
+        // <stage>/tenants/<guid> when the Tenant CR is deleted, so the entry is destroyed HERE by the
         // same identity that wrote it — a metadata delete, all versions.
         //
         // ALL VERSIONS, not the soft data delete: cas=0 is allowed only where no version information
@@ -430,8 +429,8 @@ function tenantPurgeSteps(ports: TenantLifecyclePorts, params: TenantPurgeParams
         // A move in flight holds this tenant, and purging under it drops the very databases the move
         // is carrying. The mark it sets is CLAIM_RELOCATING_ANNOTATION on every member namespace
         // (relocation-world-tenant.ts, repoint) — the one that makes the service-provisioner KEEP a
-        // claim's databases when the repoint prunes the ServiceClaims. This used to read the Tenant
-        // CR's own relocating annotation instead; nothing reconciles that CR any more and it is gone,
+        // claim's databases when the repoint prunes the ServiceClaims. Reading the Tenant
+        // CR's own relocating annotation instead would rest on an object nothing reconciles,
         // so the guard reads the mark that actually acts. One marked namespace is enough: the repoint
         // sets them together, and a partial set is a move that died mid-repoint, which holds the
         // tenant just as hard.
@@ -507,12 +506,12 @@ export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<T
             ? ", and only THEN mark the tenant + its app rows PURGED — a distinct state from the \"offboarded\" an offboard leaves, so this tenant reads as deprovisioned rather than merely un-deployed: it drops off the Tenants list and offers no further removal, while its rows are kept as the trace. The rows are settled LAST, so a delete that fails leaves the tenant visible and purgeable"
             : "") +
           ". THE OBJECT-STORAGE BUCKET AND ITS DATA SURVIVE this purge — they are deliberately kept. " +
-          // The tail an operator reads LAST, immediately before approving. It used to end "safe to
-          // re-run, and safe on a healthy tenant", which meant only "the steps will not error on a
+          // The tail an operator reads LAST, immediately before approving. Ending it "safe to
+          // re-run, and safe on a healthy tenant" means only "the steps will not error on a
           // healthy tenant" but reads as "if this turns out to be live, nothing bad happens" — the exact
           // opposite of the sentence above it, which says the reap drops the Mongo databases and the
           // crypto delete destroys the tenant's identity, neither recoverable. A purge aimed at a tenant whose inventory row is
-          // live AND whose pointer still stands is now refused at both ends (the route, and attest-target
+          // live AND whose pointer still stands is refused at both ends (the route, and attest-target
           // when the run is approved), but a LIVE tenant with no row at all — an orphan from before
           // record-provisional, or a hand-written pointer — is still perfectly reachable here, and this
           // plan is its only gate. So state the destructive

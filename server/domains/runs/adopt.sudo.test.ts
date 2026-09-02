@@ -67,14 +67,14 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
     for (const e of MANAGER_ELEVATED) expect(host.dropIn).toContain(e.cmd);
     expect(configureSudoCheckpoint(db, runId)).toMatchObject({ data: { sudoersWritten: true }, __cleanups: ["remove-sudoers"] });
     // The run log names the lifetime, because nothing else on any screen does: remove-sudoers is a
-    // Cleanup and cleanups run only on abortWithCleanup (server/executor/executor.ts:309).
+    // Cleanup and cleanups run only on abortWithCleanup (server/executor/executor.ts).
     const meta = readEvents(db.db, runId).filter((e) => e.stream === "meta").map((e) => e.text).join("\n");
     expect(meta).toContain("STAYS on the machine after this run succeeds");
   });
 
   it("takes back the blanket right an EARLIER adoption left — the machine stops granting it, and keeps the commands the manager needs", async () => {
-    // THE PLANTED STATE: a machine adopted before this change, carrying the one line every adoption
-    // used to write. `sudo -l` on it says every command, as every user, without a password — and
+    // THE PLANTED STATE: a machine carrying the one blanket line an earlier adoption left.
+    // `sudo -l` on it says every command, as every user, without a password — and
     // that is the standing route to root #19 is about.
     //
     // AND `machineSudo: "none"`, WHICH IS THE HARD HALF: the account holds no sudoers entry of its
@@ -276,7 +276,7 @@ describe("adopt run — what the adoption leaves the machine granting", () => {
     expect(plan.summary).toContain('"digi1 ALL=(ALL) NOPASSWD:ALL" has that line replaced by this run');
     expect(plan.summary).toContain("proves sudo in the preflight and installs an SSH key");
     // CONDITIONAL, because configure-sudo writes nothing where the machine already grants blanket
-    // passwordless sudo (adopt.ts:260-263) — a summary asserting the install unconditionally would
+    // passwordless sudo (adopt.ts SUDO_ALREADY_BLANKET / OUR_DROP_IN_GRANTS_BLANKET) — a summary asserting the install unconditionally would
     // tell the operator the password did something it did not.
     expect(plan.summary).toContain("Where this machine does not already grant passwordless sudo");
 
@@ -444,14 +444,14 @@ describe("the drop-in as a machine reads it", () => {
     for (const [, command] of REFUSED.slice(6)) expect(sudoersPermits(OLD_SHAPES, command)).toBe(false);
   });
 
-  // THE GENERATION THIS CHANGE REPLACED, ON ITS OWN. The plant above restores the oldest shape, in
-  // which the source pattern swallowed options too; the file that stood here YESTERDAY already had
-  // `--` in front of the source and refused that one. What it still permitted is the READ, and this
-  // is what says so — without it the two read cases could be passing on the older wildcard alone
-  // and this change would read as closing something that was already shut.
+  // AN INTERMEDIATE SHAPE, ON ITS OWN. The plant above restores the widest shape, in
+  // which the source pattern swallows options too; a shape with `--` in front of the source refuses
+  // that one and still permits the READ, and this is what says so — without it the two read cases
+  // could be passing on the wider wildcard alone, and the narrowing would read as closing something
+  // that was already shut.
   const COPIER_SHAPE = plant(file, "-m 0644 -o root -g root /dev/null", "-m 0644 -o root -g root -- *");
 
-  it.each(REFUSED.slice(4, 6))("permitted, on the copier the drop-in used to be written with, the command that %s", (_why, command) => {
+  it.each(REFUSED.slice(4, 6))("permitted, on a copier shape a drop-in can be written with, the command that %s", (_why, command) => {
     expect(sudoersPermits(COPIER_SHAPE, command)).toBe(true);
   });
 

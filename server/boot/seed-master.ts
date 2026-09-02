@@ -27,7 +27,7 @@ import { MASTER_ROLES } from "../../shared/enums.ts";
 // key file / host-key fp) is not present yet on first boot, the row is still seeded and a
 // BOUNDED background reconcile keeps retrying the pin+seal IN-PROCESS until the secret
 // materializes. Waiting for "a later boot" is not a strategy: nothing restarts the pod on its
-// own, and the prod ESO/Vault-role ordering race (secret lands minutes after boot) left the
+// own, and the prod ESO/Vault-role ordering race (secret lands minutes after boot) leaves the
 // master unpinned + unsealed forever. The fp is therefore also read from a FILE — kubelet
 // refreshes secret-volume files in a running pod, while an env var never does; that file is
 // what makes restart-free convergence possible.

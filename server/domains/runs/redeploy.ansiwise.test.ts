@@ -42,11 +42,11 @@ import { orphanedEndSuite } from "./orphaned-end.ansiwise.suite.ts";
 // live in ansiwise-serve.fixture.ts, and the orphaned-end suite in orphaned-end.ansiwise.suite.ts —
 // registered INTO this file's describe rather than collected as a second file, for that same reason.
 //
-// TWO RUNS IN ONE SECOND USED TO BE ONE RUN. The machine named a run by second + pid, so a service
-// asked twice within a second answered with one id and the two wrote over each other's record. The
-// id now carries four random bytes (ansiwise-cli _newRunId), which is why these tests can start
+// TWO RUNS IN ONE SECOND MUST NOT BE ONE RUN. A machine naming a run by second + pid answers a
+// service asked twice within a second with one id, and the two write over each other's record. The
+// id carries four random bytes (ansiwise-cli _newRunId), which is why these tests can start
 // runs back to back at all — the fixture's programs take milliseconds where a real one takes
-// minutes, so this suite is where that defect showed.
+// minutes, so this suite is where that defect shows.
 
 const bin = ansiwiseBinaries();
 const key = generateServerKeypair("test@manager");
@@ -148,8 +148,8 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const h = await liveMaster(serve);
     const { plan } = await h.executor.plan("cluster-redeploy", { serverId: MASTER_ID });
     // place-ansiwise and run-deploy-host stand here because a master could otherwise receive NO
-    // machine-layer change at all: the placement had one call site, in the slave install, and this
-    // arm ran only the two programs above GitOps (hostyour-manager#69).
+    // machine-layer change at all: the placement's other call site is the slave install, and without
+    // these two this arm would run only the programs above GitOps (hostyour-manager#69).
     expect(plan.steps.map((s) => s.name)).toEqual(
       ["attest-target", "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow"],
     );
@@ -194,10 +194,10 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   it("reads the master's cluster with the password the RUN carries — on a machine that grants no passwordless route at all", { timeout: 180_000 }, async () => {
     // THE MACHINE THIS RUNS ON: /etc/sudoers.d/ holds nothing. That is what ansiwise-client leaves
-    // behind, so it is what a FIRST MASTER is — measured on one on 2026-08-27, a README and no
+    // behind, so it is what a FIRST MASTER is — measured on a real one, a README and no
     // rule — and the scripted host refuses every `sudo -n` on it exactly as that machine does.
-    // `argocd-follow` used to reach the cluster that way and was refused there while all five steps
-    // before it had gone green, with "sudo: interactive authentication is required" printed under a
+    // `argocd-follow` reaching the cluster that way is refused there while every step
+    // before it has gone green, with "sudo: interactive authentication is required" printed under a
     // line telling the operator the cluster was not answering yet.
     const h = await liveMaster(serve);
     expect(h.hosts.adopted).toBe(false);

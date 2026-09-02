@@ -20,9 +20,9 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 
 // Every lifecycle run resolves the RIGHT kube clients + ArgoCD namespace for its target cluster at run
 // time via `resolver.resolve(clusterId)`. The master path resolves to
-// the master-local clients + argoNamespace "argocd" (behavior-identical to the pre-resolver wiring);
+// the master-local clients + argoNamespace "argocd";
 // a slave resolves to a per-slave clusterReader + argoNamespace "<slaveName>". The read/write
-// kube clients therefore no longer ride in the *Ports — only the resolver does.
+// kube clients therefore do not ride in the *Ports — only the resolver does.
 export interface LifecyclePorts {
   registrations: Registrations;
   resolver: ClusterKubeResolver;
@@ -165,7 +165,7 @@ export interface TenantLifecyclePorts {
   registrations: TenantRegistrations;
   /** Per-cluster kube resolver: the steps resolve the target cluster's
    *  clusterReader (smoke/attest), argoReader (watch), projectWriter (AppProject) + argoNamespace at
-   *  run time. Replaces the single argo/cluster/projects clients that used to ride here. */
+   *  run time. */
   resolver: ClusterKubeResolver;
   catalogRepoUrl: string;
   argoWatchTimeoutMs: number;

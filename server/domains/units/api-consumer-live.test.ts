@@ -246,7 +246,7 @@ describe("consumer live reconciliation (GET /api/consumers/:appId/live)", () => 
     });
   }
 
-  // THE REGRESSION for the false green the suspend fix introduced. This is byte-for-byte the same fixture as the
+  // THE REGRESSION for a false green on a resume that died. This is byte-for-byte the same fixture as the
   // suspended case above — apps.status "suspended", no Application — because at this route the two states
   // are INDISTINGUISHABLE, and that is the entire point:
   //
@@ -256,11 +256,11 @@ describe("consumer live reconciliation (GET /api/consumers/:appId/live)", () => 
   //   apps.status = "suspended" while the pointer STANDS IN active/ pinning a SHA — and the failure that
   //   produces it is exactly the one where no Application exists (watch-sync's message: health=Missing).
   //
-  // Deciding the VERDICT from apps.status turned that consumer green: "in sync · pinned none · deployed
-  // none" for a consumer that is pinned with nothing running — while the same state previously read
-  // "drift · pinned <sha> · deployed none", which was correct. A false green on something broken is the
-  // dangerous direction to be wrong in, and it is the same record-as-truth substitution that was removed from
-  // the pin. "not-deployed" is TRUE of both readings, so the card asserts nothing it cannot support.
+  // Deciding the VERDICT from apps.status turns that consumer green: "in sync · pinned none · deployed
+  // none" for a consumer that is pinned with nothing running — where the same state read as
+  // "drift · pinned <sha> · deployed none" is correct. A false green on something broken is the
+  // dangerous direction to be wrong in, and it is the same record-as-truth substitution the pin refuses.
+  // "not-deployed" is TRUE of both readings, so the card asserts nothing it cannot support.
   it("a RESUME that died at watch-sync must not read green — the row says suspended, the pointer says otherwise", async () => {
     seedConsumer("suspended"); // what a failed resume leaves behind, identical to a finished suspend
     const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, null));

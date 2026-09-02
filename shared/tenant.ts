@@ -55,9 +55,9 @@ export type TenantSourceRecord = z.infer<typeof TenantSourceRecordSchema>;
  *  one is a standing service. Neither the appset nor anything else in the platform needs to tell them
  *  apart, so neither does.
  *
- *  `sources` is why this is a record and not a name. The appsets used to carry the charts and template
- *  the per-member values themselves, and one of those templates carried `report:Designer,report:Viewer`
- *  as a literal — a member name of one product, inside a values string, where no schema could see it.
+ *  `sources` is why this is a record and not a name. An appset that carried the charts and templated
+ *  the per-member values itself would put a member name of one product — `report:Designer,report:Viewer`
+ *  as a literal — inside a values string, where no schema could see it.
  *  What the appset still adds at render time is the tenant's own facts (guid, subdomain, stage, member,
  *  appName, apps, seedUsers, suspended, quiesced): every source gets those and each chart uses the ones
  *  it needs, so no member's business reaches the platform.
@@ -183,7 +183,7 @@ export const TenantRegistrationSchema = z
     // fans out over.
     //
     // Holding the tail rather than mere membership is what still catches an app named after a standing
-    // member. Under the old form that was a reserved-name list; here the resolver emits TWO members of
+    // member. A reserved-name list is the alternative; here the resolver emits TWO members of
     // that name, standing and app, and the duplicate check above refuses it. A hand-written
     // registration carrying only the standing one would otherwise slip through and hand the app the
     // IdP's namespace.

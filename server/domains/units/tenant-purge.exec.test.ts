@@ -170,9 +170,9 @@ async function planned(prt: TenantLifecyclePorts, req: TenantPurgeRequest = REQU
   return result;
 }
 
-/** Run every step. Nothing is skipped by default any more: the run used to stop at a
- *  verify-deprovision that refused by design, because nothing deprovisioned a tenant. The two things
- *  that step could not vouch for now have owners — the Vault crypto entry is destroyed by
+/** Run every step. Nothing is skipped by default: a verify-deprovision that refuses by design,
+ *  because nothing deprovisions a tenant, would stop the run here. The two things
+ *  such a step cannot vouch for have owners — the Vault crypto entry is destroyed by
  *  delete-tenant-crypto here, and a member's databases go with the ServiceClaim finalizers that fire
  *  when delete-namespaces reaps their namespaces — so a purge completes on its own. `skip` stays for
  *  the tests that model an operator skipping a step with a reason. */
@@ -270,12 +270,12 @@ describe("tenant-purge execution", () => {
   });
 
   it("INVENTORIED tenant: removes the pointer, RECORDS THE ROWS PURGED (not offboarded), then deprovisions", async () => {
-    // The purge used to settle its rows to "offboarded" — the very
-    // status tenant-offboard writes — so a tenant whose Tenant CR, Vault path, object-storage credential
-    // and Mongo databases were all genuinely gone was indistinguishable in the inventory from one that
-    // was merely un-deployed with every bit of that still standing. The consequence was visible on the
-    // first screen: the tenant stayed in the "Offboarded tenants" panel, the count did not move, and the
-    // row went on offering the purge it had just finished. The two states mean opposite things, so the
+    // A purge settling its rows to "offboarded" — the very
+    // status tenant-offboard writes — makes a tenant whose Tenant CR, Vault path, object-storage
+    // credential and Mongo databases are all genuinely gone indistinguishable in the inventory from one
+    // that is merely un-deployed with every bit of that still standing. The consequence is visible on the
+    // first screen: the tenant stays in the "Offboarded tenants" panel, the count does not move, and the
+    // row goes on offering the purge it has just finished. The two states mean opposite things, so the
     // purge records its own.
     seedTenantRow();
     const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
@@ -345,13 +345,13 @@ describe("tenant-purge execution", () => {
     expect(erp?.lastRunId).toBe("run_tpurge");
   });
 
-  it("DESTROYS the tenant's crypto entry — the step that replaced the refusal", async () => {
-    // This run used to stop here. verify-deprovision refused by design: its proof was the RELEASE of
+  it("DESTROYS the tenant's crypto entry — the step that owns it", async () => {
+    // A verify-deprovision cannot stand in for this: its proof is the RELEASE of
     // the operator.hostyour.cloud/deprovision-complete finalizer, put on the Tenant CR by a reconciler
-    // watching it, and no reconciler watches it — so the CR vanished at once and reading THAT as a
-    // completed cascade would have recorded "purged" over a tenant whose crypto still stood.
-    // The entry now has an owner: the same seeder that wrote it at create-tenant destroys it here, all
-    // versions, so "purged" is a fact again rather than a request.
+    // watching it, and no reconciler watches it — so the CR vanishes at once and reading THAT as a
+    // completed cascade records "purged" over a tenant whose crypto still stands.
+    // The entry has an owner: the same seeder that wrote it at create-tenant destroys it here, all
+    // versions, so "purged" is a fact rather than a request.
     seedTenantRow();
     const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
@@ -436,9 +436,9 @@ describe("tenant-purge execution", () => {
   });
 
   it("a purge that OBSERVED lingering workloads reaps everything it can and then FAILS — it never settles the row", async () => {
-    // Fail-soft used to make the WHOLE run soft: the watch observed a fan-out that never pruned, logged
-    // "continuing", the two deletes ran, the record step flipped the rows to offboarded and the run ended
-    // SUCCEEDED. That is the settled-but-unfinished state this whole change exists to end — an offboarded
+    // Fail-soft making the WHOLE run soft is the hazard: the watch observes a fan-out that never pruned,
+    // logs "continuing", the deletes run, the record step flips the rows to offboarded and the run ends
+    // SUCCEEDED. That is the settled-but-unfinished state this guard exists to prevent — an offboarded
     // row drops out of the Tenants list, its detail page offers no action, and the orphan scan cannot see
     // it either because purge-<guid>-remove git-rm'd its pointer, so a still-serving tenant becomes
     // unnameable. Fail-soft is about PROCEEDING (the Tenant CR + namespace deletes are the backstop and
@@ -513,8 +513,8 @@ describe("tenant-purge execution", () => {
   it("attest-target refuses a member namespace carrying the relocating mark — a move holds the tenant", async () => {
     // The mark that ACTS: CLAIM_RELOCATING_ANNOTATION on the member namespaces is what makes the
     // service-provisioner KEEP a claim's databases when the repoint prunes the ServiceClaims. Purging
-    // under it drops exactly the data the move is carrying. It used to read the Tenant CR's own
-    // relocating annotation, on an object nothing reconciles and that no longer exists.
+    // under it drops exactly the data the move is carrying. Reading the Tenant CR's own
+    // relocating annotation instead would rest on an object nothing reconciles.
     seedCluster();
     const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });

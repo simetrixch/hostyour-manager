@@ -94,9 +94,9 @@ describe("preflight parser", () => {
   });
 });
 
-// THE INGRESS PORTS. The question is "does this machine already serve 80/443", and the check used to
-// answer "is a socket listening on it" — which on a machine already carrying a whole installation of
-// this platform is no. Measured on a master, 2026-08-26: `ss -Hltn "sport = :443"` found nothing
+// THE INGRESS PORTS. The question is "does this machine already serve 80/443", which is not the
+// question "is a socket listening on it" — on a machine already carrying a whole installation of
+// this platform the answer to the second is no. Measured on a master: `ss -Hltn "sport = :443"` found nothing
 // while a connection to the machine's own address on 443 was accepted and Traefik answered 404. The
 // Traefik Service is a LoadBalancer with NodePorts behind it, so what serves 443 is a DNAT below the
 // socket layer with no userspace listener to find.

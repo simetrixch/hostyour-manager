@@ -94,8 +94,8 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   it("hard-fails attest-target when the server name is not the domain's first label (the split-brain guard)", async () => {
     // The platform keys every per-slave resource on the domain's FIRST LABEL while the run keys
-    // them on server.name — a disagreement used to split the resources across two names and only
-    // die minutes in. The guard fails BEFORE anything is allocated or mutated.
+    // them on server.name — a disagreement splits the resources across two names and only
+    // dies minutes in. The guard fails BEFORE anything is allocated or mutated.
     const { db, executor, hosts } = await makeHarness();
     const { runId } = await executor.plan("cluster-deploy-slave", { ...PARAMS, domain: "s9.example.com" });
     await executor.approve(runId, elevationOnly());
@@ -350,12 +350,11 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(lines.some((l) => l.includes("reusing"))).toBe(true);
   });
 
-  it("sealTokenOnce: the SAME stable token under an OLD label no longer dies on the fingerprint index (the s1 incident)", async () => {
-    // The live create-mgmt failure class: the slave's long-lived SA token is STABLE across runs;
-    // a row sealed under the pre-rename label scheme holds the same fingerprint, the label
-    // mismatch defeats the reuse fast-path, and the old GLOBAL unique index
-    // credentials_fingerprint_uq rejected the fresh insert. Migration 0005 made the index
-    // non-unique — the seal must now succeed.
+  it("sealTokenOnce: the SAME stable token under an OLD label does not die on the fingerprint index", async () => {
+    // The create-mgmt failure class: the slave's long-lived SA token is STABLE across runs;
+    // a row sealed under a different label scheme holds the same fingerprint, the label
+    // mismatch defeats the reuse fast-path, and a GLOBAL unique index over the fingerprint
+    // would reject the fresh insert. The index is non-unique — the seal must succeed.
     const { db, store } = await makeHarness();
     const token = "eyJhbGciOiJSUzI1NiJ9.stable-long-lived-sa-token.sig";
     const fp = "sha256:" + createHash("sha256").update(token, "utf8").digest("hex");
@@ -408,9 +407,8 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
 describe("dataDiskFrom", () => {
   // THE TABLE A MASTER ACTUALLY ANSWERED WITH, shortened only where it repeats. 29 GB of cluster
-  // data sat on /dev/sda2 while /dev/sdb1 held 2.1 MB, because the three rows that place the
-  // volumes each do nothing when the answer is empty and nobody had been asked for one
-  // (2026-08-29).
+  // data sat on /dev/sda2 while /dev/sdb1 held 2.1 MB, because the rows that place the
+  // volumes each do nothing when the answer is empty and nobody had been asked for one.
   const APPS3 = [
     "/ /dev/sda2 ext4",
     "/boot/efi /dev/sda1 vfat",

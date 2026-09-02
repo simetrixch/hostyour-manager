@@ -69,7 +69,7 @@ describe("adopt run — end to end through the executor", () => {
   it("leaves the server key-only: both doors shut, and the row says which run measured it", async () => {
     const { db, executor, store, serverId } = make();
     // The second door, as the list offers it: a bootstrap password sealed beside the server row so
-    // adopt can be one click. Nothing used to take it away once the adoption succeeded.
+    // adopt can be one click. Left standing, it outlives the adoption that needed it.
     await store.seal({
       kind: "other", label: "adopt password for s5", plaintext: Buffer.from(PASSWORD),
       fingerprint: "bootstrap-password", serverId,
@@ -181,8 +181,8 @@ describe("adopt run — end to end through the executor", () => {
   });
 
   it("a client that would not answer reads 'client-unreadable' — the run never claims it measured a network", async () => {
-    // Everything the client should have printed came back empty. The old shape read that as
-    // "installed, no address ⇒ not joined", which asserts as measured fact the exact thing the
+    // Everything the client should have printed came back empty. Reading that as
+    // "installed, no address ⇒ not joined" asserts as measured fact the exact thing the
     // run failed to measure.
     const silent = ["TAILNET client present", "TAILNET version 1.80.2", "TAILNET backend ", "TAILNET address "].join("\n");
     const { db, executor, serverId } = make(fakeFactory(HEALTHY_PREFLIGHT, silent));

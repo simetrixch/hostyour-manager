@@ -303,8 +303,8 @@ describe("Executor recovery — retry / skip / abort-with-cleanup", () => {
     await executor.abortWithCleanup(runId);
     await executor.settle(runId);
 
-    // The run is cancelled but still abortable; a re-abort used to INSERT the same cleanup step
-    // names again, throwing out of the transaction into the route and wedging the run for good.
+    // The run is cancelled but still abortable; a re-abort that INSERTED the same cleanup step
+    // names again would throw out of the transaction into the route and wedge the run for good.
     await expect(executor.abortWithCleanup(runId)).resolves.toBeUndefined();
     await executor.settle(runId);
 

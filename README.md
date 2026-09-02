@@ -1,7 +1,6 @@
 # hostyour-manager
 
-Onboards consumers and tenants onto a [hostyour-cloud](https://github.com/simetrixch/hostyour-cloud)
-installation.
+Onboards consumers and tenants onto a hostyour-cloud installation.
 
 Creating a tenant means: a namespace with its network policy and its quota, a Vault path with the
 policies and auth roles that scope it, one or more databases, a build pipeline, an identity

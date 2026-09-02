@@ -44,7 +44,7 @@ import {
 // write by itself, so the bytes land there under their own two names, beside each other, which is
 // exactly what `deploymentToolBesideThis` looks for. What stands in `/usr/local/bin` afterwards is
 // `install_pinned_tool`'s to place and to keep at the pin — one row per binary, in the tool phase
-// where every other tool of this platform is held (digita-deploy ansiwise/programs/deploy-cluster.yaml).
+// where every other tool of this platform is held (hostyour-deploy ansiwise/programs/deploy-cluster.yaml).
 //
 // WHAT THIS MODULE NO LONGER DOES, AND WHERE EACH OF THEM WENT. Read this before adding anything
 // back:
@@ -52,25 +52,23 @@ import {
 //   the PACKAGES   `deploy-host`'s `install_packages` row installs git, openssl, curl, jq and
 //                  apache2-utils. The bootstrap needs none of them now: the manager fetches the
 //                  bytes and SFTP carries them.
-//   the CHECKOUTS  `/srv/ansiwise-catalog` is `git_clone`'s (digita-deploy
-//                  ansiwise/programs/). `/srv/hostyour-cloud` is declared by no
-//                  program at all, and THAT IS A GAP THIS MODULE MAY NOT FILL. Cloning a private
-//                  repository needs a credential, and a credential can reach a single command only
-//                  through that command's argument list or its environment — the first stands in
-//                  the machine's process listing for anyone on it to read, and the second needs a
-//                  shell to set. The bash this replaced solved it with a pipeline into a credential
-//                  helper, which is exactly the shape that may not come back. `git_clone` has the
-//                  answer already: it reads its origin and its credential out of files by NAME,
-//                  so neither value passes through a caller. The material belongs on such a row.
+//   the CHECKOUTS  `/srv/ansiwise-catalog` is `git_clone`'s (hostyour-deploy
+//                  ansiwise/programs/), and where a machine carries none the placement step makes
+//                  it itself (machine-catalogue.ts) — a clone with nothing standing in front of it,
+//                  because the deployment programs are a public repository.
 //
-//                  AND THE ORDER IS THE REVERSE OF THE ONE THE BASH USED, which is why this is a
-//                  gap and not an oversight: deploy-platform-services's catalogue row reads its origin from
-//                  `/srv/hostyour-cloud/configs/config.<stage>` and its credential from
-//                  `secrets.<stage>`, so the MATERIAL has to stand before the CATALOGUE can be
-//                  cloned by a step — while a program can only run once the catalogue is there.
-//                  Until something breaks that circle, a machine reaching the first program step
-//                  with no catalogue is answered by that step, in the words of a binary that finds
-//                  no program of that name.
+//                  `/srv/hostyour-cloud` is `deploy-host`'s own `git_clone` row. That row takes the
+//                  repository from an ANSWER this manager states (deploy-slave.kit.ts
+//                  `platformOrigin`), because the tree is made before any settings file it could be
+//                  read out of exists, and it takes no credential either — the platform repository
+//                  is served to anybody as well.
+//
+//                  WHAT THIS MODULE MAY NOT DO IS CARRY A CREDENTIAL TO A CLONE. A credential can
+//                  reach a single command only through that command's argument list or its
+//                  environment — the first stands in the machine's process listing for anyone on it
+//                  to read, and the second needs a shell to set. `git_clone` reads its origin and
+//                  its credential out of files by NAME, so neither value passes through a caller: a
+//                  checkout that needs one belongs on such a row and never on a step here.
 //   the UNIT       `ansiwise-rest install-service` writes it — see the block at
 //                  `installAnsiwiseService` for why that invocation is not a mutation site of this
 //                  repository's making, and for the one part of it that still is.
@@ -572,7 +570,7 @@ export interface ServiceRequest {
  *  which is the one thing that knows the command a unit has to carry — it renders `ExecStart` out of
  *  the options it was itself given, checks the three lines the unit cannot work without, writes the
  *  token file and the unit, reloads the service manager and enables the unit (ansiwise-cli
- *  bin/ansiwise_rest.dart `_installService`). digita-deploy's deploy-platform-services states the same rule from
+ *  bin/ansiwise_rest.dart `_installService`). hostyour-deploy's deploy-platform-services states the same rule from
  *  the other side: "The unit that starts the service and the switch that turns it on are the
  *  binary's own act."
  *

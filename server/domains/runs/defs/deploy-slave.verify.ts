@@ -38,8 +38,8 @@ import { requireElevationPassword } from "./ansiwise-run.kit.ts";
 /** Step 6's bounded verify window. Generous: after step 5's Synced Application, a cold
  *  slave-ArgoCD still has to deploy itself, register the slave, generate + sync the whole app
  *  tree and pull the ENTIRE platform's images on the slave — on a first-ever deploy that
- *  alone can eat 15+ minutes, and the first live run additionally burned ~14 min in an ESO
- *  backoff stall before failing at exactly the old 15-min mark. Exported for the tests (they
+ *  alone can eat 15+ minutes, and an ESO backoff stall can burn ~14 min on top of it, which
+ *  is what a 15-minute window fails inside. Exported for the tests (they
  *  expire it under fake timers, so the size costs them nothing). */
 export const VERIFY_SLAVE_TIMEOUT_MS = 30 * 60_000;
 

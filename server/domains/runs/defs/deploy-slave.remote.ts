@@ -3,7 +3,7 @@ import { PLATFORM_CHECKOUT, WORK_CHECKOUT } from "./machine-state.ts";
 
 // The REMOTE surface of the deploy-slave Run: the few shell scripts and kubectl commands the
 // steps still ship to the two hosts, plus the contracts they parse back. Everything that BUILDS
-// the slave is a deployment PROGRAM of the machine's own catalogue (digita-deploy
+// the slave is a deployment PROGRAM of the machine's own catalogue (hostyour-deploy
 // ansiwise/programs/) driven over `ansiwise-rest serve` — what stands here is only what the manager
 // does around those programs: git checkout upkeep, the credentials-file handover, and the
 // verify/handoff kubectl reads. Pure string builders + zod contracts, no IO, no db: the def

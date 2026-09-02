@@ -45,8 +45,8 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 //   3. THE COMPENSATIONS RUN IN REGISTRATION-SAFE ORDER AND WAIT FOR THE PRUNE — the registration is
 //      removed FIRST and the AppProject only after the generated Application is gone.
 //
-//   4. A COMPENSATION THAT FAILS FAILS VISIBLY. The old bare catches committed a failed kube delete as
-//      an ok cleanup step and the run ended "cancelled — cleanup complete" over standing objects.
+//   4. A COMPENSATION THAT FAILS FAILS VISIBLY. A bare catch commits a failed kube delete as
+//      an ok cleanup step, and the run ends "cancelled — cleanup complete" over standing objects.
 
 const SHA = "a".repeat(40);
 const MINTED_TAG = "1.0.0-stable-20260719120000";
@@ -246,8 +246,8 @@ describe("aborting an onboard whose consumer is LIVE", () => {
     expect(getRun(db.db, runId)?.steps.find((s) => s.name === "watch-deployment")?.status).toBe("failed");
     // The row EXISTS and says provisioning: record-provisional wrote it before the first mutation, so
     // everything this failed run left behind — the registration, the Vault entries, the AppProject,
-    // the DNS record, the webhook — is accounted for. It used to be undefined here, which is what
-    // made a failed onboard's leftovers findable only by an explicit detected-scan.
+    // the DNS record, the webhook — is accounted for. Undefined here would make a failed onboard's
+    // leftovers findable only by an explicit detected-scan.
     expect(appRow()?.status).toBe("provisioning");
 
     h.argo.setStatus(LIVE); // the deployment landed after the watch budget
