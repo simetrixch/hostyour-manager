@@ -111,7 +111,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   # commit reachable from what is being pushed is read.
   case "$remote_sha" in
     *[!0]*) range="$remote_sha..$local_sha" ;;
-    *) range="$local_sha" ;;
+    # A REF THE REMOTE DOES NOT CARRY YET INTRODUCES ONLY WHAT THE REMOTE HAS NOT GOT.
+    # git reports all zeros for such a ref, and reading that as "everything reachable"
+    # judges the whole history - every commit already published, by whatever rule held
+    # when it was written. A tag is exactly that case: it names a commit the branch
+    # already carries, so what it introduces is nothing at all. Excluding every remote
+    # ref this checkout knows asks the question the loop below means to ask - which
+    # commits does this push add - and answers it with none where none are added.
+    *) range="$local_sha --not --remotes=origin" ;;
   esac
 
   for sha in $(git rev-list --no-merges "$range" 2>/dev/null); do
