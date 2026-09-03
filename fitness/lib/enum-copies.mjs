@@ -220,7 +220,10 @@ export function findCopies(root = REPOSITORY_ROOT) {
   const owned = ownedSets(root);
   return scannedFiles(root)
     .flatMap((path) => findCopiesInText(path, readFileSync(join(root, path), "utf8"), owned))
-    .sort((a, b) => a.key.localeCompare(b.key));
+    // Byte order, not localeCompare: that one sorts by the machine's language, so two machines can
+    // write two orders of one list into fitness/known-copies.json and each sees the other's file as
+    // changed. The ratchet is a file every machine has to write the same way.
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
 
 /** How a finding is put to the person who has to act on it. Not `describe`: every test file in this

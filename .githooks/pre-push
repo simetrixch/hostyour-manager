@@ -6,7 +6,7 @@
 # scripts/check.sh runs at the push, and a red one keeps the commits local.
 #
 # THE MESSAGES ARE READ TOO. Work here stays on master, so a commit carries its own reference: the
-# issue number stands anywhere in the message, subject or body. Four things are let through without
+# issue number stands anywhere in the message, subject or body. Three things are let through without
 # one, and each is a case where no issue exists to name — a release stamp, a commit that only
 # explains, and a commit that says in a `No-issue:` trailer who asked for it.
 #
@@ -82,6 +82,19 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     echo "Check that commit out and push again."
     exit 1
   fi
+
+  # A remote sha this checkout does not carry cannot be measured from. git rev-list would fail with
+  # its message silenced, the loop below would read zero commits, and a forced push over an
+  # unfetched remote would pass the message rule with nothing read at all.
+  case "$remote_sha" in
+    *[!0]*)
+      if ! git cat-file -e "${remote_sha}^{commit}" 2>/dev/null; then
+        echo "REFUSED: the commit $remote_sha that $remote_ref points at is not in this checkout, so the commits being pushed cannot be listed."
+        echo "Run git fetch, then push again."
+        exit 1
+      fi
+      ;;
+  esac
 
   # An all-zero remote sha is a ref the remote does not have yet: there is no "before", so every
   # commit reachable from what is being pushed is read.
