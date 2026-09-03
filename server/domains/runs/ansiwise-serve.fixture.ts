@@ -10,7 +10,7 @@ import type { StepCtx } from "../../executor/types.ts";
 import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseRunRecord } from "../../adapters/ansiwise/port.ts";
 import { openChannel, programYaml, runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
-import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
+import { ANSIWISE_ELEVATION_SECRET, RECORD_APPEARS_POLL_MS, RECORD_APPEARS_TIMEOUT_MS } from "./defs/ansiwise-run.kit.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import {
   makeHarness, scriptedHosts, logger, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID,
@@ -435,16 +435,22 @@ export async function settled(h: Harness, kind: RunKind, params: Record<string, 
 }
 
 /** A 202 answers before the detached child writes its header — the step absorbs that wait itself
- *  (ansiwise-run.kit appearedRecord); a raw follow in a test has to wait the same way. */
+ *  (ansiwise-run.kit appearedRecord); a raw follow in a test has to wait the same way.
+ *
+ *  IT WAITS WHAT THE STEP WAITS, off the step's own constants rather than a second pair of numbers
+ *  beside them. Two copies of a bound drift, and the copy that drifts is the one nobody is looking
+ *  at: a fixture that gave up sooner than the step would report a machine as silent where the step
+ *  it stands in for would have waited and been answered. */
 export async function recordAppeared(client: AnsiwiseClient, id: string): Promise<void> {
+  const attempts = Math.max(1, Math.ceil(RECORD_APPEARS_TIMEOUT_MS / RECORD_APPEARS_POLL_MS));
   for (let attempt = 0; ; attempt++) {
     try {
       await client.run(id);
       return;
     } catch (err) {
-      if (!(err instanceof AnsiwiseRefused) || err.status !== 404 || attempt >= 40) throw err;
+      if (!(err instanceof AnsiwiseRefused) || err.status !== 404 || attempt >= attempts) throw err;
     }
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, RECORD_APPEARS_POLL_MS));
   }
 }
 

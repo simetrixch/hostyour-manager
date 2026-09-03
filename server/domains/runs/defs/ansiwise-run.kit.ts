@@ -41,6 +41,28 @@ export const ANSIWISE_ELEVATION_SECRET = MACHINE_PASSWORD_SECRET;
  *  to it rather than starting a second one. */
 export const ANSIWISE_PROGRAM_TIMEOUT_MS = 45 * 60_000;
 
+/** How long a run that has been ACCEPTED is given to write its record before this manager stops
+ *  waiting for it. Read together with the sleep below, which is what the wait is spent in.
+ *
+ *  IT IS THREE MINUTES AND IT USED TO BE TEN SECONDS. Everything a run does between being accepted
+ *  and writing its header happens in the detached child, not in the door that answered: the
+ *  catalogue is parsed off disk, the program's answer conditions are MEASURED AGAINST THE MACHINE
+ *  through real shell and HTTP calls, `git rev-parse HEAD` is spawned, and the gate lists the run
+ *  root and parses every record in it. Nothing serialises concurrent runs, and on a master there is
+ *  always a second one: hostyour-vault-unseal.timer asks the secret store whether it is sealed
+ *  every minute, dry then run.
+ *
+ *  Measured on apps6: a deploy-slave-branch run accepted at 15:53:06 wrote its header at 15:53:17
+ *  and finished green at 15:53:25, having cut and pushed the slave's branch — while this manager,
+ *  eleven seconds being one more than it allowed, had already failed the step and stopped its own
+ *  run at 12 of 28. A bound of ten seconds guarding a program whose own ceiling is forty-five
+ *  minutes was never proportionate to what it guards. */
+export const RECORD_APPEARS_TIMEOUT_MS = 3 * 60_000;
+
+/** The breath between two askings of the same question. Kept small because the answer usually
+ *  arrives in the first one — the wait above is for the machine that is busy, not the normal case. */
+export const RECORD_APPEARS_POLL_MS = 250;
+
 /** How the manager starts the conversation: the command run over the target's SSH session whose
  *  stdio then speaks HTTP. WHICH checkout the service reads its programs from is that command's to
  *  say — configuration, never an assumption baked in here.
@@ -366,7 +388,17 @@ export async function programPhase(
   client: AnsiwiseClient,
   cp: ProgramCheckpoint,
   mode: "dry" | "run",
-  o: { program: string; answers: Record<string, string | string[]>; password: string; signal: AbortSignal; save: () => void },
+  o: {
+    program: string;
+    answers: Record<string, string | string[]>;
+    password: string;
+    signal: AbortSignal;
+    save: () => void;
+    /** How long an accepted run is given to write its record. Absent everywhere but in the suite
+     *  that has to reach the expiry: the real wait is minutes, and a test spending them proves the
+     *  same thing more slowly. */
+    recordAppearsMs?: number;
+  },
 ): Promise<PhaseMark> {
   const slot = mode === "dry" ? "dry" : "live";
   let mark = cp[slot];
@@ -425,7 +457,7 @@ export async function programPhase(
   // that writes its header a beat after it starts, so the follow waits for the record to appear
   // before it asks for events. A run that NEVER writes one died before its first step — the
   // "starts and dies where nobody is watching" case — and is refused by name, bounded.
-  await appearedRecord(client, mark.id, o.program, o.signal);
+  await appearedRecord(client, mark.id, o.program, o.signal, o.recordAppearsMs);
 
   for await (const event of client.events(mark.id, { from: mark.seen + 1, signal: o.signal })) {
     logEvent(ctx, event);
@@ -442,21 +474,45 @@ export async function programPhase(
 }
 
 /** The record once it EXISTS (see the wait in phase). 404 is the one refusal retried here,
- *  because right after a 202 it means "not written yet" — every other refusal stands. */
-async function appearedRecord(client: AnsiwiseClient, id: string, program: string, signal: AbortSignal): Promise<void> {
+ *  because right after a 202 it means "not written yet" — every other refusal stands.
+ *
+ *  WHAT THIS REFUSAL MAY NOT SAY IS WHY. The machine answers the SAME 404 for a run id it never
+ *  issued, for one that was mistyped, and for one accepted two seconds ago whose child has not
+ *  written its header yet — `no run is called "<id>"`, from one place, with no health route beside
+ *  it and no heartbeat on the accept. So the wait expiring is a fact about this manager's patience
+ *  and nothing else, and a sentence naming a cause would be inventing the one thing it cannot read.
+ *
+ *  [timeoutMs] is a parameter so a test can reach the expiry without spending the real wait in it.
+ *  EXPORTED for that suite and for nothing else: the expiry is the one branch here that no run kind
+ *  can be driven into on purpose, because reaching it through a step would mean owning a machine
+ *  that accepts a run and then withholds its record. */
+export async function appearedRecord(
+  client: AnsiwiseClient,
+  id: string,
+  program: string,
+  signal: AbortSignal,
+  timeoutMs: number = RECORD_APPEARS_TIMEOUT_MS,
+): Promise<void> {
+  // Derived, so the bound is stated once as a duration and the two numbers cannot drift apart.
+  const attempts = Math.max(1, Math.ceil(timeoutMs / RECORD_APPEARS_POLL_MS));
   for (let attempt = 0; ; attempt++) {
     try {
       await client.run(id, { signal });
       return;
     } catch (err) {
       if (!(err instanceof AnsiwiseRefused) || err.status !== 404) throw err;
-      if (attempt >= 40) {
+      if (attempt >= attempts) {
         throw errValidation(
-          `machine run ${id} (${program}) was accepted but never wrote its record — it started and died before its first step; read the machine's serve log`,
+          `machine run ${id} (${program}) was accepted, and ${Math.round(timeoutMs / 1000)}s later the machine still ` +
+          `answers that no run is called ${id} — the same answer it gives for a run it never issued, so nothing here ` +
+          "can tell whether that run is still starting or is gone. WHAT FAILED IS THIS STEP AND NOT NECESSARILY THE " +
+          "RUN: the machine run is detached, may be running or finished, and retrying this step RE-ATTACHES to that " +
+          `same run rather than starting a second one. Read the machine's serve log, and its run root for ${id} — if a ` +
+          "record stands there, retry the step and it will be read",
         );
       }
     }
-    await sleepUnlessAborted(250, signal);
+    await sleepUnlessAborted(RECORD_APPEARS_POLL_MS, signal);
   }
 }
 

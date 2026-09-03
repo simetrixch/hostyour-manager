@@ -23,6 +23,7 @@ import {
   recordWindow, startedRuns, expectProven, settled, recordAppeared, observerStart, observerEnded, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
 import { orphanedEndSuite } from "./orphaned-end.ansiwise.suite.ts";
+import { recordAppearsSuite } from "./record-appears.ansiwise.suite.ts";
 import { deploySlaveSuite } from "./deploy-slave.ansiwise.suite.ts";
 
 // EVERY run kind that drives the machine's deployment programs, on the REAL `ansiwise-rest serve`:
@@ -395,6 +396,10 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   // suite's own tests in their own file. That module says why the split is of the FILE and not the
   // process.
   orphanedEndSuite(() => serve, () => observer);
+
+  // The other end of the same run's life: what may be said about a record that has not appeared YET,
+  // where the one above judges an end that was written and never installed.
+  recordAppearsSuite(() => serve, () => observer);
 
   // ================================ the tailnet run kinds, end to end ================================
 
