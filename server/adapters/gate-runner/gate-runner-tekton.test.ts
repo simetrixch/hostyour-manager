@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, it, expect } from "vitest";
-import { TektonGateRunner, type GateRunCluster, type ReportConfigMap, type TaskRunOutcome, type TektonGateRunnerConfig } from "./gate-runner-tekton.ts";
+import { TektonGateRunner, type GateRunCluster, type PipelineRunOwner, type ReportConfigMap, type TaskRunOutcome, type TektonGateRunnerConfig } from "./gate-runner-tekton.ts";
 import type { GateJobRequest } from "./port.ts";
 import { reportHashPayload, SANDBOX_FENCE_GATE_ID, type GateReport } from "../../../shared/gates.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -54,29 +54,46 @@ interface Script {
   taskRuns: TaskRunOutcome[] | Error;
 }
 
-interface Rec { pipelineRuns: unknown[]; secrets: Array<{ name: string; data: Record<string, string> }>; deleted: string[] }
+interface Rec {
+  pipelineRuns: unknown[];
+  secrets: Array<{ name: string; data: Record<string, string>; owner: PipelineRunOwner }>;
+  deleted: string[];
+  /** Every create and delete in the order it was asked for. submit's order and reap's order are both
+   *  load-bearing - the orphan sweep reads a single PipelineRun list and relies on nothing being
+   *  able to stand without a run beside it - so the order is recorded rather than inferred. */
+  order: string[];
+}
 class FakeCluster implements GateRunCluster {
-  rec: Rec = { pipelineRuns: [], secrets: [], deleted: [] };
+  rec: Rec = { pipelineRuns: [], secrets: [], deleted: [], order: [] };
   /** Set by deletePipelineRun. A real reap takes the run's TaskRuns with the PipelineRun, so this
    *  fake refuses to list them afterwards — that is what makes "captured BEFORE the reap" a claim
    *  this suite can actually break rather than an ordering nobody measures. */
   private reaped = false;
   constructor(private script: Script) {}
-  createSecret(name: string, data: Record<string, string>): Promise<void> { this.rec.secrets.push({ name, data }); return Promise.resolve(); }
-  createPipelineRun(body: unknown): Promise<void> { this.rec.pipelineRuns.push(body); return Promise.resolve(); }
+  createSecret(name: string, data: Record<string, string>, owner: PipelineRunOwner): Promise<void> {
+    this.rec.secrets.push({ name, data, owner });
+    this.rec.order.push(`+sec:${name}`);
+    return Promise.resolve();
+  }
+  createPipelineRun(body: unknown): Promise<PipelineRunOwner> {
+    this.rec.pipelineRuns.push(body);
+    const name = (body as { metadata?: { name?: string } }).metadata?.name ?? "unnamed";
+    this.rec.order.push(`+pr:${name}`);
+    return Promise.resolve({ name, uid: `uid-${name}` });
+  }
   pipelineRunOutcome(): Promise<{ succeeded: boolean } | null> { return Promise.resolve(this.script.outcome); }
   readReportConfigMap(): Promise<ReportConfigMap> { return Promise.resolve(this.script.cm); }
   listTaskRunOutcomes(): Promise<TaskRunOutcome[]> {
     if (this.reaped) return Promise.reject(new Error("the TaskRuns went with the PipelineRun"));
     return this.script.taskRuns instanceof Error ? Promise.reject(this.script.taskRuns) : Promise.resolve(this.script.taskRuns);
   }
-  deletePipelineRun(n: string): Promise<void> { this.reaped = true; this.rec.deleted.push(`pr:${n}`); return Promise.resolve(); }
-  deleteConfigMap(n: string): Promise<void> { this.rec.deleted.push(`cm:${n}`); return Promise.resolve(); }
-  deleteSecret(n: string): Promise<void> { this.rec.deleted.push(`sec:${n}`); return Promise.resolve(); }
-  // The orphan-sweep listing seam: nothing standing in this scripted namespace.
-  listPipelineRunNames(): Promise<string[]> { return Promise.resolve([]); }
-  listSecretNames(): Promise<string[]> { return Promise.resolve([]); }
-  listConfigMapNames(): Promise<string[]> { return Promise.resolve([]); }
+  deletePipelineRun(n: string): Promise<void> { this.reaped = true; this.rec.deleted.push(`pr:${n}`); this.rec.order.push(`-pr:${n}`); return Promise.resolve(); }
+  deleteConfigMap(n: string): Promise<void> { this.rec.deleted.push(`cm:${n}`); this.rec.order.push(`-cm:${n}`); return Promise.resolve(); }
+  deleteSecret(n: string): Promise<void> { this.rec.deleted.push(`sec:${n}`); this.rec.order.push(`-sec:${n}`); return Promise.resolve(); }
+  /** The orphan sweep's ONE listing seam. Whatever stands here is what the sweep can see: there is
+   *  no Secret or ConfigMap listing to fall back on, by design. */
+  runNames: string[] = [];
+  listPipelineRunNames(): Promise<string[]> { return Promise.resolve(this.runNames); }
 }
 
 /** The three TaskRuns a gate-run has, ended the way a real installation measured them: the gate step was OOM-killed
@@ -105,8 +122,12 @@ describe("TektonGateRunner", () => {
     const r = new TektonGateRunner(cfg(), c, () => "gate-run-fixed");
     const { jobId } = await r.submit(req());
     expect(jobId).toBe("gate-run-fixed");
-    // A uniform per-run Secret is always created; for a public repo GITCREDENTIALS is empty (anon clone).
-    expect(c.rec.secrets).toEqual([{ name: "gate-cred-gate-run-fixed", data: { GITCREDENTIALS: "" } }]);
+    // A uniform per-run Secret is always created; for a public repo GITCREDENTIALS is empty (anon
+    // clone). It is a child of the run either way — a public run's Secret is as much a leftover as
+    // a private one's if nothing collects it.
+    expect(c.rec.secrets).toEqual([
+      { name: "gate-cred-gate-run-fixed", data: { GITCREDENTIALS: "" }, owner: { name: "gate-run-fixed", uid: "uid-gate-run-fixed" } },
+    ]);
     expect(c.rec.pipelineRuns).toHaveLength(1);
     const body = JSON.stringify(c.rec.pipelineRuns[0]);
     expect(body).toContain(SHA); // git-revision param = the pinned SHA
@@ -254,22 +275,49 @@ describe("TektonGateRunner", () => {
     await expect(rejected).rejects.toThrow(/does not hold IncompleteGateRunSchema/);
   });
 
-  it("reapOrphans: reaps the whole triple for every jobId ANY surviving object names, and touches nothing foreign", async () => {
-    // Three orphans, each witnessed by a DIFFERENT survivor: a PipelineRun alone, a PAT-bearing
-    // credential Secret whose PipelineRun is already gone (a crash inside a reap), and a report
-    // ConfigMap alone — the sweep must find the jobId behind each and delete all three objects of it.
-    class LeftoverCluster extends FakeCluster {
-      override listPipelineRunNames(): Promise<string[]> { return Promise.resolve(["gate-run-aa"]); }
-      override listSecretNames(): Promise<string[]> { return Promise.resolve(["gate-cred-gate-run-bb", "unrelated-secret"]); }
-      override listConfigMapNames(): Promise<string[]> { return Promise.resolve(["gate-report-gate-run-cc", "kube-root-ca.crt"]); }
-    }
-    const c = new LeftoverCluster({ outcome: null, cm: { state: "absent" }, taskRuns: [] });
+  it("reapOrphans: reaps the whole triple of every surviving PipelineRun, off the run listing alone", async () => {
+    // The sweep's ONLY input is the PipelineRun listing. It is enough because nothing else can
+    // stand without a run: submit creates the run first, and reap deletes it last. What it must do
+    // for each surviving run is delete all three objects of it — above all the PAT-bearing
+    // credential Secret, which no TTL and no pruner would ever remove.
+    const c = new FakeCluster({ outcome: null, cm: { state: "absent" }, taskRuns: [] });
+    c.runNames = ["gate-run-aa", "gate-run-bb"];
     const { reaped } = await new TektonGateRunner(cfg(), c).reapOrphans();
-    expect(reaped).toBe(3);
-    for (const id of ["gate-run-aa", "gate-run-bb", "gate-run-cc"]) {
+    expect(reaped).toBe(2);
+    for (const id of c.runNames) {
       expect(c.rec.deleted).toEqual(expect.arrayContaining([`pr:${id}`, `cm:gate-report-${id}`, `sec:gate-cred-${id}`]));
     }
-    expect(c.rec.deleted.join(",")).not.toMatch(/unrelated-secret|kube-root-ca/);
+  });
+
+  it("submit: the PipelineRun is created BEFORE its credential Secret, and the Secret is its child", async () => {
+    // This ordering is what lets the sweep read one listing instead of enumerating Secrets — and
+    // enumerating Secrets means reading their values, a PAT among them. A Secret created first
+    // would, until the run existed, name nothing and be named by nothing.
+    const c = new FakeCluster({ outcome: null, cm: { state: "absent" }, taskRuns: [] });
+    const { jobId } = await new TektonGateRunner(cfg(), c, () => "gr-order").submit(req({ repoCredentialId: "cred-1" }));
+    expect(c.rec.order).toEqual([`+pr:${jobId}`, `+sec:gate-cred-${jobId}`]);
+    expect(c.rec.secrets[0]?.owner).toEqual({ name: jobId, uid: `uid-${jobId}` });
+  });
+
+  it("submit: a credential Secret that cannot be created takes the PipelineRun back down with it", async () => {
+    // The run is dispatched first, so the compensation runs the other way round than the order
+    // suggests: what is already standing when the second call fails is the run.
+    class NoSecret extends FakeCluster {
+      override createSecret(): Promise<void> { return Promise.reject(new Error("secrets is forbidden")); }
+    }
+    const c = new NoSecret({ outcome: null, cm: { state: "absent" }, taskRuns: [] });
+    const rejected = new TektonGateRunner(cfg(), c, () => "gr-comp").submit(req());
+    await expect(rejected).rejects.toThrow(/could not create the gate-run credential Secret/);
+    expect(c.rec.deleted).toContain("pr:gr-comp");
+  });
+
+  it("reap: the PipelineRun is deleted AFTER its Secret and its report ConfigMap", async () => {
+    // The run is the handle the sweep has on a triple. A reap that died halfway must leave the run
+    // standing, so the next boot finds the triple whole; deleting the run first would leave either
+    // of the other two behind with nothing naming them.
+    const c = new FakeCluster({ outcome: { succeeded: true }, cm: { state: "report", json: JSON.stringify(report("pass")) }, taskRuns: OOM_TASKRUNS });
+    await new TektonGateRunner(cfg(), c, () => "gr-reap").poll("gr-reap");
+    expect(c.rec.order.at(-1)).toBe("-pr:gr-reap");
   });
 
   it("poll: a schema-valid report whose reportHash does not verify against its body is refused", async () => {

@@ -74,8 +74,14 @@ export type TaskRunEvidence = { read: true; taskRuns: TaskRunOutcome[] } | { rea
 /** The narrow cluster seam the runner needs — a fake in tests, KubeGateRunCluster in production. Every
  *  op targets the ONE gate-run namespace on the control cluster. */
 export interface GateRunCluster {
-  createSecret(name: string, data: Record<string, string>): Promise<void>;
-  createPipelineRun(body: unknown): Promise<void>;
+  /** The per-run credential Secret, made a CHILD of the PipelineRun that consumes it. Kubernetes
+   *  collects a child when its owner goes, so the Secret cannot outlive the run even if nothing
+   *  deletes it by name. */
+  createSecret(name: string, data: Record<string, string>, owner: PipelineRunOwner): Promise<void>;
+  /** Dispatches the run and answers with the identity Kubernetes gave it. The uid is what makes an
+   *  owner reference to it possible, and it is knowable only after the object exists — which is why
+   *  the run is created BEFORE the Secret that names it as owner. */
+  createPipelineRun(body: unknown): Promise<PipelineRunOwner>;
   /** null while the PipelineRun is still running; {succeeded} once its Succeeded condition settles. */
   pipelineRunOutcome(name: string): Promise<{ succeeded: boolean } | null>;
   /** What the report ConfigMap carries, by key — the ConfigMap's absence included. */
@@ -88,12 +94,16 @@ export interface GateRunCluster {
   deleteConfigMap(name: string): Promise<void>;
   deleteSecret(name: string): Promise<void>;
   /** The names of every Manager-dispatched PipelineRun standing in the namespace (the impl
-   *  filters by the managed-by label pipelineRunBody stamps). Orphan-sweep input. */
+   *  filters by the managed-by label pipelineRunBody stamps). The WHOLE of the orphan sweep's
+   *  input: submit creates the run first and reap deletes it last, so a run's Secret and report
+   *  ConfigMap can never stand without it, and this one list names every leftover triple. */
   listPipelineRunNames(): Promise<string[]>;
-  /** Every Secret name in the namespace — the sweep keeps only the gate-cred-* it owns. */
-  listSecretNames(): Promise<string[]>;
-  /** Every ConfigMap name in the namespace — the sweep keeps only the gate-report-* it owns. */
-  listConfigMapNames(): Promise<string[]>;
+}
+
+/** A PipelineRun as an owner: the name it was created under and the uid Kubernetes assigned it. */
+export interface PipelineRunOwner {
+  name: string;
+  uid: string;
 }
 
 export interface TektonGateRunnerConfig {
@@ -146,15 +156,26 @@ export class KubeGateRunCluster implements GateRunCluster {
     this.custom = kc.makeApiClient(CustomObjectsApi);
   }
 
-  async createSecret(name: string, data: Record<string, string>): Promise<void> {
+  async createSecret(name: string, data: Record<string, string>, owner: PipelineRunOwner): Promise<void> {
+    // blockOwnerDeletion stays FALSE: the owner is deleted by the reap and by the sweep, and a
+    // foreground-deletion block would make either wait on this child for no gain — the child is
+    // deleted by name first anyway, and background collection is what catches the rest.
+    const ownerRef = { apiVersion: `${TEKTON.group}/${TEKTON.version}`, kind: "PipelineRun", ...owner, blockOwnerDeletion: false };
     await this.core.createNamespacedSecret({
       namespace: this.namespace,
-      body: { metadata: { name, namespace: this.namespace }, type: "Opaque", stringData: data },
+      body: { metadata: { name, namespace: this.namespace, ownerReferences: [ownerRef] }, type: "Opaque", stringData: data },
     });
   }
 
-  async createPipelineRun(body: unknown): Promise<void> {
-    await this.custom.createNamespacedCustomObject({ ...TEKTON, namespace: this.namespace, body: body as object });
+  async createPipelineRun(body: unknown): Promise<PipelineRunOwner> {
+    const created = (await this.custom.createNamespacedCustomObject({ ...TEKTON, namespace: this.namespace, body: body as object })) as {
+      metadata?: { name?: string; uid?: string };
+    };
+    const { name, uid } = created.metadata ?? {};
+    // Every object the API server admits carries both. A response missing either is not a run this
+    // Manager can own children under, and going on would create a Secret owned by nothing.
+    if (typeof name !== "string" || typeof uid !== "string") throw new Error("the created gate-run PipelineRun answered with no name and uid");
+    return { name, uid };
   }
 
   async pipelineRunOutcome(name: string): Promise<{ succeeded: boolean } | null> {
@@ -231,15 +252,6 @@ export class KubeGateRunCluster implements GateRunCluster {
     return (raw.items ?? []).map((i) => i.metadata?.name).filter((n): n is string => typeof n === "string");
   }
 
-  async listSecretNames(): Promise<string[]> {
-    const list = await this.core.listNamespacedSecret({ namespace: this.namespace });
-    return list.items.map((i) => i.metadata?.name).filter((n): n is string => typeof n === "string");
-  }
-
-  async listConfigMapNames(): Promise<string[]> {
-    const list = await this.core.listNamespacedConfigMap({ namespace: this.namespace });
-    return list.items.map((i) => i.metadata?.name).filter((n): n is string => typeof n === "string");
-  }
 }
 
 /** The GateRunner over a Tekton gate-run pipeline. `submit` dispatches a PipelineRun (+ the private-repo
@@ -266,16 +278,26 @@ export class TektonGateRunner implements GateRunner {
         token.fill(0);
       }
     }
+    // THE RUN IS CREATED BEFORE THE SECRET, and that order is what makes the orphan sweep able to see
+    // everything with the PipelineRun list alone. A Secret created first is, until the run exists, a
+    // PAT-bearing object that names nothing and that nothing names: only enumerating the namespace's
+    // Secrets would find it again, and enumerating Secrets means reading their contents. Created
+    // second, it is either a child of a run the sweep lists, or it does not exist.
+    //
+    // The run's first pod cannot outrun this: Tekton has to reconcile the PipelineRun, create a
+    // TaskRun and have a pod scheduled before any container reads the Secret, while the Secret is
+    // one API call behind the run - the same connection, microseconds later.
+    let owner: PipelineRunOwner;
     try {
-      await this.cluster.createSecret(credSecretName(runId), { GITCREDENTIALS: gitCredentials });
+      owner = await this.cluster.createPipelineRun(this.pipelineRunBody(runId, req));
     } catch (e) {
-      throw upstream(`could not create the gate-run credential Secret: ${e instanceof Error ? e.message : String(e)}`);
+      throw upstream(`could not create the gate-run PipelineRun: ${e instanceof Error ? e.message : String(e)}`);
     }
     try {
-      await this.cluster.createPipelineRun(this.pipelineRunBody(runId, req));
+      await this.cluster.createSecret(credSecretName(runId), { GITCREDENTIALS: gitCredentials }, owner);
     } catch (e) {
-      await this.cluster.deleteSecret(credSecretName(runId)).catch(() => undefined);
-      throw upstream(`could not create the gate-run PipelineRun: ${e instanceof Error ? e.message : String(e)}`);
+      await this.cluster.deletePipelineRun(runId).catch(() => undefined);
+      throw upstream(`could not create the gate-run credential Secret: ${e instanceof Error ? e.message : String(e)}`);
     }
     return { jobId: runId };
   }
@@ -360,21 +382,17 @@ export class TektonGateRunner implements GateRunner {
   /** Orphan sweep, run once at boot (wire-units). A manager restart loses every in-flight
    *  validation's jobId — it lives only in the validating call's scope, and resumeOnBoot fails the
    *  interrupted `planning` runs — so any gate object still standing in the namespace belongs to no
-   *  live validation. Every jobId any surviving object names gets its whole triple reaped: above
-   *  all the PAT-bearing gate-cred-* Secret, which no TTL and no pruner would ever remove. */
+   *  live validation. Every surviving run gets its whole triple reaped: above all the PAT-bearing
+   *  gate-cred-* Secret, which no TTL and no pruner would ever remove. */
   async reapOrphans(): Promise<{ reaped: number }> {
-    const [pipelineRuns, secrets, configMaps] = await Promise.all([
-      this.cluster.listPipelineRunNames(),
-      this.cluster.listSecretNames(),
-      this.cluster.listConfigMapNames(),
-    ]);
-    const credPrefix = credSecretName("");
-    const reportPrefix = reportCmName("");
-    const ids = new Set<string>(pipelineRuns); // the PipelineRun's name IS the jobId
-    for (const n of secrets) if (n.startsWith(credPrefix)) ids.add(n.slice(credPrefix.length));
-    for (const n of configMaps) if (n.startsWith(reportPrefix)) ids.add(n.slice(reportPrefix.length));
-    await Promise.all([...ids].map((id) => this.reap(id)));
-    return { reaped: ids.size };
+    // THE PIPELINERUN LIST IS THE WHOLE INDEX. submit creates the run before its Secret and reap
+    // deletes the run after both children, so no gate object of this Manager's making ever stands
+    // without a run standing beside it. Enumerating Secrets to look for more would read every
+    // Secret in the namespace - the API server answers a list with the values - and there is
+    // nothing left for it to find.
+    const ids = await this.cluster.listPipelineRunNames(); // the PipelineRun's name IS the jobId
+    await Promise.all(ids.map((id) => this.reap(id)));
+    return { reaped: ids.length };
   }
 
   /** Read how the run's TaskRuns ended, ahead of the reap. A read that FAILS is recorded as such and
@@ -448,12 +466,20 @@ export class TektonGateRunner implements GateRunner {
   }
 
   /** Best-effort delete of a run's objects (PipelineRun + report ConfigMap + credential Secret). */
+  /** THE PIPELINERUN IS DELETED LAST, and the two before it are awaited first. The run is the handle
+   *  the orphan sweep has on a triple: while it stands, its Secret and its report ConfigMap are
+   *  findable through it. Deleting it first - or all three at once, which is the same thing under a
+   *  crash - can leave either of the other two behind with nothing naming them, and finding those
+   *  again would mean enumerating the namespace's Secrets, which is reading them. This way a reap
+   *  that dies halfway leaves the run standing, and the sweep reaps the triple whole on the next
+   *  boot. allSettled on the first two because a NotFound on either is the normal case for a reap
+   *  that already ran. */
   private async reap(jobId: string): Promise<void> {
     await Promise.allSettled([
-      this.cluster.deletePipelineRun(jobId),
       this.cluster.deleteConfigMap(reportCmName(jobId)),
       this.cluster.deleteSecret(credSecretName(jobId)),
     ]);
+    await this.cluster.deletePipelineRun(jobId).catch(() => undefined);
   }
 
   private pipelineRunBody(runId: string, req: GateJobRequest): unknown {
