@@ -13,7 +13,6 @@
 // A host that takes a password takes it from everyone who can reach its SSH port, and this chip is
 // where an operator finds that out.
 import type { ServerView } from "../../shared/api-types.ts";
-import { hasManagerKey } from "../../shared/enums.ts";
 
 /** How long an "off" reading keeps its green chip. Past this the chip goes neutral and the
  *  sentence's age carries the whole claim: nothing re-reads the daemon on its own, and a host's
@@ -131,8 +130,11 @@ export interface PasswordLoginRunKindOffer {
  * Which run kinds this card may offer, and on what.
  *
  * Both drive one host's sshd over this manager's own key, so the one thing they share is that
- * the manager HAS one — hasManagerKey (shared/enums.ts), which is the same predicate the plan
- * refuses on, so this card can never offer a run the server then rejects.
+ * the manager HAS one — `hasKey`, which is the credential itself (server/domains/inventory/write.ts
+ * builds it from an unrotated ssh_key row), and which is the same fact the plan refuses on
+ * (defs/password-login.kit.ts), so this card can never offer a run the server then rejects. A
+ * server's STATUS is not that fact: it says where the machine stands in its deployment, and a
+ * deployment that stopped before installing a key still moves it.
  *
  * They are deliberately NOT keyed on the reading. A reading is a snapshot, so "off" an hour ago
  * says nothing about now, and hiding the disable button from a host that once read off would let a
@@ -143,6 +145,5 @@ export interface PasswordLoginRunKindOffer {
  * sshd like any other, and its own card is the only place its password door is visible.
  */
 export function passwordLoginRunKindOffer(server: ServerView): PasswordLoginRunKindOffer {
-  const reachable = hasManagerKey(server.status);
-  return { disable: reachable, enable: reachable };
+  return { disable: server.hasKey, enable: server.hasKey };
 }

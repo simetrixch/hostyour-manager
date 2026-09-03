@@ -12,12 +12,13 @@ import { clusterShortName } from "../../inventory/cluster-marking.ts";
 import { argoAppsCmd, parsePipeRows, refreshPlatformCheckoutScript } from "./deploy-slave.remote.ts";
 import { PLATFORM_CHECKOUT } from "./machine-state.ts";
 import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
-import { requireElevationPassword } from "./ansiwise-run.kit.ts";
+import { openDoor } from "./manager-key.kit.ts";
+import { requireElevationPassword, ANSIWISE_ELEVATION_SECRET } from "./ansiwise-run.kit.ts";
 
 // The building blocks the run kinds that act on a LIVE cluster share:
 //
 //   attest-target     the fail-closed precondition below — the cluster is active and the machine
-//                     is still the machine the platform adopted.
+//                     is still the one whose identity this manager recorded.
 //   refresh-checkout  brings the machine's platform checkout (/srv/hostyour-cloud, the tree every
 //                     deployment program acts on) onto the head of its install branch. The programs
 //                     read that checkout as it stands and deliberately fetch nothing themselves, so
@@ -57,8 +58,17 @@ async function argoSurface(ctx: StepCtx, target: SlaveTarget): Promise<{ session
 
 /** The fail-closed precondition of every run kind that acts on a LIVE cluster: the cluster row is
  *  active (the target lookup refuses anything else) and the machine answering on that host is still
- *  the machine the platform adopted — a stranger VM on a recycled address must never be handed the
- *  deployment programs. */
+ *  the one whose identity this manager recorded — a stranger VM on a recycled address must never be
+ *  handed the deployment programs.
+ *
+ *  THE READING IS TAKEN THROUGH THE DOOR, exactly as the slave install's own attest takes it
+ *  (deploy-slave.attest.ts). This is the first command such a run sends, and a machine reinstalled at
+ *  the hosting provider carries no line of this manager's: a session offering the key alone is
+ *  refused there, and the run would die before the steps that put the key back had a chance to run.
+ *  openDoor offers the key where the machine takes it, the run's own password where it does not, and
+ *  refuses every credential where the host key on the row and the host key on the wire disagree
+ *  (manager-key.kit.ts). The secret is the same one every root command of these run kinds is raised
+ *  with, so the door asks the operator for nothing the approve did not already collect. */
 export function attestClusterStep(target: SlaveTarget): Step {
   return {
     name: ATTEST_TARGET_STEP,
@@ -66,7 +76,7 @@ export function attestClusterStep(target: SlaveTarget): Step {
     run: async (ctx) => {
       const { domain, stage } = target.resolve(ctx.db);
       const server = loadServer(ctx.db, target.serverId);
-      const session = await ctx.ssh();
+      const session = await openDoor(ctx, ANSIWISE_ELEVATION_SECRET);
       const outcome = await attestMachineId({ db: ctx.db, session, serverId: target.serverId, signal: ctx.signal, log: (l) => ctx.log("meta", l) });
       ctx.checkpoint({ domain, stage, machineId: outcome.machineId, machineIdAction: outcome.action });
       ctx.log("meta", `${server.name} attested — cluster ${domain} (${stage}, role ${server.role})`);
@@ -113,9 +123,9 @@ export function refreshCheckoutStep(target: SlaveTarget): Step {
  *
  *  IT REACHES THE CLUSTER THE SAME WAY ITS NEIGHBOURS DO: with the elevation password the run
  *  asked for at approve, which is what the program steps raise every one of their commands
- *  with. Asking for `sudo -n` instead rests on a rule only the adoption puts on a machine — so
- *  on a master installed by ansiwise-client, which is never adopted, the last step of a redeploy is
- *  refused while every step before it has gone green. Measured on a first master:
+ *  with. Asking for `sudo -n` instead rests on a standing rule no run kind here writes — so on a
+ *  master installed by ansiwise-client, which carries none, the last step of a redeploy would be
+ *  refused while every step before it had gone green. Measured on a first master:
  *  /etc/sudoers.d/ held only a README, and the run said "sudo: interactive authentication is
  *  required" under a line telling the operator the cluster was not answering yet. */
 export function argocdFollowStep(target: SlaveTarget): Step {

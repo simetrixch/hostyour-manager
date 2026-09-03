@@ -4,7 +4,7 @@ import { events, steps } from "../db/schema/runs.ts";
 import { servers } from "../db/schema/inventory.ts";
 import type { RunEventBus } from "./bus.ts";
 import type { CredentialStore } from "../security/store.ts";
-import type { SshFactory, SshSession, SshTarget } from "../adapters/ssh/port.ts";
+import { HostKeyMismatchError, type SshFactory, type SshSession, type SshTarget } from "../adapters/ssh/port.ts";
 import { redact } from "../security/redact.ts";
 import { evtId } from "../kernel/ids.ts";
 import { AppError, errUndeclaredTarget, errMissingRunSecret, errValidation } from "../kernel/errors.ts";
@@ -54,7 +54,7 @@ export class RunContext {
   // The KEY SET is the plan-gate for a non-default ctx.ssh(id); the VALUE is what the target
   // builders resolve against.
   private readonly declared: ReadonlyMap<string, SshTransport>;
-  private passwordSession: SshSession | undefined; // The adopt password ceremony
+  private passwordSession: SshSession | undefined; // The password door (openPasswordSession)
   private readonly cleanups: Cleanup[] = [];
 
   constructor(private readonly d: RunContextDeps) {
@@ -78,7 +78,7 @@ export class RunContext {
       signal: this.d.signal,
       logger: this.d.logger.child({ step: stepName }),
       ssh: (serverId?: string) => this.getSsh(serverId, stepId),
-      openPasswordSession: () => this.openPasswordSession(stepId),
+      openPasswordSession: (secretName: string) => this.openPasswordSession(secretName, stepId),
       closePasswordSession: () => this.closePasswordSession(),
       attest: (serverId?: string) => this.attest(serverId),
       log: (stream: RunOutputStream, text: string) => this.emit(stepId, stream, text),
@@ -106,17 +106,33 @@ export class RunContext {
     this.passwordSession = undefined;
   }
 
-  // The adopt password ceremony. Password-authed session to the run's ownsHost target, opened
-  // once and reused by the ceremony steps until closePasswordSession(). Records the observed
-  // host key onto the server row (trust-on-first-use) so the later key session pins it.
-  private async openPasswordSession(stepId: string): Promise<SshSession> {
+  // THE PASSWORD DOOR. A password-authed session to the run's ownsHost target, opened once and
+  // reused by every step that asks for it until closePasswordSession(). The secret's NAME comes from
+  // the caller, because the run kind holding the password is the thing that knows what it is called.
+  //
+  // THE PIN GOES INTO THE TARGET, and that is what keeps the password on this side of the wire when
+  // the machine is not the one this manager recorded. ssh2's hostVerifier (adapters/ssh/ssh2-session.ts)
+  // decides during key exchange — before the client authenticates — so a target carrying the row's
+  // fingerprint ends the connect with a HostKeyMismatchError while the credential is still unsent.
+  // A check taken from session.hostKeyFingerprint() AFTER the session opens can only refuse a machine
+  // that already has the password, which is a refusal that protects nothing. The key path builds its
+  // target the same way (getSsh below).
+  //
+  // AND THE ROW IS RECORDED OR VERIFIED, never overwritten. A row holding no host key is a machine
+  // this manager is meeting for the first time, so what it presents is recorded; a row holding the
+  // same key is verified and nothing is written; a row holding a different one is refused with both
+  // fingerprints named. attestMachineId (executor/attest.ts) has this shape for /etc/machine-id and
+  // for the same reason: a write that happens on every connect turns the pin into a record of the
+  // last connection rather than a claim about the machine, and then it can never disagree.
+  private async openPasswordSession(secretName: string, stepId: string): Promise<SshSession> {
     if (this.passwordSession) return this.passwordSession;
     const id = this.d.targetServerId;
     if (!id) throw errUndeclaredTarget("(no target server)");
     const server = this.d.db.select().from(servers).where(eq(servers.id, id)).get();
     if (!server) throw errUndeclaredTarget(id);
-    const password = this.d.secrets.get("adopt-password");
-    if (!password) throw errMissingRunSecret("adopt-password");
+    const password = this.d.secrets.get(secretName);
+    if (!password) throw errMissingRunSecret(secretName);
+    const pinned = (server.preflightJson as { hostKey?: string } | null)?.hostKey;
     const resolved = resolveTransport(server, this.transportOf(id));
     this.emitConnecting(stepId, server, resolved);
     const target: SshTarget = {
@@ -124,13 +140,52 @@ export class RunContext {
       port: server.sshPort,
       username: server.sshUser,
       auth: { kind: "password", password },
+      ...(pinned ? { hostKeyFingerprint: pinned } : {}),
     };
-    const session = await this.d.sshFactory(target);
+    let session: SshSession;
+    try {
+      session = await this.d.sshFactory(target);
+    } catch (err) {
+      // The verifier's own refusal, which is the one that matters: it happens during key exchange, so
+      // the password is still on this side. It is re-thrown as the refusal a person reads, because a
+      // transport-level message can name the two fingerprints but not the act that settles them.
+      if (err instanceof HostKeyMismatchError) throw this.hostKeyRefusal(id, server.name, `${resolved.host}:${server.sshPort}`, err.expected, err.found);
+      throw err;
+    }
+    const observed = session.hostKeyFingerprint();
+    if (!pinned) {
+      const pf = (server.preflightJson as Record<string, unknown> | null) ?? {};
+      this.d.db.update(servers).set({ preflightJson: { ...pf, hostKey: observed } }).where(eq(servers.id, id)).run();
+      this.emit(stepId, "meta", `No host key is recorded for ${server.name}, so the one this machine presented is recorded: ${observed}. Every later session to it is pinned on this.`);
+    } else if (observed !== pinned) {
+      // The second guard, over a factory whose verifier did not refuse. The session is closed and
+      // never cached, because a transport to the wrong machine must not outlive the refusal.
+      session.close();
+      throw this.hostKeyRefusal(id, server.name, `${resolved.host}:${server.sshPort}`, pinned, observed);
+    } else {
+      this.emit(stepId, "meta", `The host key ${observed} is the one recorded for ${server.name}, so the pin is verified and nothing is written.`);
+    }
     this.passwordSession = session;
-    const fp = session.hostKeyFingerprint();
-    const pf = (server.preflightJson as Record<string, unknown> | null) ?? {};
-    this.d.db.update(servers).set({ preflightJson: { ...pf, hostKey: fp } }).where(eq(servers.id, id)).run();
     return session;
+  }
+
+  /** THE ONE REFUSAL FOR A MACHINE THAT IS NOT THE RECORDED ONE, whichever of the two guards above
+   *  reaches it. It names both fingerprints so a person has the disagreement in front of them, and it
+   *  names the act itself: a machine that was rebuilt presents a new host key, this manager cannot
+   *  tell that from another machine answering at the address, and the difference is a statement a
+   *  person makes on the server's card (domains/inventory/machine-identity.ts).
+   *
+   *  THE OBSERVED NUMBER IS EVIDENCE AND NOT THE STATEMENT. What ends the refusal is the fingerprint
+   *  read off the machine's own console; the one printed here is whatever answered at the address,
+   *  which is exactly what the person is being asked to go and check. */
+  private hostKeyRefusal(serverId: string, name: string, address: string, expected: string, got: string): AppError {
+    return errValidation(
+      `refusing the password door to ${name}: this manager has ${expected} pinned as its host key and the machine at ${address} presented ${got}. ` +
+      `A rebuilt machine presents a key this manager never recorded, and so does a different machine answering at the address; ` +
+      `the two read the same here and only somebody at the machine can tell them apart. ` +
+      `Read the fingerprint off ${name} itself and state it on this server's card under Servers, and the next run opens the door on it.`,
+      { serverId, expected, got },
+    );
   }
 
   private closePasswordSession(): void {
@@ -233,7 +288,7 @@ export class RunContext {
     const pinned = (server.preflightJson as { hostKey?: string } | null)?.hostKey;
     // Defense in depth: the master is SSHed-to by deploy-slave (this control host). Without a
     // pinned host key the connection would trust-on-first-use with an accept-any verifier —
-    // MITM-able. Refuse rather than connect unpinned. Slaves/adopt are unaffected (only the
+    // MITM-able. Refuse rather than connect unpinned. Slaves are unaffected (only the
     // master requires the pin; a slave without a recorded host key still connects TOFU).
     if (isMasterRole(server.role) && !pinned) {
       throw errValidation(

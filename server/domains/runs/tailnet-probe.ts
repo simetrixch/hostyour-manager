@@ -1,16 +1,23 @@
 // Reading a host's tailnet membership off its own client, and recording it on the server row.
 //
-// THREE kinds of run take a reading, because one is not enough to describe a host's whole life:
-//   adopt          the first reading, of a machine the platform has never touched. On a fresh box
-//                  there is no client yet — install_cli_tools puts it there during the base install
-//                  — so this reading is normally "no-client", and that is the truth at that moment.
+// TWO kinds of run take a reading, and both read a host that has a client to ask. A machine no run
+// has joined is not read at all: the client arrives with the base install (install_cli_tools), so
+// there would be nothing on the box to answer, and the row's "unknown" is the honest word for it.
 //   deploy-slave   right after the host joins. This is the reading that describes a MANAGED slave,
-//                  and without it every deployed slave would keep adopt's pre-install reading
-//                  forever: a warn chip saying "no client" about the machine the master's ArgoCD
-//                  and Vault are talking to. redeploy re-runs the same step list, so it re-reads.
+//                  and without it every deployed slave would carry no membership at all: nothing on
+//                  the card about the machine the master's ArgoCD and Vault are talking to.
+//                  redeploy re-runs the same step list, so it re-reads.
 //   the tailnet    their last step, so a disconnect, a reconnect or a rejoin is visible on the card
 //   repair run kinds   that offered it instead of leaving the reading from before the repair standing.
 // All of them go through recordTailnetReading, so there is one probe, one fold and one write.
+//
+// AND ONE READER DECIDES ON IT INSTEAD OF DISPLAYING IT. A redeploy joins the machine only where it
+// holds no address, so `join-if-absent` (defs/tailnet.kit.ts) takes this reading BEFORE the act it
+// chooses, on a host that may be on no network at all — which is why the fold below states a
+// membership for every shape a probe can come back in, including a client that is not there. That
+// step is also the one caller a probe which did not run stops: what it would otherwise choose is an
+// act on a live cluster, and the sentence under recordTailnetReading — the reading is a soft fact
+// and never fails ITS step — remains true of this function, which returns null and writes nothing.
 //
 // WHY THE CLIENT'S OWN STATE AND NOT THE ADDRESS. `tailscale ip -4` prints nothing and exits
 // non-zero for a node that is not logged in AND for a client that cannot be reached at all, and a
@@ -29,9 +36,12 @@ import type { ServerTailnetState } from "../../../shared/enums.ts";
  * The probe. Emits `TAILNET <key> <value>` lines; an ABSENT line is the absence of the fact, so
  * every branch that cannot produce a value simply prints none.
  *
- * `ts()` retries under sudo because the client talks to tailscaled over a root-owned local socket,
- * while this script runs as the login user like every other captured script — without the retry a
- * joined host whose socket the user cannot read would be recorded as a client that says nothing.
+ * THE SCRIPT IS RAISED WHOLE with the password its run carries, which is what `ts()` rests on: the
+ * client talks to tailscaled over a root-owned local socket, so a probe sent as the login user would
+ * record a joined host as a client that says nothing. The alternative — reaching for the socket with
+ * `sudo -n` — answers only on a machine carrying a standing passwordless-root rule, which no run
+ * kind here writes and which the deployment's `remove-sudoers` takes off a machine that still has
+ * one; a reading taken that way would be a refusal the probe reports as an absent fact.
  *
  * jq is not a new dependency: install_cli_tools installs jq BEFORE tailscale
  * (hostyour-cloud base/common-kubernetes.sh CLI_TOOLS), so a host that has the client has jq. A host
@@ -45,7 +55,7 @@ if ! command -v tailscale >/dev/null 2>&1; then
   exit 0
 fi
 echo "TAILNET client present"
-ts() { tailscale "$@" 2>/dev/null || sudo -n tailscale "$@" 2>/dev/null; }
+ts() { tailscale "$@" 2>/dev/null; }
 echo "TAILNET version $(ts version | head -1)"
 command -v jq >/dev/null 2>&1 || exit 0
 status="$(ts status --json)"
@@ -60,10 +70,10 @@ echo "TAILNET coordinator $(ts debug prefs | jq -r '.ControlURL // empty')"
 // is the control URL. AuthURL is the interactive login URL, which is a different thing and is empty
 // on a joined node. ipn/ipnstate.go's Status struct carries no control URL field at that tag either,
 // so this is not a reading that a newer parse of the same output could recover.
-// The reading costs one more sudo rule than the status does, and what that rule hands over was
-// measured rather than assumed: at 1.98.10 the daemon strips PrivateNodeKey, OldPrivateNodeKey and
-// NetworkLockKey out of the preferences before the local API answers, so this prints settings and
-// no key material. The grant's own table states the same measurement beside the rule it justifies.
+// `debug prefs` prints the client's whole preferences block, so what it hands this run was measured
+// rather than assumed: at 1.98.10 the daemon strips PrivateNodeKey, OldPrivateNodeKey and
+// NetworkLockKey out of the preferences before the local API answers, so this prints settings and no
+// key material.
 
 /** Turn the probe's stdout into the facts. A key whose value came out empty produces a line with
  *  nothing after the key, which matches no `TAILNET <key> <value>` pair and therefore lands here as
@@ -95,13 +105,19 @@ export function parseTailnetProbe(stdout: string): TailnetProbe {
  * the never-measured default) with a made-up one would be the one thing this surface must not do.
  * The reading is a soft fact and never fails its step: a host that will not describe its client is
  * still a host the rest of the run has business with.
+ *
+ * `elevation` is the password of the machine account, and it is a REQUIRED argument because the
+ * probe reads a root-owned socket: every run kind that takes this reading declares the same secret
+ * (ANSIWISE_ELEVATION_SECRET), so a caller that could not name one would be a caller with no way to
+ * ask the client anything.
  */
 export async function recordTailnetReading(
   ctx: StepCtx,
   session: SshSession,
   serverId: string,
+  elevation: string,
 ): Promise<ServerTailnetState | null> {
-  const cap = await remoteScriptCapture(ctx, session, "tailnet-probe", TAILNET_PROBE_SCRIPT, { timeoutMs: 60_000 });
+  const cap = await remoteScriptCapture(ctx, session, "tailnet-probe", TAILNET_PROBE_SCRIPT, { timeoutMs: 60_000, elevation });
   if (cap.result.code !== 0) {
     ctx.log("meta", `Tailnet: the membership probe did not run (exit ${cap.result.code}) — this server's stored reading is unchanged.`);
     return null;

@@ -18,10 +18,10 @@ function server(
 ): ServerView {
   return {
     id: "srv_1", name: "s1", host: "203.0.113.7", lanHost: null, tailnetHost: null, sshPort: 22, sshUser: "root",
-    role: "slave", status: "ready", tailnetState: "unknown", tailnet: { kind: "none" },
+    role: "slave", status: "ready", cluster: null, tailnetState: "unknown", tailnet: { kind: "none" },
     passwordLoginState: "unknown", passwordLogin: { kind: "none" },
     authorizedKeysState, authorizedKeys,
-    createdAt: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true, ...over,
+    hostKeyPinned: null, machineIdRecorded: false, createdAt: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true, ...over,
   };
 }
 
@@ -113,11 +113,16 @@ describe("what the card may offer", () => {
     for (const status of ["ready", "healthy", "degraded", "provisioning", "draining", "undeployed"] as const) {
       expect(authorizedKeysRunKindOffer(server("unknown", { kind: "none" }, { status })).read, status).toBe(true);
     }
-    // A host adopt has never touched, and one whose key is being installed right now: there is no
-    // session to read over.
-    for (const status of ["bare", "adopting"] as const) {
-      expect(authorizedKeysRunKindOffer(server("accounted", read([key()]), { status })).read, status).toBe(false);
-    }
+    // A host no key stands for: there is no session to read over.
+    expect(authorizedKeysRunKindOffer(server("accounted", read([key()]), { hasKey: false })).read).toBe(false);
+  });
+
+  it("follows the key and not the status, in both directions", () => {
+    // A deployment moves the row to `provisioning` in its first step and parks it when the run ends,
+    // whether or not it ever installed a key, so a status decides this wrongly for every run that
+    // stopped early — and wrongly in both directions at once.
+    expect(authorizedKeysRunKindOffer(server("unknown", { kind: "none" }, { status: "ready", hasKey: false })).read).toBe(false);
+    expect(authorizedKeysRunKindOffer(server("unknown", { kind: "none" }, { status: "bare", hasKey: true })).read).toBe(true);
   });
 
   it("offers both acts on the same predicate, whatever the reading says", () => {
@@ -126,7 +131,7 @@ describe("what the card may offer", () => {
     for (const s of [server("accounted", read([])), server("unknown", { kind: "none" })]) {
       expect(operatorKeyPlacement(s, "SHA256:pat")).toMatchObject({ place: true, remove: true });
     }
-    expect(operatorKeyPlacement(server("accounted", read([]), { status: "bare" }), "SHA256:pat"))
+    expect(operatorKeyPlacement(server("accounted", read([]), { hasKey: false }), "SHA256:pat"))
       .toMatchObject({ place: false, remove: false });
   });
 });

@@ -8,23 +8,21 @@ import { parseConfig } from "../../kernel/config.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { CredentialStore } from "../../security/store.ts";
-import { RunEventBus } from "../../executor/bus.ts";
-import { Executor } from "../../executor/executor.ts";
-import { buildRunDefinitions } from "../runs/run-definitions.ts";
 import { runActor } from "../../kernel/actor.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerServerRoutes } from "./api.ts";
 import { serverCredFlags } from "./write.ts";
-import { getRun } from "../../executor/read.ts";
 import type { AppEnv } from "../../http/app-env.ts";
-import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { ApiError, OperatorKeyView, ServerView } from "../../../shared/api-types.ts";
 
-// registerServerRoutes (api.ts) — the seven routes the server inventory screen is made of, driven
+// registerServerRoutes (api.ts) — the six routes the server inventory screen is made of, driven
 // through the real app so the chokepoint and the CSRF guard are in the path. The neighbouring
 // registerClustersRoutes is covered in api.test.ts and shares the ServerView projection; what is
 // exercised HERE is the half that projection never sees: the credential flags GET /api/servers folds
-// in (api.ts, serverCredFlags), the writes, and the adopt trigger that plans and approves a run.
+// in (api.ts, serverCredFlags) and the writes.
+//
+// NONE of these routes reaches a machine, and none plans a run, which is why this harness needs no
+// executor and no ssh factory: every act that touches a host is planned through POST /api/runs.
 
 const config = parseConfig({
   PUBLIC_URL: "https://m1.example",
@@ -38,11 +36,6 @@ const config = parseConfig({
 } as NodeJS.ProcessEnv);
 const logger = createLogger(config);
 
-// No machine exists for these cases, so every SSH connection is refused. The routes under test START
-// runs; carrying one out is the executor's business and is covered in runs/adopt.test.ts. An approved
-// adopt therefore fails on its first remote step (defs/adopt.ts, connect-password), which is what settle() waits for.
-const noSsh: SshFactory = () => Promise.reject(new Error("no ssh in this harness"));
-
 const MASTER = "m1.example.com";
 const SLAVE = "s1.example.com";
 
@@ -52,7 +45,6 @@ interface Harness {
   app: Hono<AppEnv>;
   db: DbHandle;
   store: CredentialStore;
-  executor: Executor;
   cookie: string;
 }
 
@@ -70,15 +62,6 @@ describe("server inventory API", () => {
     // directly, so it seeds the row itself.
     db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_test', 'test', 'Test')").run();
     const store = new CredentialStore({ db: db.db, logger });
-    const executor = new Executor({
-      db: db.db,
-      creds: store,
-      bus: new RunEventBus(),
-      logger,
-      runDefinitions: buildRunDefinitions({ db: db.db }),
-      sshFactory: noSsh,
-      actor: runActor,
-    });
     const session = new SessionCodec(db.db, config);
     const app = createApp({
       config,
@@ -87,10 +70,10 @@ describe("server inventory API", () => {
       session,
       registerAuth: () => undefined,
       registerProtected: (a) =>
-        registerServerRoutes(a, { db: db.db, creds: store, executor, actor: runActor }),
+        registerServerRoutes(a, { db: db.db, creds: store, actor: runActor }),
     });
     const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
-    return { app, db, store, executor, cookie };
+    return { app, db, store, cookie };
   }
 
   afterEach(() => {
@@ -145,22 +128,36 @@ describe("server inventory API", () => {
       expect(servers[0]?.role).toBe("master");
     });
 
-    it("folds in the credential flags — a stored bootstrap password shows, and its value never crosses", async () => {
+    it("folds in the credential flags a RUN sealed, and no credential's value ever crosses", async () => {
+      // The flags are read off the credential store and never off this route's input: adding a
+      // server seals nothing, so both rows below start with neither flag and what makes one of them
+      // differ is a credential sealed the way a run seals one.
       const h = await make();
-      const created = await mutate(h.app, "POST", "/api/servers", h.cookie, {
-        name: "s5", host: "10.1.1.11", sshUser: "hostyour1", password: "shared-secret-xyz",
-      });
+      const created = await mutate(h.app, "POST", "/api/servers", h.cookie, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" });
       expect(created.status).toBe(201);
+      const { server } = (await created.json()) as { server: ServerView };
+      expect(server).toMatchObject({ hasPassword: false, hasKey: false });
       await mutate(h.app, "POST", "/api/servers", h.cookie, { name: "s6", host: "10.1.1.12", sshUser: "hostyour1" });
+      await h.store.seal({
+        kind: "ssh_key", label: "SSH key for s5", plaintext: Buffer.from("private-key-material"),
+        fingerprint: "SHA256:managerkey", serverId: server.id, publicKey: "ssh-ed25519 AAAAkey hostyour:s5",
+      });
+      // A row sealed a password before this surface stopped taking one still holds a working way in,
+      // so the flag that says so must go on being reported.
+      await h.store.seal({
+        kind: "other", label: "password for s5", plaintext: Buffer.from("shared-secret-xyz"),
+        fingerprint: "bootstrap-password", serverId: server.id,
+      });
 
       const res = await h.app.request("/api/servers", authed(h.cookie));
       const body = await res.text();
       const servers = (JSON.parse(body) as { servers: ServerView[] }).servers;
-      expect(servers.find((s) => s.name === "s5")).toMatchObject({ hasPassword: true, hasKey: false });
-      // The counter-probe on the flag: the machine registered WITHOUT a password must not inherit
-      // the neighbouring one's flag.
+      expect(servers.find((s) => s.name === "s5")).toMatchObject({ hasPassword: true, hasKey: true });
+      // The counter-probe on the flags: the machine nothing was sealed for must not inherit the
+      // neighbouring one's.
       expect(servers.find((s) => s.name === "s6")).toMatchObject({ hasPassword: false, hasKey: false });
       expect(body).not.toContain("shared-secret-xyz");
+      expect(body).not.toContain("private-key-material");
     });
 
     it("withholds what the projection is the trust boundary for — notes never cross", async () => {
@@ -212,11 +209,13 @@ describe("server inventory API", () => {
       // (write.ts:37). CreateServerInput.parse (api.ts:87) throws a ZodError, and error-shape.ts:13
       // redacts every non-AppError to INTERNAL, so which field was wrong never reaches the browser.
       // The "Slave_5!" body below is not browser-reachable: the name input in web/src/pages/Servers.tsx
-      // and the one in web/src/pages/AdoptWizard.tsx both carry pattern="[a-z0-9][a-z0-9-]*" required inside a
-      // form with no noValidate, so that name is stopped before submit. Asserted as it stands
-      // rather than as it should be — this case is the record that the hole is real.
+      // carries pattern="[a-z0-9][a-z0-9-]*" required inside a form with no noValidate, so that name is
+      // stopped before submit. Asserted as it stands rather than as it should be — this case is the
+      // record that the hole is real. The last body is a field the schema does not name at all, which
+      // CreateServerInput is strict about: a credential offered here is refused and never dropped.
       const h = await make();
-      for (const body of [{ name: "Slave_5!", host: "h", sshUser: "root" }, { name: "s5", host: "h", sshUser: "root", sshPort: 70000 }, {}]) {
+      for (const body of [{ name: "Slave_5!", host: "h", sshUser: "root" }, { name: "s5", host: "h", sshUser: "root", sshPort: 70000 }, {},
+        { name: "s5", host: "h", sshUser: "root", password: "shared-secret-xyz" }]) {
         const res = await mutate(h.app, "POST", "/api/servers", h.cookie, body);
         expect(res.status).toBe(500);
         expect((await res.json()) as ApiError).toEqual({ code: "INTERNAL", message: "Internal error" });
@@ -237,9 +236,13 @@ describe("server inventory API", () => {
     it("forgets a bare server and purges the credentials sealed beside it", async () => {
       const h = await make();
       const { server } = (await (
-        await mutate(h.app, "POST", "/api/servers", h.cookie, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1", password: "pw" })
+        await mutate(h.app, "POST", "/api/servers", h.cookie, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" })
       ).json()) as { server: ServerView };
-      expect(await serverCredFlags(h.store)).toEqual(new Map([[server.id, { hasPassword: true, hasKey: false }]]));
+      await h.store.seal({
+        kind: "ssh_key", label: "SSH key for s5", plaintext: Buffer.from("private"),
+        fingerprint: "SHA256:managerkey", serverId: server.id, publicKey: "ssh-ed25519 AAAAkey hostyour:s5",
+      });
+      expect(await serverCredFlags(h.store)).toEqual(new Map([[server.id, { hasPassword: false, hasKey: true }]]));
 
       const res = await mutate(h.app, "DELETE", `/api/servers/${server.id}`, h.cookie);
       expect(res.status).toBe(200);
@@ -266,6 +269,154 @@ describe("server inventory API", () => {
       const res = await mutate(h.app, "DELETE", "/api/servers/srv_nope", h.cookie);
       expect(res.status).toBe(400);
       expect(((await res.json()) as ApiError).message).toContain("srv_nope not found");
+    });
+  });
+
+  // POST /api/servers/:id/machine-identity — the statement a person makes about a machine they
+  // rebuilt. Driven over HTTP rather than against the domain function, because the two things that
+  // make it a statement and not a default are properties of the route: the chokepoint attributes it
+  // to the operator who made it, and the CSRF guard keeps another site from making it for them.
+  describe("POST /api/servers/:id/machine-identity", () => {
+    /** A fingerprint of the shape a machine presents: SHA256: and 43 base64 characters. */
+    const fp = (seed: string): string => `SHA256:${seed.repeat(43).slice(0, 43)}`;
+    const PINNED = fp("Ab1");
+    const PRESENTED = fp("Zy9");
+    const MACHINE_ID = "0123456789abcdef0123456789abcdef";
+
+    /** A slave this manager has already reached: a host key pinned, a machine-id recorded, and the
+     *  preflight checks that share the document with the pin. */
+    function seedReached(db: DbHandle): void {
+      db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, machine_id, preflight_json) VALUES ('srv_r','r1','203.0.113.10','hostyour1','slave','ready',?,?)")
+        .run(MACHINE_ID, JSON.stringify({ hostKey: PINNED, checkedAt: 42, checks: [] }));
+    }
+
+    /** Give a row that already stands the two numbers a machine this manager has reached carries.
+     *  Used on the MASTER, whose pin comes from the deployment configuration seed-master re-reads on
+     *  every boot, and whose machine-id comes from nothing but the attestation that recorded it. */
+    function pinMachine(db: DbHandle, id: string): void {
+      db.sqlite.prepare("UPDATE servers SET machine_id = ?, preflight_json = ? WHERE id = ?")
+        .run(MACHINE_ID, JSON.stringify({ hostKey: PINNED }), id);
+    }
+
+    function identityAt(db: DbHandle, id: string): { hostKey: string | undefined; machineId: string | null } {
+      const row = db.sqlite.prepare("SELECT machine_id, preflight_json FROM servers WHERE id = ?").get(id) as { machine_id: string | null; preflight_json: string };
+      return { hostKey: (JSON.parse(row.preflight_json) as { hostKey?: string }).hostKey, machineId: row.machine_id };
+    }
+
+    function identityOf(db: DbHandle): { hostKey: string | undefined; checkedAt: number | undefined; machineId: string | null } {
+      const row = db.sqlite.prepare("SELECT machine_id, preflight_json FROM servers WHERE id = 'srv_r'").get() as { machine_id: string | null; preflight_json: string };
+      const pf = JSON.parse(row.preflight_json) as { hostKey?: string; checkedAt?: number };
+      return { hostKey: pf.hostKey, checkedAt: pf.checkedAt, machineId: row.machine_id };
+    }
+
+    it("pins the stated key, forgets the machine-id beside it, and leaves the rest of the document alone", async () => {
+      const h = await make();
+      seedReached(h.db);
+      const res = await mutate(h.app, "POST", "/api/servers/srv_r/machine-identity", h.cookie, { hostKeyFingerprint: PRESENTED });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      // The machine-id goes because a rebuilt machine reports a new one: leaving it would open the
+      // door and refuse the same run one step later, at the check that verifies it.
+      expect(identityOf(h.db)).toEqual({ hostKey: PRESENTED, checkedAt: 42, machineId: null });
+    });
+
+    it("takes the fingerprint off a terminal, newline and all", async () => {
+      const h = await make();
+      seedReached(h.db);
+      const res = await mutate(h.app, "POST", "/api/servers/srv_r/machine-identity", h.cookie, { hostKeyFingerprint: `  ${PRESENTED}
+` });
+      expect(res.status).toBe(200);
+      expect(identityOf(h.db).hostKey).toBe(PRESENTED);
+    });
+
+    it("audits both numbers and the operator who stated them — the only record of why the pin moved", async () => {
+      const h = await make();
+      seedReached(h.db);
+      await mutate(h.app, "POST", "/api/servers/srv_r/machine-identity", h.cookie, { hostKeyFingerprint: PRESENTED });
+      const row = h.db.sqlite.prepare("SELECT actor, target_id, detail_json FROM audit WHERE action = 'server.machine_identity_restated'").get() as { actor: string; target_id: string; detail_json: string };
+      expect(row.actor).toBe("op_test");
+      expect(row.target_id).toBe("srv_r");
+      expect(JSON.parse(row.detail_json)).toMatchObject({ name: "r1", hostKeyWas: PINNED, hostKeyNow: PRESENTED, machineIdDropped: MACHINE_ID });
+    });
+
+    it("refuses what is not a statement about a rebuilt machine, and writes nothing on any of them", async () => {
+      const h = await make();
+      seedThree(h.db);
+      seedReached(h.db);
+      pinMachine(h.db, "srv_m");
+      // The master's pin is provisioned, not stated: seed-master reads MASTER_SSH_HOST_KEY_FP again
+      // on every boot, so a value written here would not survive one.
+      const master = await mutate(h.app, "POST", "/api/servers/srv_m/machine-identity", h.cookie, { hostKeyFingerprint: PRESENTED });
+      expect(master.status).toBe(400);
+      expect(((await master.json()) as ApiError).message).toContain("MASTER_SSH_HOST_KEY_FP");
+      // A row pinning nothing has no identity to replace — the next run records what it meets. It
+      // carries no machine-id either: one is only ever recorded over a session, and opening one
+      // records the host key first.
+      const unpinned = await mutate(h.app, "POST", "/api/servers/srv_b/machine-identity", h.cookie, { hostKeyFingerprint: PRESENTED });
+      expect(unpinned.status).toBe(400);
+      expect(((await unpinned.json()) as ApiError).message).toContain("no host key is recorded");
+      // A value no machine can present would replace a refusal that names a real machine with one
+      // that names nothing, so it is refused rather than pinned.
+      for (const typed of ["SHA256:short", "256 SHA256:" + PRESENTED.slice(7) + " root@r1 (ED25519)", PRESENTED.slice(7)]) {
+        const bad = await mutate(h.app, "POST", "/api/servers/srv_r/machine-identity", h.cookie, { hostKeyFingerprint: typed });
+        expect(bad.status).toBe(400);
+        expect(((await bad.json()) as ApiError).message).toContain("not a host-key fingerprint");
+      }
+      // And the statement that would move NEITHER number: the pinned key on a row carrying no
+      // recorded machine-id. Nothing this manager holds is in the way, so it reports no repair.
+      h.db.sqlite.prepare("UPDATE servers SET machine_id = NULL WHERE id = 'srv_r'").run();
+      const same = await mutate(h.app, "POST", "/api/servers/srv_r/machine-identity", h.cookie, { hostKeyFingerprint: PINNED });
+      expect(same.status).toBe(400);
+      expect(((await same.json()) as ApiError).message).toContain("already what this manager has pinned");
+
+      expect(identityOf(h.db)).toEqual({ hostKey: PINNED, checkedAt: 42, machineId: null });
+      expect(identityAt(h.db, "srv_m")).toEqual({ hostKey: PINNED, machineId: MACHINE_ID });
+      expect(h.db.sqlite.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'server.machine_identity_restated'").get()).toEqual({ n: 0 });
+    });
+
+    // THE MACHINE-ID MOVES ON ITS OWN, and this route is the only writer that clears it: attest.ts
+    // records one where the column is NULL and never overwrites it, so a machine whose
+    // /etc/machine-id was regenerated while its host keys stood — a cloned VM, a removed file — is
+    // refused by every run kind that attests it until a person says what happened here.
+    it("the pinned fingerprint drops the recorded machine-id and moves no pin", async () => {
+      const h = await make();
+      seedReached(h.db);
+      const res = await mutate(h.app, "POST", "/api/servers/srv_r/machine-identity", h.cookie, { hostKeyFingerprint: PINNED });
+      expect(res.status).toBe(200);
+      expect(identityOf(h.db)).toEqual({ hostKey: PINNED, checkedAt: 42, machineId: null });
+      // Audited as the statement it is, with both halves readable: the pin did not move, the id did.
+      const row = h.db.sqlite.prepare("SELECT detail_json FROM audit WHERE action = 'server.machine_identity_restated'").get() as { detail_json: string };
+      expect(JSON.parse(row.detail_json)).toMatchObject({ hostKeyWas: PINNED, hostKeyNow: PINNED, machineIdDropped: MACHINE_ID });
+    });
+
+    it("this manager's OWN machine gets that half, which is its only route back", async () => {
+      // Its host key is pinned from a deployment configuration re-read on every boot, so the other
+      // half stays refused for it — but nothing configures a machine-id, and no other writer clears
+      // one, so a re-imaged control host is repaired here or nowhere.
+      const h = await make();
+      seedThree(h.db);
+      pinMachine(h.db, "srv_m");
+      const res = await mutate(h.app, "POST", "/api/servers/srv_m/machine-identity", h.cookie, { hostKeyFingerprint: PINNED });
+      expect(res.status).toBe(200);
+      expect(identityAt(h.db, "srv_m")).toEqual({ hostKey: PINNED, machineId: null });
+    });
+
+    it("without the same-origin header → CSRF refused, and the pin stands", async () => {
+      const h = await make();
+      seedReached(h.db);
+      const res = await mutate(h.app, "POST", "/api/servers/srv_r/machine-identity", h.cookie, { hostKeyFingerprint: PRESENTED }, false);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as ApiError).code).toBe("CSRF_REFUSED");
+      expect(identityOf(h.db).hostKey).toBe(PINNED);
+    });
+
+    it("the browser is told which key is pinned, and the rest of the preflight document stays here", async () => {
+      const h = await make();
+      seedReached(h.db);
+      const body = await (await h.app.request("/api/servers", authed(h.cookie))).text();
+      expect((JSON.parse(body) as { servers: ServerView[] }).servers[0]).toMatchObject({ hostKeyPinned: PINNED });
+      expect(body).not.toContain("checkedAt");
+      expect(body).not.toContain(MACHINE_ID);
     });
   });
 
@@ -303,76 +454,6 @@ describe("server inventory API", () => {
       const res = await mutate(h.app, "DELETE", `/api/operator-keys/${key.id}`, h.cookie);
       expect(res.status).toBe(400);
       expect(((await res.json()) as ApiError).message).toContain("s1");
-    });
-  });
-
-  describe("POST /api/servers/:id/adopt", () => {
-    it("an unknown server is a 404 before any run is planned", async () => {
-      const h = await make();
-      const res = await mutate(h.app, "POST", "/api/servers/srv_nope/adopt", h.cookie);
-      expect(res.status).toBe(404);
-      expect(((await res.json()) as ApiError).code).toBe("NOT_FOUND");
-      expect(h.db.sqlite.prepare("SELECT count(*) AS n FROM runs").get()).toEqual({ n: 0 });
-    });
-
-    it("with the bootstrap password stored → 202 approved, and the run leaves `planned`", async () => {
-      const h = await make();
-      const { server } = (await (
-        await mutate(h.app, "POST", "/api/servers", h.cookie, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1", password: "shared-secret-xyz" })
-      ).json()) as { server: ServerView };
-
-      const res = await mutate(h.app, "POST", `/api/servers/${server.id}/adopt`, h.cookie);
-      expect(res.status).toBe(202);
-      const { runId, approved } = (await res.json()) as { runId: string; approved: boolean };
-      expect(approved).toBe(true);
-      expect(runId).toMatch(/^run_/);
-
-      // The approval really fired the run: this harness refuses every SSH connection, so it stops at
-      // connect-password. A run still `planned` would mean the route had only planned it.
-      await h.executor.settle(runId);
-      expect(getRun(h.db.db, runId)?.status).toBe("failed");
-      expect(getRun(h.db.db, runId)?.kind).toBe("cluster-adopt");
-      // onTerminal put the machine back (defs/adopt.ts adoptDef.onTerminal).
-      expect((await listServersOverHttp(h)).find((s) => s.id === server.id)?.status).toBe("bare");
-    });
-
-    it("with no stored password → 202 NOT approved, and the plan waits for the Run screen's ceremony", async () => {
-      const h = await make();
-      const { server } = (await (
-        await mutate(h.app, "POST", "/api/servers", h.cookie, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" })
-      ).json()) as { server: ServerView };
-
-      const res = await mutate(h.app, "POST", `/api/servers/${server.id}/adopt`, h.cookie);
-      expect(res.status).toBe(202);
-      const { runId, approved } = (await res.json()) as { runId: string; approved: boolean };
-      expect(approved).toBe(false);
-      const run = getRun(h.db.db, runId);
-      expect(run?.status).toBe("planned");
-      // What the Run screen renders one input for.
-      expect(run?.requiredSecrets).toEqual(["adopt-password"]);
-      expect(h.db.sqlite.prepare("SELECT started_by AS a FROM runs WHERE id = ?").get(runId)).toEqual({ a: "op_test" });
-    });
-
-    it("a password in the body approves a run for a server that has none stored", async () => {
-      const h = await make();
-      const { server } = (await (
-        await mutate(h.app, "POST", "/api/servers", h.cookie, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" })
-      ).json()) as { server: ServerView };
-
-      const res = await mutate(h.app, "POST", `/api/servers/${server.id}/adopt`, h.cookie, { password: "typed-at-the-screen", intendedDomain: SLAVE });
-      expect(res.status).toBe(202);
-      const { runId, approved } = (await res.json()) as { runId: string; approved: boolean };
-      expect(approved).toBe(true);
-      await h.executor.settle(runId);
-      expect(getRun(h.db.db, runId)?.status).toBe("failed"); // it RAN — a still-planned run was never approved
-      // The intended domain rides into the frozen params. Nothing consumes it: AdoptParams declares
-      // it (defs/adopt.ts AdoptParams) and the only reader is adoptDef's own plan, where its ABSENCE pushes
-      // the plan warning "DNS wildcard check will be skipped — no domain chosen yet." Passing it
-      // therefore suppresses that warning and nothing else — the preflight step (defs/adopt.ts)
-      // runs PREFLIGHT_SCRIPT and touches neither DNS nor intendedDomain.
-      expect(h.db.sqlite.prepare("SELECT params_json AS p FROM runs WHERE id = ?").get(runId)).toEqual({
-        p: JSON.stringify({ serverId: server.id, intendedDomain: SLAVE }),
-      });
     });
   });
 });

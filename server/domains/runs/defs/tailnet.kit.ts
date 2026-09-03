@@ -6,7 +6,7 @@ import type { SshSession } from "../../../adapters/ssh/port.ts";
 import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { attestMachineId } from "../../../executor/attest.ts";
 import { resolveTransport, VIA_LABEL } from "../../../executor/transport.ts";
-import { isMasterRole, type RunKind } from "../../../../shared/enums.ts";
+import { isMasterRole, type RunKind, type ServerTailnetState } from "../../../../shared/enums.ts";
 import { registerSecret } from "../../../security/redact.ts";
 import { recordTailnetReading } from "../tailnet-probe.ts";
 import { clusterShortName } from "../../inventory/cluster-marking.ts";
@@ -85,7 +85,7 @@ const PROGRAM: Record<Exclude<TailnetKind, "cluster-tailnet-rejoin">, string> = 
 
 /** Step 0 of all three, and the reason they are declared mutating: the public address is the one
  *  most exposed to being handed to a different machine, so the run proves the box answering it is
- *  the box that was adopted before it changes anything on it. attestMachineId records the id on a
+ *  the box whose identity this manager recorded before it changes anything on it. attestMachineId records the id on a
  *  row that carries none and hard-fails on a mismatch, and the executor then makes this step unskippable. */
 function attestTargetStep(serverId: string): Step {
   return {
@@ -300,7 +300,7 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
           // showing the membership this very step took away, on the one surface built to make it
           // visible. A probe that cannot run must not replace the failure with its own.
           try {
-            await recordTailnetReading(ctx, session, serverId);
+            await recordTailnetReading(ctx, session, serverId, password);
           } catch {
             // best-effort — see above
           }
@@ -326,14 +326,101 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
  *  go on showing the reading from before the repair — the state the operator asked the run kind to
  *  change. A probe that cannot run leaves the stored reading alone and says so in the log; it does
  *  not fail the step, because the act above already happened and calling the run failed would say
- *  the opposite. EXPORTED for deploy-slave, whose join changes exactly the same reading. */
+ *  the opposite. EXPORTED for deploy-slave, whose join changes exactly the same reading.
+ *
+ *  A MISSING PASSWORD IS THE ONE THING THAT DOES FAIL IT, and by name: the probe reads the client's
+ *  root-owned socket, so without the run's own elevation password there is no reading to take at
+ *  all — a different fact from a host that would not answer, and every run kind composing this step
+ *  declares that secret. */
 export function readMembershipStep(serverId: string): Step {
   return {
     name: "read-membership",
     title: "Read the host's tailnet membership",
     run: async (ctx) => {
       const session = await ctx.ssh();
-      ctx.checkpoint({ tailnetState: await recordTailnetReading(ctx, session, serverId) });
+      ctx.checkpoint({ tailnetState: await recordTailnetReading(ctx, session, serverId, requireElevationPassword(ctx)) });
+    },
+  };
+}
+
+/** `join-if-absent`: read what the host says about its own membership, and put it back on the private
+ *  network only where it holds none. The JOIN a rebuild of a live machine layer gets, and the reading
+ *  is what makes that join safe to compose at all.
+ *
+ *  WHY THE TWO HALVES CANNOT BE SEPARATED. A machine reinstalled at the hosting provider holds no
+ *  membership, and the resident ansiwise surface a deployment ends by switching on binds an address
+ *  from that network and refuses every other one (place-ansiwise.step.ts) — so without a join such a
+ *  machine cannot be finished. A machine that never lost its membership must not be joined for it:
+ *  the join program discards the node key as its first act, so it hands a LIVE slave a fresh address
+ *  the cluster map and the master's reconciler are still pointing away from, and it mints a
+ *  credential at the coordinator that nothing can un-mint.
+ *
+ *  THE MACHINE'S OWN CLIENT ANSWERS IT, and only it can. The coordinator is the authority on WHICH
+ *  address a machine was given (deploy-slave.address.ts) and no authority at all on whether the
+ *  machine still holds it: a registration lives in the coordinator's own database on the master and
+ *  survives the machine being wiped, so a reset box is listed there exactly as a live one is. What a
+ *  client says about ITSELF is the one fact that tells them apart, which is the reading
+ *  recordTailnetReading takes and folds (domains/runs/tailnet-probe.ts).
+ *
+ *  A READING THAT DID NOT HAPPEN STOPS THE STEP, and this is the one caller that treats it that way.
+ *  Everywhere else the reading is a soft fact, because a host that will not describe its client is
+ *  still a host the rest of a run has business with. Here it is what the ACT is chosen on: joining a
+ *  machine that may already be on the network takes a live cluster off it, and joining nothing on one
+ *  that may not be leaves the step below binding an address the machine does not hold. Neither may be
+ *  chosen off a measurement the run failed to take.
+ *
+ *  EVERY STATE THAT IS NOT `joined` IS JOINED, and not one of the three is a guess. `not-joined` is
+ *  the client's own word for a node that is on no network. `no-client` is a host carrying no client
+ *  and therefore no address — and a host reaching this step has been through deploy-host, whose
+ *  install_cli_tools row puts the client there, so the join program's own dry run is what names a
+ *  machine that still has none. `client-unreadable` is a daemon that will not answer over its own
+ *  socket, which is a machine whose interface is down and whose address nothing can bind either; the
+ *  join is what brings the client back up, under a registration this installation minted.
+ *
+ *  NOT ONE COMPENSATION IS ARMED HERE, which is the difference from the deploy-slave list's own join.
+ *  There the join is the first per-slave state at the master and `remove-slave` compensates the whole
+ *  of it; against a machine that is already live that same compensation takes a WORKING slave's
+ *  management plane down, and the definition composing this step implements no cleanups for such a
+ *  name to be resolved against (redeploy.ts). What a failed join leaves is a registration at the
+ *  coordinator, and the retry clears it itself before it mints again (tailnet.coordinator.ts). */
+export function joinIfAbsentStep(target: SlaveTarget, serverId: string, ports: TailnetPorts): Step {
+  return {
+    name: "join-if-absent",
+    title: "Read the host's tailnet membership, and join only a host that holds none",
+    run: async (ctx) => {
+      const server = loadServer(ctx.db, serverId);
+      let measured: ServerTailnetState | undefined;
+      // A JOIN THIS STEP ALREADY STARTED IS RE-ENTERED AND NEVER RE-DECIDED. The join's machine run is
+      // detached and outlives this step's own budget, and the host answers "joined" from the moment
+      // the join lands — which is before the certificate re-sign and the node's return that the same
+      // machine run waits for. A retry that measured there would call the step done while its own act
+      // was still going, so the mark the phase left decides instead and rejoinStep re-attaches to it.
+      if (ctx.readCheckpoint<ProgramCheckpoint>()?.live === undefined) {
+        const reading = await recordTailnetReading(ctx, await ctx.ssh(), serverId, requireElevationPassword(ctx));
+        if (reading === null) {
+          throw errValidation(
+            `${server.name} did not answer the membership probe, and this step joins a host or leaves it alone on that ` +
+            "one reading: joining a machine that is already on the private network hands a live cluster a fresh address " +
+            "and mints a credential that cannot be un-minted, and joining nothing on a machine that is off it leaves the " +
+            "resident ansiwise service binding an address the machine does not hold. The line above says how far the " +
+            "probe came; fix that, then retry the step",
+          );
+        }
+        if (reading === "joined") {
+          ctx.log("meta",
+            `${server.name} reports its client running on the private network, so it already holds an address there and ` +
+            "this run joins nothing: no logout, no mint, no fresh address. WHICH address it holds is asked of the " +
+            "coordinator by declare-tailnet-address, further down this list.");
+          ctx.checkpoint({ measured: reading, joined: false });
+          return;
+        }
+        measured = reading;
+        ctx.log("meta",
+          `${server.name} reports "${reading}", so it holds no address of this private network — the state a machine ` +
+          "reinstalled at the hosting provider comes back in — and the join below puts it on one.");
+      }
+      await rejoinStep(target, serverId, ports).run(ctx);
+      ctx.checkpoint({ ...(measured !== undefined ? { measured } : {}), joined: true });
     },
   };
 }

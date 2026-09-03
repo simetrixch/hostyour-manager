@@ -5,7 +5,7 @@ import { relevantRun, runLine } from "./serverRuns.ts";
 
 const run = (over: { id?: string; kind?: RunKind; status?: RunStatus; targetId?: string }): RunView => ({
   id: over.id ?? "run_1",
-  kind: over.kind ?? "cluster-adopt",
+  kind: over.kind ?? "cluster-deploy-slave",
   targetKind: "server",
   targetId: over.targetId ?? "srv_1",
   status: over.status ?? "planned",
@@ -46,8 +46,8 @@ describe("runLine — what the card calls the run", () => {
     expect(runLine(run({ kind: "cluster-redeploy", status: "planned" }))).toBe("A cluster-redeploy run is planned — approve it");
   });
 
-  it("picks the article from the noun, so a vowel does not read as 'A adoption'", () => {
-    expect(runLine(run({ kind: "cluster-adopt", status: "running" }))).toBe("An adoption is running — watch it");
+  it("picks the article from the noun, so a vowel does not read as 'A operator key placement'", () => {
+    expect(runLine(run({ kind: "cluster-operator-key-place", status: "running" }))).toBe("An operator key placement is running — watch it");
     expect(runLine(run({ kind: "cluster-deploy-slave", status: "planned" }))).toBe("A deployment is planned — approve it");
   });
 });

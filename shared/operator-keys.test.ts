@@ -9,7 +9,7 @@ import type { AuthorizedKeyFact } from "./api-types.ts";
 // The two properties this file exists for.
 //
 //   THE MARKERS CANNOT REACH EACH OTHER. Removing an operator's key must never strip the line this
-//   manager logs in with, and the adoption's own cleanup must never strip a human's key. Both
+//   manager logs in with, and `remove-installed-key` must never strip a human's key. Both
 //   directions are asserted, and the pattern anchoring is asserted with them — an unanchored match
 //   on "pat" would take "pat-laptop" off the host too.
 //
@@ -35,7 +35,7 @@ describe("the two markers", () => {
     // `-operator` in between, so that substring never occurs in it.
     expect(operator.includes("hostyour:")).toBe(false);
     expect(manager.includes(OPERATOR_MARKER_PREFIX)).toBe(false);
-    // The pattern adopt's cleanup deletes by is the manager marker as a plain substring.
+    // The pattern `remove-installed-key` deletes by is the manager marker as a plain substring.
     const managerLine = `ssh-ed25519 ${BLOB_A} ${manager}`;
     const operatorLine = operatorKeyLine(`ssh-ed25519 ${BLOB_B}`, "s1");
     expect(operatorLine.includes(manager)).toBe(false);
@@ -122,7 +122,7 @@ describe("classifying a key line", () => {
   };
 
   it("knows this manager's own key by its FINGERPRINT alone — the comment is not consulted", () => {
-    // The sealed fingerprint covers both roads a manager key takes onto a host: adopt seals the
+    // The sealed fingerprint covers both roads a manager key takes onto a host: `generate-key` seals the
     // key it generates before installing the line (which then carries the marker), and the boot
     // seed seals the master's, whose line carries whatever comment it was generated with.
     expect(classifyAuthorizedKey({ fingerprint: "SHA256:mine", comment: managerKeyMarker("s1") }, ctx).kind).toBe("manager");

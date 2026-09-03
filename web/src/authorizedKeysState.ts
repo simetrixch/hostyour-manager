@@ -13,7 +13,6 @@
 // into the machine that no run kind on this surface can take off, and this chip is where an operator
 // finds out it exists.
 import type { AuthorizedKeyFact, ServerView } from "../../shared/api-types.ts";
-import { hasManagerKey } from "../../shared/enums.ts";
 
 /** How long an "accounted" reading keeps its green chip. Past this the chip goes neutral and the
  *  sentence's age carries the whole claim: nothing re-reads a host on its own, and authorized_keys
@@ -141,14 +140,17 @@ export interface AuthorizedKeysRunKindOffer {
 }
 
 /** Every one of these run kinds drives one host over this manager's own key, so the one thing they
- *  share is that the manager HAS one — hasManagerKey (shared/enums.ts), the same predicate the
- *  plans refuse on, so a card can never offer a run the server then rejects.
+ *  share is that the manager HAS one — `hasKey`, which is the credential itself
+ *  (server/domains/inventory/write.ts builds it from an unrotated ssh_key row) and the same fact the
+ *  plans refuse on (defs/operator-key.kit.ts). A server's STATUS is not that fact: it says where the
+ *  machine stands in its deployment, and a deployment that stopped before installing a key still
+ *  moves it.
  *
  *  Deliberately NOT keyed on the reading. A reading is a snapshot, so hiding the read button from a
  *  host that looked clean an hour ago would let a stale value decide what the operator may look at —
  *  on the one surface where being wrong means a key nobody is watching. */
 export function authorizedKeysRunKindOffer(server: ServerView): AuthorizedKeysRunKindOffer {
-  return { read: hasManagerKey(server.status) };
+  return { read: server.hasKey };
 }
 
 /** What ONE operator key's row says about ONE server, on the operator-keys page. */
@@ -165,8 +167,7 @@ export interface OperatorKeyPlacement {
 }
 
 export function operatorKeyPlacement(server: ServerView, fingerprint: string): OperatorKeyPlacement {
-  const reachable = hasManagerKey(server.status);
-  const acts = { place: reachable, remove: reachable };
+  const acts = { place: server.hasKey, remove: server.hasKey };
   const read = server.authorizedKeys;
   if (read.kind !== "v0") {
     return { state: "unread", line: "No readable reading — nothing here can say whether this key is on the host.", ...acts };

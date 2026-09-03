@@ -2,7 +2,6 @@ import type { RunKind } from "../../../shared/enums.ts";
 import type { Db } from "../../db/client.ts";
 import type { AnyRunDefinition, RunDefinition } from "../../executor/types.ts";
 import { noopDef } from "./defs/noop.run.ts";
-import { adoptDef } from "./defs/adopt.ts";
 import { makeDeploySlaveDef, type DeploySlavePorts } from "./defs/deploy-slave.ts";
 import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
@@ -32,9 +31,9 @@ export interface RunDefinitionsPorts extends DeploySlavePorts, AnsiwisePorts {
 export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDefinition[] = []): RunDefinitions {
   const runDefinitions: RunDefinitions = new Map();
   register(runDefinitions, noopDef);
-  // The cluster run kinds: adopt takes a bare machine into service, deploy-slave turns an adopted
-  // server into a live slave, redeploy rebuilds the machine layer of a cluster that is already live.
-  register(runDefinitions, adoptDef);
+  // The cluster run kinds: deploy-slave takes a machine from first contact to a live slave — the key
+  // this manager reaches it with is installed by the deployment itself — and redeploy rebuilds the
+  // machine layer of a cluster that is already live.
   register(runDefinitions, makeDeploySlaveDef(ports));
   register(runDefinitions, makeRedeployDef(ports));
   // The tailnet repair run kinds, on a host that is already deployed: leave the private network, come

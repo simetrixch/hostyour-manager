@@ -541,7 +541,7 @@ export class Executor {
   // Every target the run's plan declares — the gate for a non-default ctx.ssh(id) (deploy-slave
   // per target server AND per address), and the address each host is reached on. Read off the FROZEN plan, so the transport a
   // run was approved with is the transport it runs with. Falls back to the derived single
-  // owns-host target for a plan that declares no explicit targets (e.g. adopt), so single-target
+  // owns-host target for a plan that declares no explicit targets, so single-target
   // runs stay unchanged.
   private declaredTargets(run: LoadedRun): RunTargetRef[] {
     return run.plan.targets ?? this.defaultTargets(run.plan);

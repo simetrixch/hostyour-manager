@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { approveIsComplete, type OperatorInput } from "../../../shared/approve.ts";
+import { secretFieldLabel, secretFieldHint } from "../approveFields.ts";
 import { IconLock } from "./icons.tsx";
 
 /** What a person supplies before a run may start: CREDENTIALS the machine does not hold (masked —
@@ -49,15 +50,16 @@ export function RunApproveForm(props: {
             {hasSecrets && hasInputs
               ? "This run needs two things the machine does not hold: credentials only you can supply, and answers its programs ask of a person. Approving hands over both and starts the steps below."
               : hasSecrets
-                ? "This run needs credentials only you can supply — the password its programs raise their commands to root with, and any write credential the machine is asked for. Approving hands them over and starts the steps below."
+                ? "This run needs credentials only you can supply — the password every command of this run is raised to root with, and any write credential the machine is asked for. Approving hands them over and starts the steps below."
                 : "This run needs answers its programs ask of a person. Supply them below — they ride the run and are never stored."}
           </p>
         </div>
       </div>
       {requiredSecrets.map((key) => (
         <label className="field" key={key}>
-          <span className="field__label">{key.replace(/^consumer-secret:/, "")}</span>
+          <span className="field__label">{secretFieldLabel(key)}</span>
           <input type="password" value={secretVals[key] ?? ""} onChange={(e) => setSecretVals((s) => ({ ...s, [key]: e.target.value }))} autoComplete="off" />
+          {secretFieldHint(key) !== null && <span className="field__hint">{secretFieldHint(key)}</span>}
         </label>
       ))}
       {requiredInputs.map((inp) => (

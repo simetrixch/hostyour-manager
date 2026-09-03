@@ -2,26 +2,19 @@
 // code restates these lists — CI greps for duplicate enum blocks. Server, web, and the
 // Drizzle schema all import from here.
 
+// WHERE A MACHINE STANDS IN ITS DEPLOYMENT, and nothing else. A deployment moves the row to
+// "provisioning" in its first step; its last step moves a machine that is now serving to "healthy",
+// and a run that ends any other way parks the row at "ready". So every status here is a position in
+// that arc — reached by machines this manager has installed a key on and by machines whose run
+// stopped before it ever opened a session.
+//
+// SO NO STATUS SAYS WHICH CREDENTIALS THIS MANAGER HOLDS. "Can this manager reach the host over its
+// own key?" is answered by the credential itself — server/security/store.ts `holdsManagerKey` on the
+// server side, `ServerView.hasKey` in the browser — and a predicate derived from this list instead
+// would answer yes for a machine no session was ever opened to.
 export const SERVER_STATUS = ["bare", "adopting", "ready", "provisioning",
   "healthy", "degraded", "draining", "undeployed"] as const;
 export type ServerStatus = (typeof SERVER_STATUS)[number];
-
-/** Does this manager hold its OWN SSH key for a server in this status — i.e. can it reach the
- *  host without a password?
- *
- *  Only two statuses say no. "bare" is a machine adopt has never touched, and "adopting" is one
- *  whose key is being installed right now. Every other status follows a completed adoption, or —
- *  for the master, which is never adopted at all — its boot-time self-registration, which seals the
- *  self-SSH key and lands the row at "healthy" (server/boot/seed-master.ts).
- *
- *  Named once because two readers must key on the same set, and a disagreement between them shows
- *  as a button that plans a run the server then refuses: the password-login plan, which will not
- *  shut a host's password door unless something else can still reach it, and the card that offers
- *  that run kind. `adoptedAt` is NOT that set — the master's row carries none and it is the one host
- *  most in need of the run kind. */
-export function hasManagerKey(status: ServerStatus): boolean {
-  return status !== "bare" && status !== "adopting";
-}
 
 // What a server's cluster does for the platform, and nothing else: who operates ArgoCD, Vault,
 // identity and the build plane for whom. "master+slave" is one server doing BOTH jobs — a regular
@@ -238,6 +231,7 @@ export type AppProvenance = (typeof APP_PROVENANCE)[number];
 
 export const CLUSTER_STATUS = ["planned", "provisioning", "active",
   "rebuilding", "removing", "removed"] as const;
+export type ClusterStatus = (typeof CLUSTER_STATUS)[number];
 
 export const CLUSTER_TIER = ["rehearsal", "real"] as const; // default "rehearsal"
 export type ClusterTier = (typeof CLUSTER_TIER)[number];
@@ -296,8 +290,8 @@ export type ServerPasswordLoginState = (typeof SERVER_PASSWORD_LOGIN_STATE)[numb
 // would hide the one that matters.
 //   - "manager" — this manager's OWN login identity for the host: the line whose fingerprint
 //                    matches the ssh_key credential sealed for this server, or whose comment is the
-//                    marker adopt wrote. Both are checked, because the master's key is not written
-//                    by adopt at all (it arrives as a file the boot seed seals) and carries whatever
+//                    marker `generate-key` wrote. Both are checked, because the master's key is not
+//                    written by a run at all (it arrives as a file the boot seed seals) and carries whatever
 //                    comment its generator gave it.
 //   - "operator"   — a human's key this manager placed: the line carries the operator marker AND
 //                    its fingerprint is the one stored under the label that marker names. Both,
@@ -328,8 +322,9 @@ export const SERVER_AUTHORIZED_KEYS_STATE = ["unknown", "unreadable", "accounted
 export type ServerAuthorizedKeysState = (typeof SERVER_AUTHORIZED_KEYS_STATE)[number];
 
 // What a sealed credential IS, for the store's list filters and the card that shows it. Every member
-// has a producer: `ssh_key` (adopt, seed-master), `pat` (the consumer repo PAT), `kubeconfig` (a
-// slave's cluster bearer) and `other` (the adopt bootstrap password, a slave's Vault reviewer JWT).
+// has a producer: `ssh_key` (generate-key, seed-master), `pat` (the consumer repo PAT), `kubeconfig`
+// (a slave's cluster bearer) and `other` (a password sealed beside a server row, a slave's Vault
+// reviewer JWT).
 // A member with nothing sealing it is a filter that can only ever answer empty, and a kind the card
 // offers for a credential this platform cannot hold.
 export const CREDENTIAL_KIND = ["ssh_key", "pat", "kubeconfig", "other"] as const;
@@ -344,11 +339,12 @@ export type CredentialKind = (typeof CREDENTIAL_KIND)[number];
 // cannot serve, via the RUN_FAMILY grouping below.
 export const RUN_KIND = [
   "noop",                                                       // permanent resume-proof fixture
-  // The cluster run kinds. `cluster-adopt` takes a bare machine into service, `cluster-deploy-slave`
-  // turns an adopted server into a live slave, and `cluster-redeploy` rebuilds the machine layer of a
-  // cluster that is already live. Distinct on purpose: each answers a different question, and a
-  // boolean on another run kind hides that.
-  "cluster-adopt", "cluster-deploy-slave", "cluster-redeploy",
+  // The cluster run kinds. `cluster-deploy-slave` takes a machine from first contact to a live
+  // slave — the key this manager reaches it with is installed by the deployment itself, so being
+  // reachable by key is a state deploying establishes and never an act of its own — and
+  // `cluster-redeploy` rebuilds the machine layer of a cluster that is already live. Distinct on
+  // purpose: each answers a different question, and a boolean on another run kind hides that.
+  "cluster-deploy-slave", "cluster-redeploy",
   // The tailnet repair run kinds, on a host that is already deployed. Three acts, not one with a
   // switch: `cluster-tailnet-disconnect` takes the host off the private network and leaves it there,
   // `cluster-tailnet-reconnect` puts it back with the credential the host still holds, and
@@ -360,7 +356,7 @@ export const RUN_KIND = [
   // login-disable` shuts the sshd password door and destroys the bootstrap password sealed beside the
   // server row — two doors, and only the second one outlives the machine's configuration.
   // `cluster-password-login-enable` opens the sshd door again for a repair, which is the only reason
-  // it exists: adoption already leaves the door shut.
+  // it exists: a deployed machine already has that door shut.
   "cluster-password-login-disable", "cluster-password-login-enable",
   // The operator-key run kinds, on a host this manager already holds a key for. The two acts are
   // named for what they place — one human's key, under its own label and its own marker, so a
@@ -417,7 +413,7 @@ export type RunKind = (typeof RUN_KIND)[number];
 export const RUN_FAMILY = {
   fixture: ["noop"],
   cluster: [
-    "cluster-adopt", "cluster-deploy-slave", "cluster-redeploy",
+    "cluster-deploy-slave", "cluster-redeploy",
     "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin",
     "cluster-password-login-disable", "cluster-password-login-enable",
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",

@@ -60,8 +60,15 @@ describe("the probe script asks the client, not the address", () => {
     expect(TAILNET_PROBE_SCRIPT).toContain(".ControlURL");
   });
 
-  it("retries under sudo, because tailscaled's local socket is root-owned", () => {
-    expect(TAILNET_PROBE_SCRIPT).toContain("sudo -n tailscale");
+  it("asks the client directly, because the step raises the whole script with the run's password", () => {
+    // tailscaled's local socket is root-owned, so this reading needs root — and it gets it from
+    // recordTailnetReading shipping the script under one `sudo -S` (executor/stepkit.ts `raised`).
+    // A `sudo` INSIDE the script would be a second route: `sudo -n` answers only on a machine
+    // carrying a standing passwordless-root rule, which no run kind writes and the deployment
+    // removes, and the `|| ` it would sit behind turns that refusal into a fact the probe simply
+    // does not report — a card showing a joined host with no coordinator named.
+    expect(TAILNET_PROBE_SCRIPT).not.toContain("sudo");
+    expect(TAILNET_PROBE_SCRIPT).toContain('ts() { tailscale "$@" 2>/dev/null; }');
   });
 
   it("takes ONE field out of `debug prefs`, and never the block the private keys live in", () => {

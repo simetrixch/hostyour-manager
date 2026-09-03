@@ -4,25 +4,20 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { sudoersDropIn } from "./defs/adopt.ts";
 import { DISABLE_SCRIPT } from "./defs/password-login.kit.ts";
 import { REMOTE_COMMANDS, REMOTE_SCRIPTS } from "./remote-scripts.fixture.ts";
 
-// WHAT THIS MANAGER SHIPS TO A MACHINE, READ BY THE PROGRAMS THAT WILL READ IT THERE.
+// WHAT THIS MANAGER SHIPS TO A MACHINE, READ BY THE PROGRAM THAT WILL READ IT THERE.
 //
-// Two kinds of artifact leave this repository as TEXT and would otherwise be parsed for the first
-// time on somebody's machine: the sudoers drop-in the adoption installs, and every bash script a run
-// uploads. Everything this repository knows about either one is a model of the real parser — the
-// sudoers matcher in adopt.fixture.ts models fnmatch(3), and nothing at all models bash — so a file
-// that no real parser has ever read is a file whose first reader is the customer.
+// Every bash script a run uploads leaves this repository as TEXT and would otherwise be parsed for
+// the first time on somebody's machine. Nothing here models bash, so text that no real parser has
+// ever read is text whose first reader is the customer.
 //
-// What each failure costs is what makes this worth its runtime. A sudoers file sudo refuses is
-// refused WHOLE: the account loses every rule in it at once, and the adoption that installed it has
-// already taken the machine's previous grant away. A bash script with a syntax error runs nothing
-// and reports an exit code from a host, so the operator reads a run that failed on the machine and
-// starts looking at the machine.
+// What a failure costs is what makes this worth its runtime. A bash script with a syntax error runs
+// nothing and reports an exit code from a host, so the operator reads a run that failed on the
+// machine and starts looking at the machine.
 //
-// HOW MUCH IS COVERED: the drop-in as it is rendered, every script a run UPLOADS, and every command
+// HOW MUCH IS COVERED: every script a run UPLOADS, and every command
 // LINE a run composes under a name. The set is not a list here — the census below walks the source
 // with the TypeScript compiler and fails when a call sends something the collection does not carry,
 // so shell added to a run cannot quietly narrow this check.
@@ -64,52 +59,10 @@ function parse(check: (file: string) => string, text: string): { ok: boolean; re
   }
 }
 
-const VISUDO = reachable("visudo");
 const BASH = reachable("bash");
 const ABSENT = (tool: string): string =>
   `no ${tool} this suite can reach — install it, or on Windows install a WSL distribution that carries it; ` +
   `until then nothing in this repository has ever parsed what it ships`;
-
-describe.skipIf(!VISUDO)("the sudoers drop-in, parsed by a real sudo", () => {
-  if (!VISUDO) {
-    // eslint-disable-next-line no-console -- a skipped parser must be loud: a silent skip reads as a pass
-    console.warn(ABSENT("visudo"));
-  }
-
-  const checked = (text: string): { ok: boolean; report: string } => parse((f) => `visudo -c -f ${f}`, text);
-
-  it("parses the file the adoption installs", () => {
-    const { ok, report } = checked(sudoersDropIn("digi1"));
-    expect(report).toBe("");
-    expect(ok).toBe(true);
-  });
-
-  it("parses it for a user name that is not a shell word", () => {
-    // The account name comes off the server row and is whatever the operator typed, so the rendered
-    // file is not one file — it is one per adopted machine.
-    const { ok, report } = checked(sudoersDropIn("ubuntu-2"));
-    expect(report).toBe("");
-    expect(ok).toBe(true);
-  });
-
-  // THE PLANT, and it is the shape this file could really take: a line continuation that stops
-  // continuing. `sudoersDropIn` joins the rules with ", \\\n    ", and a join that lost its
-  // backslash leaves every rule after the first standing as a sudoers line of its own.
-  it("refuses a drop-in whose rules run past the end of the line", () => {
-    const broken = sudoersDropIn("digi1").replace(", \\\n", ",\n");
-    expect(broken, "the plant matched nothing — this case would be measuring today's file").not.toBe(sudoersDropIn("digi1"));
-    const { ok, report } = checked(broken);
-    expect(ok).toBe(false);
-    expect(report).toContain("syntax error");
-  });
-
-  // The other half: a real parser has to reject a rule that is simply not a rule, or "parsed OK"
-  // would mean nothing about the file above.
-  it("refuses a rule whose command is not a fully-qualified path", () => {
-    const { ok } = checked("digi1 ALL=(root) NOPASSWD: true\n");
-    expect(ok).toBe(false);
-  });
-});
 
 // ── THE CENSUS: which scripts this repository actually uploads ────────────────────────────────────
 //

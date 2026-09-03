@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { RunDefinition } from "../../../executor/types.ts";
+import { ANSIWISE_ELEVATION_SECRET } from "./ansiwise-run.kit.ts";
 import { passwordLoginPlan, passwordLoginSteps, restorePasswordLoginCleanup } from "./password-login.kit.ts";
 
 // The per-server password-login switch, as two run kinds. Each is a run like every other: a plan, an
@@ -19,14 +20,20 @@ import { passwordLoginPlan, passwordLoginSteps, restorePasswordLoginCleanup } fr
 //                           this run has no password to seal — it is a repair run kind, for the case
 //                           where a machine has to be reachable without this manager's key.
 //
-// THE SWITCH DEFAULTS TO OFF, AND ADOPTION SETS IT. The adopt run shuts the door itself, right
-// after it has verified key-only login (defs/adopt.ts): there is no state in which password login
-// should survive an adoption, so `password-login-enable` is for putting it back deliberately, never
-// for turning it on the first time.
+// THE SWITCH DEFAULTS TO OFF, AND DEPLOYING SETS IT. The deployment shuts the door itself, right
+// after it has verified key-only login (defs/deploy-slave.ts): there is no state in which password
+// login should survive a deployment, so `password-login-enable` is for putting it back deliberately,
+// never for turning it on the first time.
+//
+// BOTH ASK FOR THE MACHINE ACCOUNT'S PASSWORD, under the same name the deployment collects it under
+// (ANSIWISE_ELEVATION_SECRET). Reading and writing an sshd configuration are root acts, and a
+// machine this platform deployed grants this manager no standing passwordless-root rule — the
+// deployment's own `remove-sudoers` takes that file off — so the password a run holds is the route
+// every command here takes to root, exactly as it is for the deployment's steps.
 //
 // Both are `mutating`, so attest-target is pinned as step 0 and cannot be skipped: a run that
-// changes which credentials a machine accepts proves first that it is talking to the machine that
-// was adopted.
+// changes which credentials a machine accepts proves first that it is talking to the machine whose
+// identity this manager pinned.
 
 export const PasswordLoginParams = z.object({
   serverId: z.string().startsWith("srv_"),
@@ -37,15 +44,15 @@ export const passwordLoginDisableDef: RunDefinition<PasswordLoginParams> = {
   kind: "cluster-password-login-disable",
   paramsSchema: PasswordLoginParams,
   mutating: true,
-  plan: async (params, { db }) => passwordLoginPlan("cluster-password-login-disable", params.serverId, db),
-  steps: (params) => passwordLoginSteps("cluster-password-login-disable", params.serverId),
-  cleanups: () => [restorePasswordLoginCleanup],
+  plan: async (params, { db }) => passwordLoginPlan("cluster-password-login-disable", params.serverId, db, ANSIWISE_ELEVATION_SECRET),
+  steps: (params) => passwordLoginSteps("cluster-password-login-disable", params.serverId, ANSIWISE_ELEVATION_SECRET),
+  cleanups: () => [restorePasswordLoginCleanup(ANSIWISE_ELEVATION_SECRET)],
 };
 
 export const passwordLoginEnableDef: RunDefinition<PasswordLoginParams> = {
   kind: "cluster-password-login-enable",
   paramsSchema: PasswordLoginParams,
   mutating: true,
-  plan: async (params, { db }) => passwordLoginPlan("cluster-password-login-enable", params.serverId, db),
-  steps: (params) => passwordLoginSteps("cluster-password-login-enable", params.serverId),
+  plan: async (params, { db }) => passwordLoginPlan("cluster-password-login-enable", params.serverId, db, ANSIWISE_ELEVATION_SECRET),
+  steps: (params) => passwordLoginSteps("cluster-password-login-enable", params.serverId, ANSIWISE_ELEVATION_SECRET),
 };

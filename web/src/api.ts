@@ -109,7 +109,7 @@ export const skipRun = (id: string, stepName: string, reason: string): Promise<u
 export const abortRun = (id: string, secrets?: Record<string, string>): Promise<unknown> =>
   post(`/api/runs/${id}/abort`, { ...encodeSecrets(secrets) });
 
-// Server inventory (adopt entry point + inventory CRUD).
+// Server inventory: WHERE a machine is. Every act that reaches one is a run.
 export const listServers = (): Promise<{ servers: ServerView[] }> => req("/api/servers");
 export interface NewServer {
   name: string;
@@ -121,19 +121,27 @@ export interface NewServer {
    *  it is a slave — the cluster map's apiHost. */
   tailnetHost?: string;
   notes?: string;
-  /** Optional stored bootstrap password (enables 1-click adopt; sealed keyfile-encrypted). */
-  password?: string;
 }
 export const createServer = (input: NewServer): Promise<{ server: ServerView }> =>
   post("/api/servers", input as unknown as Record<string, unknown>);
 export const deleteServerById = (id: string): Promise<unknown> => req(`/api/servers/${id}`, { method: "DELETE" });
-/** 1-click adopt from the list. Uses the server's stored password if present; otherwise the
- *  returned run is planned and the Run screen prompts for the password. */
-export const adoptServer = (id: string, opts?: { password?: string; intendedDomain?: string }): Promise<{ runId: string; approved: boolean }> =>
-  post(`/api/servers/${id}/adopt`, opts ?? {});
-/** Plan a cluster-deploy-slave Run for a READY (adopted) server. The run comes back planned;
- *  approval on the Run screen needs no secret — the read-only repo PAT is always
- *  auto-sourced from the platform Vault (GITOPS_REPO_PAT); there is no manual override. */
+/** Say that a machine was rebuilt, and state the sshd host key it presents now. It pins that
+ *  fingerprint in place of the recorded one and forgets the /etc/machine-id recorded beside it,
+ *  so the next run records the rebuilt machine's own. It reaches no machine and plans no run: the
+ *  machine presents the stated key at the next run's door, or that run refuses it again. */
+export const restateMachineIdentity = (id: string, hostKeyFingerprint: string): Promise<unknown> =>
+  post(`/api/servers/${id}/machine-identity`, { hostKeyFingerprint });
+/** Plan a cluster-deploy-slave Run for a server. The run comes back planned; approval on the Run
+ *  screen asks for the password of the machine account, which raises every command of the
+ *  deployment to root and, where this manager holds no key for the machine yet, opens the first
+ *  login and installs one. The read-only repo PAT is auto-sourced from the platform Vault
+ *  (GITOPS_REPO_PAT) and never entered.
+ *
+ *  WHICH ARM IT TAKES IS THE TARGET'S ROLE and never a parameter of this call: a machine carrying no
+ *  master part is deployed as a slave of its own, and the machine carrying the master part takes the
+ *  slave part by regenerating its own branch under the combined role. So the master's card calls this
+ *  with the master's OWN domain and stage — the two its plan measures what is stated against, and the
+ *  two the approve card then names. */
 export const deploySlave = (serverId: string, opts: { stage: string; domain: string }): Promise<{ runId: string }> =>
   planRun("cluster-deploy-slave", { serverId, stage: opts.stage, domain: opts.domain });
 /** Rebuild the machine layer of a cluster that is already live, in place. It takes ONLY the server:
@@ -161,8 +169,8 @@ export const rejoinTailnet = (serverId: string): Promise<{ runId: string }> => p
  *  doors. The run proves key login works before it shuts either. */
 export const disablePasswordLogin = (serverId: string): Promise<{ runId: string }> =>
   planRun("cluster-password-login-disable", { serverId });
-/** Let this host's sshd take passwords again, for a repair. Nothing re-seals a bootstrap password:
- *  this run has none, and adoption is what shuts the door in the first place. */
+/** Let this host's sshd take passwords again, for a repair. Nothing re-seals a stored password: this
+ *  run has none, and the deployment is what shuts the door in the first place. */
 export const enablePasswordLogin = (serverId: string): Promise<{ runId: string }> =>
   planRun("cluster-password-login-enable", { serverId });
 

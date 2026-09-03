@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { openDb } from "../db/client.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { parseConfig } from "../kernel/config.ts";
-import { CredentialStore } from "./store.ts";
+import { CredentialStore, holdsManagerKey, serversHoldingClusterKey } from "./store.ts";
 import { runAsActor } from "../kernel/actor.ts";
 
 const logger = createLogger(
@@ -95,7 +95,7 @@ describe("CredentialStore (plaintext pass-through)", () => {
     // The create-mgmt shape: a slave's STABLE long-lived token re-sealed under a renamed
     // label carries the fingerprint the first seal carries, which a global unique index over
     // that column would refuse. Same shape: the constant "bootstrap-password" marker
-    // fingerprint shared by every server with a stored adopt password.
+    // fingerprint shared by every server carrying a password sealed beside its row.
     const { store } = fresh();
     const a = await store.seal({ kind: "kubeconfig", label: "edge1 cluster bearer (argocd-manager) — s1", plaintext: Buffer.from("stable-token"), fingerprint: "sha256:same" });
     const b = await store.seal({ kind: "kubeconfig", label: "s1 cluster bearer (argocd-manager)", plaintext: Buffer.from("stable-token"), fingerprint: "sha256:same" });
@@ -103,7 +103,7 @@ describe("CredentialStore (plaintext pass-through)", () => {
     expect((await store.list()).map((r) => r.fingerprint)).toEqual(["sha256:same", "sha256:same"]);
   });
 
-  // WHAT ORDERS list(). Callers pick "the newest key" with `.at(-1)` (adopt discard-password reads
+  // WHAT ORDERS list(). Callers pick "the newest key" with `.at(-1)` (deploy-slave's install-key reads
   // the fingerprint that way), so the last row has to be the one sealed last. createdAt is a
   // millisecond DB clock and ties under load; the id breaks the tie because kernel/ids.ts mints a
   // monotonic ULID. These two are about that tie and nothing else.
@@ -171,5 +171,72 @@ describe("CredentialStore (plaintext pass-through)", () => {
     const revoked = sqlite.prepare("SELECT count(*) AS n FROM audit WHERE action='credential.revoked'").get() as { n: number };
     expect(created.n).toBe(2);
     expect(revoked.n).toBe(1);
+  });
+});
+
+// The two readings a PLANNER takes: which credentials stand, asked of the database and answered
+// without opening one. They are what stopped standing in for a server's status — a status says
+// where a machine is in its deployment and is written by a run that may never have opened a
+// session, so a predicate built on one answers "this manager holds a key" for a machine it has
+// never logged in to.
+describe("what a planner may read off the credentials table", () => {
+  const dirs: string[] = [];
+  const closers: Array<() => void> = [];
+  function fresh() {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-store-read-"));
+    dirs.push(dir);
+    const handle = openDb(join(dir, "manager.db"));
+    closers.push(() => handle.sqlite.close());
+    handle.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_a','s1','2.2.2.1','root','slave')").run();
+    handle.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_b','s2','2.2.2.2','root','slave')").run();
+    return { db: handle.db, store: new CredentialStore({ db: handle.db, logger }) };
+  }
+  afterEach(() => {
+    for (const c of closers.splice(0)) c();
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  const sealKey = (store: CredentialStore, serverId: string, fp = "SHA256:k") =>
+    store.seal({ kind: "ssh_key", label: `key ${serverId}`, plaintext: Buffer.from("private"), fingerprint: fp, serverId });
+
+  it("holdsManagerKey answers for the credential ctx.ssh() would pick, and for nothing else", async () => {
+    const { db, store } = fresh();
+    expect(holdsManagerKey(db, "srv_a")).toBe(false);
+    const ref = await sealKey(store, "srv_a");
+    expect(holdsManagerKey(db, "srv_a")).toBe(true);
+    // Another server's key is another server's: this is asked per machine.
+    expect(holdsManagerKey(db, "srv_b")).toBe(false);
+    // A key sealed against no server at all is a PAT-shaped row and belongs to no machine.
+    await store.seal({ kind: "ssh_key", label: "loose", plaintext: Buffer.from("x"), fingerprint: "SHA256:loose" });
+    expect(holdsManagerKey(db, "srv_b")).toBe(false);
+    await store.revoke(ref.id, "test");
+    expect(holdsManagerKey(db, "srv_a")).toBe(false);
+  });
+
+  it("a rotated-out key does not count — it is one the machine has already stopped taking", async () => {
+    const { db, store } = fresh();
+    const first = await sealKey(store, "srv_a");
+    await store.rotate(first.id, { plaintext: Buffer.from("newer"), fingerprint: "SHA256:k2" });
+    // The newer row stands, so the door is open; the superseded row alone would not open it.
+    expect(holdsManagerKey(db, "srv_a")).toBe(true);
+    for (const c of await store.list({ serverId: "srv_a", kind: "ssh_key", excludeRotated: true })) await store.purge(c.id);
+    expect(holdsManagerKey(db, "srv_a")).toBe(false);
+  });
+
+  it("serversHoldingClusterKey names each machine once, and only for the cluster bearer", async () => {
+    const { db, store } = fresh();
+    expect(serversHoldingClusterKey(db)).toEqual([]);
+    // The reviewer JWT a deployment seals beside the bearer is kind "other": it is not the cluster
+    // access key, so it names no machine here.
+    await store.seal({ kind: "other", label: "s1 vault reviewer JWT", plaintext: Buffer.from("jwt"), fingerprint: "sha256:j", serverId: "srv_a" });
+    expect(serversHoldingClusterKey(db)).toEqual([]);
+    const bearer = await store.seal({ kind: "kubeconfig", label: "s1 cluster bearer (argocd-manager)", plaintext: Buffer.from("t"), fingerprint: "sha256:t", serverId: "srv_a" });
+    expect(serversHoldingClusterKey(db)).toEqual(["srv_a"]);
+    // A re-emitted token rotates the row in place and leaves the superseded one standing; the
+    // machine is still one machine.
+    await store.rotate(bearer.id, { plaintext: Buffer.from("t2"), fingerprint: "sha256:t2" });
+    expect(serversHoldingClusterKey(db)).toEqual(["srv_a"]);
+    await store.seal({ kind: "kubeconfig", label: "s2 cluster bearer (argocd-manager)", plaintext: Buffer.from("u"), fingerprint: "sha256:u", serverId: "srv_b" });
+    expect(serversHoldingClusterKey(db).sort()).toEqual(["srv_a", "srv_b"]);
   });
 });

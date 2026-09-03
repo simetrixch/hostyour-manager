@@ -40,7 +40,7 @@ function fakeSession(fp = "SHA256:abc", closed = false): SshSession {
   } as unknown as SshSession;
 }
 
-describe("RunContext — adopt password ceremony", () => {
+describe("RunContext — the machine account's password session", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   afterEach(() => {
@@ -64,7 +64,7 @@ describe("RunContext — adopt password ceremony", () => {
   it("opens a password session, pins the host key TOFU, and caches it", async () => {
     const { db, store, bus, serverId } = setup("run_x");
     const secrets = new RunSecretsMap("run_x");
-    secrets.set("adopt-password", Buffer.from("sesame"));
+    secrets.set("ansiwise-elevation", Buffer.from("sesame"));
     let target: SshTarget | undefined;
     const session = fakeSession("SHA256:xyz");
     const sshFactory: SshFactory = (t) => {
@@ -78,7 +78,7 @@ describe("RunContext — adopt password ceremony", () => {
     });
     const ctx = rc.forStep("connect-password", "step_1");
 
-    const s1 = await ctx.openPasswordSession();
+    const s1 = await ctx.openPasswordSession("ansiwise-elevation");
     expect(target?.host).toBe("203.0.113.7");
     expect(target?.username).toBe("root");
     expect(target?.auth.kind).toBe("password");
@@ -86,11 +86,11 @@ describe("RunContext — adopt password ceremony", () => {
     const row = db.db.select().from(servers).where(eq(servers.id, serverId)).get();
     expect((row?.preflightJson as { hostKey?: string } | null)?.hostKey).toBe("SHA256:xyz");
 
-    const s2 = await ctx.openPasswordSession();
+    const s2 = await ctx.openPasswordSession("ansiwise-elevation");
     expect(s2).toBe(s1); // cached — no reconnect
   });
 
-  it("throws MissingRunSecret when the adopt password is gone (the state after a crash/restart)", async () => {
+  it("throws MissingRunSecret when the machine account's password is gone (the state after a crash/restart)", async () => {
     const { db, store, bus, serverId } = setup("run_y");
     const secrets = new RunSecretsMap("run_y"); // password never set
     const sshFactory: SshFactory = () => Promise.resolve(fakeSession());
@@ -100,7 +100,7 @@ describe("RunContext — adopt password ceremony", () => {
       declaredTargets: [{ serverId, ownsHost: true, label: "s5" }],
     });
     const ctx = rc.forStep("connect-password", "step_1");
-    await expect(ctx.openPasswordSession()).rejects.toMatchObject({ code: "MISSING_RUN_SECRET" });
+    await expect(ctx.openPasswordSession("ansiwise-elevation")).rejects.toMatchObject({ code: "MISSING_RUN_SECRET" });
   });
 });
 
@@ -128,7 +128,7 @@ describe("RunContext — multi-target SSH cache (one session per target host and
       } as unknown as SshSession);
   }
 
-  // Two adopted servers (slave = primary/owns-host, master = aux), each with an installed key.
+  // Two servers this manager holds a key for (slave = primary/owns-host, master = aux).
   async function setup(
     closed: string[],
   ): Promise<{ rc: RunContext; slaveId: string; masterId: string }> {

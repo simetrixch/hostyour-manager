@@ -28,6 +28,6 @@ export const credentials = sqliteTable("credentials", {
   // long-lived SA token re-sealed under a renamed label (which a global unique index over
   // the fingerprint would refuse), a
   // rotate() that keeps the superseded row, and the constant "bootstrap-password" marker
-  // (inventory/write.ts) shared by every server with a stored adopt password.
+  // (inventory/write.ts) shared by every server carrying a password sealed beside its row.
   index("credentials_fingerprint_ix").on(t.fingerprint),
 ]);

@@ -99,7 +99,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
           sshPort: m.sshPort,
           sshUser: m.sshUser,
           role: "master",
-          status: "healthy", // the master is this running control host, not a box to adopt
+          status: "healthy", // the master is this running control host, not a box to deploy onto
         })
         .run();
     } catch (err) {
@@ -192,7 +192,7 @@ async function convergeMaster(db: Db, creds: CredentialStore, masterId: string, 
     return true; // retrying cannot help
   }
 
-  // ---- 2. Pin the host key (SAME shape adopt writes: preflightJson.hostKey — getSsh reads it
+  // ---- 2. Pin the host key (SAME shape a deployment writes: preflightJson.hostKey — getSsh reads it
   // and passes it as hostKeyFingerprint, so the SSH-to-self is authenticated, not MITM-able).
   // The fp is read FRESH each attempt (file first, env fallback) — see readHostKeyFp.
   const fpRead = readHostKeyFp(m);

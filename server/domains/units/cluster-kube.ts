@@ -73,7 +73,7 @@ export interface ClusterKubeDeps {
 /** The slice of clusters.plane_json the resolver reads (ClusterPlaneV0, shared/plane.ts, written by
  *  deploy-slave's register step). Declared as a PERMISSIVE subset — exactly the fields the resolver
  *  needs — so a plane written before the plane carried caData (kube absent) yields the explicit
- *  "re-run adopt/backfill" error below rather than an opaque schema failure. The kube-access facts
+ *  "re-run the deployment" error below rather than an opaque schema failure. The kube-access facts
  *  live under `kube` ({server, caData} == SlaveKubeAccess) and the per-slave ArgoCD namespace under
  *  `argo.namespace` — both frozen in ClusterPlaneV0.
  *
@@ -124,8 +124,8 @@ function readSlavePlane(planeJson: unknown, name: string): SlavePlane {
   if (kube === undefined) {
     // NEVER skip TLS: a per-slave client without the API server URL + CA bundle cannot verify the
     // connection, and skip-verify is a deliberate non-feature (kube.ts). Fail closed and tell the
-    // operator exactly how to heal it — adopt seals plane.kube {server, caData}.
-    throw errValidation(`cluster "${name}" has no sealed kube access (plane.kube {server, caData}) — re-run adopt/backfill (the slave API URL + CA bundle were dropped at adopt; a per-slave kube client must verify TLS, never skip it)`);
+    // operator exactly how to heal it — the deployment's register step seals plane.kube {server, caData}.
+    throw errValidation(`cluster "${name}" has no sealed kube access (plane.kube {server, caData}) — re-run the deployment (the slave API URL + CA bundle never reached this plane; a per-slave kube client must verify TLS, never skip it)`);
   }
   return { server: kube.server, caData: kube.caData, clusterBearerId: credentialIds.clusterBearer, ...(argo ? { argoNamespace: argo.namespace } : {}) };
 }
@@ -157,7 +157,7 @@ export function makeClusterKubeResolver(deps: ClusterKubeDeps): ClusterKubeResol
       // pointed at the slave API. The argoReader/projectWriter stay master-local; only the ArgoCD
       // namespace moves to the slave cluster's short name (the per-slave ArgoCD instance on the master).
       // The slave's kube-apiserver URL + CA bundle come straight from the plane (plane.kube, sealed at
-      // adopt) — no derivation from lan, no cross-namespace read of the master's cluster-slave Secret.
+      // the deployment) — no derivation from lan, no cross-namespace read of the master's cluster-slave Secret.
       const plane = readSlavePlane(cluster.planeJson, clusterShortName(cluster.domain));
       const bearer = await deps.openCredential(plane.clusterBearerId);
       let clusterReader: ClusterReader;

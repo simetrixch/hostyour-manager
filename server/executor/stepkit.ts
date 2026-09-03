@@ -2,7 +2,7 @@
 // so steps read as intent, not ssh plumbing. All remote helpers wire the session's
 // line-buffered stdout/stderr to ctx.log (the one run-output path) and thread ctx.signal
 // (no unabortable execs). Operates on any SshSession — the cached ctx.ssh() (key) or the
-// adopt ceremony's ctx.openPasswordSession() (password).
+// first-contact ctx.openPasswordSession() (password).
 //
 // A step that needs ROOT says so with `elevation` and hands over the password it holds; every
 // helper below then raises what it sends (see `raised`). Nothing here reaches root by assuming the
@@ -10,6 +10,7 @@
 import type { StepCtx } from "./types.ts";
 import type { SshSession, ExecResult } from "../adapters/ssh/port.ts";
 import type { Db } from "../db/client.ts";
+import { errMissingRunSecret } from "../kernel/errors.ts";
 
 /** What a remote helper takes beyond the command itself.
  *
@@ -31,12 +32,28 @@ export type RemoteOpts = { timeoutMs?: number } & (
  *  line: the first `sudo -S` inside it takes the password, and every later one reads an input that
  *  is already at end of file and prompts a terminal that is not there.
  *
- *  The other form, `sudo -n`, answers only where the machine already carries a sudoers rule granting
- *  that exact command without a password. A machine that carries no such rule refuses it with
- *  "interactive authentication is required", which is a closed door and reads like a broken
- *  service. */
+ *  THIS IS THE ONLY FORM ANY COMMAND OF THIS MANAGER TAKES TO ROOT. The other one, `sudo -n`,
+ *  answers only where the machine already carries a sudoers rule granting that exact command without
+ *  a password — a standing passwordless-root grant, which no run kind here writes and which the
+ *  deployment's `remove-sudoers` takes off a machine that still carries one. A machine holding no
+ *  such rule refuses `sudo -n` with "interactive authentication is required", which is a closed door
+ *  that reads like a broken service, so a call site reaching for one is caught in the source instead
+ *  (domains/runs/elevation.test.ts). */
 function raised(command: string, opts?: RemoteOpts): string {
   return opts?.elevation === undefined ? command : `sudo -S -p '' ${command}`;
+}
+
+/** The password a run holds for its target machine, or the loud refusal a step gives without it.
+ *  Run secrets are never stored, so a restart mid-run leaves a step with nothing to raise itself
+ *  with, and naming the secret is what tells the operator which one to re-enter.
+ *
+ *  It stands beside `raised` because it is the other half of the same route: a step that reaches
+ *  root asks for the password here and hands it to `elevation` there, and no step of this manager
+ *  reaches root any other way. */
+export function requirePassword(ctx: StepCtx, secretName: string): string {
+  const password = ctx.secrets.get(secretName)?.toString("utf8");
+  if (password === undefined || password.length === 0) throw errMissingRunSecret(secretName);
+  return password;
 }
 
 function execOpts(ctx: StepCtx, opts?: RemoteOpts): {

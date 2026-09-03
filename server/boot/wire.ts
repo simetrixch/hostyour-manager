@@ -197,7 +197,7 @@ export async function wire(): Promise<Wired> {
     registerProtected: (a) => {
       registerRunRoutes(a, { executor, db: db.db, bus, config, logger });
       registerClustersRoutes(a, { db: db.db, storeMode: () => (store.mode() === "plaintext" ? "plaintext" : "sealed"), logger });
-      registerServerRoutes(a, { db: db.db, creds: store, executor, actor: runActor });
+      registerServerRoutes(a, { db: db.db, creds: store, actor: runActor });
       registerBranchRoutes(a, { db: db.db, config, ...(github ? { github } : {}) });
       // Which version each of an installation's platform apps runs, riding the pin search bound above.
       registerReleaseRoutes(a, { db: db.db, ...(readPlatformAppPins ? { readPlatformAppPins } : {}) });

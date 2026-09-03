@@ -23,8 +23,9 @@
 // omission nobody can see reads as a rule that covers everything:
 //
 //   A FILE IN A DIRECTORY THE MACHINE ALREADY HAS, whose owner the program that READS it decides and
-//   not we: the sudoers drop-in the adoption writes (defs/adopt.ts SUDOERS_DROP_IN) and the sshd
-//   drop-in the password-login run kinds write (defs/password-login.kit.ts DROP_IN). sudo and sshd
+//   not we: the sudoers drop-in a machine may carry (defs/manager-key.kit.ts SUDOERS_DROP_IN, which
+//   `remove-sudoers` deletes) and the sshd drop-in the password-login run kinds write
+//   (defs/password-login.kit.ts DROP_IN). sudo and sshd
 //   each refuse a file they do not own, so those two belong to root by the rule of the daemon that
 //   reads them, and handing either to the operating account would take the file out of service.
 //

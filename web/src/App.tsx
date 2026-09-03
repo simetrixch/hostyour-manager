@@ -5,7 +5,6 @@ import { TabBar } from "./components/TabBar.tsx";
 import { LogoMark } from "./components/icons.tsx";
 import { Clusters } from "./pages/Clusters.tsx";
 import { Servers } from "./pages/Servers.tsx";
-import { AdoptWizard } from "./pages/AdoptWizard.tsx";
 import { OperatorKeys } from "./pages/OperatorKeys.tsx";
 import { RunDetail } from "./pages/RunDetail.tsx";
 import { Branches } from "./pages/Branches.tsx";
@@ -41,7 +40,6 @@ export function App() {
             <Routes>
               <Route path="/" element={<Clusters />} />
               <Route path="/servers" element={<Servers />} />
-              <Route path="/servers/adopt" element={<AdoptWizard />} />
               {/* Under /servers rather than in NAV: an operator key is a fact about the machines,
                   and isActivePath keeps the Servers rail item lit while the page is open. */}
               <Route path="/servers/keys" element={<OperatorKeys />} />

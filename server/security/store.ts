@@ -24,7 +24,7 @@ export interface CredentialRef {
 }
 
 export interface UseContext {
-  purpose: string; // "adopt:verify-key-login"
+  purpose: string; // "cluster-deploy-slave:verify-key-login"
   runId?: string;
 }
 
@@ -58,6 +58,60 @@ function toRef(row: typeof credentials.$inferSelect): CredentialRef {
     ...(row.serverId ? { serverId: row.serverId } : {}),
     ...(row.publicKey ? { publicKey: row.publicKey } : {}),
   };
+}
+
+// WHICH CREDENTIALS STAND, asked of the database and answered without opening one. Both readings
+// below are about the PRESENCE of a row, which is metadata every keystore mode keeps in SQLite even
+// when the value itself lives in Vault — so they need no data key, no unlocked store and no await,
+// and a planner can ask them before an operator is shown anything to approve.
+//
+// THEY LIVE HERE BECAUSE THE SCHEMA DOES. This module is the only importer of the credentials table
+// (.dependency-cruiser.cjs, `only-store-writes-creds`), so a reading that keys on a credential is
+// written once, here, rather than derived a second time from a status column that says something
+// else.
+
+/**
+ * Does this manager hold the key it would reach this machine over?
+ *
+ * The same question executor/context.ts answers when it picks a credential for `ctx.ssh()`: an
+ * `ssh_key` credential for this server that is neither revoked nor rotated out. A rotated-out key is
+ * one the machine has already stopped taking, so counting it would report a door that is shut.
+ *
+ * A SERVER'S STATUS ANSWERS SOMETHING ELSE. The status says where a machine stands in its
+ * deployment — a row is moved to `provisioning` by the deploy's first step and parked at `ready`
+ * when the run ends, both of which happen whether or not a key was ever installed — so it can be
+ * read as this answer only by a reader that is willing to be wrong on every run that stopped early.
+ */
+export function holdsManagerKey(db: Db, serverId: string): boolean {
+  const row = db
+    .select({ id: credentials.id })
+    .from(credentials)
+    .where(and(
+      eq(credentials.serverId, serverId),
+      eq(credentials.kind, "ssh_key"),
+      isNull(credentials.revokedAt),
+      isNull(credentials.rotatedAt),
+    ))
+    .get();
+  return row !== undefined;
+}
+
+/**
+ * The servers whose CLUSTER ACCESS KEY this manager stores, one id per server.
+ *
+ * That key is the `kubeconfig` credential a deployment seals when it harvests a slave's
+ * cluster-admin bearer (domains/runs/defs/deploy-slave.mgmt.ts, create-mgmt) — the only credential
+ * of that kind anything seals, and the one thing a plaintext keystore would expose to whoever can
+ * read the database file. Revoked rows are left out because their value is no longer a way into
+ * anything; a rotated row is not, because its blob is still there and still that same server's.
+ */
+export function serversHoldingClusterKey(db: Db): string[] {
+  const rows = db
+    .selectDistinct({ serverId: credentials.serverId })
+    .from(credentials)
+    .where(and(eq(credentials.kind, "kubeconfig"), isNull(credentials.revokedAt)))
+    .all();
+  return rows.map((r) => r.serverId).filter((id): id is string => id !== null);
 }
 
 /**
@@ -241,7 +295,7 @@ export class CredentialStore {
   }
 
   /** HARD-delete a credential row — the plaintext blob is removed, not just revoked
-   *. Used to fully remove a not-yet-adopted server. Audited. Idempotent. */
+   *. Used to fully remove a server leaving the inventory. Audited. Idempotent. */
   async purge(id: string): Promise<void> {
     const row = this.db.select().from(credentials).where(eq(credentials.id, id)).get();
     if (!row) return;

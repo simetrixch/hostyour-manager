@@ -216,7 +216,7 @@ describe("boot/seed-master — master self-registration", () => {
     expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
   });
 
-  it("pins the host-key fingerprint on the master row (same shape adopt writes)", async () => {
+  it("pins the host-key fingerprint on the master row (same shape a deployment writes)", async () => {
     const { db, store, dir } = setup();
     const key = generateServerKeypair("m1-master");
     const keyFile = join(dir, "master-ssh-key");

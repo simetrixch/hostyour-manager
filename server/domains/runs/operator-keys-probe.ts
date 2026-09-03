@@ -1,8 +1,8 @@
 // Reading WHO a host lets in, and recording it on the server row.
 //
 // WHAT IS READ. `~/.ssh/authorized_keys` of the login user this manager connects as — the same
-// file the adopt run appends the manager's own key to, and the same file the two operator-key
-// acts edit. It is sshd's default and every host this platform installs uses it.
+// file `install-key` appends the manager's own key to (domains/runs/defs/manager-key.kit.ts), and
+// the same file the two operator-key acts edit. It is sshd's default and every host this platform installs uses it.
 //
 // WHAT IS THEREFORE NOT READ, and it is a real limit rather than an oversight: sshd can be told to
 // take keys from somewhere else entirely (`AuthorizedKeysFile` naming another path, or
@@ -67,7 +67,7 @@ exit 0
  * `managerFingerprints` are the fingerprints of the ssh_key credentials sealed for THIS server —
  * rotated ones included, because a superseded key can still be sitting in the file and reporting it
  * as a stranger's would be false. They are the ONLY thing that makes a line "manager": the
- * marker comment adopt writes is not consulted (anyone with a shell can type it into the file).
+ * marker comment `generate-key` writes is not consulted (anyone with a shell can type it into the file).
  * `operatorKeys` is every operator key this manager holds, which is what makes an operator line
  * a fact rather than a comment somebody typed.
  */

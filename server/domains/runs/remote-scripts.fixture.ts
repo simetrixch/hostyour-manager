@@ -17,13 +17,12 @@
 // The values are placeholders on purpose (CLAUDE.md): `example.invalid` is the placeholder, and no
 // installation's real domain belongs in this tree.
 import { PREFLIGHT_SCRIPT } from "./preflight.ts";
-import { BASELINE_SCRIPT } from "./defs/adopt.ts";
 import { AUTHORIZED_KEYS_PROBE_SCRIPT } from "./operator-keys-probe.ts";
 import { PASSWORD_LOGIN_PROBE_SCRIPT } from "./password-login-probe.ts";
 import { TAILNET_PROBE_SCRIPT } from "./tailnet-probe.ts";
 import { DISABLE_SCRIPT, ENABLE_SCRIPT } from "./defs/password-login.kit.ts";
 import { placeScript, removeScript } from "./defs/operator-key.kit.ts";
-import { OUR_DROP_IN_GRANTS_BLANKET, SUDO_ALREADY_BLANKET } from "./defs/adopt.ts";
+import { removeSudoersScript, SUDOERS_DROP_IN } from "./defs/manager-key.kit.ts";
 import {
   CERTS_CMD,
   SECRET_STORES_CMD,
@@ -58,12 +57,12 @@ export interface RemoteScript {
 
 export const REMOTE_SCRIPTS: readonly RemoteScript[] = [
   { symbol: "PREFLIGHT_SCRIPT", module: "server/domains/runs/preflight.ts", text: PREFLIGHT_SCRIPT },
-  { symbol: "BASELINE_SCRIPT", module: "server/domains/runs/defs/adopt.ts", text: BASELINE_SCRIPT },
   { symbol: "AUTHORIZED_KEYS_PROBE_SCRIPT", module: "server/domains/runs/operator-keys-probe.ts", text: AUTHORIZED_KEYS_PROBE_SCRIPT },
   { symbol: "PASSWORD_LOGIN_PROBE_SCRIPT", module: "server/domains/runs/password-login-probe.ts", text: PASSWORD_LOGIN_PROBE_SCRIPT },
   { symbol: "TAILNET_PROBE_SCRIPT", module: "server/domains/runs/tailnet-probe.ts", text: TAILNET_PROBE_SCRIPT },
   { symbol: "ENABLE_SCRIPT", module: "server/domains/runs/defs/password-login.kit.ts", text: ENABLE_SCRIPT },
   { symbol: "DISABLE_SCRIPT", module: "server/domains/runs/defs/password-login.kit.ts", text: DISABLE_SCRIPT },
+  { symbol: "removeSudoersScript", module: "server/domains/runs/defs/manager-key.kit.ts", text: removeSudoersScript(SUDOERS_DROP_IN) },
   { symbol: "placeScript", module: "server/domains/runs/defs/operator-key.kit.ts", text: placeScript(PUBLIC_KEY, "operator-1") },
   { symbol: "removeScript", module: "server/domains/runs/defs/operator-key.kit.ts", text: removeScript("operator-1") },
   { symbol: "dnsProbeScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: dnsProbeScript(SLAVE_FQDN) },
@@ -82,8 +81,6 @@ export const REMOTE_SCRIPTS: readonly RemoteScript[] = [
  *  whole. The moment one grows a second line it has to become a symbol, because that is where a
  *  missing `fi` can hide. */
 export const REMOTE_COMMANDS: readonly RemoteScript[] = [
-  { symbol: "SUDO_ALREADY_BLANKET", module: "server/domains/runs/defs/adopt.ts", text: SUDO_ALREADY_BLANKET },
-  { symbol: "OUR_DROP_IN_GRANTS_BLANKET", module: "server/domains/runs/defs/adopt.ts", text: OUR_DROP_IN_GRANTS_BLANKET },
   { symbol: "SECRET_STORES_CMD", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: SECRET_STORES_CMD },
   { symbol: "CERTS_CMD", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: CERTS_CMD },
   { symbol: "argoAppsCmd", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: argoAppsCmd(SLAVE_FQDN) },

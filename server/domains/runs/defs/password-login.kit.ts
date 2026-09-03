@@ -2,14 +2,15 @@ import type { Db } from "../../../db/client.ts";
 import type { Cleanup, Plan, Step, StepCtx } from "../../../executor/types.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import { attestMachineId } from "../../../executor/attest.ts";
-import { remoteCmd, remoteScript } from "../../../executor/stepkit.ts";
+import { remoteCmd, remoteScript, remoteScriptCapture, requirePassword } from "../../../executor/stepkit.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
-import { hasManagerKey, type RunKind } from "../../../../shared/enums.ts";
+import { holdsManagerKey } from "../../../security/store.ts";
+import type { RunKind } from "../../../../shared/enums.ts";
 import { purgeBootstrapPassword } from "../../inventory/write.ts";
 import { recordPasswordLoginReading, SSHD_HELPERS } from "../password-login-probe.ts";
 import { loadServer } from "./deploy-slave.kit.ts";
 
-// The shared half of the two password-login run kinds (defs/password-login.ts) and of the adoption step
+// The shared half of the two password-login run kinds (defs/password-login.ts) and of the deployment's step
 // that shuts the door in the first place: the scripts they ship to a host, the steps they are
 // composed of, and the one plan builder they state their target in.
 //
@@ -19,8 +20,9 @@ import { loadServer } from "./deploy-slave.kit.ts";
 // looking. The switch is a run because only a run can write the drop-in, validate it, reload the
 // daemon and read back what the daemon resolved.
 //
-// FOUR RULES EVERY SCRIPT BELOW KEEPS. The first is the one that goes wrong in practice; the other
-// three are what keeps the act from producing a machine nobody can reach.
+// FIVE RULES EVERY SCRIPT BELOW KEEPS. The first is the one that goes wrong in practice; the next
+// three are what keeps the act from producing a machine nobody can reach; the last is how the
+// scripts reach root at all.
 //   1. ONE drop-in, and it SORTS FIRST. sshd takes the FIRST occurrence of a keyword and reads
 //      /etc/ssh/sshd_config.d in alphabetical order. A file named `99-disable-passwords.conf`,
 //      saying `PasswordAuthentication no` on its face, therefore does nothing while
@@ -39,6 +41,13 @@ import { loadServer } from "./deploy-slave.kit.ts";
 //      answers nobody, and shutting the password door is the change that can produce that. Two
 //      keywords decide it and both are read: `pubkeyauthentication`, and `authenticationmethods`,
 //      which on a two-factor host names a password method a key alone cannot stand in for.
+//   5. EVERY SCRIPT IS RAISED WHOLE WITH THE PASSWORD ITS RUN CARRIES. `sshd -T`, the write, the
+//      reload and the inventory are all root commands, and a machine this platform deploys grants
+//      this manager no standing passwordless-root rule: the deployment's `remove-sudoers` takes the
+//      drop-in off (defs/manager-key.kit.ts), and every step in the same list raises its own
+//      commands instead. One `sudo -S` per thing sent, so the script is raised as a unit rather
+//      than command by command — the first sudo consumes the password and any later one would read
+//      an input already at end of file (executor/stepkit.ts `raised`).
 //
 // The session survives the change: `systemctl reload` never drops an established connection, so
 // the run goes on talking to the host it just reconfigured. That is what makes reading the result
@@ -114,15 +123,13 @@ const SURVIVES = `survives_without_passwords() {
  *  edited: a file this platform did not write carries settings far beyond these two keywords, and
  *  the drop-in above already wins over all of them.
  *
- *  TWO GREPS, AND THE ELEVATED ONE NAMES ITS PATTERNS OUTRIGHT. The sudoers rule this command runs
- *  under matches the whole argument string, so a rule carrying `*` where a pattern belongs lets the
- *  account put `-f /etc/shadow` there instead — grep reads its patterns from a file only root may
- *  read and prints the lines that match. Two fixed `-e` patterns leave the rule with no wildcard at
- *  all, and the anchoring an ERE would do runs afterwards over grep's own `file:line:text`
- *  output, where it needs no elevation. `-H` is what makes that output shape a fact rather than a
- *  coincidence: grep prints the file name only when it was given more than one operand, so a host
- *  without /etc/ssh/sshd_config.d would otherwise print bare `line:text` and the anchor would drop
- *  every match. */
+ *  TWO GREPS, AND THE FIRST ONE NAMES ITS PATTERNS OUTRIGHT. The reading itself is two fixed `-e`
+ *  patterns and nothing else — the one that runs as root reads files and never a pattern this
+ *  script composed — and the anchoring an ERE would do runs afterwards, over grep's own
+ *  `file:line:text` output. `-H` is what makes that output shape a fact rather than a coincidence:
+ *  grep prints the file name only when it was given more than one operand, so a host without
+ *  /etc/ssh/sshd_config.d would otherwise print bare `line:text` and the anchor would drop every
+ *  match. */
 const INVENTORY = `inventory() {
   echo "files stating either keyword, in the order sshd reads them:"
   as_root grep -rniH -e PasswordAuthentication -e KbdInteractiveAuthentication \\
@@ -161,24 +168,19 @@ const RELOAD = `reload_sshd() {
  *  would make the probe report a shut door while the daemon goes on taking passwords — the same
  *  class of mistake the `99-` file made, from the other end.
  *
- *  THE ROOT WRITE NAMES NO SOURCE PATH, and that is what keeps the standing sudoers grant from
- *  being a way to read the machine. A copier takes a source the account picks, so a rule for it can
- *  only say `*` where that source stands — and the account owns whatever path the pattern allows
- *  and can point a symlink from it at /etc/shadow, which the copier follows as root into a
- *  destination it is then free to read. There is no sudoers form that permits such a copy and
- *  refuses that read. So the write is split into two commands that carry no path of the account's
- *  choosing at all, and both rules are pinned with no wildcard: `install` copies /dev/null onto the
- *  drop-in, which creates or resets it root-owned at mode 0644, and `tee` fills it from THIS
- *  script's stdin. Measured with coreutils 9.4 on Ubuntu 24.04: `install -m 0644 /dev/null target`
- *  leaves an empty 0644 file, and a following `tee` writes it without changing that mode.
+ *  THE ROOT WRITE NAMES NO SOURCE PATH, so nothing this script copies is a path something else
+ *  chose: `install` copies /dev/null onto the drop-in, which creates or resets it root-owned at
+ *  mode 0644, and `tee` fills it from THIS script's stdin. Measured with coreutils 9.4 on Ubuntu
+ *  24.04: `install -m 0644 /dev/null target` leaves an empty 0644 file, and a following `tee`
+ *  writes it without changing that mode.
  *
  *  The mode is set by `install` rather than left to `tee` alone, because a file `tee` creates takes
  *  whatever the elevating process's umask happens to be, and that is a setting of the machine and
  *  not of this script.
  *
- *  What no rule can narrow is the CONTENT: the account still chooses the bytes of the drop-in that
- *  sorts before every other sshd file, and that is the thing this call site exists to do. The
- *  operator is told about that one in the summary they approve. */
+ *  THE CONTENT IS THIS PLATFORM'S OWN, and it is the thing this call site exists to write: the bytes
+ *  of the file that sorts before every other sshd drop-in. The operator is told so in the summary
+ *  they approve. */
 const APPLY = `write_drop_in() {
   as_root install -m 0644 -o root -g root /dev/null "${DROP_IN}"
   as_root tee "${DROP_IN}" > /dev/null
@@ -216,9 +218,21 @@ ${RELOAD}
 ${APPLY}
 pw=""; kbd=""; pubkey=""; methods=""`;
 
+/** The word the script prints when it found the door already shut by this platform's own drop-in and
+ *  therefore wrote nothing. Named once, because the script prints it and the step reads it. */
+export const ALREADY_SHUT = "PASSWORD DOOR already shut";
+
 // SURVIVES belongs to this script alone: opening a door cannot leave a host with no way in.
 // Both scripts are exported so a real `bash` can parse the bytes this kit ships (remote-syntax.test.ts):
 // nothing else on the way to a machine reads them, so a typo would first be met by the host.
+//
+// THE ACT IS SKIPPED WHERE IT WOULD CHANGE NOTHING, and the skip needs BOTH facts. The daemon
+// answering `no` to both keywords says the door is shut now; this platform's own drop-in standing
+// there byte for byte says it stays shut, because that file sorts before every other one — a door
+// shut by somebody else's file is one the next cloud-init rewrite reopens, and the write is what
+// takes that away. With both true there is nothing left to write and nothing to reload, which is
+// what lets this same list run against a machine it has already taken through: the alternative
+// reloads a live slave's sshd on every reconciliation for a state it has just measured as correct.
 export const DISABLE_SCRIPT = `${PREAMBLE}
 ${SURVIVES}
 read_effective || { echo "the effective sshd configuration cannot be read, so no change may claim an effect" >&2; exit 1; }
@@ -227,6 +241,11 @@ read_effective || { echo "the effective sshd configuration cannot be read, so no
 # And a key alone has to be ENOUGH. On a host that requires two factors, every method list names a
 # password method, so turning both keywords off leaves sshd with no list it can complete.
 survives_without_passwords || { echo "sshd requires authenticationmethods '\${methods}' — every list it accepts names a password method, so with passwords off no login could complete on this host. Change AuthenticationMethods first; NOTHING was written" >&2; exit 1; }
+if [ "$pw" = "no" ] && [ "$kbd" = "no" ] && [ "$(as_root cat "${DROP_IN}" 2>/dev/null)" = "$(printf '%s' '${dropInContent("no")}')" ]; then
+  inventory
+  echo "${ALREADY_SHUT}: the daemon takes neither password nor keyboard-interactive and ${DROP_IN} already states both, so nothing was written and nothing was reloaded"
+  exit 0
+fi
 printf '%s' '${dropInContent("no")}' | apply no
 inventory
 read_effective || { echo "the effective sshd configuration cannot be read after the reload" >&2; exit 1; }
@@ -249,21 +268,31 @@ echo "password login is on"
  *  It reproduces the DOOR that was open, not the byte-for-byte configuration that was there: the
  *  step registers it only when it measured the door open or could not measure at all, so the one
  *  case it would overshoot is the one case it is never registered in. The reading is written back
- *  afterwards, or the card would go on claiming the state the compensation just undid. */
-export const restorePasswordLoginCleanup: Cleanup = {
-  name: "restore-password-login",
-  title: "Put password login back on",
-  run: async (ctx: StepCtx) => {
-    const session = await ctx.ssh();
-    const r = await remoteScript(ctx, session, "cluster-password-login-enable", ENABLE_SCRIPT, { timeoutMs: 2 * 60_000 });
-    await recordPasswordLoginReading(ctx, session, String(ctx.params.serverId));
-    if (r.code !== 0) throw errValidation(`password login could not be put back (exit ${r.code}) — see the run log`);
-  },
-};
+ *  afterwards, or the card would go on claiming the state the compensation just undid.
+ *
+ *  IT NEEDS THE RUN'S PASSWORD LIKE THE ACT IT UNDOES, which is why it is built with the secret's
+ *  name rather than standing as one shared value: the machine grants this manager no standing
+ *  passwordless-root rule, so a compensation reaching root any other way would be a route the run
+ *  itself does not have. An abort takes the secrets again where the operator re-supplies them
+ *  (executor/executor.ts abortWithCleanup); without one it refuses by name instead of failing part
+ *  way through a file. */
+export function restorePasswordLoginCleanup(secretName: string): Cleanup {
+  return {
+    name: "restore-password-login",
+    title: "Put password login back on",
+    run: async (ctx: StepCtx) => {
+      const elevation = requirePassword(ctx, secretName);
+      const session = await ctx.ssh();
+      const r = await remoteScript(ctx, session, "cluster-password-login-enable", ENABLE_SCRIPT, { timeoutMs: 2 * 60_000, elevation });
+      await recordPasswordLoginReading(ctx, session, String(ctx.params.serverId), elevation);
+      if (r.code !== 0) throw errValidation(`password login could not be put back (exit ${r.code}) — see the run log`);
+    },
+  };
+}
 
 /** Step 0 of both run kinds, and the reason they are declared mutating: the run changes which
- *  credentials a machine accepts, so it proves the box answering the address is the box that was
- *  adopted before it changes anything on it. */
+ *  credentials a machine accepts, so it proves the box answering the address is the one whose
+ *  identity this manager pinned before it changes anything on it. */
 function attestTargetStep(serverId: string): Step {
   return {
     name: "attest-target",
@@ -278,18 +307,23 @@ function attestTargetStep(serverId: string): Step {
 
 /** The disable run kind's own key-login proof, spelled as its own step so the operator sees it in the
  *  plan before approving. The session it opens IS a key session — ctx.ssh() authenticates with the
- *  sealed ssh_key credential and nothing else — so reaching the two commands is the proof; the
+ *  sealed ssh_key credential and nothing else — so reaching the command is the proof; the
  *  daemon-side half of the same question (`pubkeyauthentication yes`) is asserted by the act script
- *  before and after it writes anything. adopt needs no such step: its own verify-key-login already
- *  ran, which is why its disable step sits directly after it. */
-function verifyKeyLoginStep(): Step {
+ *  before and after it writes anything. The deployment needs no such step of its own: its
+ *  verify-key-login has already run, which is why its disable step sits after it.
+ *
+ *  IT PROVES THE SECOND HALF OF THE ACT'S ROUTE TOO. Every command the act sends is raised with the
+ *  password this run carries, so a password that does not reach root is a run that dies inside a
+ *  script that has already written a file. `/usr/bin/true` costs one command and is the whole
+ *  question: sudo took the password, or it did not. */
+function verifyKeyLoginStep(secretName: string): Step {
   return {
     name: "verify-key-login",
     title: "Verify key-only login still works",
     run: async (ctx) => {
       const session = await ctx.ssh();
       await remoteCmd(ctx, session, "echo key-ok");
-      await remoteCmd(ctx, session, "sudo -n true");
+      await remoteCmd(ctx, session, "-- /usr/bin/true", { elevation: requirePassword(ctx, secretName) });
     },
   };
 }
@@ -307,40 +341,56 @@ function verifyKeyLoginStep(): Step {
  * the daemon both accepted the new one and re-read it. `sshd -T` parses the files, so a file the
  * running daemon never read would be reported here as a shut door.
  *
- * The first reading also decides the compensation. `restore-password-login` is armed unless this
- * run MEASURED the door already shut, because only a measurement can say there is nothing to put
- * back; an unreadable reading arms it, since an unmeasured door is not a shut one.
+ * TWO THINGS DECIDE THE COMPENSATION, and each answers a question the other cannot. `arm` is the
+ * COMPOSING DEFINITION's answer to whether an abort of this run may put the door back at all — a run
+ * that establishes a machine wants it back, a run that re-measures a machine already carrying live
+ * workloads must not reopen a door that installation deliberately shut, and only the definition
+ * knows which of the two it is. It also has to be the definition's answer for a second reason: the
+ * executor resolves a registered compensation by NAME against that definition's own cleanups(), so a
+ * step arming one a definition does not implement kills the abort with a missing step. The first
+ * READING answers the narrower question of whether there is anything to put back: the compensation
+ * is armed unless this run measured the door already shut, because only a measurement can say there
+ * is not, and an unreadable reading arms it, since an unmeasured door is not a shut one.
  *
- * Shared with adopt, which is where a host meets it first: there is no state in which password
- * login should survive an adoption.
+ * THE SECOND READING IS TAKEN ONLY WHERE THE SCRIPT ACTED. Its whole purpose is to replace a row
+ * that would otherwise describe a host the act has changed, and a script that reported it wrote
+ * nothing has changed none — so on that path the reading already on the row is the reading, and the
+ * step neither sends a second probe nor claims a fresh measurement it did not take.
  */
-export function disablePasswordLoginStep(serverId: string): Step {
+export function disablePasswordLoginStep(serverId: string, options: { arm: boolean; secretName: string }): Step {
   return {
     name: "disable-password-login",
     title: "Turn password login off at the daemon",
     run: async (ctx) => {
+      const elevation = requirePassword(ctx, options.secretName);
       const session = await ctx.ssh();
-      const before = await recordPasswordLoginReading(ctx, session, serverId);
-      if (before !== "off") ctx.registerCleanup(restorePasswordLoginCleanup);
-      const r = await remoteScript(ctx, session, "cluster-password-login-disable", DISABLE_SCRIPT, { timeoutMs: 2 * 60_000 });
-      const after = await recordPasswordLoginReading(ctx, session, serverId);
-      if (r.code !== 0) throw errValidation(`password login could not be turned off (exit ${r.code}) — see the run log`);
-      ctx.checkpoint({ passwordLoginBefore: before, passwordLoginAfter: after });
+      const before = await recordPasswordLoginReading(ctx, session, serverId, elevation);
+      if (options.arm && before !== "off") ctx.registerCleanup(restorePasswordLoginCleanup(options.secretName));
+      const cap = await remoteScriptCapture(ctx, session, "cluster-password-login-disable", DISABLE_SCRIPT, { timeoutMs: 2 * 60_000, elevation });
+      const wrote = !cap.stdout.includes(ALREADY_SHUT);
+      const after = wrote ? await recordPasswordLoginReading(ctx, session, serverId, elevation) : before;
+      if (cap.result.code !== 0) throw errValidation(`password login could not be turned off (exit ${cap.result.code}) — see the run log`);
+      if (!wrote) {
+        ctx.log("meta", `${DROP_IN} already states both keywords on this host and the daemon answers to neither, so this step wrote nothing and reloaded nothing.`);
+      }
+      ctx.checkpoint({ passwordLoginBefore: before, passwordLoginAfter: after, wrote });
     },
   };
 }
 
 /** Open the password door again, and record what the daemon answers afterwards. No key-login proof
  *  and no compensation: opening a door cannot lock anybody out, and there is nothing to undo that
- *  leaving it open would not already be. */
-function enablePasswordLoginStep(serverId: string): Step {
+ *  leaving it open would not already be. Raised with the run's password like every other script
+ *  here, because the host it repairs is one this platform deployed and grants no standing rule. */
+function enablePasswordLoginStep(serverId: string, secretName: string): Step {
   return {
     name: "enable-password-login",
     title: "Turn password login on at the daemon",
     run: async (ctx) => {
+      const elevation = requirePassword(ctx, secretName);
       const session = await ctx.ssh();
-      const r = await remoteScript(ctx, session, "cluster-password-login-enable", ENABLE_SCRIPT, { timeoutMs: 2 * 60_000 });
-      const after = await recordPasswordLoginReading(ctx, session, serverId);
+      const r = await remoteScript(ctx, session, "cluster-password-login-enable", ENABLE_SCRIPT, { timeoutMs: 2 * 60_000, elevation });
+      const after = await recordPasswordLoginReading(ctx, session, serverId, elevation);
       if (r.code !== 0) throw errValidation(`password login could not be turned on (exit ${r.code}) — see the run log`);
       ctx.checkpoint({ passwordLoginAfter: after });
     },
@@ -348,17 +398,19 @@ function enablePasswordLoginStep(serverId: string): Step {
 }
 
 /**
- * The SECOND door, and the one that outlives the machine's configuration: the bootstrap password
- * sealed beside the server row so the list can offer one-click adopt. sshd's door is a setting a
- * reinstall or a cloud-init rewrite can reopen; this one is a working credential this manager
- * holds, and nothing but this step takes it away.
+ * The SECOND door, and the one that outlives the machine's configuration: a password sealed beside
+ * the server row. Nothing seals one any more — the machine account's password is a run secret held
+ * for one run (domains/inventory/write.ts) — so this step exists for the rows that still hold a
+ * blob: sshd's door is a setting a reinstall or a cloud-init rewrite can reopen, while that one is a
+ * working credential this manager holds, and nothing but this step takes it away. A machine that
+ * carries none is answered rather than failed.
  *
  * A step of its own rather than a line inside the act above, because the two doors fail
  * independently: a host whose daemon refuses the change must still not be left with a stored
  * password, and the run log has to say which of the two happened.
  *
- * Shared with adopt for the same reason the step above is: the two doors are shut by one pair of
- * steps wherever that happens.
+ * Composed by every list that shuts a password door, for the same reason the step above is: the two
+ * doors are shut by one pair of steps wherever that happens.
  */
 export function purgeBootstrapPasswordStep(serverId: string): Step {
   return {
@@ -367,8 +419,8 @@ export function purgeBootstrapPasswordStep(serverId: string): Step {
     run: async (ctx) => {
       const had = await purgeBootstrapPassword(ctx.creds, serverId);
       ctx.log("meta", had
-        ? "The bootstrap password sealed for this server is destroyed — one-click adopt will ask for one again."
-        : "No bootstrap password was stored for this server.");
+        ? "The password sealed beside this server's row is destroyed; the only password this manager can offer the machine is now the one an operator enters on a run's approve card."
+        : "No password was stored beside this server's row.");
       ctx.checkpoint({ purgedBootstrapPassword: had });
     },
   };
@@ -379,28 +431,48 @@ export function purgeBootstrapPasswordStep(serverId: string): Step {
  *  compile. */
 export type PasswordLoginKind = Extract<RunKind, `cluster-password-login-${string}`>;
 
-export function passwordLoginSteps(kind: PasswordLoginKind, serverId: string): Step[] {
+export function passwordLoginSteps(kind: PasswordLoginKind, serverId: string, secretName: string): Step[] {
   if (kind === "cluster-password-login-disable") {
-    return [attestTargetStep(serverId), verifyKeyLoginStep(), disablePasswordLoginStep(serverId), purgeBootstrapPasswordStep(serverId)];
+    // Armed: shutting the door is the whole of what this run kind does, so an abort of it has
+    // exactly one thing to take back, and `restore-password-login` is in this def's cleanups().
+    return [
+      attestTargetStep(serverId),
+      verifyKeyLoginStep(secretName),
+      disablePasswordLoginStep(serverId, { arm: true, secretName }),
+      purgeBootstrapPasswordStep(serverId),
+    ];
   }
-  return [attestTargetStep(serverId), enablePasswordLoginStep(serverId)];
+  return [attestTargetStep(serverId), enablePasswordLoginStep(serverId, secretName)];
 }
+
+/** The one sentence both run kinds carry about the password they ask for, said the same way in both
+ *  so an operator meets the same words wherever the machine account's password is collected.
+ *
+ *  IT RIDES THE SUMMARY, because the summary is the sentence the approve card renders (RunView
+ *  carries one and no warnings) and this is the run kind's account of a credential a person is about
+ *  to type. Neither of these two acts drives a program on the machine, so nothing else on that screen
+ *  says what the password is for. */
+const ELEVATION_SENTENCE =
+  "The password of the machine account is asked for and raises every command this run sends to root. " +
+  "It is held in memory for the length of the run and stored nowhere: a machine this platform deployed " +
+  "grants this manager no standing passwordless-root rule, so without it the daemon's own configuration cannot even be read.";
 
 const SUMMARY: Record<PasswordLoginKind, (o: { name: string; steps: number; host: string }) => string> = {
   "cluster-password-login-disable": (o) =>
     `Turn password login off on "${o.name}" (${o.host}): ${o.steps} steps. The run proves key login works first, ` +
     `writes one drop-in that sorts before every other, validates the configuration, reloads the daemon without ` +
-    `dropping a session, and reads the result back out of sshd -T. It also destroys the bootstrap password stored ` +
-    `for this server, which is the second way in.`,
+    `dropping a session, and reads the result back out of sshd -T. It also destroys any password stored beside ` +
+    `this server's row, which is the second way in. A host that already answers what the drop-in states is read ` +
+    `and left alone. ${ELEVATION_SENTENCE}`,
   "cluster-password-login-enable": (o) =>
     `Turn password login back on for "${o.name}" (${o.host}): ${o.steps} steps, through the same drop-in and the ` +
-    `same read-back. For a repair — an adopted server needs no password login.`,
+    `same read-back. For a repair — a machine this manager holds a key for needs no password login. ${ELEVATION_SENTENCE}`,
 };
 
 const WARNINGS: Record<PasswordLoginKind, string[]> = {
   "cluster-password-login-disable": [
     "Afterwards this host takes key logins only. Anyone who reaches it by password today — a console session that is not this manager, a script, a colleague — will not afterwards.",
-    "The stored bootstrap password is destroyed, so one-click adopt asks for a password again.",
+    "Any password stored beside this server's row is destroyed, so the only one left is the one an operator enters on a run's approve card.",
   ],
   "cluster-password-login-enable": [
     "Afterwards this host takes a password from anyone who can reach its SSH port, which on an internet-facing machine means every scanner that finds it.",
@@ -413,26 +485,27 @@ const WARNINGS: Record<PasswordLoginKind, string[]> = {
  * leaves the established session alone.
  *
  * The target OWNS its host, which derives the `server:<id>` lock every host-mutating run takes.
- * Without it, this could shut the password door on a machine an adopt in flight was still using a
- * password on.
+ * Without it, this could shut the password door on a machine whose deployment is in flight and still
+ * opening its sessions with that password (defs/manager-key.kit.ts openDoor).
  *
  * The MASTER is a legitimate target, unlike in the tailnet run kinds: their reason for refusing it is
  * that it runs the coordinator the others log in to, and nothing here has a counterpart to that.
  * The master is an internet-facing machine with an sshd like any other.
  */
-export function passwordLoginPlan(kind: PasswordLoginKind, serverId: string, db: Db): Plan {
+export function passwordLoginPlan(kind: PasswordLoginKind, serverId: string, db: Db, secretName: string): Plan {
   const server = loadServer(db, serverId);
-  if (!hasManagerKey(server.status)) {
-    // What the refusal states is the RULE, not a claim about the machine: an adoption that failed
-    // part way leaves its row back at 'bare' while the key it installed is still on the host, so a
-    // message saying "this manager holds no key for it" would be false exactly there. That run
-    // is retried or aborted from its own run screen, which is where the key is accounted for.
+  if (!holdsManagerKey(db, serverId)) {
+    // THE REFUSAL IS THE CREDENTIAL, never the row's status. Every step of both run kinds reaches
+    // the host over ctx.ssh(), which authenticates with a sealed ssh_key credential and with
+    // nothing else, so a machine none stands for is one whose every step would die at its own
+    // session — and the status column says where a deployment stands, which is a different fact
+    // (shared/enums.ts SERVER_STATUS).
     throw errValidation(
-      `refusing: "${server.name}" is '${server.status}' — only a server whose adoption finished is driven over this manager's own key. ` +
-      `An adoption that stopped part way is retried or aborted from its own run screen.`,
+      `refusing: this manager holds no SSH key for "${server.name}", and both password-login run kinds are driven over that key alone. ` +
+      `Deploying the machine is what installs one; a deployment that stopped part way is retried or aborted from its own run screen.`,
     );
   }
-  const steps = passwordLoginSteps(kind, serverId);
+  const steps = passwordLoginSteps(kind, serverId, secretName);
   const dialled = resolveTransport(server, "default");
   return {
     kind,
@@ -442,6 +515,9 @@ export function passwordLoginPlan(kind: PasswordLoginKind, serverId: string, db:
     steps: steps.map((s) => ({ name: s.name, title: s.title })),
     targets: [{ serverId, ownsHost: true, label: server.name }],
     warnings: WARNINGS[kind],
-    requiredSecrets: [],
+    // Every script these run kinds ship is raised whole with this password: `sshd -T`, the write,
+    // the validation and the reload are root commands, and the machine carries no rule granting any
+    // of them (defs/manager-key.kit.ts takes off the drop-in that would grant them).
+    requiredSecrets: [secretName],
   };
 }

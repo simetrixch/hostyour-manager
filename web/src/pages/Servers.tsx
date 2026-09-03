@@ -4,11 +4,12 @@ import type { RunView, ServerView } from "../../../shared/api-types.ts";
 import { isMasterRole } from "../../../shared/enums.ts";
 import type { ServerStatus } from "../../../shared/enums.ts";
 import {
-  listServers, listRuns, createServer, deleteServerById, adoptServer, deploySlave, redeploySlave,
+  listServers, listRuns, createServer, deleteServerById, deploySlave, redeploySlave,
   disconnectTailnet, reconnectTailnet, rejoinTailnet, disablePasswordLogin, enablePasswordLogin,
-  readAuthorizedKeys,
+  readAuthorizedKeys, restateMachineIdentity,
 } from "../api.ts";
 import { tailnetRunKindOffer } from "../tailnetState.ts";
+import { slavePartBlock } from "../slavePartState.ts";
 import { addressLines } from "../serverDialAddress.ts";
 import { OPEN_RUN, relevantRun, runLine } from "../serverRuns.ts";
 import { IconShield } from "../components/icons.tsx";
@@ -20,26 +21,35 @@ import { ServerReadings } from "../components/ServerReadings.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 // sshUser defaults to "" (not "root"): most hardened boxes disable root SSH login, so the
-// operator must name the real non-root sudo user. The placeholder
-// hints it; the adopt ceremony then escalates via `sudo -S` with the one-time password.
-const EMPTY = { name: "", host: "", tailnetHost: "", sshUser: "", sshPort: "22", password: "" };
+// operator must name the real non-root sudo user. The placeholder hints it; the deployment then
+// raises that account to root with the password approved on the Run screen.
+const EMPTY = { name: "", host: "", tailnetHost: "", sshUser: "", sshPort: "22" };
 
 /** The slave lifecycle, spelled out (console north star: the operator must see AT A GLANCE
- *  where a server stands and what the ONE next step is). Four stages; every backend status
- *  maps 1:1 onto a stepper position, a plain-language state line, and the next action. The
- *  raw status badge stays on the card — the UI never hides the backend truth; this adds the
+ *  where a server stands and what the ONE next step is). Three stages, because there are three
+ *  things that happen to a machine: it is written down, it is deployed, and it serves. Being
+ *  reachable by this manager's own key is not a fourth — the deployment establishes it on its way
+ *  through, which is why every status short of a live cluster offers the same one next step. Every
+ *  backend status maps 1:1 onto a stepper position, a plain-language state line, and that action.
+ *  The raw status badge stays on the card — the UI never hides the backend truth; this adds the
  *  orientation around it. */
-const LIFECYCLE_STAGES = ["Added", "Adopted", "Deployed", "Live"] as const;
+const LIFECYCLE_STAGES = ["Added", "Deployed", "Live"] as const;
 type StageState = "done" | "active" | "todo";
-const LIFECYCLE: Record<ServerStatus, { stages: readonly StageState[]; state: string; next: "adopt" | "deploy" | "clusters" | null }> = {
-  bare: { stages: ["done", "active", "todo", "todo"], state: "Not adopted yet — the Manager has no SSH key on this box.", next: "adopt" },
-  adopting: { stages: ["done", "active", "todo", "todo"], state: "Adoption in progress — the Manager is installing its SSH key.", next: null },
-  ready: { stages: ["done", "done", "active", "todo"], state: "Adopted — ready to deploy as a slave.", next: "deploy" },
-  provisioning: { stages: ["done", "done", "active", "todo"], state: "Deployment in progress — this server is becoming a slave.", next: null },
-  healthy: { stages: ["done", "done", "done", "done"], state: "Live slave — deployed and healthy.", next: "clusters" },
-  degraded: { stages: ["done", "done", "done", "active"], state: "Live slave — currently degraded (see Clusters).", next: "clusters" },
-  draining: { stages: ["done", "done", "done", "active"], state: "Live slave — draining (being taken out of service).", next: null },
-  undeployed: { stages: ["done", "active", "todo", "todo"], state: "Undeployed — adopt it again to redeploy.", next: "adopt" },
+const LIFECYCLE: Record<ServerStatus, { stages: readonly StageState[]; state: string; next: "deploy" | "clusters" | null }> = {
+  bare: { stages: ["done", "active", "todo"], state: "Written down, not deployed — deploying installs this Manager's key and makes the machine a slave.", next: "deploy" },
+  // No run kind writes this status. A row standing in it is deployed like any other: the deployment
+  // measures what the machine already carries before it writes anything.
+  adopting: { stages: ["done", "active", "todo"], state: "Nothing writes this state — deploying takes the machine on from wherever it stands.", next: "deploy" },
+  // Where a deployment that did not succeed parks its machine (deploy-slave.ts onTerminal). The
+  // status says a run reached this machine and stopped, and no more than that: HOW FAR IT GOT is the
+  // run's own account and the readings above, because every step of that run measures before it
+  // writes and a stepper position could only guess at it.
+  ready: { stages: ["done", "active", "todo"], state: "A deployment stopped before it finished — the machine stands where that run left it, and deploying again takes it on from there.", next: "deploy" },
+  provisioning: { stages: ["done", "active", "todo"], state: "Deployment in progress — this server is becoming a slave.", next: null },
+  healthy: { stages: ["done", "done", "done"], state: "Live slave — deployed and healthy.", next: "clusters" },
+  degraded: { stages: ["done", "done", "active"], state: "Live slave — currently degraded (see Clusters).", next: "clusters" },
+  draining: { stages: ["done", "done", "active"], state: "Live slave — draining (being taken out of service).", next: null },
+  undeployed: { stages: ["done", "active", "todo"], state: "Undeployed — deploy it again.", next: "deploy" },
 };
 
 /** Prefill for the slave FQDN: `<name>.<master-domain>` when the master's host is an FQDN
@@ -50,9 +60,9 @@ function suggestedDomain(name: string, all: ServerView[]): string {
   return master && dot > 0 ? `${name}.${master.host.slice(dot + 1)}` : "";
 }
 
-/** Inventory CRUD: add servers with an optional stored password on
- *  one page, then adopt or delete straight from the list. The password is sealed keyfile-
- *  encrypted server-side; it never returns to the browser after it's stored. */
+/** Inventory CRUD: write down where the machines are on one page, then deploy or delete straight
+ *  from the list. Nothing here carries a credential — the password of the machine account is entered
+ *  on the Run screen of the deployment that needs it and is never stored. */
 export function Servers() {
   const nav = useNavigate();
   const [servers, setServers] = useState<ServerView[] | null>(null);
@@ -94,7 +104,6 @@ export function Servers() {
         sshUser: form.sshUser.trim(),
         sshPort: Number(form.sshPort) || 22,
         ...(form.tailnetHost.trim() ? { tailnetHost: form.tailnetHost.trim() } : {}),
-        ...(form.password ? { password: form.password } : {}),
       });
       setForm({ ...EMPTY });
       setFormKey((k) => k + 1);
@@ -103,16 +112,6 @@ export function Servers() {
       setError(msg(err));
     }
     setBusy(false);
-  }
-
-  async function doAdopt(id: string): Promise<void> {
-    setError(null);
-    try {
-      const { runId } = await adoptServer(id);
-      nav(`/runs/${runId}`);
-    } catch (err) {
-      setError(msg(err));
-    }
   }
 
   async function doDeploy(e: FormEvent): Promise<void> {
@@ -127,9 +126,10 @@ export function Servers() {
     }
   }
 
-  /** Plan one of the per-server run kinds and hand off to its Run screen — the three tailnet repairs,
-   *  the two password-login acts and the authorized-keys reading all take the same one argument and
-   *  differ only in which client helper is called, so they share this. */
+  /** Plan one of the per-server acts and hand off to its Run screen — the three tailnet repairs, the
+   *  two password-login acts, the authorized-keys reading and the master taking the slave part all
+   *  read what the run needs off the inventory and differ only in which client helper is called, so
+   *  they share this. */
   async function planServerRunKind(plan: () => Promise<{ runId: string }>): Promise<void> {
     setError(null);
     try {
@@ -147,6 +147,22 @@ export function Servers() {
       nav(`/runs/${runId}`);
     } catch (err) {
       setError(msg(err));
+    }
+  }
+
+  /** Pin the host key a person states for a machine they rebuilt. It plans no run, so there is no
+   *  Run screen to navigate to: the list is re-read in place and the card then states the identity
+   *  the next run will hold the machine to. The answer says whether the statement landed, so a
+   *  refused one keeps the field open with what was typed in it. */
+  async function doRestateMachineIdentity(id: string, fingerprint: string): Promise<boolean> {
+    setError(null);
+    try {
+      await restateMachineIdentity(id, fingerprint);
+      refresh();
+      return true;
+    } catch (err) {
+      setError(msg(err));
+      return false;
     }
   }
 
@@ -170,9 +186,6 @@ export function Servers() {
         <div className="page__actions">
           <Link className="btn" to="/servers/keys">
             Operator keys
-          </Link>
-          <Link className="btn" to="/servers/adopt">
-            Adoption wizard
           </Link>
         </div>
       </header>
@@ -206,17 +219,12 @@ export function Servers() {
             <span className="field__label">Port</span>
             <input value={form.sshPort} onChange={set("sshPort")} placeholder="22" inputMode="numeric" />
           </label>
-          <label className="field">
-            <span className="field__label">
-              Password <em className="field__opt">optional</em>
-            </span>
-            <input value={form.password} onChange={set("password")} type="password" placeholder="stored encrypted" autoComplete="off" />
-          </label>
         </div>
         <div className="form-foot">
           <span className="field__hint">
             The tailnet address is where the master dials this machine&apos;s kube-apiserver once it is a slave; empty means
-            the host above goes in the cluster map instead. A stored password enables 1-click adopt; it is sealed AES-256-GCM at rest.
+            the host above goes in the cluster map instead. No password is asked for here — the deployment asks for the one
+            it needs on its own approve screen.
           </span>
           <button type="submit" className="btn btn--primary" disabled={busy || !form.name || !form.host}>
             {busy ? "Adding…" : "Add server"}
@@ -264,6 +272,7 @@ export function Servers() {
                   onDisablePasswordLogin={() => void planServerRunKind(() => disablePasswordLogin(s.id))}
                   onEnablePasswordLogin={() => void planServerRunKind(() => enablePasswordLogin(s.id))}
                   onReadAuthorizedKeys={() => void planServerRunKind(() => readAuthorizedKeys(s.id))}
+                  onRestateMachineIdentity={(fp) => doRestateMachineIdentity(s.id, fp)}
                 />
                 {run && (
                   <p className="servercard__run">
@@ -272,13 +281,15 @@ export function Servers() {
                 )}
                 {/* THE MASTER'S OWN ROW. The block below is the SLAVE lifecycle — its stages and every
                     sentence in LIFECYCLE are written about a machine becoming a slave, so a master's
-                    card cannot show it. What a master does carry is the tailnet run kinds, which act
-                    on the cluster it already is: they put its membership of the private network back.
-                    They admit a master in the plan (defs/tailnet.kit.ts); until this row existed none
-                    was reachable from any screen. */}
+                    card cannot show it. This row is where a machine carrying the master part states
+                    which parts it carries, offers to take the other one, and offers the tailnet run
+                    kinds that put its membership of the private network back. Every one of those acts
+                    admits a master in its own plan, and this is the screen they are reachable from. */}
                 {isMasterRole(s.role) && (
                   <MasterActions
+                    slavePart={slavePartBlock(s, { runOpen: runIsOpen })}
                     offer={tailnetRunKindOffer(s, { liveCluster: LIFECYCLE[s.status].next === "clusters" })}
+                    onTakeSlavePart={(own) => void planServerRunKind(() => deploySlave(s.id, own))}
                     onDisconnect={() => void planServerRunKind(() => disconnectTailnet(s.id))}
                     onReconnect={() => void planServerRunKind(() => reconnectTailnet(s.id))}
                     onRejoin={() => void planServerRunKind(() => rejoinTailnet(s.id))}
@@ -287,27 +298,24 @@ export function Servers() {
                 {!isMasterRole(s.role) &&
                   (() => {
                     const lc = LIFECYCLE[s.status];
-                    // ONE prominent next step: an open run owns it (approve/watch); otherwise
-                    // the status decides (adopt → deploy → view live).
-                    const showAdopt = !runIsOpen && lc.next === "adopt";
-                    // ADOPTING AGAIN IS OFFERED WHERE A MACHINE ALREADY LOOKS ADOPTED, because a
-                    // machine can lose what an adoption gave it. A restore puts back the disk the
-                    // snapshot was taken from, and the operator key this manager installed goes with
-                    // it: the row still says "ready" and the door answers "All configured
-                    // authentication methods failed", measured on a real machine. Nothing else offers
-                    // a way back — the server cannot be added again under its own name, and it cannot
-                    // be deleted while its cluster row stands.
+                    // ONE prominent next step: an open run owns it (approve/watch); otherwise the
+                    // status decides (deploy → view live).
                     //
-                    // It is SECONDARY and never the prominent step: on a machine that is merely
-                    // adopted, deploying is what comes next, and adopting again is the repair beside
-                    // it. The status `undeployed` already says "adopt it again to redeploy"; this is
-                    // the same sentence reachable from `ready`.
-                    const showAdoptAgain = !runIsOpen && s.status === "ready";
+                    // DEPLOYING IS ALSO THE REPAIR, which is why every status short of a live cluster
+                    // offers it. A machine can lose what this manager put on it — a restore puts back
+                    // the disk the snapshot was taken from, and the installed key goes with it, so the
+                    // row goes on saying where its deployment left it while the door answers "All
+                    // configured authentication methods failed". The deployment measures the door
+                    // before it writes and falls back to the machine account's password where its own
+                    // key is refused, so running it again is the way back, and nothing else has to be.
                     const showDeploy = !runIsOpen && lc.next === "deploy" && prov?.id !== s.id;
                     const showClusters = lc.next === "clusters";
                     // A LIVE cluster carries the run kind that acts on one: redeploy rebuilds its
                     // machine layer in place, distinct from the destructive Delete.
                     const showRedeploy = lc.next === "clusters";
+                    // DELETE IS OFFERED ON A ROW NO DEPLOYMENT HAS REACHED, because that is the row a
+                    // delete can act on: the first step of a deployment writes a cluster row for the
+                    // machine, and deleteServer refuses while one stands (domains/inventory/write.ts).
                     const showDelete = s.status === "bare";
                     // The tailnet repair run kinds are offered on their own rule (tailnetState.ts), not
                     // on the lifecycle: they act on the host's membership of the private network,
@@ -326,19 +334,9 @@ export function Servers() {
                           ))}
                         </ol>
                         <p className="servercard__state">{lc.state}</p>
-                        {(showAdopt || showAdoptAgain || showDeploy || showClusters || showRedeploy || showDelete ||
+                        {(showDeploy || showClusters || showRedeploy || showDelete ||
                           tnOffer.disconnect || tnOffer.reconnect || tnOffer.rejoin) && (
                           <div className="actions">
-                            {showAdopt && (
-                              <button type="button" className="btn btn--primary" onClick={() => void doAdopt(s.id)}>
-                                {s.hasPassword ? "Adopt this server" : "Adopt this server (enter password)"}
-                              </button>
-                            )}
-                            {showAdoptAgain && (
-                              <button type="button" className="btn" onClick={() => void doAdopt(s.id)}>
-                                {s.hasPassword ? "Adopt again" : "Adopt again (enter password)"}
-                              </button>
-                            )}
                             {showDeploy && (
                               <button
                                 type="button"
@@ -397,9 +395,11 @@ export function Servers() {
       <p className="note">
         <IconShield />
         <span>
-          A stored password is used once to install a dedicated SSH key, then the Manager uses the key. Passwords are
-          sealed AES-256-GCM at rest (keyfile mode) — a DB dump alone won&apos;t reveal them, and a successful adoption
-          destroys the stored copy and turns the server&apos;s own password login off.
+          The password of the machine account is entered on the deployment&apos;s approve screen and held for that run
+          alone — never written to disk, logs or the audit trail. The run installs a dedicated SSH key for the machine
+          and proves a login that offers that key and no password. On a machine it deploys as a slave of its own it then
+          turns that server&apos;s password login off; on the machine this manager itself runs on it leaves both doors as
+          it found them, because shutting one there is an act of its own.
         </span>
       </p>
 

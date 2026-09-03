@@ -10,18 +10,18 @@ import { getServer, type ServerCredFlags } from "./read.ts";
 import type { ServerView } from "../../../shared/api-types.ts";
 import { isMasterRole } from "../../../shared/enums.ts";
 
-// Inventory writes for the server lifecycle's entry point. Under the
-// operator's choice a bootstrap password may be STORED with the
-// server (sealed in the credential store, kind "other", marked "bootstrap-password") so the
-// list offers 1-click adopt. This is a deliberate deviation from the
-// never-stored default — accepted under "security later" (plaintext store).
+// Inventory writes for the server lifecycle's entry point.
 //
-// The deviation lasts exactly as long as the adoption: a sealed bootstrap password is a way into
-// the machine that survives the machine's own configuration, so adopt destroys it (purgeBootstrap
-// Password below, called from the run's purge-bootstrap-password step, beside the one that shuts
-// the daemon's door). Turning sshd's password door off and leaving this one open would close one of
-// two doors. It is sealed at ONE moment only — when a server is added — so there is no route that
-// re-arms it on a machine that has been adopted.
+// NOTHING HERE SEALS A PASSWORD, and adding a server takes none. The password of the machine account
+// is a run secret the operator enters on the approve card of the run that needs it, held in memory
+// for that run and never written down (executor/secrets.ts) — so a machine this manager has never
+// reached carries no credential of any kind in the store.
+//
+// WHAT `purgeBootstrapPassword` IS FOR is the rows sealed before that was true. Such a blob is a
+// working way into the machine that survives the machine's own configuration, so the two run kinds
+// that shut a password door destroy it in the same breath as the daemon's setting
+// (runs/defs/password-login.kit.ts purgeBootstrapPasswordStep): turning sshd's door off and leaving
+// this one open would close one of two doors.
 
 const BOOTSTRAP_FP = "bootstrap-password";
 
@@ -41,31 +41,11 @@ export const CreateServerInput = z.object({
   sshPort: z.number().int().min(1).max(65535).optional(),
   sshUser: z.string().min(1),
   notes: z.string().max(2000).optional(),
-  /** Optional stored bootstrap password. Sealed, never returned. */
-  password: z.string().min(1).optional(),
-});
+  // STRICT, so a field this schema does not name is a refusal and not a silent drop. Adding a server
+  // records where a machine is and nothing else; a caller still sending a credential with it is
+  // told so rather than watching it disappear.
+}).strict();
 export type CreateServerInput = z.infer<typeof CreateServerInput>;
-
-async function sealBootstrapPassword(creds: CredentialStore, serverId: string, name: string, password: string): Promise<void> {
-  // Replace any existing bootstrap password for this server (rotate-in-place via revoke+seal).
-  for (const c of await creds.list({ serverId, kind: "other" })) {
-    if (c.fingerprint === BOOTSTRAP_FP) await creds.revoke(c.id, "replaced");
-  }
-  await creds.seal({
-    kind: "other",
-    label: `adopt password for ${name}`,
-    plaintext: Buffer.from(password, "utf8"),
-    fingerprint: BOOTSTRAP_FP,
-    serverId,
-  });
-}
-
-/** The bootstrap password buffer for a server, or undefined. Caller zeroes it (withOpened). */
-export async function openBootstrapPassword(creds: CredentialStore, serverId: string, runId: string): Promise<Buffer | undefined> {
-  const c = (await creds.list({ serverId, kind: "other" })).find((x) => x.fingerprint === BOOTSTRAP_FP);
-  if (!c) return undefined;
-  return creds.open(c.id, { purpose: "cluster-adopt:bootstrap-password", runId });
-}
 
 /**
  * Destroy the stored bootstrap password for a server, if it holds one. Returns whether there was
@@ -83,21 +63,33 @@ export async function purgeBootstrapPassword(creds: CredentialStore, serverId: s
 }
 
 /** Build the per-server credential flags (hasPassword/hasKey) from the store (the sanctioned
- *  reader — inventory may not import the credentials schema). */
+ *  reader — inventory may not import the credentials schema).
+ *
+ *  `hasKey` EXCLUDES ROTATED KEYS, so it means exactly the door `ctx.ssh()` would open
+ *  (executor/context.ts lists with the same filter): a rotated-out key is one the machine has
+ *  already stopped taking, and a card claiming a key on its strength would offer run kinds that die
+ *  at their first session. The password flag counts every unrevoked row, because a superseded
+ *  password is still a password sealed beside the row and the chip exists to say one is there. */
 export async function serverCredFlags(creds: CredentialStore): Promise<Map<string, ServerCredFlags>> {
   const map = new Map<string, ServerCredFlags>();
-  for (const c of await creds.list()) {
-    if (!c.serverId) continue;
-    const f = map.get(c.serverId) ?? { hasPassword: false, hasKey: false };
-    if (c.kind === "ssh_key") f.hasKey = true;
-    if (c.kind === "other" && c.fingerprint === BOOTSTRAP_FP) f.hasPassword = true;
-    map.set(c.serverId, f);
+  const flags = (serverId: string): ServerCredFlags => {
+    const f = map.get(serverId) ?? { hasPassword: false, hasKey: false };
+    map.set(serverId, f);
+    return f;
+  };
+  for (const c of await creds.list({ kind: "ssh_key", excludeRotated: true })) {
+    if (c.serverId) flags(c.serverId).hasKey = true;
+  }
+  for (const c of await creds.list({ kind: "other" })) {
+    if (c.serverId && c.fingerprint === BOOTSTRAP_FP) flags(c.serverId).hasPassword = true;
   }
   return map;
 }
 
-/** Insert a `bare` server (+ optionally seal its bootstrap password) + audit; returns its view. */
-export async function createServer(db: Db, creds: CredentialStore, actor: string, input: CreateServerInput): Promise<ServerView> {
+/** Insert a `bare` server + audit; returns its view. Synchronous, because adding a server writes two
+ *  rows of this database and reaches no credential store: a machine nobody has reached yet holds no
+ *  credential to seal. */
+export function createServer(db: Db, actor: string, input: CreateServerInput): ServerView {
   const id = srvId();
   try {
     db.insert(servers)
@@ -118,9 +110,8 @@ export async function createServer(db: Db, creds: CredentialStore, actor: string
     }
     throw err;
   }
-  if (input.password) await sealBootstrapPassword(creds, id, input.name, input.password);
   writeAudit(db, { actor, action: "server.created", targetKind: "server", targetId: id, detail: { name: input.name, host: input.host } });
-  const view = getServer(db, id, new Map([[id, { hasPassword: Boolean(input.password), hasKey: false }]]));
+  const view = getServer(db, id, new Map([[id, { hasPassword: false, hasKey: false }]]));
   if (!view) throw errValidation("server not found immediately after creation");
   return view;
 }

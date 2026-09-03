@@ -8,10 +8,10 @@ const NOW = 1_700_000_000_000;
 function server(tailnetState: ServerTailnetState, tailnet: ServerTailnetRead): ServerView {
   return {
     id: "srv_1", name: "s1", host: "203.0.113.7", lanHost: null, tailnetHost: null, sshPort: 22, sshUser: "root",
-    role: "slave", status: "ready", tailnetState, tailnet,
+    role: "slave", status: "ready", cluster: null, tailnetState, tailnet,
     passwordLoginState: "unknown", passwordLogin: { kind: "none" },
     authorizedKeysState: "unknown", authorizedKeys: { kind: "none" },
-    createdAt: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true,
+    hostKeyPinned: null, machineIdRecorded: false, createdAt: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true,
   };
 }
 
@@ -86,9 +86,9 @@ describe("tailnetChip — a reading is never dressed up as a status", () => {
   });
 
   it("no sentence tells the operator to do anything — the card's buttons are the buttons", () => {
-    // The paragraph renders on EVERY card, including the master's (never adopted, never deployed)
-    // and every server past adoption, where the page offers no Adopt at all. An imperative here is
-    // followable only by the rows whose reading is least likely to be wrong.
+    // The paragraph renders on EVERY card, including the master's (which the page offers no
+    // deployment for at all) and every server already live, where the page offers Clusters instead.
+    // An imperative here is followable only by the rows whose reading is least likely to be wrong.
     const every = [
       tailnetChip(server("unknown", { kind: "none" }), NOW),
       tailnetChip(server("joined", { kind: "unsupported", v: 1 }), NOW),

@@ -183,7 +183,8 @@ export function ResetWizard() {
         {dbError === null && (
           <p className="callout">
             Your session survived the wipe. Now: 1 · restore the VMs from <strong>bare</strong> snapshots via Hyper-V
-            (restoring the master from a live snapshot resurrects the old database), 2 · re-adopt the slaves, 3 · re-deploy.
+            (restoring the master from a live snapshot resurrects the old database), 2 · deploy the slaves again — the run
+            installs this Manager&apos;s key on the way through.
             Rotate the GitHub tokens after any reset/restore — VM snapshots contain the old copies.
           </p>
         )}

@@ -1,7 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
-import type { ServerView } from "../../../shared/api-types.ts";
+import type { ServerClusterView, ServerView } from "../../../shared/api-types.ts";
 import { MASTER_ROLES, isMasterRole } from "../../../shared/enums.ts";
 import { readServerTailnet } from "../../../shared/tailnet.ts";
 import { readServerPasswordLogin } from "../../../shared/password-login.ts";
@@ -16,7 +16,8 @@ export interface ServerCredFlags {
 
 /**
  * Inventory read projections. Map DB rows to the wire ServerView — projection is
- * the trust boundary: machineId / preflightJson / notes never leave the server.
+ * the trust boundary: machineId and notes never leave the server, and of preflightJson only the one
+ * field named below does.
  * Sorted master-first (the one-master index is the sort key), then by name.
  *
  * The tailnet pair DOES cross: the stored document is parsed here, through the version-narrowing
@@ -34,8 +35,37 @@ export interface ServerCredFlags {
  * bodies. A fingerprint is this codebase's public, non-secret identifier for a key; the browser is
  * where the operator finds out that a machine lets somebody in, so withholding the reading would
  * defeat the only surface the question has.
+ *
+ * The machine's own CLUSTER crosses as three fields — the branch, the stage and the row's status.
+ * A domain is the cluster's FQDN, which every certificate and every DNS record already publishes;
+ * the other two are inventory facts the Clusters page carries. They cross because a card that
+ * offers a run over the machine's own cluster has to state the branch and the stage that run will
+ * act on: a person approves the act on those two words, and asking them to re-type values the row
+ * already holds is how a run gets aimed at a branch its cluster does not stand on.
+ *
+ * `hostKeyPinned` is the ONE field of preflightJson that crosses, and it crosses on the same
+ * reasoning: an sshd presents its host key to everyone who opens a connection to its port, so the
+ * fingerprint is public to every stranger before it is public here. It crosses because a person who
+ * rebuilt a machine has to compare the recorded number with the one they read on its console, and
+ * saying which machine identity this manager holds is what makes that comparison possible
+ * (domains/inventory/machine-identity.ts). The rest of the document — the preflight checks and the
+ * timestamps — stays on this side.
+ *
+ * The machine-id crosses as `machineIdRecorded`, a BOOLEAN and never the value: the identity that
+ * statement replaces is two numbers, and the card offers it only where one of them is there to
+ * replace. What a machine's /etc/machine-id IS stays on this side, because unlike a host key no
+ * machine presents it to anybody who connects.
  */
+/** The three fields of a machine's own cluster row that cross to its card, or null for a machine
+ *  that keeps no cluster. */
+function clusterView(row: typeof clusters.$inferSelect | undefined): ServerClusterView | null {
+  return row ? { domain: row.domain, stage: row.stage, status: row.status } : null;
+}
+
 export function listServers(db: Db, flags: Map<string, ServerCredFlags> | undefined): ServerView[] {
+  // A machine keeps ONE cluster (clusters_server_uq), so the table is read once and indexed by
+  // machine rather than looked up per row.
+  const clusterOf = new Map(db.select().from(clusters).all().map((c) => [c.serverId, c]));
   return db
     .select()
     .from(servers)
@@ -51,12 +81,15 @@ export function listServers(db: Db, flags: Map<string, ServerCredFlags> | undefi
         sshUser: r.sshUser,
         role: r.role,
         status: r.status,
+        cluster: clusterView(clusterOf.get(r.id)),
         tailnetState: r.tailnetState,
         tailnet: readServerTailnet(r.tailnetJson),
         passwordLoginState: r.passwordLoginState,
         passwordLogin: readServerPasswordLogin(r.passwordLoginJson),
         authorizedKeysState: r.authorizedKeysState,
         authorizedKeys: readServerAuthorizedKeys(r.authorizedKeysJson),
+        hostKeyPinned: (r.preflightJson as { hostKey?: string } | null)?.hostKey ?? null,
+        machineIdRecorded: r.machineId !== null,
         createdAt: r.createdAt.getTime(),
         adoptedAt: r.adoptedAt ? r.adoptedAt.getTime() : null,
         hasPassword: flags?.get(r.id)?.hasPassword ?? false,

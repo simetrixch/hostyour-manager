@@ -1,9 +1,9 @@
 import type { FormEvent } from "react";
 import { STAGE } from "../../../shared/enums.ts";
 
-// The deploy-slave mini-form on an adopted server's card: props only, no fetching of its own, so
-// the page keeps the one open form and the one error line. The operator names the slave's FQDN and
-// its stage; everything else the run needs it reads off the inventory.
+// The deploy-slave mini-form on a server's card: props only, no fetching of its own, so the page
+// keeps the one open form and the one error line. The operator names the slave's FQDN and its
+// stage; everything else the run needs it reads off the inventory.
 //
 // `placeholderName` is only the example inside the domain field — the server's own name, so the
 // operator sees the shape `<name>.<domain>` rather than a generic one.
@@ -48,7 +48,7 @@ export function SlaveDeployForm(props: {
       </div>
       <div className="form-foot">
         <span className="field__hint">
-          Plans the run first — you approve it on the next screen (the machine&apos;s elevation password and the certificate answers are asked for there).
+          Plans the run first — you approve it on the next screen, where the password of the machine account and the certificate answers are asked for.
         </span>
         <span className="actions">
           <button type="submit" className="btn btn--primary" disabled={!value.domain.trim()}>

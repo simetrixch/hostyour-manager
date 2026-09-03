@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { RunView } from "../../../shared/api-types.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import type { AbortOffer } from "../runScreen.ts";
+import { secretFieldLabel } from "../approveFields.ts";
 
 /** Everything a FAILED run offers: re-enter whatever the failed step needs and retry it, skip that step,
  *  ABORT it, or soft-delete the run. Split out of RunDetail exactly the way RunApproveForm is — the
@@ -68,7 +69,7 @@ export function FailedRunActions(props: {
             key={key}
             className="input"
             type="password"
-            placeholder={`Re-enter ${key.replace(/^consumer-secret:/, "")} (if the failed step needs it)`}
+            placeholder={`${secretFieldLabel(key)} — re-enter it if the failed step needs it`}
             value={secrets[key] ?? ""}
             onChange={(e) => setSecrets((s) => ({ ...s, [key]: e.target.value }))}
             autoComplete="off"

@@ -13,13 +13,14 @@ import { RunSecretsMap } from "../../executor/secrets.ts";
 import { ATTEST_TARGET_STEP } from "../../executor/guards.ts";
 import { deriveServerLocks } from "../../executor/locks.ts";
 import { seedRunRows } from "../../executor/run-rows.fixture.ts";
-import type { AnyRunDefinition, RunDefinition } from "../../executor/types.ts";
+import type { AnyRunDefinition, Cleanup, RunDefinition } from "../../executor/types.ts";
 import { servers } from "../../db/schema/inventory.ts";
 import { serverCredFlags } from "../inventory/write.ts";
 import { readServerPasswordLogin } from "../../../shared/password-login.ts";
 import type { SshFactory, SshSession, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
+import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { passwordLoginDisableDef, passwordLoginEnableDef, type PasswordLoginParams } from "./defs/password-login.ts";
-import type { PasswordLoginKind } from "./defs/password-login.kit.ts";
+import { ALREADY_SHUT, restorePasswordLoginCleanup, type PasswordLoginKind } from "./defs/password-login.kit.ts";
 
 // What a test can and cannot prove about this ticket, stated plainly because the difference is the
 // whole point of it.
@@ -57,6 +58,9 @@ const logger = createLogger(
 const SLAVE_ID = "srv_s1";
 const MASTER_ID = "srv_m1";
 const BOOTSTRAP_FP = "bootstrap-password";
+/** What an operator types on the approve card: the machine account's password, which raises every
+ *  script these run kinds ship to a host. */
+const MACHINE_PASSWORD = "open-sesame";
 
 // Keyed on PasswordLoginKind, not on string: a run kind renamed in shared/enums.ts must break THIS
 // file rather than leave the table testing two keys the enum no longer has.
@@ -80,14 +84,16 @@ interface Recorded {
   commands: string[];
 }
 
-/** A session that records the bytes of every script shipped to it and answers the two reads a step
- *  parses: the machine-id attest-target verifies, and the password-login probe. Every command
- *  succeeds — this file measures what is SENT, not what a host would do with it. */
-function fakeSession(rec: Recorded, probe: () => string): SshSession {
+/** A session that records the bytes of every script shipped to it and answers the reads a step
+ *  parses: the machine-id attest-target verifies, the password-login probe, and whatever the act
+ *  script itself prints. Every command succeeds — this file measures what is SENT, not what a host
+ *  would do with it. */
+function fakeSession(rec: Recorded, probe: () => string, actOut = ""): SshSession {
   const exec = async (command: string, opts: ExecOptions): Promise<ExecResult> => {
     rec.commands.push(command);
     if (command.includes("/etc/machine-id")) opts.onStdout?.("2f8a1c9d4b7e40a1b2c3d4e5f6071829");
     if (command.includes("dc-password-login-probe-")) for (const l of probe().split("\n")) opts.onStdout?.(l);
+    if (actOut && command.includes("dc-cluster-password-login-")) for (const l of actOut.split("\n")) opts.onStdout?.(l);
     return { code: 0, stdoutTail: "", stderrTail: "" };
   };
   return {
@@ -158,6 +164,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
     store: CredentialStore,
     probe: () => string = () => TAKES_PASSWORD,
     serverId = SLAVE_ID,
+    actOut = "",
   ): Promise<{ rec: Recorded; cleanups: string[]; stepNames: string[] }> {
     const def = DEFS[kind];
     if (!def) throw new Error(`no definition for ${kind}`);
@@ -170,9 +177,13 @@ describe("the password-login run kinds — the shape of an act that cannot be te
       steps: stepDefs.map((s, ordinal) => ({ id: `step_${kind}_${ordinal}`, name: s.name })),
     });
     const rec: Recorded = { scripts: new Map(), commands: [] };
-    const sshFactory: SshFactory = () => Promise.resolve(fakeSession(rec, probe));
+    const sshFactory: SshFactory = () => Promise.resolve(fakeSession(rec, probe, actOut));
+    // The one secret both run kinds declare: every script they ship is raised whole with it, because
+    // a machine this platform deployed grants this manager no standing passwordless-root rule.
+    const secrets = new RunSecretsMap(runId);
+    secrets.set(ANSIWISE_ELEVATION_SECRET, Buffer.from(MACHINE_PASSWORD, "utf8"));
     const rc = new RunContext({
-      runId, db: db.db, creds: store, bus: new RunEventBus(), logger, params, secrets: new RunSecretsMap(runId),
+      runId, db: db.db, creds: store, bus: new RunEventBus(), logger, params, secrets,
       signal: new AbortController().signal, sshFactory, targetServerId: serverId,
       declaredTargets: plan.targets ?? [],
     });
@@ -278,7 +289,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
     // assertion on the result comes after the write. A grep of the drop-in would have passed on the
     // one host that carried a `99-` file for three weeks.
     expect(script).toContain('effective() { as_root "$(sshd_bin)" -T; }');
-    expectInOrder(script, ["| apply no", "cannot be read after the reload", '[ "$pw" = "no" ] && [ "$kbd" = "no" ]']);
+    expectInOrder(script, ["| apply no", "cannot be read after the reload", "the daemon still takes a password after the reload"]);
     // The other files are named so a disagreement is visible, and never edited.
     expect(script).toContain("files stating either keyword, in the order sshd reads them");
     expect(script).not.toContain("50-cloud-init");
@@ -294,6 +305,98 @@ describe("the password-login run kinds — the shape of an act that cannot be te
       const { cleanups } = await runOfKind("cluster-password-login-disable", db, store, () => probe);
       expect(cleanups).toEqual(expected);
     }
+  });
+
+  /** Every script this kit ships is run by `bash /tmp/dc-<name>-<runId>.sh`; the removal afterwards
+   *  names the same path and is not one. */
+  const shippedScriptRuns = (rec: Recorded): string[] => rec.commands.filter((c) => /(^|\s)bash \/tmp\/dc-/.test(c));
+
+  for (const kind of Object.keys(DEFS) as PasswordLoginKind[]) {
+    it(`${kind} raises every script it ships with the run's own password`, async () => {
+      // The deployment takes the standing passwordless-root grant off the machine
+      // (defs/manager-key.kit.ts remove-sudoers), so `sshd -T`, the write, the validation and the
+      // reload have exactly one route to root left: `sudo -S` with the password the run carries.
+      // Raised WHOLE, because the first sudo of a send consumes the password.
+      const { db, store } = await setup();
+      const { rec } = await runOfKind(kind, db, store);
+      const shipped = shippedScriptRuns(rec);
+      expect(shipped.length).toBeGreaterThan(0);
+      for (const c of shipped) expect(c, c).toMatch(/^sudo -S -p '' bash \/tmp\/dc-/);
+    });
+  }
+
+  it("shuts the door with the SAME password it proved reaches root, one step earlier", async () => {
+    const { db, store } = await setup();
+    const { rec, stepNames } = await runOfKind("cluster-password-login-disable", db, store);
+    // verify-key-login asks sudo one question with that password before the act writes anything: a
+    // password that does not reach root would otherwise be met inside a script that has already
+    // written a file.
+    expect(stepNames.indexOf("verify-key-login")).toBeLessThan(stepNames.indexOf("disable-password-login"));
+    expect(rec.commands).toContain("sudo -S -p '' -- /usr/bin/true");
+  });
+
+  it("writes nothing and reloads nothing on a host that already answers what the drop-in states", async () => {
+    // The same list runs against a machine it has already taken through — a redeploy re-runs it on a
+    // live slave — so the act measures first and says what it found. Reloading the sshd of a running
+    // machine for a state just measured as correct is the write this guard takes away.
+    const { db, store } = await setup();
+    const { rec, cleanups } = await runOfKind(
+      "cluster-password-login-disable", db, store, () => KEY_ONLY, SLAVE_ID, `${ALREADY_SHUT}: nothing was written`,
+    );
+    const script = rec.scripts.get("cluster-password-login-disable") ?? "";
+    // BOTH facts decide it: the daemon takes neither keyword, and this platform's own drop-in is
+    // what says so — a door shut by somebody else's file is one the next cloud-init rewrite reopens.
+    expectInOrder(script, ['[ "$pw" = "no" ] && [ "$kbd" = "no" ]', ALREADY_SHUT, "| apply no"]);
+    expect(script).toContain(`[ "$(as_root cat "/etc/ssh/sshd_config.d/00-hostyour-passwords.conf"`);
+    // One probe, not two: the second reading exists to replace a row describing a host the act
+    // changed, and this act changed none.
+    expect(shippedScriptRuns(rec).filter((c) => c.includes("dc-password-login-probe-")).length).toBe(1);
+    expect(cleanups).toEqual([]);
+  });
+
+  /** Run one compensating action the way an abort does: its own step row, the same store, the same
+   *  fake host — and the secrets an abort was handed, which is what decides whether it can reach
+   *  root at all. */
+  async function runCleanup(
+    db: DbHandle, store: CredentialStore, cleanup: Cleanup, secrets: Record<string, string>,
+  ): Promise<Recorded> {
+    const runId = "run_abort";
+    seedRunRows(db, { runId, kind: "cluster-password-login-disable", targetId: SLAVE_ID, steps: [{ id: "step_c0", name: cleanup.name }] });
+    const rec: Recorded = { scripts: new Map(), commands: [] };
+    const map = new RunSecretsMap(runId);
+    for (const [name, value] of Object.entries(secrets)) map.set(name, Buffer.from(value, "utf8"));
+    const rc = new RunContext({
+      runId, db: db.db, creds: store, bus: new RunEventBus(), logger, params: { serverId: SLAVE_ID }, secrets: map,
+      signal: new AbortController().signal, sshFactory: () => Promise.resolve(fakeSession(rec, () => TAKES_PASSWORD)),
+      targetServerId: SLAVE_ID, declaredTargets: [{ serverId: SLAVE_ID, ownsHost: true, label: "s1" }],
+    });
+    try {
+      await cleanup.run(rc.forStep(cleanup.name, "step_c0"));
+    } finally {
+      rc.close();
+    }
+    return rec;
+  }
+
+  it("puts the door back over the SAME route the act took — the compensation is raised too", async () => {
+    // An abort of a first install has to leave the machine as reachable as it was found, and the
+    // machine grants this manager nothing standing: a compensation reaching root any other way
+    // would be a route the run itself does not have, so it would fail on its own first command and
+    // take every compensation behind it down with it.
+    const { db, store } = await setup();
+    const rec = await runCleanup(db, store, restorePasswordLoginCleanup(ANSIWISE_ELEVATION_SECRET), { [ANSIWISE_ELEVATION_SECRET]: MACHINE_PASSWORD });
+    const shipped = shippedScriptRuns(rec);
+    expect(shipped.length).toBeGreaterThan(0);
+    for (const c of shipped) expect(c, c).toMatch(/^sudo -S -p '' bash \/tmp\/dc-/);
+    expect(rec.scripts.get("cluster-password-login-enable")).toContain("PasswordAuthentication yes");
+  });
+
+  it("refuses the compensation BY NAME when the password is gone, rather than part way through a file", async () => {
+    // Run secrets are never stored, so an abort after a restart has none until the operator enters
+    // it again. Saying which one is missing is what tells them that.
+    const { db, store } = await setup();
+    await expect(runCleanup(db, store, restorePasswordLoginCleanup(ANSIWISE_ELEVATION_SECRET), {}))
+      .rejects.toMatchObject({ code: "MISSING_RUN_SECRET" });
   });
 
   it("names its compensation in cleanups(), so an abort can resolve the persisted name", async () => {
@@ -356,15 +459,29 @@ describe("the password-login run kinds — the shape of an act that cannot be te
       // Without the lock this could shut the password door on a machine an adopt in flight is
       // still using a password on.
       expect(deriveServerLocks(plan.targets ?? [])).toEqual([{ resource: "server", key: SLAVE_ID }]);
-      expect(plan.requiredSecrets).toEqual([]);
+      // Reading and writing an sshd configuration are root acts and the machine carries no standing
+      // rule for either, so the run asks for the password that raises every script it ships.
+      expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     });
 
-    it(`${kind} refuses a host this manager holds no key for — there would be nothing to fall back on`, async () => {
+    it(`${kind} refuses a host no ssh_key credential stands for — there would be nothing to fall back on`, async () => {
+      const { db, store } = await setup();
+      for (const c of await store.list({ serverId: SLAVE_ID, kind: "ssh_key" })) await store.purge(c.id);
+      // The row is untouched and still says `healthy`, which is where a deployment leaves every
+      // machine it reached: what refuses is the credential, and it is the same fact ctx.ssh() would
+      // look for at the run's first step.
+      expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.status).toBe("healthy");
+      await expect(DEFS[kind].plan({ serverId: SLAVE_ID }, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
+    });
+
+    it(`${kind} accepts a host whose row says 'bare' while a key stands for it`, async () => {
+      // A deployment writes `provisioning` before it opens a session and parks the row when the run
+      // ends, so no status says which credentials this manager holds. A machine whose key was
+      // installed by a run that then died elsewhere is reachable, and these run kinds are how its
+      // doors are put right.
       const { db } = await setup();
-      for (const status of ["bare", "adopting"] as const) {
-        db.db.update(servers).set({ status }).where(eq(servers.id, SLAVE_ID)).run();
-        await expect(DEFS[kind].plan({ serverId: SLAVE_ID }, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
-      }
+      db.db.update(servers).set({ status: "bare" }).where(eq(servers.id, SLAVE_ID)).run();
+      await expect(DEFS[kind].plan({ serverId: SLAVE_ID }, { db: db.db })).resolves.toBeTruthy();
     });
 
     it(`${kind} accepts the MASTER — it is an internet-facing machine with an sshd like any other`, async () => {

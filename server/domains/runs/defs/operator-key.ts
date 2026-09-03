@@ -16,7 +16,7 @@ import {
 //                         replaces its line, so a rotated key does not leave its predecessor
 //                         working.
 //   operator-key-remove   The same filter without the append. It deletes by marker and by nothing
-//                         else, so it can never reach the line adopt wrote for this manager —
+//                         else, so it can never reach the line `generate-key` wrote for this manager —
 //                         and it FAILS rather than reporting success when the read-back still finds
 //                         the key, which is what happens when somebody placed a copy by hand under
 //                         a different comment.
@@ -28,11 +28,12 @@ import {
 // THIS MANAGER'S OWN KEY IS NEVER A TARGET. It lives in the same file under a different marker
 // (`hostyour:<server name>`), it is what every one of these runs travels over, and the acts
 // prove it survived by reading the file on both sides of the edit. It is removed by exactly one
-// thing in this codebase: the adopt run's own compensation.
+// thing in this codebase: `remove-installed-key`, the compensation a deployment arms on its first
+// install of that key (domains/runs/defs/manager-key.kit.ts).
 //
 // All three are `mutating`, so attest-target is pinned as step 0 and cannot be skipped. For the two
 // acts that is the usual reason — a run that changes which credentials a machine accepts proves
-// first that it is talking to the machine that was adopted. For the read it is a narrower one: the
+// first that it is talking to the machine whose identity this manager recorded. For the read it is a narrower one: the
 // run writes a reading onto a server row, and a row may only be told about the machine it names.
 
 export const OperatorKeyParams = z.object({

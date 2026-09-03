@@ -3,7 +3,7 @@
 import type {
   ServerRole, ServerStatus, ServerTailnetState, ServerPasswordLoginState, AuthorizedKeyKind,
   ServerAuthorizedKeysState, RunKind, RunStatus, StepStatus, RunOutputStream,
-  TargetKind, LockResource,
+  TargetKind, LockResource, ClusterStatus,
   Stage, TenantStatus, AppStatus, ArgoSync, ArgoHealth, DriftVerdict,
 } from "./enums.ts";
 import type { ReleaseChannel } from "./release.ts";
@@ -183,6 +183,19 @@ export interface OperatorKeyView {
   onServerIds: string[];
 }
 
+/** The ONE cluster a machine keeps (`clusters_server_uq`), as its own card states it.
+ *
+ *  A cluster's domain IS its install branch and a cluster carries exactly one stage, so these two
+ *  are the whole of what a run aimed at a machine's OWN cluster acts on — which is why they cross:
+ *  a card that offers such a run states the branch and the stage the run will take, instead of
+ *  asking a person to re-type values the row already holds. `status` crosses with them because the
+ *  runs that act on a machine's own cluster are the ones that need it LIVE. */
+export interface ServerClusterView {
+  domain: string;
+  stage: Stage;
+  status: ClusterStatus;
+}
+
 export interface ServerView {
   id: string;
   name: string;
@@ -196,6 +209,10 @@ export interface ServerView {
   sshUser: string;
   role: ServerRole;
   status: ServerStatus;
+  /** The cluster this machine keeps, or null where it keeps none. A machine's ROLE says which parts
+   *  it carries and this says on which branch and at which stage it carries them, so together they
+   *  are what a card offering a run over that machine's own cluster is decided on. */
+  cluster: ServerClusterView | null;
   /** Tailnet membership as the last run to look at this host found it — a SECOND axis beside
    *  `status`, not a part of it (a server joins before it is ever deployed). */
   tailnetState: ServerTailnetState;
@@ -218,11 +235,31 @@ export interface ServerView {
   /** The reading behind `authorizedKeysState`: when it was taken, by which run, and every key line
    *  it found. */
   authorizedKeys: ServerAuthorizedKeysRead;
+  /** The sshd host key this manager has pinned for the machine, or null where it has recorded none
+   *  yet. Every session is refused unless the machine presents this key, so it is what a person
+   *  compares with the fingerprint they read on the machine's own console after rebuilding it, and
+   *  what the statement they then make replaces (server/domains/inventory/machine-identity.ts). */
+  hostKeyPinned: string | null;
+  /** Whether an /etc/machine-id is recorded for the machine — the boolean, never the value, which
+   *  stays on the server side of the projection. It crosses because it is the second half of the
+   *  identity the statement on this card replaces: a machine whose id was regenerated while its host
+   *  key stood is refused by every run that attests it, and the card can only offer the one act that
+   *  clears the id where there is an id to clear (server/domains/inventory/machine-identity.ts). */
+  machineIdRecorded: boolean;
   createdAt: number;
+  /** When this manager last proved it can log in to the machine with its own key — the stamp
+   *  `verify-key-login` writes (server/domains/runs/defs/manager-key.kit.ts). Null where no run has
+   *  taken that reading on the machine. */
   adoptedAt: number | null;
-  /** A bootstrap password is on file (never the value) — enables 1-click adopt. */
+  /** A password is sealed beside this row (never the value). Nothing seals one any more — the
+   *  machine account's password is a run secret — so this says the row still carries one from before
+   *  that, which is a working way into the machine until a run that shuts a password door purges it. */
   hasPassword: boolean;
-  /** A dedicated SSH key has been installed (i.e. adopt reached generate-key). */
+  /** An unrotated SSH key is sealed for this server — the credential `ctx.ssh()` would authenticate
+   *  with, so this says the manager can reach the machine over its own key. It is what every card
+   *  offering a run kind driven over that key keys on, and what the plans of those run kinds refuse
+   *  on, because a STATUS says where a machine stands in its deployment and is written by runs that
+   *  never opened a session (shared/enums.ts SERVER_STATUS). */
   hasKey: boolean;
 }
 
@@ -293,7 +330,8 @@ export interface ClustersView {
    *  so the managed count mirrors reality 1:1. */
   servers: ServerView[];
   /** The control host itself (the one role=master row), surfaced separately — labeled,
-   *  never counted as managed. Null until the manager has adopted itself. */
+   *  never counted as managed. Null until this manager's own boot has seeded that row from its
+   *  deployment configuration (server/boot/seed-master.ts). */
   master: ServerView | null;
   sources: {
     inventory: ClustersSourceState;

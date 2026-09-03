@@ -23,7 +23,7 @@ export const TENANT_RUN_KINDS: ReadonlySet<RunKind> = new Set<RunKind>(RUN_FAMIL
 
 /** The three run kinds that touch a host's ~/.ssh/authorized_keys. Listed rather than read off
  *  RUN_FAMILY, because they are only PART of the cluster family — the two sets above happen to be
- *  whole families and this one never can be, since cluster-adopt and cluster-deploy-slave belong to the same family
+ *  whole families and this one never can be, since cluster-deploy-slave and cluster-redeploy belong to the same family
  *  and to a different page. Every literal here is a RunKind, so a rename in shared/enums.ts breaks
  *  this build rather than quietly emptying the tab. */
 export const OPERATOR_KEY_RUN_KINDS: ReadonlySet<RunKind> = new Set<RunKind>([

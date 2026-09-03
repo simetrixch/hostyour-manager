@@ -2,7 +2,7 @@ import { createServer, type Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { Client, type ConnectConfig, type ClientChannel, type SFTPWrapper } from "ssh2";
 import type { SshTarget, SshSession, ExecOptions, ExecResult, PortForward, SshFactory, ChannelOptions, SshChannel } from "./port.ts";
-import { ExecFailedError, ExecTimeoutError, HostKeyMismatchError, sshAbortError } from "./port.ts";
+import { AuthFailedError, ExecFailedError, ExecTimeoutError, HostKeyMismatchError, sshAbortError } from "./port.ts";
 
 const CONNECT_TIMEOUT_DEFAULT = 15_000;
 const EXEC_TIMEOUT_DEFAULT = 120_000;
@@ -20,6 +20,20 @@ function appendTail(tail: string, chunk: string): string {
 interface Connected {
   client: Client;
   fingerprint: string;
+}
+
+/** WHICH failure a connect met, read off the one field that says so. ssh2 reports every failure as a
+ *  bare `Error` and puts the kind in a non-standard `level` property (node_modules/ssh2/lib/client.js).
+ *  `client-authentication` is the level the MACHINE decided: the socket connected, the host key
+ *  passed the verifier, and the server turned down every method, which the library reports as "All
+ *  configured authentication methods failed". Every other level — `client-socket`, `client-dns`,
+ *  `client-timeout`, `protocol`, `handshake` — is the transport failing to reach any verdict, and it
+ *  is left as the bare Error it arrives as, because that is the distinction a caller falls back on:
+ *  a second credential may be offered to a machine that refused the first, and never to a machine
+ *  that was never reached. */
+function classifyConnectError(err: Error, target: SshTarget): Error {
+  const level = (err as { level?: string }).level;
+  return level === "client-authentication" ? new AuthFailedError(target.username, err) : err;
 }
 
 function connect(target: SshTarget): Promise<Connected> {
@@ -52,11 +66,15 @@ function connect(target: SshTarget): Promise<Connected> {
     }
 
     if (password) {
-      // Ubuntu sshd often has PasswordAuthentication no but keyboard-interactive on (adopt lesson).
+      // Ubuntu sshd often has PasswordAuthentication no but keyboard-interactive on, so a password
+      // door that answers at all may answer only here.
       client.on("keyboard-interactive", (_name, _instr, _lang, _prompts, finish) => finish([password.toString("utf8")]));
     }
     client.on("ready", () => resolve({ client, fingerprint }));
-    client.on("error", (err: Error) => reject(mismatch ?? err));
+    // The mismatch WINS over whatever the library says next. A verifier that refuses ends the
+    // connection, and the error the client then emits describes the ending rather than the reason
+    // for it — so the reason is held from the verifier and handed back in its place.
+    client.on("error", (err: Error) => reject(mismatch ?? classifyConnectError(err, target)));
     client.connect(cfg);
     // ssh2 leaves Nagle on and writes one SSH packet as several small TCP segments,
     // so without TCP_NODELAY every packet can stall behind the peer's delayed ACK

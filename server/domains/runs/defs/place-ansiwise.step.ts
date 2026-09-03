@@ -129,14 +129,15 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
  *
  *  WHY IT IS A SECOND STEP AND NOT THE FIRST ONE, and the reason is about the MACHINE and not about
  *  the row. A machine cannot bind an address it does not hold, and it holds no tailnet address until
- *  the rejoin above put it on the network; the binary refuses every other one (`--listen` outside
- *  100.64.0.0/10). What changes about the ROW in between is exactly one column, written by exactly
- *  one step: `declare-tailnet-address` (deploy-slave.address.ts) asks the COORDINATOR which address
- *  it gave this machine and puts that in `tailnetHost` — the coordinator assigned it, so the value
- *  is still the platform's own statement and not the host's account of itself. `read-membership`
- *  writes `tailnetState` and `tailnetJson` and nothing else (runs/tailnet-probe.ts
- *  `recordTailnetReading`), and those stay a READING: the address in them is what the machine says,
- *  which is the one thing this column may not be.
+ *  the join above put it on the network — outright on a deployment, and on a redeploy only where the
+ *  same step read that the machine holds none (defs/tailnet.kit.ts); the binary refuses every other
+ *  one (`--listen` outside 100.64.0.0/10). What changes about the ROW in between is exactly one
+ *  column, written by exactly one step: `declare-tailnet-address` (deploy-slave.address.ts) asks the
+ *  COORDINATOR which address it gave this machine and puts that in `tailnetHost` — the coordinator
+ *  assigned it, so the value is still the platform's own statement and not the host's account of
+ *  itself. `read-membership` writes `tailnetState` and `tailnetJson` and nothing else
+ *  (runs/tailnet-probe.ts `recordTailnetReading`), and those stay a READING: the address in them is
+ *  what the machine says, which is the one thing this column may not be.
  *
  *  THE ADDRESS IS THE ONE THE MANAGER WILL DIAL, stated here and bound there: the server row's
  *  tailnetHost with ANSIWISE_SERVICE_PORT after it, which is exactly what an `{ kind: "address" }`

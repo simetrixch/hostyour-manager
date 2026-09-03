@@ -12,7 +12,8 @@ const now = sql`(unixepoch('subsec') * 1000)`;
 // has no secret half at all — this manager never holds the private one — so a row there would
 // carry a blob to encrypt that is not a secret. The second reason is the one that decides it: a
 // credential of kind `ssh_key` is looked up BY SERVER, newest wins (server/executor/context.ts
-// getSsh, and the adopt run's install-key), so a human key filed against a server would become the
+// getSsh, and install-key in domains/runs/defs/manager-key.kit.ts), so a human key filed against a
+// server would become the
 // identity this manager tries to log in with — a different key, the same lookup.
 //
 // NO LINK TO `operators`. That table is an IdP identity written at first OIDC login; a key is

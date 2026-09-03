@@ -49,16 +49,18 @@ export const servers = sqliteTable("servers", {
   machineId: text("machine_id"),                                   // /etc/machine-id; NULL until the first deploy backfills it (executor/attest.ts)
   preflightJson: text("preflight_json", { mode: "json" }),
   // Tailnet membership, per SERVER — a second axis beside `status`, on this table rather than on
-  // `clusters` because a machine joins the private network BEFORE it is deployed and a bare/ready
-  // server has no cluster row to carry it. Every writer goes through recordTailnetReading
-  // (domains/runs/tailnet-probe.ts): adopt's `baseline`, which reads a machine the platform has
-  // never touched; deploy-slave's `install-microk8s`, which reads it again right after the host
-  // joins — that second one is what a live slave's row actually carries, since the client only
-  // exists after the base install; and the `read-membership` step every tailnet repair run kind ends
-  // with, which is what makes a disconnect or a rejoin visible on the card that offered it. State
-  // and document go down in ONE statement, so a membership can never be stored without the moment
-  // and the run that produced it. The default is "unknown" — the honest reading of a row nothing
-  // has looked at, and the only literal no step writes.
+  // `clusters` because the reading is about the MACHINE and a server that carries no cluster row
+  // still has one. Every writer goes through recordTailnetReading (domains/runs/tailnet-probe.ts).
+  // Two of them read a host that has already joined: the `rejoin` step (domains/runs/defs/
+  // tailnet.kit.ts), which reads the host straight after it joins, and the `read-membership` step
+  // the deployment and every tailnet repair run kind end with, which is what makes a disconnect or a
+  // rejoin visible on the card that offered it. The third reads a host that may hold nothing:
+  // `join-if-absent`, the measured join a redeploy gets, whose reading is what decides whether the
+  // machine is put back on the network at all. A machine no run has joined has no reading to take —
+  // the client arrives with the base install — so its row honestly stays at the default. State and
+  // document go down in ONE statement, so a membership can never be stored without the moment and
+  // the run that produced it. The default is "unknown" — the honest reading of a row nothing has
+  // looked at, and the only literal no step writes.
   tailnetState: text("tailnet_state", { enum: SERVER_TAILNET_STATE }).notNull().default("unknown"),
   tailnetJson: text("tailnet_json", { mode: "json" }),              // ServerTailnetV0 (shared/tailnet.ts)
   // Whether this host's sshd takes a PASSWORD, per SERVER — a third axis beside `status` and the
@@ -67,25 +69,32 @@ export const servers = sqliteTable("servers", {
   // recordPasswordLoginReading (domains/runs/password-login-probe.ts), which reads `sshd -T` and
   // nothing else: a drop-in file can say `PasswordAuthentication no` while the daemon answers
   // `yes`, because sshd takes the FIRST occurrence of a keyword and reads its drop-in directory in
-  // alphabetical order. Three moments write it — adopt's `disable-password-login`, which reads the
-  // host before it shuts the door and again after, and the two password-login run kinds, which do the
-  // same on a host that is already adopted. The default is "unknown", the honest reading of a row
-  // nothing has looked at, and the only literal no step writes.
+  // alphabetical order. Two steps write it — `disable-password-login`, which reads the host before
+  // it shuts the door and again after, and `enable-password-login`, which does the same opening it;
+  // the deployment composes the first of them and the two password-login run kinds are each one of
+  // them whole. The default is "unknown", the honest reading of a row nothing has looked at, and the
+  // only literal no step writes.
   passwordLoginState: text("password_login_state", { enum: SERVER_PASSWORD_LOGIN_STATE }).notNull().default("unknown"),
   passwordLoginJson: text("password_login_json", { mode: "json" }),  // ServerPasswordLoginV0 (shared/password-login.ts)
   // WHO this host lets in, per SERVER — a fourth axis beside `status` and the two pairs above, and
   // the same shape: the state the card keys on, plus the document listing every key line the
   // reading found. Every writer goes through recordAuthorizedKeysReading
   // (domains/runs/operator-keys-probe.ts), which reads ~/.ssh/authorized_keys on the host and
-  // classifies each line against two things this manager knows — the marker adopt wrote and the
-  // fingerprint of the ssh_key credential sealed for this server. Four moments write it: adopt's
-  // `baseline`, which reads a machine straight after the manager's own key landed on it, and the
-  // three operator-key run kinds. The default is "unknown", the honest reading of a row nothing has
-  // looked at, and the only literal no step writes.
+  // classifies each line against two things this manager knows — the marker this manager's own key
+  // carries (shared/operator-keys.ts managerKeyMarker) and the fingerprint of the ssh_key credential
+  // sealed for this server. Four moments write it: `install-key` (domains/runs/defs/
+  // manager-key.kit.ts), which reads the file straight after this manager's own key lands in it, and
+  // the three operator-key run kinds. The default is "unknown", the honest reading of a row nothing
+  // has looked at, and the only literal no step writes.
   authorizedKeysState: text("authorized_keys_state", { enum: SERVER_AUTHORIZED_KEYS_STATE }).notNull().default("unknown"),
   authorizedKeysJson: text("authorized_keys_json", { mode: "json" }),  // ServerAuthorizedKeysV0 (shared/operator-keys.ts)
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
+  // WHEN THIS MANAGER LAST PROVED IT CAN LOG IN TO THE MACHINE WITH ITS OWN KEY. `verify-key-login`
+  // (domains/runs/defs/manager-key.kit.ts) writes it, over a session that authenticates with the
+  // sealed ssh_key credential and with nothing else, so the stamp is a reading and not a state
+  // somebody chose. It says that login answered at that moment and nothing else: how far a
+  // deployment got is `status`, and whether the key still stands is the credential.
   adoptedAt: integer("adopted_at", { mode: "timestamp_ms" }),
 }, (t) => [
   uniqueIndex("servers_name_uq").on(t.name),

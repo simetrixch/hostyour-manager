@@ -12,7 +12,7 @@ import type { SshTransport } from "./transport.ts";
 
 /** Memory-only secret channel (one-time password etc.). Implemented by RunSecretsMap. */
 export interface RunSecrets {
-  get(name: string): Buffer | undefined; // e.g. "adopt-password"
+  get(name: string): Buffer | undefined; // e.g. "ansiwise-elevation"
   wipe(name?: string): void; // zero + delete (all, when name omitted)
 }
 
@@ -36,15 +36,15 @@ export interface StepCtx {
    *  (ctx.ssh(serverId) to an aux target) is not implemented yet; a run is single-target. */
   ssh(serverId?: string): Promise<SshSession>;
 
-  /** The adopt password ceremony ONLY. Open a PASSWORD-authed session to the run's
-   *  ownsHost target from RunSecrets("adopt-password") and record the host key trust-on-
-   *  first-use onto the server row, so the later key session (ssh()) can pin it. Cached per
-   *  run; later ceremony steps get the same session until closePasswordSession(). Throws
-   *  MissingRunSecret when the password is gone (crash/restart). Normal
-   *  runs never touch this — they use ssh() (key, cached). */
-  openPasswordSession(): Promise<SshSession>;
-  /** Close + evict the password session (adopt step 6 discard-password, after key login is
-   *  verified). No-op if none is open. */
+  /** The PASSWORD door to the run's ownsHost target, opened from the run secret NAMED by the caller
+   *  — the run kind holding the password is what knows what it is called. The row's pinned host key
+   *  goes into the connection, so a machine presenting a different one is refused during key exchange
+   *  and the password is never sent; a row that pins none has what the machine presents recorded onto
+   *  it. Cached per run: every later caller gets the same session until closePasswordSession().
+   *  Throws MissingRunSecret when the password is gone (a restart drops run secrets). A step that
+   *  only needs to reach a machine this manager already holds a key for uses ssh() instead. */
+  openPasswordSession(secretName: string): Promise<SshSession>;
+  /** Close + evict the password session. No-op if none is open. */
   closePasswordSession(): void;
   /** Machine-identity attestation. Not implemented yet; the interface is final here. */
   attest(serverId?: string): Promise<void>;
@@ -94,7 +94,8 @@ export interface Plan {
   summary: string;
   steps: ReadonlyArray<Pick<Step, "name" | "title">>;
   /** Optional with executor defaulting: targetKind==='server' ⇒
-   *  [{serverId: targetId, ownsHost: true, label: name}]. So the adopt run compiles with zero edits. */
+   *  [{serverId: targetId, ownsHost: true, label: name}]. So a run kind acting on one server declares
+   *  nothing. */
   targets?: RunTargetRef[];
   locks?: LockClaim[]; // extra claims beyond the derived server:*; defaults to []
   warnings: string[];
@@ -160,7 +161,7 @@ export interface RunDefinition<P = Record<string, unknown>> {
    *  is always abortable, as before. */
   assertAbortable?(params: P, deps: { db: Db }): Promise<void>;
   /** Called once after the run commits a terminal status (succeeded/failed/cancelled), for
-   *  status choreography — e.g. adopt resets the server `adopting → bare` on failure
+   *  status choreography — e.g. deploy-slave parks the server row on failure
    *. Sync, idempotent, fast; a throw is logged and swallowed. */
   onTerminal?(status: RunStatus, deps: { db: Db; runId: string; params: P }): void;
 }

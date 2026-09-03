@@ -21,7 +21,6 @@ export function relevantRun(serverId: string, runs: RunView[]): RunView | undefi
  *  with no entry reads as "<kind> run", which is right for every run kind whose own name already is a
  *  noun phrase. */
 const RUN_NOUN: Partial<Record<RunKind, string>> = {
-  "cluster-adopt": "adoption",
   "cluster-deploy-slave": "deployment",
   "cluster-tailnet-disconnect": "tailnet disconnect",
   "cluster-tailnet-reconnect": "tailnet reconnect",
@@ -35,8 +34,8 @@ const RUN_NOUN: Partial<Record<RunKind, string>> = {
 
 export function runLine(run: RunView): string {
   const noun = RUN_NOUN[run.kind] ?? `${run.kind} run`;
-  // "A adoption" is what a fixed article produces the moment a noun starts with a vowel, and the
-  // noun list is open — every run kind added to RUN_NOUN chooses its own first letter.
+  // "A operator key placement" is what a fixed article produces the moment a noun starts with a
+  // vowel, and the noun list is open — every run kind added to RUN_NOUN chooses its own first letter.
   const a = /^[aeiou]/i.test(noun) ? "An" : "A";
   if (run.status === "planned") return `${a} ${noun} is planned — approve it`;
   if (run.status === "running") return `${a} ${noun} is running — watch it`;

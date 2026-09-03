@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { HOST_ADDRESS_COMMAND, hostAddressesFrom } from "./defs/deploy-slave.ts";
+import { HOST_ADDRESS_COMMAND, hostAddressesFrom } from "./defs/deploy-slave.remote.ts";
 import { statedTarget } from "./defs/deploy-slave.kit.ts";
 import { deploySlaveSteps } from "./defs/deploy-slave.ts";
 import type { Cleanup } from "../../executor/types.ts";

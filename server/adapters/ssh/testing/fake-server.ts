@@ -32,6 +32,15 @@ export interface FakeServerOptions {
 export interface FakeSshServer {
   port: number;
   hostKeyFingerprint: string;
+  /** EVERY AUTHENTICATION METHOD THAT REACHED THIS SERVER, in arrival order, and the array is live
+   *  for the lifetime of the fixture.
+   *
+   *  It exists so a test can assert that a credential was NOT OFFERED, which is a different and much
+   *  stronger statement than "the session did not open". A method appears here only once the client
+   *  has sent it, and a client sends it only after key exchange has completed and the host key has
+   *  been accepted — so an empty array after a refused connect is proof that the refusal happened
+   *  while the credential was still on the client's side of the wire. */
+  authMethodsSeen: string[];
   close(): Promise<void>;
 }
 
@@ -61,12 +70,17 @@ export async function startFakeSshServer(opts: FakeServerOptions = {}): Promise<
     return b64 ? Buffer.from(b64, "base64") : Buffer.alloc(0);
   });
 
+  const authMethodsSeen: string[] = [];
+
   const server = new Server({ hostKeys: [hostKey.privateOpenSsh] }, (client) => {
     // sshd sets TCP_NODELAY on its side of the connection; without it every reply
     // (ssh2 writes one SSH packet as several small TCP segments) stalls behind the
     // client's delayed ACK. ssh2's Connection has setNoDelay; @types/ssh2 omits it.
     (client as unknown as { setNoDelay(noDelay?: boolean): void }).setNoDelay(true);
     client.on("authentication", (ctx: AuthContext) => {
+      // Recorded BEFORE the method is judged: what a test asks of this array is whether the
+      // credential arrived at all, which is true of a refused one as much as of an accepted one.
+      authMethodsSeen.push(ctx.method);
       if (ctx.method === "password") {
         if (opts.acceptPassword !== undefined && ctx.password === opts.acceptPassword) ctx.accept();
         else ctx.reject();
@@ -147,6 +161,7 @@ export async function startFakeSshServer(opts: FakeServerOptions = {}): Promise<
   return {
     port,
     hostKeyFingerprint: hostKey.fingerprint,
+    authMethodsSeen,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

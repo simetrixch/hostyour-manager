@@ -3,10 +3,11 @@
 // network between the master and its slaves, so it is the word an operator meets in the software's
 // own output.
 //
-// The pair sits on `servers` and not on `clusters`, where the plane pair sits, because the plane's
-// row is created by deploy-slave's attest-target: a server at "bare", "adopting" or "ready" has no
-// cluster row at all, and that is exactly the machine whose membership has to be visible — it joins
-// the network before it is deployed.
+// The pair sits on `servers` and not on `clusters`, where the plane pair sits, because a cluster row
+// is only as old as the deployment that wrote it: a server at "bare" has none at all, and a machine
+// whose deployment stopped part way carries one that is not live. Both are machines whose membership
+// has to be visible — the join runs inside the deployment, so a run that got that far put the host on
+// the network and a run that stopped after it left it there.
 import { z } from "zod";
 import type { ServerTailnetFacts, ServerTailnetRead } from "./api-types.ts";
 import type { ServerTailnetState } from "./enums.ts";

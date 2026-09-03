@@ -5,7 +5,6 @@ import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
 import { getRun, approveRun, deleteRun, cancelRun, retryRun, skipRun, abortRun, getRunTenantState } from "../api.ts";
 import { coalesced, RUN_REFRESH_WINDOW_MS } from "../coalesce.ts";
 import { abortOffer, runOnScreen } from "../runScreen.ts";
-import { IconLock } from "../components/icons.tsx";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SkipStepDialog } from "../components/SkipStepDialog.tsx";
 import { RunApproveForm } from "../components/RunApproveForm.tsx";
@@ -36,7 +35,6 @@ export function RunDetail() {
   const [loaded, setLoaded] = useState<RunView | null>(null); // what the last GET returned — see `run` below
   const [lines, setLines] = useState<RunEventView[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [password, setPassword] = useState(""); // adopt credential ceremony (memory-only)
   const [confirmDelete, setConfirmDelete] = useState(false); // delete-run confirm (our dialog, never window.confirm)
   const [showSkip, setShowSkip] = useState(false); // skip-step dialog (our dialog, never window.prompt)
   // What the tenant a FAILED create-tenant minted IS right now, resolved SERVER-SIDE from the tenants row
@@ -236,41 +234,7 @@ export function RunDetail() {
       {run.deletedAt === null &&
         run.status === "planned" &&
         run.kind !== "cluster-deploy-slave" &&
-        (run.kind === "cluster-adopt" ? (
-          <form
-            className="ceremony"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (password) act(() => approveRun(runId, { "adopt-password": password }));
-            }}
-          >
-            <div className="ceremony__head">
-              <span className="ceremony__icon" aria-hidden="true">
-                <IconLock />
-              </span>
-              <div>
-                <h3 className="ceremony__title">Credential ceremony</h3>
-                <p className="ceremony__sub">One password, one connection, one installed key.</p>
-              </div>
-            </div>
-            <label className="field">
-              <span className="field__label">One-time password</span>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
-            </label>
-            <p className="ceremony__note">
-              Used once to install an SSH key and never stored. After the key is verified the password is discarded from
-              memory — it is never written to disk, logs, or the audit trail.
-            </p>
-            <div className="actions">
-              <button type="submit" className="btn btn--primary" disabled={!password}>
-                Approve &amp; adopt
-              </button>
-              <button type="button" className="btn" onClick={() => setConfirmDelete(true)}>
-                Delete run
-              </button>
-            </div>
-          </form>
-        ) : run.requiredSecrets.length > 0 || run.requiredInputs.length > 0 ? (
+        (run.requiredSecrets.length > 0 || run.requiredInputs.length > 0 ? (
           <RunApproveForm
             requiredSecrets={run.requiredSecrets}
             requiredInputs={run.requiredInputs}
@@ -345,9 +309,9 @@ export function RunDetail() {
               offboard or remove run and never a side effect of tidying a list.
 
               A BAR THAT REFUSES IT HERE WHILE THE EXECUTOR ALLOWS IT THERE costs a machine nobody
-              can adopt again: a restored machine loses the key its adopt installed along with the
-              snapshot, and the run that recorded the adopt stands in the way of recording a new
-              one. */}
+              can deploy again: a restored machine loses the key the deployment installed along with
+              the snapshot, and the run that recorded the deployment stands in the way of recording a
+              new one. */}
           <span className="actionbar__text">
             This run finished. Deleting it hides it from the list — what it built keeps running, and its log stays in the audit
             database.

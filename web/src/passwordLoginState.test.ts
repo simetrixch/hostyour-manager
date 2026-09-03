@@ -12,10 +12,10 @@ const NOW = 1_700_000_000_000;
 function server(passwordLoginState: ServerPasswordLoginState, passwordLogin: ServerPasswordLoginRead, over: Partial<ServerView> = {}): ServerView {
   return {
     id: "srv_1", name: "s1", host: "203.0.113.7", lanHost: null, tailnetHost: null, sshPort: 22, sshUser: "root",
-    role: "slave", status: "ready", tailnetState: "unknown", tailnet: { kind: "none" },
+    role: "slave", status: "ready", cluster: null, tailnetState: "unknown", tailnet: { kind: "none" },
     passwordLoginState, passwordLogin,
     authorizedKeysState: "unknown", authorizedKeys: { kind: "none" },
-    createdAt: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true, ...over,
+    hostKeyPinned: null, machineIdRecorded: false, createdAt: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true, ...over,
   };
 }
 
@@ -94,12 +94,20 @@ describe("passwordLoginRunKindOffer — the buttons follow the key this manager 
     expect(passwordLoginRunKindOffer(server("on", facts()))).toEqual({ disable: true, enable: true });
   });
 
-  it("offers neither before the key is installed — there would be nothing to fall back on", () => {
-    // The plan refuses the same two statuses through the same predicate
-    // (defs/password-login.kit.ts), so the card cannot offer a run the server will reject.
-    for (const status of ["bare", "adopting"] as const) {
-      expect(passwordLoginRunKindOffer(server("unknown", { kind: "none" }, { status }))).toEqual({ disable: false, enable: false });
-    }
+  it("offers neither where no key stands — there would be nothing to fall back on", () => {
+    // The plan refuses on the same fact, the credential itself (defs/password-login.kit.ts), so the
+    // card cannot offer a run the server will reject.
+    expect(passwordLoginRunKindOffer(server("unknown", { kind: "none" }, { hasKey: false }))).toEqual({ disable: false, enable: false });
+  });
+
+  it("follows the key and not the status, in both directions", () => {
+    // A deployment moves the row to `provisioning` in its first step and parks it at `ready` when
+    // the run ends, whether or not it ever installed a key — so a status decides this wrongly for
+    // every run that stopped early, in both directions at once.
+    expect(passwordLoginRunKindOffer(server("unknown", { kind: "none" }, { status: "ready", hasKey: false })))
+      .toEqual({ disable: false, enable: false });
+    expect(passwordLoginRunKindOffer(server("unknown", { kind: "none" }, { status: "bare", hasKey: true })))
+      .toEqual({ disable: true, enable: true });
   });
 
   it("keeps offering the disable run kind on a host that once read off — a snapshot may not gate an act", () => {
@@ -109,9 +117,10 @@ describe("passwordLoginRunKindOffer — the buttons follow the key this manager 
   });
 
   it("offers both on the MASTER, which carries no adoptedAt at all and needs the run kind most", () => {
-    // seed-master registers the master at boot with status "healthy" and never adopts it, so a rule
-    // keyed on adoptedAt would hide these buttons from the one host whose door was measured.
-    expect(passwordLoginRunKindOffer(server("on", facts(), { role: "master", status: "healthy", adoptedAt: null })))
+    // seed-master registers the master at boot and seals its self-SSH key, so the credential is
+    // there while the column is not — a rule keyed on adoptedAt would hide these buttons from the
+    // one host whose door was actually measured.
+    expect(passwordLoginRunKindOffer(server("on", facts(), { role: "master", status: "healthy", adoptedAt: null, hasKey: true })))
       .toEqual({ disable: true, enable: true });
   });
 });

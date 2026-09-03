@@ -17,22 +17,29 @@ import { ANSIWISE_PIN_PATH } from "../inventory/ansiwise-pin.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import { servers } from "../../db/schema/inventory.ts";
 import { meta } from "../../db/schema/meta.ts";
-import { ExecFailedError } from "../../adapters/ssh/port.ts";
+import { AuthFailedError, ExecFailedError } from "../../adapters/ssh/port.ts";
 import type { SshFactory, SshSession, SshTarget, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
 import { answerPlacementCommand, ScriptedReleases } from "./deploy-slave.placement.fixture.ts";
 import { FakeMetricsQuery } from "../../adapters/metrics/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { VERIFY_SLAVE_TIMEOUT_MS } from "./defs/deploy-slave.verify.ts";
-import { HOST_ADDRESS_COMMAND } from "./defs/deploy-slave.ts";
+import { HOST_ADDRESS_COMMAND } from "./defs/deploy-slave.remote.ts";
 // The maps this harness seeds, beside the harness rather than inside it — a fixture map is read
 // by suites that never touch a harness, and it is the one thing here that states a real file.
 export { SLAVE_MARKING_YAML, MASTER_MARKING_YAML } from "./cluster-maps.fixture.ts";
 import { SLAVE_MARKING_YAML, MASTER_MARKING_YAML, SLAVE_FQDN, FIXTURE_STAGE } from "./cluster-maps.fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
+import { fingerprintPublicKey } from "../../security/fingerprint.ts";
+// The first-contact half of the scripted machine — the state it holds, the answers it gives, and
+// the password it answers a root command for — beside the harness for the reason the placement half
+// is: it is one machine, and a caller that drives the composed run reads what first contact left off
+// the same object.
+export { IMAGE_KEY_LINE, ELEVATION_PASSWORD } from "./deploy-slave.first-contact.fixture.ts";
+import { answerFirstContactCommand, answerRootCommand, firstContactDefaults, takesManagerKey, ELEVATION_PASSWORD, type FirstContactScript } from "./deploy-slave.first-contact.fixture.ts";
 
 // The deploy-slave test fixture (shared by deploy-slave.test.ts — plan/guards/failure modes —
-// and redeploy.ansiwise.test.ts — the journeys over the REAL `ansiwise-rest serve`): a scripted
+// and deploy-slave.ansiwise.suite.ts — the journeys over the REAL `ansiwise-rest serve`): a scripted
 // two-host setup, the harness wiring, and the fake-timer helper that expires verify-slave's
 // bounded retry window without ever waiting real minutes. The deployment programs themselves are
 // NOT scripted here: every program act goes over a serve conversation (openConversation), which
@@ -56,26 +63,56 @@ export const PARAMS = { serverId: SLAVE_ID, stage: FIXTURE_STAGE, domain: SLAVE_
 export const CATALOGUE_ORIGIN_URL = "https://github.com/acme/acme-deploy.git";
 export const PULL_AUTH = "cHVsbGVyOnB1bGwtcGFzc3dvcmQ=";
 
+/** The whole of what deploying a slave is, in order: the attest, then the six FIRST-CONTACT steps,
+ *  then the preflight, then the two doors the run shuts, and then the machine layer over the
+ *  deployment programs. This run kind takes a machine from wherever it stands — a box this manager
+ *  has never logged in to included — so establishing the key it reaches the machine with is the head
+ *  of this list rather than a run kind of its own (defs/deploy-slave.ts).
+ *
+ *  ORDER IS BEHAVIOUR HERE, not layout, and two rules decide it — each one asserted by its own test
+ *  in deploy-slave.test.ts rather than only by this list's shape:
+ *    - `remove-sudoers` before `disable-password-login`, because the step that takes the standing
+ *      passwordless-root grant away may only run where every root command after it is raised with
+ *      the run's own password;
+ *    - `verify-key-login` before both irreversible acts, because shutting the daemon's password
+ *      door and destroying the sealed bootstrap password each remove a way in, and the way in that
+ *      stays has to be proven first. */
 export const STEP_NAMES = [
-  "attest-target", "slave-preflight", "prepare-checkouts", "run-deploy-slave-branch", "mark-slave",
+  "attest-target",
+  "prove-elevation", "generate-key", "install-key", "verify-key-login", "enable-ntp", "remove-sudoers",
+  "slave-preflight", "disable-password-login", "purge-bootstrap-password",
+  "prepare-checkouts", "run-deploy-slave-branch", "mark-slave",
   "place-ansiwise", "run-deploy-host", "refresh-checkout", "place-input", "run-deploy-cluster",
   "run-deploy-platform-services", "drop-input",
   "rejoin", "read-membership", "declare-tailnet-address", "enable-ansiwise-service", "create-mgmt",
   "gitops-handoff", "verify-slave", "register",
 ];
-/** The redeploy slave arm: the same list minus the two birth acts (the branch cut with its
- *  checkout preparation, and the tailnet join with its membership read). */
-export const REDEPLOY_STEP_NAMES = STEP_NAMES.filter(
-  (n) => !["prepare-checkouts", "run-deploy-slave-branch", "rejoin", "read-membership"].includes(n),
-);
+/** The redeploy slave arm: the same list minus the one birth act — the branch cut with its checkout
+ *  preparation — and with the outright join in the MEASURED form that reads the machine's membership
+ *  and puts a machine holding none back on the network (`join-if-absent`).
+ *
+ *  NEITHER FIRST CONTACT NOR THE MEMBERSHIP READ IS SUBTRACTED, because neither is a birth act: every
+ *  first-contact step measures before it acts, so on a live slave they read a key that is installed, a
+ *  login that works and doors that are already shut, and each says so; and a redeploy owes the card a
+ *  reading of the membership as much as a deployment does. What a redeploy holds back is their
+ *  compensations, which redeploy.ansiwise.test.ts asserts off the run's own checkpoints. */
+export const REDEPLOY_STEP_NAMES = STEP_NAMES.flatMap((n) =>
+  n === "rejoin" ? ["join-if-absent"]
+    : ["prepare-checkouts", "run-deploy-slave-branch"].includes(n) ? [] : [n]);
 
-// The public half of the key adopt installed — deploy-host's operator_public_key answer is read
+// The public half of the key `install-key` puts on the machine — deploy-host's operator_public_key answer is read
 // off the newest ssh_key credential's stored public line.
-export const SLAVE_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5TESTKEY hostyour:s1";
+//
+// THE BLOB IS THE LENGTH A REAL ONE IS, because the authorized-keys reading parses what the machine
+// hands back and a shorter blob is not a key line at all to it (shared/operator-keys.ts BLOB_RE) —
+// so a stand-in that looked like one here would be counted as a line this manager could not read
+// rather than as its own installed key, and the reading after install-key would say the opposite of
+// what happened.
+export const SLAVE_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAISlaveTestKeyAAAAAAAAAAAAAAAAAAAAAAAAAAAA hostyour:s1";
 
 /** The same for the master, whose own machine layer the redeploy arm now runs too: its deploy-host
  *  is owed the public half of the key this manager reaches it with, exactly as a slave's is. */
-export const MASTER_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5TESTKEY hostyour:m1";
+export const MASTER_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMasterTestKeyAAAAAAAAAAAAAAAAAAAAAAAAAAA hostyour:m1";
 
 /** The platform repository as owner/name, the way this installation names it. */
 export const PLATFORM_ORIGIN = "acme/platform";
@@ -110,7 +147,7 @@ export const EMIT_CREDS_JSON = JSON.stringify(
   null, 2,
 );
 
-// A healthy slave preflight: adopt's checks + the slave musts (80/443 free, snapd present).
+// A healthy slave preflight: the catalogue's checks + the slave musts (80/443 free, snapd present).
 export const HEALTHY_SLAVE_PREFLIGHT = [
   "CHECK os.ubuntu PASS ubuntu 26.04",
   "CHECK os.arch PASS x86_64",
@@ -132,23 +169,11 @@ export const HEALTHY_SLAVE_PREFLIGHT = [
 // are keyed by target.host — the slave answers on its LAN address (10.1.1.11), the master on
 // its FQDN — which lets the tests assert multi-target routing end to end. Every remote exec leg
 // of the steps has a scripted answer; the PROGRAM conversations go through openConversation.
-export interface HostsScript {
-  /** WHETHER THIS MACHINE CARRIES THE SUDOERS DROP-IN AN ADOPTION WRITES, which is the whole of what
-   *  a `sudo -n` this manager sends stands on.
-   *
-   *  IT DEFAULTS TO `false`, the machine that grants NOTHING without a password. That is what a
-   *  first master installed by ansiwise-client really is (measured on one on 2026-08-27: a README
-   *  in /etc/sudoers.d/ and no rule), and it is stricter than an adopted slave — so a run proven
-   *  here works on both, and a step that reaches for a standing rule is refused here instead of
-   *  months later on somebody's machine. `true` is only for the one act that genuinely needs the
-   *  adoption's file: the destructive microk8s reset a failed slave install runs as a cleanup, which
-   *  fires on an abort that may already have discarded the run's password.
-   *
-   *  A `sudo -S` is answered on either machine, and only when the elevation password really rode on
-   *  standard input: what authenticates the account is the password the RUN carries, so a step that
-   *  composed the elevation and did not hand the password through is loud here rather than green
-   *  here and refused on a real host. */
-  adopted: boolean;
+//
+// The FIRST-CONTACT half of the machine is declared and answered beside it
+// (deploy-slave.first-contact.fixture.ts): what the machine holds there is read and written by the
+// acts this manager sends, so its state and its answers stay in one place.
+export interface HostsScript extends FirstContactScript {
   machineId: string;
   dnsOut: string;
   preflightOut: string;
@@ -166,7 +191,16 @@ export interface HostsScript {
   credsExit: number;
   mintedKeyOut: string;   // the join (master): what `cat` of the mint program's key file answers
   mintedKeyExit: number;
-  tailnetProbeOut: string; // read-membership (slave): what the joined client reports back
+  /** What the client on this machine reports about its own membership, to every probe of a run. A
+   *  LIST is a machine the run itself changes: one reading is handed out per probe and the last one
+   *  stands for every probe after it — which is what a machine that comes in off the network and is
+   *  joined answers, and the only way its two readings can differ, since the join happens inside a
+   *  program run the scripted host never sees. */
+  tailnetProbeOut: string | string[];
+  /** What the probe EXITS with, absent (0) on every machine that answers it at all — the one script
+   *  of this manager whose every branch exits 0 and prints what it found, so a non-zero here is a
+   *  machine that never took the reading rather than one that reports being off the network. */
+  tailnetProbeExit?: number;
   /** WHAT `headscale nodes list -o json` PRINTS ON THE MASTER — declare-tailnet-address reads the
    *  address it puts on the row out of this, and out of nothing on the slave. The default lists the
    *  fixture slave under its own name with the address the slave row carries, so every suite that
@@ -262,16 +296,9 @@ export interface HostsScript {
   files: { host: string; path: string; content: string; mode: number }[];
 }
 
-/** The elevation password every approve in these suites carries, and the ONE the scripted machine
- *  answers a `sudo -S` for. Written down once because two values would let a call site hand the
- *  wrong buffer through and still be answered; deliberately unmistakable because the suites also
- *  assert it appears in no command line and in no file the machine was written, and a value that
- *  could occur by accident would make those assertions weaker than they read. */
-export const ELEVATION_PASSWORD = "elevation-password-SECRET-0007";
-
 export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript {
   return {
-    adopted: false,
+    ...firstContactDefaults(),
     machineId: "abc123def4567890abc123def4567890",
     dnsOut: "DNS_WILDCARD 198.51.100.10",
     preflightOut: HEALTHY_SLAVE_PREFLIGHT,
@@ -337,6 +364,14 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
 export function hostsFactory(f: HostsScript): SshFactory {
   return (target: SshTarget) => {
     const host = target.host;
+    // THE KEY DOOR, answered before anything else, because it decides whether there is a session to
+    // send a command over at all (takesManagerKey, deploy-slave.first-contact.fixture.ts). The
+    // refusal arrives as AuthFailedError and never as a bare Error: those two mean different things
+    // to the door, and only one of them may end in the operator's password being offered
+    // (adapters/ssh/port.ts).
+    if (target.auth.kind === "key" && !takesManagerKey(f)) {
+      return Promise.reject(new AuthFailedError(target.username, new Error("All configured authentication methods failed")));
+    }
     const execImpl = async (command: string, o: ExecOptions): Promise<ExecResult> => {
       f.log.push({ host, command, ...(o.stdin !== undefined ? { stdin: o.stdin } : {}) });
       const faultIdx = f.execFaults.findIndex((x) => command.includes(x.match));
@@ -348,22 +383,15 @@ export function hostsFactory(f: HostsScript): SshFactory {
         for (const l of s.split("\n")) o.onStdout?.(l);
       };
       const done = (code = 0): ExecResult => ({ code, stdoutTail: "", stderrTail: "" });
-      // HOW THIS MACHINE ANSWERS A ROOT COMMAND — asked before anything is matched on, because it is
-      // the machine's answer and not the manager's intention. Asked with `includes` and not
-      // `startsWith`, because a `sudo -n` can stand inside a compound line and the machine judges it
-      // there just the same. See HostsScript.adopted.
-      if (command.includes("sudo -S ")) {
-        // THE FIRST LINE AND ONLY THE FIRST LINE. `sudo -S` reads the password up to the first
-        // newline and hands everything after it to the command it raises, which is how a value can
-        // reach a root-owned file without standing in an argument list every account on the machine
-        // could read. So the check is the one sudo itself makes; demanding that nothing follows would
-        // refuse the one shape that keeps a credential off a command line.
-        if (!o.stdin?.toString("utf8").startsWith(`${ELEVATION_PASSWORD}\n`)) {
-          throw new Error(`sudo -S shipped without the run's elevation password on stdin: ${command}`);
-        }
-      } else if (command.includes("sudo -n ") && !f.adopted) {
-        return { code: 1, stdoutTail: "", stderrTail: "sudo: interactive authentication is required" };
-      }
+      // HOW THIS MACHINE ANSWERS A ROOT COMMAND, and what it answers of FIRST CONTACT — both from
+      // the module that holds the state each of them is judged against, because the rule and the
+      // fact it reads may not live apart (deploy-slave.first-contact.fixture.ts). Asked before
+      // anything else is matched on, because it is the machine's answer and not the manager's
+      // intention.
+      const refusal = answerRootCommand(f, command, o.stdin);
+      if (refusal !== undefined) return { code: 1, stdoutTail: "", stderrTail: refusal };
+      const firstContact = answerFirstContactCommand(f, command);
+      if (firstContact !== undefined) { emit(firstContact.out); return done(firstContact.code); }
       if (command === "cat /etc/machine-id") { emit(f.machineId); return done(); }
       if (command.includes("dc-dns-probe-")) { emit(f.dnsOut); return done(); }
       if (command.includes("dc-slave-preflight-")) { emit(f.preflightOut); return done(); }
@@ -384,7 +412,9 @@ export function hostsFactory(f: HostsScript): SshFactory {
       if (command.includes("ansiwise-cluster-credentials")) return done();
       if (command.startsWith("cat ") && command.includes("ansiwise-tailnet-join-key-")) { emit(f.mintedKeyOut); return done(f.mintedKeyExit); }
       if (command.includes("ansiwise-tailnet-join-key-")) return done();
-      if (command.includes("dc-tailnet-probe-")) { emit(f.tailnetProbeOut); return done(); }
+      // ---- the client's account of its own membership, one reading per probe where the field is a
+      // list (tailnetProbeOut): a run that puts the machine back on the network reads it twice.
+      if (command.includes("dc-tailnet-probe-")) { const p = f.tailnetProbeOut; emit(typeof p === "string" ? p : (p.length > 1 ? p.shift() : p[0]) ?? ""); return done(f.tailnetProbeExit); }
       // ---- declare-tailnet-address's one reading, and it answers on the MASTER: the coordinator is
       // a workload of the master's cluster, and the machine being deployed is never asked.
       if (command.includes("headscale") && command.includes("nodes list")) { emit(f.coordinatorNodesOut); return done(f.coordinatorNodesExit); }
@@ -405,7 +435,11 @@ export function hostsFactory(f: HostsScript): SshFactory {
       // ---- the input the manager places for the length of a run. Answered on stdoutTail, because
       // that is where the step reads it back to decide whether it has anything to write.
       if (command.startsWith("cat ") && command.includes("secrets/secrets")) { emit(f.inputOut); return done(); }
-      // ---- cleanups
+      // ---- cleanups. The reset MEASURES before it acts, and the machine answers `snap list` as one
+      // that carries the snap: the compensation is armed by deploy-cluster, which is the step that
+      // installs it, so by the time an abort can run this the snap is there. Answered here rather
+      // than by falling through, because it is what decides whether the destructive half runs at all.
+      if (command === "snap list microk8s") return done();
       if (command.includes("snap remove --purge microk8s")) return done();
       return done();
     };
@@ -546,9 +580,13 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
     id: SLAVE_ID, name: "s1", host: "s1.example.com", lanHost: "10.1.1.11", tailnetHost: "100.64.0.11",
     sshPort: 22, sshUser: "ubuntu", role: "slave", status: "ready",
   }).run();
-  // publicKey rides the credential the way adopt seals it — deploy-host's operator_public_key
-  // answer is read off exactly this line.
-  await store.seal({ kind: "ssh_key", label: "slave key", plaintext: Buffer.from("fake-slave-key"), fingerprint: "SHA256:slave", serverId: SLAVE_ID, publicKey: SLAVE_PUBLIC_KEY });
+  // publicKey rides the credential the way `generate-key` seals it — deploy-host's operator_public_key
+  // answer is read off exactly this line, and the FINGERPRINT is the one that line really has, because
+  // that is the only thing the authorized-keys reading has to tell this manager's own installed key
+  // from a stranger's (domains/runs/operator-keys-probe.ts classifies by fingerprint and never by the
+  // marker comment). A credential sealed under a made-up fingerprint would make the run's own key read
+  // as foreign on the machine it was just installed on.
+  await store.seal({ kind: "ssh_key", label: "slave key", plaintext: Buffer.from("fake-slave-key"), fingerprint: fingerprintPublicKey(SLAVE_PUBLIC_KEY), serverId: SLAVE_ID, publicKey: SLAVE_PUBLIC_KEY });
   if (opts.master !== false) {
     db.db.insert(servers).values({
       id: MASTER_ID, name: "m1", host: "m1.example.com",
@@ -557,7 +595,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
       // master); the fake session reports "SHA256:fixture" as its host key.
       preflightJson: { hostKey: "SHA256:fixture" },
     }).run();
-    await store.seal({ kind: "ssh_key", label: "master key", plaintext: Buffer.from("fake-master-key"), fingerprint: "SHA256:master", serverId: MASTER_ID, publicKey: MASTER_PUBLIC_KEY });
+    await store.seal({ kind: "ssh_key", label: "master key", plaintext: Buffer.from("fake-master-key"), fingerprint: fingerprintPublicKey(MASTER_PUBLIC_KEY), serverId: MASTER_ID, publicKey: MASTER_PUBLIC_KEY });
   }
   return { db, executor, store, hosts, platformRepo, releases, runPorts, ...(metrics ? { metrics } : {}) };
 }

@@ -5,12 +5,11 @@ import type { AppEnv } from "../../http/app-env.ts";
 import type { ClustersView, StoreMode } from "../../../shared/api-types.ts";
 import { listRuns } from "../../executor/read.ts";
 import { listLocks } from "../../executor/locks.ts";
-import { listServers, getServer } from "./read.ts";
-import { createServer, deleteServer, openBootstrapPassword, serverCredFlags, CreateServerInput } from "./write.ts";
+import { listServers } from "./read.ts";
+import { createServer, deleteServer, serverCredFlags, CreateServerInput } from "./write.ts";
+import { restateMachineIdentity, RestateMachineIdentityInput } from "./machine-identity.ts";
 import { createOperatorKey, deleteOperatorKey, listOperatorKeys, CreateOperatorKeyInput } from "./operator-keys.ts";
-import { errNotFound } from "../../kernel/errors.ts";
 import type { CredentialStore } from "../../security/store.ts";
-import type { Executor } from "../../executor/executor.ts";
 import { isMasterRole } from "../../../shared/enums.ts";
 
 export interface ClustersApiDeps {
@@ -21,8 +20,10 @@ export interface ClustersApiDeps {
 
 export interface ServerApiDeps {
   db: Db;
+  /** Read only, and for ONE question: which servers this manager already holds a credential for
+   *  (`serverCredFlags`), plus the purge a delete performs. Nothing on this surface seals one — a
+   *  credential is placed on a machine by a run, never by a route. */
   creds: CredentialStore;
-  executor: Executor;
   actor: () => string;
 }
 
@@ -61,11 +62,12 @@ export function registerClustersRoutes(app: Hono<AppEnv>, deps: ClustersApiDeps)
   app.get("/api/locks", (c) => c.json(listLocks(deps.db)));
 }
 
-/** Server inventory routes. Create can
- *  store a bootstrap password (sealed); the list offers 1-click adopt. All behind the auth
- *  chokepoint + CSRF. */
+/** Server inventory routes: WHERE a machine is, and nothing that touches one. Adding a server records
+ *  an address, a user and a port; every act that reaches the machine — installing this manager's key
+ *  included — is a run, planned through POST /api/runs, because it has a plan, an approval and a log.
+ *  All behind the auth chokepoint + CSRF. */
 export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): void {
-  const { db, creds, executor } = deps;
+  const { db, creds } = deps;
 
   app.get("/api/servers", async (c) =>
     c.json({ servers: listServers(db, await serverCredFlags(creds)) }),
@@ -73,11 +75,24 @@ export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): vo
 
   app.post("/api/servers", async (c) => {
     const input = CreateServerInput.parse(await c.req.json().catch(() => ({})));
-    return c.json({ server: await createServer(db, creds, deps.actor(), input) }, 201);
+    return c.json({ server: createServer(db, deps.actor(), input) }, 201);
   });
 
   app.delete("/api/servers/:id", async (c) => {
     await deleteServer(db, creds, deps.actor(), c.req.param("id"));
+    return c.json({ ok: true });
+  });
+
+  // The one statement a person makes about a machine that no reading can replace: this machine was
+  // rebuilt, and here is the host key it presents now. Every run refuses a machine whose host key is
+  // not the one recorded for it, and refuses it before a credential is offered — which is right, and
+  // which leaves an operator who reinstalled the box with a machine nothing can reach. This route is
+  // how they say so; it writes the two numbers this manager records about the machine's operating
+  // system (machine-identity.ts) and reaches nothing. The machine still has to present the stated
+  // key on the next run.
+  app.post("/api/servers/:id/machine-identity", async (c) => {
+    const input = RestateMachineIdentityInput.parse(await c.req.json().catch(() => ({})));
+    restateMachineIdentity(db, deps.actor(), c.req.param("id"), input);
     return c.json({ ok: true });
   });
 
@@ -99,21 +114,4 @@ export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): vo
     return c.json({ ok: true });
   });
 
-  // 1-click adopt from the list. Plans adopt, then approves with the STORED bootstrap password
-  // (or one supplied in the body). If neither is available the planned run is returned anyway —
-  // the Run screen's ceremony prompts for the password (graceful fallback).
-  app.post("/api/servers/:id/adopt", async (c) => {
-    const id = c.req.param("id");
-    if (!getServer(db, id, undefined)) {
-      throw errNotFound(`server ${id}`);
-    }
-    const body = (await c.req.json().catch(() => ({}))) as { password?: string; intendedDomain?: string };
-    const { runId } = await executor.plan("cluster-adopt", {
-      serverId: id,
-      ...(body.intendedDomain ? { intendedDomain: body.intendedDomain } : {}),
-    });
-    const pw = body.password ? Buffer.from(body.password, "utf8") : await openBootstrapPassword(creds, id, runId);
-    if (pw) await executor.approve(runId, { "adopt-password": pw });
-    return c.json({ runId, approved: Boolean(pw) }, 202);
-  });
 }

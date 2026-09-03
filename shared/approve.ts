@@ -7,6 +7,16 @@
  * `activation-input:<field>`. They are not secrets and are never sealed; the credentials asked for
  * beside them are, and they travel under their own keys.
  */
+/** The key the password of the MACHINE ACCOUNT rides under through approve (Plan.requiredSecrets →
+ *  ctx.secrets). The spelling is the deployment engine's — the installation's ansiwise.yaml says
+ *  `password_from_caller: true` and this is the name it hands the value over under — and it stands
+ *  here, in the module about what a person supplies, because both sides need it: the server declares
+ *  it on the plans that ask for it (server/domains/runs/defs/ansiwise-run.kit.ts holds it under
+ *  ANSIWISE_ELEVATION_SECRET, the name every run kind states it by) and the browser has to know which
+ *  requested credential this is in order to say what it is for (web/src/approveFields.ts). A key
+ *  spelled twice is a key that can disagree with itself. */
+export const MACHINE_PASSWORD_SECRET = "ansiwise-elevation";
+
 export interface OperatorInput {
   /** The name the program declares the answer under. */
   field: string;

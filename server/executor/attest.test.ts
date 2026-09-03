@@ -6,11 +6,12 @@ import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { servers } from "../db/schema/inventory.ts";
 import { attestMachineId } from "./attest.ts";
+import { restateMachineIdentity } from "../domains/inventory/machine-identity.ts";
 import type { SshSession, ExecOptions, ExecResult } from "../adapters/ssh/port.ts";
 
 // A fake Ubuntu session whose only interesting command is `cat /etc/machine-id`: it emits
 // the given id (with whatever trailing whitespace the caller passes) on stdout. Mirrors the
-// fake-SSH style of adopt.test.ts / context.test.ts.
+// fake-SSH style of manager-key.test.ts / context.test.ts.
 function fakeSession(machineIdOut: string): SshSession {
   return {
     exec: async (command: string, o: ExecOptions): Promise<ExecResult> => {
@@ -61,7 +62,7 @@ describe("attestMachineId ", () => {
     return db.db.select().from(servers).where(eq(servers.id, serverId)).get()?.machineId ?? null;
   }
 
-  it("records the machine-id on a NULL row (backfill after adopt)", async () => {
+  it("records the machine-id on a NULL row (the backfill a first deploy takes)", async () => {
     const { db, serverId } = setup(null);
     const logs: string[] = [];
     const out = await attestMachineId({ db: db.db, session: fakeSession(MID), serverId, signal, log: (l) => logs.push(l) });
@@ -85,7 +86,10 @@ describe("attestMachineId ", () => {
     const { db, serverId } = setup(MID);
     await expect(
       attestMachineId({ db: db.db, session: fakeSession(OTHER), serverId, signal }),
-    ).rejects.toMatchObject({ code: "VALIDATION", message: `this is not the machine we adopted: expected ${MID} got ${OTHER}` });
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: expect.stringContaining(`/etc/machine-id is ${MID} on s1's row and the machine answering at its address reports ${OTHER}`),
+    });
     expect(storedMachineId(db, serverId)).toBe(MID); // the reused-IP stranger did NOT clobber it
   });
 
@@ -93,5 +97,27 @@ describe("attestMachineId ", () => {
     const { db, serverId } = setup(MID);
     const out = await attestMachineId({ db: db.db, session: fakeSession(`${MID}\n`), serverId, signal });
     expect(out.action).toBe("verified");
+  });
+
+  it("the way back: the statement drops the recorded id, and this function then records the machine's own", async () => {
+    // The refusal above is a dead end until something clears the column, and nothing else does —
+    // this function writes it once, where it is NULL (domains/inventory/machine-id-writers.test.ts).
+    // The case that needs the way back most is the one where the host keys never moved: cloning a
+    // virtual machine or removing /etc/machine-id regenerates that number alone, so the door opens on
+    // a pin that still matches and the run stops HERE, on every run kind that attests.
+    const { db, serverId } = setup(MID);
+    const PIN = `SHA256:${"Ab1".repeat(43).slice(0, 43)}`;
+    db.db.update(servers).set({ preflightJson: { hostKey: PIN } }).where(eq(servers.id, serverId)).run();
+    await expect(attestMachineId({ db: db.db, session: fakeSession(OTHER), serverId, signal }))
+      .rejects.toThrow(/not the machine recorded here/);
+
+    // What the refusal tells the operator to do: go to the machine, read the fingerprint it presents
+    // now — here the one already pinned, because its sshd did not change — and state it.
+    restateMachineIdentity(db.db, "op_test", serverId, { hostKeyFingerprint: PIN });
+    expect(storedMachineId(db, serverId)).toBeNull();
+
+    const out = await attestMachineId({ db: db.db, session: fakeSession(OTHER), serverId, signal });
+    expect(out).toEqual({ action: "recorded", machineId: OTHER });
+    expect(storedMachineId(db, serverId)).toBe(OTHER);
   });
 });

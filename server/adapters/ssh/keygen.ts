@@ -30,10 +30,11 @@ const MAX_KEYPAIR_DRAWS = 8;
  * bytes from the key blob — right for an integer, wrong for a fixed-width 32-byte ed25519 point — and
  * writes a length of 31 into both the private and the public half. Measured at ~0.4% of draws, and
  * both halves are always spoiled together, so parsing the private half decides the pair. Nothing
- * downstream can recover from a bad one: adopt seals it as the server's ONLY ssh_key credential,
- * appends the broken public line to the host's authorized_keys, and its reuse-on-retry branch then
- * finds that same credential on every later attempt — so the server can never be adopted again until
- * someone deletes the credential row by hand. Here a bad draw costs one more draw.
+ * downstream can recover from a bad one: `generate-key` seals it as the server's ONLY ssh_key
+ * credential, `install-key` appends the broken public line to the host's authorized_keys, and the
+ * reuse branch of `generate-key` then finds that same credential on every later run — so no run can
+ * reach the machine by key until someone deletes the credential row by hand. Here a bad draw costs
+ * one more draw.
  */
 export function generateServerKeypair(comment: string): GeneratedKey {
   let lastError = "";

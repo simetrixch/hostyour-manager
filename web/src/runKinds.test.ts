@@ -22,7 +22,7 @@ describe("CONSUMER_RUN_KINDS", () => {
   });
 
   it("rejects tenant + infra + fixture kinds — the section owns only its own family", () => {
-    for (const k of ["tenant-create", "tenant-add-app", "tenant-offboard", "tenant-restart-workloads", "tenant-set-size", "cluster-deploy-slave", "cluster-redeploy", "cluster-adopt", "noop"] as const satisfies readonly RunKind[]) {
+    for (const k of ["tenant-create", "tenant-add-app", "tenant-offboard", "tenant-restart-workloads", "tenant-set-size", "cluster-deploy-slave", "cluster-redeploy", "noop"] as const satisfies readonly RunKind[]) {
       expect(CONSUMER_RUN_KINDS.has(k)).toBe(false);
     }
   });
@@ -54,7 +54,7 @@ describe("TENANT_RUN_KINDS", () => {
   });
 
   it("rejects consumer + infra + fixture kinds — the section owns only its own family", () => {
-    for (const k of ["consumer-onboard", "consumer-offboard", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-purge", "consumer-adopt", "cluster-deploy-slave", "cluster-redeploy", "cluster-adopt", "noop"] as const satisfies readonly RunKind[]) {
+    for (const k of ["consumer-onboard", "consumer-offboard", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-purge", "consumer-adopt", "cluster-deploy-slave", "cluster-redeploy", "noop"] as const satisfies readonly RunKind[]) {
       expect(TENANT_RUN_KINDS.has(k)).toBe(false);
     }
   });

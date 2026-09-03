@@ -55,7 +55,7 @@ export const errPlanRefused = (message: string, detail?: Record<string, unknown>
   new AppError("PLAN_REFUSED", message, detail ? { detail } : undefined);
 export const errUndeclaredTarget = (serverId: string): AppError =>
   new AppError("UNDECLARED_TARGET", `Step reached an undeclared target: ${serverId}`);
-// A one-time run secret (e.g. the adopt password) is absent — never stored, so lost on a
+// A one-time run secret (e.g. the machine account's password) is absent — never stored, so lost on a
 // crash/restart. Retry the step and re-enter it, or discard the run.
 export const errMissingRunSecret = (name: string): AppError =>
   new AppError(

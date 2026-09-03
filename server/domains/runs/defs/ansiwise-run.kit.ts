@@ -5,6 +5,7 @@ import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { AnsiwiseClient } from "../../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../../../adapters/ansiwise/port.ts";
 import type { Stage } from "../../../../shared/enums.ts";
+import { MACHINE_PASSWORD_SECRET } from "../../../../shared/approve.ts";
 import { loadServer, loadMaster, masterFqdnOf, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { CATALOG_CHECKOUT, CATALOG_PROGRAMS } from "./machine-state.ts";
 
@@ -27,8 +28,12 @@ import { CATALOG_CHECKOUT, CATALOG_PROGRAMS } from "./machine-state.ts";
 
 /** The name the elevation password rides under through approve (Plan.requiredSecrets →
  *  ctx.secrets). The installation's ansiwise.yaml says `password_from_caller: true`, so the
- *  password comes with each POST and lives exactly as long as the machine run does. */
-export const ANSIWISE_ELEVATION_SECRET = "ansiwise-elevation";
+ *  password comes with each POST and lives exactly as long as the machine run does.
+ *
+ *  The literal itself lives in shared/approve.ts, which is where the browser reads it to say what
+ *  the field on the approve card is: the same value is a key on this side and a question put to a
+ *  person on the other. Every run kind states it by this name. */
+export const ANSIWISE_ELEVATION_SECRET = MACHINE_PASSWORD_SECRET;
 
 /** One program's wall clock, dry and run each. The cold-install budget the host run
  *  used to get, for the same reason: a redeploy may bring a MicroK8s channel change with it.

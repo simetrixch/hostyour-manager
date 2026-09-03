@@ -10,7 +10,7 @@ export interface SshTarget {
   username: string;
   auth:
     | { kind: "key"; privateKey: Buffer } // from the credential store (OpenSSH or PEM)
-    | { kind: "password"; password: Buffer }; // adopt ceremony ONLY
+    | { kind: "password"; password: Buffer }; // the machine account's password, offered by openDoor ONLY
   /** Pinned host key "SHA256:..." — hard-fail on mismatch. undefined = trust-on-first-use;
    *  the observed fingerprint is then read via hostKeyFingerprint() and recorded by the caller. */
   hostKeyFingerprint?: string;
@@ -111,6 +111,27 @@ export class HostKeyMismatchError extends Error {
   ) {
     super(`host key mismatch: expected ${expected}, got ${found} (possible MITM)`);
     this.name = "HostKeyMismatchError";
+  }
+}
+
+/** THE MACHINE ANSWERED AND TURNED THE CREDENTIAL DOWN. The socket connected, the host key passed
+ *  the verifier, and the server refused every authentication method this session had to offer.
+ *
+ *  A class of its own beside HostKeyMismatchError because a caller reads the three outcomes as three
+ *  different facts, and choosing what to offer next depends on telling them apart. A refused key on
+ *  a host whose pinned key still matches is a machine that carries no line of this manager's, so a
+ *  password may open it. A mismatched host key is a machine that must be offered nothing at all. A
+ *  transport failure — a socket that never connected, a name that does not resolve, a handshake that
+ *  timed out — says nothing whatever about which credentials the machine takes, so it stays a bare
+ *  Error: a caller that fell back on one of those would offer the operator's password to a host whose
+ *  key door was never proven. */
+export class AuthFailedError extends Error {
+  constructor(
+    readonly username: string,
+    cause: Error,
+  ) {
+    super(`authentication failed for ${username}: ${cause.message}`, { cause });
+    this.name = "AuthFailedError";
   }
 }
 

@@ -27,11 +27,20 @@ import { passwordLoginReading, type PasswordLoginProbe } from "../../../shared/p
 import type { ServerPasswordLoginState } from "../../../shared/enums.ts";
 
 /** How every script here reaches the daemon's own configuration. Two things make it necessary:
- *  `sshd -T` may only be run by root, and the binary lives in /usr/sbin, which is on the default
- *  PATH of an Ubuntu login user but not of every host. `command -v` is a shell BUILTIN and sudo
- *  cannot run one, so the PATH lookup happens in this shell and the well-known path is probed with
- *  `test` under root instead. */
-export const SSHD_HELPERS = `as_root() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo -n "$@"; fi; }
+ *  `sshd -T` may only be run by root, and the binary lives in /usr/sbin, which is on the PATH of a
+ *  root shell on Ubuntu but not of every host — so the PATH lookup happens first and the well-known
+ *  path is probed with `test` where it found nothing.
+ *
+ *  `as_root` ASSERTS THE SHELL IS ALREADY ROOT and then runs the command; it elevates nothing. Every
+ *  step shipping one of these scripts raises the WHOLE script with the password its run carries
+ *  (executor/stepkit.ts `raised`), because one `sudo -S` per thing sent is all the password stretches
+ *  to. So the helper's job is to name, at each call site, the lines that need root — and to refuse
+ *  loudly in the one case that would otherwise be silent: a script sent unraised, where every root
+ *  line would fail one at a time with the daemon's own words and read as a broken host. The route it
+ *  deliberately does NOT take is `sudo -n`, which answers only on a machine carrying a standing
+ *  passwordless-root rule; no run kind here writes one, and the deployment's `remove-sudoers` takes
+ *  it off a machine that still has one. */
+export const SSHD_HELPERS = `as_root() { [ "$(id -u)" = 0 ] || { echo "this script reaches root through the password its run carries and was sent unraised — nothing was read and nothing was written" >&2; return 1; }; "$@"; }
 sshd_bin() {
   local found
   found="$(command -v sshd 2>/dev/null || true)"
@@ -85,6 +94,12 @@ export function parsePasswordLoginProbe(stdout: string): PasswordLoginProbe {
  * Read the host and write the pair. State and document go down in ONE statement, so a reading can
  * never be stored without the moment and the run that produced it.
  *
+ * RAISED WITH THE PASSWORD THE CALLER HOLDS, because `sshd -T` is a root command and a machine this
+ * platform has deployed carries no standing rule granting it: the deployment takes the sudoers
+ * drop-in off (defs/manager-key.kit.ts `remove-sudoers`), so a probe sent unraised would answer
+ * "the effective configuration cannot be read" on every host and every reading after it would be a
+ * guess.
+ *
  * Returns the state it wrote, or null when the probe itself did not run — in which case NOTHING is
  * written and the row keeps what it had. The reading never fails its step: the caller that needs an
  * effective value to be a certain way asserts that itself, loudly, and a reading that could not be
@@ -94,8 +109,9 @@ export async function recordPasswordLoginReading(
   ctx: StepCtx,
   session: SshSession,
   serverId: string,
+  elevation: string,
 ): Promise<ServerPasswordLoginState | null> {
-  const cap = await remoteScriptCapture(ctx, session, "password-login-probe", PASSWORD_LOGIN_PROBE_SCRIPT, { timeoutMs: 60_000 });
+  const cap = await remoteScriptCapture(ctx, session, "password-login-probe", PASSWORD_LOGIN_PROBE_SCRIPT, { timeoutMs: 60_000, elevation });
   if (cap.result.code !== 0) {
     ctx.log("meta", `Password login: the probe did not run (exit ${cap.result.code}) — this server's stored reading is unchanged.`);
     return null;

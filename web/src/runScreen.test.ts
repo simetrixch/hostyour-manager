@@ -180,7 +180,7 @@ describe("abortOffer", () => {
   // Only create-tenant mints a tenant of its own; the tenant-state route refuses every other kind (400),
   // so no state is ever fetched for them and the gate must not stall on the absence of one.
   it("offers the abort unconditionally for every other run kind", () => {
-    for (const kind of ["consumer-onboard", "tenant-offboard", "tenant-purge", "tenant-add-app", "cluster-deploy-slave", "cluster-adopt"] as const) {
+    for (const kind of ["consumer-onboard", "tenant-offboard", "tenant-purge", "tenant-add-app", "cluster-deploy-slave", "cluster-redeploy"] as const) {
       expect(abortOffer(kind, null, null)).toEqual({ offered: true, tenant: null });
     }
   });

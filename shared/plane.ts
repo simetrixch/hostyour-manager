@@ -24,7 +24,7 @@ import { z } from "zod";
  *  - `argo`            — the slave-ArgoCD namespace + the Application name; the slave cluster is
  *                        registered under its own <name>.
  *  - `kube`            — how a per-cluster kube client dials the slave's kube-apiserver DIRECTLY:
- *                        the API server URL + the base64 CA bundle the slave emitted at adopt.
+ *                        the API server URL + the base64 CA bundle the slave emitted at deployment.
  *                        Stored here so the resolver builds the client from the plane alone —
  *                        NO cross-namespace read of the master's cluster-slave Secret.
  *  - `credentialIds`   — Manager credential-store ids for the harvested slave creds.

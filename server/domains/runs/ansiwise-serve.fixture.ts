@@ -12,7 +12,10 @@ import { AnsiwiseRefused, type AnsiwiseRunRecord } from "../../adapters/ansiwise
 import { openChannel, programYaml, runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
-import { makeHarness, scriptedHosts, logger, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID, type Harness } from "./deploy-slave.fixture.ts";
+import {
+  makeHarness, scriptedHosts, logger, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID,
+  IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY, MASTER_PUBLIC_KEY, type Harness, type HostsScript,
+} from "./deploy-slave.fixture.ts";
 import type { DbHandle } from "../../db/client.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -195,11 +198,25 @@ export function serveConversation(serve: ServeFixture): Conversation {
 
 /** A harness whose master carries an ACTIVE cluster — the state redeploy's master arm acts on.
  *
- *  Its machine carries no sudoers drop-in, like every other world here — see HostsScript.adopted.
- *  A first master is installed by ansiwise-client and never adopted, so on a real one the only way
- *  to root is the elevation password the run itself carries. */
-export async function liveMaster(serve: ServeFixture): Promise<Harness> {
-  const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
+ *  Its machine carries no sudoers drop-in, like every other world here — see
+ *  FirstContactScript.adopted (deploy-slave.first-contact.fixture.ts).
+ *  A first master is installed by ansiwise-client, which writes no such file, so on a real one the
+ *  only way to root is the elevation password the run itself carries.
+ *
+ *  AND THE MACHINE LOOKS LIKE A LIVE MASTER, which is what the first-contact steps at the head of
+ *  that arm are re-measured against: this manager's key already stands in its authorized_keys and
+ *  its clock already synchronises, because its own installation put both there. It also really
+ *  JUDGES the key a session offers, so the door has something to decide rather than opening whatever
+ *  is presented to it — and `overrides` is how the machine that lost that line is asked for, which is
+ *  the machine a reinstall at the hosting provider hands back. */
+export async function liveMaster(serve: ServeFixture, overrides: Partial<HostsScript> = {}): Promise<Harness> {
+  const hosts = scriptedHosts({
+    openConversation: async () => openChannel(serve),
+    authorizedKeys: [IMAGE_KEY_LINE, MASTER_PUBLIC_KEY],
+    ntp: "yes",
+    judgesKeys: true,
+    ...overrides,
+  });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   h.db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, MASTER_ID)).run();
   h.db.db.insert(clusters).values({
@@ -229,7 +246,8 @@ export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean
   return h;
 }
 
-/** A fresh, adopted slave and its master, wired to reach the real `ansiwise-rest serve` on BOTH hosts.
+/** A fresh slave this manager already holds a key for, and its master, wired to reach the real
+ *  `ansiwise-rest serve` on BOTH hosts.
  *  ONE serve installation stands in for the two machines, and that is honest for what is under
  *  proof: the fixture's programs are pure measurements, so what the engine judges — the gate, the
  *  answers validation, the detached records — is host-independent, while WHICH surface each
@@ -247,14 +265,42 @@ export async function deployWorld(serve: ServeFixture): Promise<Harness> {
 }
 
 /** A slave that already IS one — redeploy's slave arm acts on this. The default marking rides
- *  along (makeHarness seeds SLAVE_MARKING_YAML), which is exactly what a live slave's books say. */
-export async function liveSlaveWorld(serve: ServeFixture): Promise<Harness> {
-  const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
+ *  along (makeHarness seeds SLAVE_MARKING_YAML), which is exactly what a live slave's books say.
+ *
+ *  AND THE MACHINE LOOKS LIKE ONE TOO, which is what the first-contact steps at the head of that arm
+ *  are re-measured against: this manager's key already stands in its authorized_keys and its daemon
+ *  already takes no password, because a deployment put both there. A live slave scripted as a fresh
+ *  cloud image would let those steps write on every reconciliation and the suite would call it
+ *  green — measure-then-act is only a property against a machine that has already been through the
+ *  list once.
+ *
+ *  THE OVERRIDES ARE HOW THE OTHER MACHINE BEHIND THE SAME ROW IS SCRIPTED, and it is the one an
+ *  owner actually redeploys: the row still says a finished deployment while the MACHINE was
+ *  reinstalled at the hosting provider and carries none of it. That is a different host script under
+ *  identical rows, exactly as `liveMaster` takes one for the master arm — never a second world with a
+ *  second copy of the rows to drift from these. */
+export async function liveSlaveWorld(serve: ServeFixture, overrides: Partial<HostsScript> = {}): Promise<Harness> {
+  const hosts = scriptedHosts({
+    openConversation: async () => openChannel(serve),
+    authorizedKeys: [IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY],
+    passwordLogin: "no",
+    ntp: "yes",
+    // And it judges the key a session offers against that file, so the door really opens on the key
+    // here: a slave whose password door is shut has no other way in, and a run that reached the
+    // machine on something else would prove nothing about the one it will meet.
+    judgesKeys: true,
+    ...overrides,
+  });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   h.db.db.insert(clusters).values({
     id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1, planeState: "ready",
   }).run();
   h.db.db.update(servers).set({ status: "healthy" }).where(eq(servers.id, SLAVE_ID)).run();
+  // The machine's own install branch, which is where the join reads the coordinator's address
+  // (global.endpoints.tailnet.url) — seeded beside the values chain's sentinel file, because the fake
+  // materializes its own profile on a branch's first touch unless that file already stands there.
+  h.platformRepo.seed("s1.example.com", "clusters/platform/values-common.yaml", "global: {}\n");
+  h.platformRepo.seed("s1.example.com", clusterMapPath("s1.example.com"), "global:\n  endpoints:\n    tailnet:\n      url: https://tale.m1.example.com\n");
   return h;
 }
 

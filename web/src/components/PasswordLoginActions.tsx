@@ -6,9 +6,9 @@ import type { PasswordLoginRunKindOffer } from "../passwordLoginState.ts";
 // buttons.
 //
 // "Turn off" is the ordinary button and "Turn on" is the danger one, which is the opposite of how a
-// pair like this usually reads. It is the right way round here: an adopted server needs no password
-// login, so opening the door again is the deliberate act, and the run screen still asks for an
-// approval before either happens.
+// pair like this usually reads. It is the right way round here: a server this manager holds a key
+// for needs no password login, so opening the door again is the deliberate act, and the run screen
+// still asks for an approval before either happens.
 
 export function PasswordLoginActions(props: {
   offer: PasswordLoginRunKindOffer;

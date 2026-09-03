@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { approveIsComplete, type OperatorInput } from "./approve.ts";
+import { approveIsComplete, MACHINE_PASSWORD_SECRET, type OperatorInput } from "./approve.ts";
 
 // WHAT A PERSON HAS TO TYPE BEFORE A RUN MAY START, and what they may leave alone.
 //
@@ -12,7 +12,7 @@ import { approveIsComplete, type OperatorInput } from "./approve.ts";
 // the ceremony demand a value from a field that had just invited none, so the run could not be
 // approved at all.
 
-const ELEVATION = "ansiwise-elevation";
+const ELEVATION = MACHINE_PASSWORD_SECRET;
 
 /** The answers a master's release actually asks for, by their real fields and their real
  *  optionality — three that must be answered and three that may stay blank. */

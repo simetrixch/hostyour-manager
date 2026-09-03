@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { createSshSession } from "./ssh2-session.ts";
 import { generateServerKeypair } from "./keygen.ts";
 import { startFakeSshServer, type FakeSshServer, type FakeServerOptions } from "./testing/fake-server.ts";
-import { ExecFailedError, ExecTimeoutError, HostKeyMismatchError, type SshTarget } from "./port.ts";
+import { AuthFailedError, ExecFailedError, ExecTimeoutError, HostKeyMismatchError, type SshTarget } from "./port.ts";
 
 const key = generateServerKeypair("test@m1");
 
@@ -166,5 +166,62 @@ describe("ssh2 session against a real in-process ssh2.Server", () => {
     ac.abort();
     await closed; // the remote command's channel is gone — nothing outlives the run that started it
     session.close();
+  });
+});
+
+// WHAT A FAILED CONNECT WAS, told apart against the real library.
+//
+// A caller that offers a second credential after a refusal — the first-contact door — may only do so
+// when the MACHINE refused the first one. ssh2 reports every failure as a bare Error and puts the
+// kind in a non-standard `level` property that no type checks, so whether the three are actually
+// distinguishable is a question about the library and is answered here rather than assumed.
+describe("a connect that fails says WHICH failure it was", () => {
+  const servers: FakeSshServer[] = [];
+  afterEach(async () => {
+    for (const s of servers.splice(0)) await s.close();
+  });
+  async function start(opts: FakeServerOptions): Promise<FakeSshServer> {
+    const s = await startFakeSshServer(opts);
+    servers.push(s);
+    return s;
+  }
+
+  it("a machine that turns the password down answers AuthFailedError", async () => {
+    const srv = await start({}); // takes no password and holds no authorized key
+    const err = await createSshSession({
+      host: "127.0.0.1", port: srv.port, username: "u", auth: { kind: "password", password: Buffer.from("pw") },
+    }).then(() => undefined, (e: unknown) => e);
+    expect(err).toBeInstanceOf(AuthFailedError);
+  });
+
+  it("a key the machine does not hold is the same refusal — the one case the door falls back on", async () => {
+    const srv = await start({ authorizedKeys: [] });
+    const err = await createSshSession({
+      host: "127.0.0.1", port: srv.port, username: "u", auth: { kind: "key", privateKey: key.privateOpenSsh },
+    }).then(() => undefined, (e: unknown) => e);
+    expect(err).toBeInstanceOf(AuthFailedError);
+  });
+
+  it("a port nothing listens on is NOT a refusal — the transport reached no verdict at all", async () => {
+    // Started and closed, so the port is one nothing answers on rather than one this suite guessed.
+    const dead = await startFakeSshServer({ acceptPassword: "pw" });
+    await dead.close();
+    const err = await createSshSession({
+      host: "127.0.0.1", port: dead.port, username: "u", timeoutMs: 5_000,
+      auth: { kind: "password", password: Buffer.from("pw") },
+    }).then(() => undefined, (e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(AuthFailedError);
+  });
+
+  it("a changed host key is neither, and the credential is never offered", async () => {
+    const srv = await start({ acceptPassword: "pw" });
+    const err = await createSshSession({
+      host: "127.0.0.1", port: srv.port, username: "u", auth: { kind: "password", password: Buffer.from("pw") },
+      hostKeyFingerprint: "SHA256:wrongwrongwrongwrongwrongwrongwrongwrong00",
+    }).then(() => undefined, (e: unknown) => e);
+    expect(err).toBeInstanceOf(HostKeyMismatchError);
+    expect(err).not.toBeInstanceOf(AuthFailedError);
+    expect(srv.authMethodsSeen).toEqual([]);
   });
 });

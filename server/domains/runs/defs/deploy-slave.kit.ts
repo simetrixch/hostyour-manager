@@ -4,7 +4,7 @@ import type { Db } from "../../../db/client.ts";
 import type { StepCtx, Cleanup } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { errValidation, errNotFound } from "../../../kernel/errors.ts";
-import { remoteCmd } from "../../../executor/stepkit.ts";
+import { remoteCmd, remoteExec, requirePassword } from "../../../executor/stepkit.ts";
 import { MASTER_ROLES, type Stage, type ClusterTier } from "../../../../shared/enums.ts";
 import { errNotConfigured } from "../../../kernel/errors.ts";
 import type { PlatformRepo } from "../../../adapters/git/port.ts";
@@ -190,8 +190,8 @@ export function credLabels(name: string): { bearer: string; reviewer: string } {
  *   - rotate   — a credential with the same kind+label but a DIFFERENT fingerprint exists
  *                (the token changed: a rebuilt slave, a re-minted emit) ⇒ rotate it in
  *                place (new row, old row marked rotated_at) instead of blind-inserting,
- *                so later remove-/rebuild-slave Runs still find the newest (list order,
- *                adopt's idiom) and provenance stays on the superseded row;
+ *                so later remove-/rebuild-slave Runs still find the newest (list order, the idiom
+ *                below) and provenance stays on the superseded row;
  *   - seal     — no row for this kind+label yet ⇒ a fresh credential. */
 export async function sealTokenOnce(ctx: StepCtx, o: { kind: "kubeconfig" | "other"; label: string; serverId: string; token: string }): Promise<string> {
   const fingerprint = "sha256:" + createHash("sha256").update(o.token, "utf8").digest("hex");
@@ -213,8 +213,8 @@ export async function sealTokenOnce(ctx: StepCtx, o: { kind: "kubeconfig" | "oth
   return ref.id;
 }
 
-/** Find the NEWEST sealed credential for kind+label on this server (adopt's list-order
- *  idiom — a rebuilt slave sealed a fresh row; the last one wins). Step 7's resolver: the
+/** Find the NEWEST sealed credential for kind+label on this server (the list-order idiom every
+ *  credential lookup here uses — a rebuilt slave sealed a fresh row; the last one wins). Step 7's resolver: the
  *  credential store is the sanctioned cross-step channel for the step-4 IDs (a step never
  *  reads another step's checkpoint row — the runs schema is executor-owned). */
 export async function newestCredId(ctx: StepCtx, o: { serverId: string; kind: "kubeconfig" | "other"; label: string }): Promise<string | undefined> {
@@ -251,21 +251,37 @@ export function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<voi
 // BEFORE its mutating remote call, because a step that dies halfway leaves a partial
 // resource only the cleanup can compensate (all three tolerate already-absent state, so
 // early registration is safe). The executor resolves the persisted __cleanups names against
-// cleanups() (the adopt.ts pattern); they run ONLY on an explicit
+// cleanups(); they run ONLY on an explicit
 // abort-with-cleanup, never automatically — microk8s-reset-slave is destructive by design.
 
-export const microk8sResetSlaveCleanup: Cleanup = {
-  name: "microk8s-reset-slave",
-  title: "Remove MicroK8s from the slave (DESTRUCTIVE)",
-  run: async (ctx: StepCtx) => {
-    const session = await ctx.ssh(); // the slave (the run's ownsHost target)
-    // Only the snap goes. The two checkouts — the platform tree at /srv/hostyour-cloud and the
-    // catalogue at /srv/ansiwise-catalog — and the binary beside them are what a retry of the run
-    // resumes onto, all three placed idempotently by place-ansiwise, so removing them would buy a
-    // second download and two more clones and nothing else.
-    await remoteCmd(ctx, session, "if snap list microk8s >/dev/null 2>&1; then sudo -n snap remove --purge microk8s; fi", { timeoutMs: 10 * 60_000 });
-  },
-};
+/** Take MicroK8s off the machine the run owns. Built per run because it needs the name the machine's
+ *  password rides under: the removal is a root act, and it is raised with that password like every
+ *  other root command this manager sends, so the machine needs no standing rule for it. An abort is
+ *  what re-supplies the password — a terminal run's secrets went with the run — and without it this
+ *  compensation refuses by name rather than being refused by the machine
+ *  (executor/executor.ts abortWithCleanup). */
+export function microk8sResetSlaveCleanup(secretName: string): Cleanup {
+  return {
+    name: "microk8s-reset-slave",
+    title: "Remove MicroK8s from the slave (DESTRUCTIVE)",
+    run: async (ctx: StepCtx) => {
+      const session = await ctx.ssh(); // the slave (the run's ownsHost target)
+      // MEASURE, THEN ACT, and the measurement is deliberately NOT raised: `snap list` reads a
+      // catalogue every account on the machine may read, so asking it as the login user is the same
+      // answer for one round trip less of the password. Only the removal is a root act.
+      const present = await remoteExec(ctx, session, "snap list microk8s", { timeoutMs: 60_000 });
+      if (present.code !== 0) {
+        ctx.log("meta", "the machine carries no microk8s snap — the reset found nothing to remove and wrote nothing.");
+        return;
+      }
+      // Only the snap goes. The two checkouts — the platform tree at /srv/hostyour-cloud and the
+      // catalogue at /srv/ansiwise-catalog — and the binary beside them are what a retry of the run
+      // resumes onto, all three placed idempotently by place-ansiwise, so removing them would buy a
+      // second download and two more clones and nothing else.
+      await remoteCmd(ctx, session, "snap remove --purge microk8s", { timeoutMs: 10 * 60_000, elevation: requirePassword(ctx, secretName) });
+    },
+  };
+}
 
 /** The git-side inverse of the map write: drop the slave part again, which takes the cluster out of the
  *  master's slaves ApplicationSet and cascades the teardown of its management plane. The map itself

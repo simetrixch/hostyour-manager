@@ -6,18 +6,18 @@ import { errValidation, errNotFound } from "../kernel/errors.ts";
 
 // Machine-id record/verify. `ctx.attest()` (context.ts) still rejects with "not implemented", so
 // this function is what a step calls instead: a destructive deploy step needs to be sure the box
-// behind the (LAN) IP is the SAME box we adopted, so a stranger VM that later grabs a recycled IP
-// can't be deployed in its place.
+// behind the (LAN) IP is the SAME box this manager recorded, so a stranger VM that later grabs a
+// recycled IP can't be deployed in its place.
 //
-// `servers.machine_id` (inventory.ts) is NULL right after adopt — adopt never populated it. So on
-// the FIRST deploy we *record* /etc/machine-id (backfill); on every later run we *verify* it and
-// hard-fail on a mismatch.
+// `servers.machine_id` (inventory.ts) is NULL on a machine no run has reached — nothing before this
+// function writes it. So on the FIRST deploy we *record* /etc/machine-id (backfill); on every later
+// run we *verify* it and hard-fail on a mismatch.
 //
 // Deliberately a pure function over its deps (db, a live SshSession, serverId, an AbortSignal,
 // an optional meta-logger) — no StepCtx, no globals — so a step wires it with
 // `attestMachineId({ db: ctx.db, session: await ctx.ssh(), serverId, signal: ctx.signal,
 // log: (l) => ctx.log("meta", l) })` while a unit test drives it with a fake session + an
-// in-memory db, exactly like adopt.test.ts / context.test.ts.
+// in-memory db, exactly like manager-key.test.ts / context.test.ts.
 
 export interface AttestMachineDeps {
   db: Db;
@@ -55,7 +55,8 @@ export async function readMachineId(session: SshSession, signal: AbortSignal): P
  * Record-or-verify the target's machine identity.
  *  - stored id is NULL  -> RECORD it (backfill the row + meta-log "recorded machine-id ...").
  *  - stored id == read   -> OK (meta-log "machine-id verified ...").
- *  - stored id != read   -> THROW errValidation("this is not the machine we adopted ...").
+ *  - stored id != read   -> THROW errValidation("this is not the machine recorded here ..."), which names the
+ *    statement a person makes about a machine they rebuilt (domains/inventory/machine-identity.ts).
  * The row is never overwritten on a mismatch — that is the whole protection.
  */
 export async function attestMachineId(deps: AttestMachineDeps): Promise<AttestOutcome> {
@@ -78,9 +79,11 @@ export async function attestMachineId(deps: AttestMachineDeps): Promise<AttestOu
     log?.(`machine-id verified (${observed})`);
     return { action: "verified", machineId: observed };
   }
-  throw errValidation(`this is not the machine we adopted: expected ${row.machineId} got ${observed}`, {
-    serverId,
-    expected: row.machineId,
-    got: observed,
-  });
+  throw errValidation(
+    `this is not the machine recorded here: /etc/machine-id is ${row.machineId} on ${row.name}'s row and the machine ` +
+    `answering at its address reports ${observed}. A rebuilt machine reports a new one, and only a person can say that ` +
+    `is what happened: state the host key it presents now on this server's card under Servers, which is the statement ` +
+    `that drops this recorded id so the next run records the rebuilt machine's own.`,
+    { serverId, expected: row.machineId, got: observed },
+  );
 }

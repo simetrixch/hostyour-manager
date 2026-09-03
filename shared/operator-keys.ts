@@ -6,7 +6,8 @@
 // that comment and by nothing else:
 //
 //   hostyour:<server name>          the MANAGER's own login identity for that one host,
-//                                        written by the adopt run and deleted by its compensation.
+//                                        written by `install-key` and deleted by the compensation
+//                                        a first install arms (manager-key.kit.ts).
 //   hostyour-operator:<label>       ONE human's key, placed under the label it was added
 //                                        under, and deleted by the operator-key-remove run.
 //
@@ -14,7 +15,7 @@
 // manager marker is `hostyour` followed immediately by a colon, the operator marker is
 // `hostyour` followed by `-operator`, and a label may not contain a colon at all. So a removal
 // aimed at an operator can never match the manager's line — which would take this platform's own
-// way into the machine away — and adopt's compensation can never strip a human's key.
+// way into the machine away — and that compensation can never strip a human's key.
 //
 // A LABEL IS ALSO WHAT MAKES THE PATTERN SAFE. The removal is a `grep` pattern built from the
 // label, and the label charset below (lowercase, digits, hyphen) contains no regular-expression
@@ -25,7 +26,7 @@ import { z } from "zod";
 import type { AuthorizedKeyFact, ServerAuthorizedKeysFacts, ServerAuthorizedKeysRead } from "./api-types.ts";
 import { AUTHORIZED_KEY_KIND, type AuthorizedKeyKind, type ServerAuthorizedKeysState } from "./enums.ts";
 
-/** The comment adopt puts on the key it generates for a server, and the pattern its compensation
+/** The comment `generate-key` puts on the key it draws for a server, and the pattern the removal
  *  deletes by. Named here so the two sides of that pair, and the operator marker that must never
  *  match it, are stated in one place. */
 export function managerKeyMarker(serverName: string): string {
@@ -130,10 +131,10 @@ export interface OperatorKeyIdentity {
  * host, and anyone who can append to the file can type either marker into it.
  *
  * "manager" is a fingerprint match against the ssh_key credentials sealed for this server. That
- * one signal covers both ways a manager key gets onto a host: adopt seals the key it generates
+ * one signal covers both ways a manager key gets onto a host: `generate-key` seals the key it draws
  * before it installs the line, and the boot seed seals the master's key it reads from a file — so
  * every line this manager can log in with is one whose fingerprint it holds. The marker comment
- * adopt writes is for the REMOVAL grep, not for classification: honoring it here would let a
+ * `generate-key` writes is for the REMOVAL grep, not for classification: honoring it here would let a
  * stranger's key reading `ssh-ed25519 <their key> hostyour:s1` report as the manager's own,
  * fold the file to "accounted", and hide a working way into the machine behind the very card that
  * exists to surface it.

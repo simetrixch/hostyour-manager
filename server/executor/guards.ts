@@ -1,10 +1,11 @@
-import { eq, and, ne, notInArray } from "drizzle-orm";
+import { eq, and, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { meta } from "../db/schema/meta.ts";
 import { clusters, servers } from "../db/schema/inventory.ts";
+import { serversHoldingClusterKey } from "../security/store.ts";
 import { errPlanRefused } from "../kernel/errors.ts";
 import type { PlanGuard, PlannerDeps, AnyRunDefinition } from "./types.ts";
-import { MASTER_ROLES, type RunKind } from "../../shared/enums.ts";
+import { MASTER_ROLES, isMasterRole, type RunKind } from "../../shared/enums.ts";
 
 const GATE_MESSAGE =
   "Cluster keys are stored unencrypted — this action requires the envelope keystore or an explicit, dated decision to keep storing them unencrypted.";
@@ -13,27 +14,74 @@ function keystoreMode(db: Db): string {
   return db.select().from(meta).where(eq(meta.key, "keystore.mode")).get()?.value ?? "plaintext";
 }
 
-// What the gate below counts is clusters whose ACCESS KEY the manager stores: a slave is reached
-// over a harvested cluster-admin bearer sealed in the keystore. A cluster carrying the master part is
-// reached over the manager pod's own ServiceAccount and no bearer is harvested for it
-// (domains/units/cluster-kube.ts), so it holds nothing the plaintext keystore could expose and
-// is excluded — including a master+slave, whose slave part is its own host.
-function countLiveSlaves(db: Db): number {
+/**
+ * How many OTHER machines this manager already stores a cluster access key for.
+ *
+ * WHAT IT COUNTS IS KEYS, not cluster rows, because a key is the whole of what the gate protects: a
+ * slave is administered over a cluster-admin bearer harvested from it and sealed in the keystore
+ * (`create-mgmt`, domains/runs/defs/deploy-slave.mgmt.ts), and under a plaintext keystore that
+ * bearer is readable by whoever can read the database file. A cluster ROW says where an installation
+ * stands and is written by its first step, so a deployment that stopped anywhere leaves one behind
+ * with no key beside it — counting those would refuse the very machine whose run has to be run
+ * again, which is the one thing every step of that run is written to allow.
+ *
+ * A CLUSTER CARRYING THE MASTER PART HOLDS NO SUCH KEY. It is reached over the manager pod's own
+ * ServiceAccount and nothing is harvested from it (domains/units/cluster-kube.ts), so it is left out
+ * — a master+slave included, whose slave part is this manager's own host.
+ *
+ * AND THE RUN'S OWN TARGET IS LEFT OUT, because the question the gate asks is whether approving
+ * THIS plan puts a SECOND machine's key into the store. Deploying a machine whose key is already
+ * sealed adds none: `sealTokenOnce` reuses or rotates the row it finds (deploy-slave.kit.ts).
+ */
+function otherServersWithStoredClusterKey(db: Db, exceptServerId: string | undefined): number {
+  const holders = serversHoldingClusterKey(db).filter((id) => id !== exceptServerId);
+  if (holders.length === 0) return 0;
   return db
-    .select({ id: clusters.id })
-    .from(clusters)
-    .innerJoin(servers, eq(clusters.serverId, servers.id))
-    .where(and(notInArray(servers.role, [...MASTER_ROLES]), ne(clusters.status, "removed")))
+    .select({ id: servers.id })
+    .from(servers)
+    .where(and(inArray(servers.id, holders), notInArray(servers.role, [...MASTER_ROLES])))
     .all().length;
 }
 
+/**
+ * Is this plan the MASTER ARM of cluster-deploy-slave — the machine that already carries the master
+ * part taking the slave part as well?
+ *
+ * Read off the TARGET'S ROLE, which is where the run definition itself reads it
+ * (domains/runs/defs/deploy-slave.ts steps()), so the gate below and the arm it lets through are
+ * decided by one fact rather than by two that agree until somebody changes one.
+ */
+function targetCarriesMasterPart(db: Db, params: unknown): boolean {
+  const target = (params as { serverId?: unknown }).serverId;
+  if (typeof target !== "string") return false;
+  const row = db.select({ role: servers.role }).from(servers).where(eq(servers.id, target)).get();
+  return row !== undefined && isMasterRole(row.role);
+}
+
 // The crypto gate: under plaintext, a new slave is allowed only as the single
-// rehearsal slave (zero real slaves). Non-plaintext ⇒ the gate is open: the keystore encrypts at
-// rest, so a harvested cluster access key is no longer readable from the database file alone.
+// rehearsal slave (no other machine's cluster key stored). Non-plaintext ⇒ the gate is open: the
+// keystore encrypts at rest, so a harvested cluster access key is no longer readable from the
+// database file alone.
+//
+// THE MASTER ARM IS OUTSIDE THE GATE ALTOGETHER, and that is not the same exemption as the two the
+// count makes. What this gate protects is a cluster access key landing in a store that keeps it in
+// the clear, and the master arm stores none: it composes no `create-mgmt` and seals no kubeconfig,
+// because the cluster it delivers is the master's own and this manager reaches that one over its
+// pod's ServiceAccount (domains/runs/defs/deploy-slave.master.ts). An act that puts nothing in the
+// store has nothing for the gate to protect — and refusing it would refuse the machine this manager
+// operates the whole installation from, on an installation whose keystore change it cannot make for
+// itself.
+//
+// IT STANDS BEFORE THE TIER CHECK for the same reason. A tier says how much a harvested cluster key
+// would be worth to whoever reads the database file; on an arm that harvests none, it says nothing
+// about this act at all.
 const slaveCryptoGate: PlanGuard = async (params, deps) => {
   if (keystoreMode(deps.db) !== "plaintext") return;
+  if (targetCarriesMasterPart(deps.db, params)) return;
   if ((params as { tier?: unknown }).tier !== "rehearsal") throw errPlanRefused(GATE_MESSAGE, { code: "O_GATE_1" });
-  if (countLiveSlaves(deps.db) >= 1) throw errPlanRefused(GATE_MESSAGE, { code: "O_GATE_1" });
+  const target = (params as { serverId?: unknown }).serverId;
+  const others = otherServersWithStoredClusterKey(deps.db, typeof target === "string" ? target : undefined);
+  if (others >= 1) throw errPlanRefused(GATE_MESSAGE, { code: "O_GATE_1" });
 };
 
 // onboard under plaintext: allowed only onto a rehearsal cluster. The BUILD-ONLY form names
@@ -68,7 +116,6 @@ const createTenantCryptoGate: PlanGuard = async (params, deps) => {
  */
 export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   noop: [],
-  "cluster-adopt": [],
   "cluster-deploy-slave": [slaveCryptoGate],
   // cluster-redeploy acts on a cluster that is ALREADY live and harvests no new cluster access key —
   // so the crypto gate has nothing to protect. Gating it would strand exactly the running cluster it
@@ -81,12 +128,12 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   "cluster-tailnet-reconnect": [],
   "cluster-tailnet-rejoin": [],
   // The password-login run kinds change one daemon's configuration and one stored credential on a host
-  // that is ALREADY adopted, and harvest no cluster access key — so the crypto gate has nothing to
+  // this manager ALREADY holds a key for, and harvest no cluster access key — so the crypto gate has nothing to
   // protect. Gating the disable run kind would additionally block, on exactly the plaintext-keystore
   // install the gate exists for, the one act that takes a way into that host away.
   "cluster-password-login-disable": [],
   "cluster-password-login-enable": [],
-  // The operator-key run kinds edit one line of one file on a host that is ALREADY adopted, and harvest
+  // The operator-key run kinds edit one line of one file on a host this manager ALREADY holds a key for, and harvest
   // no cluster access key — so the crypto gate has nothing to protect. Gating the removal would additionally
   // block, on exactly the plaintext-keystore install the gate exists for, the one act that takes a
   // human's standing access to a machine away.

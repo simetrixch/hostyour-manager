@@ -50,19 +50,75 @@ describe("crypto gate", () => {
     expect(await refused(() => runGuards("cluster-deploy-slave", { tier: "real" }, { db }))).toBe("PLAN_REFUSED");
   });
 
-  it("deploy-slave refused under plaintext when a live slave already exists", async () => {
+  /** A slave whose deployment finished: a cluster row AND the cluster-admin bearer this manager
+   *  sealed off it, which is the thing a plaintext keystore would expose. */
+  function seedDeployedSlave(sqlite: DbHandle["sqlite"], id: string, name: string, role = "slave"): void {
+    sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES (?,?,?,'root',?)").run(id, name, `2.2.2.${id.length}`, role);
+    sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, status) VALUES (?,?,'prod',?,'active')")
+      .run(`cls_${id}`, id, `${name}.example`);
+    sqlite.prepare("INSERT INTO credentials (id, kind, label, server_id, encrypted_blob, fingerprint) VALUES (?,?,?,?,?,?)")
+      .run(`cred_${id}`, "kubeconfig", `${name} cluster bearer (argocd-manager)`, id, "plain:v0:t", "sha256:t");
+  }
+
+  it("deploy-slave refused under plaintext once this manager stores ANOTHER machine's cluster key", async () => {
     const { db, sqlite } = fresh();
-    sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_e','s5','2.2.2.2','root','slave')").run();
-    sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, status) VALUES ('cls_e','srv_e','prod','s5.example','active')").run();
-    expect(await refused(() => runGuards("cluster-deploy-slave", { tier: "rehearsal" }, { db }))).toBe("PLAN_REFUSED");
+    seedDeployedSlave(sqlite, "srv_e", "s5");
+    expect(await refused(() => runGuards("cluster-deploy-slave", { tier: "rehearsal", serverId: "srv_new" }, { db }))).toBe("PLAN_REFUSED");
+  });
+
+  it("a cluster row a stopped deployment left behind refuses nothing — no key was harvested off it", async () => {
+    // Step 1 of a deployment inserts the cluster row and onTerminal parks it back; a run that died
+    // anywhere before create-mgmt therefore leaves a row and no credential. Counting the row would
+    // refuse every plan on this installation, the failed machine's own retry first of all — and
+    // finishing a half-finished run by running it again is what every step of it is written for.
+    const { db, sqlite } = fresh();
+    for (const [i, status] of ["planned", "provisioning"].entries()) {
+      sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES (?,?,?,'root','slave')").run(`srv_h${i}`, `h${i}`, `2.2.2.${i}`);
+      sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, status) VALUES (?,?,'prod',?,?)")
+        .run(`cls_h${i}`, `srv_h${i}`, `h${i}.example`, status);
+    }
+    await expect(runGuards("cluster-deploy-slave", { tier: "rehearsal", serverId: "srv_h0" }, { db })).resolves.toBeUndefined();
+  });
+
+  it("does not count the run's OWN target: deploying a machine whose key is already stored adds none", async () => {
+    // sealTokenOnce reuses or rotates the row it finds, so a second deployment of that same machine
+    // puts no second key into the store — and refusing it would leave a slave that got as far as
+    // create-mgmt with no way to be finished.
+    const { db, sqlite } = fresh();
+    seedDeployedSlave(sqlite, "srv_e", "s5");
+    await expect(runGuards("cluster-deploy-slave", { tier: "rehearsal", serverId: "srv_e" }, { db })).resolves.toBeUndefined();
+  });
+
+  it("does not count a machine carrying the MASTER part: nothing is harvested off one", async () => {
+    // A cluster carrying the master part is reached over the manager pod's own ServiceAccount, so a
+    // credential row against such a server is not a cluster access key of the kind this gate counts.
+    const { db, sqlite } = fresh();
+    seedDeployedSlave(sqlite, "srv_m", "m1", "master+slave");
+    await expect(runGuards("cluster-deploy-slave", { tier: "rehearsal", serverId: "srv_new" }, { db })).resolves.toBeUndefined();
+  });
+
+  it("does not gate the MASTER ARM: the machine taking the slave part stores no cluster key at all", async () => {
+    // cluster-deploy-slave has two arms and the target's role picks them. Aimed at the master, it
+    // regenerates that machine's own branch and composes no create-mgmt, so nothing is harvested and
+    // nothing is sealed — while a slave deployed earlier has already put its bearer in the store,
+    // which is what the count below would refuse the act on.
+    const { db, sqlite } = fresh();
+    seedDeployedSlave(sqlite, "srv_e", "s5");
+    sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_m','m1','1.1.1.1','root','master')").run();
+    sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, status) VALUES ('cls_m','srv_m','prod','m1.example','active')").run();
+    await expect(runGuards("cluster-deploy-slave", { tier: "rehearsal", serverId: "srv_m" }, { db })).resolves.toBeUndefined();
+    // And the TIER says nothing about an act that harvests no key either: a real installation's own
+    // control host takes the slave part on the same reasoning.
+    await expect(runGuards("cluster-deploy-slave", { tier: "real", serverId: "srv_m" }, { db })).resolves.toBeUndefined();
+    // The exemption is the ROLE and not the id: the same plan aimed at a slave is refused.
+    expect(await refused(() => runGuards("cluster-deploy-slave", { tier: "rehearsal", serverId: "srv_new" }, { db }))).toBe("PLAN_REFUSED");
   });
 
   it("the gate is open once the store is no longer plaintext", async () => {
     const { db, sqlite } = fresh();
     sqlite.prepare("UPDATE meta SET value='passphrase' WHERE key='keystore.mode'").run();
-    sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_e','s5','2.2.2.2','root','slave')").run();
-    sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, status) VALUES ('cls_e','srv_e','prod','s5.example','active')").run();
-    await expect(runGuards("cluster-deploy-slave", { tier: "real" }, { db })).resolves.toBeUndefined();
+    seedDeployedSlave(sqlite, "srv_e", "s5");
+    await expect(runGuards("cluster-deploy-slave", { tier: "real", serverId: "srv_new" }, { db })).resolves.toBeUndefined();
   });
 
   it("onboard refused onto a real cluster under plaintext, allowed onto rehearsal", async () => {
@@ -134,8 +190,11 @@ describe("crypto gate", () => {
   it("assertGuardsArmed passes an empty runDefinitions and rejects a mutating def without attest-target", () => {
     const empty = new Map<RunKind, AnyRunDefinition>();
     expect(() => assertGuardsArmed(empty)).not.toThrow();
+    // A FABRICATED def under the fixture literal, never a real one: what is measured is the rule
+    // itself — a mutating def whose step 0 is not attest-target — and keying it on a run kind that
+    // really is mutating would read as a claim about that run kind's own steps.
     const bad = new Map<RunKind, AnyRunDefinition>([
-      ["cluster-adopt", { kind: "cluster-adopt", mutating: true, steps: () => [{ name: "not-attest", title: "x", run: async () => undefined }] } as unknown as AnyRunDefinition],
+      ["noop", { kind: "noop", mutating: true, steps: () => [{ name: "not-attest", title: "x", run: async () => undefined }] } as unknown as AnyRunDefinition],
     ]);
     expect(() => assertGuardsArmed(bad)).toThrow(/attest-target/);
   });

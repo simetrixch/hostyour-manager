@@ -33,8 +33,8 @@ import { tailnetPlan, tailnetSteps, type TailnetPorts } from "./tailnet.kit.ts";
 //
 // All three are `mutating`, so the executor pins attest-target as step 0 and makes it
 // unskippable: the public address is the one most likely to have been handed to a different
-// machine, so every one of them proves the box answering it is the box that was adopted before it
-// changes anything on it.
+// machine, so every one of them proves the box answering it is the box whose identity this manager
+// recorded before it changes anything on it.
 
 export const TailnetParams = z.object({
   serverId: z.string().startsWith("srv_"),

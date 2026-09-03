@@ -4,7 +4,8 @@ import { errValidation } from "../../../kernel/errors.ts";
 import { attestMachineId } from "../../../executor/attest.ts";
 import { remoteScript } from "../../../executor/stepkit.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
-import { hasManagerKey, type RunKind } from "../../../../shared/enums.ts";
+import { holdsManagerKey } from "../../../security/store.ts";
+import type { RunKind } from "../../../../shared/enums.ts";
 import { authorizedKeysHold, operatorKeyLine, operatorKeyMarker } from "../../../../shared/operator-keys.ts";
 import { loadOperatorKey } from "../../inventory/operator-keys.ts";
 import { recordAuthorizedKeysReading, type AuthorizedKeysReadingResult } from "../operator-keys-probe.ts";
@@ -256,21 +257,24 @@ const SUMMARY: Record<OperatorKeyKind, (o: { label: string; fp: string; name: st
 
 const WARNINGS: Record<OperatorKeyKind, string[]> = {
   "cluster-operator-key-place": [
-    "Afterwards this person can log in to the host as the same user this manager uses, with the passwordless sudo the adoption configured.",
+    "Afterwards this person can log in to the host as the same user this manager uses. Reaching root there takes the machine account's password: a machine this platform deployed carries no standing passwordless-root grant of this manager's.",
   ],
   "cluster-operator-key-remove": [
     "Only the line this platform wrote for that label goes. A copy of the same key placed by hand, under another comment, stays — and the run fails saying so rather than reporting a removal that did not happen.",
   ],
 };
 
-function assertReachable(server: { name: string; status: Parameters<typeof hasManagerKey>[0] }): void {
-  if (!hasManagerKey(server.status)) {
-    // The refusal states the RULE, not a claim about the machine: an adoption that failed part way
-    // leaves its row back at 'bare' while the key it installed is still on the host, so a message
-    // saying "this manager holds no key for it" would be false exactly there.
+/** THE REFUSAL IS THE CREDENTIAL, never the row's status. Every step of all three run kinds reaches
+ *  the host over ctx.ssh(), which authenticates with a sealed ssh_key credential and with nothing
+ *  else, so a machine none stands for is one whose every step dies at its own session. The status
+ *  column says where a deployment stands and is moved by a run that may never have opened a session
+ *  at all (shared/enums.ts SERVER_STATUS), which is a different fact and answers this question
+ *  wrongly for every deployment that stopped early. */
+function assertReachable(db: Db, server: { id: string; name: string }): void {
+  if (!holdsManagerKey(db, server.id)) {
     throw errValidation(
-      `refusing: "${server.name}" is '${server.status}' — only a server whose adoption finished is reached over this ` +
-      `manager's own key. An adoption that stopped part way is retried or aborted from its own run screen.`,
+      `refusing: this manager holds no SSH key for "${server.name}", and every one of these acts is driven over that key alone. ` +
+      `Deploying the machine is what installs one; a deployment that stopped part way is retried or aborted from its own run screen.`,
     );
   }
 }
@@ -291,7 +295,7 @@ function assertReachable(server: { name: string; status: Parameters<typeof hasMa
  */
 export function operatorKeyPlan(kind: OperatorKeyKind, target: OperatorKeyTarget, db: Db): Plan {
   const server = loadServer(db, target.serverId);
-  assertReachable(server);
+  assertReachable(db, server);
   const key = loadOperatorKey(db, target.operatorKeyId);
   const steps = operatorKeySteps(kind, target);
   const dialled = resolveTransport(server, "default");
@@ -314,7 +318,7 @@ export function operatorKeyPlan(kind: OperatorKeyKind, target: OperatorKeyTarget
  *  longer than one `install`. */
 export function authorizedKeysReadPlan(serverId: string, db: Db): Plan {
   const server = loadServer(db, serverId);
-  assertReachable(server);
+  assertReachable(db, server);
   const steps = authorizedKeysReadSteps(serverId);
   const dialled = resolveTransport(server, "default");
   return {

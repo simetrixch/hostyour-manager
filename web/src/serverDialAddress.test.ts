@@ -10,11 +10,11 @@ import type { ServerView } from "../../shared/api-types.ts";
 function server(over: Partial<ServerView>): ServerView {
   return {
     id: "srv_1", name: "s1", host: "203.0.113.7", lanHost: null, tailnetHost: null,
-    sshPort: 22, sshUser: "ubuntu", role: "slave", status: "ready",
+    sshPort: 22, sshUser: "ubuntu", role: "slave", status: "ready", cluster: null,
     tailnetState: "unknown", tailnet: { kind: "none" },
     passwordLoginState: "unknown", passwordLogin: { kind: "none" },
     authorizedKeysState: "unknown", authorizedKeys: { kind: "none" },
-    createdAt: 0, adoptedAt: null, hasPassword: false, hasKey: true,
+    hostKeyPinned: null, machineIdRecorded: false, createdAt: 0, adoptedAt: null, hasPassword: false, hasKey: true,
     ...over,
   };
 }

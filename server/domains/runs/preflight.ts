@@ -1,12 +1,13 @@
-// The adopt preflight checks. Two halves:
+// The machine preflight checks. Two halves:
 //   1. PREFLIGHT_SCRIPT — a self-contained bash script of checks, uploaded + run over SSH (step 1).
 //      It emits one `CHECK <id> <PASS|WARN|FAIL> <detail>` line per check, one
 //      `NIC <iface> <addr>` line per global-scope IPv4 interface, one
 //      `PORT <port> listener=<yes|no> connect=<address|no>` line per ingress port, plus a single
-//      `PUBLIC_IP <ip>` line (feeds dns.wildcard + the baseline step).
+//      `PUBLIC_IP <ip>` line (feeds dns.wildcard).
 //   2. parsePreflightOutput / makeCheck — turn those lines (and the runner-added checks
 //      sudo.ok / dns.wildcard / net.inbound) into typed PreflightChecks via one catalog.
-// Pure module (no ssh2, no db): unit-testable; the adopt run def wires it to a session.
+// Pure module (no ssh2, no db): unit-testable; the deployment's `slave-preflight` step wires it to
+// a session.
 //
 // WHY THE INGRESS PORTS ARE THE ONE CHECK THE SCRIPT DOES NOT JUDGE. Every other check reaches its
 // verdict on the machine and ships the answer; `port.80` and `port.443` ship the two MEASUREMENTS and
@@ -28,7 +29,11 @@ export const PREFLIGHT_CATALOG: Record<string, CatalogEntry> = {
   "cpu.count": { title: "CPU cores", severity: "soft", hint: "≥4 vCPU recommended." },
   "mem.total": { title: "Memory", severity: "soft", hint: "≥8 GB RAM recommended." },
   "disk.free": { title: "Free disk space", severity: "soft", hint: "≥40 GB free recommended." },
-  "sudo.ok": { title: "Sudo access", severity: "hard", hint: "Adopt as root, or grant the user sudo first." },
+  // NO STEP EMITS THIS ROW. Whether the machine account reaches root is measured by `prove-elevation`
+  // (defs/manager-key.kit.ts), which asks the machine with the password the run carries and refuses
+  // before anything is written. The catalogue keeps the row so a report carrying one from an earlier
+  // reading still renders under a title and a hint rather than under its bare id.
+  "sudo.ok": { title: "Sudo access", severity: "hard", hint: "Log in as root, or grant the login account sudo." },
   "port.22": { title: "SSH port (22)", severity: "soft", hint: "sshd should be listening on :22." },
   "port.80": { title: "Port 80 free", severity: "soft", hint: "Traefik will own :80 — free it, or take a machine that is not already serving ingress." },
   "port.443": { title: "Port 443 free", severity: "soft", hint: "Traefik will own :443 — free it, or take a machine that is not already serving ingress." },
@@ -36,6 +41,12 @@ export const PREFLIGHT_CATALOG: Record<string, CatalogEntry> = {
   "net.egress": { title: "Outbound internet", severity: "hard", hint: "The installer needs egress for the repo, snaps, and Let's Encrypt." },
   "dns.wildcard": { title: "DNS wildcard", severity: "soft", hint: "Add *.<domain> A <server-ip> (verified via 1.1.1.1)." },
   "snapd.present": { title: "snapd installed", severity: "soft", hint: "apt install snapd (provision can install it)." },
+  // HARD, because the machine has to carry git BEFORE anything installs it. place-ansiwise clones
+  // the catalogue with plain `git` (defs/machine-catalogue.ts) and it stands one step in front of
+  // deploy-host, which is the program whose install_packages row puts git on a machine. So the
+  // deployment cannot bootstrap its own clone tool, and a box without it dies at the placement with
+  // "git: command not found" rather than here, where the sentence names the fix.
+  "git.present": { title: "git installed", severity: "hard", hint: "apt install git — the catalogue is cloned with plain git one step before the program that would install it." },
   "time.sync": { title: "Clock synchronized", severity: "soft", hint: "Enable NTP: timedatectl set-ntp true (TLS/LE dislike clock skew)." },
   // deploy-slave extra (the master's Vault must answer from the slave —
   // the per-slave KV mount lives there and slave-ESO authenticates against it.
@@ -100,16 +111,16 @@ export function portCheck(reading: PortReading): PreflightCheck {
 }
 
 // ---- deploy-slave HARD policy (the slave must reach the master's Vault) --------------------
-// Additive: adopt keeps consuming the raw parsed checks; only the deploy-slave run maps
+// Additive: the parsed checks stand as the catalogue grades them; only the slave-preflight step maps
 // them through this policy.
 
 /** Preflight checks whose WARN outcome is fatal on a SLAVE deploy: Traefik must own
  *  80/443 (`ingress` addon) and MicroK8s arrives via snap, so "port already served" /
- *  "snapd missing" — mere warnings at adopt time — mean the box cannot be deployed. */
+ *  "snapd missing" — mere warnings as the catalogue grades them — mean the box cannot be deployed. */
 export const SLAVE_FAIL_ON_WARN: ReadonlySet<string> = new Set(["port.80", "port.443", "snapd.present"]);
 
 /** The deploy-slave severity re-map (shared/preflight.ts: soft checks are "re-evaluated
- *  as hard by the deploy preflight") — an adoptable box may still
+ *  as hard by the deploy preflight") — a box that passes the catalogue's own grading may still
  *  be un-deployable. Every check becomes `hard` (any FAIL now blocks), and the
  *  SLAVE_FAIL_ON_WARN warns are promoted to fails. Pure over the parsed checks. */
 export function hardenPreflightForSlave(checks: PreflightCheck[]): PreflightCheck[] {
@@ -241,7 +252,7 @@ export function parsePreflightOutput(stdout: string): ParsedPreflight {
 
 /** One operator-facing run-log line showing EVERY network adapter, not just the public IP —
  *  e.g. "NICs: eth0=10.1.1.11/24  ens18=192.168.0.5/24 · public=203.0.113.7". Shared by the
- *  adopt preflight and the deploy-slave slave-preflight so both logs read identically. */
+ *  every step that runs the checks, so every such log reads identically. */
 export function formatNicsLine(parsed: ParsedPreflight): string {
   const nics = Object.entries(parsed.nics).map(([iface, addr]) => `${iface}=${addr}`);
   return `NICs: ${nics.length > 0 ? nics.join("  ") : "none detected"} · public=${parsed.publicIp ?? "unknown"}`;
@@ -251,7 +262,7 @@ export function formatNicsLine(parsed: ParsedPreflight): string {
 // JS template literal (no ${...} interpolation, no \n). Best-effort: a missing tool degrades
 // to WARN, never aborts. The thresholds are the ones hostyour-cloud's own installer preflight uses.
 export const PREFLIGHT_SCRIPT = `#!/usr/bin/env bash
-# adopt preflight checks. Emits: CHECK <id> <PASS|WARN|FAIL> <detail>, NIC <iface> <addr>, PUBLIC_IP <ip>.
+# machine preflight checks. Emits: CHECK <id> <PASS|WARN|FAIL> <detail>, NIC <iface> <addr>, PUBLIC_IP <ip>.
 emit() { echo "CHECK $1 $2 $3"; }
 
 ID=; VERSION_ID=
@@ -323,6 +334,9 @@ else emit net.egress FAIL "cannot reach github.com"; fi
 
 if command -v snap >/dev/null 2>&1; then emit snapd.present PASS "snap present"
 else emit snapd.present WARN "snapd missing"; fi
+
+if command -v git >/dev/null 2>&1; then emit git.present PASS "git present"
+else emit git.present FAIL "git missing"; fi
 
 if [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = "yes" ]; then emit time.sync PASS "clock synced"
 else emit time.sync WARN "clock not NTP-synced"; fi

@@ -63,7 +63,7 @@ const PAT_KEY = `ssh-ed25519 ${BLOB_PAT}`;
 const PAT_FP = fingerprintPublicKey(PAT_KEY);
 const MINE_FP = fingerprintPublicKey(`ssh-ed25519 ${BLOB_MINE}`);
 
-/** The line adopt leaves on a host — the one no act here may ever touch. */
+/** The line `install-key` leaves on a host — the one no act here may ever touch. */
 const MANAGER_LINE = `ssh-ed25519 ${BLOB_MINE} ${managerKeyMarker("s1")}`;
 /** A key the cloud image shipped with: nothing here placed it, and nothing here can remove it. */
 const FOREIGN_LINE = `ssh-ed25519 ${BLOB_HETZ} someone@example.com`;
@@ -216,7 +216,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
     const script = rec.scripts.get("cluster-operator-key-remove") ?? "";
     expect(script).toContain("hostyour-operator:pat");
     // The manager's own marker is `hostyour` and then a colon. It appears nowhere in an act,
-    // so no pattern here can reach the line adopt wrote.
+    // so no pattern here can reach the line `install-key` wrote.
     expect(script).not.toContain("hostyour:");
     // Anchored at the end of the line, or removing "pat" would also take "pat-laptop" off.
     expect(script).toContain("hostyour-operator:pat[[:space:]]*$");
@@ -387,13 +387,23 @@ describe("the operator-key run kinds — one line of one file, and never this ma
       expect(plan.requiredSecrets).toEqual([]);
     });
 
-    it(`${kind} refuses a host this manager holds no key for — there is no session to edit over`, async () => {
+    it(`${kind} refuses a host no ssh_key credential stands for — there is no session to edit over`, async () => {
+      const { db, store, keyId } = await setup();
+      const params = kind === "cluster-authorized-keys-read" ? { serverId: SLAVE_ID } : { serverId: SLAVE_ID, operatorKeyId: keyId };
+      for (const c of await store.list({ serverId: SLAVE_ID, kind: "ssh_key" })) await store.purge(c.id);
+      // The row is untouched and still says `healthy`: what refuses is the credential, which is the
+      // same thing ctx.ssh() looks for at the run's first step.
+      expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.status).toBe("healthy");
+      await expect(DEFS[kind].plan(params, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
+    });
+
+    it(`${kind} accepts a host whose row says 'bare' while a key stands for it`, async () => {
+      // A deployment moves the row before it opens a session and parks it when the run ends, so no
+      // status says which credentials this manager holds (shared/enums.ts SERVER_STATUS).
       const { db, keyId } = await setup();
       const params = kind === "cluster-authorized-keys-read" ? { serverId: SLAVE_ID } : { serverId: SLAVE_ID, operatorKeyId: keyId };
-      for (const status of ["bare", "adopting"] as const) {
-        db.db.update(servers).set({ status }).where(eq(servers.id, SLAVE_ID)).run();
-        await expect(DEFS[kind].plan(params, { db: db.db })).rejects.toMatchObject({ code: "VALIDATION" });
-      }
+      db.db.update(servers).set({ status: "bare" }).where(eq(servers.id, SLAVE_ID)).run();
+      await expect(DEFS[kind].plan(params, { db: db.db })).resolves.toBeTruthy();
     });
 
     it(`${kind} accepts the MASTER — the machine an operator most needs to reach by hand`, async () => {
@@ -408,7 +418,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
   it("keeps an operator key OUT of the credential store, so no by-server lookup can ever reach it", async () => {
     const { db, store } = await setup();
     // The finding this design is built on: a credential of kind ssh_key is looked up BY SERVER,
-    // newest wins (executor/context.ts getSsh, and adopt's install-key). A human's key filed there
+    // newest wins (executor/context.ts getSsh, and manager-key.kit.ts install-key). A human's key filed there
     // would become the identity this manager tries to log in with — a different key, the same
     // lookup. It lives in its own table instead, so the collision cannot be reached at all.
     const all = await store.list();

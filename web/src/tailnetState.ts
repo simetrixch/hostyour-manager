@@ -8,11 +8,12 @@
 //      moment, and the wording always says when. Green is therefore reserved for a fresh reading
 //      of a joined host; everything else — never read, read long ago, unreadable — reads as
 //      exactly that.
-//   2. No sentence tells the operator to do something. The page offers Adopt only on a bare or
-//      undeployed server (LIFECYCLE in pages/Servers.tsx) and offers nothing at all on the master,
-//      while this paragraph renders on every card — so an instruction here would be followable
-//      only by the servers whose reading is least likely to be wrong. The sentences state what was
-//      measured and what would measure it again, and let the card's own buttons be the buttons.
+//   2. No sentence tells the operator to do something. The page offers Deploy only on a server
+//      short of a live cluster (LIFECYCLE in pages/Servers.tsx) and offers nothing at all on the
+//      master, while this paragraph renders on every card — so an instruction here would be
+//      followable only by the servers whose reading is least likely to be wrong. The sentences state
+//      what was measured and what would measure it again, and let the card's own buttons be the
+//      buttons.
 import type { ServerView } from "../../shared/api-types.ts";
 import { isMasterRole, type ServerTailnetState } from "../../shared/enums.ts";
 
@@ -24,9 +25,9 @@ import { isMasterRole, type ServerTailnetState } from "../../shared/enums.ts";
 export const TAILNET_READING_FRESH_MS = 60 * 60 * 1000;
 
 /** What takes a new reading. Every sentence that mentions re-reading ends with this, so the card
- *  never implies a live probe behind the number. Deliberately not a list of run kinds: adopt,
- *  deploy-slave, redeploy and each of the three tailnet repair run kinds take one, and a list here
- *  would be a fifth place to keep in step with them. */
+ *  never implies a live probe behind the number. Deliberately not a list of run kinds: deploy-slave,
+ *  redeploy and each of the three tailnet repair run kinds take one, and a list here would be a
+ *  fifth place to keep in step with them. */
 const RE_READ = "only a run takes a new one";
 
 export interface TailnetChip {
@@ -180,7 +181,7 @@ export function tailnetRunKindOffer(server: ServerView, o: { liveCluster: boolea
   // either where no run has ever looked is a guess. A rejoin establishes one from nothing: it mints
   // a fresh credential and joins with it, which is precisely the repair for a host whose membership
   // is not known. Hiding it until a reading exists locks out the only host that needs it — a machine
-  // this manager never adopted has no reading and no way to get one.
+  // no run has reached has no reading and no way to get one.
   //
   // What DOES withhold it is a run that looked and found no client at all: the join's first row
   // requires the client, so there would be nothing to join with.

@@ -15,9 +15,10 @@ import { PLATFORM_CHECKOUT, WORK_CHECKOUT } from "./machine-state.ts";
 // asked for at approve (executor/stepkit.ts `raised`). A SCRIPT is therefore raised WHOLE: its
 // kubectl lines carry no elevation each, because the first `sudo -S` would consume the password and
 // leave the rest of the script prompting a terminal that is not there.
-// The route that is NOT taken is `sudo -n`, answered only by a standing sudoers rule the adoption
-// writes. A machine that was never adopted — a first master, installed by ansiwise-client — carries
-// no such rule, and the one row that used to grant these is granted to nobody now.
+// The route that is NOT taken is `sudo -n`, answered only by a standing sudoers rule no run kind
+// here writes and `remove-sudoers` takes off. A machine carries no such rule of this platform's
+// making — a first master, installed by ansiwise-client, never had one — and the one row that used
+// to grant these is granted to nobody now.
 
 /** The MicroK8s kube-apiserver port — a platform constant (the emit-cluster-credentials answer
  *  and the cluster map's apiPort carry the same value). */
@@ -273,4 +274,106 @@ export function parsePipeRows(out: string): string[][] {
     .map((l) => l.trim())
     .filter((l) => l.length > 0)
     .map((l) => l.split("|"));
+}
+
+// ---- what the machine is asked about ITSELF, and how the answer is read ---------------------
+// Two readings the run takes off the host with one command each and turns into values a program or
+// a cluster map is written from. They stand here for the same reason every builder above does: the
+// command is a string and the reading is pure, so a test can plant a real machine's answer in it
+// without a host — and the step that ships them (defs/deploy-slave.ts) keeps the IO.
+
+/** The line separator, as a call rather than a literal. */
+function chr10(): string { return String.fromCharCode(10); }
+
+/** What is asked of a machine to find the disk its volumes belong on. `findmnt` reads the kernel's
+ *  own mount table, so what comes back is what is mounted and not what somebody meant to mount.
+ *
+ *  THE MACHINE DOES THE DISCARDING, AND THAT IS NOT AN OPTIMISATION. What comes back of a command
+ *  is its TAIL, and a cluster's own mount table runs to hundreds of lines — every pod subpath the
+ *  container runtime binds appears in it. Asked unfiltered, the one line that matters sits at the
+ *  top and scrolls out: the same machine answered "/mnt/data" before its cluster was installed and
+ *  "no separate data disk" minutes later, with the disk still mounted (apps4, 2026-08-29). What is
+ *  left here is short whatever the machine runs, and the reading below judges it again. */
+export const DATA_DISK_COMMAND =
+  "findmnt -rno TARGET,SOURCE | grep ' /dev/' | grep -v -e '^/ ' -e '^/boot' -e '^/snap' -e '^/var/snap' | head -20";
+
+/** WHERE THE VOLUMES OF A CLUSTER BELONG: the machine's separate disk, if it carries one.
+ *
+ *  THIS WAS ASKED OF A PERSON AND THEREFORE FORGOTTEN. The three rows that place the volumes —
+ *  require_storage_mount, create_storage_directory, link_storage_path — each do nothing when the
+ *  answer is empty, and empty is what a form gets when nobody types a path. Measured on a master on
+ *  2026-08-29: 29 GB of cluster data on the 124 GB boot disk while a 1 TB disk sat mounted at
+ *  /mnt/data with 2.1 MB on it. Nothing reported it, because nothing had been asked.
+ *
+ *  WHAT COUNTS AS THAT DISK: a mount of a real block device that is neither the root filesystem nor
+ *  a place the system keeps for itself. The boot partition is not it, and neither are the mounts the
+ *  container runtime makes under a snap's tree — those are the cluster's own volumes appearing as
+ *  mounts, and taking one would point the storage at itself. The shallowest remaining one wins,
+ *  because a machine built with one data disk has exactly one and a nested mount is a part of it.
+ *
+ *  A MACHINE WITH NO SUCH DISK IS ANSWERED WITH NOTHING, and the three rows then skip exactly as
+ *  they did before this existed. */
+export function dataDiskFrom(mountTable: string): { storage_mount: string; storage_subdirectory: string } | undefined {
+  const candidates: string[] = [];
+  for (const line of mountTable.split(chr10())) {
+    const [target, source] = line.trim().split(/\s+/);
+    if (target === undefined || source === undefined) continue;
+    if (!source.startsWith("/dev/")) continue;
+    if (target === "/" || target.startsWith("/boot") || target.startsWith("/var/snap") || target.startsWith("/snap")) continue;
+    candidates.push(target);
+  }
+  if (candidates.length === 0) return undefined;
+  const shallowest = candidates.sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))[0]!;
+  // NAMED, NOT THE MOUNT ITSELF. The link the cluster follows points at a directory ON that disk, so
+  // the disk keeps a name of its own and what the cluster wrote is told apart from what else is
+  // there — a mount pointed at directly is one nobody can put anything else on.
+  return { storage_mount: shallowest, storage_subdirectory: `${shallowest}/microk8s-storage` };
+}
+
+/** WHERE THIS MACHINE CAN BE REACHED, each address on its own as a `/32`.
+ *
+ *  THE MASTER'S ADDRESSES USED TO STAND IN A SLAVE'S MAP. `global.nodeCidrs` is what the gate
+ *  sandbox draws its fence from, and a slave's whole map is composed from the master's — so the
+ *  fence around a slave named the master's machine and left the slave's own outside it. Nothing
+ *  reported it: the list was not empty, so the reader that refuses to render on an empty list had
+ *  something to render.
+ *
+ *  THE SAME READING measure_host_addresses takes on a master, because the two write one file and a
+ *  second lifting of the same fact must not read it a second way: every global-scope IPv4 address
+ *  the kernel lists, as a `/32` and not as the prefix it was configured with, minus loopback and
+ *  minus the interfaces a container network makes and renumbers on its own schedule.
+ *
+ *  A /32 and not the interface's prefix: a node configured 10.1.1.7/24 shares that /24 with every
+ *  other host on the wire, and what a boundary needs is the machine, not the segment. */
+export const HOST_ADDRESS_COMMAND = "ip -4 -o addr show scope global";
+
+/** The beginnings of the names of interfaces that are not the machine's — the same nine
+ *  deploy-branch's own measure_host_addresses row passes over. Matched as PREFIXES, because every
+ *  one of these families numbers or hashes its own. */
+export const NOT_THE_MACHINES_INTERFACES = [
+  "cali", "vxlan.calico", "tunl", "flannel", "cni", "docker", "br-", "veth", "kube-ipvs",
+];
+
+/** The `/32`s in a listing, in the order the kernel gave them.
+ *
+ *  Read by POSITION FROM THE `inet` MARKER and not by a fixed index, because the fields in front of
+ *  it differ between an interface with a label and one without. */
+export function hostAddressesFrom(listing: string): string[] {
+  const found: string[] = [];
+  for (const line of listing.split(chr10())) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 2) continue;
+    const at = fields.indexOf("inet");
+    if (at < 0 || at + 1 >= fields.length) continue;
+    const device = fields[1]!;
+    if (NOT_THE_MACHINES_INTERFACES.some((prefix) => device.startsWith(prefix))) continue;
+    const address = fields[at + 1]!.split("/")[0]!;
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) continue;
+    // Loopback is every host's own and identifies none of them, so a fence that carved it out would
+    // carve out the caller's too.
+    if (address.startsWith("127.")) continue;
+    const cidr = `${address}/32`;
+    if (!found.includes(cidr)) found.push(cidr);
+  }
+  return found;
 }

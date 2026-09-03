@@ -10,14 +10,16 @@ import { hardenPreflightForSlave, parsePreflightOutput } from "./preflight.ts";
 import { hasHardFailure } from "../../../shared/preflight.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
 import { credLabels, sealTokenOnce, newestCredId, statedTarget } from "./defs/deploy-slave.kit.ts";
-import { dataDiskFrom, SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
+import { SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
+import { dataDiskFrom } from "./defs/deploy-slave.remote.ts";
 import { registerStep } from "./defs/deploy-slave.verify.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
-import type { AnyRunDefinition, StepCtx } from "../../executor/types.ts";
+import type { AnyRunDefinition, Step, StepCtx } from "../../executor/types.ts";
+import { serverCredFlags } from "../inventory/write.ts";
 import {
   SLAVE_ID, MASTER_ID, PARAMS, STEP_NAMES, HEALTHY_SLAVE_PREFLIGHT, MASTER_MARKING_YAML,
-  ELEVATION_PASSWORD, scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx, bareStepCtx,
-  drainToVerifyDeadline, drainToNextTimer, stepOf,
+  ELEVATION_PASSWORD, SLAVE_PUBLIC_KEY, scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx,
+  bareStepCtx, drainToVerifyDeadline, drainToNextTimer, stepOf,
   type Harness,
 } from "./deploy-slave.fixture.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
@@ -26,8 +28,15 @@ import { stepColumn } from "../../executor/run-rows.fixture.ts";
 // program conversation, and the local steps driven directly (mark-slave's map write, the verify
 // gates under fake timers, register's idempotence). Everything that starts a machine run — the
 // journeys over the deployment programs, the credential handshake, the cleanups drill — lives in
-// redeploy.ansiwise.test.ts, the ONE file that talks to a real `ansiwise-rest serve` (the engine's run
-// root is per-drive, so two serve fixtures in parallel would share records and collide).
+// deploy-slave.ansiwise.suite.ts, registered into the ONE file that talks to a real
+// `ansiwise-rest serve` (the engine's run root is per-drive, so two serve fixtures in parallel would
+// share records and collide).
+//
+// THE FAILURE MODES ARE ALSO WHERE THE ORDER OF FIRST CONTACT IS READ, and that is not a
+// coincidence: a run that dies at the preflight and a run that dies at prepare-checkouts have taken
+// a machine to two different states, and the difference between them IS the reason the two
+// irreversible acts stand where they do. Each of those two cases asserts what the machine was left
+// as, so the ordering is held by what a refusal leaves behind rather than by a list's shape.
 
 describe("deploy-slave run — plan, guards, failure modes", () => {
   afterEach(disposeHarnesses);
@@ -59,6 +68,15 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     );
     expect(plan.summary).toContain("s1.example.com");
     expect(plan.summary).toContain("m1");
+    // WHAT THE CARD HAS TO DISCLOSE, because this is the only ceremony left in front of a machine
+    // this manager has never logged in to: the password a person types here opens that first login
+    // and installs a key, and the run leaves both of the machine's password doors shut behind it.
+    // A card that named only the machine layer would take those three acts on an approval nobody
+    // gave for them.
+    expect(plan.summary).toContain("opens the first login and installs one");
+    expect(plan.summary).toContain("taking key logins only");
+    expect(plan.summary).toContain("bootstrap password sealed beside its row destroyed");
+    expect(plan.summary).toContain("no standing passwordless-root grant");
     expect(plan.warnings).toHaveLength(1);
     expect(plan.warnings[0]).toContain("detached");
     expect(plan.planHash).toMatch(/^[0-9a-f]{64}$/);
@@ -85,11 +103,52 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(() => assertGuardsArmed(runDefinitions)).not.toThrow();
   });
 
-  it("resolves every cleanup name the steps can register (abortWithCleanup's lookup path)", async () => {
+  it("puts each act of first contact where the route the next one needs is still there", async () => {
+    // THE ORDER IS THE BEHAVIOUR, and a list that merely contains the right names holds none of it.
+    // Two rules decide where these steps stand, each of them a way a machine is lost:
+    //   - `remove-sudoers` takes the standing passwordless-root grant away, so it may only run where
+    //     every root command after it is raised with the password the run itself carries. Put it
+    //     before a step that reaches root any other way and that step is refused on every machine.
+    //   - shutting the daemon's password door and destroying the sealed bootstrap password each
+    //     remove a way in, so both wait for `verify-key-login` — the proof of the way in that stays.
+    //     Put either ahead of it and a machine whose key never took is reachable by nobody.
     const { db } = await makeHarness();
     const def = buildRunDefinitions({ db: db.db }).get("cluster-deploy-slave") as AnyRunDefinition;
+    const list = def.steps({ ...PARAMS, tier: "rehearsal" }).map((s: Step) => s.name);
+    const at = (name: string): number => {
+      const i = list.indexOf(name);
+      expect(i, `${name} is not in the deploy-slave step list`).toBeGreaterThanOrEqual(0);
+      return i;
+    };
+    expect(at("remove-sudoers")).toBeLessThan(at("disable-password-login"));
+    expect(at("verify-key-login")).toBeLessThan(at("disable-password-login"));
+    expect(at("verify-key-login")).toBeLessThan(at("purge-bootstrap-password"));
+    // And the preflight is read over the key those steps installed, so it stands behind them: a
+    // machine whose account cannot reach root is refused by prove-elevation for the cost of one
+    // command instead of a whole script.
+    expect(at("prove-elevation")).toBeLessThan(at("slave-preflight"));
+    expect(at("install-key")).toBeLessThan(at("slave-preflight"));
+  });
+
+  it("resolves every cleanup name the steps can register, on the arm that arms them and on the arm that must not (abortWithCleanup's lookup path)", async () => {
+    const { db } = await makeHarness();
+    const definitions = buildRunDefinitions({ db: db.db });
+    const def = definitions.get("cluster-deploy-slave") as AnyRunDefinition;
     const names = (def.cleanups?.({ ...PARAMS, tier: "rehearsal" }) ?? []).map((c) => c.name);
-    expect(names.sort()).toEqual(["drop-input", "microk8s-reset-slave", "remove-slave", "remove-slave-marking"]);
+    // The executor resolves a persisted __cleanups entry by NAME against the definition's own list,
+    // so a name a step can register and this list does not carry ends an abort with a step that has
+    // no implementation. First contact adds two of them: install-key, which puts this manager's only
+    // way in onto the machine, and disable-password-login, which shuts the door that opened it.
+    expect(names.sort()).toEqual([
+      "drop-input", "microk8s-reset-slave", "remove-installed-key",
+      "remove-slave", "remove-slave-marking", "restore-password-login",
+    ]);
+    // THE OTHER SIDE OF THE SAME RULE, and it is why the arming is the composing definition's
+    // decision rather than the step's: redeploy's slave arm runs these very steps and implements no
+    // compensating action at all, so every one of them has to be held back there. What that arm
+    // really arms is read off a live slave's own checkpoints in redeploy.ansiwise.test.ts; here it is
+    // the fact that there would be nothing to resolve a name against.
+    expect((definitions.get("cluster-redeploy") as AnyRunDefinition).cleanups).toBeUndefined();
   });
 
   it("hard-fails attest-target when the server name is not the domain's first label (the split-brain guard)", async () => {
@@ -124,16 +183,16 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(db.db.select().from(clusters).all()).toHaveLength(0);
   });
 
-  it("hard-fails attest-target when the box behind the address is NOT the machine we adopted", async () => {
+  it("hard-fails attest-target when the box behind the address is NOT the machine recorded here", async () => {
     const hosts = scriptedHosts({ machineId: "ffffffffffffffffffffffffffffffff" });
     const { db, executor } = await makeHarness({ hosts, keystore: "keyfile" });
-    // The row remembers the machine adopt saw; the box now answering reports another one.
+    // The row remembers the machine the last run reached; the box now answering reports another one.
     db.db.update(servers).set({ machineId: "abc123def4567890abc123def4567890" }).where(eq(servers.id, SLAVE_ID)).run();
     const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
     await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
     expect(getRun(db.db, runId)?.status).toBe("failed");
-    expect(stepColumn(db, runId, "attest-target", "error")).toMatch(/not the machine we adopted/);
+    expect(stepColumn(db, runId, "attest-target", "error")).toMatch(/not the machine recorded here/);
   });
 
   it("attest-target refuses a LIVE cluster and names the run kind that does this job", async () => {
@@ -163,9 +222,9 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   // The whole refusal, end to end, in the shape the field produced it: a machine already serving
   // ingress through a DNAT — nothing listening on 80, and a connection to its own address accepted.
-  // That is a WARN at adopt time and a hard refusal here, and it is the machine a second installation
+  // The catalogue grades that a WARN and this step refuses it, and it is the machine a second installation
   // must not be laid over.
-  it("slave-preflight blocks on the HARD policy: port 80 served with no listener (a mere WARN at adopt time)", async () => {
+  it("slave-preflight blocks on the HARD policy: port 80 served with no listener (a mere WARN in the catalogue)", async () => {
     const hosts = scriptedHosts({
       preflightOut: HEALTHY_SLAVE_PREFLIGHT.replace("PORT 80 listener=no connect=no", "PORT 80 listener=no connect=203.0.113.7"),
     });
@@ -178,6 +237,17 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(run?.status).toBe("failed");
     expect(run?.steps.find((s) => s.name === "slave-preflight")?.status).toBe("failed");
     expect(stepColumn(db, runId, "slave-preflight", "error")).toMatch(/Port 80 free/);
+    // WHERE THE RUN GOT TO, which is what the preflight's place in the list is for. Everything
+    // before it is first contact, so the machine now carries this manager's key and the row is
+    // stamped with the login that key proved — and NEITHER irreversible act has run, so the box
+    // still takes the password it was found taking. A machine this refusal leaves behind is exactly
+    // as reachable as the one the run met, which is what lets a person fix port 80 and run it again.
+    expect(hosts.authorizedKeys).toContain(SLAVE_PUBLIC_KEY);
+    expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.adoptedAt).toBeInstanceOf(Date);
+    expect(hosts.passwordLogin).toBe("yes");
+    for (const untouched of ["disable-password-login", "purge-bootstrap-password"] as const) {
+      expect(run?.steps.find((s) => s.name === untouched)?.status, untouched).toBe("pending");
+    }
     // onTerminal choreography: server freed, cluster parked planned with its slaveId
     expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.status).toBe("ready");
     const cluster = db.db.select().from(clusters).where(eq(clusters.domain, PARAMS.domain)).get();
@@ -197,7 +267,16 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   it("prepare-checkouts fails NAMED when the master's checkouts cannot be stood where the branch cut reads — no program starts, no map is written", async () => {
     const hosts = scriptedHosts({ checkoutsOut: "", checkoutsExit: 3 });
-    const { db, executor } = await makeHarness({ hosts });
+    const { db, executor, store } = await makeHarness({ hosts });
+    // A row sealed while the machine account's password was still kept beside it. That blob is a way
+    // into the machine which outlives the daemon's own setting, and it is the second of the two
+    // doors this list shuts — so it has to be there before the run for its destruction to be a
+    // measurement rather than a sentence about a row that held nothing.
+    await store.seal({
+      kind: "other", label: "bootstrap password for s1", plaintext: Buffer.from("bootstrap-pw-0011"),
+      fingerprint: "bootstrap-password", serverId: SLAVE_ID,
+    });
+    expect((await serverCredFlags(store)).get(SLAVE_ID)?.hasPassword).toBe(true);
     const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
     await executor.approve(runId, elevationOnly());
     await executor.settle(runId);
@@ -209,6 +288,15 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(error).toContain("origin/m1.example.com");   // the live tree's branch, named
     expect(error).toContain("product branch");          // the work tree's, named
     expect(error).toContain("then retry the run");      // the fix is actionable
+    // WHERE THE RUN GOT TO, and it is the other half of the ordering the preflight case shows. This
+    // is the first step that can fail on the MASTER, so by here everything that could fail without
+    // this manager's own key has passed and both irreversible acts have run: the daemon takes no
+    // password any more and the sealed one is destroyed. The machine is left reachable by this
+    // manager and by nobody else — which is the state a retry of this same run needs, and the reason
+    // those two acts stand ahead of the machine layer rather than at the end of the list.
+    expect(hosts.authorizedKeys).toContain(SLAVE_PUBLIC_KEY);
+    expect(hosts.passwordLogin).toBe("no");
+    expect((await serverCredFlags(store)).get(SLAVE_ID)?.hasPassword).toBe(false);
     // Nothing downstream ran: no serve conversation was opened on either host, and the run was
     // parked by onTerminal with its ordinal kept.
     expect(hosts.log.filter((l) => l.command.includes("ansiwise"))).toHaveLength(0);
@@ -226,6 +314,11 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const { db, executor } = await makeHarness();
     db.db.insert(servers).values({ id: "srv_other", name: "s2", host: "s2.example.com", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_other", serverId: "srv_other", stage: "prod", domain: "s2.example.com", status: "active", slaveId: 7 }).run();
+    // What the gate counts is the cluster-admin bearer create-mgmt harvested off that machine, which
+    // is the thing a plaintext keystore would expose — the cluster row beside it says only where its
+    // installation stands (executor/guards.ts).
+    db.sqlite.prepare("INSERT INTO credentials (id, kind, label, server_id, encrypted_blob, fingerprint) VALUES (?,?,?,?,?,?)")
+      .run("cred_other", "kubeconfig", "s2 cluster bearer (argocd-manager)", "srv_other", "plain:v0:t", "sha256:t");
     const err = await executor.plan("cluster-deploy-slave", PARAMS).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppError);
     expect((err as AppError).code).toBe("PLAN_REFUSED");
@@ -368,7 +461,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(await newestCredId(ctx, { serverId: SLAVE_ID, kind: "kubeconfig", label })).toBe(id);
   });
 
-  it("hardenPreflightForSlave: every check hard; 80/443/snapd warns promoted to fails; adopt's view untouched", () => {
+  it("hardenPreflightForSlave: every check hard; 80/443/snapd warns promoted to fails; the catalogue's own view untouched", () => {
     const parsed = parsePreflightOutput([
       "CHECK os.ubuntu PASS ubuntu 26.04",
       "CHECK cpu.count WARN 2 cores (>=4 recommended)",
@@ -388,10 +481,10 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(byId.get("snapd.present")?.status).toBe("fail"); // promoted (MicroK8s is a snap)
     expect(byId.get("cpu.count")?.status).toBe("warn"); // NOT in the promotion set
     expect(byId.get("time.sync")?.status).toBe("warn");
-    expect(byId.get("disk.free")?.status).toBe("fail"); // soft-fail at adopt ⇒ blocks here
+    expect(byId.get("disk.free")?.status).toBe("fail"); // a soft fail in the catalogue ⇒ blocks here
     expect(byId.get("os.ubuntu")?.status).toBe("pass");
     expect(hasHardFailure({ checkedAt: 0, checks: hard })).toBe(true);
-    // pure: the input (what adopt persisted) keeps its soft severities
+    // pure: the input (the checks as the catalogue graded them) keeps its soft severities
     expect(parsed.find((c) => c.id === "cpu.count")?.severity).toBe("soft");
   });
 

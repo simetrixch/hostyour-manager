@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import type { Step, StepCtx, Cleanup, RunDefinition } from "../../../executor/types.ts";
+import type { Db } from "../../../db/client.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { STAGE, CLUSTER_TIER, isMasterRole } from "../../../../shared/enums.ts";
 import { errValidation, errNotConfigured } from "../../../kernel/errors.ts";
@@ -18,30 +19,54 @@ import {
   ansiwiseProgramStep, requireElevationPassword, ANSIWISE_ELEVATION_SECRET,
   type AnsiwisePorts, type ExtraAnswers,
 } from "./ansiwise-run.kit.ts";
+import {
+  proveElevationStep, generateKeyStep, installKeyStep, verifyKeyLoginStep, enableNtpStep,
+  removeSudoersStep, removeInstalledKeyCleanup, type FirstContactInput,
+} from "./manager-key.kit.ts";
+import { disablePasswordLoginStep, purgeBootstrapPasswordStep, restorePasswordLoginCleanup } from "./password-login.kit.ts";
 import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
 import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
-import { masterCheckoutsScript, SLAVE_API_PORT } from "./deploy-slave.remote.ts";
+import { masterCheckoutsScript, SLAVE_API_PORT, DATA_DISK_COMMAND, HOST_ADDRESS_COMMAND, dataDiskFrom, hostAddressesFrom } from "./deploy-slave.remote.ts";
 import { refreshCheckoutStep } from "./live-cluster.kit.ts";
 import { placeInputStep, dropInputStep, dropInputCleanup } from "./deploy-slave.input.ts";
-import { rejoinStep, readMembershipStep } from "./tailnet.kit.ts";
+import { rejoinStep, joinIfAbsentStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
 import { clusterShortName, resolveClusterMarking, writeClusterMarking, projectClusterMarking, type ClusterMarking, writeClusterMarkingOnBranch } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
+import { masterSlavePartSteps, masterSlavePartPlan } from "./deploy-slave.master.ts";
 
-// "cluster-deploy-slave" — the Run that turns a READY (adopted) server into a live slave, over the
-// deployment PROGRAMS of the machine's own catalogue (hostyour-deploy ansiwise/programs/), each
-// driven over `ansiwise-rest serve` and proven by a dry run the machine's gate then admits the real run
-// against. Two hosts: the MASTER cuts the slave's install branch (deploy-slave-branch) and takes
-// its registration (register-slave); the SLAVE is built by the same three machine-layer programs
-// every cluster is (deploy-host, deploy-cluster, deploy-platform-services), joins the private network with a
-// credential the master mints, and emits the one credentials file the registration is made from.
+// "cluster-deploy-slave" — the Run that gives a server the SLAVE PART, over the deployment PROGRAMS
+// of the machine's own catalogue (hostyour-deploy ansiwise/programs/), each driven over
+// `ansiwise-rest serve` and proven by a dry run the machine's gate then admits the real run against.
+//
+// TWO ARMS, decided by the target's ROLE and by nothing an operator states, the way redeploy decides
+// between its own — because giving a machine the slave part is a different set of acts on a machine
+// that already carries the master part:
+//   pure slave        the list below, over TWO HOSTS: the MASTER cuts the slave's install branch
+//                     (deploy-slave-branch) and takes its registration (register-slave); the SLAVE is
+//                     built by the same three machine-layer programs every cluster is (deploy-host,
+//                     deploy-cluster, deploy-platform-services), joins the private network with a
+//                     credential the master mints, and emits the one credentials file the
+//                     registration is made from.
+//   master, master+   deploy-slave.master.ts, over ONE host: the machine takes the slave part by
+//     slave           regenerating its OWN branch under the combined role. One machine, one branch,
+//                     one cluster — no ordinal, no second cluster row, no per-slave management plane,
+//                     and not one compensating action armed, because every one of them would act on
+//                     the control host itself.
+//
+// IT STARTS ON A BARE MACHINE, and that is why first contact is the head of its step list rather
+// than a run kind of its own. Holding a key for a machine is a STATE, not an act somebody performs
+// once: this run establishes it where it does not exist and re-measures it where it does, so the
+// same list carries a box this manager has never logged in to and a box it deployed yesterday. What
+// a person is asked for is the password of the machine account, which raises every root command the
+// run sends and, on a machine holding no key of this manager's, opens the first login too.
 //
 // Before the first of those programs, place-ansiwise puts the binary they are driven through, the
-// catalogue they are read from and the platform checkout they act on onto the slave: a machine
-// adopted from bare metal carries none of them, and every program step would otherwise open a
-// conversation with a command that is not there. After the last of them and after the join,
+// catalogue they are read from and the platform checkout they act on onto the slave: a bare machine
+// carries none of them, and every program step would otherwise open a conversation with a command
+// that is not there. After the last of them and after the join,
 // enable-ansiwise-service runs the SAME placement once more to switch the machine's own resident
 // surface on — the fourth thing that placement places, and the one that needs an address the machine
 // only holds once it is on the private network.
@@ -62,13 +87,26 @@ export const DeploySlaveParams = z.object({
   /** Defaults to rehearsal so the parsed params satisfy slaveCryptoGate's literal check
    *  (a `real` slave is refused until the keystore hardening lifts the gate). */
   tier: z.enum(CLUSTER_TIER).default("rehearsal"),
-  /** Explicit ordinal — used by a retry after a failed run (it is never recycled) or to adopt
-   *  a manually provisioned slave. Omitted ⇒ attest-target allocates max(slave_id)+1. */
+  /** Explicit ordinal — used by a retry after a failed run (it is never recycled) or to take on a
+   *  slave provisioned by hand. Omitted ⇒ attest-target allocates max(slave_id)+1. */
   slaveId: z.number().int().positive().optional(),
 });
 export type DeploySlaveParams = z.infer<typeof DeploySlaveParams>;
 
 export type { DeploySlavePorts };
+
+/** What the DEFINITION takes beyond what its steps do: the inventory, for the one question that must
+ *  be answered BEFORE the steps exist — which arm the target's ROLE earns. steps() is handed the
+ *  persisted params and no database, so the db is a port of the def exactly as the platform repo is
+ *  one, and it is not optional: an arm chosen off a port that may be absent would be an arm chosen by
+ *  whether this manager is configured.
+ *
+ *  It stands here rather than on DeploySlavePorts for the reason redeploy states the same field on
+ *  RedeployPorts (redeploy.ts): the step-level ports are what a STEP is handed, and no step of either
+ *  arm reads a database through them — every one of them has ctx.db. */
+export interface DeploySlaveDefPorts extends DeploySlavePorts, AnsiwisePorts {
+  db: Db;
+}
 
 /** The answers the machine-layer programs declare that neither the inventory nor the cluster map
  *  can state, asked for at approve and carried to the steps as `activation-input:<answer>`. All
@@ -100,106 +138,6 @@ function armed(cleanup: Cleanup | undefined, step: Step): Step {
   };
 }
 
-/** Answers the DEF is authoritative for on the machine-layer programs, read off the slave's OWN
- *  cluster map — the record mark-slave wrote earlier in the same run (and re-reads on a redeploy).
- *  books_fqdn is the master's domain (deploy-cluster/-gitops default it to the machine's own,
- *  which for a slave would install a second books keeper); build_plane_fqdn is the map's, whose
- *  self-naming form the programs read the same way as "this machine". */
-/** What is asked of a machine to find the disk its volumes belong on. `findmnt` reads the kernel's
- *  own mount table, so what comes back is what is mounted and not what somebody meant to mount. */
-/** The line separator, as a call rather than a literal. */
-function chr10(): string { return String.fromCharCode(10); }
-
-/** THE MACHINE DOES THE DISCARDING, AND THAT IS NOT AN OPTIMISATION. What comes back of a command
- *  is its TAIL, and a cluster's own mount table runs to hundreds of lines — every pod subpath the
- *  container runtime binds appears in it. Asked unfiltered, the one line that matters sits at the
- *  top and scrolls out: the same machine answered "/mnt/data" before its cluster was installed and
- *  "no separate data disk" minutes later, with the disk still mounted (apps4, 2026-08-29). What is
- *  left here is short whatever the machine runs, and the reading below judges it again. */
-export const DATA_DISK_COMMAND =
-  "findmnt -rno TARGET,SOURCE | grep ' /dev/' | grep -v -e '^/ ' -e '^/boot' -e '^/snap' -e '^/var/snap' | head -20";
-
-/** WHERE THE VOLUMES OF A CLUSTER BELONG: the machine's separate disk, if it carries one.
- *
- *  THIS WAS ASKED OF A PERSON AND THEREFORE FORGOTTEN. The three rows that place the volumes —
- *  require_storage_mount, create_storage_directory, link_storage_path — each do nothing when the
- *  answer is empty, and empty is what a form gets when nobody types a path. Measured on a master on
- *  2026-08-29: 29 GB of cluster data on the 124 GB boot disk while a 1 TB disk sat mounted at
- *  /mnt/data with 2.1 MB on it. Nothing reported it, because nothing had been asked.
- *
- *  WHAT COUNTS AS THAT DISK: a mount of a real block device that is neither the root filesystem nor
- *  a place the system keeps for itself. The boot partition is not it, and neither are the mounts the
- *  container runtime makes under a snap's tree — those are the cluster's own volumes appearing as
- *  mounts, and taking one would point the storage at itself. The shallowest remaining one wins,
- *  because a machine built with one data disk has exactly one and a nested mount is a part of it.
- *
- *  A MACHINE WITH NO SUCH DISK IS ANSWERED WITH NOTHING, and the three rows then skip exactly as
- *  they did before this existed. */
-export function dataDiskFrom(mountTable: string): { storage_mount: string; storage_subdirectory: string } | undefined {
-  const candidates: string[] = [];
-  for (const line of mountTable.split(chr10())) {
-    const [target, source] = line.trim().split(/\s+/);
-    if (target === undefined || source === undefined) continue;
-    if (!source.startsWith("/dev/")) continue;
-    if (target === "/" || target.startsWith("/boot") || target.startsWith("/var/snap") || target.startsWith("/snap")) continue;
-    candidates.push(target);
-  }
-  if (candidates.length === 0) return undefined;
-  const shallowest = candidates.sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))[0]!;
-  // NAMED, NOT THE MOUNT ITSELF. The link the cluster follows points at a directory ON that disk, so
-  // the disk keeps a name of its own and what the cluster wrote is told apart from what else is
-  // there — a mount pointed at directly is one nobody can put anything else on.
-  return { storage_mount: shallowest, storage_subdirectory: `${shallowest}/microk8s-storage` };
-}
-
-/** WHERE THIS MACHINE CAN BE REACHED, each address on its own as a `/32`.
- *
- *  THE MASTER'S ADDRESSES USED TO STAND IN A SLAVE'S MAP. `global.nodeCidrs` is what the gate
- *  sandbox draws its fence from, and a slave's whole map is composed from the master's — so the
- *  fence around a slave named the master's machine and left the slave's own outside it. Nothing
- *  reported it: the list was not empty, so the reader that refuses to render on an empty list had
- *  something to render.
- *
- *  THE SAME READING measure_host_addresses takes on a master, because the two write one file and a
- *  second lifting of the same fact must not read it a second way: every global-scope IPv4 address
- *  the kernel lists, as a `/32` and not as the prefix it was configured with, minus loopback and
- *  minus the interfaces a container network makes and renumbers on its own schedule.
- *
- *  A /32 and not the interface's prefix: a node configured 10.1.1.7/24 shares that /24 with every
- *  other host on the wire, and what a boundary needs is the machine, not the segment. */
-export const HOST_ADDRESS_COMMAND = "ip -4 -o addr show scope global";
-
-/** The beginnings of the names of interfaces that are not the machine's — the same nine
- *  deploy-branch's own measure_host_addresses row passes over. Matched as PREFIXES, because every
- *  one of these families numbers or hashes its own. */
-export const NOT_THE_MACHINES_INTERFACES = [
-  "cali", "vxlan.calico", "tunl", "flannel", "cni", "docker", "br-", "veth", "kube-ipvs",
-];
-
-/** The `/32`s in a listing, in the order the kernel gave them.
- *
- *  Read by POSITION FROM THE `inet` MARKER and not by a fixed index, because the fields in front of
- *  it differ between an interface with a label and one without. */
-export function hostAddressesFrom(listing: string): string[] {
-  const found: string[] = [];
-  for (const line of listing.split(chr10())) {
-    const fields = line.trim().split(/\s+/);
-    if (fields.length < 2) continue;
-    const at = fields.indexOf("inet");
-    if (at < 0 || at + 1 >= fields.length) continue;
-    const device = fields[1]!;
-    if (NOT_THE_MACHINES_INTERFACES.some((prefix) => device.startsWith(prefix))) continue;
-    const address = fields[at + 1]!.split("/")[0]!;
-    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) continue;
-    // Loopback is every host's own and identifies none of them, so a fence that carved it out would
-    // carve out the caller's too.
-    if (address.startsWith("127.")) continue;
-    const cidr = `${address}/32`;
-    if (!found.includes(cidr)) found.push(cidr);
-  }
-  return found;
-}
-
 /** WHO THE BRANCH CUT COMMITS AS. One thing on every machine of this platform: `installer@` and the
  *  machine's own domain, which the run already holds — so it is composed rather than asked, and a
  *  person is not offered a field whose only right answer is the one thing already known.
@@ -213,6 +151,16 @@ export function slaveBranchAnswers(target: SlaveTarget): ExtraAnswers {
   };
 }
 
+/** Answers the DEF is authoritative for on the machine-layer programs, read off the machine's OWN
+ *  cluster map — the record mark-slave wrote earlier in the same run (and re-reads on a redeploy).
+ *  books_fqdn is the master's domain (deploy-cluster/-gitops default it to the machine's own,
+ *  which for a slave would install a second books keeper); build_plane_fqdn is the map's, whose
+ *  self-naming form the programs read the same way as "this machine".
+ *
+ *  A MACHINE THAT KEEPS THE BOOKS ITSELF is answered by the same reading, and that is why the master
+ *  arm (deploy-slave.master.ts) composes this one rather than a second copy: its map names no books
+ *  cluster, so books_fqdn is omitted and the programs default to the machine's own — which for that
+ *  machine is the right answer, because it IS where the books are kept. */
 export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts): ExtraAnswers {
   return async (ctx) => {
     const { domain } = target.resolve(ctx.db);
@@ -241,10 +189,10 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
   };
 }
 
-/** deploy-host's operator_public_key: the public half of the key this manager installed at
- *  adopt (the newest ssh_key credential's stored public line). The program re-installs it
- *  idempotently and proves sshd would accept it. A row without one (an adopt from before the
- *  public line was stored) sends nothing, and the program refuses the missing answer by name. */
+/** deploy-host's operator_public_key: the public half of the key this manager holds for the machine
+ *  (the newest ssh_key credential's stored public line, put on the host by `install-key`). The
+ *  program re-installs it idempotently and proves sshd would accept it. A credential row carrying no
+ *  public line sends nothing, and the program refuses the missing answer by name. */
 /** deploy-host's two checkout answers: WHICH repository the platform tree comes from, and WHICH
  *  branch it stands on. The one extra a machine-layer program takes that nothing on the machine can
  *  answer, because the checkout it would be read from is what the program establishes.
@@ -294,28 +242,73 @@ export function operatorKeyAnswer(serverId: string): ExtraAnswers {
   };
 }
 
-/** The install step list BOTH cluster run kinds run: deploy-slave takes a READY server through it, and
- *  redeploy re-runs it against a slave that is already live. `mode` decides two things. Per step,
- *  whether the compensating action that would UNDO it is armed — never on a redeploy, where every
- *  one of them undoes a WORKING slave. And whether the two BIRTH acts run at all: the branch cut
- *  (a slave's branch is cut once; the program's push takes no force, so re-cutting a standing
- *  branch is refused rather than rewritten) and the tailnet join (the join program deliberately
- *  discards the node key first, which on a LIVE slave would rotate the address the cluster map
- *  states — repairing a live slave's membership is the tailnet run kinds' own job). */
+/** The install step list BOTH cluster run kinds run: deploy-slave takes a machine from wherever it
+ *  stands — a box nothing has touched included — through it, and redeploy re-runs it against a slave
+ *  that is already live. `mode` decides two things. Per step, whether the compensating action that
+ *  would UNDO it is armed — never on a redeploy, where every one of them undoes a WORKING slave, and
+ *  where the redeploy definition implements none of them to be resolved against. And whether the ONE
+ *  BIRTH act runs at all: the branch cut, which a slave gets once — the program's push takes no
+ *  force, so re-cutting a standing branch is refused rather than rewritten.
+ *
+ *  THE TAILNET JOIN IS NOT A BIRTH ACT, and a list that treats it as one cannot finish a machine
+ *  reinstalled at the hosting provider — which is the machine a redeploy is asked for (redeploy.ts).
+ *  It is unconditional on a deployment, where the machine's membership is this platform's to
+ *  establish whatever the box arrived carrying, and MEASURED on a redeploy, where a machine
+ *  reinstalled at the hosting provider holds none and a live one must not be handed a fresh address
+ *  for nothing. Which of the two runs is decided here; what the measured one reads and why it acts
+ *  is written where it lives (tailnet.kit.ts joinIfAbsentStep).
+ *
+ *  THE FIRST-CONTACT STEPS RUN ON BOTH ARMS, and only their compensations are held back. Each of
+ *  them measures before it acts, so on a live slave they read a key that is installed, a login that
+ *  works and doors that are already shut, and each says so in a full sentence. A step left out of a
+ *  list is a step nobody can see was considered; a step that reports finding nothing to do is a
+ *  reading. */
 export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePorts & AnsiwisePorts): Step[] {
   const { target, mode } = input;
   const sid = target.serverId;
   const redeploying = mode === "redeploy";
   const machineAnswers = slaveMachineAnswers(target, ports);
+  // The password every root command of this run is raised with is also what opens the first login on
+  // a machine this manager holds no key for — one secret, named once, and the same one the machine's
+  // own programs are driven with (ansiwise-run.kit.ts).
+  const firstContact: FirstContactInput = { serverId: sid, secretName: ANSIWISE_ELEVATION_SECRET };
   return [
     attestTargetStep(input),
+    // ---- FIRST CONTACT: the manager's own key onto the machine, and the machine's doors left the
+    // way this platform keeps them. Every one of these steps is measure-then-act (manager-key.kit.ts),
+    // so a machine that already carries all of it is read by every one of them, written to by none,
+    // and reported on in a full sentence by each — which is what lets the same list run against a
+    // bare box and against a live slave. They stand HERE, before the preflight, because the
+    // preflight and everything after it reach the machine over ctx.ssh(), and ctx.ssh()
+    // authenticates with the key install-key puts there and verify-key-login proves.
+    proveElevationStep(firstContact),
+    generateKeyStep(firstContact),
+    // install-key is the only one of the key steps that leaves anything on the machine, so it is the
+    // only one with a compensation — and the kit takes the arming as an answer from here, because
+    // taking this manager's only way in off a machine is right after a first install that failed and
+    // wrong after a redeploy that did. `arm` is this definition's half of that; the step's own
+    // measurement is the other, and it withholds the removal on a machine whose key line an earlier
+    // run of this same list appended (manager-key.kit.ts).
+    installKeyStep(firstContact, { arm: !redeploying }),
+    verifyKeyLoginStep(firstContact),
+    enableNtpStep(firstContact),
+    // Last of the key steps, and it may only stand here because every root command this run sends
+    // afterwards is raised with the password the run carries: the programs by their own engine, the
+    // steps through the step-kit's `elevation`.
+    removeSudoersStep(firstContact),
     {
       name: "slave-preflight",
       title: "Preflight the slave (hard policy)",
       run: async (ctx) => {
-        // The adopt checks re-run under the SLAVE-HARD policy (an adoptable box may still be
-        // un-deployable): every severity becomes hard, and bound 80/443 / missing snapd —
-        // warnings at adopt time — are promoted to failures (preflight.ts SLAVE_FAIL_ON_WARN).
+        // The machine's checks under the SLAVE-HARD policy: every severity becomes hard, and the
+        // two ingress ports and a missing snapd — which the catalogue grades soft, because a box
+        // carrying either is still a box — are promoted to failures, since a slave needs Traefik to
+        // own 80/443 and MicroK8s arrives as a snap (preflight.ts SLAVE_FAIL_ON_WARN).
+        //
+        // It stands AFTER first contact, and that ordering is what makes it the one preflight this
+        // machine gets: it is read over ctx.ssh(), which authenticates with the key the steps above
+        // installed, and a machine whose account cannot reach root has already been refused by
+        // prove-elevation, for the cost of one command rather than of a whole script.
         const server = loadServer(ctx.db, sid);
         const master = loadMaster(ctx.db);
         const masterFqdn = masterFqdnOf(ctx.db, master);
@@ -358,7 +351,9 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         else ctx.log("meta", `pod-CIDR/cluster-LAN overlap check skipped — server ${server.name} has no IPv4 lanHost to derive the cluster LAN from`);
 
         const report: PreflightReport = { checkedAt: Date.now(), checks };
-        // Merge under its own key — never clobber the adopt report (hostKey pins ctx.ssh!).
+        // Merge under its own key, never replace the column: the same JSON holds `hostKey`, which is
+        // the fingerprint every session to this machine is pinned on (executor/context.ts), and a
+        // report written over it would take the pin off the row.
         const pf = (server.preflightJson as Record<string, unknown> | null) ?? {};
         localTx(ctx, (tx) => tx.update(servers).set({ preflightJson: { ...pf, slavePreflight: report } }).where(eq(servers.id, sid)).run());
         ctx.checkpoint({ checkCount: checks.length });
@@ -371,6 +366,39 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         }
       },
     },
+    // ---- THE TWO IRREVERSIBLE ACTS, and they stand exactly here for a reason that is narrower than
+    // "last": they run after everything that can fail WITHOUT this manager's own key. Shutting the
+    // daemon's password door and destroying the stored bootstrap password each remove a way in, so
+    // both wait until verify-key-login has proven the way in that stays — and a run that dies in the
+    // machine layer below therefore leaves a machine reachable by key and by this manager alone,
+    // which is the state a retry of this same run needs.
+    //
+    // AND THEY STAND AFTER `remove-sudoers`, WHICH IS THE ORDER THIS LIST IS BUILT ON. Each of the
+    // three takes away one route, and the list is ordered so that the route the NEXT step needs is
+    // still there when it runs:
+    //   - `remove-sudoers` takes away the standing passwordless-root grant. What is left is the
+    //     password this run carries, which every step after it raises its own commands with — the
+    //     step's own condition on any list that contains it (defs/manager-key.kit.ts), and the
+    //     reason `disable-password-login` ships its script raised whole rather than reaching root
+    //     through a rule the step before it deleted.
+    //   - `disable-password-login` takes away the daemon's password door, which is how a FIRST
+    //     session is opened on a machine this manager holds no key for. Every step that may need
+    //     one — the whole of first contact, through `openDoor` — has run by here, and everything
+    //     after it reaches the machine over ctx.ssh(). Shutting that door does not touch how this
+    //     run reaches root: `sudo -S` over the key session takes the same password it always did.
+    //   - `purge-bootstrap-password` takes away the password sealed beside the row, and it goes last
+    //     because it is the one thing no later step and no compensation could ask for again.
+    // Run the list a second time and each of the three measures first and finds its work done, so
+    // the order is a property of one pass rather than a state a retry has to be talked out of.
+    //
+    // NEVER ARMED ON A REDEPLOY. Putting the password door back on a live slave would reopen a door
+    // that machine's own installation deliberately shut, and the redeploy definition implements no
+    // such compensation anyway — a step that armed one there would kill the abort naming a step that
+    // does not exist.
+    disablePasswordLoginStep(sid, { arm: !redeploying, secretName: firstContact.secretName }),
+    // No compensation at all, on either arm: a destroyed credential cannot be put back, and this run
+    // holds the operator's password in memory rather than a copy of the machine's sealed one.
+    purgeBootstrapPasswordStep(sid),
     ...(redeploying ? [] : ([
       {
         name: "prepare-checkouts",
@@ -548,34 +576,41 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // first row that reads one of them is deploy-cluster's containerd mirror; drop-input below
     // takes it away once the last one has run.
     placeInputStep(target, ports),
-    armed(redeploying ? undefined : microk8sResetSlaveCleanup,
+    armed(redeploying ? undefined : microk8sResetSlaveCleanup(ANSIWISE_ELEVATION_SECRET),
       ansiwiseProgramStep(target, "deploy-cluster", ports, { extra: machineAnswers })),
     // deploy-platform-services also declares elevation_password — the ENGINE fills that one from the
     // password the POST carries beside the answers; sending it as an answer is refused.
     ansiwiseProgramStep(target, "deploy-platform-services", ports, { extra: machineAnswers }),
     // Both programs that read them have run.
     dropInputStep(target),
-    ...(redeploying ? [] : [
-      // The join: mint on the master, carry the credential over the session, spend it in ONE
-      // program run on the slave — the tailnet kit's own step, because a first join is the same
-      // act (the program's logout-first is a no-op on a machine that was never on the network).
-      // remove-slave is armed here, before the FIRST master-side per-slave state (the coordinator
-      // user) exists; it also covers everything create-mgmt makes later, and it tolerates absent
-      // state, so early registration is safe.
-      armed(removeSlaveCleanup(ports), rejoinStep(target, sid, ports)),
-      // The reading that describes a managed slave — without it the row keeps adopt's "no client"
-      // reading about the machine the master's ArgoCD and Vault are talking to.
-      readMembershipStep(sid),
-    ]),
-    // Which address that is, asked of the one that handed it out. It is OUTSIDE the guard above
-    // because a redeploy does not join again and is still the run that has to notice an address
-    // that moved — and it is before the step below because that step is the first thing to dial it.
+    // THE JOIN, and WHICH join is the one thing this guard still decides. A deployment joins the
+    // machine outright: mint on the master, carry the credential over the session, spend it in ONE
+    // program run on the slave (the tailnet kit's own step, because a first join is the same act —
+    // the program's logout-first is a no-op on a machine that was never on the network), and a
+    // machine that arrived carrying somebody else's membership is REPLACED rather than left on it.
+    // remove-slave is armed there, before the FIRST master-side per-slave state (the coordinator
+    // user) exists; it also covers everything create-mgmt makes later, and it tolerates absent
+    // state, so early registration is safe. A redeploy takes the measured form of the same act and
+    // arms nothing: it joins a machine that holds no address and says what it read of one that
+    // does (tailnet.kit.ts joinIfAbsentStep).
+    ...(redeploying
+      ? [joinIfAbsentStep(target, sid, ports)]
+      : [armed(removeSlaveCleanup(ports), rejoinStep(target, sid, ports))]),
+    // The reading that describes a managed slave, taken after whichever of the two ran — without it
+    // the row carries no membership at all for the machine the master's ArgoCD and Vault are talking
+    // to, and a redeploy would end showing the reading its own decision was made on rather than the
+    // one the machine holds now.
+    readMembershipStep(sid),
+    // WHICH address the machine holds there, asked of the one that handed it out — before the step
+    // below, because that step is the first thing to dial it, and on every deployment rather than
+    // only after a fresh join: a join hands the machine a NEW address, and a run that joined nothing
+    // is still the one that has to notice a row whose address went stale.
     declareTailnetAddressStep(target, sid, ports),
     // The machine's own surface, switched on. It stands HERE and not beside the placement at the
-    // head of the list because the address it binds is the one the join above gave the machine —
-    // and on a redeploy the machine already holds it, so the step measures a standing service and
-    // places nothing. Everything before this reached the machine over a held-open session; this is
-    // what makes the machine reachable without one, across a restart.
+    // head of the list because it binds an address of the private network: the join above is what
+    // measured that the machine holds one or put it back on the network, and the step right above is
+    // what states which address that is. Everything before this reached the machine over a held-open
+    // session; this is what makes the machine reachable without one, across a restart.
     enableAnsiwiseServiceStep(target, ports),
     createMgmtStep(target, ports),
     {
@@ -629,15 +664,35 @@ function installInput(params: DeploySlaveParams): SlaveInstallInput {
   };
 }
 
-export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): RunDefinition<DeploySlaveParams> {
+/** Does this run's target already carry the MASTER part? The whole arm choice, asked of the
+ *  inventory, because a role is a fact of the row and never something an operator states.
+ *
+ *  ONE predicate for both plan() and steps(), each handing it the database it has — the planner its
+ *  own, and steps() the one the def holds as a port, because steps() is given the persisted params
+ *  and no database. Two spellings of this question could disagree, and a plan whose card described
+ *  one arm while its steps ran the other is exactly what that would look like.
+ *
+ *  A server the lookup does not resolve is answered NO and takes the pure-slave arm: that is the arm
+ *  of a machine this manager has no row for yet, and it is also what the boot check needs, which
+ *  calls steps({}) with no params at all purely to assert that step 0 is attest-target — a question
+ *  the two arms answer alike. */
+function carriesMasterPart(db: Db, serverId: string): boolean {
+  const role = db.select({ role: servers.role }).from(servers).where(eq(servers.id, serverId)).get()?.role;
+  return role !== undefined && isMasterRole(role);
+}
+
+export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<DeploySlaveParams> {
   return {
   kind: "cluster-deploy-slave",
   paramsSchema: DeploySlaveParams,
   mutating: true, // mutating ⇒ steps()[0] MUST be attest-target, asserted where the run definitions are assembled at boot
   plan: async (params, { db }) => {
+    // WHICH ARM, asked before anything is composed. The master arm plans a run over ONE host and ONE
+    // cluster, so it carries its own card, its own targets and its own locks rather than a branch
+    // inside the ones below (deploy-slave.master.ts).
+    if (carriesMasterPart(db, params.serverId)) return masterSlavePartPlan(params, ports, db);
     const slave = loadServer(db, params.serverId);
     const master = loadMaster(db);
-    if (master.id === slave.id) throw errValidation("the master cannot be deployed as a slave");
     const stepDefs = deploySlaveSteps(installInput(params), ports);
     // The address the run will actually dial. Neither target below states a transport, so the slave
     // resolves the way every run always has — and the card must name the address the first connect
@@ -647,11 +702,20 @@ export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): Run
       kind: "cluster-deploy-slave",
       targetKind: "server",
       targetId: params.serverId,
+      // WHAT THE PASSWORD IS SPENT ON is part of the summary and not of the warnings, because the
+      // approve card is what an operator reads before typing it (RunView carries a summary and no
+      // warnings). It says all three things the password does on this run: it raises every root
+      // command the run and the machine's own programs send, and where this manager holds no key for
+      // the machine yet it also opens the very first login and installs one.
       summary:
         `Deploy "${slave.name}" (${dialled.host}) as ${params.stage} slave ${params.domain}` +
         `${params.slaveId !== undefined ? ` (slaveId ${params.slaveId})` : ""} [tier ${params.tier}]: ` +
-        `${stepDefs.length} steps over two hosts — the slave (the machine-layer programs on its own ansiwise surface) ` +
-        `and the master "${master.name}" (branch cut + registration).`,
+        `${stepDefs.length} steps over two hosts — the slave (first contact, then the machine-layer programs on its own ` +
+        `ansiwise surface) and the master "${master.name}" (branch cut + registration). ` +
+        `The password you enter raises every root command of this run, and where this manager holds no key for ` +
+        `"${slave.name}" it also opens the first login and installs one. It is held in memory for the length of the run ` +
+        `and stored nowhere. The machine is left taking key logins only, with the bootstrap password sealed beside its ` +
+        `row destroyed and no standing passwordless-root grant of this manager's on it.`,
       steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
       // BOTH hosts are declared so ctx.ssh(slave) AND ctx.ssh(master) pass the plan gate;
       // only the slave is owned (server:<slave> lock derives from ownsHost).
@@ -682,19 +746,48 @@ export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): Run
       requiredInputs: SLAVE_INSTALL_INPUTS,
     };
   },
-  steps: (params) => deploySlaveSteps(installInput(params), ports),
-  // The compensating actions the install steps register (resolved by NAME from the persisted
-  // __cleanups, run in reverse registration order on an explicit abort-with-cleanup):
+  steps: (params) => carriesMasterPart(ports.db, params.serverId)
+    ? masterSlavePartSteps(params, ports)
+    : deploySlaveSteps(installInput(params), ports),
+  // Every compensating action this run's steps may register, and each one has to be here: the
+  // executor resolves the persisted __cleanups by NAME against this list, so a name it does not
+  // carry ends an abort with a step that has no implementation. They run in reverse registration
+  // order on an explicit abort-with-cleanup:
   // remove-slave (armed by the join, before the first master-side per-slave state) →
   // microk8s-reset-slave (deploy-cluster) → drop-input (place-input, which takes the two placed
-  // values off a machine whose run died before drop-input could) → remove-slave-marking (mark-slave, armed first and so
-  // run last — by then remove-slave has already dropped the map's slave part itself, FIRST, which
-  // is that program's own contract, so the last cleanup finds nothing left to drop). attest-target,
-  // slave-preflight and the checkout steps arm nothing: the install branch on the remote is the
+  // values off a machine whose run died before drop-input could) → remove-slave-marking (mark-slave —
+  // by then remove-slave has already dropped the map's slave part itself, FIRST, which
+  // is that program's own contract, so this one finds nothing left to drop) →
+  // restore-password-login (disable-password-login) → remove-installed-key (install-key, armed
+  // first and so run last). THAT ORDER IS THE POINT of the last two: the machine takes passwords
+  // again before the key this manager reaches it with is taken off it, so an abort of a first
+  // install leaves the box exactly as reachable as it was found rather than reachable by nobody.
+  // AND EACH OF THE TWO IS ARMED ONLY WHERE THIS RUN'S OWN MEASUREMENT FOUND IT SOMETHING TO PUT
+  // BACK, which is what makes that sentence true of the SECOND run of a machine as well as the
+  // first: a run that read the key line already standing and the password door already shut arms
+  // neither, so aborting it takes away neither the line an earlier run appended nor a door that run
+  // deliberately shut. A run that measured nothing to compensate has nothing to compensate.
+  // TWO OF THEM ARE ROOT ACTS ON A MACHINE THAT GRANTS THIS MANAGER NOTHING WITHOUT A PASSWORD —
+  // putting the sshd door back, and taking MicroK8s off — so the abort has to be given the run's
+  // password again (executor/executor.ts abortWithCleanup); without it each refuses by name and
+  // nothing behind it runs, which is the loud form of the same fact rather than a machine
+  // half-restored.
+  // attest-target, the key steps before install-key, slave-preflight, purge-bootstrap-password and
+  // the checkout steps arm nothing: a generated key that was never installed leaves nothing on the
+  // machine, a destroyed credential cannot be put back, the install branch on the remote is the
   // operator's to keep, and the binary, the catalogue and the checkout place-ansiwise puts on the
   // machine are what a retry resumes onto — a cleanup that removed them would buy a second download
   // and two more clones.
-  cleanups: () => [microk8sResetSlaveCleanup, removeSlaveCleanup(ports), removeSlaveMarkingCleanup(ports), dropInputCleanup],
+  //
+  // THE MASTER ARM REGISTERS NOT ONE OF THEM, so this list is the pure-slave arm's alone. Every
+  // action in it acts on the machine the run OWNS, and on that arm the owned machine is the control
+  // host: the reset would take MicroK8s off the cluster this manager's own platform runs on
+  // (deploy-slave.master.ts). The list stays whole because the executor resolves persisted names
+  // against it, and a run of either arm may hold names from a run of its own.
+  cleanups: () => [
+    microk8sResetSlaveCleanup(ANSIWISE_ELEVATION_SECRET), removeSlaveCleanup(ports), removeSlaveMarkingCleanup(ports), dropInputCleanup,
+    restorePasswordLoginCleanup(ANSIWISE_ELEVATION_SECRET), removeInstalledKeyCleanup,
+  ],
   onTerminal: (status, { db, params }) => {
     if (status === "succeeded") return; // the register step set the terminal states
     const sid = String(params.serverId);
@@ -702,6 +795,11 @@ export function makeDeploySlaveDef(ports: DeploySlavePorts & AnsiwisePorts): Run
     // Free the server (provisioning→ready; never clobber another status) and park the
     // cluster row back at `planned` KEEPING its allocated slaveId — the ordinal is never
     // recycled (clusters_slave_id_uq); a retry resumes the row (or passes slaveId explicitly).
+    //
+    // BOTH ARE NO-OPS AFTER A MASTER-ARM RUN, and by the status guards rather than by a branch: that
+    // arm moves neither row, so its machine stands at `healthy` and its cluster at `active`
+    // throughout, and neither WHERE clause below matches. A failed run therefore leaves a live
+    // installation exactly as live as it found it.
     db.update(servers)
       .set({ status: "ready" })
       .where(and(eq(servers.id, sid), eq(servers.status, "provisioning")))

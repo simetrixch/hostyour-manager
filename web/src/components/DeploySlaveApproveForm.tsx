@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { RunView } from "../../../shared/api-types.ts";
 import { approvePayload, readyToApprove, secretsToSupply } from "../runScreen.ts";
+import { secretFieldLabel, secretFieldHint } from "../approveFields.ts";
 import { IconLock } from "./icons.tsx";
 
 /** The slave-deployment ceremony: the secrets the PLAN declares, asked for as it declares them, and the
@@ -43,13 +44,14 @@ export function DeploySlaveApproveForm(props: {
       </div>
       {asked.map((key) => (
         <label className="field" key={key}>
-          <span className="field__label">{key}</span>
+          <span className="field__label">{secretFieldLabel(key)}</span>
           <input
             type="password"
             value={supplied[key] ?? ""}
             onChange={(e) => setSupplied((v) => ({ ...v, [key]: e.target.value }))}
             autoComplete="off"
           />
+          {secretFieldHint(key) !== null && <span className="field__hint">{secretFieldHint(key)}</span>}
         </label>
       ))}
       {/* WHAT THE PROGRAMS ASK OF A PERSON, and what a blank one means. These are not secrets: the

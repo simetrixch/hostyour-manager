@@ -5,10 +5,12 @@ import { tailnetChip } from "../tailnetState.ts";
 import { passwordLoginChip, passwordLoginRunKindOffer } from "../passwordLoginState.ts";
 import { authorizedKeysChip, authorizedKeysRunKindOffer } from "../authorizedKeysState.ts";
 import { PasswordLoginActions } from "./PasswordLoginActions.tsx";
+import { MachineIdentity } from "./MachineIdentity.tsx";
 
 // Everything a server's card says about the machine ITSELF, as opposed to its position in the slave
 // lifecycle: three READINGS beside the status badge — is it on the private network, does its sshd
-// take a password, and who is in its authorized_keys — and the run kinds that act on the last two.
+// take a password, and who is in its authorized_keys — the run kinds that act on the last two, and
+// beneath them the identity this manager has recorded for the machine.
 //
 // This block sits OUTSIDE the lifecycle stepper on the page, because the master belongs in it too:
 // it is an internet-facing machine with an sshd and an authorized_keys like any other, while the
@@ -16,7 +18,8 @@ import { PasswordLoginActions } from "./PasswordLoginActions.tsx";
 //
 // Each reading is a SNAPSHOT one run took, never a live probe, and each sentence says when. The ages
 // are computed at render time and nothing re-renders on a timer, so `now` is passed in rather than
-// read here — a test can then pin it.
+// read here — a test can then pin it. The identity below is not one of them: it is what this manager
+// holds the machine to, and it changes only when a person says the machine was rebuilt.
 
 export function ServerReadings(props: {
   server: ServerView;
@@ -24,8 +27,9 @@ export function ServerReadings(props: {
   onDisablePasswordLogin: () => void;
   onEnablePasswordLogin: () => void;
   onReadAuthorizedKeys: () => void;
+  onRestateMachineIdentity: (fingerprint: string) => Promise<boolean>;
 }) {
-  const { server, now, onDisablePasswordLogin, onEnablePasswordLogin, onReadAuthorizedKeys } = props;
+  const { server, now, onDisablePasswordLogin, onEnablePasswordLogin, onReadAuthorizedKeys, onRestateMachineIdentity } = props;
   const tn = tailnetChip(server, now);
   const pl = passwordLoginChip(server, now);
   const ak = authorizedKeysChip(server, now);
@@ -58,6 +62,7 @@ export function ServerReadings(props: {
           )}
         </p>
       ))}
+      <MachineIdentity server={server} onRestate={onRestateMachineIdentity} />
       {(plOffer.disable || plOffer.enable || akOffer.read) && (
         <div className="actions">
           <PasswordLoginActions offer={plOffer} onDisable={onDisablePasswordLogin} onEnable={onEnablePasswordLogin} />

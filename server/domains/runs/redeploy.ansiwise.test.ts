@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { clusters, servers } from "../../db/schema/inventory.ts";
+import { servers } from "../../db/schema/inventory.ts";
 import { getRun, readEvents } from "../../executor/read.ts";
 import { createSshSession } from "../../adapters/ssh/ssh2-session.ts";
 import { generateServerKeypair } from "../../adapters/ssh/keygen.ts";
@@ -12,22 +12,18 @@ import { isServe } from "./ansiwise-serve.fixture.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
 
-import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { ClusterPlaneV0 } from "../../../shared/plane.ts";
-import { readServerTailnet } from "../../../shared/tailnet.ts";
-import { SLAVE_MACHINE_INPUTS } from "./defs/deploy-slave.ts";
 import {
-  STEP_NAMES, REDEPLOY_STEP_NAMES, PARAMS, EMIT_ARGOCD_TOKEN, EMIT_REVIEWER_TOKEN, EMIT_CREDS_JSON,
-  disposeHarnesses, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID, MINT_AUTHKEY, ANSIWISE_PIN,
+  disposeHarnesses, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID, MINT_AUTHKEY,
+  IMAGE_KEY_LINE, MASTER_PUBLIC_KEY, type Harness,
 } from "./deploy-slave.fixture.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
-import { ANSIWISE_SERVICE_PORT } from "./defs/place-ansiwise.ts";
 import {
-  uniqueEmail, approveSecrets, elevationOnly, deploySecrets, composedAnswers,
-  fixturePrograms, serveConversation, liveMaster, tailnetHost, deployWorld, liveSlaveWorld,
-  recordWindow, startedRuns, expectProven, expectAbsent, settled, recordAppeared, observerStart, observerEnded, programStepCtx,
+  uniqueEmail, approveSecrets, elevationOnly, composedAnswers,
+  fixturePrograms, serveConversation, liveMaster, tailnetHost,
+  recordWindow, startedRuns, expectProven, settled, recordAppeared, observerStart, observerEnded, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
 import { orphanedEndSuite } from "./orphaned-end.ansiwise.suite.ts";
+import { deploySlaveSuite } from "./deploy-slave.ansiwise.suite.ts";
 
 // EVERY run kind that drives the machine's deployment programs, on the REAL `ansiwise-rest serve`:
 // redeploy (both arms), the tailnet repair run kinds, deploy-slave, and the transport
@@ -39,8 +35,9 @@ import { orphanedEndSuite } from "./orphaned-end.ansiwise.suite.ts";
 // ONE FILE ON PURPOSE: the engine's run root is per-drive ('/var/lib/ansiwise/runs'), so two
 // test files each running a serve fixture in parallel would share records and collide. Everything
 // that starts machine runs lives here, sequentially; the programs, the worlds and the plumbing
-// live in ansiwise-serve.fixture.ts, and the orphaned-end suite in orphaned-end.ansiwise.suite.ts —
-// registered INTO this file's describe rather than collected as a second file, for that same reason.
+// live in ansiwise-serve.fixture.ts; the orphaned-end and deploy-slave suites live in
+// orphaned-end.ansiwise.suite.ts and deploy-slave.ansiwise.suite.ts, registered INTO this file's
+// describe rather than collected as separate files, for that same reason.
 //
 // TWO RUNS IN ONE SECOND MUST NOT BE ONE RUN. A machine naming a run by second + pid answers a
 // service asked twice within a second with one id, and the two write over each other's record. The
@@ -50,6 +47,13 @@ import { orphanedEndSuite } from "./orphaned-end.ansiwise.suite.ts";
 
 const bin = ansiwiseBinaries();
 const key = generateServerKeypair("test@manager");
+
+/** What a step wrote down about what it FOUND — its own checkpoint's data, which is where a
+ *  measure-then-act step records the reading its act was decided on. Read off the run's rows rather
+ *  than off the machine, because the question is what the step reported and not only what the
+ *  machine ended up holding. */
+const found = (h: Harness, runId: string, step: string): Record<string, unknown> =>
+  (JSON.parse(stepColumn(h.db, runId, step, "checkpoint_json") ?? "{}") as { data?: Record<string, unknown> }).data ?? {};
 
 describe.skipIf(bin === undefined)("the manager's run kinds over the machine's own deployment programs (REAL ansiwise-rest serve)", () => {
   if (bin === undefined) {
@@ -144,15 +148,22 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   // ================================ redeploy (master arm), end to end ================================
 
-  it("plan: the master arm composes attest, the placement, the three machine programs and the argocd follow, and asks for the password + the missing answers", async () => {
+  it("plan: the master arm composes attest, first contact, the placement, the three machine programs and the argocd follow, and asks for the password + the missing answers", async () => {
     const h = await liveMaster(serve);
     const { plan } = await h.executor.plan("cluster-redeploy", { serverId: MASTER_ID });
     // place-ansiwise and run-deploy-host stand here because a master could otherwise receive NO
     // machine-layer change at all: the placement's other call site is the slave install, and without
     // these two this arm would run only the programs above GitOps (hostyour-manager#69).
-    expect(plan.steps.map((s) => s.name)).toEqual(
-      ["attest-target", "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow"],
-    );
+    //
+    // The six first-contact steps stand between the attest and the placement because everything from
+    // the placement down reaches the machine over ctx.ssh(), which authenticates with the key
+    // install-key puts there — and a machine reinstalled at the hosting provider keeps its cluster
+    // row at `active`, which makes this run kind the only one that may act on it at all.
+    expect(plan.steps.map((s) => s.name)).toEqual([
+      "attest-target",
+      "prove-elevation", "generate-key", "install-key", "verify-key-login", "enable-ntp", "remove-sudoers",
+      "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow",
+    ]);
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
       ["letsencrypt_email", "letsencrypt_server", "build_plane_fqdn", "lan_cidr", "storage_mount", "storage_subdirectory"],
@@ -190,6 +201,78 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // machine layer.
     expect(h.platformRepo.commits).toHaveLength(0);
     expect(h.platformRepo.tags.size).toBe(0);
+  });
+
+  it("a master that lost this manager's key is reached on the password, gets the key back, and carries on into the machine layer", { timeout: 180_000 }, async () => {
+    // THE MACHINE AN OWNER RESETS AT THE HOSTING PROVIDER. What comes back carries the image's own
+    // key and no line of this manager's, so a session offering that key is refused; its cluster row
+    // is still `active`, which is the row cluster-deploy-slave turns away (defs/deploy-slave.attest.ts)
+    // and the row this run kind is for. Without the door at the head of this arm the run opens a key
+    // session for a key the machine no longer holds and dies on its own first step.
+    const h = await liveMaster(serve, { authorizedKeys: [IMAGE_KEY_LINE] });
+
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(uniqueEmail()));
+    // The first step's own error FIRST, because it names what the machine turned away — a bare status
+    // assertion would go red saying only that something did.
+    expect(stepColumn(h.db, runId, "attest-target", "error") ?? "").toBe("");
+    expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
+
+    // WHICH OF THE DOOR'S THREE OUTCOMES THIS WAS, in the run log an operator reads: the machine
+    // presented the host key recorded for it and THEN refused the key, which is a machine carrying no
+    // line of ours rather than a machine this manager cannot identify (defs/manager-key.kit.ts).
+    const events = JSON.stringify(readEvents(h.db.db, runId));
+    expect(events).toContain("refused this manager's key");
+    expect(events).toContain("the password opens the session again");
+
+    // THE KEY IS BACK, appended once and beside the image's own key, which no run kind here removes.
+    // The manager never lost it — only the machine did — so nothing was generated.
+    expect(found(h, runId, "generate-key")["generated"]).toBe(false);
+    expect(found(h, runId, "install-key")["appended"]).toBe(true);
+    expect(h.hosts.authorizedKeys).toEqual([IMAGE_KEY_LINE, MASTER_PUBLIC_KEY]);
+
+    // AND NOTHING WAS ARMED TO TAKE IT OFF AGAIN. An abort that removed this line would leave a LIVE
+    // cluster with nothing to reach it by, and cluster-redeploy implements no such cleanup for the
+    // name to be resolved against — a step that armed one would end the abort on a step that is not
+    // there.
+    const armed = JSON.parse(stepColumn(h.db, runId, "install-key", "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
+    expect(armed.__cleanups).toBeUndefined();
+
+    // AND THE RUN CARRIED ON INTO THE MACHINE LAYER over the key it had just put back: all three
+    // programs proven dry, then run, on the machine's own records.
+    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-host", "deploy-cluster", "deploy-platform-services"]);
+  });
+
+  it("a master that still holds the key is written to by none of the added steps, and the run does what it did before", { timeout: 180_000 }, async () => {
+    // THE OTHER HALF OF THE SAME PROPERTY, and the one that makes the six steps safe in front of
+    // EVERY redeploy rather than only the ones that need them: this machine carries the key line and
+    // a clock already synchronised, because its own installation put both there, so each step
+    // measures, finds its work done and says so. A step left out of a list is a step nobody can see
+    // was considered; a step that reports finding nothing to do is a reading.
+    const h = await liveMaster(serve);
+
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(uniqueEmail()));
+    expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
+
+    // The door took the key path, and the operator's password was offered to nothing at all.
+    const events = JSON.stringify(readEvents(h.db.db, runId));
+    expect(events).toContain("takes this manager's own key, so no password is offered to it");
+    expect(events).not.toContain("password opens the session");
+
+    // What each step wrote down about what it found.
+    expect(found(h, runId, "prove-elevation")["loginIsRoot"]).toBe(false);
+    expect(found(h, runId, "generate-key")["generated"]).toBe(false);
+    expect(found(h, runId, "install-key")["appended"]).toBe(false);
+    expect(found(h, runId, "enable-ntp")["ntp"]).toBe("already-on");
+    expect(found(h, runId, "remove-sudoers")["sudoersDropIn"]).toBe("absent");
+
+    // …and the machine is byte for byte what it was: no second copy of the key line, and no clock
+    // setting written over one the step had just measured as already right.
+    expect(h.hosts.authorizedKeys).toEqual([IMAGE_KEY_LINE, MASTER_PUBLIC_KEY]);
+    expect(h.hosts.log.filter((l) => l.command.includes(">> ~/.ssh/authorized_keys"))).toEqual([]);
+    expect(h.hosts.log.filter((l) => l.command.includes("timedatectl set-ntp"))).toEqual([]);
+
+    // And the machine layer ran exactly as it does without any of them.
+    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-host", "deploy-cluster", "deploy-platform-services"]);
   });
 
   it("reads the master's cluster with the password the RUN carries — on a machine that grants no passwordless route at all", { timeout: 180_000 }, async () => {
@@ -437,193 +520,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(h.hosts.log.filter((l) => isServe(l.command))).toHaveLength(0);
   });
 
-  // ================================ deploy-slave, end to end ================================
-
-  it("INNOCENT CASE (deploy-slave): the whole run kind runs green — every program dry-proven then run on the machines' own records, one address everywhere, the tokens nowhere", { timeout: 300_000 }, async () => {
-    const h = await deployWorld(serve);
-    const email = uniqueEmail();
-
-    const r = await h.executor.plan("cluster-deploy-slave", PARAMS);
-    expect(r.plan.steps.map((s) => s.name)).toEqual(STEP_NAMES);
-    await h.executor.approve(r.runId, deploySecrets(email));
-    await h.executor.settle(r.runId);
-    expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
-
-    // hm#22, on the whole run kind: the deployment that makes the machine is the deployment that
-    // leaves it SERVING. Nobody typed a command after this run, and the unit is enabled — so a
-    // restart brings it back — running, and starting the PINNED binary on the address the manager
-    // dials, all four read off the machine and not off the installer.
-    expect(h.hosts.serviceEnabled).toBe(true);
-    expect(h.hosts.serviceActive).toBe(true);
-    expect(h.hosts.serviceExecVersion).toBe(ANSIWISE_PIN);
-    expect(h.hosts.serviceExecListen).toBe(`100.64.0.11:${ANSIWISE_SERVICE_PORT}`);
-
-    // The machines' OWN records: dry + run per program, every one green — the branch cut and the
-    // registration on the master's surface, the machine layer, the join and the emit on the slave's.
-    expectProven(serve, h.db, r.runId, await observer.runs(), [
-      "deploy-slave-branch", "deploy-host", "deploy-cluster", "deploy-platform-services",
-      "tailnet-mint-join-key", "tailnet-rejoin", "emit-cluster-credentials", "register-slave",
-    ]);
-
-    // WHICH surface each conversation went over: three on the master (branch cut, mint,
-    // register), five on the slave (host, cluster, gitops, rejoin, emit) — and the master's
-    // checkouts were stood up BEFORE its first conversation.
-    const master = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
-    const slave = h.hosts.log.filter((l) => l.host === "10.1.1.11").map((l) => l.command);
-    expect(master.filter(isServe)).toHaveLength(3);
-    expect(slave.filter(isServe)).toHaveLength(5);
-    // WHAT EACH MACHINE WAS TOLD IT IS, which is the fact a serve cannot default. Without it the
-    // slave's serve claims `master`, and emit-cluster-credentials — the first program in this run
-    // kind declared for a slave — is thrown out of Runner.run before it writes one event, leaving
-    // the caller on a stream that never carries anything. The role is the inventory row's, sent as
-    // it stands: a row naming both parts is sent whole, because the engine reads a role's PARTS and
-    // a program declared for either one applies (appliesTo, ansiwise-core program.dart).
-    for (const [cmds, want] of [[slave, "--role slave"], [master, "--role master --fqdn m1.example.com"]] as const) for (const c of cmds.filter(isServe)) expect(c, c).toContain(want);
-    expect(master.findIndex((c) => c.includes("dc-prepare-checkouts-"))).toBeLessThan(master.findIndex(isServe));
-
-    // THE ONE-ADDRESS LAW, on the record: the map the run committed carries the same spelling the
-    // emit and the register were given as their answer — the fixture's api_server_url/ca_data rows
-    // are what judged those, so the green register run above IS the proof the answers matched.
-    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath("s1.example.com")) ?? "";
-    for (const want of ["  master: m1.example.com", "booksCluster: m1.example.com", "  apiHost: 100.64.0.11", "  apiPort: 16443", "role: slave", "  catalogUrl: https://github.com/acme/acme-catalog.git"]) {
-      expect(map).toContain(want);
-    }
-
-    // The credentials file was read over the session and removed; same for the join key.
-    expect(slave.some((c) => c === "cat /tmp/ansiwise-cluster-credentials")).toBe(true);
-    expect(slave.some((c) => c === "rm -f /tmp/ansiwise-cluster-credentials")).toBe(true);
-    expect(master.some((c) => c === "cat /tmp/ansiwise-tailnet-join-key-s1")).toBe(true);
-    expect(master.some((c) => c === "rm -f /tmp/ansiwise-tailnet-join-key-s1")).toBe(true);
-
-    // register's terminal choreography: cluster ACTIVE with a valid plane carrying the emitted
-    // kube facts and the sealed credential ids; server healthy, with the join's own reading.
-    const cluster = h.db.db.select().from(clusters).where(eq(clusters.domain, "s1.example.com")).get();
-    expect(cluster?.status).toBe("active");
-    const bearer = await h.store.list({ serverId: SLAVE_ID, kind: "kubeconfig" });
-    const reviewer = await h.store.list({ serverId: SLAVE_ID, kind: "other" });
-    const plane = ClusterPlaneV0.parse(cluster?.planeJson);
-    expect(plane.kube).toEqual({ server: "https://100.64.0.11:16443", caData: "TFMtQ0EtREFUQQ==" });
-    expect(plane.credentialIds).toEqual({ clusterBearer: bearer[0]?.id, reviewerJwt: reviewer[0]?.id });
-    const server = h.db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
-    expect(server?.status).toBe("healthy");
-    expect(server?.tailnetState).toBe("joined");
-    expect(readServerTailnet(server?.tailnetJson).kind).toBe("v0");
-
-    // REDACTION: the two bearer tokens and the join key appear NOWHERE in the persisted run
-    // surface (every table except the sealed credential store, plus the run log).
-    const tables = h.db.sqlite
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'credentials'")
-      .all() as { name: string }[];
-    let dump = JSON.stringify(readEvents(h.db.db, r.runId));
-    for (const t of tables) dump += JSON.stringify(h.db.sqlite.prepare(`SELECT * FROM ${t.name}`).all());
-    expect(dump).not.toContain(EMIT_ARGOCD_TOKEN);
-    expect(dump).not.toContain(EMIT_REVIEWER_TOKEN);
-    expect(dump).not.toContain(MINT_AUTHKEY);
-  });
-
-  it("PLANTED DEFECT (deploy-slave): a TAMPERED credentials file goes red on the machine's own dry run of register-slave — nothing is registered, and the tokens still leak nowhere", { timeout: 300_000 }, async () => {
-    const h = await deployWorld(serve);
-    // The defect sits in the FILE contract: the slave hands back an authority the master must not
-    // trust. The fixture's ca_data row is the machine-side judge.
-    h.hosts.credsOut = EMIT_CREDS_JSON.replace("TFMtQ0EtREFUQQ==", "VEFNUEVSRUQ=");
-
-    const runId = await settled(h, "cluster-deploy-slave", PARAMS, deploySecrets(uniqueEmail()));
-    expect(getRun(h.db.db, runId)?.status).toBe("failed");
-    expect(stepColumn(h.db, runId, "create-mgmt", "error")).toMatch(/DRY run of register-slave on the master is not green/);
-    // The emit itself is green — the defect is in what it handed over — and the registration
-    // never ran: not one run-mode register-slave record on the machine.
-    const all = await observer.runs();
-    expectProven(serve, h.db, runId, all, ["emit-cluster-credentials"]);
-    expect(recordWindow(all, startedRuns(h.db, runId)).filter((x) => x.program === "register-slave" && x.mode === "run")).toHaveLength(0);
-    // The tampered file's tokens still appear nowhere in the persisted surface.
-    const dump = JSON.stringify(readEvents(h.db.db, runId));
-    expect(dump).not.toContain(EMIT_ARGOCD_TOKEN);
-    expect(dump).not.toContain(EMIT_REVIEWER_TOKEN);
-  });
-
-  it("abort-with-cleanup (deploy-slave): the map's slave part goes FIRST, then the remove-slave program on the master's record, then the snap purge — and the marking cleanup finds nothing left", { timeout: 300_000 }, async () => {
-    const h = await deployWorld(serve);
-    h.hosts.credsOut = EMIT_CREDS_JSON.replace("TFMtQ0EtREFUQQ==", "VEFNUEVSRUQ="); // park at create-mgmt with all three cleanups armed
-    const runId = await settled(h, "cluster-deploy-slave", PARAMS, deploySecrets(uniqueEmail()));
-    expect(getRun(h.db.db, runId)?.status).toBe("failed");
-
-    // Each arming step persisted exactly its own cleanup name (__cleanups)...
-    for (const [step, name] of [
-      ["mark-slave", "remove-slave-marking"],
-      ["run-deploy-cluster", "microk8s-reset-slave"],
-      ["rejoin", "remove-slave"],
-    ] as const) {
-      const cp = JSON.parse(stepColumn(h.db, runId, step, "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
-      expect(cp.__cleanups, step).toEqual([name]);
-    }
-
-    const logMark = h.hosts.log.length;
-    // THE ONE ACT OF THIS REPOSITORY THAT STILL STANDS ON THE ADOPTION'S DROP-IN. Every step of the
-    // run above was driven on a machine granting nothing without a password (HostsScript.adopted
-    // defaults to false) and needed no rule. The microk8s reset below is different: it is a CLEANUP,
-    // it fires on an abort that may already have discarded the run's password, and it therefore
-    // raises itself with `sudo -n snap remove --purge microk8s` — a row of MANAGER_ELEVATED, and the
-    // reason a slave is adopted at all. So the machine is given the file it really carries.
-    h.hosts.adopted = true;
-    // The failed run's secrets were wiped with it — the abort re-supplies the elevation password,
-    // exactly the way a retry does, because the remove-slave cleanup drives the master's programs.
-    await h.executor.abortWithCleanup(runId, elevationOnly());
-    await h.executor.settle(runId);
-
-    const run = getRun(h.db.db, runId);
-    expect(run?.status).toBe("cancelled");
-    const cleanupSteps = run?.steps.filter((s) => s.name.startsWith("cleanup:")) ?? [];
-    expect(cleanupSteps.map((s) => s.name)).toEqual([
-      "cleanup:remove-slave", "cleanup:microk8s-reset-slave", "cleanup:drop-input", "cleanup:remove-slave-marking",
-    ]); // reverse registration order — the map cleanup was armed FIRST (mark-slave), so it runs LAST,
-    // and drop-input stands where place-input armed it: after the map, before deploy-cluster
-    expect(cleanupSteps.every((s) => s.status === "ok")).toBe(true);
-
-    // The map keeps the cluster's identity and loses ONLY the slave part — dropped by the
-    // remove-slave cleanup itself, FIRST (the program's own contract), so the marking cleanup
-    // afterwards found nothing left to drop.
-    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath("s1.example.com")) ?? "";
-    expect(map).toContain("role: slave");
-    expect(map).toContain("  buildPlane: m1.example.com");
-    // booksCluster goes WITH the slave part: a map still carrying the selector key without the
-    // endpoint would make the generated Application error instead of disappear.
-    for (const gone of ["master:", "booksCluster:", "apiHost:", "apiPort:"]) expect(map).not.toContain(gone);
-
-    // The removal itself is a machine act, dry-proven then run on the master's own record...
-    expectProven(serve, h.db, runId, await observer.runs(), ["remove-slave"]);
-    // ...and the destructive snap purge ran on the SLAVE.
-    const tail = h.hosts.log.slice(logMark);
-    expect(tail.find((l) => l.command.includes("snap remove --purge microk8s"))?.host).toBe("10.1.1.11");
-  });
-
-  it("INNOCENT CASE (redeploy, slave arm): the live slave is re-reconciled over the programs — no branch cut, no join, a fresh emit re-points the registration, and nothing is armed", { timeout: 300_000 }, async () => {
-    const h = await liveSlaveWorld(serve);
-    const email = uniqueEmail();
-
-    const r = await h.executor.plan("cluster-redeploy", { serverId: SLAVE_ID });
-    expect(r.plan.steps.map((s) => s.name)).toEqual(REDEPLOY_STEP_NAMES);
-    expect(r.plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
-    expect(r.plan.requiredInputs?.map((i) => i.field)).toEqual(SLAVE_MACHINE_INPUTS.map((i) => i.field));
-    await h.executor.approve(r.runId, approveSecrets(email));
-    await h.executor.settle(r.runId);
-    expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
-
-    // The machine layer and the handshake re-ran, each dry-proven; the two BIRTH acts did not —
-    // no branch cut, no mint, no rejoin, on either machine's records.
-    const all = await observer.runs();
-    expectProven(serve, h.db, r.runId, all, ["deploy-host", "deploy-cluster", "deploy-platform-services", "emit-cluster-credentials", "register-slave"]);
-    expectAbsent(h.db, r.runId, all, ["deploy-slave-branch", "tailnet-mint-join-key", "tailnet-rejoin"]);
-
-    // Not one compensating action was armed: every one of them undoes a WORKING slave.
-    for (const step of ["mark-slave", "run-deploy-cluster", "create-mgmt"] as const) {
-      const cp = JSON.parse(stepColumn(h.db, r.runId, step, "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
-      expect(cp.__cleanups, step).toBeUndefined();
-    }
-
-    // The row stayed active + single + same ordinal (re-reconciled in place, never re-inserted).
-    const rows = h.db.db.select().from(clusters).all();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.status).toBe("active");
-    expect(rows[0]?.slaveId).toBe(1);
-  });
+  // Registered from deploy-slave.ansiwise.suite.ts — the composed run kind's own four journeys,
+  // in their own file for the size doctrine and against the ONE serve fixture this file starts.
+  deploySlaveSuite(() => serve, () => observer);
 });
