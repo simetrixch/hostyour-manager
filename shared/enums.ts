@@ -12,7 +12,13 @@
 // own key?" is answered by the credential itself — server/security/store.ts `holdsManagerKey` on the
 // server side, `ServerView.hasKey` in the browser — and a predicate derived from this list instead
 // would answer yes for a machine no session was ever opened to.
-export const SERVER_STATUS = ["bare", "adopting", "ready", "provisioning",
+//
+// THERE IS NO STATUS FOR BEING TAKEN OVER. A machine is written down, deployed, and serving; being
+// reachable by this manager's own key is something the deployment establishes on its way through
+// rather than a position of its own. The run kind that used to write such a status is gone, and a
+// status nothing writes is a state the screen has to explain and the reader has to learn for
+// nothing.
+export const SERVER_STATUS = ["bare", "ready", "provisioning",
   "healthy", "degraded", "draining", "undeployed"] as const;
 export type ServerStatus = (typeof SERVER_STATUS)[number];
 

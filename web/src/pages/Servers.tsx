@@ -37,9 +37,6 @@ const LIFECYCLE_STAGES = ["Added", "Deployed", "Live"] as const;
 type StageState = "done" | "active" | "todo";
 const LIFECYCLE: Record<ServerStatus, { stages: readonly StageState[]; state: string; next: "deploy" | "clusters" | null }> = {
   bare: { stages: ["done", "active", "todo"], state: "Written down, not deployed — deploying installs this Manager's key and makes the machine a slave.", next: "deploy" },
-  // No run kind writes this status. A row standing in it is deployed like any other: the deployment
-  // measures what the machine already carries before it writes anything.
-  adopting: { stages: ["done", "active", "todo"], state: "Nothing writes this state — deploying takes the machine on from wherever it stands.", next: "deploy" },
   // Where a deployment that did not succeed parks its machine (deploy-slave.ts onTerminal). The
   // status says a run reached this machine and stopped, and no more than that: HOW FAR IT GOT is the
   // run's own account and the readings above, because every step of that run measures before it
@@ -181,7 +178,7 @@ export function Servers() {
       <header className="page__head">
         <div>
           <h2 className="page__title">Servers</h2>
-          <p className="page__desc">The inventory this manager can reach over SSH.</p>
+          <p className="page__desc">The machines this installation knows, and where each one stands.</p>
         </div>
         <div className="page__actions">
           <Link className="btn" to="/servers/keys">
