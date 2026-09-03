@@ -226,6 +226,32 @@ try {
 
   $prefix = "$Version-$Channel-"
   $existing = @(git tag -l "$prefix*" | Sort-Object)
+
+  # A TAG THAT NEVER REACHED ORIGIN AND NAMES ANOTHER COMMIT IS RESIDUE, and reusing it aims every
+  # retry at the commit a refused push left behind. The tag is minted before it is pushed, so a push
+  # the pre-push hook refuses leaves it standing here and nowhere else; the next run finds it, reuses
+  # it, and is refused again — for the same reason, printed as if it were about the new attempt.
+  #
+  # A TAG THAT IS ON ORIGIN IS LEFT EXACTLY AS IT STANDS, whatever commit it names. That is mint-once
+  # itself, and the reuse below relies on it: one release per version+channel, put on a further stage
+  # without rebuilding, which is why the release commit is read off the tag and never off HEAD.
+  if ($existing.Count -gt 0) {
+    $candidate = $existing[-1]
+    git ls-remote --exit-code --tags origin "refs/tags/$candidate" *> $null
+    $onOrigin = ($LASTEXITCODE -eq 0)
+    $candidateSha = (git rev-parse --verify --quiet "$candidate^{commit}" | Select-Object -First 1)
+    $headSha = (git rev-parse --verify HEAD | Select-Object -First 1)
+    if (-not $onOrigin -and "$candidateSha" -ne "$headSha") {
+      $candidateShort = (git rev-parse --short=7 "$candidate^{commit}" | Select-Object -First 1)
+      Write-Host "release: $candidate stands on this machine only and names $candidateShort, not the commit being released. A run whose push was refused left it behind; it is dropped and cut again."
+      git tag -d $candidate *> $null
+      if ($LASTEXITCODE -ne 0) {
+        Die "the leftover tag $candidate could not be dropped, and reusing it would release a commit nobody is releasing"
+      }
+      $existing = @()
+    }
+  }
+
   if ($existing.Count -gt 0) {
     $tag = $existing[-1]
     Write-Host "release: reusing the existing release $tag — one release per version+channel, so putting it on $Stage rebuilds nothing"

@@ -174,6 +174,24 @@ git fetch --tags --quiet origin 2>/dev/null || true
 
 PREFIX="${VERSION}-${CHANNEL}-"
 EXISTING="$(git tag -l "${PREFIX}*" | sort | tail -1)"
+
+# A TAG THAT NEVER REACHED ORIGIN AND NAMES ANOTHER COMMIT IS RESIDUE, and reusing it aims every
+# retry at the commit a refused push left behind. The tag is minted before it is pushed, so a push
+# the pre-push hook refuses leaves it standing here and nowhere else; the next run finds it, reuses
+# it, and is refused again — for the same reason, printed as if it were about the new attempt.
+#
+# A TAG THAT IS ON ORIGIN IS LEFT EXACTLY AS IT STANDS, whatever commit it names. That is mint-once
+# itself, and the reuse below relies on it: one release per version+channel, put on a further stage
+# without rebuilding, which is why the release commit is read off the tag and never off HEAD.
+if [ -n "$EXISTING" ] \
+  && ! git ls-remote --exit-code --tags origin "refs/tags/${EXISTING}" >/dev/null 2>&1 \
+  && [ "$(git rev-parse --verify --quiet "${EXISTING}^{commit}")" != "$(git rev-parse --verify HEAD)" ]; then
+  echo "release: ${EXISTING} stands on this machine only and names $(git rev-parse --short=7 "${EXISTING}^{commit}"), not the commit being released. A run whose push was refused left it behind; it is dropped and cut again."
+  git tag -d "$EXISTING" >/dev/null \
+    || die "the leftover tag ${EXISTING} could not be dropped, and reusing it would release a commit nobody is releasing"
+  EXISTING=""
+fi
+
 if [ -n "$EXISTING" ]; then
   TAG="$EXISTING"
   echo "release: reusing the existing release ${TAG} — one release per version+channel, so putting it on ${STAGE} rebuilds nothing"
