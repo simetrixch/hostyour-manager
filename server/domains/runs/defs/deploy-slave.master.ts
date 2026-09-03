@@ -21,7 +21,8 @@ import {
   loadServer, loadMaster, requirePlatformRepo,
   type DeploySlavePorts, type SlaveInstallInput, type SlaveTarget,
 } from "./deploy-slave.kit.ts";
-import { hostAnswers, slaveMachineAnswers } from "./deploy-slave.ts";
+import { hostAnswers, slaveMachineAnswers, checkoutAnswers } from "./deploy-slave.ts";
+import { MANAGER_COMMITTER_NAME, MANAGER_COMMITTER_EMAIL } from "../../../adapters/git/git.ts";
 import type { DeploySlaveParams } from "./deploy-slave.ts";
 
 // THE MASTER ARM of `cluster-deploy-slave`: what the run does when the machine it is aimed at
@@ -152,11 +153,68 @@ export function masterSelfTarget(serverId: string, stated: { domain: string; sta
   };
 }
 
-/** The one answer this arm is authoritative for: the role the branch is regenerated under. An extra
- *  answer wins over the row's own (ansiwise-run.kit.ts composeAnswers), and it has to here — the row
- *  is what `project-marking` moves once the regenerated map states the combined role, so on a first
- *  pass it still says `master` when this answer is composed. */
-const combinedRoleAnswer: ExtraAnswers = async () => ({ role: MASTER_AND_SLAVE_ROLE });
+/** What `regenerate-branch` is answered with, and every value of it is READ rather than asked for.
+ *
+ *  THE PROGRAM IS THE ONE THE LIFECYCLE DRIVES FROM A CONFIG FILE, and this manager holds no such
+ *  file. What it holds instead is the installation's own cluster map, which is where those answers
+ *  were written when the installation was generated — the certificate authority, the apex its units
+ *  are reached below, the mailboxes its alerts go to, the catalogue its tenants come from. Measured
+ *  on a real run: the step was given the role and nothing else, and the machine refused to start the
+ *  program with ten sentences, each naming an answer that stood written down two directories away.
+ *
+ *  THE COMMITTER IS THIS MANAGER, and that is not an inference. It already commits into this same
+ *  repository under that identity — the cluster-map commits on the very branch this run regenerates
+ *  carry it — so the regeneration it drives writes under the name it writes under everywhere else.
+ *
+ *  THE ROLE IS THE ONE ANSWER THIS ARM IS AUTHORITATIVE FOR, and it has to overrule the inventory.
+ *  An extra answer wins over the row's own (ansiwise-run.kit.ts composeAnswers), and the row is what
+ *  `project-marking` moves once the regenerated map states the combined role — so on a first pass it
+ *  still says `master` at the moment these answers are composed.
+ *
+ *  `platform_ref` IS THE ONE THAT CAN BE ABSENT, and it is refused rather than guessed. The map's
+ *  release line is what the lifecycle's own regeneration reads the ref off, and an installation that
+ *  records none has not been released onto: bringing its branch to whatever the trunk happens to hold
+ *  would leave a machine standing on a state its own map cannot name. */
+export function branchAnswers(target: SlaveTarget, serverId: string, ports: DeploySlavePorts): ExtraAnswers {
+  const checkout = checkoutAnswers(target, ports);
+  return async (ctx) => {
+    const { domain } = target.resolve(ctx.db);
+    const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
+    if (marking.release === undefined) {
+      throw errValidation(
+        `${domain} records no release in ${clusterMapPath(domain)}, so there is no state to bring its ` +
+        "branch to. The regeneration reads that line and never the trunk's own head: a machine brought " +
+        "to whatever master happens to hold stands on a state its own map cannot name. Cut a platform " +
+        "release onto this installation first, then run this again",
+      );
+    }
+    const server = ctx.db.select({ lanHost: servers.lanHost }).from(servers).where(eq(servers.id, serverId)).get();
+    if (server?.lanHost === undefined || server.lanHost === null || server.lanHost.length === 0) {
+      throw errValidation(
+        `the inventory row of ${domain} carries no LAN address, and the regeneration is answered with ` +
+        "it: the manager serves on the node's own network, and the chart-validation gate has to prove " +
+        "it cannot be reached from inside the fence. Write the address on the server row, then run " +
+        "this again",
+      );
+    }
+    return {
+      ...(await checkout(ctx)),
+      platform_ref: marking.release,
+      lan_host: server.lanHost,
+      committer_name: MANAGER_COMMITTER_NAME,
+      committer_email: MANAGER_COMMITTER_EMAIL,
+      ...(marking.booksCluster !== undefined ? { books_fqdn: marking.booksCluster } : {}),
+      build_plane_fqdn: marking.buildPlaneFqdn,
+      ...(marking.unitApex !== undefined ? { unit_apex: marking.unitApex } : {}),
+      ...(marking.platformDomain !== undefined ? { platform_domain: marking.platformDomain } : {}),
+      ...(marking.alertRecipients !== undefined ? { alert_recipients: marking.alertRecipients } : {}),
+      ...(marking.catalogRepo !== undefined ? { catalog_repo: marking.catalogRepo } : {}),
+      ...(marking.letsencryptEmail !== undefined ? { letsencrypt_email: marking.letsencryptEmail } : {}),
+      ...(marking.letsencryptServer !== undefined ? { letsencrypt_server: marking.letsencryptServer } : {}),
+      role: MASTER_AND_SLAVE_ROLE,
+    };
+  };
+}
 
 /** `project-marking` — read the regenerated cluster map back and move the inventory row onto it.
  *
@@ -244,7 +302,7 @@ export function masterSlavePartSteps(params: DeploySlaveParams, ports: DeploySla
     // The program rewrites the branch from the trunk and stamps this installation into it, the map
     // among what it stamps — so the slave part arrives as a property of the branch the machine
     // already reads, and not as a second branch beside it.
-    ansiwiseProgramStep(target, "regenerate-branch", ports, { extra: combinedRoleAnswer }),
+    ansiwiseProgramStep(target, "regenerate-branch", ports, { extra: branchAnswers(target, sid, ports) }),
     projectMarkingStep(target, ports),
     // ---- the machine layer, exactly as every cluster gets it: the three deployment programs on the
     // machine's own surface, each dry-proven then run. deploy-host is owed the two checkout answers

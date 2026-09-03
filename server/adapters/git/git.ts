@@ -57,6 +57,14 @@ export interface GitRepoReaderDeps {
   allowFileURLs?: boolean;
 }
 
+/** WHO THIS MANAGER COMMITS AS, wherever it writes into a repository of this platform. It is one
+ *  identity and not one per call site: a reader looking at a branch has to be able to tell a
+ *  commit this process made from one a person made, and two spellings of the same actor make that
+ *  reading a guess. The branch regeneration a run drives is answered with these too, so what the
+ *  machine writes on the manager's behalf carries the same name as what the manager writes itself. */
+export const MANAGER_COMMITTER_NAME = 'hostyour-manager';
+export const MANAGER_COMMITTER_EMAIL = 'manager@hostyour';
+
 export class GitRepoReader implements RepoReader {
   constructor(private readonly deps: GitRepoReaderDeps = {}) {}
 
@@ -165,8 +173,8 @@ export interface GitPlatformRepoDeps {
   /** Optional fetch/push credential, opened per use via openCredential (same askpass path as the reader). */
   credentialId?: string;
   openCredential?: (credentialId: string) => Promise<Buffer>;
-  committerName?: string; // default "hostyour-manager"
-  committerEmail?: string; // default "manager@hostyour"
+  committerName?: string; // default MANAGER_COMMITTER_NAME
+  committerEmail?: string; // default MANAGER_COMMITTER_EMAIL
   /** Opt-in push-reject backoff (tenant repo). Omitted ⇒ the original 3-retry, no-wait behavior. */
   pushBackoff?: PushBackoff;
   /** Tests only: permit a file:// platformRepoURL. */
@@ -186,8 +194,8 @@ export class GitPlatformRepo implements PlatformRepo {
   }
 
   private identity(): string[] {
-    const name = this.deps.committerName ?? "hostyour-manager";
-    const email = this.deps.committerEmail ?? "manager@hostyour";
+    const name = this.deps.committerName ?? MANAGER_COMMITTER_NAME;
+    const email = this.deps.committerEmail ?? MANAGER_COMMITTER_EMAIL;
     return ["-c", `user.name=${name}`, "-c", `user.email=${email}`];
   }
 
@@ -428,8 +436,8 @@ export interface GitConsumerRepoDeps {
   /** Opens the consumer repo's push credential's token bytes by id (the CredentialStore seam) — the
    *  SAME sealed one-PAT-per-consumer the reader clones with. Required: every consumer repo is private. */
   openCredential: (credentialId: string) => Promise<Buffer>;
-  committerName?: string; // default "hostyour-manager"
-  committerEmail?: string; // default "manager@hostyour"
+  committerName?: string; // default MANAGER_COMMITTER_NAME
+  committerEmail?: string; // default MANAGER_COMMITTER_EMAIL
   /** Tests only: permit file:// origins. Production stays https://-only. */
   allowFileURLs?: boolean;
 }
@@ -445,8 +453,8 @@ export class GitConsumerRepo implements ConsumerRepo {
   constructor(private readonly deps: GitConsumerRepoDeps) {}
 
   private identity(): string[] {
-    const name = this.deps.committerName ?? "hostyour-manager";
-    const email = this.deps.committerEmail ?? "manager@hostyour";
+    const name = this.deps.committerName ?? MANAGER_COMMITTER_NAME;
+    const email = this.deps.committerEmail ?? MANAGER_COMMITTER_EMAIL;
     return ["-c", `user.name=${name}`, "-c", `user.email=${email}`];
   }
 

@@ -3,7 +3,11 @@ import { eq } from "drizzle-orm";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { buildRunDefinitions } from "./run-definitions.ts";
-import { masterTakingSlavePart, MASTER_AND_SLAVE_ROLE } from "./defs/deploy-slave.master.ts";
+import { masterTakingSlavePart, MASTER_AND_SLAVE_ROLE, masterSelfTarget, branchAnswers } from "./defs/deploy-slave.master.ts";
+import { MANAGER_COMMITTER_NAME, MANAGER_COMMITTER_EMAIL } from "../../adapters/git/git.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { hostedStepCtx } from "./deploy-slave.fixture.ts";
+import { MASTER_MARKING_YAML } from "./cluster-maps.fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import { MASTER_ID, SLAVE_ID, makeHarness, disposeHarnesses, type Harness } from "./deploy-slave.fixture.ts";
@@ -123,5 +127,66 @@ describe("cluster-deploy-slave, master arm — the plan, what it says, and where
     const otherStage = await h.executor.plan("cluster-deploy-slave", { ...MASTER_PARAMS, stage: "test" })
       .catch((e: unknown) => e);
     expect((otherStage as AppError).message).toContain("a cluster carries one stage");
+  });
+
+  // WHAT THE REGENERATION IS ANSWERED WITH, and it is the half a plan cannot show: the answers are
+  // composed when the step runs, off the installation's own map. Measured on a real run before this
+  // existed: the machine refused to start the program with ten sentences, each naming an answer that
+  // stood written down in a file this manager already reads.
+  describe("the answers the regeneration is given", () => {
+    // The same map with the line a released installation carries. Written as a template literal
+    // because the line IS a line: a map whose release sat on the end of another key would be a
+    // different file, and this test would then prove nothing about the one the lifecycle writes.
+    const withRelease = MASTER_MARKING_YAML.replace("role: master", `role: master
+release: 0.7.9-stable-20260903202414`);
+
+    async function answersOf(h: Harness): Promise<Record<string, string | string[]>> {
+      const target = masterSelfTarget(MASTER_ID, { domain: MASTER_DOMAIN, stage: "prod" });
+      return branchAnswers(target, MASTER_ID, h.runPorts)(hostedStepCtx(h));
+    }
+
+    it("reads every one of them off the map, and commits as this manager", async () => {
+      const h = await masterWithLiveCluster();
+      h.platformRepo.seed(h.platformRepo.booksBranch, clusterMapPath(MASTER_DOMAIN), withRelease);
+      // A real master's row carries one - the run that deploys from it connects over that address -
+      // and the fixture's does not, so the case that reads the answers has to state it.
+      h.db.db.update(servers).set({ lanHost: "10.1.1.5" }).where(eq(servers.id, MASTER_ID)).run();
+
+      const answers = await answersOf(h);
+
+      // The ten the machine named, and the role this arm overrules the inventory with.
+      expect(answers.platform_ref).toBe("0.7.9-stable-20260903202414");
+      expect(answers.platform_repo).toBeDefined();
+      expect(answers.build_plane_fqdn).toBe(MASTER_DOMAIN);
+      expect(answers.unit_apex).toBe("example.com");
+      expect(answers.platform_domain).toBe("example.com");
+      expect(answers.alert_recipients).toBeDefined();
+      expect(answers.lan_host).toBe("10.1.1.5");
+      expect(answers.role).toBe(MASTER_AND_SLAVE_ROLE);
+      // Not an inference: it is the identity this manager already commits into this repository under.
+      expect(answers.committer_name).toBe(MANAGER_COMMITTER_NAME);
+      expect(answers.committer_email).toBe(MANAGER_COMMITTER_EMAIL);
+    });
+
+    it("refuses an installation whose map records no release, rather than bringing it to the trunk", async () => {
+      // The fixture's master map carries no release line, which is what a machine looks like before a
+      // platform release has been cut onto it - measured on a real installation the same evening.
+      const h = await masterWithLiveCluster();
+
+      const refused = await answersOf(h).catch((e: unknown) => e);
+
+      expect((refused as AppError).message).toContain("records no release");
+      expect((refused as AppError).message).toContain("Cut a platform release onto this installation first");
+    });
+
+    it("refuses a server row with no LAN address, which the gate is proven against", async () => {
+      const h = await masterWithLiveCluster();
+      h.platformRepo.seed(h.platformRepo.booksBranch, clusterMapPath(MASTER_DOMAIN), withRelease);
+      h.db.db.update(servers).set({ lanHost: null }).where(eq(servers.id, MASTER_ID)).run();
+
+      const refused = await answersOf(h).catch((e: unknown) => e);
+
+      expect((refused as AppError).message).toContain("carries no LAN address");
+    });
   });
 });
