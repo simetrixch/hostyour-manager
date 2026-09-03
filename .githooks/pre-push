@@ -82,7 +82,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   esac
   pushed=$((pushed + 1))
 
-  if [ "$local_sha" != "$head_sha" ]; then
+  # WHAT IS PUSHED IS RESOLVED TO A COMMIT FIRST. An annotated tag hands its own
+  # object's sha here, never the commit it names, so comparing it to HEAD refuses
+  # every annotated tag there is - including the ones a release mints. Resolving it
+  # asks the question the refusal below means to ask: does the tree this ref names
+  # match the tree the checks are about to measure.
+  local_commit="$(git rev-parse --quiet --verify "${local_sha}^{commit}" 2>/dev/null || printf '%s' "$local_sha")"
+  if [ "$local_commit" != "$head_sha" ]; then
     echo "REFUSED: $local_ref is not the checked-out commit, so the checks below would measure a different tree."
     echo "Check that commit out and push again."
     exit 1
