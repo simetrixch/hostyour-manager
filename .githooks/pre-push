@@ -19,6 +19,11 @@ set -uo pipefail
 
 root="$(git rev-parse --show-toplevel)" || exit 1
 cd "$root" || exit 1
+# Git exports GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE to a hook. A check that starts git itself in
+# a temporary directory - a test that runs git init and git remote add - would then act on THIS
+# repository instead of its own. The hook has changed into the tree by now, so git finds it by
+# the working directory and nothing below needs the variables.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
 
 # The sibling checkouts stand beside the MAIN checkout, and this hook also runs from a worktree,
 # whose own parent directory holds no sibling at all. The common git directory is the main
