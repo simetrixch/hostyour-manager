@@ -161,6 +161,10 @@ release: 0.7.9-stable-20260903202414`);
       expect(answers.unit_apex).toBe("example.com");
       expect(answers.platform_domain).toBe("example.com");
       expect(answers.alert_recipients).toBeDefined();
+      // NOT one of the ten: the machine never named it, because the program defaults it rather than
+      // demanding it. That default is platform-local, so an unanswered issuer is a silent reissue of
+      // every certificate from the cluster's own root.
+      expect(answers.cluster_issuer).toBe("platform-acme");
       expect(answers.lan_host).toBe("10.1.1.5");
       expect(answers.role).toBe(MASTER_AND_SLAVE_ROLE);
       // Not an inference: it is the identity this manager already commits into this repository under.
@@ -177,6 +181,23 @@ release: 0.7.9-stable-20260903202414`);
 
       expect((refused as AppError).message).toContain("records no release");
       expect((refused as AppError).message).toContain("Cut a platform release onto this installation first");
+    });
+
+    it("refuses a map that names no certificate authority, rather than letting the default reissue", async () => {
+      // Measured on apps6 on 2026-09-04: the map carried no clusterIssuer, this arm passed none, the
+      // program's default of platform-local won, and the run deleted the platform-acme issuer and
+      // reissued every address of the installation from a root nothing outside the machine trusts —
+      // reporting itself green. The other answers are spread only where the map carries them, which
+      // is harmless for a value whose default is inert; this one is passed unconditionally.
+      const h = await masterWithLiveCluster();
+      h.platformRepo.seed(h.platformRepo.booksBranch, clusterMapPath(MASTER_DOMAIN),
+        withRelease.replace("  clusterIssuer: platform-acme\n", ""));
+      h.db.db.update(servers).set({ lanHost: "10.1.1.5" }).where(eq(servers.id, MASTER_ID)).run();
+
+      const refused = await answersOf(h).catch((e: unknown) => e);
+
+      expect((refused as AppError).message).toContain("records no clusterIssuer");
+      expect((refused as AppError).message).toContain("platform-acme or platform-local");
     });
 
     it("refuses a server row with no LAN address, which the gate is proven against", async () => {

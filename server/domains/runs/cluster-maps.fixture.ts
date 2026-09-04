@@ -35,6 +35,7 @@ export const SLAVE_MARKING_YAML = [
   "  clusterName: s1",
   "  unitApex: example.com",
   "  platformDomain: example.com",
+  "  clusterIssuer: platform-acme",
   "  letsencryptEmail: ops@example.com",
   "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
   "  vaultKubernetesAuthPath: kubernetes-s1",
@@ -85,6 +86,7 @@ export const MASTER_MARKING_YAML = [
   // per cluster carries, and the auth mount that tells two clusters of one installation apart when
   // they log in. The rest belong to the installation and must arrive untouched.
   "  clusterName: m1",
+  "  clusterIssuer: platform-acme",
   "  letsencryptEmail: ops@example.com",
   "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
   "  vaultKubernetesAuthPath: kubernetes-m1",

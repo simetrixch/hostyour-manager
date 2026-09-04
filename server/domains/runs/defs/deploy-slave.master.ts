@@ -171,10 +171,20 @@ export function masterSelfTarget(serverId: string, stated: { domain: string; sta
  *  `project-marking` moves once the regenerated map states the combined role — so on a first pass it
  *  still says `master` at the moment these answers are composed.
  *
- *  `platform_ref` IS THE ONE THAT CAN BE ABSENT, and it is refused rather than guessed. The map's
- *  release line is what the lifecycle's own regeneration reads the ref off, and an installation that
- *  records none has not been released onto: bringing its branch to whatever the trunk happens to hold
- *  would leave a machine standing on a state its own map cannot name. */
+ *  TWO CAN BE ABSENT FROM THE MAP, and both are refused rather than guessed.
+ *
+ *  `platform_ref` — the map's release line is what the lifecycle's own regeneration reads the ref
+ *  off, and an installation that records none has not been released onto: bringing its branch to
+ *  whatever the trunk happens to hold would leave a machine standing on a state its own map cannot
+ *  name.
+ *
+ *  `cluster_issuer` — every other answer here is spread only where the map carries it, so an absent
+ *  one leaves the program's own default standing. That is harmless for a value whose default is
+ *  inert and destructive for this one: regenerate-branch defaults it to platform-local, writes it
+ *  into configs/config.<stage> and into the base certificate, and the run then reissues every
+ *  address of the installation from the cluster's own root. Measured on apps6 on 2026-09-04 in
+ *  run_01M1NP396FB7E7DHCRQ3F10E59, which deleted the platform-acme issuer and reported itself
+ *  green. So this one is passed unconditionally, and a map that does not name it stops the run. */
 export function branchAnswers(target: SlaveTarget, serverId: string, ports: DeploySlavePorts): ExtraAnswers {
   const checkout = checkoutAnswers(target, ports);
   return async (ctx) => {
@@ -186,6 +196,15 @@ export function branchAnswers(target: SlaveTarget, serverId: string, ports: Depl
         "branch to. The regeneration reads that line and never the trunk's own head: a machine brought " +
         "to whatever master happens to hold stands on a state its own map cannot name. Cut a platform " +
         "release onto this installation first, then run this again",
+      );
+    }
+    if (marking.clusterIssuer === undefined) {
+      throw errValidation(
+        `${domain} records no clusterIssuer in ${clusterMapPath(domain)}, and the regeneration is ` +
+        "answered with it. Left unanswered the program defaults it to platform-local and reissues " +
+        "every certificate of this installation from the cluster's own root, which nothing outside " +
+        "the machine trusts. Write the authority this installation issues by — platform-acme or " +
+        "platform-local — under global in that map, then run this again",
       );
     }
     const server = ctx.db.select({ lanHost: servers.lanHost }).from(servers).where(eq(servers.id, serverId)).get();
@@ -209,6 +228,7 @@ export function branchAnswers(target: SlaveTarget, serverId: string, ports: Depl
       ...(marking.platformDomain !== undefined ? { platform_domain: marking.platformDomain } : {}),
       ...(marking.alertRecipients !== undefined ? { alert_recipients: marking.alertRecipients } : {}),
       ...(marking.catalogRepo !== undefined ? { catalog_repo: marking.catalogRepo } : {}),
+      cluster_issuer: marking.clusterIssuer,
       ...(marking.letsencryptEmail !== undefined ? { letsencrypt_email: marking.letsencryptEmail } : {}),
       ...(marking.letsencryptServer !== undefined ? { letsencrypt_server: marking.letsencryptServer } : {}),
       role: MASTER_AND_SLAVE_ROLE,

@@ -120,9 +120,13 @@ const ClusterMarkingFileSchema = z.object({
     platformDomain: z.string().min(1).optional(),
     alertRecipients: z.union([z.string(), z.array(z.string())]).optional(),
     catalogUrl: z.string().min(1).optional(),
-    // THE ONE AUTHORITY OF THIS INSTALLATION, and the mailbox it writes to. Read rather than merely
-    // carried: a machine added to an installation later is told them from here instead of being
-    // asked for them again, because they are the installation's answer and not the machine's.
+    // THE ONE AUTHORITY OF THIS INSTALLATION, the mailbox it writes to, and WHICH authority issues
+    // at all. Read rather than merely carried: a machine added to an installation later is told them
+    // from here instead of being asked for them again, because they are the installation's answer
+    // and not the machine's. Absent, a regeneration is told nothing about the authority and the
+    // answer falls to the program's default of platform-local, which reissues every certificate
+    // from the cluster's own root.
+    clusterIssuer: z.string().min(1).optional(),
     letsencryptEmail: z.string().min(1).optional(),
     letsencryptServer: z.string().min(1).optional(),
     endpoints: z.object({}).passthrough().optional(),
@@ -176,9 +180,10 @@ export interface ClusterMarking {
   mailUrl?: string;
   /** Carried, never read here. */
   catalogRepo?: string;
-  /** The certificate authority this installation registers with, and the mailbox it writes to.
-   *  Handed to the machine-layer programs of a machine that joins later, so nobody is asked twice
-   *  for one answer of the installation. */
+  /** Which authority issues this installation's certificates, the authority it registers with, and
+   *  the mailbox that one writes to. Handed to the machine-layer programs of a machine that joins
+   *  later, so nobody is asked twice for one answer of the installation. */
+  clusterIssuer?: string;
   letsencryptEmail?: string;
   letsencryptServer?: string;
   /** Everything `global` carried that this module does not name, carried VERBATIM. The schema lets
@@ -205,7 +210,7 @@ function headerOf(text: string): string | undefined {
 const NAMED_GLOBALS = new Set([
   "domain", "booksCluster", "buildPlane", "master", "apiHost", "apiPort",
   "unitApex", "platformDomain", "alertRecipients", "catalogUrl",
-  "letsencryptEmail", "letsencryptServer",
+  "clusterIssuer", "letsencryptEmail", "letsencryptServer",
 ]);
 
 function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking {
@@ -251,6 +256,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
       : {}),
     ...(mailUrl !== undefined ? { mailUrl } : {}),
     ...(catalogRepo ? { catalogRepo } : {}),
+    ...(g.clusterIssuer !== undefined ? { clusterIssuer: g.clusterIssuer } : {}),
     ...(g.letsencryptEmail !== undefined ? { letsencryptEmail: g.letsencryptEmail } : {}),
     ...(g.letsencryptServer !== undefined ? { letsencryptServer: g.letsencryptServer } : {}),
     ...(Object.keys(rest).length > 0 ? { globalRest: rest } : {}),
@@ -404,6 +410,7 @@ function serializeMarking(m: ClusterMarking): string {
     // READ AND THEREFORE WRITTEN. A key this module names but does not emit is a key that survives
     // being read and vanishes on the next write — and the round-trip below is what caught it, which
     // is the whole reason that check stands here.
+    ...(m.clusterIssuer !== undefined ? ([["clusterIssuer", m.clusterIssuer]] as [string, string][]) : []),
     ...(m.letsencryptEmail !== undefined ? ([["letsencryptEmail", m.letsencryptEmail]] as [string, string][]) : []),
     ...(m.letsencryptServer !== undefined ? ([["letsencryptServer", m.letsencryptServer]] as [string, string][]) : []),
   ];
