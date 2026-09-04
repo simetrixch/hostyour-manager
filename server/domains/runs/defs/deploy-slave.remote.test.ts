@@ -5,8 +5,9 @@ import { mergeTrunkScript } from "./deploy-slave.remote.ts";
 // THE MERGE THE BRANCH CUT PERFORMS, RUN AGAINST REAL GIT.
 //
 // mergeTrunkScript is the one place a slave's published branch meets today's trunk, and what it does
-// with a conflict is a decision about the customer's repository: inside the two trees the next step
-// re-stamps whole it takes the trunk's version, and anywhere else it stops the run. Neither half can
+// with a conflict is a decision about the customer's repository: inside the two trees that carry no
+// decision of the branch's own it takes the trunk's version, and anywhere else it stops the run.
+// Neither half can
 // be read off the text — `git checkout --theirs` during a merge, what `--diff-filter=U` lists, and
 // whether an aborted merge leaves the branch where it stood are git's behaviour, not this
 // repository's. So the script is executed here, against repositories this test builds, rather than
@@ -45,8 +46,8 @@ git init -q --bare "$origin"
 # ---- the trunk, as it stood when the slave's branch was cut
 seed=$root/seed
 git init -q -b master "$seed"
-mkdir -p "$seed/clusters/argocd/apps" "$seed/clusters/bootstrap"
-printf 'values:\n  - every-cluster\n  - __CLUSTER_ROLE__\n' > "$seed/clusters/argocd/apps/appset.yaml"
+mkdir -p "$seed/clusters/argocd/files" "$seed/clusters/bootstrap"
+printf 'values:\n  - every-cluster\n  - __CLUSTER_ROLE__\n' > "$seed/clusters/argocd/files/platform-apps-appset.yaml"
 printf 'name: __CLUSTER_NAME__\n' > "$seed/clusters/bootstrap/values.yaml"
 printf 'the trunk\n' > "$seed/README.md"
 git -C "$seed" add -A && git -C "$seed" commit -qm "trunk v1"
@@ -54,7 +55,7 @@ git -C "$seed" remote add origin "$origin" && git -C "$seed" push -q origin mast
 
 # ---- the slave's branch: cut from that trunk and STAMPED
 git -C "$seed" checkout -q -b apps4.example
-printf 'values:\n  - every-cluster\n  - slave\n' > "$seed/clusters/argocd/apps/appset.yaml"
+printf 'values:\n  - every-cluster\n  - slave\n' > "$seed/clusters/argocd/files/platform-apps-appset.yaml"
 printf 'name: apps4\n' > "$seed/clusters/bootstrap/values.yaml"
 mkdir -p "$seed/clusters/active"
 printf 'role: slave\n' > "$seed/clusters/active/apps4.example.yaml"
@@ -63,7 +64,7 @@ git -C "$seed" push -q origin apps4.example
 
 # ---- the trunk moves on: the selector becomes two slots
 git -C "$seed" checkout -q master
-printf 'values:\n  - every-cluster\n  - __CLUSTER_ROLE_FIRST_PART__\n  - __CLUSTER_ROLE_LAST_PART__\n' > "$seed/clusters/argocd/apps/appset.yaml"
+printf 'values:\n  - every-cluster\n  - __CLUSTER_ROLE_FIRST_PART__\n  - __CLUSTER_ROLE_LAST_PART__\n' > "$seed/clusters/argocd/files/platform-apps-appset.yaml"
 ${extra}
 git -C "$seed" add -A && git -C "$seed" commit -qm "select by part"
 git -C "$seed" push -q origin master
@@ -75,7 +76,7 @@ git -C "$work" checkout -q -B apps4.example origin/apps4.example
 
 ${merge}
 echo "HEAD_AFTER $(git -C "$work" rev-parse --abbrev-ref HEAD)"
-echo "APPSET $(tr '\n' '|' < "$work/clusters/argocd/apps/appset.yaml")"
+echo "APPSET $(tr '\n' '|' < "$work/clusters/argocd/files/platform-apps-appset.yaml")"
 echo "MAP $(tr '\n' '|' < "$work/clusters/active/apps4.example.yaml")"
 echo "UNMERGED [$(git -C "$work" diff --name-only --diff-filter=U | tr '\n' ' ')]"
 `;
@@ -84,7 +85,7 @@ echo "UNMERGED [$(git -C "$work" diff --name-only --diff-filter=U | tr '\n' ' ')
 const MERGE = mergeTrunkScript("$work", "origin/master");
 
 describe("mergeTrunkScript — a published slave branch meeting today's trunk", () => {
-  it("INNOCENT CASE: a conflict inside a re-stamped tree takes the trunk's version, and the branch keeps what only it carries", { timeout: 120_000 }, () => {
+  it("INNOCENT CASE: a conflict inside one of the two trees takes the trunk's version, and the branch keeps what only it carries", { timeout: 120_000 }, () => {
     const r = shell(scenario("", MERGE));
     expect(r.err, r.err).not.toMatch(/CONFLICT|Automatic merge failed/);
     expect(r.code, `${r.out}\n${r.err}`).toBe(0);
@@ -94,7 +95,7 @@ describe("mergeTrunkScript — a published slave branch meeting today's trunk", 
     expect(r.out).toMatch(/MAP role: slave/);
     // the merge was completed, not left standing
     expect(r.out).toMatch(/UNMERGED \[\]/);
-    expect(r.out).toMatch(/MERGE_RESOLVED clusters\/argocd\/apps\/appset\.yaml/);
+    expect(r.out).toMatch(/MERGE_RESOLVED clusters\/argocd\/files\/platform-apps-appset\.yaml/);
     expect(r.out).toMatch(/HEAD_AFTER apps4\.example/);
   });
 
@@ -116,7 +117,7 @@ describe("mergeTrunkScript — a published slave branch meeting today's trunk", 
     // Only the README moves. There is no conflict, the fragment's body never runs, and the branch
     // carries the trunk's change — the behaviour before this resolution existed.
     const r = shell(scenario(`printf 'the trunk, later\n' > "$seed/README.md"`, MERGE)
-      .replace('printf \'values:\n  - every-cluster\n  - __CLUSTER_ROLE_FIRST_PART__\n  - __CLUSTER_ROLE_LAST_PART__\n\' > "$seed/clusters/argocd/apps/appset.yaml"\n', ""));
+      .replace('printf \'values:\n  - every-cluster\n  - __CLUSTER_ROLE_FIRST_PART__\n  - __CLUSTER_ROLE_LAST_PART__\n\' > "$seed/clusters/argocd/files/platform-apps-appset.yaml"\n', ""));
     expect(r.code, `${r.out}\n${r.err}`).toBe(0);
     expect(r.out).not.toMatch(/MERGE_RESOLVED/);
     expect(r.out).toMatch(/APPSET values:\|  - every-cluster\|  - slave\|/);

@@ -64,14 +64,21 @@ echo "CHECKOUT_HEAD $old $new"
 `;
 }
 
-// THE TWO TREES THE BRANCH CUT RE-STAMPS WHOLE, and the reason a merge conflict inside them is not
-// a question for a person. deploy-slave-branch writes every placeholder of this installation into
-// `clusters/argocd` and `clusters/bootstrap` immediately after the merge below (its
-// stamp_placeholder_in_tracked_files rows name those two trees and no other; the single row that
-// walks the whole repository replaces `example.invalid` and nothing else). So whatever a branch
+// THE TWO TREES A MERGE TAKES FROM THE TRUNK, and the reason a conflict inside them is not a
+// question for a person: neither one carries a decision the branch made.
+//
+// `clusters/bootstrap` is re-stamped whole by deploy-slave-branch immediately after the merge below.
+// Its stamp_placeholder_in_tracked_files rows name that tree and no other, and the single row that
+// walks the whole repository replaces `example.invalid` and nothing else. So whatever a branch
 // carries there is the STAMPED form of an older trunk, and the trunk's own version is what the
 // stamping expects to find — taking it is not a choice between two decisions, it is restoring the
 // input the next step reads.
+//
+// `clusters/argocd` is a Helm chart the reconciler renders from `clusters/active/<fqdn>.yaml` at
+// sync time, so no row stamps it and the branch is meant to hold the trunk's bytes unchanged. A
+// branch cut before that chart existed still carries the stamped `clusters/argocd/apps/`, and this
+// resolution is what replaces it with the chart — narrowing the paths below to `clusters/bootstrap`
+// leaves such a branch stopping on every file the chart moved.
 //
 // This is the same rule the catalogue's regenerate-branch program states as `toward_ref`, and its
 // absence here is what a slave hit: a branch stamped at 20:28 met a trunk that had rewritten the

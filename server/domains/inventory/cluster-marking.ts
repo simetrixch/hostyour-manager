@@ -21,7 +21,7 @@
 //                Vault, identity and the build plane for whom. Never a placement rule.
 //   books-cluster  the domain of the cluster that keeps the books — the cluster's own for a
 //                master, the master's for a slave. The slaves ApplicationSet SELECTS on this key
-//                (argocd/apps/slaves-appset.yaml matchLabels), so a slave map without it is
+//                (clusters/argocd/files/slaves-appset.yaml matchLabels), so a slave map without it is
 //                invisible to the generator.
 //   build-plane  the FQDN of the cluster that builds this one's images. The predicate is
 //                `buildPlane := (build-plane == fqdn)`, so one field answers both "do I run the

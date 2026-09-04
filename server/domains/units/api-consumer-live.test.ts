@@ -32,8 +32,10 @@ const DEPLOYED = "b".repeat(40); // where the pointer stands now / what the clus
 const GITOPS_SHA = "c".repeat(40); // the resolved head of the install branch
 const CONSUMER_REPO = "https://github.com/x/acme.git";
 // The generated consumer Application's OTHER two sources: the GitOps repo, targeted at the INSTALL
-// BRANCH (hostyour-cloud argocd/<stage>/apps/consumers-appset.yaml — set-domain.sh restamps `master`
-// to the branch named after the master FQDN). Reading a pin off source 0 therefore yields this NAME.
+// BRANCH (hostyour-cloud clusters/argocd/files/consumers-appset.yaml carries `targetRevision:
+// __BRANCH__`, and the chart at clusters/argocd/templates/apps.yaml fills that marker with the
+// cluster map's global.domain, which is the branch named after the master FQDN). Reading a pin off
+// source 0 therefore yields this NAME.
 const GITOPS_REPO = "https://github.com/simetrixch/hostyour-cloud.git";
 const INSTALL_BRANCH = "m1.example.com";
 
