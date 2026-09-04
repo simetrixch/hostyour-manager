@@ -19,7 +19,10 @@ import {
 } from "./deploy-slave.fixture.ts";
 import type { DbHandle } from "../../db/client.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { MASTER_FQDN, MASTER_MARKING_YAML, MAP_LETSENCRYPT_EMAIL, MAP_LETSENCRYPT_SERVER } from "./cluster-maps.fixture.ts";
+import {
+  MASTER_FQDN, MASTER_MARKING_YAML, MAP_LETSENCRYPT_EMAIL, MAP_LETSENCRYPT_SERVER, MAP_TAILNET_URL,
+  SLAVE_FQDN, SLAVE_MARKING_YAML,
+} from "./cluster-maps.fixture.ts";
 
 // The fixture half of the ONE suite that talks to a real `ansiwise-rest serve`
 // (redeploy.ansiwise.test.ts): the measuring programs the serve installation carries, the worlds
@@ -237,21 +240,29 @@ export async function liveMaster(serve: ServeFixture, overrides: Partial<HostsSc
   return h;
 }
 
-/** A harness whose SLAVE is the tailnet run kinds' target. The cluster row and the profile (where the
+/** A harness whose SLAVE is the tailnet run kinds' target. The cluster row and the map (where the
  *  rejoin reads global.endpoints.tailnet.url) are the rejoin's world; the two client run kinds run without either
- *  — the host that needs them most is exactly the one whose deploy went wrong. */
+ *  — the host that needs them most is exactly the one whose deploy went wrong.
+ *
+ *  [tailnetUrl] re-seeds the slave's map ON THE BOOKS BRANCH, which is where readLoginServer
+ *  (defs/tailnet.kit.ts) reads that address: a cluster carrying only the slave part has no branch of
+ *  its own, so a map seeded on a branch named after the cluster is one nothing reads. `false` takes
+ *  the coordinator's address out of the map altogether. Left out, the map `makeHarness` seeds stands
+ *  (SLAVE_MARKING_YAML, which states MAP_TAILNET_URL like every map of the installation). */
 export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean; tailnetUrl?: string | false } = {}): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   if (opts.cluster ?? true) {
     h.db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1,
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: SLAVE_FQDN, status: "active", slaveId: 1,
     }).run();
-    if (opts.tailnetUrl !== false) {
-      // Seeded BESIDE the values chain's sentinel file: the fake materializes its own profile on
-      // a branch's first touch unless clusters/platform/values-common.yaml already stands there.
-      h.platformRepo.seed("s1.example.com", "clusters/platform/values-common.yaml", "global: {}\n");
-      h.platformRepo.seed("s1.example.com", clusterMapPath("s1.example.com"), `global:\n  endpoints:\n    tailnet:\n      url: ${opts.tailnetUrl ?? "https://tale.m1.example.com"}\n`);
+    if (opts.tailnetUrl !== undefined) {
+      const stated = `    tailnet:\n      url: ${MAP_TAILNET_URL}\n`;
+      h.platformRepo.seed(
+        h.platformRepo.booksBranch,
+        clusterMapPath(SLAVE_FQDN),
+        SLAVE_MARKING_YAML.replace(stated, opts.tailnetUrl === false ? "" : `    tailnet:\n      url: ${opts.tailnetUrl}\n`),
+      );
     }
   }
   return h;
@@ -264,15 +275,12 @@ export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean
  *  answers validation, the detached records — is host-independent, while WHICH surface each
  *  conversation went over is still real per host (the scripted sessions are keyed by host and
  *  every `ansiwise-rest serve` open is logged against the host it was opened on). What the programs
- *  would WRITE on a real machine is stood in by the scripted side: the slave-branch profile the
- *  join reads its coordinator address from (seeded on the fake platform repo) and the two
- *  credential files the manager `cat`s over the session. */
+ *  would WRITE on a real machine is stood in by the scripted side: the two credential files the
+ *  manager `cat`s over the session. The map the join reads its coordinator address from is not
+ *  seeded here — the run's own marking step writes it, on the books branch, before the join. */
 export async function deployWorld(serve: ServeFixture): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
-  const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve", marking: false });
-  h.platformRepo.seed("s1.example.com", "clusters/platform/values-common.yaml", "global: {}\n");
-  h.platformRepo.seed("s1.example.com", clusterMapPath("s1.example.com"), "global:\n  endpoints:\n    tailnet:\n      url: https://tale.m1.example.com\n");
-  return h;
+  return makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve", marking: false });
 }
 
 /** A slave that already IS one — redeploy's slave arm acts on this. The default marking rides
@@ -307,11 +315,6 @@ export async function liveSlaveWorld(serve: ServeFixture, overrides: Partial<Hos
     id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1, planeState: "ready",
   }).run();
   h.db.db.update(servers).set({ status: "healthy" }).where(eq(servers.id, SLAVE_ID)).run();
-  // The machine's own install branch, which is where the join reads the coordinator's address
-  // (global.endpoints.tailnet.url) — seeded beside the values chain's sentinel file, because the fake
-  // materializes its own profile on a branch's first touch unless that file already stands there.
-  h.platformRepo.seed("s1.example.com", "clusters/platform/values-common.yaml", "global: {}\n");
-  h.platformRepo.seed("s1.example.com", clusterMapPath("s1.example.com"), "global:\n  endpoints:\n    tailnet:\n      url: https://tale.m1.example.com\n");
   return h;
 }
 

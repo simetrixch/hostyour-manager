@@ -20,6 +20,10 @@ export const FIXTURE_STAGE = "prod";
  *  map states, and a value spelled twice is a value that can disagree with itself. */
 export const MAP_LETSENCRYPT_EMAIL = "ops@example.com";
 export const MAP_LETSENCRYPT_SERVER = "https://acme-v02.api.letsencrypt.org/directory";
+/** Where the tailnet coordinator answers — `tale.<books cluster>`, one coordinator per installation,
+ *  so every cluster map of it states the same address. Named here because a test that re-seeds a map
+ *  with a DIFFERENT coordinator has to replace the line this states. */
+export const MAP_TAILNET_URL = `https://tale.${MASTER_FQDN}`;
 
 /** A slave's cluster map as mark-slave leaves it on the books branch — identity plus the slave
  *  part that makes the master's slaves ApplicationSet able to dial it. Seeded by tests that start
@@ -55,7 +59,7 @@ export const SLAVE_MARKING_YAML = [
   "    idp:",
   "      url: https://idp.m1.example.com",
   "    tailnet:",
-  "      url: https://tale.m1.example.com",
+  `      url: ${MAP_TAILNET_URL}`,
   // A slave keeps no books and, here, does not build: all three false is what mark-slave writes.
   "  servicesLocal:",
   "    registry: false",
@@ -117,7 +121,7 @@ export const MASTER_MARKING_YAML = [
   "    idp:",
   "      url: https://idp.m1.example.com",
   "    tailnet:",
-  "      url: https://tale.m1.example.com",
+  `      url: ${MAP_TAILNET_URL}`,
   // A MASTER HOLDS ALL THREE: it keeps the books and, here, also builds. Two of them are what a
   // slave must be told it does NOT hold.
   "  servicesLocal:",
