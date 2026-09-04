@@ -80,11 +80,13 @@ describe("release-kit embedded assets", () => {
 
     const sh = byPath["release/release.sh"]!;
     expect(sh).toContain('ADMITS="dev test"'); // beta
-    expect(sh).toContain("WARNING — channel ${CHANNEL} admits only: ${ADMITS}.");
+    expect(sh).toContain("WARNING - channel ${CHANNEL} admits only: ${ADMITS}.");
     // A ceiling violation must NOT reach `die` — the platform's own refusal is what the ceiling
     // rests on, and a local abort would mean the pipeline never got to state it.
     expect(sh).not.toMatch(/die "channel \$\{CHANNEL\} admits/);
-    expect(byPath["release/release.ps1"]!).toContain("Write-Warning");
+    // The twin warns in the same words on the same stream. Write-Warning wrote a differently worded
+    // line with the host's own prefix, which is a difference release-parity.test.ts now runs for.
+    expect(byPath["release/release.ps1"]!).toContain("Warn \"WARNING - channel $Channel admits only:");
   });
 
   // This repository is a consumer unit of itself, so onboarding it runs inject-release-kit over its
@@ -136,8 +138,8 @@ describe("release-kit embedded assets", () => {
     expect(ps1).toContain("names no platformRepo, so nothing is pinned from here");
 
     // A repository in another language has no package.json: the stamp says so and the release runs on.
-    expect(sh).toContain("this repository carries no package.json — no version manifest to stamp");
-    expect(ps1).toContain("this repository carries no package.json — no version manifest to stamp");
+    expect(sh).toContain("this repository carries no package.json - no version manifest to stamp");
+    expect(ps1).toContain("this repository carries no package.json - no version manifest to stamp");
   });
 
   it("refuses a release it could not pin BEFORE it mints anything — the probe is the push, not the clone", () => {

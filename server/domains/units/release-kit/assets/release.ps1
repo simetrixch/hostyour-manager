@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-  release.ps1 — put a release of this repo on ONE stage. Lives in release/; copied here by the
+  release.ps1 - put a release of this repo on ONE stage. Lives in release/; copied here by the
   platform at onboarding. Bash twin: release.sh (same folder). The two are held to answering
   identically.
 
 .DESCRIPTION
-  The three inputs are the version (x.y.z), the channel — the maturity CEILING of the release: alpha
-  may reach dev only, beta dev and test, stable anywhere — and the stage this run puts the release
+  The three inputs are the version (x.y.z), the channel - the maturity CEILING of the release: alpha
+  may reach dev only, beta dev and test, stable anywhere - and the stage this run puts the release
   on. The channel is part of the release tag; the stage is not.
 
   It:
@@ -18,7 +18,7 @@
     5. MINT-ONCE: exactly one release tag per (version, channel). The first run stamps the version
        into package.json where the repo has one, mints <x.y.z>-<channel>-<ts14> (ts14 = UTC
        yyyyMMddHHmmss) on HEAD and pushes the commit + the tag. A later run for the SAME
-       version+channel REUSES that tag — that is how a release reaches a further stage without being
+       version+channel REUSES that tag - that is how a release reaches a further stage without being
        rebuilt: the same commit, the same image, one more stage.
     6. Deletes and re-pushes the deploy ref refs/tags/deploy/<stage>/<tag>. Pushing that ref is the
        ONLY build trigger. It is deleted first because pushing a ref that already stands changes
@@ -37,8 +37,8 @@
   names its own there and can reach no other.
 
   The ceiling is checked LOCALLY as a courtesy so a mistake is visible here, but it does NOT stop
-  the push: the pipeline is the only thing that can write, and its refusal — naming channel, stage
-  and the allowed stages — is the one that counts. Every property here is re-verified there.
+  the push: the pipeline is the only thing that can write, and its refusal - naming channel, stage
+  and the allowed stages - is the one that counts. Every property here is re-verified there.
 
 .EXAMPLE
   ./release/release.ps1 0.6.0 stable prod
@@ -50,11 +50,22 @@ param(
   [Parameter(Mandatory = $true, Position = 2)][ValidateSet('dev', 'test', 'prod')][string]$Stage
 )
 $ErrorActionPreference = 'Stop'
-# Written straight to stderr and not through Write-Error, so a refusal reads as the one sentence the
-# bash twin prints rather than as a wrapped error record with a caret diagram over it — and so the
-# exit code is the one chosen here. Under ErrorActionPreference Stop, Write-Error ends the script
-# where it stands, which would make every `exit` after it unreachable.
-function Die($m) { [Console]::Error.WriteLine("release: $m"); exit 1 }
+# WHAT THIS SCRIPT PRINTS, AND WHO WRITES THE NEWLINE. Every printed line is ASCII and ends with the
+# one "`n" written here, because neither is the host's to choose. Write-Host and WriteLine end a line
+# with the HOST's ending, which on Windows is two bytes where the bash twin writes one; and
+# [Console]::Error.WriteLine writes in the console's CODE PAGE, which turned a printed em dash into a
+# different byte. Both made the twins answer differently for reasons that have nothing to do with the
+# release, and the two are held to being byte-for-byte the same. Comments carry whatever characters
+# they like; only what is PRINTED is bound.
+#
+# Written straight to the console streams and not through Write-Error, so a refusal reads as the one
+# sentence the bash twin prints rather than as a wrapped error record with a caret diagram over it —
+# and so the exit code is the one chosen here. Under ErrorActionPreference Stop, Write-Error ends the
+# script where it stands, which would make every `exit` after it unreachable.
+function Write-Line($m) { [Console]::Out.Write("$m`n") }
+function Say($m) { Write-Line "release: $m" }
+function Warn($m) { [Console]::Error.Write("release: $m`n") }
+function Die($m) { Warn $m; exit 1 }
 
 # THE PIN GRAMMAR AND NOTHING ELSE: builds[]{name,image,tag}, in the values file of the stage this
 # release is going to. Read and written by name rather than by line, so a file whose entries are
@@ -113,18 +124,18 @@ function Test-RunsHere {
 function Publish-BranchPin {
   param([Parameter(Mandatory = $true)][string]$Branch)
   git -C $platformRepoDir checkout --quiet $Branch 2>$null
-  if ($LASTEXITCODE -ne 0) { Die "the platform tree has no branch $Branch — nothing further was pinned" }
+  if ($LASTEXITCODE -ne 0) { Die "the platform tree has no branch $Branch - nothing further was pinned" }
   git -C $platformRepoDir reset --quiet --hard "origin/$Branch"
   $pinned = @(Write-StagePin -Tree $platformRepoDir -PinStage $Stage -ImageTag "$tag-$sha7" -BuildNames $buildNames)
   if ($pinned.Count -eq 0) {
-    Write-Host "release: $Branch carries no values-$Stage.yaml pin of $name — left as it stands"
+    Say "$Branch carries no values-$Stage.yaml pin of $name - left as it stands"
     return
   }
   git -C $platformRepoDir add -- @pinned
   git -C $platformRepoDir commit --quiet -m "Pin $Stage to $tag" -m "Written by the release of $name, once its images were built."
   git -C $platformRepoDir push --quiet origin $Branch
   if ($LASTEXITCODE -ne 0) { Die "the pin of $Stage to $tag-$sha7 could not be pushed to $Branch of $platformRepo" }
-  Write-Host "release: pinned $Branch to $tag-$sha7 in $($pinned -join ' ')"
+  Say "pinned $Branch to $tag-$sha7 in $($pinned -join ' ')"
   $script:pinnedAny = $true
 }
 
@@ -140,13 +151,13 @@ function Publish-BranchPin {
 function Set-ManifestVersion($Root, $Version, $Tag) {
   $file = Join-Path $Root 'package.json'
   if (-not (Test-Path -LiteralPath $file)) {
-    Write-Host 'release: this repository carries no package.json — no version manifest to stamp'
+    Say 'this repository carries no package.json - no version manifest to stamp'
     return
   }
   $text = [System.IO.File]::ReadAllText($file)
   $rx = [regex]'(?m)^(\s*)"version":\s*"[^"]*"'
   if (-not $rx.IsMatch($text)) {
-    Write-Host 'release: package.json declares no version — nothing to stamp'
+    Say 'package.json declares no version - nothing to stamp'
     return
   }
   $bumped = $rx.Replace($text, '$1"version": "' + $Version + '"', 1)
@@ -155,7 +166,7 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
   git add -- $file
   git commit --quiet -m "release: $Tag"
   if ($LASTEXITCODE -ne 0) { Die "the version bump to $Version could not be committed" }
-  Write-Host "release: package.json declares $Version"
+  Say "package.json declares $Version"
 }
 
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
@@ -165,18 +176,18 @@ if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
 # The courtesy ceiling check. It WARNS and continues on purpose — see the description.
 $admits = @{ alpha = @('dev'); beta = @('dev', 'test'); stable = @('dev', 'test', 'prod') }[$Channel]
 if ($admits -notcontains $Stage) {
-  Write-Warning "release: channel $Channel admits only: $($admits -join ', '). Stage $Stage is above its ceiling, so the platform will refuse this run. Pushing anyway; the refusal comes from the pipeline."
+  Warn "WARNING - channel $Channel admits only: $($admits -join ' '). Stage $Stage is above its ceiling, so the platform will refuse this run. Pushing anyway; the refusal comes from the pipeline."
 }
 
 git rev-parse --is-inside-work-tree 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) { Die 'not inside a git repository' }
-if (git status --porcelain) { Die 'worktree is dirty — commit or stash before releasing' }
+if (git status --porcelain) { Die 'worktree is dirty - commit or stash before releasing' }
 
 # Anchor the manifest read at the repo root so it resolves whether the script is run from the
 # repo root or from inside release/ (git tag/push are already repo-relative, not cwd-relative).
 $root = (git rev-parse --show-toplevel 2>$null)
 if (-not $root) { $root = '.' }
-$manifest = Join-Path $root 'deploy/platform.yaml'
+$manifest = "$root/deploy/platform.yaml"
 
 $name = ''
 $platformRepo = ''
@@ -189,7 +200,7 @@ if (Test-Path -LiteralPath $manifest) {
   if ($repoLine.Success) { $platformRepo = $repoLine.Groups[1].Value }
   $buildNames = @([regex]::Matches($manifestText, '(?m)^\s*-\s*name:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value })
 }
-if (-not $name) { Die "the manifest $manifest states no name — it is what the release line and any pin are written under" }
+if (-not $name) { Die "the manifest $manifest states no name - it is what the release line and any pin are written under" }
 
 # ── The pin pre-flight ────────────────────────────────────────────────────────────────────────
 #
@@ -215,11 +226,11 @@ $runsOn = ''
 try {
   if ($platformRepo) {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-      Die "gh is not on this path, so the build of this release could not be waited for and its pin could not be written — nothing has been minted or pushed"
+      Die "gh is not on this path, so the build of this release could not be waited for and its pin could not be written - nothing has been minted or pushed"
     }
     $platformRepoDir = (New-Item -ItemType Directory -Path (Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName()))).FullName
     git clone --quiet "https://github.com/$platformRepo.git" $platformRepoDir
-    if ($LASTEXITCODE -ne 0) { Die "the platform tree $platformRepo could not be cloned, so this release could not write its pin — nothing has been minted or pushed" }
+    if ($LASTEXITCODE -ne 0) { Die "the platform tree $platformRepo could not be cloned, so this release could not write its pin - nothing has been minted or pushed" }
     $priorPrompt = $env:GIT_TERMINAL_PROMPT
     $env:GIT_TERMINAL_PROMPT = '0'
     try { git -C $platformRepoDir push --dry-run --quiet origin HEAD *> $null }
@@ -227,7 +238,7 @@ try {
       if ($null -eq $priorPrompt) { Remove-Item Env:GIT_TERMINAL_PROMPT } else { $env:GIT_TERMINAL_PROMPT = $priorPrompt }
     }
     if ($LASTEXITCODE -ne 0) {
-      Die "this machine may not push to $platformRepo, so this release could not write its pin — nothing has been minted or pushed. A unit that pins itself is released from a machine logged in to both repositories, never from a build runner."
+      Die "this machine may not push to $platformRepo, so this release could not write its pin - nothing has been minted or pushed. A unit that pins itself is released from a machine logged in to both repositories, never from a build runner."
     }
     # WHERE THE UNIT RUNS, which is what decides which branches its pin belongs on. The platform
     # states it per unit, in one place: runsOn in clusters/inventories/<unit>/app.yaml on the trunk,
@@ -238,7 +249,7 @@ try {
     $runsOnLine = [regex]::Match(((git -C $platformRepoDir show "origin/master:$appYaml" 2>$null) -join "`n"), '(?m)^runsOn:[ \t]*(\S+)')
     if ($runsOnLine.Success) { $runsOn = $runsOnLine.Groups[1].Value }
     if (-not $runsOn) {
-      Die "$appYaml on the trunk of $platformRepo states no runsOn, so where $name runs is unknown and its pin belongs to no branch in particular — nothing has been minted or pushed"
+      Die "$appYaml on the trunk of $platformRepo states no runsOn, so where $name runs is unknown and its pin belongs to no branch in particular - nothing has been minted or pushed"
     }
   }
 
@@ -265,7 +276,7 @@ try {
     $headSha = (git rev-parse --verify HEAD | Select-Object -First 1)
     if (-not $onOrigin -and "$candidateSha" -ne "$headSha") {
       $candidateShort = (git rev-parse --short=7 "$candidate^{commit}" | Select-Object -First 1)
-      Write-Host "release: $candidate stands on this machine only and names $candidateShort, not the commit being released. A run whose push was refused left it behind; it is dropped and cut again."
+      Say "$candidate stands on this machine only and names $candidateShort, not the commit being released. A run whose push was refused left it behind; it is dropped and cut again."
       git tag -d $candidate *> $null
       if ($LASTEXITCODE -ne 0) {
         Die "the leftover tag $candidate could not be dropped, and reusing it would release a commit nobody is releasing"
@@ -276,7 +287,7 @@ try {
 
   if ($existing.Count -gt 0) {
     $tag = $existing[-1]
-    Write-Host "release: reusing the existing release $tag — one release per version+channel, so putting it on $Stage rebuilds nothing"
+    Say "reusing the existing release $tag - one release per version+channel, so putting it on $Stage rebuilds nothing"
   }
   else {
     $ts14 = (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss')
@@ -285,7 +296,7 @@ try {
     git tag -a $tag -m "release $tag"
     git push origin HEAD
     git push origin "refs/tags/$tag"
-    Write-Host "release: minted $tag"
+    Say "minted $tag"
   }
 
   # The release COMMIT is the tag's, never HEAD — on a reuse, HEAD has usually moved on.
@@ -314,10 +325,10 @@ try {
   # the tree that stage reads still names the previous images is telling the operator something that
   # is not so, and the machine is where they find out.
   if (-not $platformRepo) {
-    Write-Host "release: the manifest $manifest names no platformRepo, so nothing is pinned from here — the deploy ref above is what the platform reacts to"
+    Say "the manifest $manifest names no platformRepo, so nothing is pinned from here - the deploy ref above is what the platform reacts to"
   }
   else {
-    Write-Host "release: waiting for the images of $tag — the pin is written when they exist"
+    Say "waiting for the images of $tag - the pin is written when they exist"
     $runId = ''
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
       $runId = (gh run list --workflow release-images --branch $tag --limit 1 --json databaseId --jq '.[0].databaseId' 2>$null | Select-Object -First 1)
@@ -326,21 +337,21 @@ try {
       Start-Sleep -Seconds 4
     }
     if (-not $runId) {
-      Die "no release-images run appeared for $tag within two minutes — the images are unbuilt and nothing was pinned"
+      Die "no release-images run appeared for $tag within two minutes - the images are unbuilt and nothing was pinned"
     }
     gh run watch $runId --exit-status --interval 20 *> $null
     if ($LASTEXITCODE -ne 0) {
       # 75 and not Die's 1: a build that ran and failed is a different answer from a release that
       # was refused, and the bash twin says so with the same number.
-      [Console]::Error.WriteLine("release: the images of $tag did not build — no pin was written. Read the run: gh run view $runId --log-failed")
+      Warn "the images of $tag did not build - no pin was written. Read the run: gh run view $runId --log-failed"
       exit 75
     }
-    Write-Host "release: the images of $tag are built"
+    Say "the images of $tag are built"
     # The clone is as old as the pre-flight, which stands before a build that takes minutes. Refresh
     # the remote-tracking refs, or the reset below writes onto a tip somebody else has moved past and
     # the push is refused for a reason that has nothing to do with this release.
     git -C $platformRepoDir fetch --quiet --prune origin
-    if ($LASTEXITCODE -ne 0) { Die "the platform tree $platformRepo could not be refreshed after the build — the images exist and nothing was pinned" }
+    if ($LASTEXITCODE -ne 0) { Die "the platform tree $platformRepo could not be refreshed after the build - the images exist and nothing was pinned" }
 
     # EVERY BRANCH A CLUSTER ACTUALLY READS, and the trunk they are cut from.
     #
@@ -367,25 +378,25 @@ try {
       $roleLine = [regex]::Match(($map -join "`n"), '(?m)^role:[ \t]*(.*)$')
       $role = if ($roleLine.Success) { $roleLine.Groups[1].Value.Trim() } else { '' }
       if (-not $role) {
-        Write-Host "release: $ref carries no clusters/active/$ref.yaml, so it is no cluster's install branch - passed over"
+        Say "$ref carries no clusters/active/$ref.yaml, so it is no cluster's install branch - passed over"
       }
       elseif (Test-RunsHere -Role $role) {
         Publish-BranchPin -Branch $ref
       }
       else {
-        Write-Host "release: $ref carries the $role part and $name runs on $runsOn - passed over"
+        Say "$ref carries the $role part and $name runs on $runsOn - passed over"
       }
     }
     if (-not $pinnedAny) {
-      Die "no branch of $platformRepo carries a values-$Stage.yaml pin of $name — the images are built and no cluster reads them, so this release reaches nothing"
+      Die "no branch of $platformRepo carries a values-$Stage.yaml pin of $name - the images are built and no cluster reads them, so this release reaches nothing"
     }
   }
 
-  Write-Host "release: $name $tag (commit $sha7) is on its way to $Stage"
+  Say "$name $tag (commit $sha7) is on its way to $Stage"
   if ($buildNames.Count -gt 0) {
-    Write-Host 'release: the platform builds these image tags, or skips the build when they already exist:'
+    Say 'the platform builds these image tags, or skips the build when they already exist:'
     foreach ($build in $buildNames) {
-      Write-Host "    ${build}:$tag-$sha7"
+      Write-Line "    ${build}:$tag-$sha7"
     }
   }
 }

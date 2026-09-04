@@ -56,7 +56,17 @@
 # ===========================================================================
 set -euo pipefail
 
-die() { echo "release: $*" >&2; exit 1; }
+# WHAT THIS SCRIPT PRINTS, AND WHO WRITES THE NEWLINE. Every printed line is ASCII and ends with the
+# one \n written here, because neither is the host's to choose. A PowerShell host ends a line with
+# two bytes where a shell writes one, and [Console]::Error.WriteLine writes in the console's code
+# page, which turns a printed em dash into a different byte on a Windows console — so the twins
+# answered differently for two reasons that have nothing to do with the release, and the two are
+# held to being byte-for-byte the same. Comments carry whatever characters they like; only what is
+# PRINTED is bound.
+line() { printf '%s\n' "$*"; }
+say() { line "release: $*"; }
+warn() { line "release: $*" >&2; }
+die() { warn "$*"; exit 1; }
 
 # THE COMMIT A TAG SITS ON DECLARES THE VERSION THE TAG NAMES. The build reads the version out of
 # the tag, so a package.json still declaring an older number labels the artifact with a version
@@ -70,18 +80,18 @@ die() { echo "release: $*" >&2; exit 1; }
 stamp_manifest_version() {
   file="$ROOT/package.json"
   if [ ! -f "$file" ]; then
-    echo "release: this repository carries no package.json — no version manifest to stamp"
+    say "this repository carries no package.json - no version manifest to stamp"
     return 0
   fi
   if ! grep -qE '^[[:space:]]*"version":[[:space:]]*"' "$file"; then
-    echo "release: package.json declares no version — nothing to stamp"
+    say "package.json declares no version - nothing to stamp"
     return 0
   fi
   sed -i '0,/^\([[:space:]]*\)"version":[[:space:]]*"[^"]*"/s//\1"version": "'"$VERSION"'"/' "$file"
   git diff --quiet -- "$file" && return 0
   git add -- "$file"
   git commit --quiet -m "release: $TAG" || die "the version bump to $VERSION could not be committed"
-  echo "release: package.json declares ${VERSION}"
+  say "package.json declares ${VERSION}"
 }
 
 # Does this unit run on a cluster whose role is $1? A role names every PART the cluster carries,
@@ -100,18 +110,18 @@ runs_here() {
 # branch are what make the write land on THAT branch and not on whatever the clone had open.
 pin_branch() {
   branch="$1"
-  git -C "$PLATFORM_REPO_DIR" checkout --quiet "$branch" || die "the platform tree has no branch ${branch} — nothing further was pinned"
+  git -C "$PLATFORM_REPO_DIR" checkout --quiet "$branch" || die "the platform tree has no branch ${branch} - nothing further was pinned"
   git -C "$PLATFORM_REPO_DIR" reset --quiet --hard "origin/${branch}"
   pinned="$(python3 "$PINNER" "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST")"
   if [ -z "$pinned" ]; then
-    echo "release: ${branch} carries no values-${STAGE}.yaml pin of ${NAME} — left as it stands"
+    say "${branch} carries no values-${STAGE}.yaml pin of ${NAME} - left as it stands"
     return 0
   fi
   git -C "$PLATFORM_REPO_DIR" add -- $pinned
   git -C "$PLATFORM_REPO_DIR" commit --quiet -m "Pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME}, once its images were built."
   git -C "$PLATFORM_REPO_DIR" push --quiet origin "$branch" \
     || die "the pin of ${STAGE} to ${TAG}-${SHA7} could not be pushed to ${branch} of ${PLATFORM_REPO}"
-  echo "release: pinned ${branch} to ${TAG}-${SHA7} in ${pinned}"
+  say "pinned ${branch} to ${TAG}-${SHA7} in ${pinned}"
   PINNED_ANY=1
 }
 
@@ -134,11 +144,11 @@ case "$CHANNEL" in
 esac
 case " $ADMITS " in
   *" $STAGE "*) ;;
-  *) echo "release: WARNING — channel ${CHANNEL} admits only: ${ADMITS}. Stage ${STAGE} is above its ceiling, so the platform will refuse this run. Pushing anyway; the refusal comes from the pipeline." >&2 ;;
+  *) warn "WARNING - channel ${CHANNEL} admits only: ${ADMITS}. Stage ${STAGE} is above its ceiling, so the platform will refuse this run. Pushing anyway; the refusal comes from the pipeline." ;;
 esac
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not inside a git repository"
-[ -z "$(git status --porcelain)" ] || die "worktree is dirty — commit or stash before releasing"
+[ -z "$(git status --porcelain)" ] || die "worktree is dirty - commit or stash before releasing"
 
 # Anchor the manifest read at the repo root so it resolves whether the script is run from the
 # repo root or from inside release/ (git tag/push are already repo-relative, not cwd-relative).
@@ -150,7 +160,7 @@ MANIFEST="$ROOT/deploy/platform.yaml"
 # pipeline. The capture stops at the first space, which is also what drops a trailing YAML comment.
 manifest_value() { sed -nE "s/^$1:[[:space:]]*([^[:space:]]+).*\$/\\1/p" "$MANIFEST" 2>/dev/null | head -1; }
 NAME="$(manifest_value name || true)"
-[ -n "$NAME" ] || die "the manifest ${MANIFEST} states no name — it is what the release line and any pin are written under"
+[ -n "$NAME" ] || die "the manifest ${MANIFEST} states no name - it is what the release line and any pin are written under"
 PLATFORM_REPO="$(manifest_value platformRepo || true)"
 
 # ── The pin pre-flight ────────────────────────────────────────────────────────────────────────
@@ -171,14 +181,14 @@ PLATFORM_REPO="$(manifest_value platformRepo || true)"
 # happens to sit on the machine, and nothing here can touch one.
 if [ -n "$PLATFORM_REPO" ]; then
   command -v gh >/dev/null 2>&1 \
-    || die "gh is not on this path, so the build of this release could not be waited for and its pin could not be written — nothing has been minted or pushed"
+    || die "gh is not on this path, so the build of this release could not be waited for and its pin could not be written - nothing has been minted or pushed"
   PLATFORM_REPO_DIR="$(mktemp -d)"
   PINNER="${PLATFORM_REPO_DIR}.pin.py"
   trap 'rm -rf "$PLATFORM_REPO_DIR" "$PINNER"' EXIT
   git clone --quiet "https://github.com/${PLATFORM_REPO}.git" "$PLATFORM_REPO_DIR" \
-    || die "the platform tree ${PLATFORM_REPO} could not be cloned, so this release could not write its pin — nothing has been minted or pushed"
+    || die "the platform tree ${PLATFORM_REPO} could not be cloned, so this release could not write its pin - nothing has been minted or pushed"
   GIT_TERMINAL_PROMPT=0 git -C "$PLATFORM_REPO_DIR" push --dry-run --quiet origin HEAD >/dev/null 2>&1 \
-    || die "this machine may not push to ${PLATFORM_REPO}, so this release could not write its pin — nothing has been minted or pushed. A unit that pins itself is released from a machine logged in to both repositories, never from a build runner."
+    || die "this machine may not push to ${PLATFORM_REPO}, so this release could not write its pin - nothing has been minted or pushed. A unit that pins itself is released from a machine logged in to both repositories, never from a build runner."
   # WHERE THE UNIT RUNS, which is what decides which branches its pin belongs on. The platform states
   # it per unit, in one place: `runsOn` in clusters/inventories/<unit>/app.yaml on the trunk, the very
   # field the platform-apps ApplicationSet selects a cluster's workloads by. Read here, in the
@@ -187,7 +197,7 @@ if [ -n "$PLATFORM_REPO" ]; then
   APP_YAML="clusters/inventories/${NAME}/app.yaml"
   RUNS_ON="$(git -C "$PLATFORM_REPO_DIR" show "origin/master:${APP_YAML}" 2>/dev/null | sed -nE 's/^runsOn:[[:space:]]*([^[:space:]]+).*$/\1/p' | head -1)"
   [ -n "$RUNS_ON" ] \
-    || die "${APP_YAML} on the trunk of ${PLATFORM_REPO} states no runsOn, so where ${NAME} runs is unknown and its pin belongs to no branch in particular — nothing has been minted or pushed"
+    || die "${APP_YAML} on the trunk of ${PLATFORM_REPO} states no runsOn, so where ${NAME} runs is unknown and its pin belongs to no branch in particular - nothing has been minted or pushed"
 fi
 
 # Remote view first: mint-once has to see the tags other people pushed, or a second machine would
@@ -208,7 +218,7 @@ EXISTING="$(git tag -l "${PREFIX}*" | sort | tail -1)"
 if [ -n "$EXISTING" ] \
   && ! git ls-remote --exit-code --tags origin "refs/tags/${EXISTING}" >/dev/null 2>&1 \
   && [ "$(git rev-parse --verify --quiet "${EXISTING}^{commit}")" != "$(git rev-parse --verify HEAD)" ]; then
-  echo "release: ${EXISTING} stands on this machine only and names $(git rev-parse --short=7 "${EXISTING}^{commit}"), not the commit being released. A run whose push was refused left it behind; it is dropped and cut again."
+  say "${EXISTING} stands on this machine only and names $(git rev-parse --short=7 "${EXISTING}^{commit}"), not the commit being released. A run whose push was refused left it behind; it is dropped and cut again."
   git tag -d "$EXISTING" >/dev/null \
     || die "the leftover tag ${EXISTING} could not be dropped, and reusing it would release a commit nobody is releasing"
   EXISTING=""
@@ -216,7 +226,7 @@ fi
 
 if [ -n "$EXISTING" ]; then
   TAG="$EXISTING"
-  echo "release: reusing the existing release ${TAG} — one release per version+channel, so putting it on ${STAGE} rebuilds nothing"
+  say "reusing the existing release ${TAG} - one release per version+channel, so putting it on ${STAGE} rebuilds nothing"
 else
   TS14="$(date -u +%Y%m%d%H%M%S)"
   TAG="${VERSION}-${CHANNEL}-${TS14}"
@@ -224,7 +234,7 @@ else
   git tag -a "$TAG" -m "release $TAG"
   git push origin HEAD
   git push origin "refs/tags/${TAG}"
-  echo "release: minted ${TAG}"
+  say "minted ${TAG}"
 fi
 
 # The release COMMIT is the tag's, never HEAD — on a reuse, HEAD has usually moved on.
@@ -253,9 +263,9 @@ git push origin "${SHA}:${DEPLOY_REF}"
 # the tree that stage reads still names the previous images is telling the operator something that
 # is not so, and the machine is where they find out.
 if [ -z "$PLATFORM_REPO" ]; then
-  echo "release: the manifest ${MANIFEST} names no platformRepo, so nothing is pinned from here — the deploy ref above is what the platform reacts to"
+  say "the manifest ${MANIFEST} names no platformRepo, so nothing is pinned from here - the deploy ref above is what the platform reacts to"
 else
-  echo "release: waiting for the images of ${TAG} — the pin is written when they exist"
+  say "waiting for the images of ${TAG} - the pin is written when they exist"
   RUN_ID=""
   for _ in $(seq 1 30); do
     RUN_ID="$(gh run list --workflow release-images --branch "$TAG" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
@@ -263,17 +273,17 @@ else
     sleep 4
   done
   if [ -z "$RUN_ID" ]; then
-    die "no release-images run appeared for ${TAG} within two minutes — the images are unbuilt and nothing was pinned"
+    die "no release-images run appeared for ${TAG} within two minutes - the images are unbuilt and nothing was pinned"
   elif ! gh run watch "$RUN_ID" --exit-status --interval 20 >/dev/null 2>&1; then
-    echo "release: the images of ${TAG} did not build — no pin was written. Read the run: gh run view ${RUN_ID} --log-failed" >&2
+    warn "the images of ${TAG} did not build - no pin was written. Read the run: gh run view ${RUN_ID} --log-failed"
     exit 75
   fi
-  echo "release: the images of ${TAG} are built"
+  say "the images of ${TAG} are built"
   # The clone is as old as the pre-flight, which stands before a build that takes minutes. Refresh
   # the remote-tracking refs, or the reset below writes onto a tip somebody else has moved past and
   # the push is refused for a reason that has nothing to do with this release.
   git -C "$PLATFORM_REPO_DIR" fetch --quiet --prune origin \
-    || die "the platform tree ${PLATFORM_REPO} could not be refreshed after the build — the images exist and nothing was pinned"
+    || die "the platform tree ${PLATFORM_REPO} could not be refreshed after the build - the images exist and nothing was pinned"
   # THE PIN GRAMMAR AND NOTHING ELSE: builds[]{name,image,tag}, in the values file of the stage
   # this release is going to. Read and written by name rather than by line, so a file whose
   # entries are ordered differently is still pinned and a file that carries none is left alone.
@@ -329,23 +339,23 @@ PIN
     [ "$ref" = "HEAD" ] && continue
     role="$(git -C "$PLATFORM_REPO_DIR" show "origin/${ref}:clusters/active/${ref}.yaml" 2>/dev/null | grep -m1 -E '^role:' | sed -E 's/^role:[[:space:]]*//' || true)"
     if [ -z "$role" ]; then
-      echo "release: ${ref} carries no clusters/active/${ref}.yaml, so it is no cluster's install branch - passed over"
+      say "${ref} carries no clusters/active/${ref}.yaml, so it is no cluster's install branch - passed over"
     elif runs_here "$role"; then
       pin_branch "$ref"
     else
-      echo "release: ${ref} carries the ${role} part and ${NAME} runs on ${RUNS_ON} - passed over"
+      say "${ref} carries the ${role} part and ${NAME} runs on ${RUNS_ON} - passed over"
     fi
   done
   [ "$PINNED_ANY" = "1" ] \
-    || die "no branch of ${PLATFORM_REPO} carries a values-${STAGE}.yaml pin of ${NAME} — the images are built and no cluster reads them, so this release reaches nothing"
+    || die "no branch of ${PLATFORM_REPO} carries a values-${STAGE}.yaml pin of ${NAME} - the images are built and no cluster reads them, so this release reaches nothing"
 fi
 
-echo "release: ${NAME} ${TAG} (commit ${SHA7}) is on its way to ${STAGE}"
+say "${NAME} ${TAG} (commit ${SHA7}) is on its way to ${STAGE}"
 # Read with sed and not grep: under `set -o pipefail` a manifest that declares no builds — a
 # chart-only or fan-out unit — would make the pipeline's exit status 1 and end a release that had
 # already succeeded. `sed -n ... p` answers nothing and exits 0.
 BUILDS="$(sed -nE 's/^[[:space:]]*-[[:space:]]*name:[[:space:]]*([^[:space:]]+).*$/\1/p' "$MANIFEST")"
 if [ -n "$BUILDS" ]; then
-  echo "release: the platform builds these image tags, or skips the build when they already exist:"
-  printf '%s\n' "$BUILDS" | while read -r b; do echo "    ${b}:${TAG}-${SHA7}"; done
+  say "the platform builds these image tags, or skips the build when they already exist:"
+  printf '%s\n' "$BUILDS" | while read -r b; do line "    ${b}:${TAG}-${SHA7}"; done
 fi
