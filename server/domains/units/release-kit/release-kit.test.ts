@@ -85,23 +85,33 @@ describe("release-kit embedded assets", () => {
     // rests on, and a local abort would mean the pipeline never got to state it.
     expect(sh).not.toMatch(/die "channel \$\{CHANNEL\} admits/);
     // The twin warns in the same words on the same stream. Write-Warning wrote a differently worded
-    // line with the host's own prefix, which is a difference release-parity.test.ts now runs for.
+    // line carrying the host's own prefix, so the twin warns through its own Warn helper.
     expect(byPath["release/release.ps1"]!).toContain("Warn \"WARNING - channel $Channel admits only:");
   });
 
   // This repository is a consumer unit of itself, so onboarding it runs inject-release-kit over its
   // own release/ directory. The kit REPLACES, so anything its own copy carries and the asset does
-  // not is deleted by that act — which is how the pin write and the manifest stamp were lost. The
-  // fix is that there is nothing extra to lose: the asset IS the script this repository runs, and
-  // these two assertions are what keeps it that way.
-  it("IS this repository's own release script, byte for byte — an onboarding of this repo cannot take anything away", () => {
-    const byPath = Object.fromEntries(RELEASE_KIT_FILES.map((f) => [f.path, f.content]));
-    // Read first, so an equality that passes cannot mean two empty strings: readFileSync throws on
-    // a path that is not there, and these two lines say the bytes are the real scripts.
+  // not is deleted by that act — which is how the pin write and the manifest stamp were lost. Its
+  // own two files only START the asset, so a replace has nothing to take away.
+  it("starts the asset and carries no release logic — an onboarding of this repo takes nothing away", () => {
+    // readFileSync throws on a path that is not there, so reading is what says both files exist,
+    // and the shebangs say the bytes are the real start scripts rather than two empty strings.
     expect(ownCopy("release/release.sh").startsWith("#!/usr/bin/env bash")).toBe(true);
-    expect(ownCopy("release/release.ps1")).toContain("[CmdletBinding()]");
-    expect(ownCopy("release/release.sh")).toBe(byPath["release/release.sh"]);
-    expect(ownCopy("release/release.ps1")).toBe(byPath["release/release.ps1"]);
+    expect(ownCopy("release/release.ps1").startsWith("#!/usr/bin/env pwsh")).toBe(true);
+
+    const ASSETS = "server/domains/units/release-kit/assets";
+    for (const [own, mint, stamp] of [
+      ["release/release.sh", 'git tag -a "$TAG"', "stamp_manifest_version"],
+      ["release/release.ps1", "git tag -a $tag", "Set-ManifestVersion"],
+    ] as const) {
+      const text = ownCopy(own);
+      expect(text).toContain(`${ASSETS}/${own.slice("release/".length)}`);
+      // The mint, the stamp and the push are what a copy of the asset would carry, and the stamp and
+      // the pin write are what a replace deleted the last time this repository's copy carried more.
+      expect(text).not.toContain(mint);
+      expect(text).not.toContain(stamp);
+      expect(text).not.toContain("git push");
+    }
   });
 
   it("carries the manifest stamp, the build wait and the pin write — the three the short kit dropped", () => {
