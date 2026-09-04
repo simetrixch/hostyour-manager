@@ -53,17 +53,14 @@ export const NO_BINARY =
   "(ansiwise-cli tool/build.dart); these tests prove the transport against the REAL surface and cannot run without " +
   "BOTH, because the serving binary refuses to start when the deployment tool is not standing beside it";
 
-/** One measuring row of a fixture program. */
+/** One measuring row of a fixture program. Every row is REQUIRED and carries no default: a default
+ *  that matches the pattern cannot tell "sent the right value" from "sent nothing", so an answer no
+ *  caller states has to be refused at the door rather than filled in by the fixture. */
 export interface ProbeRow {
   answer: string;
   /** The regular expression the answer must match — '.+' passes anything non-empty, '$a' ("end
    *  then a") can never match and is the planted red. */
   pattern: string;
-  /** Declare the answer optional with this default — for a program two run kinds share, where one
-   *  run kind states the value and the other legitimately leaves the engine's default to fill it.
-   *  The default is then what the pattern judges for the silent run kind, so a default that matches
-   *  cannot tell "sent the right value" from "sent nothing"; use it only where that is stated. */
-  fallback?: string;
 }
 
 export function programYaml(name: string, rows: ProbeRow[]): string {
@@ -75,7 +72,6 @@ export function programYaml(name: string, rows: ProbeRow[]): string {
     ...[...byAnswer.values()].flatMap((r) => [
       `  - name: ${r.answer}`,
       "    kind: text",
-      ...(r.fallback !== undefined ? ["    required: false", `    default: '${r.fallback}'`] : []),
       `    describes: the ${r.answer} this fixture measures`,
     ]),
     "steps:",

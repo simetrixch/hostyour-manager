@@ -11,7 +11,6 @@ import { ClusterPlaneV0 } from "../../../shared/plane.ts";
 import { readServerTailnet } from "../../../shared/tailnet.ts";
 import { readServerAuthorizedKeys } from "../../../shared/operator-keys.ts";
 import { serverCredFlags } from "../inventory/write.ts";
-import { SLAVE_MACHINE_INPUTS } from "./defs/deploy-slave.ts";
 import {
   STEP_NAMES, REDEPLOY_STEP_NAMES, PARAMS, EMIT_ARGOCD_TOKEN, EMIT_REVIEWER_TOKEN, EMIT_CREDS_JSON,
   ELEVATION_PASSWORD, SLAVE_ID, MINT_AUTHKEY, ANSIWISE_PIN, IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY,
@@ -20,7 +19,7 @@ import {
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import { ANSIWISE_SERVICE_PORT } from "./defs/place-ansiwise.ts";
 import {
-  uniqueEmail, approveSecrets, elevationOnly, deploySecrets, expectProven, expectAbsent,
+  elevationOnly, expectProven, expectAbsent,
   deployWorld, liveSlaveWorld, recordWindow, startedRuns, settled,
 } from "./ansiwise-serve.fixture.ts";
 
@@ -71,7 +70,6 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
   describe("deploying a slave, and re-deploying one that already is", () => {
     it("INNOCENT CASE (deploy-slave): the whole run kind runs green — every program dry-proven then run on the machines' own records, one address everywhere, the tokens nowhere", { timeout: 300_000 }, async () => {
       const h = await deployWorld(serve());
-      const email = uniqueEmail();
       // A password sealed beside the row while that was still how a machine was reached. It is a way
       // in that survives whatever the daemon is told, so it is the second of the two doors this run
       // shuts, and it has to stand here for its destruction below to be a measurement.
@@ -82,7 +80,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
 
       const r = await h.executor.plan("cluster-deploy-slave", PARAMS);
       expect(r.plan.steps.map((s) => s.name)).toEqual(STEP_NAMES);
-      await h.executor.approve(r.runId, deploySecrets(email));
+      await h.executor.approve(r.runId, elevationOnly());
       await h.executor.settle(r.runId);
       expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
 
@@ -205,7 +203,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // trust. The fixture's ca_data row is the machine-side judge.
       h.hosts.credsOut = EMIT_CREDS_JSON.replace("TFMtQ0EtREFUQQ==", "VEFNUEVSRUQ=");
 
-      const runId = await settled(h, "cluster-deploy-slave", PARAMS, deploySecrets(uniqueEmail()));
+      const runId = await settled(h, "cluster-deploy-slave", PARAMS, elevationOnly());
       expect(getRun(h.db.db, runId)?.status).toBe("failed");
       expect(stepColumn(h.db, runId, "create-mgmt", "error")).toMatch(/DRY run of register-slave on the master is not green/);
       // The emit itself is green — the defect is in what it handed over — and the registration
@@ -222,7 +220,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
     it("abort-with-cleanup (deploy-slave): the map's slave part goes FIRST, then the remove-slave program on the master's record, then the snap purge — and the marking cleanup finds nothing left", { timeout: 300_000 }, async () => {
       const h = await deployWorld(serve());
       h.hosts.credsOut = EMIT_CREDS_JSON.replace("TFMtQ0EtREFUQQ==", "VEFNUEVSRUQ="); // park at create-mgmt with every cleanup armed
-      const runId = await settled(h, "cluster-deploy-slave", PARAMS, deploySecrets(uniqueEmail()));
+      const runId = await settled(h, "cluster-deploy-slave", PARAMS, elevationOnly());
       expect(getRun(h.db.db, runId)?.status).toBe("failed");
 
       // Each arming step persisted exactly its own cleanup name (__cleanups)...
@@ -292,13 +290,15 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
 
     it("INNOCENT CASE (redeploy, slave arm): the live slave is re-reconciled over the programs — no branch cut, no join, a fresh emit re-points the registration, and nothing is armed", { timeout: 300_000 }, async () => {
       const h = await liveSlaveWorld(serve());
-      const email = uniqueEmail();
 
       const r = await h.executor.plan("cluster-redeploy", { serverId: SLAVE_ID });
       expect(r.plan.steps.map((s) => s.name)).toEqual(REDEPLOY_STEP_NAMES);
       expect(r.plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
-      expect(r.plan.requiredInputs?.map((i) => i.field)).toEqual(SLAVE_MACHINE_INPUTS.map((i) => i.field));
-      await h.executor.approve(r.runId, approveSecrets(email));
+      // AND NOT ONE ANSWER BESIDE IT, on this arm as on the master one: what the machine-layer
+      // programs declare past the inventory stands in this slave's own cluster map, and
+      // slaveMachineAnswers reads it there.
+      expect(r.plan.requiredInputs).toBeUndefined();
+      await h.executor.approve(r.runId, elevationOnly());
       await h.executor.settle(r.runId);
       expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
 
@@ -376,7 +376,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
 
       const r = await h.executor.plan("cluster-redeploy", { serverId: SLAVE_ID });
       expect(r.plan.steps.map((s) => s.name)).toEqual(REDEPLOY_STEP_NAMES);
-      await h.executor.approve(r.runId, approveSecrets(uniqueEmail()));
+      await h.executor.approve(r.runId, elevationOnly());
       await h.executor.settle(r.runId);
       // The two steps this machine's whole membership stands between, by their own errors FIRST: a
       // bare status assertion would go red saying only that something did.
@@ -433,7 +433,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // off it leaves the resident surface binding an address the machine does not hold.
       const h = await liveSlaveWorld(serve(), { tailnetProbeExit: 1 });
 
-      const runId = await settled(h, "cluster-redeploy", { serverId: SLAVE_ID }, approveSecrets(uniqueEmail()));
+      const runId = await settled(h, "cluster-redeploy", { serverId: SLAVE_ID }, elevationOnly());
       expect(getRun(h.db.db, runId)?.status).toBe("failed");
       expect(stepColumn(h.db, runId, "join-if-absent", "error")).toMatch(/did not answer the membership probe/);
 

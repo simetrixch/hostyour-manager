@@ -4,7 +4,7 @@ import type { Step, RunDefinition } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { servers } from "../../../db/schema/inventory.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
-import { deploySlaveSteps, SLAVE_MACHINE_INPUTS, hostAnswers } from "./deploy-slave.ts";
+import { deploySlaveSteps, hostAnswers, slaveMachineAnswers } from "./deploy-slave.ts";
 import { placeAnsiwiseStep } from "./place-ansiwise.step.ts";
 import { activeClusterTarget, loadMaster, masterFqdnOf, type DeploySlavePorts } from "./deploy-slave.kit.ts";
 import { attestClusterStep, argocdFollowStep, loadActiveCluster } from "./live-cluster.kit.ts";
@@ -112,22 +112,11 @@ export interface RedeployPorts extends DeploySlavePorts, AnsiwisePorts {
  *  (hostyour-deploy ansiwise/programs/); each step reads the program's declared answers off the
  *  machine, so nothing about their INSIDES is repeated here.
  *
- *  deploy-host is NOT in this list and stands beside it, for the same reason it stands beside the
- *  slave's two (deploy-slave.ts:313): it is the one of the three owed an answer this manager holds
- *  and the machine does not — the public half of the key the manager reaches it with. */
+ *  BOTH TAKE THE SAME `extra` AND IT IS THE MAP'S. deploy-host is not in this list because what it
+ *  is owed comes from elsewhere — this installation's setting, the cluster row and a sealed
+ *  credential (hostAnswers in deploy-slave.ts) — while these two are owed the INSTALLATION's own
+ *  answers, and those stand written in its cluster map. */
 const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-platform-services"] as const;
-
-/** The answers the inventory cannot state, asked for at approve and carried to the step as
- *  `activation-input:<answer>`. The four optional ones may stay blank — a blank input is
- *  dropped at approve and the program's own default (or its refusal, by name) decides. */
-const MASTER_ARM_INPUTS = [
-  { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to before a certificate expires" },
-  { field: "letsencrypt_server", label: "The ACME directory this installation registers with — the authority's production one; a staging directory is refused, because its root is in no machine's trust store" },
-  { field: "build_plane_fqdn", label: "The cluster the image registry stands on — blank when this cluster hosts it itself", optional: true },
-  { field: "lan_cidr", label: "The IPv4 range this machine shares with the other clusters — blank when it shares none", optional: true },
-  { field: "storage_mount", label: "Where the machine's separate storage is mounted — blank when it has none", optional: true },
-  { field: "storage_subdirectory", label: "The directory under that mount for the cluster's volumes — blank for the snap's default", optional: true },
-];
 
 function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
   const target = activeClusterTarget(params.serverId);
@@ -144,6 +133,7 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
   // machine that no longer holds this manager's key — one secret, named once, and the same one the
   // machine's own programs are driven with (ansiwise-run.kit.ts).
   const firstContact: FirstContactInput = { serverId: params.serverId, secretName: ANSIWISE_ELEVATION_SECRET };
+  const machineAnswers = slaveMachineAnswers(target, ports);
   return [
     attestClusterStep(target),
     // ---- FIRST CONTACT: this manager's own key on the machine, and the machine's clock and its
@@ -170,7 +160,18 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
     // that pin is the state this run kind exists to end.
     placeAnsiwiseStep(target, ports),
     ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(params.serverId, ports) }),
-    ...MASTER_ARM_PROGRAMS.map((program) => ansiwiseProgramStep(target, program, ports)),
+    // READ OFF THE MACHINE'S OWN CLUSTER MAP, never asked of a person, and this is the same reader
+    // the slave arm below and cluster-deploy-slave's master arm hand these two programs
+    // (deploy-slave.ts slaveMachineAnswers, deploy-slave.master.ts). What it answers is the
+    // INSTALLATION's own: the certificate authority, the mailbox it writes to, the cluster that
+    // keeps the books, the cluster the registry stands on, and whatever the machine's mount table
+    // says about a data disk. AN INSTALLATION RECORDS EACH OF THOSE ONCE, so asking a person for
+    // them per machine produces a second copy per machine, and two copies agree only until one is
+    // typed differently — the mailbox and the directory are what deploy-cluster writes the
+    // certificate manifest from. A map carrying none of an answer sends none, and deploy-cluster
+    // declares letsencrypt_email and letsencrypt_server with no default, so the machine refuses by
+    // name rather than proceeding on something this manager invented.
+    ...MASTER_ARM_PROGRAMS.map((program) => ansiwiseProgramStep(target, program, ports, { extra: machineAnswers })),
     argocdFollowStep(target),
   ];
 }
@@ -235,14 +236,12 @@ export function makeRedeployDef(ports: RedeployPorts): RunDefinition<RedeployPar
         warnings: [
           `The machine layer re-runs on ${server.name} — expect a brief kube-apiserver blip while kubelite restarts.`,
         ],
-        // BOTH arms drive programs now, and the programs raise their commands to root with a
-        // password the CALLER hands over per run (the installation's ansiwise.yaml:
+        // THE PASSWORD AND NOTHING ELSE, ON EITHER ARM. The programs raise their commands to root
+        // with a password the CALLER hands over per run (the installation's ansiwise.yaml:
         // password_from_caller) — collected at approve, held in memory, sent with each POST /runs,
-        // persisted nowhere. The inputs differ: the master arm may host the build plane and is
-        // asked for it; the slave arm reads it off its own cluster map and asks only what the
-        // machine-layer programs declare beyond the inventory.
+        // persisted nowhere. Nothing is asked beyond it: what the machine-layer programs declare
+        // past the inventory stands in the cluster map, and both arms read it there.
         requiredSecrets: [ANSIWISE_ELEVATION_SECRET],
-        requiredInputs: onMaster ? MASTER_ARM_INPUTS : SLAVE_MACHINE_INPUTS,
       };
     },
     steps: (params) => redeploySteps(params, ports),

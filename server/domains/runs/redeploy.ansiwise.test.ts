@@ -9,8 +9,7 @@ import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused } from "../../adapters/ansiwise/port.ts";
 import { ansiwiseBinaries, NO_BINARY, startServe, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { isServe } from "./ansiwise-serve.fixture.ts";
-import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
-import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
+import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 
 import {
   disposeHarnesses, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID, MINT_AUTHKEY,
@@ -18,7 +17,7 @@ import {
 } from "./deploy-slave.fixture.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import {
-  uniqueEmail, approveSecrets, elevationOnly, composedAnswers,
+  uniqueEmail, elevationOnly, composedAnswers, seedMasterMailbox, redeployStep,
   fixturePrograms, serveConversation, liveMaster, tailnetHost,
   recordWindow, startedRuns, expectProven, settled, recordAppeared, observerStart, observerEnded, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
@@ -149,7 +148,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   // ================================ redeploy (master arm), end to end ================================
 
-  it("plan: the master arm composes attest, first contact, the placement, the three machine programs and the argocd follow, and asks for the password + the missing answers", async () => {
+  it("plan: the master arm composes attest, first contact, the placement, the three machine programs and the argocd follow, and asks for the password and nothing else", async () => {
     const h = await liveMaster(serve);
     const { plan } = await h.executor.plan("cluster-redeploy", { serverId: MASTER_ID });
     // place-ansiwise and run-deploy-host stand here because a master could otherwise receive NO
@@ -166,16 +165,17 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow",
     ]);
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
-    expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
-      ["letsencrypt_email", "letsencrypt_server", "build_plane_fqdn", "lan_cidr", "storage_mount", "storage_subdirectory"],
-    );
+    // AND NOT ONE ANSWER BESIDE IT. The six the machine-layer programs declare past the inventory —
+    // the certificate authority, its mailbox, the build plane, the shared range and the two storage
+    // paths — stand in this installation's own cluster map and on the machine itself, so the card is
+    // the password field alone, exactly as cluster-deploy-slave's master arm already shows it.
+    expect(plan.requiredInputs).toBeUndefined();
   });
 
   it("INNOCENT CASE: the whole master arm runs green — all three programs proven dry, then run, on the machine's own records; no pin moves", { timeout: 180_000 }, async () => {
     const h = await liveMaster(serve);
-    const email = uniqueEmail();
 
-    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(email));
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, elevationOnly());
     expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
 
     // The run log carries the machine runs: both programs admitted by their own dry, both green.
@@ -212,7 +212,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // session for a key the machine no longer holds and dies on its own first step.
     const h = await liveMaster(serve, { authorizedKeys: [IMAGE_KEY_LINE] });
 
-    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(uniqueEmail()));
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, elevationOnly());
     // The first step's own error FIRST, because it names what the machine turned away — a bare status
     // assertion would go red saying only that something did.
     expect(stepColumn(h.db, runId, "attest-target", "error") ?? "").toBe("");
@@ -251,7 +251,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // was considered; a step that reports finding nothing to do is a reading.
     const h = await liveMaster(serve);
 
-    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(uniqueEmail()));
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, elevationOnly());
     expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
 
     // The door took the key path, and the operator's password was offered to nothing at all.
@@ -286,7 +286,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const h = await liveMaster(serve);
     expect(h.hosts.adopted).toBe(false);
 
-    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(uniqueEmail()));
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, elevationOnly());
     // The step's own error FIRST, because it names what the machine turned away — a bare status
     // assertion would go red saying only that something did.
     expect(stepColumn(h.db, runId, "argocd-follow", "error") ?? "").toBe("");
@@ -301,18 +301,43 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(reads.some((l) => l.command.includes(ELEVATION_PASSWORD))).toBe(false);
   });
 
-  it("PLANTED DEFECT (redeploy): a dry the machine judges red FAILS the step before anything is acted on — no run-mode machine run starts", { timeout: 60_000 }, async () => {
+  it("PLANTED DEFECT (redeploy): a mailbox the MAP states badly makes the dry red and FAILS the step before anything is acted on — no run-mode machine run starts", { timeout: 60_000 }, async () => {
     const h = await liveMaster(serve);
     const runsBefore = (await observer.runs()).filter((x) => x.program === "deploy-cluster" && x.mode === "run").length;
 
-    // "not-an-email" fails the program's own ^[^@]+@[^@]+$ row — the defect is ON THE MACHINE'S
-    // SIDE of the wire, and the machine's dry run is what catches it.
-    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets("not-an-email"));
+    // THE DEFECT IS PLANTED IN THE MAP AND NOT AT APPROVE, because the map is where the answer comes
+    // from: nothing an operator types reaches letsencrypt_email on this arm any more. "not-an-email"
+    // fails the program's own ^[^@]+@[^@]+$ row, so the defect is on the MACHINE'S side of the wire
+    // and the machine's dry run is what catches it — which is also the proof that the value the
+    // manager sent was read out of clusters/active/m1.example.com.yaml.
+    seedMasterMailbox(h, "not-an-email");
+
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, elevationOnly());
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
     expect(stepColumn(h.db, runId, "run-deploy-cluster", "error")).toMatch(/DRY run of deploy-cluster on the machine is not green/);
     // The proof failed, so the act never started: not one new run-mode record on the machine.
     const runsAfter = (await observer.runs()).filter((x) => x.program === "deploy-cluster" && x.mode === "run").length;
     expect(runsAfter).toBe(runsBefore);
+  });
+
+  it("PLANTED DEFECT (redeploy): a map that states no mailbox at all is refused BY NAME at the machine's door — no machine run is started for it", { timeout: 60_000 }, async () => {
+    // THE OTHER SHAPE OF THE SAME QUESTION, and the one the six approve fields used to hide: a map
+    // that carries no letsencryptEmail sends no answer, and deploy-cluster declares that answer with
+    // no default (hostyour-deploy ansiwise/programs/deploy-cluster.yaml). So the machine refuses it
+    // by name at the door rather than the manager inventing a value or a program silently defaulting
+    // one — which is what an operator can act on, because the sentence names the answer to write
+    // into the map.
+    const h = await liveMaster(serve);
+    seedMasterMailbox(h);
+
+    const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, elevationOnly());
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+    const refusal = stepColumn(h.db, runId, "run-deploy-cluster", "error") ?? "";
+    expect(refusal).toMatch(/the machine refused to start deploy-cluster \(dry\)/);
+    expect(refusal).toContain("letsencrypt_email");
+    // Refused at the door: the machine wrote no record at all, so there is nothing for a retry to
+    // re-attach to and nothing on the machine claiming this run did anything.
+    expect(startedRuns(h.db, runId).filter((r) => r.program === "deploy-cluster")).toEqual([]);
   });
 
   it("a checkpoint holding a FINISHED-RED machine run starts a fresh one — a retry that could never work", { timeout: 120_000 }, async ({ signal }) => {
@@ -322,6 +347,9 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // it. Nothing they could do from outside would ever clear it.
     const h = await liveMaster(serve);
     const email = uniqueEmail();
+    // The mailbox this test's own step will compose, so the fresh dry it starts below carries a
+    // fingerprint no other test shares. It goes into the MAP, because that is where the step reads it.
+    seedMasterMailbox(h, email);
 
     // A machine run that is FINISHED and RED: the program refuses an answer it can judge itself.
     const bad = await observerStart(serve, {
@@ -339,13 +367,14 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     };
     const logs: string[] = [];
     const ctx = programStepCtx(serve, h, {
-      secrets: approveSecrets(email),
+      secrets: elevationOnly(),
       log: (line) => logs.push(line),
       readCheckpoint: () => checkpoint,
       checkpoint: (data) => (checkpoint = data),
     });
 
-    const step = ansiwiseProgramStep(activeClusterTarget(MASTER_ID), "deploy-cluster", { ansiwiseServeCommand: "ansiwise-rest serve" });
+    // The step the ARM composes, answers and all — never one assembled beside it.
+    const step = redeployStep(h, "run-deploy-cluster");
     await step.run(ctx);
 
     expect(
@@ -361,6 +390,10 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   it("re-entry re-attaches with ?from= instead of starting a second run, and a green checkpoint repeats nothing", { timeout: 120_000 }, async () => {
     const h = await liveMaster(serve);
     const email = uniqueEmail();
+    // The dry this test POSTs by hand has to carry the fingerprint the STEP will compose, or the
+    // gate admits no run against it — and the mailbox is the one part of that composition a test can
+    // make its own, so it goes into the map the step reads and into the mirror below.
+    seedMasterMailbox(h, email);
     const answers = composedAnswers(email);
 
     // The crashed manager: a dry was POSTed, the machine run is going (here: already done — the
@@ -370,13 +403,14 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     let checkpoint: unknown = { program: "deploy-cluster", dry: { id: dry.run, seen: -1 } };
     const logs: string[] = [];
     const ctx = programStepCtx(serve, h, {
-      secrets: approveSecrets(email),
+      secrets: elevationOnly(),
       log: (line) => logs.push(line),
       readCheckpoint: () => checkpoint,
       checkpoint: (data) => (checkpoint = data),
     });
 
-    const step = ansiwiseProgramStep(activeClusterTarget(MASTER_ID), "deploy-cluster", { ansiwiseServeCommand: "ansiwise-rest serve" });
+    // The step the ARM composes, answers and all — never one assembled beside it.
+    const step = redeployStep(h, "run-deploy-cluster");
     await step.run(ctx);
 
     expect(logs.some((l) => l.includes(`re-attaching to machine run ${dry.run} from event 0`))).toBe(true);

@@ -229,36 +229,41 @@ describe("secretsToSupply / readyToApprove", () => {
 });
 
 describe("approvePayload", () => {
-  // WHAT MUST NOT GO MISSING. A slave ceremony that asks for the secrets a plan requires and for
-  // none of its INPUTS lets a deployment be approved without them, and the machine-layer
-  // programs stop eight steps later at `needs the answer "letsencrypt_email"` — after a branch
-  // has been cut and a machine given an engine. Measured on a real machine.
-  const slave = (): RunView => ({
-    ...run("run_1", "cluster-deploy-slave", "planned"),
-    requiredSecrets: ["ansiwise-elevation"],
+  // WHAT MUST NOT GO MISSING. A ceremony that asks for the secrets a plan requires and for none of
+  // its INPUTS lets a run be approved without them, and the act that needs one then refuses far
+  // enough in that a machine or a namespace has already been changed. The payload is composed here
+  // rather than in the form, because a form is the one thing this repository cannot test.
+  const onboard = (): RunView => ({
+    ...run("run_1", "consumer-onboard", "planned"),
+    requiredSecrets: ["repo-pat"],
+    // What a unit's own manifest prompts for (shared/consumer.ts ConsumerActivationPromptSchema),
+    // which the onboard plan lists one for one.
     requiredInputs: [
-      { field: "letsencrypt_email", label: "The mailbox the certificate authority writes to" },
-      { field: "lan_cidr", label: "The IPv4 range this machine shares" },
+      { field: "email", label: "First administrator email" },
+      { field: "display_name", label: "The name that administrator is shown under" },
     ],
   });
 
   it("carries the secrets under their names and every input under activation-input:", () => {
-    expect(approvePayload(slave(), { "ansiwise-elevation": "pw" }, { letsencrypt_email: "info@simetrix.ch" })).toEqual({
-      "ansiwise-elevation": "pw",
-      "activation-input:letsencrypt_email": "info@simetrix.ch",
-      // A BLANK IS SENT AS A BLANK: the server drops it and the program's own default, or its
-      // refusal by name, decides. Three of a slave's five inputs are meant to stay empty.
-      "activation-input:lan_cidr": "",
+    expect(approvePayload(onboard(), { "repo-pat": "pw" }, { email: "info@simetrix.ch" })).toEqual({
+      "repo-pat": "pw",
+      "activation-input:email": "info@simetrix.ch",
+      // A BLANK IS SENT AS A BLANK: the server drops it (domains/runs/api.ts) and the refusal an
+      // untyped answer earns is the one the field exists to produce, rather than a browser deciding
+      // to withhold it.
+      "activation-input:display_name": "",
     });
   });
 
   it("carries an input the plan declares even when nothing was typed into it", () => {
-    const keys = Object.keys(approvePayload(slave(), { "ansiwise-elevation": "pw" }, {}));
-    expect(keys).toContain("activation-input:letsencrypt_email");
-    expect(keys).toContain("activation-input:lan_cidr");
+    const keys = Object.keys(approvePayload(onboard(), { "repo-pat": "pw" }, {}));
+    expect(keys).toContain("activation-input:email");
+    expect(keys).toContain("activation-input:display_name");
   });
 
   it("carries nothing of its own for a plan that declares neither", () => {
+    // Every cluster run kind, once its answers came off the cluster map: the plan asks for the
+    // machine password and lists no input at all.
     const bare = { ...run("run_1", "cluster-deploy-slave", "planned") };
     expect(approvePayload(bare, {}, {})).toEqual({});
   });

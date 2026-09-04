@@ -10,7 +10,6 @@ import { hardenPreflightForSlave, parsePreflightOutput } from "./preflight.ts";
 import { hasHardFailure } from "../../../shared/preflight.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
 import { credLabels, sealTokenOnce, newestCredId, statedTarget } from "./defs/deploy-slave.kit.ts";
-import { SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
 import { dataDiskFrom, HOST_ADDRESS_COMMAND } from "./defs/deploy-slave.remote.ts";
 import { registerStep } from "./defs/deploy-slave.verify.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
@@ -61,13 +60,11 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
       { resource: "master-vault", key: "m" },
       { resource: "master-kube", key: "m" },
     ]);
-    // The programs raise their commands to root with a password the caller hands over per run;
-    // the inputs are what the programs declare and neither the inventory nor the map can state.
+    // The programs raise their commands to root with a password the caller hands over per run, and
+    // that password is the whole of what a person supplies: every answer the programs declare past
+    // the inventory stands in the master's own cluster map, and slaveMachineAnswers reads it there.
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
-    expect(plan.requiredInputs).toEqual(SLAVE_INSTALL_INPUTS);
-    expect(plan.requiredInputs?.map((i) => i.field)).toEqual(
-      [],
-    );
+    expect(plan.requiredInputs).toBeUndefined();
     expect(plan.summary).toContain("s1.example.com");
     expect(plan.summary).toContain("m1");
     // WHAT THE CARD HAS TO DISCLOSE, because this is the only ceremony left in front of a machine

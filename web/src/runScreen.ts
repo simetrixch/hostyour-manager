@@ -169,16 +169,14 @@ export function readyToApprove(run: RunView, supplied: Record<string, string>): 
  *  under `activation-input:<field>`, which is where the server looks for an answer no inventory and
  *  no cluster map can state (domains/runs/defs/ansiwise-run.kit.ts composeAnswers).
  *
- *  BOTH, AND NOT ONE OF THEM. A ceremony that asked for the secrets alone approved a slave
- *  deployment whose machine-layer programs then stopped at `needs the answer "letsencrypt_email"` —
- *  eight steps in, after a branch had been cut and a machine given an engine. The payload is
- *  composed here rather than in the form because a form is the one thing this repository cannot
- *  test, and what went missing was a whole half of it.
+ *  BOTH, AND NOT ONE OF THEM. A ceremony that asked for the secrets alone approved a run whose act
+ *  then refused for want of an answer, far enough in that a machine or a namespace had already been
+ *  changed. The payload is composed here rather than in the form because a form is the one thing
+ *  this repository cannot test, and what went missing was a whole half of it.
  *
  *  A BLANK INPUT IS SENT AS A BLANK and not dropped here: the server drops it (domains/runs/api.ts)
- *  and the program's own default, or its refusal by name, decides. Three of a slave's five inputs
- *  are meant to stay empty on most machines, so a browser that withheld them would be deciding
- *  something the program is written to decide. */
+ *  and whatever reads the answer decides, by its own default or by refusing and naming it. A browser
+ *  that withheld the field instead would be deciding that for it. */
 export function approvePayload(
   run: RunView,
   supplied: Record<string, string>,

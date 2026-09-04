@@ -67,7 +67,7 @@ export function RunApproveForm(props: {
           <span className="field__label">{inp.label}</span>
           {/* Plaintext (type=text), never a password field: an activation input is not a secret. */}
           <input type="text" value={inputVals[inp.field] ?? ""} onChange={(e) => setInputVals((s) => ({ ...s, [inp.field]: e.target.value }))} autoComplete="off" />
-          <span className="field__hint">{inp.optional === true ? "Optional — a blank is the answer here, and the machine reads it as \"this cluster has none\"." : "Not a secret and not stored — it rides the run and reaches the program that declares it."}</span>
+          <span className="field__hint">Not a secret and not stored — it rides the run and reaches the program that declares it.</span>
         </label>
       ))}
       <p className="ceremony__note">

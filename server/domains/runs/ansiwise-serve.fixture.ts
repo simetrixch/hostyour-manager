@@ -6,7 +6,8 @@ import { eq } from "drizzle-orm";
 import type { Conversation } from "../../adapters/ssh/testing/fake-server.ts";
 import type { SshSession } from "../../adapters/ssh/port.ts";
 import type { RunKind } from "../../../shared/enums.ts";
-import type { StepCtx } from "../../executor/types.ts";
+import type { AnyRunDefinition, Step, StepCtx } from "../../executor/types.ts";
+import { buildRunDefinitions } from "./run-definitions.ts";
 import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseRunRecord } from "../../adapters/ansiwise/port.ts";
 import { openChannel, programYaml, runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
@@ -18,45 +19,56 @@ import {
 } from "./deploy-slave.fixture.ts";
 import type { DbHandle } from "../../db/client.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { MASTER_FQDN, MASTER_MARKING_YAML, MAP_LETSENCRYPT_EMAIL, MAP_LETSENCRYPT_SERVER } from "./cluster-maps.fixture.ts";
 
 // The fixture half of the ONE suite that talks to a real `ansiwise-rest serve`
 // (redeploy.ansiwise.test.ts): the measuring programs the serve installation carries, the worlds
 // the run kinds run in, and the observer/step plumbing. Split out of the test file (the file-size
 // doctrine); nothing here asserts — the suite does.
 
-export const ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory";
-
-// The letsencrypt answers ride approve as activation inputs; a UNIQUE email per test gives each
-// test its own fingerprint, so one test's green dry can never admit another test's run.
+// A UNIQUE mailbox per test gives that test its own fingerprint, so one test's green dry can never
+// admit another test's run. Where the test drives a STEP, the value has to go into the master's
+// cluster map (seedMasterMailbox below), because that is where the step reads it; where a test POSTs
+// to the machine itself, it states the value directly.
 let stamp = 0;
 export const uniqueEmail = (): string => `op-${Date.now()}-${++stamp}@example.com`;
 
-export const approveSecrets = (email: string): Record<string, Buffer> => ({
-  [ANSIWISE_ELEVATION_SECRET]: Buffer.from(ELEVATION_PASSWORD),
-  "activation-input:letsencrypt_email": Buffer.from(email),
-  "activation-input:letsencrypt_server": Buffer.from(ACME_STAGING),
-});
-
+/** THE ONLY THING ANY CLUSTER RUN KIND'S APPROVE CARRIES. Every answer the machine-layer programs
+ *  declare beyond the inventory stands in the cluster map and is read there by the run definition
+ *  (defs/deploy-slave.ts slaveMachineAnswers), so no plan lists an activation input at all. */
 export const elevationOnly = (): Record<string, Buffer> => ({ [ANSIWISE_ELEVATION_SECRET]: Buffer.from(ELEVATION_PASSWORD) });
-
-/** What deploy-slave's approve carries: the elevation password, the machine-layer inputs, and the
- *  branch cut's committer identity. */
-export const deploySecrets = (email: string): Record<string, Buffer> => ({
-  ...approveSecrets(email),
-  "activation-input:committer_email": Buffer.from(email),
-});
 
 /** What the step composes for deploy-cluster on the fixture master — mirrored ONLY so a test can
  *  start a dry run itself and hand its id to the step as a checkpoint (the crashed-manager
- *  re-entry). The values are the harness rows': domain, stage, role, sshUser. */
+ *  re-entry). Four values are the harness rows' (domain, stage, role, sshUser) and four are the
+ *  master map's, which is what makes [email] a parameter: a test wanting its own fingerprint seeds
+ *  that mailbox into the map and states the same one here, or the mirror and the step compose
+ *  different answers and the gate admits neither against the other. */
 export const composedAnswers = (email: string): Record<string, string> => ({
-  fqdn: "m1.example.com",
+  fqdn: MASTER_FQDN,
   stage: "prod",
   role: "master+slave",
   operator_user: "m1",
   letsencrypt_email: email,
-  letsencrypt_server: ACME_STAGING,
+  letsencrypt_server: MAP_LETSENCRYPT_SERVER,
+  books_fqdn: MASTER_FQDN,
+  build_plane_fqdn: MASTER_FQDN,
 });
+
+/** The master's own cluster map, re-seeded with a different mailbox for the certificate authority —
+ *  or with none at all where [email] is left out.
+ *
+ *  THE MAP IS WHERE THAT ANSWER COMES FROM, so a test about the value changes the map and never
+ *  approve. `makeHarness` seeds `MASTER_MARKING_YAML` there and says a test about a master map
+ *  without a field seeds over it, which is what this does. */
+export function seedMasterMailbox(h: Harness, email?: string): void {
+  const stated = `  letsencryptEmail: ${MAP_LETSENCRYPT_EMAIL}\n`;
+  h.platformRepo.seed(
+    h.platformRepo.booksBranch,
+    clusterMapPath(MASTER_FQDN),
+    MASTER_MARKING_YAML.replace(stated, email === undefined ? "" : `  letsencryptEmail: ${email}\n`),
+  );
+}
 
 /** A fixture for a program whose REAL declaration carries no answers (the tailnet client run kinds):
  *  one defaulted row, so a run whose caller sent NOTHING still exercises the engine's own record
@@ -87,10 +99,12 @@ export function fixturePrograms(): Record<string, string> {
     // TWO run kinds run deploy-cluster — redeploy's master arm (m1, whose harness row carries the
     // union role master+slave and whose composition must send it WHOLE, never flattened to
     // "master") and deploy-slave's machine layer (s1/slave) — so the identity rows take either
-    // spelling; books_fqdn and build_plane_fqdn
-    // carry the master's domain as their fallback, because the master arm legitimately sends
-    // neither (the real program defaults them to the machine's own domain) while a slave that
-    // sent its OWN domain goes red.
+    // spelling.
+    //
+    // BOOKS_FQDN AND BUILD_PLANE_FQDN ARE MEASURED LIKE THE REST, because every arm that drives this
+    // program reads both off the cluster map (defs/deploy-slave.ts slaveMachineAnswers). An arm that
+    // sent neither would be refused at the door by name, which is the answer this fixture owes: a
+    // default standing in for a value nobody sent reports the composition green either way.
     "deploy-cluster": programYaml("deploy-cluster", [
       { answer: "fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
       { answer: "stage", pattern: "^prod$" },
@@ -98,8 +112,8 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "operator_user", pattern: "^(m1|ubuntu)$" },
       { answer: "letsencrypt_email", pattern: "^[^@]+@[^@]+$" },
       { answer: "letsencrypt_server", pattern: "^https://" },
-      { answer: "books_fqdn", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
-      { answer: "build_plane_fqdn", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
+      { answer: "books_fqdn", pattern: "^m1\\.example\\.com$" },
+      { answer: "build_plane_fqdn", pattern: "^m1\\.example\\.com$" },
     ]),
     // elevation_password is deliberately NOT declared, although the real deploy-platform-services declares
     // it: the ENGINE fills that answer from the password the POST carries beside the answers
@@ -113,7 +127,7 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
       { answer: "stage", pattern: "^prod$" },
       { answer: "role", pattern: "^(master\\+slave|slave)$" },
-      { answer: "books_fqdn", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
+      { answer: "books_fqdn", pattern: "^m1\\.example\\.com$" },
     ]),
     // The deploy-slave family. NO BRANCH PROGRAM IS AMONG THEM: a pure slave has no install branch,
     // so nothing here cuts one. The machine handshake takes ONE address spelling on both sides
@@ -578,6 +592,19 @@ async function strandedEnd(serve: ServeFixture, id: string, signal: AbortSignal)
   if (signal.aborted || !pendingEnd(serve, id)) return undefined;
   const dir = join(runRoot(serve.dir), id);
   return `machine run ${id} ended and its end was never installed: ${join(dir, "run.json.writing")} carries the exit code and ${join(dir, "run.json")} still carries none, ${STRANDED_SETTLE_MS}ms apart. The engine renames the one onto the other and that rename did not land; nothing will retry it, so no amount of further waiting can find an end here`;
+}
+
+/** One step out of the SHIPPED cluster-redeploy definition, built with the harness's own ports.
+ *
+ *  BUILT FROM THE DEFINITION AND NOT BESIDE IT. A program step's answers are half the definition's:
+ *  the arm hands `deploy-cluster` the reader that composes them off the cluster map
+ *  (defs/redeploy.ts). A step assembled by hand in a test carries whichever of those the test
+ *  remembered, so it proves the re-entry logic against a composition nobody ships. */
+export function redeployStep(h: Harness, name: string): Step {
+  const def = buildRunDefinitions(h.runPorts).get("cluster-redeploy") as AnyRunDefinition;
+  const step = def.steps({ serverId: MASTER_ID }).find((candidate: Step) => candidate.name === name);
+  if (!step) throw new Error(`no step ${name} in cluster-redeploy`);
+  return step;
 }
 
 /** A hand StepCtx for driving one program step directly — the executor-shaped surface with the

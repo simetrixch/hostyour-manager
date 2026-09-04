@@ -14,6 +14,13 @@ export const MASTER_FQDN = "m1.example.com";
 export const SLAVE_FQDN = "s1.example.com";
 export const FIXTURE_STAGE = "prod";
 
+/** THE INSTALLATION'S OWN TWO ANSWERS, which every cluster of it carries the same value of: the
+ *  authority it registers with and the mailbox that one writes to. Named here rather than written
+ *  into each map below, because a test that mirrors what a run composes has to state the value the
+ *  map states, and a value spelled twice is a value that can disagree with itself. */
+export const MAP_LETSENCRYPT_EMAIL = "ops@example.com";
+export const MAP_LETSENCRYPT_SERVER = "https://acme-v02.api.letsencrypt.org/directory";
+
 /** A slave's cluster map as mark-slave leaves it on the books branch — identity plus the slave
  *  part that makes the master's slaves ApplicationSet able to dial it. Seeded by tests that start
  *  from a slave that ALREADY IS one (redeploy); a fresh deploy writes its own. */
@@ -36,8 +43,8 @@ export const SLAVE_MARKING_YAML = [
   "  unitApex: example.com",
   "  platformDomain: example.com",
   "  clusterIssuer: platform-acme",
-  "  letsencryptEmail: ops@example.com",
-  "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
+  `  letsencryptEmail: ${MAP_LETSENCRYPT_EMAIL}`,
+  `  letsencryptServer: ${MAP_LETSENCRYPT_SERVER}`,
   "  vaultKubernetesAuthPath: kubernetes-s1",
   "  nodeCidrs: [198.51.100.11/32]",
   "  endpoints:",
@@ -87,8 +94,8 @@ export const MASTER_MARKING_YAML = [
   // they log in. The rest belong to the installation and must arrive untouched.
   "  clusterName: m1",
   "  clusterIssuer: platform-acme",
-  "  letsencryptEmail: ops@example.com",
-  "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
+  `  letsencryptEmail: ${MAP_LETSENCRYPT_EMAIL}`,
+  `  letsencryptServer: ${MAP_LETSENCRYPT_SERVER}`,
   "  vaultKubernetesAuthPath: kubernetes-m1",
   "  registryPullUser: puller",
   "  registryPushUser: pusher",

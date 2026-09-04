@@ -110,21 +110,6 @@ export interface DeploySlaveDefPorts extends DeploySlavePorts, AnsiwisePorts {
   db: Db;
 }
 
-/** The answers the machine-layer programs declare that neither the inventory nor the cluster map
- *  can state, asked for at approve and carried to the steps as `activation-input:<answer>`. All
- *  three may stay blank — a blank input is dropped at approve and the program's own default (or its
- *  refusal, by name) decides. Shared with redeploy's slave arm, which runs the same programs.
- *
- *  WHAT THE MAP STATES IS NOT ASKED FOR. The certificate authority and its mailbox stood here until
- *  2026-08-28 and were asked of a person for every machine, although one installation registers with
- *  one authority and the map had carried its answer since the master was installed. They come from
- *  slaveMachineAnswers now. What is left is what only THIS machine can say: the range it shares, and
- *  the storage bolted to it. */
-export const SLAVE_MACHINE_INPUTS: { field: string; label: string }[] = [];
-
-/** deploy-slave's own inputs: the machine-layer set plus the one answer only the branch cut takes. */
-export const SLAVE_INSTALL_INPUTS = [...SLAVE_MACHINE_INPUTS];
-
 /** Register [cleanup] before the step runs — for a step whose body is a generic program step and
  *  cannot know which compensating action the RUN KIND arms around it. Registered before the first
  *  mutating act, because a step that dies halfway leaves a partial resource only the cleanup can
@@ -699,9 +684,10 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
       ],
       // The programs raise their commands to root with a password the CALLER hands over per run
       // (the installation's ansiwise.yaml: password_from_caller) — collected at approve, held in
-      // memory, sent with each POST /runs, persisted nowhere.
+      // memory, sent with each POST /runs, persisted nowhere. Nothing is asked beyond it: what the
+      // machine-layer programs declare past the inventory stands in the master's own cluster map,
+      // and slaveMachineAnswers reads it there.
       requiredSecrets: [ANSIWISE_ELEVATION_SECRET],
-      requiredInputs: SLAVE_INSTALL_INPUTS,
     };
   },
   steps: (params) => carriesMasterPart(ports.db, params.serverId)

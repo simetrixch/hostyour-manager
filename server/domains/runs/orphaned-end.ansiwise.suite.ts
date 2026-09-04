@@ -6,7 +6,7 @@ import type { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { MASTER_ID } from "./deploy-slave.fixture.ts";
 import {
-  uniqueEmail, approveSecrets, composedAnswers, liveMaster, settled,
+  uniqueEmail, composedAnswers, liveMaster, settled, elevationOnly,
   startedRuns, expectProven, observerStart, observerEnded,
 } from "./ansiwise-serve.fixture.ts";
 
@@ -74,7 +74,7 @@ export function orphanedEndSuite(serve: () => ServeFixture, observer: () => Ansi
     // rather than a race.
     it("makes the ASSERTION say which file the end is standing in, instead of comparing an absence to zero", { timeout: 180_000 }, async () => {
       const h = await liveMaster(serve());
-      const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, approveSecrets(uniqueEmail()));
+      const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, elevationOnly());
       expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
 
       // THE INNOCENT CASE, on the same run and before anything is touched: with both records whole
