@@ -4,7 +4,7 @@ import { servers } from "../../../db/schema/inventory.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import { localTx } from "../../../executor/stepkit.ts";
 import {
-  clusterShortName, resolveClusterMarking, writeClusterMarking, writeClusterMarkingOnBranch,
+  clusterShortName, resolveClusterMarking, writeClusterMarking,
 } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { loadMaster, loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
@@ -50,8 +50,8 @@ import { coordinatorNodesOf, describeNode, ipv4Of } from "./tailnet.coordinator.
  *
  *  IT IS THE SAME VALUE IN THE SAME ACT. This step is where the address becomes known, so it is
  *  where both places that state it are brought to it — the inventory row the manager dials, and the
- *  map the master's reconciler dials. Written on the books branch and on the machine's own, the two
- *  `mark-slave` writes, because those are the two trees that carry a map.
+ *  map the master's reconciler dials. The map is written ONCE, on the books branch, because that is
+ *  the one branch an installation keeps maps on and the one a slave's own checkout stands on.
  *
  *  A REJOIN IS THE OTHER HALF. It hands a machine a FRESH address, and a map left on the previous
  *  one points the master's reconciler at something that has stopped answering there. */
@@ -64,11 +64,10 @@ async function alignMapAddress(ctx: StepCtx, ports: DeploySlavePorts, domain: st
   }
   const corrected = { ...marking, apiHost: address };
   await writeClusterMarking(repo, corrected, ctx.runId);
-  await writeClusterMarkingOnBranch(repo, corrected, domain, ctx.runId);
   ctx.log(
     "meta",
     `${clusterMapPath(domain)} now states apiHost ${address}, was ${marking.apiHost ?? "unset"} — the address the ` +
-    "coordinator gave this machine, on the books branch and on the machine's own",
+    `coordinator gave this machine, on ${repo.booksBranch}`,
   );
   return true;
 }

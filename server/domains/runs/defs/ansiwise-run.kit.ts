@@ -54,10 +54,10 @@ export const ANSIWISE_PROGRAM_TIMEOUT_MS = 45 * 60_000;
  *  always a second one: hostyour-vault-unseal.timer asks the secret store whether it is sealed
  *  every minute, dry then run.
  *
- *  Measured on apps6: a deploy-slave-branch run accepted at 15:53:06 wrote its header at 15:53:17
- *  and finished green at 15:53:25, having cut and pushed the slave's branch — while this manager,
- *  eleven seconds being one more than it allowed, had already failed the step and stopped its own
- *  run at 12 of 28. A bound of ten seconds guarding a program whose own ceiling is forty-five
+ *  Measured on apps6 in September 2026, on the branch-cut program a slave deploy ran on the master
+ *  back then: accepted at 15:53:06, header written at 15:53:17, green at 15:53:25 — while this
+ *  manager, eleven seconds being one more than it allowed, had already failed the step and stopped
+ *  its own run at 12 of 28. A bound of ten seconds guarding a program whose own ceiling is forty-five
  *  minutes was never proportionate to what it guards. */
 export const RECORD_APPEARS_TIMEOUT_MS = 3 * 60_000;
 

@@ -2,16 +2,16 @@
 // its stage, its short name and whether it carries the build plane. All four come from ONE file,
 // `clusters/active/<fqdn>.yaml`. A master's map is written when the cluster is installed (the
 // deployment programs' install path); a SLAVE's map is the Manager's to write — deploy-slave's
-// mark-slave step, through writeClusterMarking below — because a slave's branch deliberately
-// carries no books and the per-slave generator reads the map here. No third writer exists: a copy
-// somewhere else is what let maps drift away from the branches they describe.
+// mark-slave step, through writeClusterMarking below. No third writer exists: a copy somewhere else
+// is what let maps drift away from the branches they describe.
 //
 // EVERY cluster's map stands on ONE branch — this installation's books (shared/branches.ts), which is
 // the install branch of the cluster holding the master role, and which the platform repo port carries
-// as `booksBranch`. Not each cluster's own install branch: the slaves ApplicationSet is a git
-// generator with one revision, and this module folds every map at once to catch short-name
-// collisions, so both readers need them side by side. Not the trunk either — a map names a real
-// FQDN, a stage and a business domain, and the trunk is what every future installation is cut from.
+// as `booksBranch`. It is the ONLY install branch an installation has: a cluster carrying only the
+// slave part has none, and its machine's own checkout stands on this same branch. So a map is
+// written ONCE, and the tree a slave reads its own map out of is the tree every other map stands
+// in. Not the trunk either — a map names a real FQDN, a stage and a business domain, and the trunk
+// is what every future installation is cut from.
 //
 // The map's shape, and what each field drives:
 //   fqdn         the cluster's public FQDN == its install branch == clusters.domain.
@@ -484,51 +484,15 @@ function markingDifferences(a: ClusterMarking, b: ClusterMarking): string[] {
 interface MarkingCommit {
   marking: ClusterMarking;
   message: string;
-  /** Which branch the map is written on. Absent, the books — the one an installation keeps its maps
-   *  on, and the only one another cluster's map is ever read from. */
-  branch?: string;
 }
 
 async function commitMarking(repo: PlatformRepo, c: MarkingCommit): Promise<{ commit: string }> {
-  return repo.withBranch(c.branch ?? repo.booksBranch, (books) =>
+  return repo.withBranch(repo.booksBranch, (books) =>
     books.commit({
       message: c.message,
       write: [{ path: clusterMapPath(c.marking.fqdn), content: serializeMarking(c.marking) }],
     }),
   );
-}
-
-/** Put a cluster's map on the cluster's OWN install branch as well as on the books.
- *
- *  WHY BOTH. The books branch is where an installation's maps are kept and read from — that is what
- *  makes one cluster able to say something about another. But a machine reads ITS OWN map out of the
- *  checkout standing on ITS OWN branch: deploy-platform-services asks for the address of the
- *  installation's secret store, and asks the file beside it rather than a branch it does not stand
- *  on. A master has it there because the program that generates a master's branch writes it; a slave
- *  had it only on the books, and its own machine layer stopped at `is not on this host` (apps4,
- *  2026-08-29).
- *
- *  IT IS THE SAME MAP AND NOT A SECOND ONE. Written from one value in one act, so the two cannot
- *  come to say different things: what differs between the branches is only which of them a reader
- *  happens to stand on. */
-export async function writeClusterMarkingOnBranch(
-  repo: PlatformRepo,
-  marking: ClusterMarking,
-  branch: string,
-  runId: string,
-): Promise<{ changed: boolean }> {
-  const content = serializeMarking(marking);
-  const path = clusterMapPath(marking.fqdn);
-  return repo.withBranch(branch, async (scope) => {
-    // COMPARED BEFORE IT IS WRITTEN. Every redeploy of a machine passes here, and a commit that
-    // changes nothing is a commit somebody has to read past to find the one that did.
-    if ((await scope.readFile(path)) === content) return { changed: false };
-    await scope.commit({
-      message: `deploy(clusters): mark ${marking.name} (${marking.role}, ${marking.stage}) on its own branch [${runId}]`,
-      write: [{ path, content }],
-    });
-    return { changed: true };
-  });
 }
 
 /** Write ONE cluster's whole map onto the books branch — deploy-slave's mark-slave step, the

@@ -115,15 +115,9 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "role", pattern: "^(master\\+slave|slave)$" },
       { answer: "books_fqdn", pattern: "^m1\\.example\\.com$", fallback: "m1.example.com" },
     ]),
-    // The deploy-slave family. The branch cut takes the slave's two facts and the committer
-    // identity from approve; the machine handshake takes ONE address spelling on both sides
+    // The deploy-slave family. NO BRANCH PROGRAM IS AMONG THEM: a pure slave has no install branch,
+    // so nothing here cuts one. The machine handshake takes ONE address spelling on both sides
     // (emit and register), and register additionally the credentials file's values as answers.
-    "deploy-slave-branch": programYaml("deploy-slave-branch", [
-      { answer: "fqdn", pattern: "^s1\\.example\\.com$" },
-      { answer: "stage", pattern: "^prod$" },
-      { answer: "role", pattern: "^slave$" },
-      { answer: "committer_email", pattern: "^[^@]+@[^@]+$" },
-    ]),
     // TWO run kinds run deploy-host as well — redeploy's master arm (m1/master) and deploy-slave's
     // machine layer (s1/slave) — so the identity row takes either spelling, for the same reason
     // deploy-cluster's does.
@@ -131,11 +125,14 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "operator_user", pattern: "^(m1|ubuntu)$" },
       { answer: "operator_public_key", pattern: "^ssh-ed25519 " },
       // The two the machine cannot answer itself, because the checkout they would be read off is
-      // what this program's git_clone row establishes. The BRANCH is the target cluster's own and
-      // never the trunk: a live tree standing on master is a machine whose release-cluster then
-      // cannot find clusters/active/<fqdn>.yaml, measured on a real one.
+      // what this program's git_clone row establishes. The BRANCH is the installation's ONE install
+      // branch — the books, named after the cluster carrying the master part — for every machine,
+      // the slave included: a pure slave has no branch of its own, and a pattern still admitting
+      // `s1` would be a check that stopped covering its subject. Never the trunk either: a live tree
+      // standing on master is a machine whose release-cluster then cannot find
+      // clusters/active/<fqdn>.yaml, measured on a real one.
       { answer: "platform_repo", pattern: "^acme/platform$" },
-      { answer: "platform_branch", pattern: "^(m1|s1)\.example\.com$" },
+      { answer: "platform_branch", pattern: "^m1\.example\.com$" },
     ]),
     "emit-cluster-credentials": programYaml("emit-cluster-credentials", [
       { answer: "api_server_url", pattern: "^https://100\\.64\\.0\\.11:16443$" },

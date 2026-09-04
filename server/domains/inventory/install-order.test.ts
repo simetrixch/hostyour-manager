@@ -68,11 +68,12 @@ describe("holdsInstallOrder", () => {
   });
 
   it("NAMES a program the declaration does not state, and still agrees about the rest", () => {
-    // The declaration states no slave sequence on purpose, so the master-side branch cut is expected
-    // to be unstated. A verdict that hid it would let the whole set drift and still read green.
-    const v = holdsInstallOrder(["deploy-slave-branch", "deploy-host", "deploy-cluster"], MASTER);
+    // The declaration states a master install sequence only, so a program belonging to a run kind of
+    // its own is expected to be unstated. A verdict that hid one would let the whole set drift and
+    // still read green.
+    const v = holdsInstallOrder(["tailnet-disconnect", "deploy-host", "deploy-cluster"], MASTER);
     expect(v.agrees).toBe(true);
-    expect(v.unstated).toEqual(["deploy-slave-branch"]);
+    expect(v.unstated).toEqual(["tailnet-disconnect"]);
     expect(v.held).toEqual(["deploy-host", "deploy-cluster"]);
   });
 

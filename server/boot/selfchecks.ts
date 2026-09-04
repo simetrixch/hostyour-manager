@@ -356,8 +356,8 @@ function programDrivingKinds(runDefinitions: RunDefinitions): { kind: RunKind; p
  *   1. A program a run drives that the declaration does not state. The declaration states no slave
  *      sequence, on purpose — half of a slave's steps are this manager's own acts and a list of only
  *      the program rows would describe a shape nobody can follow. Such a program is reported BY NAME
- *      in the detail, green or red; `deploy-slave-branch` and the two tailnet programs are expected
- *      to be among them.
+ *      in the detail, green or red; `tailnet-disconnect` and `tailnet-reconnect`, each the whole of
+ *      a run kind of its own, are expected to be among them.
  *   2. The SET. This holds the ORDER of what the two sides share and nothing else, so a program
  *      DROPPED from a run stays green: a run legitimately drives a subset — a slave three of the
  *      master's five — and nothing here can tell a subset that is meant from one that lost a phase.

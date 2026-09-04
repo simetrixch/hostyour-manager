@@ -106,9 +106,9 @@ function liveResolver(smoke: SmokeResult, argo: ArgoAppStatus | null): FakeClust
  *  null case every other test in this file exercises. */
 function apexRegistrations(unitApex: string): Registrations {
   const repo = new FakePlatformRepo();
-  repo.seed("s1.example", "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-  repo.seed("s1.example", "clusters/platform/values-prod.yaml", "global:\n  env: prod\n");
-  repo.seed("s1.example", clusterMapPath("s1.example"), `global:\n  unitApex: ${unitApex}\n`);
+  repo.seed(repo.booksBranch, "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+  repo.seed(repo.booksBranch, "clusters/platform/values-prod.yaml", "global:\n  env: prod\n");
+  repo.seed(repo.booksBranch, clusterMapPath("s1.example"), `global:\n  unitApex: ${unitApex}\n`);
   return new Registrations(repo, async () => ({ name: "s1", stage: "prod" }));
 }
 

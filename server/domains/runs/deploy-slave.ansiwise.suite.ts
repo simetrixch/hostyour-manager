@@ -95,19 +95,20 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       expect(h.hosts.serviceExecVersion).toBe(ANSIWISE_PIN);
       expect(h.hosts.serviceExecListen).toBe(`100.64.0.11:${ANSIWISE_SERVICE_PORT}`);
 
-      // The machines' OWN records: dry + run per program, every one green — the branch cut and the
-      // registration on the master's surface, the machine layer, the join and the emit on the slave's.
+      // The machines' OWN records: dry + run per program, every one green — the registration on the
+      // master's surface, the machine layer, the join and the emit on the slave's. NO BRANCH PROGRAM
+      // is among them: a pure slave has no install branch, and its map is the manager's own write
+      // onto the books.
       expectProven(serve(), h.db, r.runId, await observer().runs(), [
-        "deploy-slave-branch", "deploy-host", "deploy-cluster", "deploy-platform-services",
+        "deploy-host", "deploy-cluster", "deploy-platform-services",
         "tailnet-mint-join-key", "tailnet-rejoin", "emit-cluster-credentials", "register-slave",
       ]);
 
-      // WHICH surface each conversation went over: three on the master (branch cut, mint,
-      // register), five on the slave (host, cluster, gitops, rejoin, emit) — and the master's
-      // checkouts were stood up BEFORE its first conversation.
+      // WHICH surface each conversation went over: two on the master (mint, register), five on the
+      // slave (host, cluster, gitops, rejoin, emit).
       const master = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
       const slave = h.hosts.log.filter((l) => l.host === "10.1.1.11").map((l) => l.command);
-      expect(master.filter(isServe)).toHaveLength(3);
+      expect(master.filter(isServe)).toHaveLength(2);
       expect(slave.filter(isServe)).toHaveLength(5);
       // WHAT EACH MACHINE WAS TOLD IT IS, which is the fact a serve cannot default. Without it the
       // slave's serve claims `master`, and emit-cluster-credentials — the first program in this run
@@ -121,7 +122,6 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // the slave's own two conversations name its cluster and carry its stage with it.
       for (const c of slave.filter(isServe)) expect(/ --fqdn \S+/.test(c), c).toBe(/ --stage \S+/.test(c));
       expect(slave.filter(isServe).some((c) => c.includes("--fqdn s1.example.com --stage prod"))).toBe(true);
-      expect(master.findIndex((c) => c.includes("dc-prepare-checkouts-"))).toBeLessThan(master.findIndex(isServe));
 
       // THE ONE-ADDRESS LAW, on the record: the map the run committed carries the same spelling the
       // emit and the register were given as their answer — the fixture's api_server_url/ca_data rows
@@ -302,11 +302,11 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       await h.executor.settle(r.runId);
       expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
 
-      // The machine layer and the handshake re-ran, each dry-proven; the birth act did not — no
-      // branch cut — and neither did the join, on either machine's records.
+      // The machine layer and the handshake re-ran, each dry-proven; the join did not, on either
+      // machine's records.
       const all = await observer().runs();
       expectProven(serve(), h.db, r.runId, all, ["deploy-host", "deploy-cluster", "deploy-platform-services", "emit-cluster-credentials", "register-slave"]);
-      expectAbsent(h.db, r.runId, all, ["deploy-slave-branch", "tailnet-mint-join-key", "tailnet-rejoin"]);
+      expectAbsent(h.db, r.runId, all, ["tailnet-mint-join-key", "tailnet-rejoin"]);
 
       // AND WHAT DECIDED THE SECOND OF THOSE, because it is a MEASUREMENT here and not a step left
       // out of the list: `join-if-absent` read the machine's own client, found it running on the

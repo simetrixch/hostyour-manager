@@ -33,7 +33,7 @@ describe("the chain's paths", () => {
 });
 
 describe("readClusterValueChain", () => {
-  it("reads every file of the chain off the cluster's own branch, in layering order", async () => {
+  it("reads every file of the chain off the books branch, in layering order", async () => {
     const repo = new FakePlatformRepo();
     const files = await readClusterValueChain(repo, DOMAIN, "prod");
     expect(files.map((f) => f.path)).toEqual([...clusterValueChainPaths(DOMAIN, "prod")]);
@@ -44,10 +44,14 @@ describe("readClusterValueChain", () => {
     // A chain assembled without one of its files silently drops the Vault URL, the registry host
     // and the unit apex, and the gate would approve a render nobody could deploy. The consumers
     // ApplicationSet sets no ignoreMissingValueFiles either, so a missing file stops the deploy too.
+    //
+    // Seeding one file of the books branch states that this tree is the test's own, so the fake
+    // invents nothing else on it — which is how an INCOMPLETE tree can be observed at all.
     const repo = new FakePlatformRepo();
-    repo.seed("bare.example", "clusters/platform/values-common.yaml", "global: {}\n");
+    repo.seed(repo.booksBranch, "clusters/platform/values-common.yaml", "global: {}\n");
     await expect(readClusterValueChain(repo, "bare.example", "prod")).rejects.toMatchObject({ code: "UPSTREAM" });
-    await expect(readClusterValueChain(repo, "bare.example", "prod")).rejects.toThrow(/bare\.example carries no clusters\/platform\/values-prod\.yaml/);
+    await expect(readClusterValueChain(repo, "bare.example", "prod"))
+      .rejects.toThrow(new RegExp(`${repo.booksBranch} carries no clusters/platform/values-prod\\.yaml`));
   });
 
   it("a branch the fixture materialized reads a COMPLETE chain — the fixture cannot drift off the reader", async () => {

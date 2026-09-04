@@ -56,13 +56,6 @@ export const PLATFORM_STATE_ROOTS = ["/srv/", "/var/lib/"] as const;
  *  refresh feeds them and the tree they act on are one path stated once. */
 export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
 
-/** WHERE the master writes a SLAVE's branch — deploy-slave-branch cuts it here and
- *  regenerate-slave-branch merges the release tag into it here: a second checkout with the same
- *  origin, stood on the branch the program demands by the caller (the product branch for a cut, the
- *  slave's own branch for a regeneration). Working in the LIVE checkout would yank the machine's
- *  tree off the branch its reconciler and its installer stand on. Both programs name the path on
- *  their own rows; this constant is the caller's half of the same contract. */
-export const WORK_CHECKOUT = "/srv/hostyour-cloud-slave";
 
 /** WHERE the catalogue stands on the machine: the checkout the serving binary reads its programs and
  *  its `ansiwise.yaml` from. The machine's own path and not this module's invention — the `git_clone`
@@ -171,15 +164,6 @@ export const MACHINE_STATE: readonly MachineStateEntry[] = [
       "the platform tree every deployment program acts on, cloned by a `git_clone` row that hands it " +
       "over after the clone rather than before — git recreates as root everything it is made to " +
       "write into a directory handed over first",
-  },
-  {
-    path: WORK_CHECKOUT,
-    owner: "operator",
-    handover: "elsewhere",
-    what:
-      "the master's second checkout, where a slave's branch is cut and regenerated. The manager " +
-      "clones it over its own session as the operating account, so it belongs to that account " +
-      "without anybody handing it over",
   },
   {
     path: SERVICE_TOKEN_FILE,

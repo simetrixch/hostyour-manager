@@ -11,7 +11,7 @@ import { isMasterRole } from "../../../../shared/enums.ts";
 import { clusterShortName } from "../../inventory/cluster-marking.ts";
 import { argoAppsCmd, parsePipeRows, refreshPlatformCheckoutScript } from "./deploy-slave.remote.ts";
 import { PLATFORM_CHECKOUT } from "./machine-state.ts";
-import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { loadServer, loadMaster, masterFqdnOf, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { openDoor } from "./manager-key.kit.ts";
 import { requireElevationPassword, ANSIWISE_ELEVATION_SECRET } from "./ansiwise-run.kit.ts";
 
@@ -84,31 +84,38 @@ export function attestClusterStep(target: SlaveTarget): Step {
   };
 }
 
-/** `refresh-checkout`: bring the machine's platform checkout onto the head of its install branch,
- *  tags included. Runs on the run's OWNED host, BEFORE the deployment programs read that checkout —
- *  a stale tree hands deploy-cluster old installer state and deploy-platform-services a cluster map
- *  the manager has since rewritten, and the programs deliberately fetch nothing themselves (a
- *  program acts on the tree it was pointed at; which state that tree stands on is the caller's to
- *  establish). */
+/** `refresh-checkout`: bring the machine's platform checkout onto the head of the installation's
+ *  install branch, tags included. Runs on the run's OWNED host, BEFORE the deployment programs read
+ *  that checkout — a stale tree hands deploy-cluster old installer state and
+ *  deploy-platform-services a cluster map the manager has since rewritten, and the programs
+ *  deliberately fetch nothing themselves (a program acts on the tree it was pointed at; which state
+ *  that tree stands on is the caller's to establish).
+ *
+ *  THE BRANCH IS THE BOOKS, FOR EVERY MACHINE. An installation has exactly one install branch: the
+ *  one named after the cluster carrying the master part, which is where every cluster map of the
+ *  installation stands. A machine carrying only the slave part has no branch of its own, so this is
+ *  the tree it reads its own map out of too — answering its own domain here would name a branch
+ *  nothing cuts. It is the same answer `checkoutAnswers` gives deploy-host's `platform_branch`, so
+ *  the clone and the refresh cannot land on two different branches. */
 export function refreshCheckoutStep(target: SlaveTarget): Step {
   return {
     name: "refresh-checkout",
-    title: "Bring the machine's platform checkout onto its install branch head",
+    title: "Bring the machine's platform checkout onto the install branch head",
     run: async (ctx) => {
-      const { domain } = target.resolve(ctx.db);
+      const branch = masterFqdnOf(ctx.db, loadMaster(ctx.db));
       const server = loadServer(ctx.db, target.serverId);
       const session = await ctx.ssh();
-      const refresh = await remoteScriptCapture(ctx, session, "refresh-checkout", refreshPlatformCheckoutScript(domain), { timeoutMs: 2 * 60_000 });
+      const refresh = await remoteScriptCapture(ctx, session, "refresh-checkout", refreshPlatformCheckoutScript(branch), { timeoutMs: 2 * 60_000 });
       const heads = /^CHECKOUT_HEAD (\S+) (\S+)$/m.exec(refresh.stdout);
       if (refresh.result.code !== 0 || !heads) {
         throw errValidation(
-          `could not refresh ${PLATFORM_CHECKOUT} on ${server.name} to origin/${domain} (exit ${refresh.result.code}) — ` +
+          `could not refresh ${PLATFORM_CHECKOUT} on ${server.name} to origin/${branch} (exit ${refresh.result.code}) — ` +
           `the deployment programs read that checkout as it stands, so a stale tree would deliver the previous state; ` +
           `see the run log, fix the machine's checkout, then retry the run`,
         );
       }
-      ctx.checkpoint({ host: server.name, branch: domain, head: heads[2] });
-      ctx.log("meta", `${server.name}: ${PLATFORM_CHECKOUT} refreshed ${heads[1]}..${heads[2]} on ${domain}`);
+      ctx.checkpoint({ host: server.name, branch, head: heads[2] });
+      ctx.log("meta", `${server.name}: ${PLATFORM_CHECKOUT} refreshed ${heads[1]}..${heads[2]} on ${branch}`);
     },
   };
 }

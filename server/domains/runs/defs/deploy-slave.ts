@@ -26,12 +26,12 @@ import {
 import { disablePasswordLoginStep, purgeBootstrapPasswordStep, restorePasswordLoginCleanup } from "./password-login.kit.ts";
 import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
 import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
-import { masterCheckoutsScript, SLAVE_API_PORT, DATA_DISK_COMMAND, HOST_ADDRESS_COMMAND, dataDiskFrom, hostAddressesFrom } from "./deploy-slave.remote.ts";
+import { SLAVE_API_PORT, DATA_DISK_COMMAND, HOST_ADDRESS_COMMAND, dataDiskFrom, hostAddressesFrom } from "./deploy-slave.remote.ts";
 import { refreshCheckoutStep } from "./live-cluster.kit.ts";
 import { placeInputStep, dropInputStep, dropInputCleanup } from "./deploy-slave.input.ts";
 import { rejoinStep, joinIfAbsentStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
-import { clusterShortName, resolveClusterMarking, writeClusterMarking, projectClusterMarking, type ClusterMarking, writeClusterMarkingOnBranch } from "../../inventory/cluster-marking.ts";
+import { clusterShortName, resolveClusterMarking, writeClusterMarking, projectClusterMarking, type ClusterMarking } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
@@ -44,12 +44,14 @@ import { masterSlavePartSteps, masterSlavePartPlan } from "./deploy-slave.master
 // TWO ARMS, decided by the target's ROLE and by nothing an operator states, the way redeploy decides
 // between its own — because giving a machine the slave part is a different set of acts on a machine
 // that already carries the master part:
-//   pure slave        the list below, over TWO HOSTS: the MASTER cuts the slave's install branch
-//                     (deploy-slave-branch) and takes its registration (register-slave); the SLAVE is
-//                     built by the same three machine-layer programs every cluster is (deploy-host,
-//                     deploy-cluster, deploy-platform-services), joins the private network with a
-//                     credential the master mints, and emits the one credentials file the
-//                     registration is made from.
+//   pure slave        the list below, over TWO HOSTS: the MASTER marks the slave in its books and
+//                     takes its registration (register-slave); the SLAVE is built by the same three
+//                     machine-layer programs every cluster is (deploy-host, deploy-cluster,
+//                     deploy-platform-services), joins the private network with a credential the
+//                     master mints, and emits the one credentials file the registration is made
+//                     from. NO BRANCH IS CUT: a pure slave has none, its map stands on the books
+//                     branch beside every other map of the installation, and its checkout stands on
+//                     that same branch (deploy-branch names `master` alone in its own roles line).
 //   master, master+   deploy-slave.master.ts, over ONE host: the machine takes the slave part by
 //     slave           regenerating its OWN branch under the combined role. One machine, one branch,
 //                     one cluster — no ordinal, no second cluster row, no per-slave management plane,
@@ -138,19 +140,6 @@ function armed(cleanup: Cleanup | undefined, step: Step): Step {
   };
 }
 
-/** WHO THE BRANCH CUT COMMITS AS. One thing on every machine of this platform: `installer@` and the
- *  machine's own domain, which the run already holds — so it is composed rather than asked, and a
- *  person is not offered a field whose only right answer is the one thing already known.
- *
- *  It reaches git_identity's `email_answer`, and what it decides is the address in the log of the
- *  branch this run cuts. Nothing authenticates with it. */
-export function slaveBranchAnswers(target: SlaveTarget): ExtraAnswers {
-  return async (ctx) => {
-    const { domain } = target.resolve(ctx.db);
-    return { committer_email: `installer@${domain}` };
-  };
-}
-
 /** Answers the DEF is authoritative for on the machine-layer programs, read off the machine's OWN
  *  cluster map — the record mark-slave wrote earlier in the same run (and re-reads on a redeploy).
  *  books_fqdn is the master's domain (deploy-cluster/-gitops default it to the machine's own,
@@ -197,12 +186,12 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
  *  branch it stands on. The one extra a machine-layer program takes that nothing on the machine can
  *  answer, because the checkout it would be read from is what the program establishes.
  *
- *  THE BRANCH IS THE CLUSTER'S OWN, never the trunk. Every machine's live tree stands on its
- *  installation branch: that is what its reconciler follows and what release-cluster and
- *  regenerate-branch read the release out of (`clusters/active/<fqdn>.yaml` exists on that branch and
- *  on no other). Answering `master` here would move the live tree onto the trunk — measured on apps3,
- *  whose tree stood on master for twelve hours while ArgoCD went on reconciling from origin, and whose
- *  release-cluster then refused because the file it records into was not there.
+ *  THE BRANCH IS THE INSTALLATION'S, never the trunk. Every machine's live tree stands on the
+ *  installation's one install branch — the books, named after the cluster carrying the master part.
+ *  That is what its reconciler follows and what release-cluster and regenerate-branch read the
+ *  release out of. Answering `master` here would move the live tree onto the trunk — measured on
+ *  apps3, whose tree stood on master for twelve hours while ArgoCD went on reconciling from origin,
+ *  and whose release-cluster then refused because the file it records into was not there.
  *
  *  A machine being born as a master is the one case that takes `master`, and it is not this manager's
  *  case: it has no cluster row yet and is installed by ansiwise-client, which answers this itself. */
@@ -211,15 +200,15 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
  *  a program step takes one — and both run kinds that drive deploy-host owe the machine all three.
  *
  *  Note the DIFFERENT sources, which is why they are composed rather than read from one place: the
- *  repository is this installation's setting, the branch is the target cluster's row, and the key is
+ *  repository is this installation's setting, the branch is the master's cluster row, and the key is
  *  a sealed credential. */
-export function hostAnswers(target: SlaveTarget, serverId: string, ports: DeploySlavePorts): ExtraAnswers {
-  const checkout = checkoutAnswers(target, ports);
+export function hostAnswers(serverId: string, ports: DeploySlavePorts): ExtraAnswers {
+  const checkout = checkoutAnswers(ports);
   const key = operatorKeyAnswer(serverId);
   return async (ctx) => ({ ...(await checkout(ctx)), ...(await key(ctx)) });
 }
 
-export function checkoutAnswers(target: SlaveTarget, ports: DeploySlavePorts): ExtraAnswers {
+export function checkoutAnswers(ports: DeploySlavePorts): ExtraAnswers {
   return async (ctx) => {
     const origin = ports.platformOrigin;
     if (origin === undefined || origin.length === 0) {
@@ -230,8 +219,14 @@ export function checkoutAnswers(target: SlaveTarget, ports: DeploySlavePorts): E
         "repo stands on",
       );
     }
-    const { domain } = target.resolve(ctx.db);
-    return { platform_repo: origin, platform_branch: domain };
+    // THE BOOKS BRANCH, WHICH IS THE ONLY INSTALL BRANCH AN INSTALLATION HAS. A machine carrying the
+    // master part keeps a branch named after its own domain, and that branch IS the books; a machine
+    // carrying only the slave part has none at all, and its checkout stands on the books branch
+    // beside the master's, where its own cluster map is. Answering the machine's own domain here
+    // would put a pure slave's checkout on a branch nothing ever cuts, and deploy-host's git_clone
+    // row is where the run would stop.
+    const masterFqdn = masterFqdnOf(ctx.db, loadMaster(ctx.db));
+    return { platform_repo: origin, platform_branch: masterFqdn };
   };
 }
 
@@ -399,41 +394,6 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // No compensation at all, on either arm: a destroyed credential cannot be put back, and this run
     // holds the operator's password in memory rather than a copy of the machine's sealed one.
     purgeBootstrapPasswordStep(sid),
-    ...(redeploying ? [] : ([
-      {
-        name: "prepare-checkouts",
-        title: "Stand the master's two checkouts where the branch cut reads and cuts",
-        run: async (ctx) => {
-          // The two git states deploy-slave-branch reads and refuses to establish itself: the LIVE
-          // checkout on the head of the master's own install branch (the program copies the
-          // master's map out of its committed state — a stale tree hands every slave an old map),
-          // and the WORK checkout standing on the product branch (the program's git_branch row
-          // refuses a checkout standing anywhere else rather than moving it). Runs under the
-          // git-branch lock on the master's own domain, which this run already claims.
-          const { domain } = target.resolve(ctx.db);
-          const master = loadMaster(ctx.db);
-          const masterFqdn = masterFqdnOf(ctx.db, master);
-          const mSession = await ctx.ssh(master.id); // the AUX target — declared in `targets`
-          const cap = await remoteScriptCapture(ctx, mSession, "prepare-checkouts",
-            masterCheckoutsScript({ masterFqdn, slaveFqdn: domain }), { timeoutMs: 5 * 60_000 });
-          const live = /^LIVE_HEAD (\S+)$/m.exec(cap.stdout)?.[1];
-          const work = /^WORK_HEAD (\S+)$/m.exec(cap.stdout)?.[1];
-          if (cap.result.code !== 0 || !live || !work) {
-            throw errValidation(
-              `could not stand the master's checkouts for the branch cut (exit ${cap.result.code}) — the live tree must ` +
-              `hold origin/${masterFqdn}'s head and the work tree the product branch; see the run log, fix the master's ` +
-              "checkouts, then retry the run",
-            );
-          }
-          ctx.checkpoint({ liveHead: live, workHead: work });
-          ctx.log("meta", `master checkouts ready: live on ${masterFqdn} @ ${live}, work on the product branch @ ${work}`);
-        },
-      },
-      // The cut itself: two answers (the slave's domain and its stage, both the inventory's),
-      // everything else read from the master's books by the program — a value typed a second time
-      // is a value that can disagree with itself. The optional committer identity rides approve.
-      ansiwiseProgramStep(target, "deploy-slave-branch", ports, { onMaster: true, extra: slaveBranchAnswers(target) }),
-    ] satisfies Step[])),
     {
       name: "mark-slave",
       title: "Mark the slave in the cluster map on the books branch",
@@ -539,13 +499,12 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         // teardown of the management plane. NEVER armed on a redeploy — that cascade against a
         // LIVE slave is exactly what must not happen.
         if (!redeploying) ctx.registerCleanup(removeSlaveMarkingCleanup(ports));
+        // ONE WRITE, ON THE BOOKS BRANCH. It is where an installation keeps its maps and where one
+        // cluster reads about another — and, since a pure slave has no branch of its own, it is also
+        // the tree standing beside the machine, which is where a machine reads ITS OWN map (a slave
+        // whose map was missing there had its machine layer stop at "is not on this host" asking for
+        // the secret store's address; apps4, 2026-08-29).
         const { changed } = await writeClusterMarking(repo, slaveMarking, ctx.runId);
-        // AND ON THE MACHINE'S OWN BRANCH, which is the one its checkout stands on. The books branch
-        // is where an installation keeps its maps and where one cluster reads about another; a
-        // machine reads ITS OWN out of the tree beside it, and a slave's was on the books alone —
-        // its machine layer stopped at "is not on this host" asking for the secret store's address
-        // (apps4, 2026-08-29). One map, written twice, from one value in one act.
-        await writeClusterMarkingOnBranch(repo, slaveMarking, domain, ctx.runId);
         // THE ROW FOLLOWS THE MAP. The map is the writable place and the inventory columns are the
         // copy every role and stage decision in this process queries, so the act that rewrites the
         // map moves the copy in the same step — this is the code path that puts "master+slave" on
@@ -566,7 +525,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // ---- the machine layer, exactly as every cluster gets it: the three deployment programs on
     // the slave's own surface, each dry-proven then run. deploy-host makes the box workable (the
     // packages, the key proof) and must precede the checkout refresh, which needs git.
-    ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(target, sid, ports) }),
+    ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(sid, ports) }),
     // The programs read /srv/hostyour-cloud as it stands and deliberately fetch nothing — this is
     // what brings the slave's checkout onto the branch the cut just pushed. The checkout itself was
     // placed above; this step is what moves it onto that branch's head.
@@ -711,7 +670,7 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
         `Deploy "${slave.name}" (${dialled.host}) as ${params.stage} slave ${params.domain}` +
         `${params.slaveId !== undefined ? ` (slaveId ${params.slaveId})` : ""} [tier ${params.tier}]: ` +
         `${stepDefs.length} steps over two hosts — the slave (first contact, then the machine-layer programs on its own ` +
-        `ansiwise surface) and the master "${master.name}" (branch cut + registration). ` +
+        `ansiwise surface) and the master "${master.name}" (the books and the registration). ` +
         `The password you enter raises every root command of this run, and where this manager holds no key for ` +
         `"${slave.name}" it also opens the first login and installs one. It is held in memory for the length of the run ` +
         `and stored nowhere. The machine is left taking key logins only, with the bootstrap password sealed beside its ` +
@@ -723,15 +682,14 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
         { serverId: slave.id, ownsHost: true, label: `${slave.name} (slave)` },
         { serverId: master.id, ownsHost: false, label: `${master.name} (master)` },
       ],
-      // The locks beyond the derived server:<slave>: both touched git branches (the slave's
-      // install branch is cut + refreshed onto; the master's branch is what the live checkout is
-      // brought onto and the books branch the map lands on), the master's Vault surface
+      // The locks beyond the derived server:<slave>: the ONE touched git branch — the books, which
+      // is the master's own install branch, the branch the slave's checkout is brought onto and the
+      // branch its map lands on — the master's Vault surface
       // (register-slave's mounts/policies/roles), and the master's kube-apiserver (the handoff
       // wait + verify reads). Key "m" and no per-cluster key, because the platform has ONE Vault
       // and it sits on the master: a second deploy-slave (or any other master-vault Run)
       // therefore serializes instead of interleaving Vault surgery.
       locks: [
-        { resource: "git-branch", key: params.domain },
         { resource: "git-branch", key: masterFqdnOf(db, master) },
         { resource: "master-vault", key: "m" },
         { resource: "master-kube", key: "m" },

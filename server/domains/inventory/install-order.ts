@@ -84,8 +84,9 @@ export interface OrderVerdict {
  * five — so the question is whether the shared programs are a SUBSEQUENCE of the stated order, not
  * whether the two lists are equal. A program the run drives that the declaration does not state is
  * neither agreement nor disagreement: the declaration says outright that it states no slave sequence,
- * so `deploy-slave-branch` is expected to be unstated. It is NAMED rather than counted, because a
- * verdict that hid it would let the whole set drift out of the declaration and still read green.
+ * so a program belonging to a run kind of its own — `tailnet-disconnect`, `tailnet-reconnect` — is
+ * expected to be unstated. It is NAMED rather than counted, because a verdict that hid it would let
+ * the whole set drift out of the declaration and still read green.
  */
 export function holdsInstallOrder(runPrograms: readonly string[], stated: readonly string[]): OrderVerdict {
   const held: string[] = [];

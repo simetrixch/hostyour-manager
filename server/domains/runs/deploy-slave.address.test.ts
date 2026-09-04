@@ -108,7 +108,7 @@ describe("the address the coordinator gave this machine", () => {
     expect(said.join(" ")).toContain("nothing to write");
   });
 
-  it("brings the cluster map's apiHost to it, on the books branch and on the machine's own", async () => {
+  it("brings the cluster map's apiHost to it, on the one branch an installation keeps maps on", async () => {
     // What consumes the map is the master's own ArgoCD entry for this cluster: the slaves
     // ApplicationSet feeds slave.apiHost into externalsecret-cluster-slave.yaml, which renders
     // `server: "https://<apiHost>:<apiPort>"` with verification on. mark-slave wrote that field
@@ -120,10 +120,12 @@ describe("the address the coordinator gave this machine", () => {
 
     await stepOf(h, "declare-tailnet-address").run(hostedStepCtx(h));
 
-    for (const branch of [h.platformRepo.booksBranch, PARAMS.domain]) {
-      expect(h.platformRepo.read(branch, path) ?? "", `${branch} states the coordinator's address`)
-        .toContain("apiHost: 100.64.0.7");
-    }
+    const books = h.platformRepo.booksBranch;
+    expect(h.platformRepo.read(books, path) ?? "", `${books} states the coordinator's address`)
+      .toContain("apiHost: 100.64.0.7");
+    // AND NOWHERE ELSE. A pure slave has no branch of its own, so a second write named after the
+    // machine would put a map on a branch nothing cuts and nothing reads.
+    expect(h.platformRepo.read(PARAMS.domain, path), "no map on a branch of the machine's own name").toBeNull();
   });
 
   it("leaves the map alone when it already states that address", async () => {

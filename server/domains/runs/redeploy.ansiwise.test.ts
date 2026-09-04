@@ -97,7 +97,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     try {
       const programs = await client.programs();
       expect(programs.map((p) => p.name).sort()).toEqual([
-        "deploy-cluster", "deploy-host", "deploy-platform-services", "deploy-slave-branch",
+        "deploy-cluster", "deploy-host", "deploy-platform-services",
         "emit-cluster-credentials", "register-slave",
         "remove-slave", "tailnet-disconnect", "tailnet-mint-join-key",
         "tailnet-reconnect", "tailnet-rejoin",
@@ -488,8 +488,8 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // WHAT THE MACHINE WAS TOLD IT IS, all three facts, off its own cluster row — the mint's
     // conversation and the join's alike. The engine defaults the stage to `dev` and writes that word
     // into the record of every run the machine keeps, so a serve that leaves it unsaid makes a prod
-    // installation keep records saying dev: measured on apps6, whose deploy-slave-branch record
-    // 20260903T220006Z-227727-07d5f8a7 carries "stage": "dev" while its own map says prod.
+    // installation keep records saying dev: measured on apps6 in September 2026, whose branch-cut
+    // record 20260903T220006Z-227727-07d5f8a7 carries "stage": "dev" while its own map says prod.
     for (const c of h.hosts.log.filter((l) => isServe(l.command)).map((l) => l.command)) {
       expect(c, c).toContain("--role master+slave --fqdn m1.example.com --stage prod");
     }

@@ -174,23 +174,21 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)), "and writes nothing").toBeNull();
   });
 
-  it("puts that map on the machine's own branch as well, which is the one its checkout stands on", async () => {
+  it("puts that map on the books branch and on no other — a pure slave has no branch of its own", async () => {
     // The books branch is where an installation keeps its maps and where one cluster reads about
-    // another. A machine reads ITS OWN out of the tree beside it — deploy-platform-services asks
-    // the file, not a branch it does not stand on.
+    // another. It is also the branch a pure slave's own checkout stands on, so the machine reads its
+    // own map out of the tree beside it without a second copy being written anywhere.
     const h = await makeHarness({ marking: false });
     h.db.db.insert(clusters).values({
       id: "cls_s3", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
     }).run();
     await stepOf(h, "mark-slave").run(hostedStepCtx(h));
 
-    const own = h.platformRepo.read(PARAMS.domain, clusterMapPath(PARAMS.domain));
-    const books = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain));
-    expect(own, "the machine's own branch carries its map").not.toBeNull();
-    // ONE MAP AND NOT TWO: written from one value in one act, so the branches cannot come to say
-    // different things about one cluster.
-    expect(own).toBe(books);
+    expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)), "the books carry it").not.toBeNull();
+    expect(h.platformRepo.read(PARAMS.domain, clusterMapPath(PARAMS.domain)), "and no branch of the machine's own name does").toBeNull();
+    expect(h.platformRepo.commits.every((c) => c.branch === h.platformRepo.booksBranch), "one branch was written").toBe(true);
   });
+
   it("mark-slave keeps what another writer recorded: a standing release pin survives the rewrite", async () => {
     const h = await makeHarness({
       marking: [

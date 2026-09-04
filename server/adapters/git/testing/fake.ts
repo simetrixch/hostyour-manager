@@ -4,7 +4,7 @@
 // (the release-kit writer) keeps a per-repoURL file map + a commit recorder.
 import { errNotFound } from "../../../kernel/errors.ts";
 import type { RepoReader, ClonedRepo, PlatformRepo, BranchScope, CommitInput, ConsumerRepo, ConsumerRepoSession } from "../port.ts";
-import { clusterMapPath, PLATFORM_VALUES_COMMON, PLATFORM_VALUES_DIR } from "../../../../shared/cluster-values.ts";
+import { CLUSTER_MAP_DIR, PLATFORM_VALUES_COMMON, PLATFORM_VALUES_DIR } from "../../../../shared/cluster-values.ts";
 import { STAGE } from "../../../../shared/enums.ts";
 
 /** The scripted content a FakeRepoReader serves for a single clone (the resolved SHA + the files). */
@@ -81,6 +81,38 @@ export class FakePlatformRepo implements PlatformRepo {
     this.store.set(`${branch}\0${path}`, content);
   }
 
+  /** ONE cluster's map, invented the first time something READS it off the books branch.
+   *
+   *  WHY THE BOOKS BRANCH AND WHY ON DEMAND. An installation keeps every cluster map on that one
+   *  branch — a cluster carrying only the slave part has no branch of its own — so a map materialized
+   *  per branch would stand where nothing reads it. It cannot be seeded up front either: that
+   *  branch's clusters/active/ IS the installation's cluster inventory, indexMarkings folds every
+   *  file in it, and two clusters whose first FQDN labels collide are a refusal by design — so a map
+   *  invented ahead of a read would add a cluster no test declared. Materializing exactly the one
+   *  path a reader ASKS for adds nothing nobody looked for, and it is stored, so the listing and the
+   *  read cannot come to disagree.
+   *
+   *  The map is a VALID marking as well as a values file: it is the LAST file of the values chain and
+   *  it is also what the cluster marking is read from, and a map that were only one of the two would
+   *  fail whichever reader a test did not have in mind.
+   *
+   *  unitApex rides along because it is not optional to a caller: the admission policy pins the
+   *  unit's ONE host to <name>.<unitApex>, so a chain without it fails the plan on a tree the test
+   *  never meant to be incomplete. Each cluster gets its OWN apex, which is what a unit standing at
+   *  two stages requires — provision-dns refuses a second stage whose host another cluster's address
+   *  already answers (domains/units/unit-dns.ts). A real install may well give two clusters one
+   *  apex, so a test that wants THAT world seeds the map itself (units/cluster-map.fixture.ts). */
+  private materializeMap(branch: string, relPath: string): string | null {
+    if (branch !== this.booksBranch || !this.materialized.has(branch)) return null;
+    const fqdn = relPath.startsWith(`${CLUSTER_MAP_DIR}/`) && relPath.endsWith(".yaml")
+      ? relPath.slice(CLUSTER_MAP_DIR.length + 1, -".yaml".length)
+      : "";
+    if (fqdn.length === 0 || fqdn.includes("/")) return null;
+    const map = `stage: prod\nrole: master\n\nglobal:\n  domain: ${fqdn}\n  buildPlane: ${fqdn}\n  unitApex: ${fqdn}\n  endpoints:\n    vault:\n      url: https://vault.${fqdn}:8200\n`;
+    this.seed(branch, relPath, map);
+    return map;
+  }
+
   /** seed's mirror, for a test that asserts what a run LEFT on a branch. Deliberately not a port
    *  method: peeking at the store is a test's business, and going through withBranch to do it would
    *  make an assertion queue behind the very turns it is asserting about. */
@@ -104,50 +136,30 @@ export class FakePlatformRepo implements PlatformRepo {
     return turn;
   }
 
-  // Every install branch carries the cluster values chain, so the fake materializes it the first
-  // time a branch is touched — a test that needs different values seeds over it. Without this the
-  // chain read that precedes every gate run would find nothing and fail on a branch the test never
-  // meant to be incomplete.
+  /** The branches whose standing content this fake invented, rather than a test seeding it. A test
+   *  that seeds the platform values itself is stating what its installation carries, and nothing
+   *  below then invents anything for that branch — which is how a test asks to observe an
+   *  INCOMPLETE tree. */
+  private readonly materialized = new Set<string>();
+
+  // An install branch carries the cluster values chain, so the fake materializes it the first time a
+  // branch is touched — a test that needs different values seeds over it. Without this the chain
+  // read that precedes every gate run would find nothing and fail on a branch the test never meant
+  // to be incomplete.
   private async runTurn<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T> {
     // The paths come from the chain definition itself, never from literals spelled here. While they
     // were literals, the fixture and the reader agreed with each other about a layout the repository
     // had stopped having: every test was green and the running system could read none of it.
     if (!this.store.has(`${branch}\0${PLATFORM_VALUES_COMMON}`)) {
+      this.materialized.add(branch);
       this.seed(branch, PLATFORM_VALUES_COMMON, "global:\n  timezone: Europe/Amsterdam\n");
       for (const stage of STAGE) {
         this.seed(branch, `${PLATFORM_VALUES_DIR}/values-${stage}.yaml`, `global:\n  env: ${stage}\n`);
       }
     }
-    // The cluster's own map is the LAST file of the chain and it is also the file the cluster
-    // marking is read from — one file, two readers, exactly as an install branch carries it. So the
-    // seeded map is a VALID marking as well as a values file: a map that were only one of the two
-    // would fail whichever reader a test did not have in mind, and indexMarkings folds every map on
-    // every read, so one unparseable map takes the whole read down.
-    //
-    // Seeded ONLY when absent, and separately from the platform files above: a test that writes its
-    // own map for this cluster is stating what that cluster is, and this must never overwrite it.
-    //
-    // NEVER on the books branch. That branch's clusters/active/ is the whole installation's cluster
-    // inventory — indexMarkings folds every file in it — so a map invented there would add a cluster
-    // no test declared, and two clusters whose first FQDN labels collide are a refusal by design.
-    // Which clusters the books branch knows is a thing tests state (units/cluster-map.fixture.ts).
-    //
-    // unitApex rides along because it is not optional to a caller: the admission policy pins the
-    // unit's ONE host to <name>.<unitApex>, so a chain without it fails the plan on a branch the
-    // test never meant to be incomplete. Each branch gets its OWN apex, which is what a unit
-    // standing at two stages requires — provision-dns refuses a second stage whose host another
-    // cluster's address already answers (domains/units/unit-dns.ts). A real install may well
-    // give two clusters one apex, so a test that wants THAT world seeds the map itself.
-    if (branch !== this.booksBranch && !this.store.has(`${branch}\0${clusterMapPath(branch)}`)) {
-      this.seed(
-        branch,
-        clusterMapPath(branch),
-        `stage: prod\nrole: master\n\nglobal:\n  domain: ${branch}\n  buildPlane: ${branch}\n  unitApex: ${branch}\n  endpoints:\n    vault:\n      url: https://vault.${branch}:8200\n`,
-      );
-    }
     return fn({
       branch,
-      readFile: async (relPath) => this.store.get(`${branch}\0${relPath}`) ?? null,
+      readFile: async (relPath) => this.store.get(`${branch}\0${relPath}`) ?? this.materializeMap(branch, relPath),
       // Immediate children of relPath on this branch, DERIVED from the seeded/committed store keys
       // (no extra script surface): every path under "<relPath>/" contributes its next segment.
       // Mirrors the real reader's non-recursive listing + absent-is-empty contract.

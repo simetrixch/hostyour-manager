@@ -81,24 +81,24 @@ export const STEP_NAMES = [
   "attest-target",
   "prove-elevation", "generate-key", "install-key", "verify-key-login", "enable-ntp", "remove-sudoers",
   "slave-preflight", "disable-password-login", "purge-bootstrap-password",
-  "prepare-checkouts", "run-deploy-slave-branch", "mark-slave",
+  "mark-slave",
   "place-ansiwise", "run-deploy-host", "refresh-checkout", "place-input", "run-deploy-cluster",
   "run-deploy-platform-services", "drop-input",
   "rejoin", "read-membership", "declare-tailnet-address", "enable-ansiwise-service", "create-mgmt",
   "gitops-handoff", "verify-slave", "register",
 ];
-/** The redeploy slave arm: the same list minus the one birth act — the branch cut with its checkout
- *  preparation — and with the outright join in the MEASURED form that reads the machine's membership
- *  and puts a machine holding none back on the network (`join-if-absent`).
+/** The redeploy slave arm: the SAME list, with the outright join in the MEASURED form that reads the
+ *  machine's membership and puts a machine holding none back on the network (`join-if-absent`).
  *
- *  NEITHER FIRST CONTACT NOR THE MEMBERSHIP READ IS SUBTRACTED, because neither is a birth act: every
- *  first-contact step measures before it acts, so on a live slave they read a key that is installed, a
- *  login that works and doors that are already shut, and each says so; and a redeploy owes the card a
- *  reading of the membership as much as a deployment does. What a redeploy holds back is their
- *  compensations, which redeploy.ansiwise.test.ts asserts off the run's own checkpoints. */
-export const REDEPLOY_STEP_NAMES = STEP_NAMES.flatMap((n) =>
-  n === "rejoin" ? ["join-if-absent"]
-    : ["prepare-checkouts", "run-deploy-slave-branch"].includes(n) ? [] : [n]);
+ *  NOTHING IS SUBTRACTED ANY MORE, and that is what dropping the slave branch left behind: the one
+ *  birth act this list used to hold was the branch cut with its checkout preparation, and a pure
+ *  slave has no branch to cut. Neither first contact nor the membership read was ever subtracted
+ *  either, because neither is a birth act: every first-contact step measures before it acts, so on a
+ *  live slave they read a key that is installed, a login that works and doors that are already shut,
+ *  and each says so; and a redeploy owes the card a reading of the membership as much as a
+ *  deployment does. What a redeploy holds back is their compensations, which
+ *  redeploy.ansiwise.test.ts asserts off the run's own checkpoints. */
+export const REDEPLOY_STEP_NAMES = STEP_NAMES.map((n) => n === "rejoin" ? "join-if-absent" : n);
 
 // The public half of the key `install-key` puts on the machine — deploy-host's operator_public_key answer is read
 // off the newest ssh_key credential's stored public line.
@@ -179,10 +179,9 @@ export interface HostsScript extends FirstContactScript {
   preflightOut: string;
   vaultCode: string;
   vaultExit: number;
-  // prepare-checkouts AND prepare-regeneration (master): LIVE_HEAD + WORK_HEAD lines. ONE field for
-  // two steps, because the two scripts assert the same two facts under the same stdout contract —
-  // WHICH branches they stand the checkouts on is decided in deploy-slave.remote.ts's two builders
-  // and proven there, not by a second scripted answer repeating the same two words.
+  // prepare-regeneration (the master arm): LIVE_HEAD + WORK_HEAD lines, the script's own stdout
+  // contract. WHICH branches it stands the checkouts on is decided where the script is built and
+  // proven there, not by a scripted answer repeating the same two words.
   checkoutsOut: string;
   checkoutsExit: number;
   refreshOut: string;     // refresh-checkout (slave): CHECKOUT_HEAD <old> <new>
@@ -405,7 +404,7 @@ export function hostsFactory(f: HostsScript): SshFactory {
         return done(placement.code);
       }
       // ---- the git upkeep around the programs
-      if (command.includes("dc-prepare-checkouts-") || command.includes("dc-prepare-regeneration-")) { emit(f.checkoutsOut); return done(f.checkoutsExit); }
+      if (command.includes("dc-prepare-regeneration-")) { emit(f.checkoutsOut); return done(f.checkoutsExit); }
       if (command.includes("dc-refresh-checkout-")) { emit(f.refreshOut); return done(f.refreshExit); }
       // ---- the two credential files the manager reads over the session and removes
       if (command.startsWith("cat ") && command.includes("ansiwise-cluster-credentials")) { emit(f.credsOut); return done(f.credsExit); }

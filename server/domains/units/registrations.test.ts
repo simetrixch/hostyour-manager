@@ -469,9 +469,9 @@ describe("clusterStageFromMarkings", () => {
 describe("Registrations.readClusterValueFiles", () => {
   it("reads the chain off the install branch in layering order", async () => {
     const repo = new FakePlatformRepo();
-    repo.seed("s1.example", "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
-    repo.seed("s1.example", "clusters/platform/values-prod.yaml", "global:\n  env: prod\n");
-    repo.seed("s1.example", clusterMapPath("s1.example"), "global:\n  endpoints:\n    vault:\n      url: https://vault.s1.example:8200\n");
+    repo.seed(repo.booksBranch, "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
+    repo.seed(repo.booksBranch, "clusters/platform/values-prod.yaml", "global:\n  env: prod\n");
+    repo.seed(repo.booksBranch, clusterMapPath("s1.example"), "global:\n  endpoints:\n    vault:\n      url: https://vault.s1.example:8200\n");
 
     const files = await new Registrations(repo, CLUSTERS).readClusterValueFiles("s1.example", "prod");
     expect(files.map((f) => f.path)).toEqual([
@@ -483,10 +483,10 @@ describe("Registrations.readClusterValueFiles", () => {
   });
 
   it("throws UPSTREAM when a chain file is missing", async () => {
-    // A branch that carries only part of the chain: seeding one file marks it materialized, so the
-    // fake's own default seed never fills the rest in.
+    // A books branch carrying only part of the chain: seeding one file states that this tree is the
+    // test's own, so the fake invents nothing else on it.
     const repo = new FakePlatformRepo();
-    repo.seed("bare.example", "clusters/platform/values-common.yaml", "global: {}\n");
+    repo.seed(repo.booksBranch, "clusters/platform/values-common.yaml", "global: {}\n");
     await expect(new Registrations(repo, CLUSTERS).readClusterValueFiles("bare.example", "prod")).rejects.toMatchObject({ code: "UPSTREAM" });
   });
 });

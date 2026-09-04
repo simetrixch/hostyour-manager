@@ -16,10 +16,10 @@ import {
 // there is always a second one, because hostyour-vault-unseal.timer asks the secret store whether it
 // is sealed every minute.
 //
-// SO THE WAIT CAN EXPIRE ON A RUN THAT IS PERFECTLY ALIVE. Measured on apps6: a deploy-slave-branch
-// run accepted at 15:53:06 wrote its header at 15:53:17 and finished green at 15:53:25, having cut
-// and pushed the slave's branch — while the manager, on a ten-second bound, had already failed the
-// step and stopped its own run at 12 of 28. What it said was that the run "started and died before
+// SO THE WAIT CAN EXPIRE ON A RUN THAT IS PERFECTLY ALIVE. Measured on apps6 in September 2026, on
+// the branch-cut program a slave deploy ran on the master back then: accepted at 15:53:06, header
+// written at 15:53:17, green at 15:53:25 — while the manager, on a ten-second bound, had already
+// failed the step and stopped its own run at 12 of 28. What it said was that the run "started and died before
 // its first step", which it had no way of knowing: the machine answers the SAME 404 for a run id it
 // never issued and for one whose child is still starting.
 //

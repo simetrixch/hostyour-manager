@@ -11,7 +11,7 @@ import { hasHardFailure } from "../../../shared/preflight.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
 import { credLabels, sealTokenOnce, newestCredId, statedTarget } from "./defs/deploy-slave.kit.ts";
 import { SLAVE_INSTALL_INPUTS } from "./defs/deploy-slave.ts";
-import { dataDiskFrom } from "./defs/deploy-slave.remote.ts";
+import { dataDiskFrom, HOST_ADDRESS_COMMAND } from "./defs/deploy-slave.remote.ts";
 import { registerStep } from "./defs/deploy-slave.verify.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import type { AnyRunDefinition, Step, StepCtx } from "../../executor/types.ts";
@@ -33,10 +33,11 @@ import { stepColumn } from "../../executor/run-rows.fixture.ts";
 // share records and collide).
 //
 // THE FAILURE MODES ARE ALSO WHERE THE ORDER OF FIRST CONTACT IS READ, and that is not a
-// coincidence: a run that dies at the preflight and a run that dies at prepare-checkouts have taken
-// a machine to two different states, and the difference between them IS the reason the two
-// irreversible acts stand where they do. Each of those two cases asserts what the machine was left
-// as, so the ordering is held by what a refusal leaves behind rather than by a list's shape.
+// coincidence: a run that dies at the preflight and a run that dies at mark-slave — the first step
+// past both irreversible acts — have taken a machine to two different states, and the difference
+// between them IS the reason those two acts stand where they do. Each of those two cases asserts
+// what the machine was left as, so the ordering is held by what a refusal leaves behind rather than
+// by a list's shape.
 
 describe("deploy-slave run — plan, guards, failure modes", () => {
   afterEach(disposeHarnesses);
@@ -52,9 +53,10 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
       { serverId: SLAVE_ID, ownsHost: true, label: "s1 (slave)" },
       { serverId: MASTER_ID, ownsHost: false, label: "m1 (master)" },
     ]);
-    // The locks: both git branches + the master's Vault and kube surfaces.
+    // The locks: the ONE git branch this installation has — the books, which is the master's own
+    // install branch and where every cluster map of the installation stands — plus the master's
+    // Vault and kube surfaces.
     expect(plan.locks).toEqual([
-      { resource: "git-branch", key: "s1.example.com" },
       { resource: "git-branch", key: "m1.example.com" },
       { resource: "master-vault", key: "m" },
       { resource: "master-kube", key: "m" },
@@ -265,8 +267,8 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(stepColumn(db, runId, "slave-preflight", "error")).toMatch(/Master Vault reachable/);
   });
 
-  it("prepare-checkouts fails NAMED when the master's checkouts cannot be stood where the branch cut reads — no program starts, no map is written", async () => {
-    const hosts = scriptedHosts({ checkoutsOut: "", checkoutsExit: 3 });
+  it("mark-slave fails NAMED when the machine lists no address of its own — no program starts, no map is written", async () => {
+    const hosts = scriptedHosts({ hostAddressesOut: "", hostAddressesExit: 0 });
     const { db, executor, store } = await makeHarness({ hosts });
     // A row sealed while the machine account's password was still kept beside it. That blob is a way
     // into the machine which outlives the daemon's own setting, and it is the second of the two
@@ -283,13 +285,13 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
     const run = getRun(db.db, runId);
     expect(run?.status).toBe("failed");
-    expect(run?.steps.find((s) => s.name === "prepare-checkouts")?.status).toBe("failed");
-    const error = stepColumn(db, runId, "prepare-checkouts", "error") ?? "";
-    expect(error).toContain("origin/m1.example.com");   // the live tree's branch, named
-    expect(error).toContain("product branch");          // the work tree's, named
-    expect(error).toContain("then retry the run");      // the fix is actionable
+    expect(run?.steps.find((s) => s.name === "mark-slave")?.status).toBe("failed");
+    const error = stepColumn(db, runId, "mark-slave", "error") ?? "";
+    expect(error).toContain("s1.example.com");          // the machine that answered nothing, named
+    expect(error).toContain(HOST_ADDRESS_COMMAND);      // what was asked of it, named
+    expect(error).toContain("global.nodeCidrs");        // the key that would have been written blind
     // WHERE THE RUN GOT TO, and it is the other half of the ordering the preflight case shows. This
-    // is the first step that can fail on the MASTER, so by here everything that could fail without
+    // is the first step past both irreversible acts, so by here everything that could fail without
     // this manager's own key has passed and both irreversible acts have run: the daemon takes no
     // password any more and the sealed one is destroyed. The machine is left reachable by this
     // manager and by nobody else — which is the state a retry of this same run needs, and the reason

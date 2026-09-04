@@ -85,9 +85,9 @@ import {
 // THE PLACEMENT IS WHY A MASTER COULD NOT BE BROUGHT FORWARD AT ALL. `placeAnsiwiseStep` had ONE call
 // site, in the slave install, so every engine, catalogue and machine-layer program an installed master
 // carried was whatever ansiwise-client left there at its first installation, and no run moved any of
-// them again. That is not an ageing problem: `cluster-deploy-slave` runs deploy-slave-branch ON THE
-// MASTER through the master's own ansiwise-rest, so a slave deploy already depends on a master's
-// machine layer being current, and nothing could make it current (hostyour-manager#69). The step is
+// them again. That is not an ageing problem: `cluster-deploy-slave` drives programs ON THE MASTER
+// through the master's own ansiwise-rest, so a slave deploy already depends on a master's machine
+// layer being current, and nothing could make it current (hostyour-manager#69). The step is
 // idempotent by measurement, which is what lets it run against a machine that already carries all
 // three.
 //
@@ -169,7 +169,7 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
     // what puts both at what clusters/platform/versions.yaml pins. A master whose engine drifted off
     // that pin is the state this run kind exists to end.
     placeAnsiwiseStep(target, ports),
-    ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(target, params.serverId, ports) }),
+    ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(params.serverId, ports) }),
     ...MASTER_ARM_PROGRAMS.map((program) => ansiwiseProgramStep(target, program, ports)),
     argocdFollowStep(target),
   ];

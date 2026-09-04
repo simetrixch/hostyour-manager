@@ -11,7 +11,7 @@ import {
   buildPlaneFqdnFromMarkings,
   projectClusterMarking,
   removeSlaveMarkingPart,
-  writeClusterMarkingOnBranch,
+  writeClusterMarking,
   CLUSTER_MARKING_FILE_KEYS,
 } from "./cluster-marking.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -198,9 +198,9 @@ describe("map rewrite — a writer keeps every value the map carried", () => {
   // not the four fields this module happens to name. The schema lets `global` through on purpose,
   // so a chart can add a value without failing every map read — but a writer that emits only what
   // it understands turns that permission into DATA LOSS the moment anything rewrites the file, and
-  // mark-slave rewrites a map on every deploy. Driven through writeClusterMarkingOnBranch, the
-  // rewrite every deploy makes onto the cluster's own branch — the same serializeMarking every
-  // writer of this file goes through.
+  // mark-slave rewrites a map on every deploy. Driven through writeClusterMarking, the one writer
+  // of this file, with ONE field moved so the write is not skipped as a no-op — the rewrite every
+  // deploy makes onto the books branch, which is the only branch an installation keeps maps on.
   const FULL_MAP = [
     "stage: prod", "role: master", "booksCluster: m1.example.com", `release: ${TAG}`, "",
     "global:",
@@ -238,8 +238,8 @@ describe("map rewrite — a writer keeps every value the map carried", () => {
   it("keeps every value the map carried, including the ones this module does not name", async () => {
     const repo = repoWith({ [MASTER]: FULL_MAP });
     const marking = await resolveClusterMarking(repo, MASTER);
-    await writeClusterMarkingOnBranch(repo, marking, MASTER, "run_1");
-    const after = repo.read(MASTER, clusterMapPath(MASTER)) ?? "";
+    await writeClusterMarking(repo, { ...marking, apiHost: "203.0.113.7" }, "run_1");
+    const after = repo.read(repo.booksBranch, clusterMapPath(MASTER)) ?? "";
 
     // Each of these is read by a chart. A rewrite that drops one leaves an installation whose charts
     // render against a value that is simply gone, and nothing between here and the render says so.
@@ -277,9 +277,9 @@ describe("map rewrite — a writer keeps every value the map carried", () => {
     const two = FULL_MAP.replace("['ops@example.com']", "['ops@example.com', 'oncall@example.com']");
     const repo = repoWith({ [MASTER]: two });
     const marking = await resolveClusterMarking(repo, MASTER);
-    await writeClusterMarkingOnBranch(repo, marking, MASTER, "run_1");
+    await writeClusterMarking(repo, { ...marking, apiHost: "203.0.113.7" }, "run_1");
 
-    const after = repo.read(MASTER, clusterMapPath(MASTER)) ?? "";
+    const after = repo.read(repo.booksBranch, clusterMapPath(MASTER)) ?? "";
     expect(after).toContain("alertRecipients: ['ops@example.com', 'oncall@example.com']");
     expect(after, "and never as one joined word").not.toContain("ops@example.com,oncall@example.com");
   });

@@ -331,9 +331,10 @@ describe("boot self-checks", () => {
     // How much it covered, not only that it found nothing. Two things make a clean answer worth
     // something: every run kind that drives a program is named, so one that stops being held is
     // visible as an absence, and a program the declaration does not state is named too — the
-    // declaration states no slave sequence on purpose, so the master-side branch cut is one of them.
+    // declaration states a master install sequence only, so a program belonging to a run kind of its
+    // own — tailnet-disconnect, tailnet-reconnect — is expected to be unstated.
     for (const kind of KINDS_DRIVING_PROGRAMS) expect(check?.detail, kind).toContain(kind);
-    expect(check?.detail).toContain("deploy-slave-branch");
+    expect(check?.detail).toContain("unstated: tailnet-disconnect");
   });
 
   // THE COUNTER-PROBE: the declaration edited and the manager not. Two of the programs the slave run

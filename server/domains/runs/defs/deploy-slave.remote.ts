@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PLATFORM_CHECKOUT, WORK_CHECKOUT } from "./machine-state.ts";
+import { PLATFORM_CHECKOUT } from "./machine-state.ts";
 
 // The REMOTE surface of the deploy-slave Run: the few shell scripts and kubectl commands the
 // steps still ship to the two hosts, plus the contracts they parse back. Everything that BUILDS
@@ -61,108 +61,6 @@ git -C "${PLATFORM_CHECKOUT}" reset --hard
 git -C "${PLATFORM_CHECKOUT}" checkout -B "${branch}" "origin/${branch}"
 new=$(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)
 echo "CHECKOUT_HEAD $old $new"
-`;
-}
-
-// THE TWO TREES A MERGE TAKES FROM THE TRUNK, and the reason a conflict inside them is not a
-// question for a person: neither one carries a decision the branch made.
-//
-// `clusters/bootstrap` is re-stamped whole by deploy-slave-branch immediately after the merge below.
-// Its stamp_placeholder_in_tracked_files rows name that tree and no other, and the single row that
-// walks the whole repository replaces `example.invalid` and nothing else. So whatever a branch
-// carries there is the STAMPED form of an older trunk, and the trunk's own version is what the
-// stamping expects to find — taking it is not a choice between two decisions, it is restoring the
-// input the next step reads.
-//
-// `clusters/argocd` is a Helm chart the reconciler renders from `clusters/active/<fqdn>.yaml` at
-// sync time, so no row stamps it and the branch is meant to hold the trunk's bytes unchanged. A
-// branch cut before that chart existed still carries the stamped `clusters/argocd/apps/`, and this
-// resolution is what replaces it with the chart — narrowing the paths below to `clusters/bootstrap`
-// leaves such a branch stopping on every file the chart moved.
-//
-// This is the same rule the catalogue's regenerate-branch program states as `toward_ref`, and its
-// absence here is what a slave hit: a branch stamped at 20:28 met a trunk that had rewritten the
-// ApplicationSet's role selector at 22:26, and git — which cannot know that `- slave` is the stamped
-// form of the two markers now standing there — stopped on it. Three run attempts ended in an
-// operator deleting the branch.
-//
-// EVERY OTHER PATH STILL STOPS THE RUN, and that is the whole point of naming the two rather than
-// merging with a strategy: `clusters/active/<branch>.yaml`, `configs/config.<stage>` and
-// `installation/values/*` are written on the branch and exist nowhere on the trunk, so a conflict
-// there is two decisions meeting and only a person can say which one stands.
-/** The merge of `trunkRef` into the branch checked out at `repo`, with a conflict inside the
- *  re-stamped trees resolved toward the trunk and a conflict anywhere else left to a person.
- *  Takes the path so a test can run it against a repository that is not /srv. */
-export function mergeTrunkScript(repo: string, trunkRef: string): string {
-  return `if ! git -C "${repo}" merge --no-edit ${trunkRef}; then
-  conflicted=$(git -C "${repo}" diff --name-only --diff-filter=U)
-  if [ -z "$conflicted" ]; then
-    git -C "${repo}" merge --abort >/dev/null 2>&1 || true
-    echo "the merge of ${trunkRef} into $(git -C "${repo}" rev-parse --abbrev-ref HEAD) stopped without naming a conflicted path, so there is nothing here to resolve — the checkout was not clean, or the merge itself was refused" >&2
-    exit 5
-  fi
-  outside=$(printf '%s\\n' "$conflicted" | grep -v -E '^clusters/(argocd|bootstrap)/' || true)
-  if [ -n "$outside" ]; then
-    git -C "${repo}" merge --abort
-    echo "the merge of ${trunkRef} stopped on $(printf '%s' "$outside" | tr '\\n' ' ') — these are written on the branch and stand nowhere on the trunk, so both sides decided something and only a person can say which stands. Nothing was changed." >&2
-    exit 6
-  fi
-  printf '%s\\n' "$conflicted" | while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    git -C "${repo}" checkout --theirs -- "$f"
-    git -C "${repo}" add -- "$f"
-  done
-  git -C "${repo}" commit --no-edit >/dev/null
-  echo "MERGE_RESOLVED $(printf '%s' "$conflicted" | tr '\\n' ' ')"
-fi`;
-}
-
-// prepare-checkouts (the step before deploy-slave-branch), run over the MASTER's session — the two
-// git states that program reads and refuses to establish itself:
-//
-//   1. the LIVE checkout on the head of the master's own install branch. The program copies the
-//      master's cluster map out of the COMMITTED state of the branch the live checkout stands on
-//      (its <branch> slot), so a stale checkout hands every slave an old map — the recorded live
-//      incident's shape.
-//   2. the WORK checkout at /srv/hostyour-cloud-slave STANDING on the product branch. The program's
-//      git_branch row refuses a checkout standing anywhere else rather than moving it, which is
-//      also what keeps it from ever cutting in the live checkout by mistake — so the caller stands
-//      it there, cloned from the live checkout's own origin when it does not exist yet. A leftover
-//      local branch of the slave's name is deleted so the cut regenerates rather than resumes onto
-//      a snapshot of an older trunk.
-//
-// stdout contract: `LIVE_HEAD <short>` + `WORK_HEAD <short>` (secret-free).
-export function masterCheckoutsScript(o: { masterFqdn: string; slaveFqdn: string }): string {
-  return `#!/usr/bin/env bash
-set -euo pipefail
-[ -d "${PLATFORM_CHECKOUT}/.git" ] || { echo "no platform checkout at ${PLATFORM_CHECKOUT} on the master — the machine's installation puts it there" >&2; exit 3; }
-git -C "${PLATFORM_CHECKOUT}" fetch origin
-git -C "${PLATFORM_CHECKOUT}" reset --hard
-git -C "${PLATFORM_CHECKOUT}" checkout -B "${o.masterFqdn}" "origin/${o.masterFqdn}"
-echo "LIVE_HEAD $(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)"
-if [ ! -d "${WORK_CHECKOUT}/.git" ]; then
-  origin=$(git -C "${PLATFORM_CHECKOUT}" remote get-url origin)
-  git clone "$origin" "${WORK_CHECKOUT}"
-fi
-git -C "${WORK_CHECKOUT}" fetch origin
-git -C "${WORK_CHECKOUT}" reset --hard
-git -C "${WORK_CHECKOUT}" checkout -B master origin/master
-git -C "${WORK_CHECKOUT}" clean -fd
-git -C "${WORK_CHECKOUT}" branch -D "${o.slaveFqdn}" >/dev/null 2>&1 || true
-# A BRANCH THAT IS ALREADY PUBLISHED IS THE ONE THIS MACHINE CUT BEFORE, and the cut has to grow
-# from it rather than beside it. Cut fresh from master every time, the new tip shares no history
-# with what stands on the remote, and the push at the last row is refused as a non-fast-forward —
-# after the branch was cut, the files stamped and the commit made (apps4, three attempts on
-# 2026-08-29, each one an operator deleting a branch by hand to get past it).
-#
-# So where one exists, this stands on it and merges today's master in. git_branch then finds the
-# branch checked out and is a no-op, the rows re-stamp what an installation is described by, and
-# the commit lands on top of what is published — which is what a push can carry.
-if git -C "${WORK_CHECKOUT}" ls-remote --exit-code --heads origin "${o.slaveFqdn}" >/dev/null 2>&1; then
-  git -C "${WORK_CHECKOUT}" checkout -B "${o.slaveFqdn}" "origin/${o.slaveFqdn}"
-${mergeTrunkScript(WORK_CHECKOUT, "origin/master")}
-fi
-echo "WORK_HEAD $(git -C "${WORK_CHECKOUT}" rev-parse --short HEAD)"
 `;
 }
 

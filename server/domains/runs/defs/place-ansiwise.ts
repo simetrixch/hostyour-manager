@@ -702,7 +702,7 @@ async function readServiceToken(machine: PlacementMachine, elevationPassword: st
  *  already carries one exactly as it stands.
  *
  *  WHY A MACHINE CAN HAVE NONE. The token is minted and materialized by two rows of
- *  deploy-platform-services, and both carry `when: [secret_store_enabled, books_here_in_config]` —
+ *  deploy-platform-services, and both carry `when: [secret_store_enabled, books_here_in_answers]` —
  *  the secret store is the books cluster's, and a cluster that keeps no books has neither. So on a
  *  slave those rows are SKIPPED, the program still reports green, and SERVICE_TOKEN_FILE never comes
  *  into being. machine-state.ts records that file as handed over `elsewhere`, which was true of every

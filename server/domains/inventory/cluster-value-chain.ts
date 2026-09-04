@@ -17,15 +17,20 @@ import { clusterValueChainPaths, type ClusterValueFile } from "../../../shared/c
 import type { Stage } from "../../../shared/enums.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 
-/** Read `domain`'s values chain off its install branch, in layering order. The branch IS the
- *  domain — an install branch is named after the cluster's FQDN. */
+/** Read `domain`'s values chain off the installation's books branch, in layering order.
+ *
+ *  THE BRANCH IS THE BOOKS AND NOT THE DOMAIN. An installation has exactly one install branch — the
+ *  one named after the cluster carrying the master part — and every cluster map of the installation
+ *  stands on it, a pure slave's included, because a pure slave has no branch of its own. Reading a
+ *  cluster's chain off a branch named after that cluster therefore answered for the master and threw
+ *  for every other cluster, which is every tenant and every app onboarded onto a slave. */
 export async function readClusterValueChain(repo: PlatformRepo, domain: string, stage: Stage): Promise<ClusterValueFile[]> {
-  return repo.withBranch(domain, async (cluster) => {
+  return repo.withBranch(repo.booksBranch, async (cluster) => {
     const files: ClusterValueFile[] = [];
     for (const path of clusterValueChainPaths(domain, stage)) {
       const content = await cluster.readFile(path);
       if (content === null) {
-        throw new AppError("UPSTREAM", `install branch ${domain} carries no ${path} — the cluster values chain is incomplete`);
+        throw new AppError("UPSTREAM", `${repo.booksBranch} carries no ${path} — the cluster values chain for ${domain} is incomplete`);
       }
       files.push({ path, content });
     }

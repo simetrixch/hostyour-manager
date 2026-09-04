@@ -11,7 +11,7 @@ import { inputFile } from "./machine-state.ts";
 // secrets/secrets.<stage> is the one hand-filled input of an installation. It is gitignored, so it
 // cannot travel on a branch, and it is written by deploy-branch and regenerate-branch — the branch
 // programs of the cluster that keeps the books — and by nothing else. Everything seeded out of it
-// into the secret store belongs to that cluster and now says so (books_here_in_config, in the
+// into the secret store belongs to that cluster and now says so (books_here_in_answers, in the
 // catalogue's deploy-platform-services).
 //
 // ONE ROW IS THE EXCEPTION, and gating it the same way would be wrong because a cluster keeping no

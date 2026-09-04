@@ -186,7 +186,7 @@ export function masterSelfTarget(serverId: string, stated: { domain: string; sta
  *  run_01M1NP396FB7E7DHCRQ3F10E59, which deleted the platform-acme issuer and reported itself
  *  green. So this one is passed unconditionally, and a map that does not name it stops the run. */
 export function branchAnswers(target: SlaveTarget, serverId: string, ports: DeploySlavePorts): ExtraAnswers {
-  const checkout = checkoutAnswers(target, ports);
+  const checkout = checkoutAnswers(ports);
   return async (ctx) => {
     const { domain } = target.resolve(ctx.db);
     const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
@@ -328,7 +328,7 @@ export function masterSlavePartSteps(params: DeploySlaveParams, ports: DeploySla
     // machine's own surface, each dry-proven then run. deploy-host is owed the two checkout answers
     // and the public half of the key this manager reaches the machine with, which is why it stands
     // apart from the two below rather than in a list with them.
-    ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(target, sid, ports) }),
+    ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(sid, ports) }),
     ansiwiseProgramStep(target, "deploy-cluster", ports, { extra: machineAnswers }),
     ansiwiseProgramStep(target, "deploy-platform-services", ports, { extra: machineAnswers }),
     // What the cluster's own reconciler makes of the branch it now stands on. A cluster carrying the
