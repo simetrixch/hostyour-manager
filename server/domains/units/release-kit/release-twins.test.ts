@@ -69,15 +69,19 @@ function bashCandidates(): string[] {
   return [...where("bash"), ...besideGit];
 }
 
-/** Can this bash run a SCRIPT FILE named by a path of this filesystem? Asked as the thing it will
- *  actually be asked to do, because a name on the PATH is not the same question: an interpreter that
- *  cannot take such a path answers every scenario below with its own error, and the comparison would
- *  be between two failures. */
+/** Every line the asset prints opens with this, through `warn` and `die`. An interpreter that could
+ *  not run it prints its own error instead, and that is what the probe below tells apart. */
+const SAYS = "release: ";
+
+/** Can this bash run THE ASSET, named by a path of this filesystem, far enough to reach the asset's
+ *  own refusal? Asked as the thing every scenario below asks of it, because neither a name on the
+ *  PATH nor a script of our own is that question. Two interpreters on this machine run a plain
+ *  script and not this one: the WSL launcher takes no path of this filesystem at all, and a BusyBox
+ *  `bash.exe` on the PATH answers `syntax error: unexpected "("` on the `[[ ]]` the asset validates
+ *  its version with. Either would make every comparison below one between two failures. The refusal
+ *  is only read as far as the prefix, so the scenario that asserts its bytes can still go red. */
 function bashRuns(bash: string): boolean {
-  const dir = tempDir();
-  const probe = join(dir, "probe.sh");
-  writeFileSync(probe, "printf ok\n");
-  return run(bash, [probe], dir).stdout === "ok";
+  return run(bash, [SCRIPTS.sh, "1.2", "stable", "dev"], tempDir()).stderr.startsWith(SAYS);
 }
 
 /** The same question of pwsh, which is how the twin is started here and on a consumer's machine. */
@@ -243,7 +247,7 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   if (!BOTH) {
     // eslint-disable-next-line no-console -- a skipped comparison must be loud: a silent skip reads as a pass
     console.warn(
-      `no ${!USABLE.sh ? `bash of ${bashCandidates().join(", ") || "(none found)"}` : "pwsh"} runs a script file named by ` +
+      `no ${!USABLE.sh ? `bash of ${bashCandidates().join(", ") || "(none found)"}` : "pwsh"} runs the asset named by ` +
       "a path of this filesystem — install one, or the two spellings of the release script have never been run against " +
       "each other on this machine",
     );
