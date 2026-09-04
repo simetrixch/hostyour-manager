@@ -485,6 +485,14 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // key file was read and removed there — the same host the join then ran on.
     const serves = h.hosts.log.filter((l) => isServe(l.command)).map((l) => l.host);
     expect(serves).toEqual(["m1.example.com", "m1.example.com"]);
+    // WHAT THE MACHINE WAS TOLD IT IS, all three facts, off its own cluster row — the mint's
+    // conversation and the join's alike. The engine defaults the stage to `dev` and writes that word
+    // into the record of every run the machine keeps, so a serve that leaves it unsaid makes a prod
+    // installation keep records saying dev: measured on apps6, whose deploy-slave-branch record
+    // 20260903T220006Z-227727-07d5f8a7 carries "stage": "dev" while its own map says prod.
+    for (const c of h.hosts.log.filter((l) => isServe(l.command)).map((l) => l.command)) {
+      expect(c, c).toContain("--role master+slave --fqdn m1.example.com --stage prod");
+    }
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "cat /tmp/ansiwise-tailnet-join-key-m1")).toBe(true);
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "rm -f /tmp/ansiwise-tailnet-join-key-m1")).toBe(true);
 

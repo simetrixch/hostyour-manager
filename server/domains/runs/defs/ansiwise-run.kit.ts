@@ -1,3 +1,5 @@
+import type { Db } from "../../../db/client.ts";
+import type { servers } from "../../../db/schema/inventory.ts";
 import type { Step, StepCtx } from "../../../executor/types.ts";
 import type { SshSession } from "../../../adapters/ssh/port.ts";
 import type { ReleaseDownloads } from "../../../adapters/downloads/port.ts";
@@ -6,7 +8,7 @@ import { AnsiwiseClient } from "../../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../../../adapters/ansiwise/port.ts";
 import type { Stage } from "../../../../shared/enums.ts";
 import { MACHINE_PASSWORD_SECRET } from "../../../../shared/approve.ts";
-import { loadServer, loadMaster, masterFqdnOf, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { loadServer, loadMaster, masterFqdnOf, masterStageOf, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { CATALOG_CHECKOUT, CATALOG_PROGRAMS } from "./machine-state.ts";
 
 // Driving one ansiwise PROGRAM on a machine, through the machine's own REST surface — the step
@@ -127,11 +129,11 @@ export function requireServeCommand(ports: AnsiwisePorts): string {
       `stdio, e.g. \`cd ${CATALOG_CHECKOUT} && ~/ansiwise-rest serve --programs ${CATALOG_PROGRAMS}\``,
     );
   }
-  if (/(^|\s)--(role|fqdn)(\s|=)/.test(ports.ansiwiseServeCommand)) {
+  if (/(^|\s)--(role|fqdn|stage)(\s|=)/.test(ports.ansiwiseServeCommand)) {
     throw errNotConfigured(
-      "ANSIWISE_SERVE_COMMAND names --role or --fqdn, and those two are not the installation's to state: one command " +
-      "serves every machine this manager reaches, while what a machine IS differs per machine and is written on its " +
-      "inventory row. This manager appends both from that row — take them out of the configured command",
+      "ANSIWISE_SERVE_COMMAND names --role, --fqdn or --stage, and those three are not the installation's to state: one " +
+      "command serves every machine this manager reaches, while what a machine IS differs per machine and is written on " +
+      "its inventory row. This manager appends all three from that row — take them out of the configured command",
     );
   }
   return ports.ansiwiseServeCommand;
@@ -155,11 +157,23 @@ export interface ServeMachine {
   role: string;
   /** The domain the machine's cluster is known by. */
   fqdn: string;
+  /** The `stage` column of that same cluster row, where the caller carries one.
+   *
+   *  THE ENGINE WRITES IT INTO EVERY RECORD A RUN LEAVES ON THE MACHINE, and defaults it to `dev`
+   *  (ansiwise-cli lib/installation.dart, `stageOption`). A serve started without it therefore
+   *  records `dev` on a prod installation — measured on apps6, a prod master, whose deploy-slave
+   *  branch run 20260903T220006Z-227727-07d5f8a7 carries `"stage": "dev"`. Nothing in this manager
+   *  reads that field back, which is precisely why a wrong value survives a rebuild: a record is
+   *  what somebody reaches for once the machine is no longer in the state that produced it.
+   *
+   *  Absent where the caller states no domain either: both come off the cluster row, and a host
+   *  this manager carries no row for has neither to state. */
+  stage?: Stage;
 }
 
-/** `--role X --fqdn Y`, refused rather than quoted where either is not one plain word. The command
- *  is a shell line on the machine, and a value that cannot stand in one is a value this must not
- *  send — the same rule place-ansiwise.ts states for every word it composes. */
+/** `--role X --fqdn Y --stage Z`, refused rather than quoted where a value is not one plain word.
+ *  The command is a shell line on the machine, and a value that cannot stand in one is a value this
+ *  must not send — the same rule place-ansiwise.ts states for every word it composes. */
 export function serveIdentity(machine: ServeMachine): string {
   const word = (what: string, value: string): string => {
     if (!/^[A-Za-z0-9._+-]+$/.test(value)) {
@@ -171,14 +185,24 @@ export function serveIdentity(machine: ServeMachine): string {
     }
     return value;
   };
-  // THE ROLE IS ALWAYS SAID AND THE DOMAIN ONLY WHERE THERE IS ONE. A host reached for a repair
-  // carries no cluster at all — the two tailnet run kinds that put a membership back state in their
-  // own words that they need none — so demanding a domain there would refuse the very hosts those
-  // runs exist for. Left unsaid it stays the binary's own default, the empty text, which is what
-  // every such run has always been given; the role is the fact that was missing.
+  // THE ROLE IS ALWAYS SAID AND THE CLUSTER'S TWO FACTS ONLY WHERE THERE IS A CLUSTER. A host
+  // reached for a repair carries none at all — the two tailnet run kinds that put a membership back
+  // state in their own words that they need none — so demanding a domain there would refuse the very
+  // hosts those runs exist for. Left unsaid each stays the binary's own default, the empty text and
+  // `dev`; the role is the fact that was missing.
   const parts = [`--role ${word("role", machine.role)}`];
   if (machine.fqdn.length > 0) parts.push(`--fqdn ${word("fqdn", machine.fqdn)}`);
+  if (machine.stage !== undefined) parts.push(`--stage ${word("stage", machine.stage)}`);
   return parts.join(" ");
+}
+
+/** What the MASTER is, composed in ONE place. Every step that drives a program on the master states
+ *  the same three facts, and the domain and the stage come off the same cluster row — composed
+ *  apart, a caller can state the domain and leave the stage to the engine's default, which is the
+ *  defect that put `"stage": "dev"` in every record a prod master has ever written. */
+export function masterMachine(db: Db, master: typeof servers.$inferSelect): ServeMachine {
+  const stage = masterStageOf(db, master);
+  return { role: master.role, fqdn: masterFqdnOf(db, master), ...(stage !== undefined ? { stage } : {}) };
 }
 
 /** One phase's progress, persisted so a re-entry re-attaches instead of re-starting. `seen` is
@@ -279,13 +303,13 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
 
       const master = opts.onMaster ? loadMaster(ctx.db) : undefined;
       const session = master ? await ctx.ssh(master.id) : await ctx.ssh();
-      // THE ROLE COMES OFF THE SERVER ROW, WHICH ALWAYS STANDS; the domain is only stated for the
-      // master, whose own is a fact of the installation. A step's target may carry no cluster at all
-      // — the two tailnet repairs say so in their own words — so resolving one here to name a domain
-      // would refuse the very hosts those runs exist for. Unsaid, it stays the binary's default,
-      // which is what every run has been given until now.
+      // THE ROLE COMES OFF THE SERVER ROW, WHICH ALWAYS STANDS; the domain and the stage are only
+      // stated for the master, whose cluster row carries both and is a fact of the installation. A
+      // step's target may carry no cluster at all — the two tailnet repairs say so in their own words
+      // — so resolving one here to name a domain would refuse the very hosts those runs exist for.
+      // Unsaid, each stays the binary's default, which is what every run has been given until now.
       const machine: ServeMachine = master
-        ? { role: master.role, fqdn: masterFqdnOf(ctx.db, master) }
+        ? masterMachine(ctx.db, master)
         : { role: loadServer(ctx.db, target.serverId).role, fqdn: "" };
       const conversation = await openServeConversation(ctx, session, ports, signal, machine);
       try {

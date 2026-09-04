@@ -116,6 +116,11 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // it stands: a row naming both parts is sent whole, because the engine reads a role's PARTS and
       // a program declared for either one applies (appliesTo, ansiwise-core program.dart).
       for (const [cmds, want] of [[slave, "--role slave"], [master, "--role master --fqdn m1.example.com"]] as const) for (const c of cmds.filter(isServe)) expect(c, c).toContain(want);
+      // THE STAGE TRAVELS WITH THE DOMAIN wherever the CLUSTER ROW states both. This master carries
+      // no such row, so its domain is the fallback (servers.host) and there is no stage to state;
+      // the slave's own two conversations name its cluster and carry its stage with it.
+      for (const c of slave.filter(isServe)) expect(/ --fqdn \S+/.test(c), c).toBe(/ --stage \S+/.test(c));
+      expect(slave.filter(isServe).some((c) => c.includes("--fqdn s1.example.com --stage prod"))).toBe(true);
       expect(master.findIndex((c) => c.includes("dc-prepare-checkouts-"))).toBeLessThan(master.findIndex(isServe));
 
       // THE ONE-ADDRESS LAW, on the record: the map the run committed carries the same spelling the

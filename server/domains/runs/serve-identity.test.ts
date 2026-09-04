@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { serveIdentity, requireServeCommand } from "./defs/ansiwise-run.kit.ts";
+import type { Stage } from "../../../shared/enums.ts";
 
 // WHAT A MACHINE IS, SAID TO THE BINARY THAT SERVES IT.
 //
@@ -12,25 +13,36 @@ import { serveIdentity, requireServeCommand } from "./defs/ansiwise-run.kit.ts";
 // `emit-cluster-credentials applies to slave, and this machine is master`, well into the
 // deployment, because every program before it applies to both parts.
 
-describe("serveIdentity — the two facts a serve cannot default", () => {
-  it("says the role and the domain, in the form the binary takes", () => {
-    expect(serveIdentity({ role: "slave", fqdn: "apps4.digitacloud.app" }))
-      .toBe("--role slave --fqdn apps4.digitacloud.app");
+describe("serveIdentity — the three facts a serve cannot default", () => {
+  it("says the role, the domain and the stage, in the form the binary takes", () => {
+    expect(serveIdentity({ role: "slave", fqdn: "apps4.digitacloud.app", stage: "prod" }))
+      .toBe("--role slave --fqdn apps4.digitacloud.app --stage prod");
   });
 
   it("carries a role of two parts as it stands, because that is what the machine is", () => {
     // A machine can hold both parts; the engine reads the role's parts and a program naming either
     // applies. Splitting or shortening it here would be this module deciding what a machine is.
-    expect(serveIdentity({ role: "master+slave", fqdn: "apps3.digitacloud.app" }))
-      .toBe("--role master+slave --fqdn apps3.digitacloud.app");
+    expect(serveIdentity({ role: "master+slave", fqdn: "apps3.digitacloud.app", stage: "test" }))
+      .toBe("--role master+slave --fqdn apps3.digitacloud.app --stage test");
   });
 
   it("says the role alone for a host that carries no cluster, because a repair reaches such hosts", () => {
     // cluster-tailnet-disconnect and cluster-tailnet-reconnect state in their own words that they
     // need no cluster row: they put a membership back on a host that may have none. Demanding a
     // domain there would refuse exactly the hosts those runs exist for, and the binary's own default
-    // for it — the empty text — is what every such run has always been given.
+    // for it — the empty text — is what every such run has always been given. The stage comes off
+    // that same absent row, so it is unsaid there too.
     expect(serveIdentity({ role: "slave", fqdn: "" })).toBe("--role slave");
+  });
+
+  it("states the stage where there is a cluster row, and nothing at all where there is none", () => {
+    // The engine defaults --stage to `dev` (ansiwise-cli lib/installation.dart), and it writes that
+    // word into the record of every run the machine performs. Measured on apps6, a prod master:
+    // record 20260903T220006Z-227727-07d5f8a7 carries "stage": "dev". Nothing reads the field back,
+    // which is why the wrong value survived a rebuild — so what holds it is this, not a consumer.
+    expect(serveIdentity({ role: "master", fqdn: "apps6.digitacloud.app", stage: "prod" }))
+      .toContain("--stage prod");
+    expect(serveIdentity({ role: "master", fqdn: "apps6.digitacloud.app" })).not.toContain("--stage");
   });
 
   it("PLANTED DEFECT: a value that is not one plain word is refused, never quoted", () => {
@@ -40,6 +52,9 @@ describe("serveIdentity — the two facts a serve cannot default", () => {
       expect(() => serveIdentity({ role: bad, fqdn: "apps4.example" }), bad).toThrow(/not one plain word/);
       expect(() => serveIdentity({ role: "slave", fqdn: bad }), bad).toThrow(/not one plain word/);
       expect(() => serveIdentity({ role: "", fqdn: "apps4.example" })).toThrow(/not one plain word/); // a role is never absent
+      // The stage is a Stage today, so the compiler already refuses a line like this one; the guard
+      // stands for the same reason the other two do, because what reaches the machine is a shell line.
+      expect(() => serveIdentity({ role: "slave", fqdn: "apps4.example", stage: bad as Stage }), bad).toThrow(/not one plain word/);
     }
   });
 });
@@ -54,7 +69,7 @@ describe("requireServeCommand — whose statement the role is", () => {
     // One command serves every machine this manager reaches, and what a machine IS differs per
     // machine. A role in the configuration would be right for one machine and silently wrong for
     // every other — and the one it is wrong for fails fifteen steps into a deployment.
-    for (const bad of ["... serve --role master", "... serve --fqdn=x.example", "... serve --role=slave --programs p"]) {
+    for (const bad of ["... serve --role master", "... serve --fqdn=x.example", "... serve --role=slave --programs p", "... serve --stage dev"]) {
       expect(() => requireServeCommand({ ansiwiseServeCommand: bad }), bad).toThrow(/not the installation's to state/);
     }
   });

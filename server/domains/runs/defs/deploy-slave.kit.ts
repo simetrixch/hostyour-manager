@@ -164,6 +164,15 @@ export function masterFqdnOf(db: Db, master: typeof servers.$inferSelect): strin
   return cluster?.domain ?? master.host;
 }
 
+/** The stage of that same cluster row, and nothing in its place where the master carries no row.
+ *  There is no fallback the way `servers.host` stands in for the domain: which stage an installation
+ *  is, is stated in one place and nowhere else, so a master with no cluster row leaves it unsaid
+ *  rather than claiming one. Its one caller writes `--stage` onto the command that serves the
+ *  machine, where an unsaid stage stays the engine's own default (`dev`). */
+export function masterStageOf(db: Db, master: typeof servers.$inferSelect): Stage | undefined {
+  return db.select().from(clusters).where(eq(clusters.serverId, master.id)).get()?.stage;
+}
+
 /** The cluster row is the cross-step channel (attest-target's tx allocated the ordinal onto
  *  it). Returns the FULL row (register keeps provisionedAt stable across re-runs), with
  *  slaveId narrowed to number. */

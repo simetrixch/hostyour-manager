@@ -12,9 +12,9 @@ import { recordTailnetReading } from "../tailnet-probe.ts";
 import { clusterShortName } from "../../inventory/cluster-marking.ts";
 import { dropCoordinatorNodes } from "./tailnet.coordinator.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
-import { activeClusterTarget, loadMaster, loadServer, masterFqdnOf, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { activeClusterTarget, loadMaster, loadServer, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import {
-  ansiwiseProgramStep, composeAnswers, openServeConversation, programPhase, requireElevationPassword,
+  ansiwiseProgramStep, composeAnswers, masterMachine, openServeConversation, programPhase, requireElevationPassword,
   ANSIWISE_ELEVATION_SECRET, ANSIWISE_PROGRAM_TIMEOUT_MS, type AnsiwisePorts, type ProgramCheckpoint,
 } from "./ansiwise-run.kit.ts";
 
@@ -210,7 +210,7 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
     name: "rejoin",
     title: "Mint on the master, then log the host out and join it again (one program run)",
     run: async (ctx) => {
-      const { domain } = target.resolve(ctx.db);
+      const { domain, stage } = target.resolve(ctx.db);
       const password = requireElevationPassword(ctx);
       const cp = ctx.readCheckpoint<ProgramCheckpoint>() ?? { program: REJOIN_PROGRAM };
       const save = (): void => ctx.checkpoint(cp);
@@ -246,9 +246,8 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
           //
           // The coordinator's USER for this machine stays, with its keys: the mint is idempotent
           // against a standing credential, and destroying the user would mint a fresh one every run.
-          await dropCoordinatorNodes(ctx, mSession, target.resolve(ctx.db).stage, clusterShortName(domain));
-          const mint = await openServeConversation(ctx, mSession, ports, signal,
-            { role: loadMaster(ctx.db).role, fqdn: masterFqdnOf(ctx.db, loadMaster(ctx.db)) });
+          await dropCoordinatorNodes(ctx, mSession, stage, clusterShortName(domain));
+          const mint = await openServeConversation(ctx, mSession, ports, signal, masterMachine(ctx.db, master));
           try {
             const mintCp: ProgramCheckpoint = { program: MINT_PROGRAM };
             const nosave = (): void => undefined;
@@ -276,7 +275,7 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
         }
         const session = await ctx.ssh();
         const conversation = await openServeConversation(ctx, session, ports, signal,
-          { role: loadServer(ctx.db, serverId).role, fqdn: domain });
+          { role: loadServer(ctx.db, serverId).role, fqdn: domain, stage });
         try {
           const answers = await composeAnswers(ctx, conversation.client, REJOIN_PROGRAM, target, signal, async () => fresh);
           const dry = await programPhase(ctx, conversation.client, cp, "dry", { program: REJOIN_PROGRAM, answers, password, signal, save });

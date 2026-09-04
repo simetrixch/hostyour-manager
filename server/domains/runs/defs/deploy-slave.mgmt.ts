@@ -10,7 +10,7 @@ import type { Stage } from "../../../../shared/enums.ts";
 import { removeSlaveMarkingPart } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import {
-  openServeConversation, composeAnswers, programPhase, requireElevationPassword,
+  openServeConversation, composeAnswers, masterMachine, programPhase, requireElevationPassword,
   ANSIWISE_PROGRAM_TIMEOUT_MS, type AnsiwisePorts, type ProgramCheckpoint,
 } from "./ansiwise-run.kit.ts";
 import {
@@ -103,7 +103,7 @@ export function createMgmtStep(target: SlaveTarget, ports: DeploySlavePorts & An
     name: "create-mgmt",
     title: "Create the master-side slave-management plane (emit on the slave, register on the master)",
     run: async (ctx) => {
-      const { domain } = target.resolve(ctx.db);
+      const { domain, stage } = target.resolve(ctx.db);
       const server = loadServer(ctx.db, target.serverId);
       const master = loadMaster(ctx.db);
       const cluster = requireSlaveCluster(ctx.db, domain);
@@ -138,7 +138,7 @@ export function createMgmtStep(target: SlaveTarget, ports: DeploySlavePorts & An
         if (cp.live === undefined) {
           const slave = await ctx.ssh(); // the run's ownsHost target
           const emit = await openServeConversation(ctx, slave, ports, signal,
-            { role: loadServer(ctx.db, target.serverId).role, fqdn: domain });
+            { role: loadServer(ctx.db, target.serverId).role, fqdn: domain, stage });
           try {
             const emitCp: ProgramCheckpoint = { program: EMIT_PROGRAM };
             const nosave = (): void => undefined;
@@ -187,8 +187,7 @@ export function createMgmtStep(target: SlaveTarget, ports: DeploySlavePorts & An
         }
 
         const mSession = await ctx.ssh(master.id); // the AUX target — declared in `targets`
-        const conversation = await openServeConversation(ctx, mSession, ports, signal,
-          { role: master.role, fqdn: masterFqdnOf(ctx.db, master) });
+        const conversation = await openServeConversation(ctx, mSession, ports, signal, masterMachine(ctx.db, master));
         try {
           const answers = await composeAnswers(ctx, conversation.client, REGISTER_PROGRAM, target, signal,
             async () => ({ slave_fqdn: domain, master_fqdn: masterFqdnOf(ctx.db, loadMaster(ctx.db)), api_server_url: apiServerUrl, ...fresh }));
@@ -248,8 +247,7 @@ export function removeSlaveCleanup(ports: DeploySlavePorts & AnsiwisePorts): Cle
       const session = await ctx.ssh(master.id);
       const budget = AbortSignal.timeout(ANSIWISE_PROGRAM_TIMEOUT_MS);
       const signal = AbortSignal.any([ctx.signal, budget]);
-      const conversation = await openServeConversation(ctx, session, ports, signal,
-        { role: master.role, fqdn: masterFqdnOf(ctx.db, master) });
+      const conversation = await openServeConversation(ctx, session, ports, signal, masterMachine(ctx.db, master));
       try {
         // The cluster row may already be gone or parked — the answers need only what the params
         // state, so the target is the stated one, never the active-cluster lookup.
