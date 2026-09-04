@@ -65,6 +65,7 @@ $ErrorActionPreference = 'Stop'
 function Write-Line($m) { [Console]::Out.Write("$m`n") }
 function Say($m) { Write-Line "release: $m" }
 function Warn($m) { [Console]::Error.Write("release: $m`n") }
+function Note($m) { [Console]::Error.Write("$m`n") }
 function Die($m) { Warn $m; exit 1 }
 
 # THE PIN GRAMMAR AND NOTHING ELSE: builds[]{name,image,tag}, in the values file of the stage this
@@ -343,7 +344,16 @@ try {
     if ($LASTEXITCODE -ne 0) {
       # 75 and not Die's 1: a build that ran and failed is a different answer from a release that
       # was refused, and the bash twin says so with the same number.
-      Warn "the images of $tag did not build - no pin was written. Read the run: gh run view $runId --log-failed"
+      # THE REASON IS PRINTED HERE, not left to a command somebody is told to run next. Whoever
+      # reads this failure is standing at a terminal with the credential already in hand, and a
+      # release that sends them one round trip away for the cause has answered nothing. The FAILED
+      # STEPS and not the whole log: a green build is thousands of lines and they bury the rest.
+      Note "----- the failed steps of run $runId -----"
+      $log = (gh run view $runId --log-failed 2>&1 | Select-Object -Last 120)
+      if ($log) { $log | ForEach-Object { Note $_ } }
+      else { Note "the log of run $runId could not be read" }
+      Note "----- end of run $runId -----"
+      Warn "the images of $tag did not build - no pin was written"
       exit 75
     }
     Say "the images of $tag are built"

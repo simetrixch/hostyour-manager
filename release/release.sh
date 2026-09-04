@@ -66,6 +66,7 @@ set -euo pipefail
 line() { printf '%s\n' "$*"; }
 say() { line "release: $*"; }
 warn() { line "release: $*" >&2; }
+note() { line "$*" >&2; }
 die() { warn "$*"; exit 1; }
 
 # THE COMMIT A TAG SITS ON DECLARES THE VERSION THE TAG NAMES. The build reads the version out of
@@ -275,7 +276,14 @@ else
   if [ -z "$RUN_ID" ]; then
     die "no release-images run appeared for ${TAG} within two minutes - the images are unbuilt and nothing was pinned"
   elif ! gh run watch "$RUN_ID" --exit-status --interval 20 >/dev/null 2>&1; then
-    warn "the images of ${TAG} did not build - no pin was written. Read the run: gh run view ${RUN_ID} --log-failed"
+    # THE REASON IS PRINTED HERE, not left to a command somebody is told to run next. Whoever reads
+    # this failure is standing at a terminal with the credential already in hand, and a release that
+    # sends them one round trip away for the cause has answered nothing. The FAILED STEPS and not the
+    # whole log: a green build is thousands of lines and they bury the ones that matter.
+    note "----- the failed steps of run ${RUN_ID} -----"
+    gh run view "$RUN_ID" --log-failed 2>&1 | tail -120 >&2 || note "the log of run ${RUN_ID} could not be read"
+    note "----- end of run ${RUN_ID} -----"
+    warn "the images of ${TAG} did not build - no pin was written"
     exit 75
   fi
   say "the images of ${TAG} are built"
