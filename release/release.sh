@@ -100,10 +100,12 @@ stamp_manifest_version() {
 # against the parts, exactly as the platform-apps ApplicationSet's In selector matches them, and
 # `every-cluster` belongs on all of them.
 runs_here() {
-  [ "$RUNS_ON" = "every-cluster" ] && return 0
-  case "+$1+" in
-    *"+${RUNS_ON}+"*) return 0 ;;
-  esac
+  for where in $RUNS_ON; do
+    [ "$where" = "every-cluster" ] && return 0
+    case "+$1+" in
+      *"+${where}+"*) return 0 ;;
+    esac
+  done
   return 1
 }
 
@@ -191,14 +193,24 @@ if [ -n "$PLATFORM_REPO" ]; then
   GIT_TERMINAL_PROMPT=0 git -C "$PLATFORM_REPO_DIR" push --dry-run --quiet origin HEAD >/dev/null 2>&1 \
     || die "this machine may not push to ${PLATFORM_REPO}, so this release could not write its pin - nothing has been minted or pushed. A unit that pins itself is released from a machine logged in to both repositories, never from a build runner."
   # WHERE THE UNIT RUNS, which is what decides which branches its pin belongs on. The platform states
-  # it per unit, in one place: `runsOn` in clusters/inventories/<unit>/app.yaml on the trunk, the very
-  # field the platform-apps ApplicationSet selects a cluster's workloads by. Read here, in the
-  # pre-flight, so a unit whose inventory does not say where it runs is refused before anything is
-  # minted rather than after its images are built.
-  APP_YAML="clusters/inventories/${NAME}/app.yaml"
-  RUNS_ON="$(git -C "$PLATFORM_REPO_DIR" show "origin/master:${APP_YAML}" 2>/dev/null | sed -nE 's/^runsOn:[[:space:]]*([^[:space:]]+).*$/\1/p' | head -1)"
-  [ -n "$RUNS_ON" ] \
-    || die "${APP_YAML} on the trunk of ${PLATFORM_REPO} states no runsOn, so where ${NAME} runs is unknown and its pin belongs to no branch in particular - nothing has been minted or pushed"
+  # it PER BUILD and not per unit, and the two are different names: a manifest's `name` is the unit,
+  # its `builds[].name` are the workloads, and clusters/inventories is keyed by the workload. This
+  # unit is called hostyour-manager and its charts are manager and gate-runner, so a lookup under the
+  # unit's own name finds nothing at all.
+  #
+  # ANY BUILD THAT RUNS SOMEWHERE PUTS THE PIN THERE. The pin is written per build into one values
+  # file, so a branch reads it if any build of this unit runs on that cluster. A build carrying no
+  # chart - an image a job pulls, never a workload - names no cluster and contributes nothing.
+  RUNS_ON=""
+  for build in $(sed -nE 's/^[[:space:]]*-[[:space:]]*name:[[:space:]]*([^[:space:]]+).*$/\1/p' "$MANIFEST"); do
+    where="$(git -C "$PLATFORM_REPO_DIR" show "origin/master:clusters/inventories/${build}/app.yaml" 2>/dev/null \
+             | sed -nE 's/^runsOn:[[:space:]]*([^[:space:]]+).*$/\1/p' | head -1)"
+    [ -n "$where" ] && RUNS_ON="$RUNS_ON $where"
+  done
+  RUNS_ON="$(printf '%s\n' $RUNS_ON | sort -u | tr '\n' ' ')"
+  [ -n "$(printf '%s' "$RUNS_ON" | tr -d ' ')" ] \
+    || die "no build of ${NAME} carries a clusters/inventories/<build>/app.yaml on the trunk of ${PLATFORM_REPO} that states runsOn, so where this unit runs is unknown and its pin belongs to no branch in particular - nothing has been minted or pushed"
+  say "${NAME} runs on: ${RUNS_ON}"
 fi
 
 # Remote view first: mint-once has to see the tags other people pushed, or a second machine would

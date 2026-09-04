@@ -111,13 +111,18 @@ function Write-StagePin {
 }
 
 # Does this unit run on a cluster whose role is $Role? A role names every PART the cluster carries,
-# master+slave included, while the unit's runsOn names the ONE part it belongs to — so the match is
+# master+slave included, while runsOn names the ONE part a workload belongs to — so the match is
 # against the parts, exactly as the platform-apps ApplicationSet's In selector matches them, and
-# every-cluster belongs on all of them.
+# every-cluster belongs on all of them. A unit answers for every build it has: any one of them
+# running on that cluster puts the pin on its branch.
 function Test-RunsHere {
   param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Role)
-  if ($runsOn -eq 'every-cluster') { return $true }
-  return ($Role -split '\+') -contains $runsOn
+  $parts = $Role -split '\+'
+  foreach ($where in $runsOn) {
+    if ($where -eq 'every-cluster') { return $true }
+    if ($parts -contains $where) { return $true }
+  }
+  return $false
 }
 
 # One branch of the platform tree, pinned and pushed. The checkout and the reset onto the remote
@@ -223,7 +228,7 @@ if (-not $name) { Die "the manifest $manifest states no name - it is what the re
 # PowerShell runs a finally for `exit` and for a terminating error alike — so the clone is removed
 # on every path out, the refusals included.
 $platformRepoDir = ''
-$runsOn = ''
+$runsOn = @()
 try {
   if ($platformRepo) {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
@@ -242,16 +247,25 @@ try {
       Die "this machine may not push to $platformRepo, so this release could not write its pin - nothing has been minted or pushed. A unit that pins itself is released from a machine logged in to both repositories, never from a build runner."
     }
     # WHERE THE UNIT RUNS, which is what decides which branches its pin belongs on. The platform
-    # states it per unit, in one place: runsOn in clusters/inventories/<unit>/app.yaml on the trunk,
-    # the very field the platform-apps ApplicationSet selects a cluster's workloads by. Read here, in
-    # the pre-flight, so a unit whose inventory does not say where it runs is refused before anything
-    # is minted rather than after its images are built.
-    $appYaml = "clusters/inventories/$name/app.yaml"
-    $runsOnLine = [regex]::Match(((git -C $platformRepoDir show "origin/master:$appYaml" 2>$null) -join "`n"), '(?m)^runsOn:[ \t]*(\S+)')
-    if ($runsOnLine.Success) { $runsOn = $runsOnLine.Groups[1].Value }
-    if (-not $runsOn) {
-      Die "$appYaml on the trunk of $platformRepo states no runsOn, so where $name runs is unknown and its pin belongs to no branch in particular - nothing has been minted or pushed"
+    # states it PER BUILD and not per unit, and the two are different names: a manifest's name is the
+    # unit, its builds[].name are the workloads, and clusters/inventories is keyed by the workload.
+    # This unit is called hostyour-manager and its charts are manager and gate-runner, so a lookup
+    # under the unit's own name finds nothing at all.
+    #
+    # ANY BUILD THAT RUNS SOMEWHERE PUTS THE PIN THERE. The pin is written per build into one values
+    # file, so a branch reads it if any build of this unit runs on that cluster. A build carrying no
+    # chart - an image a job pulls, never a workload - names no cluster and contributes nothing.
+    $found = @()
+    foreach ($build in ([regex]::Matches((Get-Content -Raw $manifest), '(?m)^[ \t]*-[ \t]*name:[ \t]*(\S+)') | ForEach-Object { $_.Groups[1].Value })) {
+      $appYaml = "clusters/inventories/$build/app.yaml"
+      $line = [regex]::Match(((git -C $platformRepoDir show "origin/master:$appYaml" 2>$null) -join "`n"), '(?m)^runsOn:[ \t]*(\S+)')
+      if ($line.Success) { $found += $line.Groups[1].Value }
     }
+    $runsOn = ($found | Sort-Object -Unique)
+    if (-not $runsOn) {
+      Die "no build of $name carries a clusters/inventories/<build>/app.yaml on the trunk of $platformRepo that states runsOn, so where this unit runs is unknown and its pin belongs to no branch in particular - nothing has been minted or pushed"
+    }
+    Say "$name runs on: $($runsOn -join ' ')"
   }
 
   # Remote view first: mint-once has to see the tags other people pushed, or a second machine would

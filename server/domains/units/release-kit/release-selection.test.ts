@@ -5,7 +5,7 @@ import { RELEASE_KIT_FILES } from "./release-kit.ts";
 // WHERE A RELEASE WRITES ITS PIN, and how the two spellings decide it.
 //
 // A pin belongs on the branch of every cluster that RUNS the unit. The platform states that per unit
-// — `runsOn` in clusters/inventories/<unit>/app.yaml — and states a cluster's parts per branch —
+// — `runsOn` in clusters/inventories/<build>/app.yaml — and states a cluster's parts per branch —
 // `role` in clusters/active/<branch>.yaml. The same two fields the platform-apps ApplicationSet
 // matches to decide which workloads a cluster renders.
 //
@@ -84,21 +84,30 @@ describe("which branches a release pins", () => {
   it("states the rule in the shipped bytes: the unit's runsOn against the branch's role", () => {
     // The field, its file, and the tree it is read off — the trunk, which is where the
     // ApplicationSet's own generator reads it.
-    expect(SH).toContain('APP_YAML="clusters/inventories/${NAME}/app.yaml"');
-    expect(SH).toContain('git -C "$PLATFORM_REPO_DIR" show "origin/master:${APP_YAML}"');
-    expect(PS1).toContain('$appYaml = "clusters/inventories/$name/app.yaml"');
+    //
+    // KEYED BY THE BUILD AND NOT BY THE UNIT, and the two are different names: this manifest's
+    // `name` is hostyour-manager and its builds are manager, gate-runner and dbtools, while
+    // clusters/inventories is keyed by the build. Measured on 2026-09-04: a lookup under the unit's
+    // own name refused every release of this repository, because no such inventory exists.
+    expect(SH).toContain('clusters/inventories/${build}/app.yaml');
+    expect(SH).toContain('git -C "$PLATFORM_REPO_DIR" show "origin/master:clusters/inventories/${build}/app.yaml"');
+    expect(PS1).toContain('$appYaml = "clusters/inventories/$build/app.yaml"');
     expect(PS1).toContain('git -C $platformRepoDir show "origin/master:$appYaml"');
+    // Every build is asked, not the first one: a unit whose pin belongs on two kinds of cluster gets
+    // it on both, and a build carrying no chart contributes nothing rather than deciding for the rest.
+    expect(SH).toContain('for build in $(sed -nE');
+    expect(PS1).toContain('foreach ($build in (');
     // And the question that is no longer asked: whether the branch happens to be a master.
     expect(SH).not.toContain('[ "$role" = "master" ] || continue');
     expect(PS1).not.toContain("$roleLine.Groups[1].Value.Trim() -ne 'master'");
   });
 
-  it("refuses a unit whose inventory states no runsOn BEFORE anything is minted", () => {
+  it("refuses a unit no build of which states runsOn, BEFORE anything is minted", () => {
     // In the pre-flight, beside the push probe: a release that cannot tell where its unit runs
     // cannot tell where its pin belongs, and a refusal after the tag exists is a release nothing can
     // re-mint. Both spellings say so, and both say it before the mint.
     for (const [script, mint] of [[SH, 'git tag -a "$TAG"'], [PS1, "git tag -a $tag"]] as const) {
-      const refusal = script.indexOf("states no runsOn");
+      const refusal = script.indexOf("that states runsOn");
       expect(refusal).toBeGreaterThan(-1);
       expect(script.indexOf(mint)).toBeGreaterThan(refusal);
     }
