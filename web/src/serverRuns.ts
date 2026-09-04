@@ -25,6 +25,7 @@ const RUN_NOUN: Partial<Record<RunKind, string>> = {
   "cluster-tailnet-disconnect": "tailnet disconnect",
   "cluster-tailnet-reconnect": "tailnet reconnect",
   "cluster-tailnet-rejoin": "tailnet rejoin",
+  "cluster-tailnet-read": "tailnet reading",
   "cluster-password-login-disable": "password login disable",
   "cluster-password-login-enable": "password login enable",
   "cluster-operator-key-place": "operator key placement",

@@ -36,10 +36,13 @@ describe("relevantRun — the ONE run a server's card surfaces", () => {
 });
 
 describe("runLine — what the card calls the run", () => {
-  it("names the three tailnet repair run kinds in words, not in kind literals", () => {
+  it("names the four tailnet run kinds in words, not in kind literals", () => {
     expect(runLine(run({ kind: "cluster-tailnet-disconnect", status: "planned" }))).toBe("A tailnet disconnect is planned — approve it");
     expect(runLine(run({ kind: "cluster-tailnet-reconnect", status: "running" }))).toBe("A tailnet reconnect is running — watch it");
     expect(runLine(run({ kind: "cluster-tailnet-rejoin", status: "failed" }))).toBe("The last tailnet rejoin failed — open it to retry");
+    // The reading is a run like the three above and its line reads like one: an operator watching a
+    // card cannot tell from the sentence alone whether something is being changed, so the word says it.
+    expect(runLine(run({ kind: "cluster-tailnet-read", status: "running" }))).toBe("A tailnet reading is running — watch it");
   });
 
   it("falls back to '<kind> run' for a run kind whose name is already a noun phrase", () => {

@@ -5,7 +5,7 @@ import { noopDef } from "./defs/noop.run.ts";
 import { makeDeploySlaveDef, type DeploySlavePorts } from "./defs/deploy-slave.ts";
 import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
-import { makeTailnetDisconnectDef, makeTailnetReconnectDef, makeTailnetRejoinDef } from "./defs/tailnet.ts";
+import { makeTailnetDisconnectDef, makeTailnetReadDef, makeTailnetReconnectDef, makeTailnetRejoinDef } from "./defs/tailnet.ts";
 import { passwordLoginDisableDef, passwordLoginEnableDef } from "./defs/password-login.ts";
 import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from "./defs/operator-key.ts";
 
@@ -36,14 +36,17 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // machine layer of a cluster that is already live.
   register(runDefinitions, makeDeploySlaveDef(ports));
   register(runDefinitions, makeRedeployDef(ports));
-  // The tailnet repair run kinds, on a host that is already deployed: leave the private network, come
+  // The tailnet run kinds, on a host that is already deployed: leave the private network, come
   // back with the credential the host holds, or be logged out and joined again with one the master
   // mints. Every act is a program of the machine's own catalogue driven over `ansiwise-rest serve`, so
   // they take the serve command, and a rejoin additionally reads the coordinator's address off the
-  // platform repo — both fail loud in the step when unconfigured, like redeploy's.
+  // platform repo — both fail loud in the step when unconfigured, like redeploy's. The READ drives no
+  // program and needs neither: it asks the host's client what it is doing and writes the answer down,
+  // which is the only way to refresh a reading without performing a repair.
   register(runDefinitions, makeTailnetDisconnectDef(ports));
   register(runDefinitions, makeTailnetReconnectDef(ports));
   register(runDefinitions, makeTailnetRejoinDef(ports));
+  register(runDefinitions, makeTailnetReadDef(ports));
   // The password-login switch, on a host this manager already holds a key for: shut the sshd
   // password door and destroy the bootstrap password stored beside the server row, or open the
   // door again for a repair. They take no ports — the inventory and the one host are everything.

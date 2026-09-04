@@ -351,13 +351,15 @@ export const RUN_KIND = [
   // `cluster-redeploy` rebuilds the machine layer of a cluster that is already live. Distinct on
   // purpose: each answers a different question, and a boolean on another run kind hides that.
   "cluster-deploy-slave", "cluster-redeploy",
-  // The tailnet repair run kinds, on a host that is already deployed. Three acts, not one with a
-  // switch: `cluster-tailnet-disconnect` takes the host off the private network and leaves it there,
-  // `cluster-tailnet-reconnect` puts it back with the credential the host still holds, and
+  // The tailnet run kinds, on a host that is already deployed. Three repairs and a reading, not one
+  // with a switch: `cluster-tailnet-disconnect` takes the host off the private network and leaves it
+  // there, `cluster-tailnet-reconnect` puts it back with the credential the host still holds, and
   // `cluster-tailnet-rejoin` is for when it holds none — the master mints a fresh one, which only the
-  // coordinator can do. Each reaches its host on the PUBLIC address, because a run kind cannot
-  // travel over the network it is repairing.
-  "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin",
+  // coordinator can do. `cluster-tailnet-read` changes nothing and asks the host what its client is
+  // doing: without it the only way to take a fresh reading is to perform a repair, and the cheapest
+  // of the three still re-dials the client. Each reaches its host on the PUBLIC address, because a
+  // run kind cannot travel over the network it is repairing.
+  "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin", "cluster-tailnet-read",
   // The password-login run kinds, on a host this manager already holds a key for. `cluster-password-
   // login-disable` shuts the sshd password door and destroys the bootstrap password sealed beside the
   // server row — two doors, and only the second one outlives the machine's configuration.
@@ -420,7 +422,7 @@ export const RUN_FAMILY = {
   fixture: ["noop"],
   cluster: [
     "cluster-deploy-slave", "cluster-redeploy",
-    "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin",
+    "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin", "cluster-tailnet-read",
     "cluster-password-login-disable", "cluster-password-login-enable",
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
   ],

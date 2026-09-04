@@ -1,8 +1,14 @@
 import type { TailnetRunKindOffer } from "../tailnetState.ts";
 
-// The three tailnet repair run kinds on a server's card. Props-only, like SlaveDeployForm: WHICH of
-// them this server may be offered is decided by tailnetRunKindOffer (tailnetState.ts, a pure module a
-// test can reach), and what each one does is decided by the run it plans — this renders buttons.
+// The three tailnet repair run kinds on a server's card, and the reading beside them. Props-only,
+// like SlaveDeployForm: WHICH of them this server may be offered is decided by tailnetRunKindOffer
+// (tailnetState.ts, a pure module a test can reach), and what each one does is decided by the run it
+// plans — this renders buttons.
+//
+// THE READING COMES FIRST because it is the cheapest thing on the card: it changes nothing, and an
+// operator who only wants to know whether the host is on the network should not have to read past two
+// repairs to find that out. Before it existed the two repairs beside it were also the only refresh
+// there was, so they stood lit on a host that was demonstrably a member.
 //
 // Each run kind reaches the host on its PUBLIC address, which is why the titles say so: an operator who
 // presses "Leave tailnet" has to know the host stays reachable afterwards, or the button reads as a
@@ -16,13 +22,24 @@ import type { TailnetRunKindOffer } from "../tailnetState.ts";
 
 export function TailnetActions(props: {
   offer: TailnetRunKindOffer;
+  onRead: () => void;
   onDisconnect: () => void;
   onReconnect: () => void;
   onRejoin: () => void;
 }) {
-  const { offer, onDisconnect, onReconnect, onRejoin } = props;
+  const { offer, onRead, onDisconnect, onReconnect, onRejoin } = props;
   return (
     <>
+      {offer.read && (
+        <button
+          type="button"
+          className="btn"
+          onClick={onRead}
+          title="Ask this host's tailnet client what it is doing and date the answer. Nothing on the host is changed: no program is run, no credential is minted and no certificate is touched."
+        >
+          Read the tailnet membership
+        </button>
+      )}
       {offer.disconnect && (
         <button
           type="button"

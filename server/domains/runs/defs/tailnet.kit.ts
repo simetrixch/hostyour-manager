@@ -18,11 +18,12 @@ import {
   ANSIWISE_ELEVATION_SECRET, ANSIWISE_PROGRAM_TIMEOUT_MS, type AnsiwisePorts, type ProgramCheckpoint,
 } from "./ansiwise-run.kit.ts";
 
-// The shared half of the three tailnet repair run kinds (defs/tailnet.ts): the steps they are composed
+// The shared half of the four tailnet run kinds (defs/tailnet.ts): the steps they are composed
 // of and the one plan builder they all state their targets in. The ACTS themselves are the tailnet
 // PROGRAMS of the machine's own catalogue (hostyour-deploy ansiwise/programs/), each driven over the
 // machine's `ansiwise-rest serve` surface and proven by a dry run the machine's gate then admits the
-// real run against — nothing here ships a script to a host any more.
+// real run against — nothing here ships a script to a host any more. The fourth kind performs no act
+// at all: it reads the host and writes the reading down.
 //
 // WHAT MAKES THESE RUN KINDS DIFFERENT FROM EVERY OTHER RUN. Each one reaches its host on the PUBLIC
 // address — servers.host, stated on the plan's own target (RunTargetRef.transport) and resolved by
@@ -58,27 +59,29 @@ const MINT_PROGRAM = "tailnet-mint-join-key";
 const REJOIN_PROGRAM = "tailnet-rejoin";
 
 /** The run kinds this kit builds — every RUN_KIND literal in the tailnet family, named by the family
- *  rather than listed, so a fourth one cannot be added to the enum without the maps below refusing
+ *  rather than listed, so another one cannot be added to the enum without the maps below refusing
  *  to compile. */
 export type TailnetKind = Extract<RunKind, `cluster-tailnet-${string}`>;
 
-/** WHICH repair a run is. Three acts, not one with a switch — see the def file for what each one
- *  honestly means and where the line between reconnect and rejoin runs. Derived from the kind and
+/** WHAT a run is. Three acts and a reading, not one with a switch — see the def file for what each
+ *  one honestly means and where the line between reconnect and rejoin runs. Derived from the kind and
  *  never passed beside it: a plan built for one kind in the shape of another would be a run that
  *  says one thing and does the other. */
-type TailnetMode = "disconnect" | "reconnect" | "rejoin";
+type TailnetMode = "disconnect" | "reconnect" | "rejoin" | "read";
 
 const MODE: Record<TailnetKind, TailnetMode> = {
   "cluster-tailnet-disconnect": "disconnect",
   "cluster-tailnet-reconnect": "reconnect",
   "cluster-tailnet-rejoin": "rejoin",
+  "cluster-tailnet-read": "read",
 };
 
 /** The catalogue program each single-host run kind drives, by the catalogue's OWN name. The run kind
  *  carries its family (`cluster-`) and the program does not, so the two spellings are stated here
  *  rather than derived: a program name is the machine's, and this manager does not get to rename it.
- *  A rejoin has no entry — it drives two programs and composes them itself. */
-const PROGRAM: Record<Exclude<TailnetKind, "cluster-tailnet-rejoin">, string> = {
+ *  A rejoin has no entry — it drives two programs and composes them itself — and neither has the
+ *  read, which drives none: it runs the membership probe and nothing else. */
+const PROGRAM: Record<Exclude<TailnetKind, "cluster-tailnet-rejoin" | "cluster-tailnet-read">, string> = {
   "cluster-tailnet-disconnect": "tailnet-disconnect",
   "cluster-tailnet-reconnect": "tailnet-reconnect",
 };
@@ -430,6 +433,11 @@ export function joinIfAbsentStep(target: SlaveTarget, serverId: string, ports: T
  *  all — the machine that needs them most is exactly the one whose deploy went wrong. */
 export function tailnetSteps(kind: TailnetKind, serverId: string, ports: TailnetPorts): Step[] {
   const target = activeClusterTarget(serverId);
+  // THE READING ON ITS OWN: attest the box, then read it. No program, no credential minted, no
+  // certificate touched — so it is the one kind offerable on a host no run has ever looked at, and
+  // the only way to refresh a reading without performing a repair. Every other kind ENDS with this
+  // same step, which is why the reading it writes is the same fact whichever kind took it.
+  if (kind === "cluster-tailnet-read") return [attestTargetStep(serverId), readMembershipStep(serverId)];
   if (kind === "cluster-tailnet-rejoin") {
     return [attestTargetStep(serverId), rejoinStep(target, serverId, ports), readMembershipStep(serverId)];
   }
@@ -446,6 +454,10 @@ const SUMMARY: Record<TailnetMode, (o: { name: string; steps: number; host: stri
     `Put "${o.name}" back on the tailnet with the credential it already holds: ${o.steps} steps, reaching it on its ` +
     `public address ${o.host} — the tailnet-reconnect program on the host's own ansiwise surface. ` +
     `Nothing is minted${o.masterIsTarget ? "" : " and the master is not touched"}.`,
+  read: (o) =>
+    `Read what "${o.name}"'s tailnet client says about itself: ${o.steps} steps, reaching it on its public address ` +
+    `${o.host}. Nothing on the host is changed — no program is run, no credential is minted and no certificate is ` +
+    `touched; the reading lands on the server's row and dates itself.`,
   rejoin: (o) =>
     `Log "${o.name}" out of the tailnet and join it again with a credential the tailnet-mint-join-key program mints ` +
     (o.masterIsTarget ? "on this same host — it carries the master part" : `on the master "${o.master}"`) +
@@ -456,6 +468,9 @@ const SUMMARY: Record<TailnetMode, (o: { name: string; steps: number; host: stri
 };
 
 const WARNINGS: Record<TailnetMode, (o: { masterIsTarget: boolean }) => string[]> = {
+  // The read warns about nothing, and that is the whole point of it: it is the one kind whose
+  // approval screen has nothing to weigh, because the host is left exactly as it was found.
+  read: () => [],
   disconnect: () => ["The host belongs to no private network afterwards, until a reconnect or a rejoin puts it back."],
   reconnect: () => ["A host whose credential is gone cannot re-establish this way — the run fails, and tailnet-rejoin is the run kind that mints a fresh one."],
   rejoin: () => [

@@ -9,10 +9,10 @@ import { deriveServerLocks } from "../../executor/locks.ts";
 import type { AnyRunDefinition, RunDefinition } from "../../executor/types.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
-import { makeTailnetDisconnectDef, makeTailnetReconnectDef, makeTailnetRejoinDef, type TailnetParams } from "./defs/tailnet.ts";
+import { makeTailnetDisconnectDef, makeTailnetReadDef, makeTailnetReconnectDef, makeTailnetRejoinDef, type TailnetParams } from "./defs/tailnet.ts";
 import type { TailnetKind } from "./defs/tailnet.kit.ts";
 
-// The PLAN of the three repair run kinds — everything the operator approves before a machine is asked
+// The PLAN of the four tailnet run kinds — everything the operator approves before a machine is asked
 // anything: which address the run is aimed at, what it locks, whose hosts it names, and what it
 // demands at approve. The acts themselves are ansiwise programs now, and driving them takes a real
 // `ansiwise-rest serve`; the executed proofs — the program runs, the address every session actually
@@ -34,23 +34,26 @@ const LAN_HOST = "10.1.1.11";
 const TAILNET_ADDRESS = "100.71.4.9";
 
 // Keyed on TailnetKind, not on string: a run kind renamed in shared/enums.ts must break THIS file
-// rather than leave the table testing three keys the enum no longer has.
+// rather than leave the table testing keys the enum no longer has.
 const DEFS: Record<TailnetKind, RunDefinition<TailnetParams>> = {
   "cluster-tailnet-disconnect": makeTailnetDisconnectDef({}),
   "cluster-tailnet-reconnect": makeTailnetReconnectDef({}),
   "cluster-tailnet-rejoin": makeTailnetRejoinDef({}),
+  "cluster-tailnet-read": makeTailnetReadDef({}),
 };
 
-/** The one manager-side step of each run kind beside the shared attest/read pair: the program step for
- *  the two single-host run kinds (named run-<program>, after the CATALOGUE program the kit maps the
- *  kind to), and the mint-carry-rejoin choreography for the third. */
-const MIDDLE_STEP: Record<TailnetKind, string> = {
+/** The one manager-side step each run kind has between the shared attest and the shared read: the
+ *  program step for the two single-host run kinds (named run-<program>, after the CATALOGUE program
+ *  the kit maps the kind to), and the mint-carry-rejoin choreography for the third. The READ has
+ *  none, and that absence is the run kind: attest the box, read it, stop. */
+const MIDDLE_STEP: Record<TailnetKind, string | null> = {
   "cluster-tailnet-disconnect": "run-tailnet-disconnect",
   "cluster-tailnet-reconnect": "run-tailnet-reconnect",
   "cluster-tailnet-rejoin": "rejoin",
+  "cluster-tailnet-read": null,
 };
 
-describe("the tailnet repair run kinds — the plan they are approved on", () => {
+describe("the tailnet run kinds — the plan they are approved on", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   afterEach(() => {
@@ -107,15 +110,16 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
       expect(plan.locks ?? []).toEqual([]);
     });
 
-    it(`${kind} runs ${ATTEST_TARGET_STEP}, then ${MIDDLE_STEP[kind]}, then reads the membership back`, async () => {
+    it(`${kind} runs ${ATTEST_TARGET_STEP}, then ${MIDDLE_STEP[kind] ?? "nothing of its own"}, then reads the membership back`, async () => {
       const db = setup();
+      const middle = MIDDLE_STEP[kind];
       const plan = await def.plan({ serverId: SLAVE_ID }, { db: db.db });
-      expect(plan.steps.map((s) => s.name)).toEqual([ATTEST_TARGET_STEP, MIDDLE_STEP[kind], "read-membership"]);
+      expect(plan.steps.map((s) => s.name)).toEqual([ATTEST_TARGET_STEP, ...(middle === null ? [] : [middle]), "read-membership"]);
       // mutating ⇒ the executor refuses to let an operator skip that first step.
       expect((def as AnyRunDefinition).mutating).toBe(true);
     });
 
-    it(`${kind} demands the elevation password at approve — the programs raise their commands to root with it`, async () => {
+    it(`${kind} demands the elevation password at approve — the client's socket and the programs both need root`, async () => {
       const db = setup();
       const plan = await def.plan({ serverId: SLAVE_ID }, { db: db.db });
       expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
@@ -126,7 +130,7 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
     const db = setup();
     const rejoin = await DEFS["cluster-tailnet-rejoin"].plan({ serverId: SLAVE_ID }, { db: db.db });
     expect(rejoin.targets?.find((t) => t.serverId === MASTER_ID)?.transport).toBeUndefined();
-    for (const kind of ["cluster-tailnet-disconnect", "cluster-tailnet-reconnect"] as const) {
+    for (const kind of ["cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-read"] as const) {
       const plan = await DEFS[kind].plan({ serverId: SLAVE_ID }, { db: db.db });
       expect(plan.targets?.map((t) => t.serverId)).toEqual([SLAVE_ID]);
     }
@@ -144,6 +148,9 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
     // infrastructure. Reconnect needs no cluster row on a master, exactly as it needs none on a
     // slave — the master here carries none.
     await expect(DEFS["cluster-tailnet-reconnect"].plan({ serverId: MASTER_ID }, { db: db.db })).resolves.toBeTruthy();
+    // And the READ admits it too, which is the whole reason it exists: a master's reading could
+    // otherwise be refreshed only by a repair, and the cheapest of the three still re-dials its client.
+    await expect(DEFS["cluster-tailnet-read"].plan({ serverId: MASTER_ID }, { db: db.db })).resolves.toBeTruthy();
   });
 
   it("admits the master to a rejoin: ONE target — its own, public — and a plan that claims no certificate work", async () => {
@@ -182,5 +189,28 @@ describe("the tailnet repair run kinds — the plan they are approved on", () =>
     // state, and they drive the client on the host and nothing else.
     await expect(DEFS["cluster-tailnet-disconnect"].plan({ serverId: SLAVE_ID }, { db: db.db })).resolves.toBeTruthy();
     await expect(DEFS["cluster-tailnet-reconnect"].plan({ serverId: SLAVE_ID }, { db: db.db })).resolves.toBeTruthy();
+    await expect(DEFS["cluster-tailnet-read"].plan({ serverId: SLAVE_ID }, { db: db.db })).resolves.toBeTruthy();
+  });
+
+  it("the READ plans on a host with no cluster row and no reading at all — the host that has no other way to be read", async () => {
+    const db = setup();
+    // A host nothing has looked at: no cluster row, and the column default for a row no run has
+    // reached. Until this run kind existed the only way to obtain a reading here was to REJOIN the
+    // host — mint a credential, log it out, join it again and re-sign its serving certificate — to
+    // learn a number that changes nothing.
+    db.db.delete(clusters).where(eq(clusters.serverId, SLAVE_ID)).run();
+    db.db.update(servers).set({ tailnetState: "unknown", tailnetJson: null }).where(eq(servers.id, SLAVE_ID)).run();
+
+    const plan = await DEFS["cluster-tailnet-read"].plan({ serverId: SLAVE_ID }, { db: db.db });
+    expect(plan.steps.map((s) => s.name)).toEqual([ATTEST_TARGET_STEP, "read-membership"]);
+    expect(plan.targets?.map((t) => t.serverId)).toEqual([SLAVE_ID]);
+    // Nothing to weigh at approve: the host is left as it was found, so the plan warns about nothing
+    // and its summary says what it does NOT do — the counter-fact to the three repairs' warnings.
+    expect(plan.warnings).toEqual([]);
+    expect(plan.summary).toContain("Nothing on the host is changed");
+    for (const kind of ["cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin"] as const) {
+      const other = await DEFS[kind].plan({ serverId: SLAVE_ID }, { db: db.db }).catch(() => null);
+      expect(other?.warnings ?? ["refused"], kind).not.toEqual([]);
+    }
   });
 });

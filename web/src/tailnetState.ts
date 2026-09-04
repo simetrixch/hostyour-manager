@@ -26,8 +26,8 @@ export const TAILNET_READING_FRESH_MS = 60 * 60 * 1000;
 
 /** What takes a new reading. Every sentence that mentions re-reading ends with this, so the card
  *  never implies a live probe behind the number. Deliberately not a list of run kinds: deploy-slave,
- *  redeploy and each of the three tailnet repair run kinds take one, and a list here would be a
- *  fifth place to keep in step with them. */
+ *  redeploy, the tailnet reading and each of the three tailnet repairs take one, and a list here
+ *  would be a fifth place to keep in step with them. */
 const RE_READ = "only a run takes a new one";
 
 export interface TailnetChip {
@@ -137,11 +137,12 @@ export function tailnetChip(server: ServerView, now: number): TailnetChip {
   }
 }
 
-/** Which of the three tailnet repair run kinds a server's card may offer. */
+/** Which of the four tailnet run kinds a server's card may offer. */
 export interface TailnetRunKindOffer {
   disconnect: boolean;
   reconnect: boolean;
   rejoin: boolean;
+  read: boolean;
 }
 
 /** The readings in which a run has SEEN a tailnet client on the host. The other two have not:
@@ -151,8 +152,8 @@ const CLIENT_SEEN: ReadonlySet<ServerTailnetState> = new Set<ServerTailnetState>
 /**
  * Which run kinds this card may offer, and on what.
  *
- * All three drive the tailnet CLIENT on the host, so the one thing they share is that a run has
- * seen a client there: on a host with none the first command exits saying so, and a host nothing
+ * The three REPAIRS drive the tailnet CLIENT on the host, so the one thing they share is that a run
+ * has seen a client there: on a host with none the first command exits saying so, and a host nothing
  * has read yet gives the page nothing to base an offer on.
  *
  * They are deliberately NOT keyed on the membership itself. A reading is a snapshot, so "joined" an
@@ -190,5 +191,12 @@ export function tailnetRunKindOffer(server: ServerView, o: { liveCluster: boolea
     disconnect: seen && !isMasterRole(server.role),
     reconnect: seen,
     rejoin: !clientAbsent && o.liveCluster,
+    // THE READING IS OFFERED ON EVERY ROW, and nothing withholds it. It runs no program, mints
+    // nothing and touches no certificate, so there is no state of the host it could be wrong on —
+    // including a host no run has ever looked at, which until this run kind existed could be read
+    // only by REJOINING it. It is also what the three above are not: a way to refresh the number
+    // without performing a repair, which is why they stay offered on a stale reading and this
+    // carries the operator who only wants to know.
+    read: true,
   };
 }

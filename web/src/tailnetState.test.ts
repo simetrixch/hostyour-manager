@@ -129,11 +129,25 @@ describe("the age in the sentence", () => {
   });
 });
 
-describe("tailnetRunKindOffer — which repair run kinds a card may offer", () => {
+describe("tailnetRunKindOffer — which tailnet run kinds a card may offer", () => {
   const live = { liveCluster: true };
 
-  it("offers all three on a live slave a run has seen a client on", () => {
-    expect(tailnetRunKindOffer(server("joined", facts()), live)).toEqual({ disconnect: true, reconnect: true, rejoin: true });
+  it("offers all three repairs on a live slave a run has seen a client on", () => {
+    expect(tailnetRunKindOffer(server("joined", facts()), live)).toEqual({ disconnect: true, reconnect: true, rejoin: true, read: true });
+  });
+
+  it("offers the READING on every row there is, because it changes nothing on the host", () => {
+    // It runs no program, mints no credential and touches no certificate, so there is no state of a
+    // host it could be wrong on — and it is the only way to refresh a reading without performing a
+    // repair. A host nothing has looked at could until now be read only by REJOINING it: mint a
+    // credential, log the host out, join it again and re-sign its serving certificate, to learn a
+    // number that changes nothing.
+    for (const state of SERVER_TAILNET_STATE) {
+      expect(tailnetRunKindOffer(server(state, facts()), live).read, state).toBe(true);
+      expect(tailnetRunKindOffer(server(state, { kind: "none" }), { liveCluster: false }).read, state).toBe(true);
+    }
+    const master: ServerView = { ...server("unknown", { kind: "none" }), role: "master" };
+    expect(tailnetRunKindOffer(master, { liveCluster: false }).read).toBe(true);
   });
 
   it("offers them on a NOT-JOINED host too — a reading is a snapshot, not the live state", () => {
@@ -148,7 +162,7 @@ describe("tailnetRunKindOffer — which repair run kinds a card may offer", () =
 
   it("offers NOTHING where a run looked and found no client — there is nothing to drive", () => {
     expect(tailnetRunKindOffer(server("no-client", { kind: "none" }), live)).toEqual({
-      disconnect: false, reconnect: false, rejoin: false,
+      disconnect: false, reconnect: false, rejoin: false, read: true,
     });
   });
 
@@ -158,7 +172,7 @@ describe("tailnetRunKindOffer — which repair run kinds a card may offer", () =
     // host whose membership is not known. A machine this manager never adopted has no reading and no
     // way to get one, so withholding the rejoin locks out the one host that needs it.
     expect(tailnetRunKindOffer(server("unknown", { kind: "none" }), live)).toEqual({
-      disconnect: false, reconnect: false, rejoin: true,
+      disconnect: false, reconnect: false, rejoin: true, read: true,
     });
   });
 
@@ -168,13 +182,13 @@ describe("tailnetRunKindOffer — which repair run kinds a card may offer", () =
     // so taking the master off it is not a repair. Putting it back on is: a master that is not a
     // member cannot dial the address its slaves are registered under.
     const master: ServerView = { ...server("joined", facts()), role: "master" };
-    expect(tailnetRunKindOffer(master, live)).toEqual({ disconnect: false, reconnect: true, rejoin: true });
+    expect(tailnetRunKindOffer(master, live)).toEqual({ disconnect: false, reconnect: true, rejoin: true, read: true });
   });
 
   it("withholds the master's REJOIN without a live cluster, the same rule as any other host", () => {
     const master: ServerView = { ...server("joined", facts()), role: "master" };
     expect(tailnetRunKindOffer(master, { liveCluster: false })).toEqual({
-      disconnect: false, reconnect: true, rejoin: false,
+      disconnect: false, reconnect: true, rejoin: false, read: true,
     });
   });
 
@@ -182,12 +196,12 @@ describe("tailnetRunKindOffer — which repair run kinds a card may offer", () =
     // The offer rests on a reading, not on the role: a host nothing has looked at gives the card
     // nothing to base an offer on, and that holds for the master as much as for a slave.
     const master: ServerView = { ...server("unknown", { kind: "none" }), role: "master" };
-    expect(tailnetRunKindOffer(master, live)).toEqual({ disconnect: false, reconnect: false, rejoin: true });
+    expect(tailnetRunKindOffer(master, live)).toEqual({ disconnect: false, reconnect: false, rejoin: true, read: true });
   });
 
   it("withholds only REJOIN without a live cluster — the credential is minted per slave", () => {
     expect(tailnetRunKindOffer(server("joined", facts()), { liveCluster: false })).toEqual({
-      disconnect: true, reconnect: true, rejoin: false,
+      disconnect: true, reconnect: true, rejoin: false, read: true,
     });
   });
 

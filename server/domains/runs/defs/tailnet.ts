@@ -2,13 +2,13 @@ import { z } from "zod";
 import type { RunDefinition } from "../../../executor/types.ts";
 import { tailnetPlan, tailnetSteps, type TailnetPorts } from "./tailnet.kit.ts";
 
-// The three tailnet repair run kinds. Each is a run like every other: a plan, an approval, steps and a
-// log — and each reaches its host on the PUBLIC address, because an act that takes a host off the
-// private network, or puts it back, cannot travel over that network. Each act is a PROGRAM of the
-// machine's own catalogue (hostyour-deploy ansiwise/programs/), driven over the machine's
-// `ansiwise-rest serve` surface; the shared steps and the plan live in tailnet.kit.ts, and what stands
-// here is the one thing that must be written out per run kind, its own `kind` literal (the source
-// census in run-definitions-census.test.ts reads exactly that field).
+// The three tailnet repair run kinds and the reading beside them. Each is a run like every other: a
+// plan, an approval, steps and a log — and each reaches its host on the PUBLIC address, because an
+// act that takes a host off the private network, or puts it back, cannot travel over that network.
+// Each act is a PROGRAM of the machine's own catalogue (hostyour-deploy ansiwise/programs/), driven
+// over the machine's `ansiwise-rest serve` surface; the shared steps and the plan live in
+// tailnet.kit.ts, and what stands here is the one thing that must be written out per run kind, its
+// own `kind` literal (the source census in run-definitions-census.test.ts reads exactly that field).
 //
 // THREE ACTS, and the line between the last two is the whole reason there are three:
 //
@@ -31,10 +31,22 @@ import { tailnetPlan, tailnetSteps, type TailnetPorts } from "./tailnet.kit.ts";
 //                       the tailnet-rejoin program — logout, join and the certificate work
 //                       work, because nothing dials a master's kube-apiserver at a tailnet address.
 //
-// All three are `mutating`, so the executor pins attest-target as step 0 and makes it
+// AND THE READING, which is none of them:
+//
+//   tailnet-read        Asks the host's own client what it is doing and writes the answer on the
+//                       server's row. It runs no program, mints nothing, touches no certificate and
+//                       leaves the host exactly as it found it. Without it the only way to refresh a
+//                       reading was to perform a repair — and the cheapest of the three still
+//                       re-dials the client — so a master's tailnet line went stale and stayed
+//                       stale, since the repairs are also the only refresh a master has. It is the
+//                       tailnet family's `cluster-authorized-keys-read`.
+//
+// All four are `mutating`, so the executor pins attest-target as step 0 and makes it
 // unskippable: the public address is the one most likely to have been handed to a different
 // machine, so every one of them proves the box answering it is the box whose identity this manager
-// recorded before it changes anything on it.
+// recorded before it changes anything on it. For the read the reason is the narrower one the
+// authorized-keys read states: the run writes a reading onto a server row, and a row may only be
+// told about the machine it names.
 
 export const TailnetParams = z.object({
   serverId: z.string().startsWith("srv_"),
@@ -58,6 +70,19 @@ export function makeTailnetReconnectDef(ports: TailnetPorts): RunDefinition<Tail
     mutating: true,
     plan: async (params, { db }) => tailnetPlan("cluster-tailnet-reconnect", params.serverId, db, ports),
     steps: (params) => tailnetSteps("cluster-tailnet-reconnect", params.serverId, ports),
+  };
+}
+
+/** The reading on its own. It takes the same ports as its siblings although it uses neither: one
+ *  builder signature for the family, so registering it cannot become the place somebody decides a
+ *  run kind needs less than the family does. */
+export function makeTailnetReadDef(ports: TailnetPorts): RunDefinition<TailnetParams> {
+  return {
+    kind: "cluster-tailnet-read",
+    paramsSchema: TailnetParams,
+    mutating: true,
+    plan: async (params, { db }) => tailnetPlan("cluster-tailnet-read", params.serverId, db, ports),
+    steps: (params) => tailnetSteps("cluster-tailnet-read", params.serverId, ports),
   };
 }
 

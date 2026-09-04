@@ -33,13 +33,14 @@ export function MasterActions(props: {
   slavePart: SlavePartBlock | null;
   offer: TailnetRunKindOffer;
   onTakeSlavePart: (own: { domain: string; stage: Stage }) => void;
+  onRead: () => void;
   onDisconnect: () => void;
   onReconnect: () => void;
   onRejoin: () => void;
 }) {
-  const { slavePart, offer, onTakeSlavePart, onDisconnect, onReconnect, onRejoin } = props;
+  const { slavePart, offer, onTakeSlavePart, onRead, onDisconnect, onReconnect, onRejoin } = props;
   const takeSlavePart = slavePart?.offer ?? null;
-  const anyAction = takeSlavePart !== null || offer.disconnect || offer.reconnect || offer.rejoin;
+  const anyAction = takeSlavePart !== null || offer.read || offer.disconnect || offer.reconnect || offer.rejoin;
   if (!slavePart && !anyAction) return null;
   return (
     <>
@@ -53,6 +54,7 @@ export function MasterActions(props: {
           )}
           <TailnetActions
             offer={offer}
+            onRead={onRead}
             onDisconnect={onDisconnect}
             onReconnect={onReconnect}
             onRejoin={onRejoin}

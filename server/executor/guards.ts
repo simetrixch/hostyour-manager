@@ -121,12 +121,13 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   // so the crypto gate has nothing to protect. Gating it would strand exactly the running cluster it
   // exists to reconcile on a plaintext-keystore install (purge's reasoning).
   "cluster-redeploy": [],
-  // The tailnet repair run kinds act on a host that is ALREADY deployed and harvest no cluster access
+  // The tailnet run kinds act on a host that is ALREADY deployed and harvest no cluster access
   // key, so the crypto gate has nothing to protect — and arming it would strand exactly the host they
-  // exist to put back on the private network (purge's reasoning).
+  // exist to put back on the private network (purge's reasoning). The read harvests nothing at all.
   "cluster-tailnet-disconnect": [],
   "cluster-tailnet-reconnect": [],
   "cluster-tailnet-rejoin": [],
+  "cluster-tailnet-read": [],
   // The password-login run kinds change one daemon's configuration and one stored credential on a host
   // this manager ALREADY holds a key for, and harvest no cluster access key — so the crypto gate has nothing to
   // protect. Gating the disable run kind would additionally block, on exactly the plaintext-keystore

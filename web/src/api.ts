@@ -149,9 +149,10 @@ export const deploySlave = (serverId: string, opts: { stage: string; domain: str
  *  for the operator to re-state and nothing to get wrong. */
 export const redeploySlave = (serverId: string): Promise<{ runId: string }> => planRun("cluster-redeploy", { serverId });
 
-// The three tailnet repair run kinds. Each takes ONLY the server: the address they reach it on is the
-// public one and the plan states it, and a rejoin reads the FQDN and the stage off the server's own
-// cluster row — so there is nothing here for the operator to re-state and nothing to get wrong.
+// The three tailnet repair run kinds and the reading beside them. Each takes ONLY the server: the
+// address they reach it on is the public one and the plan states it, and a rejoin reads the FQDN and
+// the stage off the server's own cluster row — so there is nothing here for the operator to re-state
+// and nothing to get wrong.
 /** Take the host off the private network. It keeps answering on its public address, which is how
  *  the two run kinds below reach it afterwards. */
 export const disconnectTailnet = (serverId: string): Promise<{ runId: string }> => planRun("cluster-tailnet-disconnect", { serverId });
@@ -161,6 +162,9 @@ export const reconnectTailnet = (serverId: string): Promise<{ runId: string }> =
 /** Log the host out and join it again with a credential minted on the master — for the case
  *  reconnect cannot answer, where the host holds none. */
 export const rejoinTailnet = (serverId: string): Promise<{ runId: string }> => planRun("cluster-tailnet-rejoin", { serverId });
+/** Ask the host's own client what it is doing and write the answer on its row. It changes nothing —
+ *  it is the only way to refresh a reading without performing one of the three repairs above. */
+export const readTailnet = (serverId: string): Promise<{ runId: string }> => planRun("cluster-tailnet-read", { serverId });
 
 // The password-login switch. A run kind and not a PATCH field: nothing this manager stores changes
 // what a daemon answers on port 22, so the switch has to be a run that writes the drop-in,

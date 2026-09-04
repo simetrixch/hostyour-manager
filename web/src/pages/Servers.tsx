@@ -5,7 +5,7 @@ import { isMasterRole } from "../../../shared/enums.ts";
 import type { ServerStatus } from "../../../shared/enums.ts";
 import {
   listServers, listRuns, createServer, deleteServerById, deploySlave, redeploySlave,
-  disconnectTailnet, reconnectTailnet, rejoinTailnet, disablePasswordLogin, enablePasswordLogin,
+  disconnectTailnet, reconnectTailnet, rejoinTailnet, readTailnet, disablePasswordLogin, enablePasswordLogin,
   readAuthorizedKeys, restateMachineIdentity,
 } from "../api.ts";
 import { tailnetRunKindOffer } from "../tailnetState.ts";
@@ -287,6 +287,7 @@ export function Servers() {
                     slavePart={slavePartBlock(s, { runOpen: runIsOpen })}
                     offer={tailnetRunKindOffer(s, { liveCluster: LIFECYCLE[s.status].next === "clusters" })}
                     onTakeSlavePart={(own) => void planServerRunKind(() => deploySlave(s.id, own))}
+                    onRead={() => void planServerRunKind(() => readTailnet(s.id))}
                     onDisconnect={() => void planServerRunKind(() => disconnectTailnet(s.id))}
                     onReconnect={() => void planServerRunKind(() => reconnectTailnet(s.id))}
                     onRejoin={() => void planServerRunKind(() => rejoinTailnet(s.id))}
@@ -332,7 +333,7 @@ export function Servers() {
                         </ol>
                         <p className="servercard__state">{lc.state}</p>
                         {(showDeploy || showClusters || showRedeploy || showDelete ||
-                          tnOffer.disconnect || tnOffer.reconnect || tnOffer.rejoin) && (
+                          tnOffer.read || tnOffer.disconnect || tnOffer.reconnect || tnOffer.rejoin) && (
                           <div className="actions">
                             {showDeploy && (
                               <button
@@ -360,6 +361,7 @@ export function Servers() {
                             )}
                             <TailnetActions
                               offer={tnOffer}
+                              onRead={() => void planServerRunKind(() => readTailnet(s.id))}
                               onDisconnect={() => void planServerRunKind(() => disconnectTailnet(s.id))}
                               onReconnect={() => void planServerRunKind(() => reconnectTailnet(s.id))}
                               onRejoin={() => void planServerRunKind(() => rejoinTailnet(s.id))}
