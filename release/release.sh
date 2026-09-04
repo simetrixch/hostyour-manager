@@ -34,7 +34,8 @@
 #      so a repeat of the same (release, stage) would do nothing at all. The
 #      deletion itself fires a webhook too; the platform's trigger drops it.
 #   7. Where `platformRepo` is declared: waits for this repo's own
-#      release-images run and writes the image pin into that tree.
+#      release-images run and writes the image pin into that tree, on the
+#      trunk and on every install branch whose cluster RUNS this unit.
 #
 # THE TWO SHAPES THIS ONE SCRIPT SERVES, and what tells them apart
 #   A unit whose manifest declares NO platformRepo is built and pinned by the
@@ -81,6 +82,18 @@ stamp_manifest_version() {
   git add -- "$file"
   git commit --quiet -m "release: $TAG" || die "the version bump to $VERSION could not be committed"
   echo "release: package.json declares ${VERSION}"
+}
+
+# Does this unit run on a cluster whose role is $1? A role names every PART the cluster carries,
+# `master+slave` included, while the unit's runsOn names the ONE part it belongs to — so the match is
+# against the parts, exactly as the platform-apps ApplicationSet's In selector matches them, and
+# `every-cluster` belongs on all of them.
+runs_here() {
+  [ "$RUNS_ON" = "every-cluster" ] && return 0
+  case "+$1+" in
+    *"+${RUNS_ON}+"*) return 0 ;;
+  esac
+  return 1
 }
 
 # One branch of the platform tree, pinned and pushed. The checkout and the reset onto the remote
@@ -166,6 +179,15 @@ if [ -n "$PLATFORM_REPO" ]; then
     || die "the platform tree ${PLATFORM_REPO} could not be cloned, so this release could not write its pin — nothing has been minted or pushed"
   GIT_TERMINAL_PROMPT=0 git -C "$PLATFORM_REPO_DIR" push --dry-run --quiet origin HEAD >/dev/null 2>&1 \
     || die "this machine may not push to ${PLATFORM_REPO}, so this release could not write its pin — nothing has been minted or pushed. A unit that pins itself is released from a machine logged in to both repositories, never from a build runner."
+  # WHERE THE UNIT RUNS, which is what decides which branches its pin belongs on. The platform states
+  # it per unit, in one place: `runsOn` in clusters/inventories/<unit>/app.yaml on the trunk, the very
+  # field the platform-apps ApplicationSet selects a cluster's workloads by. Read here, in the
+  # pre-flight, so a unit whose inventory does not say where it runs is refused before anything is
+  # minted rather than after its images are built.
+  APP_YAML="clusters/inventories/${NAME}/app.yaml"
+  RUNS_ON="$(git -C "$PLATFORM_REPO_DIR" show "origin/master:${APP_YAML}" 2>/dev/null | sed -nE 's/^runsOn:[[:space:]]*([^[:space:]]+).*$/\1/p' | head -1)"
+  [ -n "$RUNS_ON" ] \
+    || die "${APP_YAML} on the trunk of ${PLATFORM_REPO} states no runsOn, so where ${NAME} runs is unknown and its pin belongs to no branch in particular — nothing has been minted or pushed"
 fi
 
 # Remote view first: mint-once has to see the tags other people pushed, or a second machine would
@@ -290,18 +312,29 @@ PIN
   # pin no machine ever sees. It is written on the trunk as well, because an install branch that is
   # regenerated later takes what stands there.
   #
-  # WHICH INSTALL BRANCHES: the ones whose own cluster map says `role: master`. A branch states its
-  # role in clusters/active/<branch>.yaml, which is read here without checking the branch out. A
-  # cluster holding the slave part runs no copy of this unit, so pinning its branch would move a
-  # value nothing reads.
+  # WHICH INSTALL BRANCHES: the ones whose cluster RUNS this unit. A branch states its role in
+  # clusters/active/<branch>.yaml, which is read here without checking the branch out, and the unit
+  # states its runsOn in its inventory — the same two facts the platform-apps ApplicationSet matches
+  # to decide which workloads a cluster renders. A cluster that runs no copy of this unit is passed
+  # over, because a pin on its branch moves a value nothing there reads.
+  #
+  # ASKING WHETHER THE BRANCH IS A MASTER instead is a different question with the same answer today,
+  # and a wrong answer on the first unit that declares `runsOn: slave` or `every-cluster` and carries
+  # a build: its pin would reach no slave branch at all, and the release would report itself on its
+  # way to the stage while the machines that run it kept the previous image.
   PINNED_ANY=0
   pin_branch master
   for ref in $(git -C "$PLATFORM_REPO_DIR" for-each-ref --format='%(refname:strip=3)' refs/remotes/origin); do
     [ "$ref" = "master" ] && continue
     [ "$ref" = "HEAD" ] && continue
     role="$(git -C "$PLATFORM_REPO_DIR" show "origin/${ref}:clusters/active/${ref}.yaml" 2>/dev/null | grep -m1 -E '^role:' | sed -E 's/^role:[[:space:]]*//' || true)"
-    [ "$role" = "master" ] || continue
-    pin_branch "$ref"
+    if [ -z "$role" ]; then
+      echo "release: ${ref} carries no clusters/active/${ref}.yaml, so it is no cluster's install branch - passed over"
+    elif runs_here "$role"; then
+      pin_branch "$ref"
+    else
+      echo "release: ${ref} carries the ${role} part and ${NAME} runs on ${RUNS_ON} - passed over"
+    fi
   done
   [ "$PINNED_ANY" = "1" ] \
     || die "no branch of ${PLATFORM_REPO} carries a values-${STAGE}.yaml pin of ${NAME} — the images are built and no cluster reads them, so this release reaches nothing"

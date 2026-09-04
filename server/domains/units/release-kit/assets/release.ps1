@@ -26,7 +26,7 @@
        all. The deletion fires a webhook too; the platform's trigger drops it.
     7. Where platformRepo is declared: waits for the release-images run of that tag, because a tag is
        a name and not a release until the images exist, and then writes the image pin into that tree,
-       on the trunk and on every install branch whose own cluster map says role: master.
+       on the trunk and on every install branch whose cluster RUNS this unit.
 
   THE TWO SHAPES THIS ONE SCRIPT SERVES, and what tells them apart. A unit whose manifest declares NO
   platformRepo is built and pinned by the platform's build plane, which the deploy ref above reaches.
@@ -96,6 +96,16 @@ function Write-StagePin {
     }
   }
   return $touched
+}
+
+# Does this unit run on a cluster whose role is $Role? A role names every PART the cluster carries,
+# master+slave included, while the unit's runsOn names the ONE part it belongs to — so the match is
+# against the parts, exactly as the platform-apps ApplicationSet's In selector matches them, and
+# every-cluster belongs on all of them.
+function Test-RunsHere {
+  param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Role)
+  if ($runsOn -eq 'every-cluster') { return $true }
+  return ($Role -split '\+') -contains $runsOn
 }
 
 # One branch of the platform tree, pinned and pushed. The checkout and the reset onto the remote
@@ -201,6 +211,7 @@ if (-not $name) { Die "the manifest $manifest states no name — it is what the 
 # PowerShell runs a finally for `exit` and for a terminating error alike — so the clone is removed
 # on every path out, the refusals included.
 $platformRepoDir = ''
+$runsOn = ''
 try {
   if ($platformRepo) {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
@@ -217,6 +228,17 @@ try {
     }
     if ($LASTEXITCODE -ne 0) {
       Die "this machine may not push to $platformRepo, so this release could not write its pin — nothing has been minted or pushed. A unit that pins itself is released from a machine logged in to both repositories, never from a build runner."
+    }
+    # WHERE THE UNIT RUNS, which is what decides which branches its pin belongs on. The platform
+    # states it per unit, in one place: runsOn in clusters/inventories/<unit>/app.yaml on the trunk,
+    # the very field the platform-apps ApplicationSet selects a cluster's workloads by. Read here, in
+    # the pre-flight, so a unit whose inventory does not say where it runs is refused before anything
+    # is minted rather than after its images are built.
+    $appYaml = "clusters/inventories/$name/app.yaml"
+    $runsOnLine = [regex]::Match(((git -C $platformRepoDir show "origin/master:$appYaml" 2>$null) -join "`n"), '(?m)^runsOn:[ \t]*(\S+)')
+    if ($runsOnLine.Success) { $runsOn = $runsOnLine.Groups[1].Value }
+    if (-not $runsOn) {
+      Die "$appYaml on the trunk of $platformRepo states no runsOn, so where $name runs is unknown and its pin belongs to no branch in particular — nothing has been minted or pushed"
     }
   }
 
@@ -327,18 +349,32 @@ try {
     # trunk is a pin no machine ever sees. It is written on the trunk as well, because an install
     # branch that is regenerated later takes what stands there.
     #
-    # WHICH INSTALL BRANCHES: the ones whose own cluster map says `role: master`. A branch states
-    # its role in clusters/active/<branch>.yaml, which is read here without checking the branch out.
-    # A cluster holding the slave part runs no copy of this unit, so pinning its branch would move a
-    # value nothing reads.
+    # WHICH INSTALL BRANCHES: the ones whose cluster RUNS this unit. A branch states its role in
+    # clusters/active/<branch>.yaml, which is read here without checking the branch out, and the unit
+    # states its runsOn in its inventory — the same two facts the platform-apps ApplicationSet
+    # matches to decide which workloads a cluster renders. A cluster that runs no copy of this unit
+    # is passed over, because a pin on its branch moves a value nothing there reads.
+    #
+    # ASKING WHETHER THE BRANCH IS A MASTER instead is a different question with the same answer
+    # today, and a wrong answer on the first unit that declares runsOn: slave or every-cluster and
+    # carries a build: its pin would reach no slave branch at all, and the release would report
+    # itself on its way to the stage while the machines that run it kept the previous image.
     $pinnedAny = $false
     Publish-BranchPin -Branch 'master'
     foreach ($ref in (git -C $platformRepoDir for-each-ref --format='%(refname:strip=3)' refs/remotes/origin)) {
       if ($ref -eq 'master' -or $ref -eq 'HEAD') { continue }
       $map = (git -C $platformRepoDir show "origin/${ref}:clusters/active/$ref.yaml" 2>$null)
       $roleLine = [regex]::Match(($map -join "`n"), '(?m)^role:[ \t]*(.*)$')
-      if (-not $roleLine.Success -or $roleLine.Groups[1].Value.Trim() -ne 'master') { continue }
-      Publish-BranchPin -Branch $ref
+      $role = if ($roleLine.Success) { $roleLine.Groups[1].Value.Trim() } else { '' }
+      if (-not $role) {
+        Write-Host "release: $ref carries no clusters/active/$ref.yaml, so it is no cluster's install branch - passed over"
+      }
+      elseif (Test-RunsHere -Role $role) {
+        Publish-BranchPin -Branch $ref
+      }
+      else {
+        Write-Host "release: $ref carries the $role part and $name runs on $runsOn - passed over"
+      }
     }
     if (-not $pinnedAny) {
       Die "no branch of $platformRepo carries a values-$Stage.yaml pin of $name — the images are built and no cluster reads them, so this release reaches nothing"
