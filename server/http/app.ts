@@ -6,6 +6,7 @@ import type { ApiError, ReadyzView } from "../../shared/api-types.ts";
 import type { SessionCodec } from "../domains/access/session.ts";
 import type { AppEnv } from "./app-env.ts";
 import { securityHeaders } from "./middleware/headers.ts";
+import { requestLog } from "./middleware/request-log.ts";
 import { chokepoint } from "./middleware/chokepoint.ts";
 import { FORBIDDEN_CSS, FORBIDDEN_CSS_PATH } from "../domains/access/forbidden.ts";
 import { csrfGuard } from "./middleware/csrf.ts";
@@ -20,12 +21,17 @@ export interface AppDeps {
   registerProtected?: (app: Hono<AppEnv>) => void;
 }
 
-// App assembly: headers → public /healthz,/readyz,403-stylesheet,/auth → chokepoint →
+// App assembly: request log → headers → public /healthz,/readyz,403-stylesheet,/auth → chokepoint →
 // protected routes (H) → static SPA (I). The order is law: the chokepoint sits between the
 // public routes and everything else, so nothing protected can be reached ungated.
+//
+// The request log is OUTERMOST so its line covers the whole of the handling — the gate's refusals
+// and the 404s included. A log that only saw what the chokepoint let through could not tell a
+// request that was turned away from one that never arrived.
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  app.use("*", requestLog(deps.logger));
   app.use("*", securityHeaders(deps.config));
 
   app.get("/healthz", (c) => c.json({ status: "ok" as const, version: deps.config.version }));
