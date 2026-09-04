@@ -89,29 +89,51 @@ describe("release-kit embedded assets", () => {
     expect(byPath["release/release.ps1"]!).toContain("Warn \"WARNING - channel $Channel admits only:");
   });
 
-  // This repository is a consumer unit of itself, so onboarding it runs inject-release-kit over its
-  // own release/ directory. The kit REPLACES, so anything its own copy carries and the asset does
-  // not is deleted by that act — which is how the pin write and the manifest stamp were lost. Its
-  // own two files only START the asset, so a replace has nothing to take away.
-  it("starts the asset and carries no release logic — an onboarding of this repo takes nothing away", () => {
+  // This repository's own two files under release/ START the asset and carry no release logic of
+  // their own, so there is ONE release script and a change to the kit is this repository's own
+  // change too. A second copy here would be released from while every consumer receives the asset,
+  // and nothing a developer sees would say the two had drifted.
+  const ASSETS = "server/domains/units/release-kit/assets";
+
+  /** Every way a file under release/ can fail that, NAMED: an empty list is the property holding.
+   *  Asked of any text, so the probe below can plant one and see it answer both ways. */
+  const releaseLogicIn = (text: string, asset: string, mint: string, stamp: string): string[] =>
+    [
+      text.includes(`${ASSETS}/${asset}`) ? null : `does not name ${ASSETS}/${asset}`,
+      text.includes(mint) ? "mints the tag" : null,
+      text.includes(stamp) ? "stamps the manifest" : null,
+      text.includes("git push") ? "pushes" : null,
+    ].filter((v) => v !== null);
+
+  const OWN = [
+    ["release/release.sh", "release.sh", 'git tag -a "$TAG"', "stamp_manifest_version"],
+    ["release/release.ps1", "release.ps1", "git tag -a $tag", "Set-ManifestVersion"],
+  ] as const;
+
+  it("starts the asset and carries no release logic — there is one release script, not two", () => {
     // readFileSync throws on a path that is not there, so reading is what says both files exist,
     // and the shebangs say the bytes are the real start scripts rather than two empty strings.
     expect(ownCopy("release/release.sh").startsWith("#!/usr/bin/env bash")).toBe(true);
     expect(ownCopy("release/release.ps1").startsWith("#!/usr/bin/env pwsh")).toBe(true);
 
-    const ASSETS = "server/domains/units/release-kit/assets";
-    for (const [own, mint, stamp] of [
-      ["release/release.sh", 'git tag -a "$TAG"', "stamp_manifest_version"],
-      ["release/release.ps1", "git tag -a $tag", "Set-ManifestVersion"],
-    ] as const) {
-      const text = ownCopy(own);
-      expect(text).toContain(`${ASSETS}/${own.slice("release/".length)}`);
-      // The mint, the stamp and the push are what a copy of the asset would carry, and the stamp and
-      // the pin write are what a replace deleted the last time this repository's copy carried more.
-      expect(text).not.toContain(mint);
-      expect(text).not.toContain(stamp);
-      expect(text).not.toContain("git push");
-    }
+    for (const [own, asset, mint, stamp] of OWN) expect(releaseLogicIn(ownCopy(own), asset, mint, stamp), own).toEqual([]);
+  });
+
+  it("COUNTER-PROBE: that check goes red on a planted copy of the asset and stays green on a start script", () => {
+    const [, asset, mint, stamp] = OWN[0];
+    const START = `#!/usr/bin/env bash\nexec bash "$(dirname "$0")/../${ASSETS}/release.sh" "$@"\n`;
+    // The planted innocent: a start script naming the asset and doing nothing else.
+    expect(releaseLogicIn(START, asset, mint, stamp)).toEqual([]);
+    // One planted defect per way the property breaks, so a check that stopped seeing one of them
+    // cannot pass as a check that found nothing.
+    expect(releaseLogicIn(`${START}stamp_manifest_version "$ROOT"\n`, asset, mint, stamp)).toEqual(["stamps the manifest"]);
+    expect(releaseLogicIn(`${START}git tag -a "$TAG" -m x\n`, asset, mint, stamp)).toEqual(["mints the tag"]);
+    expect(releaseLogicIn(`${START}git push origin HEAD\n`, asset, mint, stamp)).toEqual(["pushes"]);
+    // And the state this repository must never stand in: the asset's own bytes at its own path,
+    // which is what an onboarding of this repository as a consumer of itself would write.
+    const byPath = Object.fromEntries(RELEASE_KIT_FILES.map((f) => [f.path, f.content]));
+    expect(releaseLogicIn(byPath["release/release.sh"]!, asset, mint, stamp))
+      .toEqual([`does not name ${ASSETS}/release.sh`, "mints the tag", "stamps the manifest", "pushes"]);
   });
 
   it("carries the manifest stamp, the build wait and the pin write — the three the short kit dropped", () => {

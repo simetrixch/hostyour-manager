@@ -83,10 +83,18 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
     expect(logs.some((l) => l.includes("already carry the current kit"))).toBe(true);
   });
 
-  it("takes NOTHING away from THIS repository's release/ — onboarding the manager as a consumer of itself", async () => {
-    // The manager is a consumer unit of itself, so an onboarding runs this step over its own
-    // release/ directory. Seeded with the bytes that actually stand in this repository — read off
-    // disk, not off the assets — so the assertion measures the two copies rather than restating one.
+  it("puts the release logic back into THIS repository's release/ — the manager is a registered consumer of itself nowhere", async () => {
+    // The kit REPLACES, and it replaces a file that only STARTS the asset like any other: the
+    // onboarding triggers the script it just wrote, so a copy nobody validated must not survive it.
+    // This repository's own two files under release/ are start scripts, so an onboarding of this
+    // repository over its own repo URL writes the full assets over them, and the copy
+    // release-kit.test.ts refuses stands in this repository until somebody puts the start scripts
+    // back by hand. NOTHING IN THE CODE REFUSES THAT: what keeps it from happening is that no
+    // registration names this repository as a consumer. This test states the outcome so that the
+    // replace is not read as a guarantee that the two start scripts survive it.
+    //
+    // Seeded with the bytes that actually stand in this repository — read off disk, not off the
+    // assets — so the assertion measures the two copies rather than restating one.
     const consumerRepo = new FakeConsumerRepo();
     const own: Record<string, string> = {};
     for (const path of ["release/release.sh", "release/release.ps1"]) {
@@ -96,15 +104,15 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
     const logs: string[] = [];
     await step({ consumerRepo }).run(ctx(logs));
 
-    // This repository's two files only START the asset, so both differ from it and the replace
-    // writes all three paths. Nothing is REMOVED: everything standing under release/ is kit-owned.
+    // Both files differ from the asset, so the replace writes all three paths. Nothing is REMOVED:
+    // everything standing under release/ is kit-owned.
     expect(consumerRepo.commits[0]?.write?.map((w) => w.path) ?? []).toEqual([...RELEASE_KIT_PATHS]);
     expect(consumerRepo.commits[0]?.remove).toEqual([]);
 
-    // The replace takes nothing away because there is nothing to take: the two files carry none of
-    // the release logic, and the asset that lands in their place carries all of it. The manifest
-    // stamp and the pin write are named because they are what a replace deleted the last time this
-    // repository's own copy carried more than the asset did.
+    // What is traded: the two files carry none of the release logic, and the asset that lands in
+    // their place carries all of it. The manifest stamp, the build wait and the pin write are the
+    // three a release of this repository cannot do without, so each one is named rather than
+    // counted.
     const files = consumerRepo.filesFor(REPO_URL);
     for (const marker of ["stamp_manifest_version", "gh run watch", 'git -C "$PLATFORM_REPO_DIR" push --quiet origin "$branch"']) {
       expect(own["release/release.sh"]).not.toContain(marker);
