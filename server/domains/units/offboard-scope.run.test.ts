@@ -4,7 +4,6 @@ import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
-import { renderConsumerAppProject } from "./appproject.ts";
 import { renderSmtpOpsGrant } from "./build-rbac.ts";
 import { Registrations, type ClusterStageResolver } from "./registrations.ts";
 import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
@@ -131,7 +130,6 @@ describe("offboard scope — one stage of a two-stage unit", () => {
 
     const buildRbac = await seedBuildGrants();
     const projects = new FakeMasterProjectWriter();
-    await projects.applyAppProject("argocd", renderConsumerAppProject({ name: "acme", namespace: "acme", repoURL: REPO, platformRepoURL: "https://github.com/x/hostyour-cloud.git", argoNamespace: "argocd" }));
     const github = new FakeGitHubConsumer();
     github.seedHook("x", "acme", BUILD_HOOK_URL);
     const consumerRepo = new FakeConsumerRepo();

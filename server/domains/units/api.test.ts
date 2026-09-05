@@ -123,7 +123,6 @@ function onboardPorts(): OnboardPorts {
     seeder: fakeSeeder(),
     // Reuse the lifecycle resolver so onboard drives the same master-local fakes.
     resolver: lifecycle.resolver,
-    platformRepoURL: "https://github.com/x/hostyour-cloud.git",
     tenantSubdomains: async () => [],
     declareListening: true,
     argoWatchTimeoutMs: 1000,
@@ -332,7 +331,7 @@ function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
     registrations: reg,
     resolver: tenantResolver(),
     catalogRepoUrl: DEPLOY_URL,
-    platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
+    platformRepoURL: "https://github.com/x/hostyour-cloud.git",
     argoWatchTimeoutMs: 1000,
     // ensure-images defaults: every image present ⇒ the step is a pure probe/no-op here.
     registryProbe: new FakeRegistryProbe(),

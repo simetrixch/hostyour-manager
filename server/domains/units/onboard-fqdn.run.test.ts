@@ -13,7 +13,6 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
-import { renderConsumerAdmissionPolicy } from "./admission-policy.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -24,9 +23,9 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 //
 // WHERE THE ATTESTED NAME IS FENCED IS NO LONGER THIS RUN'S DOING. The per-unit admission policy is
 // rendered from that same stage registration by clusters/units/admissionpolicy (hostyour-cloud#174),
-// so what this run owes the fence is the FIELD, and the assertion below is on the field plus the
-// renderer that composes the clause from it — the one relocation still applies onto a target cluster
-// whose registration does not name it yet. The gate's own unit checks live in gates/compose.test.ts; this file follows the
+// and since hostyour-manager#113 this repository renders no consumer boundary at all — so what this
+// run owes the fence is the FIELD, and that is exactly what the assertion below reads back out of the
+// committed registration. The gate's own unit checks live in gates/compose.test.ts; this file follows the
 // onboard-activate.run.test.ts pattern (a dedicated file per step concern) so onboard.run.test.ts
 // stays within the file-size doctrine.
 
@@ -89,7 +88,6 @@ function ports(over: Partial<OnboardPorts> & { cluster?: FakeClusterReader } = {
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    platformRepoURL: "https://github.com/x/hostyour-cloud.git",
     tenantSubdomains: async () => [],
     declareListening: true,
     argoWatchTimeoutMs: 1000,
@@ -169,14 +167,9 @@ describe("onboard with a manifest-declared fqdn", () => {
     const attested = (await prt.registrations.readRegistration("prod", "acme"))?.entry.fqdn;
     expect(attested).toBe(FQDN);
 
-    // The registration IS the grant's record, and the clause is composed out of it. Read back what
-    // the run committed rather than what it holds in params, so the assertion is on the field the
-    // chart reads.
-    const { policy } = renderConsumerAdmissionPolicy({
-      name: "acme", namespace: "acme", unitApex: "example.com", argoAppName: "acme-prod", services: [],
-      ...(attested !== undefined ? { fqdn: attested } : {}),
-    });
-    expect(policy.spec.validations[0]!.expression).toContain(`r.host == 'acme.example.com' || r.host == '${FQDN}'`);
+    // Read back out of the COMMITTED registration rather than out of the params the run holds: the
+    // registration file is the grant's one record, and it is the only thing
+    // clusters/units/admissionpolicy reads when it composes the host clause on the unit's cluster.
   });
 
   it("check refuses the run when the declared fqdn changed since the approval froze it", async () => {

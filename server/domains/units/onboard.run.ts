@@ -210,10 +210,6 @@ export interface OnboardPorts {
   tenantSubdomains: TenantSubdomainReader;
   seeder: VaultSeeder;
   resolver: ClusterKubeResolver;
-  /** The platform's OWN GitOps repo (hostyour-cloud) URL. Threaded into the per-consumer AppProject so
-   *  its sourceRepos allows the generated Application's hostyour-cloud sources ($values + the service
-   *  sources) alongside the consumer's own chart repo (see renderConsumerAppProject). */
-  platformRepoURL: string;
   declareListening: boolean;
   /** Bound of the whole validation poll (validate.ts pollBudgetMs). The wiring sets it a margin
    *  above the gate-runner's sandbox job budget, so the in-pod budget fires first on a healthy run

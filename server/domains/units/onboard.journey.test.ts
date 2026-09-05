@@ -100,7 +100,6 @@ function fakePorts(over: Partial<OnboardPorts> = {}): OnboardPorts {
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    platformRepoURL: "https://github.com/x/hostyour-cloud.git",
     tenantSubdomains: async () => [],
     declareListening: true,
     argoWatchTimeoutMs: 1000,

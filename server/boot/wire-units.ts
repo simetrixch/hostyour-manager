@@ -415,9 +415,6 @@ function buildConsumerOnboarding(
     },
     seeder,
     resolver,
-    // The platform's own GitOps repo — the per-consumer AppProject must allow the generated
-    // Application's hostyour-cloud sources ($values ref + image-guard) next to the consumer's chart repo.
-    platformRepoURL: `https://github.com/${config.github.owner}/${config.github.repo}.git`,
     // A CONSTANT, and the report says so rather than calling it a confirmation. Nothing here probes
     // the must-fail targets: this is the Manager's word that they were listening, and the leg is
     // named `…DeclaredListening` end to end so a receipt cannot be read as a measurement. What a
@@ -468,7 +465,6 @@ function buildConsumerOnboarding(
     ...lifecyclePorts,
     ...relocation,
     registrations,
-    platformRepoURL: onboardPorts.platformRepoURL,
     buildRbac,
     repoCredential,
     ...(dns ? { dns } : {}),

@@ -83,7 +83,6 @@ function ports(mongodb: MongodbMode, seeder?: RecordingSeeder): OnboardPorts {
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    platformRepoURL: "https://github.com/x/hostyour-cloud.git",
     tenantSubdomains: async () => [],
     declareListening: true,
     argoWatchTimeoutMs: 1000,

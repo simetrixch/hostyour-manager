@@ -31,8 +31,11 @@ export function attestRestoreTargetStep(ports: RelocationPorts, worldOf: WorldOf
   };
 }
 
-/** provision-target for a MIGRATE: the unit's isolation on the target, from the LIVE registration
- *  (it still stands — the repoint comes after). */
+/** provision-target for a MIGRATE, and it runs BEFORE the repoint on purpose: what it arms is what
+ *  no chart renders, and the moment the repoint lands the target starts generating the unit's
+ *  Application against it. For a consumer that is the repository credential alone — its AppProject,
+ *  its admission policy and its argo-sync grant are rendered from the registration the repoint
+ *  flips. The live registration still stands here, which is why nothing is passed in. */
 export function provisionTargetStep(worldOf: WorldOf, targetClusterId: string): Step {
   return {
     name: "provision-target",

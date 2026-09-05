@@ -114,7 +114,6 @@ export function ports(over: Partial<OnboardPorts> & FakeKube = {}): OnboardPorts
       projectWriter: projects ?? new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    platformRepoURL: "https://github.com/x/hostyour-cloud.git",
     tenantSubdomains: async () => [],
     declareListening: true,
     argoWatchTimeoutMs: 1000,

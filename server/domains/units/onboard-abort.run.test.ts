@@ -160,7 +160,6 @@ function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator;
     resolveBuildPlaneFqdn: seedClusterMaps(platform, { "s1.example": "prod", "m1.example": "prod" }),
     seeder,
     resolver: new FakeClusterKubeResolver({ clusterReader: cluster, argoReader: argo, projectWriter: projects, argoNamespace: "argocd" }),
-    platformRepoURL: "https://github.com/x/hostyour-cloud.git",
     tenantSubdomains: async () => [],
     declareListening: true,
     argoWatchTimeoutMs: 1000,

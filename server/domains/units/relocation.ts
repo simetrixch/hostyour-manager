@@ -71,11 +71,13 @@ export interface RelocationWorld {
   sourceDbListJob(ctx: StepCtx): Promise<RelocationJob | null>;
   /** Drop the source databases + delete the box folder — the LAST thing a move does. */
   clearSourceJobs(ctx: StepCtx): Promise<RelocationJob[]>;
-  /** Provision the unit's isolation on the target: a consumer's AppProject/VAP/build grants/repo
-   *  credential, a tenant's member AppProjects/Tenant CR/argo-sync. Vault: NOTHING — one shared
-   *  mount, never touched by a move. A RESTORE provisions from the DUMPED registration (the live one
-   *  is long gone), so the dumped bytes ride in; a migrate reads the live registration and passes
-   *  nothing. */
+  /** Arm the target with what no chart of the platform repository can render for it: a consumer's
+   *  repository credential (its five fences come off its registration, so the repoint after this
+   *  step is what raises them on the target), a tenant's member AppProjects/Tenant CR/argo-sync
+   *  (nothing renders registrations/<guid>/…, so all of it is the Manager's). Vault: NOTHING — one
+   *  shared mount, never touched by a move. A RESTORE provisions from the DUMPED registration (the
+   *  live one is long gone), so the dumped bytes ride in; a migrate reads the live registration and
+   *  passes nothing. */
   provisionTarget(ctx: StepCtx, target: TargetCluster, dumpedRegistrationYaml?: string): Promise<void>;
   /** Flip the registration's cluster field onto the target — plus, for a tenant, annotate the source
    *  CR relocating and delete it (the annotation makes that delete a release, not a deprovision). */

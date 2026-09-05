@@ -13,9 +13,8 @@ import { localTx } from "../../executor/stepkit.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { serializePointer, parseRegistration, type Registrations } from "./registrations.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
-import { unitApexFromChain, consumerAdmissionPolicyName, renderConsumerAdmissionPolicy } from "./admission-policy.ts";
-import { renderConsumerAppProject } from "./appproject.ts";
-import { renderBuildRbac, renderConsumerArgoSync } from "./build-rbac.ts";
+import { unitApexFromChain, consumerAdmissionPolicyName } from "./admission-policy.ts";
+import { renderConsumerArgoSync } from "./build-rbac.ts";
 import { renderConsumerRepoCredential, consumerRepoCredentialName } from "./repo-credential.ts";
 import { consumerUnitHost } from "./unit-dns.ts";
 import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/port.ts";
@@ -35,9 +34,10 @@ import {
  *  writers the migrate/restore run kinds re-arm on the target. */
 export interface ConsumerRelocationPorts extends RelocationPorts, LifecyclePorts {
   registrations: Registrations;
-  platformRepoURL: string;
-  /** Optional but UNCONDITIONALLY needed by provision-target — absent ⇒ fail loud (offboard's shape). */
+  /** clear-source's only writer: the argo-sync grant of the cluster the unit is LEAVING. Absent ⇒
+   *  the grant is left to the source reconciler's own prune (offboard's shape). */
   buildRbac?: BuildRbacWriter;
+  /** Needed by provision-target for a unit whose repo is private — absent then ⇒ fail loud. */
   repoCredential?: RepoCredentialWriter;
 }
 
@@ -103,34 +103,33 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       },
       // ---- migrate/restore closures -------------------------------------------------------
       provisionTarget: async (c, target, dumpedRegistrationYaml) => {
-        // ABSENT is a state here — a migrate may run this step after the source registration was
-        // released, which is why the repoURL below has the apps-row fallback. A FAILED read is not:
-        // the registration is the ONLY record of the attested fqdn grant, so swallowing the failure
-        // would render the target policy without it and the moved unit's own Ingress (which carries
-        // the granted rule) would be refused there. readRegistration answers null for absent and
-        // throws on an unreadable branch/file — the throw propagates and the step is retried.
-        const reg = dumpedRegistrationYaml !== undefined
-          ? ConsumerRegistrationSchema.parse(parseRegistration(dumpedRegistrationYaml))
-          : (await ports.registrations.readRegistration(ac.stage, ac.name))?.entry ?? null;
-        const repoURL = reg?.repoURL ?? ctx.db.select({ repoUrl: apps.repoUrl }).from(apps).where(eq(apps.id, appId)).get()?.repoUrl;
-        if (repoURL === undefined || repoURL === null) throw errValidation(`consumer "${ac.name}" has no repo URL on record — the target AppProject cannot be rendered`);
-        const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(target.clusterId);
-        await projectWriter.applyAppProject(argoNamespace, renderConsumerAppProject({ name: ac.name, namespace: ac.name, repoURL, platformRepoURL: ports.platformRepoURL, argoNamespace }));
-        const targetApex = unitApexFromChain(await ports.registrations.readClusterValueFiles(target.domain, target.stage));
-        // The attested fqdn moves WITH the unit: the registration is the grant's record, so the
-        // target cluster's policy admits the same extra FQDN the source's did.
-        // The attested services move with the unit for the same reason the fqdn does: they decide
-        // which platform namespace labels the target policy admits, and the target cluster's
-        // ApplicationSet stamps them off this same registration.
-        const { policy, binding } = renderConsumerAdmissionPolicy({ name: ac.name, namespace: ac.name, unitApex: targetApex, argoAppName: appName, services: reg?.services ?? [], ...(reg?.fqdn !== undefined ? { fqdn: reg.fqdn } : {}) });
-        await clusterReader.applyAdmissionPolicy(policy, binding);
-        if (!ports.buildRbac) throw errValidation(`provision-target for "${ac.name}" requires the build RBAC writer but none is wired — the release pipelines could never sync the moved unit`);
-        await ports.buildRbac.applyBuildRbac(renderBuildRbac({ name: ac.name, argoNamespace }));
+        // THE FIVE FENCES ARE NOT WRITTEN HERE. The isolation AppProject, the admission policy with
+        // its Binding, the argo-sync grant and the two `<name>-build` grants are all rendered from
+        // the unit's registration by hostyour-cloud (clusters/units/reconciler,
+        // clusters/units/admissionpolicy, clusters/inventories/consumer-build), and every one of
+        // those ApplicationSets selects on the registration's `cluster` — so the REPOINT that
+        // follows this step is what moves them onto the target, exactly as an onboard's first
+        // commit is what raises them. What is left below is the one object no chart renders, and it
+        // has to stand BEFORE the flip for the reason the flip itself gives: the moment the
+        // registration names the target, the target generates the unit's Application and tries to
+        // clone its repository.
+        const { clusterReader, argoNamespace } = await ports.resolver.resolve(target.clusterId);
         // The repository credential must exist in the TARGET's ArgoCD namespace or a private repo
         // can never sync there. A public repo (no sealed credential) simply has none to carry over.
         const row = ctx.db.select({ repoCredentialId: apps.repoCredentialId }).from(apps).where(eq(apps.id, appId)).get();
         if (row?.repoCredentialId) {
           if (!ports.repoCredential) throw errValidation(`provision-target for "${ac.name}" requires the repository-credential writer but none is wired — ArgoCD on the target could never fetch the private consumer repo`);
+          // ABSENT is a state here — a migrate may run this step after the source registration was
+          // released, which is why the repoURL has the apps-row fallback. A FAILED read is not:
+          // readRegistration answers null for absent and throws on an unreadable branch/file, and
+          // that throw propagates so the step is retried rather than sealing a credential against a
+          // repository nobody read. A restore has no live registration at all and rides the dumped
+          // bytes in.
+          const reg = dumpedRegistrationYaml !== undefined
+            ? ConsumerRegistrationSchema.parse(parseRegistration(dumpedRegistrationYaml))
+            : (await ports.registrations.readRegistration(ac.stage, ac.name))?.entry ?? null;
+          const repoURL = reg?.repoURL ?? ctx.db.select({ repoUrl: apps.repoUrl }).from(apps).where(eq(apps.id, appId)).get()?.repoUrl;
+          if (repoURL === undefined || repoURL === null) throw errValidation(`consumer "${ac.name}" has no repo URL on record — the credential would be sealed against a repository nobody can name`);
           const pat = await c.creds.open(row.repoCredentialId, { purpose: "relocation:provision-target", runId: c.runId });
           try {
             await ports.repoCredential.applyRepoCredential(renderConsumerRepoCredential({ consumerName: ac.name, argoNamespace, repoURL, pat: pat.toString("utf8") }));
@@ -147,7 +146,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         if ((await clusterReader.smoke(ac.name)).namespaceExists) {
           await clusterReader.annotateNamespace(ac.name, { [CLAIM_RELOCATING_ANNOTATION]: null });
         }
-        c.log("meta", `target ${target.cluster} provisioned for ${ac.name} — AppProject, admission policy, build grants${row?.repoCredentialId ? ", repository credential" : ""} in ${argoNamespace}`);
+        c.log("meta", `target ${target.cluster} provisioned for ${ac.name} — ${row?.repoCredentialId ? `repository credential in ${argoNamespace}; ` : ""}the isolation AppProject, the admission policy and the argo-sync grant are rendered from the registration and follow the repoint`);
       },
       repoint: async (c, target) => {
         // The mark FIRST, on the SOURCE namespace, because the flip below IS a delete on the source:
@@ -201,10 +200,19 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
         await clusterReader.deleteAdmissionPolicy(consumerAdmissionPolicyName(ac.name));
         await projectWriter.deleteAppProject(argoNamespace, ac.name);
-        // The argo-sync grant ONLY. The other two grants renderBuildRbac carries live in the stage-free
+        // The argo-sync grant ONLY. The unit's two other build grants live in the stage-free
         // `<name>-build` namespace, which does not move with the unit and is the one place its release
         // PipelineRun is created — deleting them here would leave the unit unable to build on its new
-        // cluster. The tenant world clears its source the same way (one argo-sync grant, nothing else).
+        // cluster; they are also clusters/inventories/consumer-build's to render and prune, off a
+        // build registration this move never touches. The tenant world clears its source the same way
+        // (one argo-sync grant, nothing else).
+        //
+        // THESE THREE DELETES STAND ON PURPOSE while nothing has ever run a relocation. The repoint
+        // already took the unit out of the source reconciler's selection, and both units-appset.yaml
+        // sets prune with the resources finalizer, so ArgoCD should have removed all three long
+        // before this step — which verify-source-released measured for the delivery Application off
+        // the same selector. Until one real move says so on a real cluster, a leftover cluster-scoped
+        // policy on a shared source is worth three idempotent calls (hostyour-manager#113).
         if (ports.buildRbac) await ports.buildRbac.deleteBuildRbac([renderConsumerArgoSync({ name: ac.name, argoNamespace })]);
         if (ports.repoCredential) await ports.repoCredential.deleteRepoCredential(argoNamespace, consumerRepoCredentialName(ac.name));
         const { deleted } = await clusterReader.deleteNamespace(ac.name);

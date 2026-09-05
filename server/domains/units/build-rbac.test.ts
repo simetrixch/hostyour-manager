@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderBuildRbac, renderConsumerArgoSync, renderSmtpOpsGrant, renderTenantArgoSync, tenantSyncUnits, unitBuildNamespace, RELAY_NAMESPACE, EVENTLISTENER_SUBJECT, MANAGER_SUBJECT, BUILD_PIPELINE_SERVICE_ACCOUNT } from "./build-rbac.ts";
+import { renderConsumerArgoSync, renderSmtpOpsGrant, renderTenantArgoSync, tenantSyncUnits, unitBuildNamespace, RELAY_NAMESPACE, BUILD_PIPELINE_SERVICE_ACCOUNT } from "./build-rbac.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL, type RoleManifest, type RoleBindingManifest } from "../../adapters/kube/port.ts";
 
@@ -7,82 +7,49 @@ import { CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL, type RoleManifest, type R
  *  tenant's registration states its own. */
 const TEST_MEMBERS = ["auth", "jobs", "report"];
 
-// The three grants are what stands between a pushed deploy ref and a release that actually runs and
-// syncs. They are also the only Roles a unit gets, so what they reach — and what they do NOT — is the
-// whole of what its pipeline can do to the cluster.
+// The argo-sync grant is what stands between a release that has committed its bump and one that has
+// actually told ArgoCD to take it. It is also the only Role of a unit this repository still renders —
+// the two `<name>-build` grants come off the registration through
+// clusters/inventories/consumer-build — and it is rendered here for the INVERSE alone: clear-source
+// deletes the grant of the cluster a relocated unit is leaving.
 
-const grants = (argoNamespace = "argocd"): { role: RoleManifest; binding: RoleBindingManifest }[] =>
-  renderBuildRbac({ name: "example-auth", argoNamespace });
+const argoSync = (argoNamespace = "argocd"): { role: RoleManifest; binding: RoleBindingManifest } =>
+  renderConsumerArgoSync({ name: "example-auth", argoNamespace });
 
-const byName = (name: string, argoNamespace = "argocd"): { role: RoleManifest; binding: RoleBindingManifest } =>
-  grants(argoNamespace).find((g) => g.role.metadata.name === name)!;
-
-describe("renderBuildRbac", () => {
-  it("renders exactly three grants, each a Role plus the Binding that arms it", () => {
-    const all = grants();
-    expect(all.map((g) => g.role.metadata.name)).toEqual(["example-auth-build-eventlistener", "example-auth-build-manager-read", "example-auth-argo-sync"]);
-    for (const { role, binding } of all) {
-      expect(binding.roleRef).toEqual({ apiGroup: "rbac.authorization.k8s.io", kind: "Role", name: role.metadata.name });
-      expect(binding.metadata.namespace).toBe(role.metadata.namespace);
-      // Both halves carry the Manager ownership label the writer guards on.
-      expect(role.metadata.labels).toEqual({ [CONSUMER_PROJECT_LABEL.key]: CONSUMER_PROJECT_LABEL.value });
-      expect(binding.metadata.labels).toEqual({ [CONSUMER_PROJECT_LABEL.key]: CONSUMER_PROJECT_LABEL.value });
-    }
+describe("renderConsumerArgoSync", () => {
+  it("is a Role plus the Binding that arms it, both under the ownership label the writer guards on", () => {
+    const { role, binding } = argoSync();
+    expect(role.metadata.name).toBe("example-auth-argo-sync");
+    expect(binding.roleRef).toEqual({ apiGroup: "rbac.authorization.k8s.io", kind: "Role", name: role.metadata.name });
+    expect(binding.metadata.name).toBe(role.metadata.name);
+    expect(binding.metadata.namespace).toBe(role.metadata.namespace);
+    expect(role.metadata.labels).toEqual({ [CONSUMER_PROJECT_LABEL.key]: CONSUMER_PROJECT_LABEL.value });
+    expect(binding.metadata.labels).toEqual({ [CONSUMER_PROJECT_LABEL.key]: CONSUMER_PROJECT_LABEL.value });
   });
 
-  it("lets the shared EventListener create PipelineRuns in the unit's OWN build namespace, and nothing else", () => {
-    const { role, binding } = byName("example-auth-build-eventlistener");
-    expect(role.metadata.namespace).toBe(unitBuildNamespace("example-auth"));
-    expect(role.metadata.namespace).toBe("example-auth-build");
-    expect(role.rules).toEqual([{ apiGroups: ["tekton.dev"], resources: ["pipelineruns"], verbs: ["create"] }]);
-    // The subject lives in the build plane's own namespace — a cross-namespace binding is the only
-    // way to reach it, since the unit's AppProject forbids the unit from rendering one itself.
-    expect(binding.subjects).toEqual([{ kind: "ServiceAccount", name: EVENTLISTENER_SUBJECT.name, namespace: EVENTLISTENER_SUBJECT.namespace }]);
-  });
-
-  it("lets the manager READ the unit's PipelineRuns — read only, because it has no task in the release cycle", () => {
-    const { role, binding } = byName("example-auth-build-manager-read");
-    expect(role.metadata.namespace).toBe("example-auth-build");
-    expect(role.rules).toEqual([{ apiGroups: ["tekton.dev"], resources: ["pipelineruns"], verbs: ["get", "list", "watch"] }]);
-    expect(role.rules[0]!.verbs).not.toContain("create");
-    // The literals, not MANAGER_SUBJECT's own fields: comparing the rendering against the constant
-    // it was rendered from is a comparison of a value with itself, and it held while the constant
-    // named an account no chart renders. These two names are apps/manager/templates/
-    // serviceaccount.yaml and apps/manager/app.yaml in hostyour-cloud, which this repo cannot read.
-    expect(binding.subjects).toEqual([{ kind: "ServiceAccount", name: "manager", namespace: "manager" }]);
-    expect(MANAGER_SUBJECT).toEqual({ namespace: "manager", name: "manager" });
-  });
-
-  it("scopes argo-sync to the unit's THREE Applications by name, in the ArgoCD namespace they live in", () => {
-    const { role, binding } = byName("example-auth-argo-sync");
+  it("scopes to the unit's THREE Applications by name, in the ArgoCD namespace they live in", () => {
+    const { role, binding } = argoSync();
     expect(role.metadata.namespace).toBe("argocd");
     expect(role.rules[0]!.resourceNames).toEqual(["example-auth-dev", "example-auth-test", "example-auth-prod"]);
     expect(role.rules[0]!.apiGroups).toEqual(["argoproj.io"]);
     expect(role.rules[0]!.resources).toEqual(["applications"]);
     // The pipeline runs in the unit's build namespace, so that is where the subject lives.
-    expect(binding.subjects).toEqual([{ kind: "ServiceAccount", name: BUILD_PIPELINE_SERVICE_ACCOUNT, namespace: "example-auth-build" }]);
+    expect(binding.subjects).toEqual([{ kind: "ServiceAccount", name: BUILD_PIPELINE_SERVICE_ACCOUNT, namespace: unitBuildNamespace("example-auth") }]);
+    expect(unitBuildNamespace("example-auth")).toBe("example-auth-build");
   });
 
-  it("keeps list and watch OUT of argo-sync — kube ignores resourceNames for them, so either would reach every Application", () => {
-    const { role } = byName("example-auth-argo-sync");
+  it("keeps list and watch OUT — kube ignores resourceNames for them, so either would reach every Application", () => {
+    const { role } = argoSync();
     expect(role.rules[0]!.verbs).toEqual(["get", "patch"]);
     expect(role.rules[0]!.verbs).not.toContain("list");
     expect(role.rules[0]!.verbs).not.toContain("watch");
   });
 
-  it("follows the unit to a slave's ArgoCD namespace — only the argo-sync grant moves, the build ones stay", () => {
-    const all = grants("s1");
-    expect(all.map((g) => g.role.metadata.namespace)).toEqual(["example-auth-build", "example-auth-build", "s1"]);
-    expect(byName("example-auth-argo-sync", "s1").binding.metadata.namespace).toBe("s1");
-  });
-
-  // The two build-namespace grants exist once per UNIT (the namespace is stage-free) while argo-sync
-  // exists once per stage, in the target cluster's own ArgoCD namespace. A teardown of one stage renders
-  // the third grant ALONE, so it must be the very object renderBuildRbac puts in that slot.
-  it("renders its argo-sync grant through renderConsumerArgoSync, so a one-stage teardown can render it alone", () => {
-    for (const argoNamespace of ["argocd", "s1"]) {
-      expect(renderConsumerArgoSync({ name: "example-auth", argoNamespace })).toEqual(byName("example-auth-argo-sync", argoNamespace));
-    }
+  it("follows the unit to a slave's ArgoCD namespace, while its subject stays in the build namespace that does not move", () => {
+    const { role, binding } = argoSync("s1");
+    expect(role.metadata.namespace).toBe("s1");
+    expect(binding.metadata.namespace).toBe("s1");
+    expect(binding.subjects[0]!.namespace).toBe("example-auth-build");
   });
 });
 

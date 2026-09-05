@@ -146,7 +146,6 @@ export function consumerPorts(f: RelocationFakes): ConsumerRelocationPorts & { r
     dns: f.dns,
     storageBox: { ...BOX },
     dbtoolsImage: DBTOOLS_IMAGE,
-    platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
     buildRbac: f.buildRbac,
     repoCredential: f.repoCredential,
   };

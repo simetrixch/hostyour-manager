@@ -1,58 +1,39 @@
-// A unit's build RBAC — the three grants its release cycle needs, plus the ONE mail-ops grant a unit
-// that attests `smtp-ops` gets. Two of the three build grants belong to the UNIT and the third to the
-// unit AT ONE STAGE; the scopes are set out below, and calling the set "the per-unit build RBAC" is
-// what made a one-stage teardown delete all three.
+// A unit's per-stage argo-sync grant, its mail-ops grant, and a tenant's argo-sync grant — what is
+// left in this repository of what used to be "the per-unit build RBAC".
 //
-// WHO APPLIES WHAT, AND IT IS NOT ONE ANSWER ANY MORE. All three build grants are rendered from the
-// registration since hostyour-cloud#174 — the two `<name>-build` ones by clusters/inventories/consumer-build
-// in unit mode (under the names that chart already used, `eventlistener-create-pipelineruns` and
-// `manager-read-pipelineruns`), and the argo-sync one by clusters/units/reconciler. So the onboard,
-// the offboard and the purge write none of them, and renderBuildRbac/renderConsumerArgoSync keep ONE
-// caller here: relocation-world-consumer.ts, which arms a TARGET cluster while the registration still
-// points at the SOURCE and clears the source's argo-sync grant afterwards — two moments at which no
-// chart can render either, because the ApplicationSets select on the registration's `cluster`.
+// WHO APPLIES WHAT, AND IT IS NOT ONE ANSWER. All three build grants are RENDERED FROM THE
+// REGISTRATION since hostyour-cloud#174 — the two `<name>-build` ones by
+// clusters/inventories/consumer-build in unit mode (under the names that chart already used,
+// `eventlistener-create-pipelineruns` and `manager-read-pipelineruns`), and the argo-sync one by
+// clusters/units/reconciler. So no run kind of this repository writes any of them, and
+// hostyour-manager#113 deleted renderBuildRbac with the last caller it had.
 //
-// renderSmtpOpsGrant is the exception, and the reason is a destination rather than a preference: it
-// lands in the relay's namespace ON THE MASTER, and the reconciler that manages a slave-hosted unit
-// is registered for exactly one namespace, so it cannot reach `postfix` at all. The Manager is
-// therefore still its only writer, with the onboard's provision-smtp-ops-grant and the removal run
-// kinds' delete-smtp-ops-grant as its inverse.
+// renderConsumerArgoSync survives for the INVERSE only: relocation's clear-source deletes the
+// argo-sync grant of the cluster a unit is LEAVING, where the repoint has already taken that unit
+// out of the source reconciler's selection and no chart of the source renders anything of it.
 //
-// The three build grants, each a Role plus the Binding that arms it:
+// renderSmtpOpsGrant is the exception on the apply side, and the reason is a destination rather than
+// a preference: it lands in the relay's namespace ON THE MASTER, and the reconciler that manages a
+// slave-hosted unit is registered for exactly one namespace, so it cannot reach `postfix` at all. The
+// Manager is therefore still its only writer, with the onboard's provision-smtp-ops-grant and the
+// removal run kinds' delete-smtp-ops-grant as its inverse.
 //
-//   1. EventListener — create PipelineRuns in <name>-build. The webhook the unit's release ref fires
-//      lands on the shared EventListener, which then has to create a PipelineRun in the unit's OWN
-//      build namespace; without this grant the delivery is accepted and nothing runs.
-//   2. Manager read — get/list/watch PipelineRuns in <name>-build, so the manager can watch a
-//      release run it did not start. Read only: the manager has no task in the release cycle.
-//   3. argo-sync — patch the unit's OWN Applications, in the ArgoCD namespace they live in. This is
-//      what lets the release pipeline's last step tell ArgoCD to sync the bump it just committed.
-//      Scoped by resourceNames to exactly <name>-dev/-test/-prod.
+// THE THREE BUILD GRANTS DO NOT SHARE A SCOPE, which is what makes the argo-sync one a renderer of
+// its own. The two `<name>-build` grants belong to the UNIT and a build is stage-free — one namespace
+// per unit, one image per release — so a unit deployed at two stages has ONE of each. The argo-sync
+// grant belongs to the unit AT ONE STAGE: it lives in the target cluster's ArgoCD namespace, and a
+// cluster carries exactly one stage, so that one exists per stage. A teardown that removed the first
+// two while another stage stood would leave that stage unable to release, which is what calling the
+// set "the per-unit build RBAC" once made it do.
 //
-// The three do NOT share a scope, which is what makes renderConsumerArgoSync a renderer of its own.
-// Grants 1 and 2 live in `<name>-build`, and a build is stage-free — one namespace per unit, one image
-// per release — so a unit deployed at two stages has ONE of each. Grant 3 lives in the target cluster's
-// ArgoCD namespace, and a cluster carries exactly one stage, so that one exists per stage. A teardown
-// that removes 1 and 2 while another stage stands leaves that stage unable to release.
-//
-// A TENANT gets one more grant of the same kind, rendered here as well (renderTenantArgoSync): its
-// member Applications need the same sync, but a tenant runs no release of its own, so the grant arms
-// the build pipelines of the units that BUILD the images its charts pin.
+// A TENANT gets one more grant of the same kind (renderTenantArgoSync): its member Applications need
+// the same sync, but a tenant runs no release of its own, so the grant arms the build pipelines of
+// the units that BUILD the images its charts pin.
 //
 // Pure: no IO. The writer (adapters/kube) applies what this renders.
 import { CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL, type BuildRbacGrant, type RoleBindingManifest, type RoleManifest } from "../../adapters/kube/port.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { consumerArgoAppName } from "../../../shared/consumer.ts";
-
-/** The shared EventListener's ServiceAccount — the identity that creates a PipelineRun when a unit's
- *  deploy ref is pushed. It lives in the build plane's own namespace, not the unit's, which is why the
- *  grant has to be a RoleBinding across namespaces rather than a Role the unit's chart could carry. */
-export const EVENTLISTENER_SUBJECT = { namespace: "image-builder", name: "eventlistener-sa" } as const;
-
-/** This process's own ServiceAccount — the identity behind every kube read it makes. Both halves
- *  are the chart's: apps/manager/templates/serviceaccount.yaml renders the account, and
- *  apps/manager/app.yaml names the namespace it is installed into. */
-export const MANAGER_SUBJECT = { namespace: "manager", name: "manager" } as const;
 
 /** The ServiceAccount every PipelineRun in a unit's build namespace runs under. One per build
  *  namespace, so a unit's pipeline holds exactly this unit's grants and no other's. */
@@ -98,35 +79,6 @@ function grant(input: {
     subjects: input.subjects.map((s) => ({ kind: "ServiceAccount" as const, name: s.name, namespace: s.namespace })),
   };
   return { role, binding };
-}
-
-/**
- * Render a unit's build grants. `argoNamespace` is where the unit's Application CRs live — the
- * master's "argocd" or a slave's per-slave ArgoCD namespace — so the argo-sync grant lands beside the
- * Applications it names rather than in the build namespace. ABSENT for a build-only unit: it has no
- * Applications, so an argo-sync grant would name objects that can never exist; only the two
- * build-namespace grants (the webhook's create, the manager's watch) are rendered.
- */
-export function renderBuildRbac(input: { name: string; argoNamespace?: string }): BuildRbacGrant[] {
-  const buildNs = unitBuildNamespace(input.name);
-  const grants = [
-    grant({
-      name: `${input.name}-build-eventlistener`,
-      namespace: buildNs,
-      label: CONSUMER_PROJECT_LABEL,
-      rules: [{ apiGroups: ["tekton.dev"], resources: ["pipelineruns"], verbs: ["create"] }],
-      subjects: [EVENTLISTENER_SUBJECT],
-    }),
-    grant({
-      name: `${input.name}-build-manager-read`,
-      namespace: buildNs,
-      label: CONSUMER_PROJECT_LABEL,
-      rules: [{ apiGroups: ["tekton.dev"], resources: ["pipelineruns"], verbs: ["get", "list", "watch"] }],
-      subjects: [MANAGER_SUBJECT],
-    }),
-  ];
-  if (input.argoNamespace !== undefined) grants.push(renderConsumerArgoSync({ name: input.name, argoNamespace: input.argoNamespace }));
-  return grants;
 }
 
 /**
