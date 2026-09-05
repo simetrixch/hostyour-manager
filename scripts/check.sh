@@ -2,8 +2,8 @@
 # EVERY CHECK THIS REPOSITORY HAS TO PASS, in order, on the machine of the person who changed it.
 #
 # One entry point, so the person, the pre-push hook and anybody reading the map all name the same
-# thing. The twin scripts/check.ps1 runs the same steps in the same order for a person working in
-# PowerShell.
+# thing. scripts/check.ps1 is the Windows entry point and is a shim that starts THIS file, so a
+# person working in PowerShell runs these very steps and not a second spelling of them.
 #
 # The steps stop at the first red one. A step that ran after a failure would print output nobody
 # reads, and the line that mattered scrolls off the screen.
