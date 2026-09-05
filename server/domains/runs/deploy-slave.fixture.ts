@@ -149,11 +149,7 @@ export const EMIT_CREDS_JSON = JSON.stringify(
 
 // A healthy slave preflight: the catalogue's checks + the slave musts (80/443 free, snapd present).
 export const HEALTHY_SLAVE_PREFLIGHT = [
-  "CHECK os.ubuntu PASS ubuntu 26.04",
   "CHECK os.arch PASS x86_64",
-  "CHECK cpu.count PASS 8 cores",
-  "CHECK mem.total PASS 32 GiB",
-  "CHECK disk.free PASS 900 GB free",
   "CHECK port.22 PASS sshd listening",
   // The ingress ports ship their two readings and are judged in portCheck: nothing listening and
   // every connection refused is the bare machine a slave may be deployed onto.

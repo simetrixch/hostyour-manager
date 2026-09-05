@@ -71,13 +71,10 @@ const ABSOLUTE_PATH = new RegExp(String.raw`(?<![A-Za-z0-9:/._-])/(?:${FHS_TOP.j
 const MACHINE_OWN = [
   "/usr/bin/env",
   "/usr/sbin/sshd",
-  "/etc/os-release",
   "/etc/ssh/sshd_config",
   "/etc/ssh/sshd_config.d",
-  "/proc/meminfo",
   "/dev/null",
   "/dev/tcp",
-  "/mnt/data",
 ];
 
 /** The two files this platform WRITES into a configuration directory the machine already has, and

@@ -4,11 +4,7 @@ import { hasHardFailure, type PreflightReport } from "../../../shared/preflight.
 
 // A representative preflight run: a healthy-ish Ubuntu box with a couple of soft warnings.
 const SAMPLE = [
-  "CHECK os.ubuntu PASS ubuntu 26.04",
   "CHECK os.arch PASS x86_64",
-  "CHECK cpu.count PASS 8 cores",
-  "CHECK mem.total WARN 6 GiB (>=8 recommended)",
-  "CHECK disk.free PASS 512 GB free",
   "CHECK port.22 PASS sshd listening",
   "PORT 80 listener=no connect=no",
   "PORT 443 listener=no connect=no",
@@ -24,13 +20,13 @@ describe("preflight parser", () => {
   it("parses every CHECK line into a typed check + extracts the public IP", () => {
     const { checks, publicIp } = parsePreflightOutput(SAMPLE);
     expect(publicIp).toBe("203.0.113.7");
-    expect(checks).toHaveLength(11);
-    const os = checks.find((c) => c.id === "os.ubuntu");
-    expect(os).toMatchObject({ title: "Operating system", severity: "hard", status: "pass", detail: "ubuntu 26.04" });
+    expect(checks).toHaveLength(7);
+    const arch = checks.find((c) => c.id === "os.arch");
+    expect(arch).toMatchObject({ title: "CPU architecture", severity: "hard", status: "pass", detail: "x86_64" });
     // a soft WARN carries its catalog hint
-    const mem = checks.find((c) => c.id === "mem.total");
-    expect(mem).toMatchObject({ severity: "soft", status: "warn" });
-    expect(mem?.hint).toContain("8 GB");
+    const snapd = checks.find((c) => c.id === "snapd.present");
+    expect(snapd).toMatchObject({ severity: "soft", status: "warn" });
+    expect(snapd?.hint).toContain("snapd");
   });
 
   it("attaches a hint only when the status is not pass", () => {
@@ -50,17 +46,22 @@ describe("preflight parser", () => {
   });
 
   it("hasHardFailure blocks only on a hard check that failed", () => {
-    const soft: PreflightReport = { checkedAt: 0, checks: [makeCheck("cpu.count", "fail", "1 core")] };
+    const soft: PreflightReport = { checkedAt: 0, checks: [makeCheck("time.sync", "fail", "clock not NTP-synced")] };
     expect(hasHardFailure(soft)).toBe(false); // soft fail rides along
     const hard: PreflightReport = { checkedAt: 0, checks: [makeCheck("os.arch", "fail", "riscv64")] };
     expect(hasHardFailure(hard)).toBe(true);
-    const warn: PreflightReport = { checkedAt: 0, checks: [makeCheck("os.ubuntu", "warn", "ubuntu 22.04")] };
+    const warn: PreflightReport = { checkedAt: 0, checks: [makeCheck("os.arch", "warn", "riscv64")] };
     expect(hasHardFailure(warn)).toBe(false); // a warn never blocks, even on a hard check
   });
 
   it("the checks script is self-contained bash that emits CHECK + NIC + PUBLIC_IP", () => {
     expect(PREFLIGHT_SCRIPT).toMatch(/^#!\/usr\/bin\/env bash/);
-    expect(PREFLIGHT_SCRIPT).toContain("emit os.ubuntu");
+    expect(PREFLIGHT_SCRIPT).toContain("emit os.arch");
+    // AND NOT THE FOUR deploy-host GATES ON THE SAME FACTS: the program refuses a machine on its
+    // release, processors, memory and free disk, and a second reading here would be a second floor.
+    for (const gone of ["os.ubuntu", "cpu.count", "mem.total", "disk.free"]) {
+      expect(PREFLIGHT_SCRIPT, gone).not.toContain(gone);
+    }
     expect(PREFLIGHT_SCRIPT).toContain("PUBLIC_IP");
     // one NIC line per global-scope IPv4 adapter (show every adapter, not just public IP)
     expect(PREFLIGHT_SCRIPT).toContain(`awk '{print "NIC "$2" "$4}'`);
@@ -80,7 +81,7 @@ describe("preflight parser", () => {
     const parsed = parsePreflightOutput(SAMPLE);
     expect(parsed.nics).toEqual({ "eth0": "10.1.1.11/24", "ens18": "192.168.0.5/24" });
     // NIC lines are not checks — the check count is unchanged by their presence
-    expect(parsed.checks).toHaveLength(11);
+    expect(parsed.checks).toHaveLength(7);
   });
 
   it("formatNicsLine renders every adapter plus the public IP", () => {

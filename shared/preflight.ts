@@ -5,17 +5,17 @@
 /** The outcome of a single check. */
 export type PreflightStatus = "pass" | "warn" | "fail";
 
-/** Whether a `fail` blocks. `hard` = the run cannot produce a usable server (not Ubuntu,
- *  no sudo, no egress). `soft` = recorded as a warning on the server card and re-evaluated
- *  as `hard` by the provision preflight. */
+/** Whether a `fail` blocks. `hard` = the run cannot produce a usable server (the wrong processor
+ *  architecture, no egress, no git). `soft` = recorded as a warning on the server card and
+ *  re-evaluated as `hard` by the provision preflight. */
 export type PreflightSeverity = "hard" | "soft";
 
 export interface PreflightCheck {
-  id: string; // "os.ubuntu"
-  title: string; // "Operating system"
+  id: string; // "os.arch"
+  title: string; // "CPU architecture"
   severity: PreflightSeverity;
   status: PreflightStatus;
-  detail: string; // "ubuntu 26.04"
+  detail: string; // "x86_64"
   hint?: string; // actionable fix shown on failure
 }
 

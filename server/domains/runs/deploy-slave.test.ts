@@ -462,14 +462,13 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   it("hardenPreflightForSlave: every check hard; 80/443/snapd warns promoted to fails; the catalogue's own view untouched", () => {
     const parsed = parsePreflightOutput([
-      "CHECK os.ubuntu PASS ubuntu 26.04",
-      "CHECK cpu.count WARN 2 cores (>=4 recommended)",
-      "CHECK disk.free FAIL 10 GB free (<25)",
+      "CHECK os.arch PASS x86_64",
+      "CHECK port.22 WARN nothing listening on :22",
+      "CHECK time.sync FAIL clock not NTP-synced",
       // The reading a machine already serving ingress produces: no listening socket, and a connection
       // to its own address accepted anyway.
       "PORT 443 listener=no connect=203.0.113.7",
       "CHECK snapd.present WARN snapd missing",
-      "CHECK time.sync WARN clock not NTP-synced",
     ].join("\n")).checks;
 
     const hard = hardenPreflightForSlave(parsed);
@@ -478,13 +477,12 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(byId.get("port.443")?.status).toBe("fail"); // promoted (Traefik must own it)
     expect(byId.get("port.443")?.hint).toBeDefined();
     expect(byId.get("snapd.present")?.status).toBe("fail"); // promoted (MicroK8s is a snap)
-    expect(byId.get("cpu.count")?.status).toBe("warn"); // NOT in the promotion set
-    expect(byId.get("time.sync")?.status).toBe("warn");
-    expect(byId.get("disk.free")?.status).toBe("fail"); // a soft fail in the catalogue ⇒ blocks here
-    expect(byId.get("os.ubuntu")?.status).toBe("pass");
+    expect(byId.get("port.22")?.status).toBe("warn"); // NOT in the promotion set
+    expect(byId.get("time.sync")?.status).toBe("fail"); // a soft fail in the catalogue ⇒ blocks here
+    expect(byId.get("os.arch")?.status).toBe("pass");
     expect(hasHardFailure({ checkedAt: 0, checks: hard })).toBe(true);
     // pure: the input (the checks as the catalogue graded them) keeps its soft severities
-    expect(parsed.find((c) => c.id === "cpu.count")?.severity).toBe("soft");
+    expect(parsed.find((c) => c.id === "port.22")?.severity).toBe("soft");
   });
 
   it("the master's map is what mark-slave inherits from — MASTER_MARKING_YAML carries every field the composition reads", () => {

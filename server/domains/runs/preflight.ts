@@ -3,9 +3,9 @@
 //      It emits one `CHECK <id> <PASS|WARN|FAIL> <detail>` line per check, one
 //      `NIC <iface> <addr>` line per global-scope IPv4 interface, one
 //      `PORT <port> listener=<yes|no> connect=<address|no>` line per ingress port, plus a single
-//      `PUBLIC_IP <ip>` line (feeds dns.wildcard).
-//   2. parsePreflightOutput / makeCheck — turn those lines (and the runner-added checks
-//      sudo.ok / dns.wildcard / net.inbound) into typed PreflightChecks via one catalog.
+//      `PUBLIC_IP <ip>` line, which the run logs beside the adapters it read.
+//   2. parsePreflightOutput / makeCheck — turn those lines, and the two checks the runner pushes
+//      itself (vault.reachable, net.podcidr), into typed PreflightChecks via one catalog.
 // Pure module (no ssh2, no db): unit-testable; the deployment's `slave-preflight` step wires it to
 // a session.
 //
@@ -22,24 +22,22 @@ interface CatalogEntry {
   hint?: string; // shown when status !== "pass"
 }
 
-// One home for every check's title + severity + fix hint.
+// One home for every check's title + severity + fix hint. EVERY ROW IS EMITTED BY SOMETHING: the
+// script below, portCheck, podCidrOverlapCheck, or the slave step's own Vault probe. A row nothing
+// emits is dead — nothing renders a stored report, the column preflightJson.slavePreflight is
+// written by defs/deploy-slave.ts and read by no code path in this repository — so it is deleted
+// rather than kept for a reading that never comes back.
+//
+// THE MACHINE'S RELEASE, PROCESSORS, MEMORY AND FREE DISK ARE NOT HERE, and that is the one
+// deliberate absence: deploy-host gates all four on the machine itself (require_pinned_ubuntu,
+// require_machine_size, require_free_disk in hostyour-deploy ansiwise/programs/deploy-host.yaml),
+// and a second reading in this script would be a second floor to keep in step with the first.
 export const PREFLIGHT_CATALOG: Record<string, CatalogEntry> = {
-  "os.ubuntu": { title: "Operating system", severity: "hard", hint: "hostyour-cloud requires Ubuntu 24.04 or 26.04." },
   "os.arch": { title: "CPU architecture", severity: "hard", hint: "MicroK8s needs x86_64 or aarch64." },
-  "cpu.count": { title: "CPU cores", severity: "soft", hint: "≥4 vCPU recommended." },
-  "mem.total": { title: "Memory", severity: "soft", hint: "≥8 GB RAM recommended." },
-  "disk.free": { title: "Free disk space", severity: "soft", hint: "≥40 GB free recommended." },
-  // NO STEP EMITS THIS ROW. Whether the machine account reaches root is measured by `prove-elevation`
-  // (defs/manager-key.kit.ts), which asks the machine with the password the run carries and refuses
-  // before anything is written. The catalogue keeps the row so a report carrying one from an earlier
-  // reading still renders under a title and a hint rather than under its bare id.
-  "sudo.ok": { title: "Sudo access", severity: "hard", hint: "Log in as root, or grant the login account sudo." },
   "port.22": { title: "SSH port (22)", severity: "soft", hint: "sshd should be listening on :22." },
   "port.80": { title: "Port 80 free", severity: "soft", hint: "Traefik will own :80 — free it, or take a machine that is not already serving ingress." },
   "port.443": { title: "Port 443 free", severity: "soft", hint: "Traefik will own :443 — free it, or take a machine that is not already serving ingress." },
-  "net.inbound": { title: "Inbound 80/443 reachable", severity: "soft", hint: "Open the firewall/SG: ufw allow 22,80,443/tcp." },
   "net.egress": { title: "Outbound internet", severity: "hard", hint: "The installer needs egress for the repo, snaps, and Let's Encrypt." },
-  "dns.wildcard": { title: "DNS wildcard", severity: "soft", hint: "Add *.<domain> A <server-ip> (verified via 1.1.1.1)." },
   "snapd.present": { title: "snapd installed", severity: "soft", hint: "apt install snapd (provision can install it)." },
   // HARD, because the machine has to carry git BEFORE anything installs it. place-ansiwise clones
   // the catalogue with plain `git` (defs/machine-catalogue.ts) and it stands one step in front of
@@ -260,55 +258,23 @@ export function formatNicsLine(parsed: ParsedPreflight): string {
 
 // The remote checks. Written brace-free + backslash-free on purpose so it survives a plain
 // JS template literal (no ${...} interpolation, no \n). Best-effort: a missing tool degrades
-// to WARN, never aborts. The thresholds are the ones hostyour-cloud's own installer preflight uses.
+// to WARN, never aborts.
+//
+// WHAT THIS SCRIPT DOES NOT MEASURE, and it is deliberate: the machine's Ubuntu release, its
+// processor count, its memory and its free disk. deploy-host refuses a machine on all four, on the
+// machine itself, out of the catalogue (hostyour-deploy ansiwise/programs/deploy-host.yaml —
+// require_pinned_ubuntu, require_machine_size, require_free_disk). Two readings of one fact are two
+// floors to keep in step, and the program's is the one an operator can read off the machine's own
+// record.
 export const PREFLIGHT_SCRIPT = `#!/usr/bin/env bash
 # machine preflight checks. Emits: CHECK <id> <PASS|WARN|FAIL> <detail>, NIC <iface> <addr>, PUBLIC_IP <ip>.
 emit() { echo "CHECK $1 $2 $3"; }
-
-ID=; VERSION_ID=
-if [ -r /etc/os-release ]; then
-  . /etc/os-release
-  if [ "$ID" = "ubuntu" ]; then
-    case "$VERSION_ID" in
-      24.04|26.04) emit os.ubuntu PASS "ubuntu $VERSION_ID";;
-      *) emit os.ubuntu WARN "ubuntu $VERSION_ID (untested; installer targets 24.04/26.04)";;
-    esac
-  else
-    emit os.ubuntu FAIL "$ID $VERSION_ID (not Ubuntu)"
-  fi
-else
-  emit os.ubuntu FAIL "no /etc/os-release"
-fi
 
 arch=$(uname -m 2>/dev/null || echo unknown)
 case "$arch" in
   x86_64|aarch64) emit os.arch PASS "$arch";;
   *) emit os.arch FAIL "$arch (need x86_64 or aarch64)";;
 esac
-
-cores=$(nproc 2>/dev/null || echo 0)
-if [ "$cores" -ge 4 ]; then emit cpu.count PASS "$cores cores"
-elif [ "$cores" -ge 2 ]; then emit cpu.count WARN "$cores cores (>=4 recommended)"
-else emit cpu.count FAIL "$cores cores (<2)"; fi
-
-memkb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)
-[ -z "$memkb" ] && memkb=0
-memgib=$(( memkb / 1048576 ))
-if [ "$memkb" -ge 8388608 ]; then emit mem.total PASS "$memgib GiB"
-elif [ "$memkb" -ge 4194304 ]; then emit mem.total WARN "$memgib GiB (>=8 recommended)"
-else emit mem.total FAIL "$memgib GiB (<4)"; fi
-
-avail_root=$(df -B1 --output=avail / 2>/dev/null | tail -1 | tr -d ' ')
-[ -z "$avail_root" ] && avail_root=0
-avail=$avail_root
-if mountpoint -q /mnt/data 2>/dev/null; then
-  avail_data=$(df -B1 --output=avail /mnt/data 2>/dev/null | tail -1 | tr -d ' ')
-  [ -n "$avail_data" ] && [ "$avail_data" -gt "$avail" ] && avail=$avail_data
-fi
-availgb=$(( avail / 1000000000 ))
-if [ "$availgb" -ge 40 ]; then emit disk.free PASS "$availgb GB free"
-elif [ "$availgb" -ge 25 ]; then emit disk.free WARN "$availgb GB free (>=40 recommended)"
-else emit disk.free FAIL "$availgb GB free (<25)"; fi
 
 if ss -Hltn 'sport = :22' 2>/dev/null | grep -q .; then emit port.22 PASS "sshd listening"
 else emit port.22 WARN "nothing listening on :22"; fi
