@@ -27,7 +27,6 @@ import { disablePasswordLoginStep, purgeBootstrapPasswordStep, restorePasswordLo
 import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
 import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
 import { SLAVE_API_PORT, DATA_DISK_COMMAND, HOST_ADDRESS_COMMAND, dataDiskFrom, hostAddressesFrom } from "./deploy-slave.remote.ts";
-import { refreshCheckoutStep } from "./live-cluster.kit.ts";
 import { placeInputStep, dropInputStep, dropInputCleanup } from "./deploy-slave.input.ts";
 import { rejoinStep, joinIfAbsentStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
@@ -508,13 +507,15 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // measurement, which is what lets a redeploy run the same step against a machine that carries them.
     placeAnsiwiseStep(target, ports),
     // ---- the machine layer, exactly as every cluster gets it: the three deployment programs on
-    // the slave's own surface, each dry-proven then run. deploy-host makes the box workable (the
-    // packages, the key proof) and must precede the checkout refresh, which needs git.
+    // the slave's own surface, each dry-proven then run.
+    //
+    // deploy-host makes the box workable and stands FIRST of the three because it is also the ONE
+    // WRITER of /srv/hostyour-cloud, the tree the two programs after it act on: its git_clone row
+    // fetches the books branch and places the checkout on that branch's published tip, which is how
+    // the cluster map mark-slave pushed earlier in this run reaches the machine. The programs after
+    // it read that tree as it stands and deliberately fetch nothing themselves. Its own
+    // install_packages row is what puts `git` on the machine for that row.
     ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(sid, ports) }),
-    // The programs read /srv/hostyour-cloud as it stands and deliberately fetch nothing — this is
-    // what brings the slave's checkout onto the branch the cut just pushed. The checkout itself was
-    // placed above; this step is what moves it onto that branch's head.
-    refreshCheckoutStep(target),
     // The two values a cluster keeping no books reads off its machine, composed out of what this
     // manager already holds and put there for the length of the run. It stands HERE because the
     // first row that reads one of them is deploy-cluster's containerd mirror; drop-input below

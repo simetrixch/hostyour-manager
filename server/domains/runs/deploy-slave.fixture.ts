@@ -82,7 +82,7 @@ export const STEP_NAMES = [
   "prove-elevation", "generate-key", "install-key", "verify-key-login", "enable-ntp", "remove-sudoers",
   "slave-preflight", "disable-password-login", "purge-bootstrap-password",
   "mark-slave",
-  "place-ansiwise", "run-deploy-host", "refresh-checkout", "place-input", "run-deploy-cluster",
+  "place-ansiwise", "run-deploy-host", "place-input", "run-deploy-cluster",
   "run-deploy-platform-services", "drop-input",
   "rejoin", "read-membership", "declare-tailnet-address", "enable-ansiwise-service", "create-mgmt",
   "gitops-handoff", "verify-slave", "register",
@@ -175,13 +175,6 @@ export interface HostsScript extends FirstContactScript {
   preflightOut: string;
   vaultCode: string;
   vaultExit: number;
-  // prepare-regeneration (the master arm): LIVE_HEAD + WORK_HEAD lines, the script's own stdout
-  // contract. WHICH branches it stands the checkouts on is decided where the script is built and
-  // proven there, not by a scripted answer repeating the same two words.
-  checkoutsOut: string;
-  checkoutsExit: number;
-  refreshOut: string;     // refresh-checkout (slave): CHECKOUT_HEAD <old> <new>
-  refreshExit: number;
   credsOut: string;       // create-mgmt (slave): what `cat` of the emitted credentials file answers
   credsExit: number;
   mintedKeyOut: string;   // the join (master): what `cat` of the mint program's key file answers
@@ -299,10 +292,6 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     preflightOut: HEALTHY_SLAVE_PREFLIGHT,
     vaultCode: "200",
     vaultExit: 0,
-    checkoutsOut: "LIVE_HEAD aaa1111\nWORK_HEAD ccc3333",
-    checkoutsExit: 0,
-    refreshOut: "CHECKOUT_HEAD ddd4444 eee5555",
-    refreshExit: 0,
     credsOut: EMIT_CREDS_JSON,
     credsExit: 0,
     mintedKeyOut: MINT_AUTHKEY,
@@ -399,9 +388,6 @@ export function hostsFactory(f: HostsScript): SshFactory {
         emit(placement.out);
         return done(placement.code);
       }
-      // ---- the git upkeep around the programs
-      if (command.includes("dc-prepare-regeneration-")) { emit(f.checkoutsOut); return done(f.checkoutsExit); }
-      if (command.includes("dc-refresh-checkout-")) { emit(f.refreshOut); return done(f.refreshExit); }
       // ---- the two credential files the manager reads over the session and removes
       if (command.startsWith("cat ") && command.includes("ansiwise-cluster-credentials")) { emit(f.credsOut); return done(f.credsExit); }
       if (command.includes("ansiwise-cluster-credentials")) return done();

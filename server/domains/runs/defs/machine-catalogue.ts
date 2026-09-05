@@ -60,8 +60,7 @@ export interface CatalogueVerdict {
   to?: string;
 }
 
-/** One command's wall clock. A fetch of one repository over the machine's own network, the same
- *  budget the platform tree's refresh is given (live-cluster.kit.ts). */
+/** One command's wall clock. A fetch of one repository over the machine's own network. */
 const COMMAND_TIMEOUT_MS = 2 * 60_000;
 
 /** How long one clone of the catalogue may take. A fetch is a delta and the clone is the whole tree,

@@ -1,12 +1,13 @@
 import { z } from "zod";
-import { PLATFORM_CHECKOUT } from "./machine-state.ts";
 
 // The REMOTE surface of the deploy-slave Run: the few shell scripts and kubectl commands the
 // steps still ship to the two hosts, plus the contracts they parse back. Everything that BUILDS
 // the slave is a deployment PROGRAM of the machine's own catalogue (hostyour-deploy
 // ansiwise/programs/) driven over `ansiwise-rest serve` — what stands here is only what the manager
-// does around those programs: git checkout upkeep, the credentials-file handover, and the
-// verify/handoff kubectl reads. Pure string builders + zod contracts, no IO, no db: the def
+// does around those programs: the DNS probe, the credentials-file handover, and the verify/handoff
+// kubectl reads. NOTHING HERE TOUCHES A CHECKOUT: /srv/hostyour-cloud is moved by deploy-host's own
+// git_clone row and by nothing this manager uploads. Pure string builders + zod contracts, no IO,
+// no db: the def
 // composes them, tests golden them.
 //
 // NOTHING HERE CARRIES A `sudo` OF ITS OWN, and that is a rule of this module rather than a
@@ -41,26 +42,6 @@ if [ -z "$ip" ]; then
   ip=$(getent ahostsv4 "$probe" 2>/dev/null | awk '{print $1; exit}')
 fi
 if [ -n "$ip" ]; then echo "DNS_WILDCARD $ip"; else echo "DNS_WILDCARD none"; fi
-`;
-}
-
-// The refresh for the PLATFORM checkout at /srv/hostyour-cloud — the tree the deployment programs
-// act on and deliberately never fetch into themselves (a program acts on the tree it was pointed
-// at; which state that tree stands on is the caller's to establish). `fetch --tags` so the tree
-// carries every ref the catalogue's own programs may need: its branch regeneration merges a release
-// tag out of this same tree. Idempotent fetch + reset --hard +
-// checkout -B; `checkout -B` also HEALS a wrong-branch checkout (name AND content), not just a
-// stale one. stdout contract: one `CHECKOUT_HEAD <old> <new>` line (short HEADs — secret-free).
-export function refreshPlatformCheckoutScript(branch: string): string {
-  return `#!/usr/bin/env bash
-set -euo pipefail
-[ -d "${PLATFORM_CHECKOUT}/.git" ] || { echo "no platform checkout at ${PLATFORM_CHECKOUT} — this step moves that tree onto a branch and never creates it, and no step of this manager does either: a clone belongs on a git_clone row of a program, which reads its origin and its credential out of the machine's own settings files by name. Give the machine that row, or clone the tree onto it by hand, then run this again" >&2; exit 3; }
-old=$(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)
-git -C "${PLATFORM_CHECKOUT}" fetch origin --tags
-git -C "${PLATFORM_CHECKOUT}" reset --hard
-git -C "${PLATFORM_CHECKOUT}" checkout -B "${branch}" "origin/${branch}"
-new=$(git -C "${PLATFORM_CHECKOUT}" rev-parse --short HEAD)
-echo "CHECKOUT_HEAD $old $new"
 `;
 }
 

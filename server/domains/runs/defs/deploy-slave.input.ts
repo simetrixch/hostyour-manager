@@ -118,9 +118,11 @@ export const dropInputCleanup: Cleanup = {
 
 /** `place-input`: compose the value out of what this manager holds and put it on the machine.
  *
- *  It stands after the checkout refresh and before deploy-cluster, because the row that reads it is
- *  that program's containerd mirror. The refresh cannot undo it — that script fetches, resets and
- *  checks out, and none of those touches an ignored file. */
+ *  It stands after run-deploy-host and before deploy-cluster, because the row that reads it is that
+ *  program's containerd mirror and deploy-host's own git_clone row is what stands the checkout it is
+ *  written into on the branch. That row cannot undo it: the file is ignored by the tree
+ *  (hostyour-cloud .gitignore excludes everything under secrets/ but the template), so git never
+ *  sees it. */
 export function placeInputStep(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): Step {
   return {
     name: "place-input",

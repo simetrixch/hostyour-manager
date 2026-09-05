@@ -30,12 +30,10 @@ import {
   dnsProbeScript,
   externalSecretsCmd,
   forceSyncExternalSecretsCmd,
-  refreshPlatformCheckoutScript,
   slaveDiagScript,
 } from "./defs/deploy-slave.remote.ts";
 
-/** A cluster FQDN and a slave FQDN, in the placeholder domain. */
-const MASTER_FQDN = "m1.example.invalid";
+/** A slave FQDN, in the placeholder domain. */
 const SLAVE_FQDN = "s1.example.invalid";
 
 /** An ed25519 public key of the right SHAPE and no value — the operator-key scripts embed whatever
@@ -65,7 +63,6 @@ export const REMOTE_SCRIPTS: readonly RemoteScript[] = [
   { symbol: "placeScript", module: "server/domains/runs/defs/operator-key.kit.ts", text: placeScript(PUBLIC_KEY, "operator-1") },
   { symbol: "removeScript", module: "server/domains/runs/defs/operator-key.kit.ts", text: removeScript("operator-1") },
   { symbol: "dnsProbeScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: dnsProbeScript(SLAVE_FQDN) },
-  { symbol: "refreshPlatformCheckoutScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: refreshPlatformCheckoutScript(MASTER_FQDN) },
   { symbol: "slaveDiagScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: slaveDiagScript(SLAVE_FQDN) },
 ];
 

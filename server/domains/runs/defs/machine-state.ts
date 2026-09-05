@@ -52,15 +52,18 @@
 export const PLATFORM_STATE_ROOTS = ["/srv/", "/var/lib/"] as const;
 
 /** WHERE the deployment programs read and write the platform tree — the MATERIAL. The programs
- *  (hostyour-deploy ansiwise/programs/) name this path on every `repository:` row, so the tree a
- *  refresh feeds them and the tree they act on are one path stated once. */
+ *  (hostyour-deploy ansiwise/programs/) name this path on every `repository:` row, so the tree
+ *  deploy-host's `git_clone` row stands on a branch and the tree they act on are one path stated
+ *  once. */
 export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
 
 
 /** WHERE the catalogue stands on the machine: the checkout the serving binary reads its programs and
- *  its `ansiwise.yaml` from. The machine's own path and not this module's invention — the `git_clone`
- *  row of the first program either role runs clones the catalogue repository to exactly this path,
- *  and the resident service is given `--programs` out of it. */
+ *  its `ansiwise.yaml` from. The machine's own path and not this module's invention — the
+ *  `git_clone` row of `deploy-platform-services`, the LAST deployment program, brings the catalogue
+ *  forward at exactly this path, and the resident service is given `--programs` out of it. A machine
+ *  that carries none is given one before any program runs at all, by `refreshCatalogue`
+ *  (defs/machine-catalogue.ts) or, on a first master, by hostyour-cloud's own installer. */
 export const CATALOG_CHECKOUT = "/srv/ansiwise-catalog";
 
 /** The program files inside that checkout — what `--programs` has to name, because the option's own
@@ -153,8 +156,9 @@ export const MACHINE_STATE: readonly MachineStateEntry[] = [
     owner: "operator",
     handover: "elsewhere",
     what:
-      "the catalogue the resident service reads its programs and its plugin list out of, cloned by " +
-      "the `git_clone` row of the first program either role runs",
+      "the catalogue the resident service reads its programs and its plugin list out of, brought " +
+      "forward by the `git_clone` row of deploy-platform-services and put there in the first place " +
+      "by this manager's own refreshCatalogue",
   },
   {
     path: PLATFORM_CHECKOUT,
