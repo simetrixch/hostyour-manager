@@ -11,8 +11,8 @@
 // as place-ansiwise puts them side by side in a machine's home.
 //
 // WHERE THEY COME FROM: $ANSIWISE_BIN / $ANSIWISE_REST_BIN, or the sibling checkout's build output
-// (../ansiwise-cli/build/). Absent ⇒ the suites that need them SKIP, loudly — the same shape the
-// ansiwise repositories use for a missing installation. They are COPIED into the fixture (Windows
+// (../ansiwise-cli/build/). Absent ⇒ the suites that need them REFUSE THE RUN, unless the person
+// starting it said they may skip (ansiwiseBinaries below). They are COPIED into the fixture (Windows
 // spawn needs the .exe name, and a copy cannot collide with a rebuild of the sibling checkout
 // mid-test).
 //
@@ -22,36 +22,74 @@
 
 import { Duplex } from "node:stream";
 import { spawn, type ChildProcess } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, statSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, parse, resolve } from "node:path";
 import { createServer, connect, type Server } from "node:net";
 
-/** The deployment tool and the serving binary, or undefined where either is missing — the PAIR and
- *  never one of them, because a machine carrying one of the two answers nothing at all. */
+/** The variable a person sets to be let through WITHOUT the binaries — the one way past the refusal
+ *  below, and deliberately the only one. Somebody who cannot build the sibling Dart checkout has to
+ *  be able to work; what they may not do is get that concession by accident, which is exactly what a
+ *  silent skip is. Set to anything at all. */
+export const MAY_SKIP_REAL_SERVE = "ANSIWISE_TESTS_MAY_SKIP";
+
+/** What the refusal says, and what a skip prints where one was asked for: actionable, not silent. */
+export const NO_BINARY =
+  "no ansiwise binaries — set ANSIWISE_BIN and ANSIWISE_REST_BIN to the two FILES (not the directory " +
+  "they stand in), or build the sibling checkout (ansiwise-cli tool/build.dart); these tests prove the " +
+  "transport against the REAL surface and cannot run without BOTH, because the serving binary refuses to " +
+  `start when the deployment tool is not standing beside it. To run without them anyway, set ${MAY_SKIP_REAL_SERVE}` +
+  " — and then the run proves nothing about the machine's own surface";
+
+/** The deployment tool and the serving binary — the PAIR and never one of them, because a machine
+ *  carrying one of the two answers nothing at all.
+ *
+ *  A MISSING PAIR REFUSES THE RUN. These are the only tests that prove this manager against the real
+ *  engine surface, and they skip themselves when the pair is absent — which is the state every push
+ *  is made in, so a run reported `2483 passed | 31 skipped` and nobody read the line. Two of the
+ *  twenty-nine were red on master for a day underneath such a green (repaired as #110): a skip reads
+ *  exactly like a pass, and it is the reader who is expected to tell them apart at the moment they
+ *  are least likely to look. So the absence is a THROW, and the run that would have been green is
+ *  red with the reason in it.
+ *
+ *  The throw stands HERE and not in the pre-push hook, because the blindness is the suite's: a
+ *  `npx vitest run` typed by hand is how those two red tests were finally found, and a guard living
+ *  in the hook leaves that command reporting green. It is also why nothing here names a FILE or a
+ *  vitest project — every real-serve suite asks this one function for its binaries and the three
+ *  legitimate skips (two `process.platform === "win32"`, one absent sibling checkout) never do, so
+ *  having asked IS the rule, and a real-serve file added tomorrow is covered by asking. */
 export function ansiwiseBinaries(): { tool: string; rest: string } | undefined {
   const tool = binaryNamed("ANSIWISE_BIN", "ansiwise");
   const rest = binaryNamed("ANSIWISE_REST_BIN", "ansiwise-rest");
-  return tool !== undefined && rest !== undefined ? { tool, rest } : undefined;
+  if (tool !== undefined && rest !== undefined) return { tool, rest };
+  if (process.env[MAY_SKIP_REAL_SERVE] === undefined) throw new Error(NO_BINARY);
+  return undefined;
 }
 
+/** A FILE, and that is the load-bearing word. `ANSIWISE_BIN` pointed at the build DIRECTORY — the
+ *  obvious reading of "where the binaries are" — passed an existence test, and the fixture then died
+ *  copying a directory (EISDIR) with the whole real-serve file reported as skipped: the same
+ *  `31 skipped` the unset variables produce, from the opposite mistake. Asking for a file is what the
+ *  gate always meant, and it sends that case to the refusal above, which names itself. */
 function binaryNamed(variable: string, name: string): string | undefined {
   const named = process.env[variable];
-  if (named && existsSync(named)) return named;
+  if (named && isFile(named)) return named;
   for (const candidate of [
     resolve(process.cwd(), "..", "ansiwise-cli", "build", name),
     resolve(process.cwd(), "..", "ansiwise-cli", "build", `${name}.exe`),
   ]) {
-    if (existsSync(candidate)) return candidate;
+    if (isFile(candidate)) return candidate;
   }
   return undefined;
 }
 
-/** The reason a suite prints when it skips: actionable, not silent. */
-export const NO_BINARY =
-  "no ansiwise binaries — set ANSIWISE_BIN and ANSIWISE_REST_BIN, or build the sibling checkout " +
-  "(ansiwise-cli tool/build.dart); these tests prove the transport against the REAL surface and cannot run without " +
-  "BOTH, because the serving binary refuses to start when the deployment tool is not standing beside it";
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
 
 /** One measuring row of a fixture program. Every row is REQUIRED and carries no default: a default
  *  that matches the pattern cannot tell "sent the right value" from "sent nothing", so an answer no
