@@ -200,11 +200,13 @@ if [ -n "$PLATFORM_REPO" ]; then
   #
   # ANY BUILD THAT RUNS SOMEWHERE PUTS THE PIN THERE. The pin is written per build into one values
   # file, so a branch reads it if any build of this unit runs on that cluster. A build carrying no
-  # chart - an image a job pulls, never a workload - names no cluster and contributes nothing.
+  # chart - an image a job pulls, never a workload - names no cluster and contributes nothing. `git
+  # show` answers 128 for a path the trunk does not carry, and under pipefail that status would be
+  # the substitution's and end the release here, so the file is read on its own first.
   RUNS_ON=""
   for build in $(sed -nE 's/^[[:space:]]*-[[:space:]]*name:[[:space:]]*([^[:space:]]+).*$/\1/p' "$MANIFEST"); do
-    where="$(git -C "$PLATFORM_REPO_DIR" show "origin/master:clusters/inventories/${build}/app.yaml" 2>/dev/null \
-             | sed -nE 's/^runsOn:[[:space:]]*([^[:space:]]+).*$/\1/p' | head -1)"
+    app="$(git -C "$PLATFORM_REPO_DIR" show "origin/master:clusters/inventories/${build}/app.yaml" 2>/dev/null || true)"
+    where="$(printf '%s\n' "$app" | sed -nE '/^runsOn:/{s/^runsOn:[[:space:]]*([^[:space:]]+).*$/\1/p;q;}')"
     [ -n "$where" ] && RUNS_ON="$RUNS_ON $where"
   done
   RUNS_ON="$(printf '%s\n' $RUNS_ON | sort -u | tr '\n' ' ')"
