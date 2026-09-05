@@ -13,14 +13,20 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
+import { renderConsumerAdmissionPolicy } from "./admission-policy.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // The declare-and-attest path of the manifest's extra FQDN at RUN level: planStream freezes the
 // G19-checked declaration into params (and rejects a name the platform already serves),
-// write-registration commits the ATTEST into the stage file, apply-admission-policy admits the
-// attested value beside the platform address, and check refuses a declaration that moved after the
-// approval. The gate's own unit checks live in gates/compose.test.ts; this file follows the
+// write-registration commits the ATTEST into the stage file, and check refuses a declaration that
+// moved after the approval.
+//
+// WHERE THE ATTESTED NAME IS FENCED IS NO LONGER THIS RUN'S DOING. The per-unit admission policy is
+// rendered from that same stage registration by clusters/units/admissionpolicy (hostyour-cloud#174),
+// so what this run owes the fence is the FIELD, and the assertion below is on the field plus the
+// renderer that composes the clause from it — the one relocation still applies onto a target cluster
+// whose registration does not name it yet. The gate's own unit checks live in gates/compose.test.ts; this file follows the
 // onboard-activate.run.test.ts pattern (a dedicated file per step concern) so onboard.run.test.ts
 // stays within the file-size doctrine.
 
@@ -154,20 +160,23 @@ describe("onboard with a manifest-declared fqdn", () => {
     expect(res).toMatchObject({ outcome: "rejected", summary: expect.stringContaining("G19") });
   });
 
-  it("write-registration ATTESTS the fqdn into the stage file, and apply-admission-policy admits it beside the platform address", async () => {
+  it("write-registration ATTESTS the fqdn into the stage file, and the rendered policy admits it beside the platform address", async () => {
     seedCluster();
-    const cluster = new FakeClusterReader();
-    const prt = ports({ cluster });
+    const prt = ports({ cluster: new FakeClusterReader() });
     const p = params();
     const steps = makeOnboardDef(prt).steps(p);
     await steps.find((s) => s.name === "write-registration")!.run(ctx(p, "write-registration", []));
-    expect((await prt.registrations.readRegistration("prod", "acme"))?.entry.fqdn).toBe(FQDN);
+    const attested = (await prt.registrations.readRegistration("prod", "acme"))?.entry.fqdn;
+    expect(attested).toBe(FQDN);
 
-    const logs: string[] = [];
-    await steps.find((s) => s.name === "apply-admission-policy")!.run(ctx(p, "apply-admission-policy", logs));
-    const expr = cluster.admissionPolicies.get("consumer-acme")!.policy.spec.validations[0]!.expression;
-    expect(expr).toContain(`r.host == 'acme.example.com' || r.host == '${FQDN}'`);
-    expect(logs.some((l) => l.includes(`acme.example.com and ${FQDN}`))).toBe(true);
+    // The registration IS the grant's record, and the clause is composed out of it. Read back what
+    // the run committed rather than what it holds in params, so the assertion is on the field the
+    // chart reads.
+    const { policy } = renderConsumerAdmissionPolicy({
+      name: "acme", namespace: "acme", unitApex: "example.com", argoAppName: "acme-prod", services: [],
+      ...(attested !== undefined ? { fqdn: attested } : {}),
+    });
+    expect(policy.spec.validations[0]!.expression).toContain(`r.host == 'acme.example.com' || r.host == '${FQDN}'`);
   });
 
   it("check refuses the run when the declared fqdn changed since the approval froze it", async () => {

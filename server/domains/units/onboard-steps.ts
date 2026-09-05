@@ -16,10 +16,8 @@ import { errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import type { AppProvenance, AppStatus, Stage } from "../../../shared/enums.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
-import { renderConsumerAppProject } from "./appproject.ts";
-import { renderBuildRbac, renderConsumerArgoSync, renderSmtpOpsGrant, unitBuildNamespace } from "./build-rbac.ts";
+import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "./build-rbac.ts";
 import { unitStaysRegistered } from "./lifecycle.ts";
-import { consumerAdmissionPolicyName, renderConsumerAdmissionPolicy } from "./admission-policy.ts";
 import { buildConsumerSecretDataWithDerivations } from "./secret-mint.ts";
 import { renderConsumerRepoCredential, consumerRepoCredentialName } from "./repo-credential.ts";
 import { provisionUnitDns, removeUnitDns, consumerUnitHost } from "./unit-dns.ts";
@@ -93,36 +91,6 @@ export function removeBuildRegistrationCleanup(ports: OnboardPorts, p: OnboardPa
   };
 }
 
-/** The offboard inverse of apply-admission-policy, run only on an explicit abort-with-cleanup. An
- *  already-absent policy resolves deleted:false (a run that died before the apply, or a re-abort). */
-export function deleteAdmissionPolicyCleanup(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
-  return {
-    name: "delete-admission-policy",
-    title: "Delete the per-consumer admission policy",
-    run: async (ctx) => {
-      const { clusterReader } = await ports.resolver.resolve(p.clusterId);
-      const { deleted } = await clusterReader.deleteAdmissionPolicy(consumerAdmissionPolicyName(p.consumerName));
-      ctx.log("meta", deleted ? `admission policy for ${p.consumerName} deleted` : `no admission policy for ${p.consumerName} — already absent`);
-    },
-  };
-}
-
-/** The offboard inverse of apply-appproject, run only on an explicit abort-with-cleanup. An
- *  already-absent project resolves deleted:false. */
-export function deleteAppProjectCleanup(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
-  return {
-    name: "delete-appproject",
-    title: "Delete the per-consumer AppProject",
-    run: async (ctx) => {
-      // Resolve the target cluster's projectWriter + ArgoCD namespace (a slave's AppProject lives in
-      // the per-slave ArgoCD ns on the master, "argocd" for the master) — the same seam the apply used.
-      const { projectWriter, argoNamespace } = await ports.resolver.resolve(p.clusterId);
-      const { deleted } = await projectWriter.deleteAppProject(argoNamespace, p.consumerName);
-      ctx.log("meta", deleted ? `AppProject ${p.consumerName} deleted from ${argoNamespace}` : `AppProject ${p.consumerName} was already absent in ${argoNamespace}`);
-    },
-  };
-}
-
 /** The offboard inverse of provision-repo-credential, run only on an explicit abort-with-cleanup. An
  *  already-absent Secret resolves deleted:false; an unwired writer never provisioned one. */
 export function deleteRepoCredentialCleanup(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
@@ -161,41 +129,36 @@ export function removeCeremonySecretsCleanup(ports: OnboardPorts, p: DeployableO
   };
 }
 
-/** The teardown inverse of provision-build-rbac — registered by that step, run only on an explicit
- *  abort-with-cleanup. Tolerates already-absent grants (idempotent).
+/** The teardown inverse of provision-smtp-ops-grant — registered by that step, run only on an
+ *  explicit abort-with-cleanup. Tolerates an already-absent grant (idempotent).
  *
- *  It obeys the same per-stage/per-unit split the removal run kinds do (offboard.run.ts SCOPE), because the
- *  apply it inverts REPLACES objects an earlier stage created rather than only creating its own: the two
- *  grants in the stage-free `<name>-build` namespace exist once per unit, so an abort takes them only
- *  when no OTHER stage of the unit stands. Without that read, aborting the onboard of a second stage
- *  strips the live stage's EventListener of its create-PipelineRun grant, and its next release push
- *  produces nothing at all. */
-export function deleteBuildRbacCleanup(ports: OnboardPorts, p: OnboardParams): Cleanup {
+ *  IT IS THE UNIT'S GRANT AND NOT THIS STAGE'S, so it obeys the per-stage/per-unit split the removal
+ *  run kinds do (offboard.run.ts SCOPE): a dashboard runs in the unit's namespace whatever stage it
+ *  was onboarded at, so the grant goes only when no OTHER stage of the unit stands. Without that read,
+ *  aborting the onboard of a second stage takes the live stage's queue dashboard away from it.
+ *
+ *  A BUILD-ONLY UNIT NEVER HAS ONE — it claims no services and has no namespace to run a dashboard in
+ *  — so this compensation is armed on the deployable form alone (onboard-abort.ts). */
+export function deleteSmtpOpsGrantCleanup(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
   return {
-    name: "delete-build-rbac",
-    title: "Delete the build grants of this run (the unit's own go with its last stage)",
+    name: "delete-smtp-ops-grant",
+    title: "Delete the unit's mail-ops grant (it goes with the unit's last stage)",
     run: async (ctx) => {
+      if (!p.services.includes("smtp-ops")) {
+        ctx.log("meta", `${p.consumerName} claims no smtp-ops — no mail-ops grant was ever written, nothing to take back`);
+        return;
+      }
       if (!ports.buildRbac) {
         ctx.log("meta", `no build RBAC writer wired — nothing was ever provisioned, nothing to take back`);
         return;
       }
-      const argoNamespace = p.form === "build-only" ? undefined : (await ports.resolver.resolve(p.clusterId)).argoNamespace;
-      // A build-only run has no stage registration of its own, so it discounts none.
-      const unit = { name: p.consumerName, ...(p.form === "build-only" ? {} : { stage: p.stage }) };
-      const stageOnly = await unitStaysRegistered(ctx, ports.registrations, unit, "the build-namespace grants");
-      const grants = stageOnly
-        ? argoNamespace !== undefined
-          ? [renderConsumerArgoSync({ name: p.consumerName, argoNamespace })]
-          : [] // build-only, and the unit stands elsewhere: nothing of this run's grants is this run's alone
-        : [
-            ...renderBuildRbac({ name: p.consumerName, ...(argoNamespace !== undefined ? { argoNamespace } : {}) }),
-            // Only on the FULL teardown: the ops grant is the unit's, not this stage's, exactly like
-            // the build-namespace grants it is removed beside.
-            ...(p.form !== "build-only" && p.services.includes("smtp-ops") ? [renderSmtpOpsGrant({ name: p.consumerName })] : []),
-          ];
-      if (grants.length === 0) return;
-      const { deleted } = await ports.buildRbac.deleteBuildRbac(grants);
-      ctx.log("meta", deleted ? `${deleted} build grant object(s) for ${p.consumerName} deleted` : `no build grants for ${p.consumerName} — already absent`);
+      const stageOnly = await unitStaysRegistered(ctx, ports.registrations, { name: p.consumerName, stage: p.stage }, "the mail-ops grant");
+      if (stageOnly) {
+        ctx.log("meta", `mail-ops grant for ${p.consumerName} kept — the unit still stands at another stage and the grant is the unit's`);
+        return;
+      }
+      const { deleted } = await ports.buildRbac.deleteBuildRbac([renderSmtpOpsGrant({ name: p.consumerName })]);
+      ctx.log("meta", deleted ? `mail-ops grant for ${p.consumerName} deleted from ${RELAY_NAMESPACE}` : `no mail-ops grant for ${p.consumerName} — already absent`);
     },
   };
 }
@@ -330,94 +293,38 @@ export function provisionRepoCredentialStep(ports: OnboardPorts, p: DeployableOn
   };
 }
 
-/** apply-appproject: create/replace the per-consumer isolation AppProject on the target cluster's
- *  ArgoCD namespace and register the delete inverse. Idempotent. */
-export function applyAppProjectStep(ports: OnboardPorts, p: DeployableOnboardParams): Step {
+/** provision-smtp-ops-grant: write the unit's mail-OPS grant — read/exec on the relay's pods, in the
+ *  relay's own namespace — for a unit whose stage registration attests `smtp-ops`, and register the
+ *  delete inverse. A unit that claims nothing writes nothing and the step says so.
+ *
+ *  IT IS THE ONE PER-UNIT OBJECT LEFT THAT NO RECONCILER RENDERS, and that is why it alone stands
+ *  where a whole apply of four object kinds used to. The other five — the isolation AppProject, the
+ *  admission policy with its Binding, the argo-sync grant and the two `<name>-build` grants — are
+ *  rendered from the registration this run already commits (hostyour-cloud#174: a fence is rendered by
+ *  the reconciler that manages the namespace it lands in). This grant lands in `postfix` ON THE
+ *  MASTER, which the reconciler of a slave-hosted unit cannot reach at all — its in-cluster
+ *  registration is restricted to one namespace — so no chart can render it and the Manager stays its
+ *  writer.
+ *
+ *  Idempotent: the writer replaces the object in place on a resume. */
+export function provisionSmtpOpsGrantStep(ports: OnboardPorts, p: DeployableOnboardParams): Step {
   return {
-    name: "apply-appproject",
-    title: "Apply the per-consumer isolation AppProject",
+    name: "provision-smtp-ops-grant",
+    title: "Provision the unit's mail-ops grant",
     run: async (ctx) => {
-      // The generated Application references .spec.project == consumerName, and ArgoCD rejects an
-      // Application whose project is absent — so this stands before the first release can sync.
-      // The delete inverse is armed at write-registration with the rest of the ordered rollback
-      // (onboard-abort.ts). Idempotent: a crash-resumed executor re-runs this step and the writer
-      // replaces the existing project in place.
-      const { projectWriter, argoNamespace } = await ports.resolver.resolve(p.clusterId);
-      const project = renderConsumerAppProject({ name: p.consumerName, namespace: p.namespace, repoURL: p.repoURL, platformRepoURL: ports.platformRepoURL, argoNamespace });
-      const { created } = await projectWriter.applyAppProject(argoNamespace, project);
-      ctx.checkpoint({ appProject: p.consumerName, created });
-      ctx.log("meta", `AppProject ${p.consumerName} ${created ? "created" : "updated"} in ${argoNamespace} — the consumer is isolated to its own namespace + repo`);
-    },
-  };
-}
-
-/** apply-admission-policy: arm the unit's ValidatingAdmissionPolicy + Binding on the TARGET cluster
- *  and register the delete inverse. A one-time provisioning, like the AppProject: the boundary holds
- *  for whatever the unit deploys afterwards, which is what makes a per-release check unnecessary.
- *  Idempotent (the writer replaces both in place on a resume). */
-export function applyAdmissionPolicyStep(ports: OnboardPorts, p: DeployableOnboardParams): Step {
-  return {
-    name: "apply-admission-policy",
-    title: "Apply the per-consumer admission policy",
-    run: async (ctx) => {
-      const { clusterReader } = await ports.resolver.resolve(p.clusterId);
-      const { policy, binding } = renderConsumerAdmissionPolicy({
-        name: p.consumerName,
-        namespace: p.namespace,
-        unitApex: p.unitApex,
-        argoAppName: p.argoAppName,
-        // the plan-frozen attested fqdn — the SAME value write-registration committed above, so the
-        // policy and the registration cannot disagree within one run
-        ...(p.fqdn !== undefined ? { fqdn: p.fqdn } : {}),
-        // likewise plan-frozen: the claimed services decide the redis-consumer namespace label the
-        // policy admits, and the consumers ApplicationSet stamps it off the same attested field
-        services: p.services,
-      });
-      const { created } = await clusterReader.applyAdmissionPolicy(policy, binding);
-      ctx.checkpoint({ admissionPolicy: policy.metadata.name, created });
-      const served = [`${p.consumerName}.${p.unitApex}`, ...(p.fqdn !== undefined ? [p.fqdn] : [])].join(" and ");
-      ctx.log(
-        "meta",
-        `admission policy ${policy.metadata.name} ${created ? "created" : "updated"} on ${p.domain} — the unit may serve only ${served}, expose only ClusterIP Services, and create only the namespace ${p.namespace}`,
-      );
-    },
-  };
-}
-
-/** provision-build-rbac: write the unit's build grants — the EventListener's create on PipelineRuns
- *  in `<name>-build`, the manager's read on the same, and (for a DEPLOYABLE unit) the argo-sync
- *  Role+Binding scoped to the unit's own Applications — and register the delete inverse. A build-only
- *  unit has no Applications, so its argo-sync grant has no object and is not rendered; the two
- *  build-namespace grants are what let the webhook create its release run and the manager watch
- *  it. The unit's AppProject blacklists Role and RoleBinding, so nothing the unit deploys can create
- *  these and the Manager is the only writer left. Idempotent (the writer replaces each object in
- *  place on a resume). */
-export function provisionBuildRbacStep(ports: OnboardPorts, p: OnboardParams): Step {
-  return {
-    name: "provision-build-rbac",
-    title: "Provision the unit's build grants",
-    run: async (ctx) => {
-      if (!ports.buildRbac) {
-        throw errValidation("the build RBAC writer is not wired — without it the webhook could not create a PipelineRun in the unit's build namespace and the release pipeline could not sync its bump");
+      // The claim is the plan-frozen services[] — the SAME one the registration commits and the
+      // rendered admission policy reads — so the grant and the fence cannot disagree within one run.
+      if (!p.services.includes("smtp-ops")) {
+        ctx.log("meta", `${p.consumerName} claims no smtp-ops — no grant in ${RELAY_NAMESPACE}, and nothing of this unit may read the relay's queue`);
+        return;
       }
-      const argoNamespace = p.form === "build-only" ? undefined : (await ports.resolver.resolve(p.clusterId)).argoNamespace;
-      // The mail-OPS grant rides along on an attested `smtp-ops` claim — the SAME plan-frozen
-      // services[] the admission policy and the namespace label read, so the three cannot disagree
-      // within one run. It lands in the relay's namespace, not the unit's build namespace.
-      //
-      // Never for a build-only unit: it has no stage registration, so it claims nothing, and it has
-      // no namespace to run a dashboard in — the grant would name a ServiceAccount that does not
-      // exist.
-      const grants = [
-        ...renderBuildRbac({ name: p.consumerName, ...(argoNamespace !== undefined ? { argoNamespace } : {}) }),
-        ...(p.form !== "build-only" && p.services.includes("smtp-ops") ? [renderSmtpOpsGrant({ name: p.consumerName })] : []),
-      ];
-      const { created } = await ports.buildRbac.applyBuildRbac(grants);
-      ctx.checkpoint({ buildRbac: grants.map((g) => `${g.role.metadata.namespace}/${g.role.metadata.name}`), created });
-      ctx.log(
-        "meta",
-        `build grants provisioned in ${unitBuildNamespace(p.consumerName)}${argoNamespace !== undefined ? ` and ${argoNamespace}` : ""} (${created} created, ${grants.length * 2 - created} replaced) — the webhook may start a release run${argoNamespace !== undefined ? `, and that run may sync ${p.consumerName}'s own Applications and no others` : ""}`,
-      );
+      if (!ports.buildRbac) {
+        throw errValidation("the build RBAC writer is not wired — without it this unit's queue dashboard could not read the relay it was granted");
+      }
+      const grant = renderSmtpOpsGrant({ name: p.consumerName });
+      const { created } = await ports.buildRbac.applyBuildRbac([grant]);
+      ctx.checkpoint({ smtpOpsGrant: `${grant.role.metadata.namespace}/${grant.role.metadata.name}`, created });
+      ctx.log("meta", `mail-ops grant provisioned in ${RELAY_NAMESPACE} (${created} created, ${2 - created} replaced) — ${p.consumerName} may read and exec the relay's pods`);
     },
   };
 }

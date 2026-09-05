@@ -173,7 +173,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     expect(planned?.status).toBe("planned");
     expect(planned?.steps.map((s) => s.name)).toEqual([
       "attest-target", "preflight-scopes", "check", "record-provisional", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
-      "provision-repo-credential", "apply-appproject", "apply-admission-policy", "await-build-namespace", "provision-build-rbac", "provision-dns",
+      "provision-repo-credential", "await-build-namespace", "provision-smtp-ops-grant", "provision-dns",
       "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-workflow", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",
     ]);

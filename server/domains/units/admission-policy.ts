@@ -1,7 +1,14 @@
-// The per-consumer ADMISSION boundary — a ValidatingAdmissionPolicy plus its Binding, rendered
-// here and applied ONCE at onboarding beside the AppProject. The AppProject fences what a unit may
-// SUBMIT to ArgoCD (source repos, destination namespace, forbidden kinds); this fences what the
-// resulting objects may SAY. Together they hold regardless of what the unit deploys, which is what
+// The per-consumer ADMISSION boundary — a ValidatingAdmissionPolicy plus its Binding. The AppProject
+// fences what a unit may SUBMIT to ArgoCD (source repos, destination namespace, forbidden kinds);
+// this fences what the resulting objects may SAY.
+//
+// A CONSUMER'S IS RENDERED FROM ITS REGISTRATION and not applied by the onboard any more: the six CEL
+// clauses below were moved into hostyour-cloud's clusters/units/admissionpolicy chart character for
+// character (hostyour-cloud#174), and that chart is what stands on the unit's TARGET cluster.
+// renderConsumerAdmissionPolicy keeps ONE caller here, relocation-world-consumer.ts's provisionTarget,
+// which arms a target cluster while the registration still names the source — the moment at which no
+// chart can render it. renderTenantMemberAdmissionPolicy has no chart at all behind it: nothing
+// renders registrations/<guid>/…, so the Manager is still the only writer of a tenant's. Together they hold regardless of what the unit deploys, which is what
 // makes a per-release check unnecessary — and it is why the gates can stop asking these three
 // questions at plan time.
 //

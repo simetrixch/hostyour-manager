@@ -138,7 +138,7 @@ interface Harness {
   dns: FakeDnsProvider;
 }
 
-function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator; projects?: FakeMasterProjectWriter; created?: boolean } = {}): Harness {
+function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator; projects?: FakeMasterProjectWriter; repoCredential?: FakeRepoCredentialWriter; created?: boolean } = {}): Harness {
   const platform = platformRepo("s1.example", "m1.example");
   const registrations = new Registrations(platform, prodClusterStage);
   const argo = new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } });
@@ -176,7 +176,7 @@ function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator;
     // The reader await-build-namespace waits through, scripted converged: this journey's
     // subject is the run and not that wait.
     buildArgo: new FakeMasterArgoReader({ everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
-    repoCredential: new FakeRepoCredentialWriter(),
+    repoCredential: over.repoCredential ?? new FakeRepoCredentialWriter(),
     buildPlane,
     dns,
     ...(over.activator ? { activator: over.activator } : {}),
@@ -227,7 +227,6 @@ describe("aborting an onboard whose consumer is LIVE", () => {
 
     // Nothing was scheduled and nothing ran: the consumer is exactly as it was, and so is the run.
     expect(await h.registrations.readRegistration("prod", "acme")).not.toBeNull();
-    expect(h.projects.get("argocd", "acme")).toBeDefined();
     expect(appRow()?.status).toBe("active");
     expect(h.seeder.deletedApp).toEqual([]);
     expect(getRun(db.db, runId)?.status).toBe("failed");
@@ -276,21 +275,20 @@ describe("aborting an onboard whose consumer never came up", () => {
 
     expect(getRun(db.db, runId)?.status).toBe("cancelled");
     // The order IS the property: the registration goes first (it is what generates the Application),
-    // the prune is awaited, and only then do the per-unit objects come down. The ceremony-secret
-    // inverse was armed by seed-secrets (a later step), so it runs ahead of the block.
+    // the prune is awaited, and only then do the two objects no reconciler renders come down — since
+    // hostyour-cloud#174 the prune itself takes the AppProject, the admission policy and the three
+    // build grants, so delete-appproject and delete-admission-policy are gone from this list. The
+    // ceremony-secret inverse was armed by seed-secrets (a later step), so it runs ahead of the block.
     expect(cleanupSteps(runId)).toEqual([
       { name: "cleanup:remove-ceremony-secrets", status: "ok" },
       { name: "cleanup:remove-consumer-registration", status: "ok" },
       { name: "cleanup:watch-consumer-prune", status: "ok" },
-      { name: "cleanup:delete-appproject", status: "ok" },
-      { name: "cleanup:delete-admission-policy", status: "ok" },
-      { name: "cleanup:delete-build-rbac", status: "ok" },
+      { name: "cleanup:delete-smtp-ops-grant", status: "ok" },
       { name: "cleanup:delete-repo-credential", status: "ok" },
       { name: "cleanup:remove-dns", status: "ok" },
       { name: "cleanup:remove-consumer-webhook", status: "ok" },
     ]);
     expect(await h.registrations.readRegistration("prod", "acme")).toBeNull();
-    expect(h.projects.get("argocd", "acme")).toBeUndefined();
     // The Vault entry THIS run created is destroyed, so the next onboard reaches created:true
     // instead of inheriting this run's keys under the cas=0 create-only seed.
     expect(h.seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]);
@@ -314,12 +312,14 @@ describe("aborting an onboard whose consumer never came up", () => {
 
   it("a compensation that fails FAILS the cleanup step — never a swallowed ok", async () => {
     seedClusters();
-    class RefusingProjectWriter extends FakeMasterProjectWriter {
-      override async deleteAppProject(): Promise<{ deleted: boolean }> {
+    // The subject is the repository credential, which is one of the two objects the Manager still
+    // writes by hand and therefore one of the two its abort still has to take back.
+    class RefusingRepoCredentialWriter extends FakeRepoCredentialWriter {
+      override async deleteRepoCredential(): Promise<{ deleted: boolean }> {
         throw new Error("the master API server is unreachable");
       }
     }
-    const h = harness({ projects: new RefusingProjectWriter() });
+    const h = harness({ repoCredential: new RefusingRepoCredentialWriter() });
     h.argo.setStatus(STALLED);
     const runId = await runOnboard(h);
 
@@ -328,8 +328,8 @@ describe("aborting an onboard whose consumer never came up", () => {
     await h.executor.settle(runId);
 
     // The failed delete is VISIBLE: the cleanup step is failed and the run is failed — re-abortable —
-    // instead of "cancelled — cleanup complete" over a standing AppProject.
+    // instead of "cancelled — cleanup complete" over a standing Secret carrying a PAT.
     expect(getRun(db.db, runId)?.status).toBe("failed");
-    expect(cleanupSteps(runId).find((s) => s.name === "cleanup:delete-appproject")?.status).toBe("failed");
+    expect(cleanupSteps(runId).find((s) => s.name === "cleanup:delete-repo-credential")?.status).toBe("failed");
   });
 });

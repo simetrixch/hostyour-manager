@@ -13,9 +13,22 @@ export const PROMETHEUS_COMMUNITY_HELM_REPO = "https://prometheus-community.gith
 // The per-UNIT isolation AppProject renderer.
 // One template, two formats: renderConsumerAppProject (one per consumer) and renderTenantAppProject
 // (one per tenant MEMBER). Pure: no IO — the writer (adapters/kube/kube.ts) applies what this
-// renders. Rendered before the registration is committed, because the generated Application references
-// .spec.project == the unit's isolation project and ArgoCD rejects an Application whose project is
-// absent. Both renderers hold the identity law (name == namespace == the unit, where a tenant's unit
+// renders. A unit's project stands before its Application can sync, because that Application
+// references .spec.project == the unit's isolation project and ArgoCD rejects an Application whose
+// project is absent.
+//
+// WHO STILL APPLIES EACH OF THE TWO, because it is no longer the same answer and the difference is
+// the reason both survive:
+//   renderConsumerAppProject  is rendered from the registration by hostyour-cloud's
+//                             clusters/units/reconciler chart (hostyour-cloud#174), so the onboard,
+//                             the offboard and the purge write nothing. Its ONE caller here is
+//                             relocation-world-consumer.ts's provisionTarget, which arms a TARGET
+//                             cluster while the registration still points at the SOURCE — the moment
+//                             at which no chart in the platform repository can render it, because
+//                             the ApplicationSet selects on the registration's `cluster`.
+//   renderTenantAppProject    is applied by create-tenant, add-app and the tenant relocation. Nothing
+//                             renders a tenant's per-MEMBER objects out of registrations/<guid>/…,
+//                             so the Manager is still their only writer. Both renderers hold the identity law (name == namespace == the unit, where a tenant's unit
 // is ONE member) and the fence-4 self-escalation blacklist; they differ in ownership label,
 // sourceRepos and the destination pin (consumer: server "*", tenant: name <cluster> — its ONE slave).
 

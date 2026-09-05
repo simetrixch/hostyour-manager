@@ -41,6 +41,18 @@ function params(over: Partial<DeployableOnboardParams> = {}): OnboardParams {
   });
 }
 
+/** The one unit that claims the ONE service the Manager still writes a grant for, and the gate
+ *  runner that agrees with it. `check` re-runs the gates at the default-branch head and refuses a run
+ *  whose services moved since approval, so the claim has to stand in BOTH — which is that drift belt
+ *  doing its job rather than something to route around. */
+const SMTP_OPS_MANIFEST: ConsumerManifest = { ...MANIFEST, services: ["smtp-ops"] };
+function smtpOpsParams(): OnboardParams {
+  return params({ services: ["smtp-ops"], report: passReport(SMTP_OPS_MANIFEST) });
+}
+function smtpOpsRunner(): FakeGateRunner {
+  return new FakeGateRunner({ report: passReport(SMTP_OPS_MANIFEST) });
+}
+
 function buildOnlyParams(): OnboardParams {
   return OnboardParams.parse({
     ...BASE, form: "build-only", stage: "dev", domain: "m1.example", report: passReport(BUILD_ONLY_MANIFEST),
@@ -85,7 +97,7 @@ describe("onboard run definition", () => {
     expect(def.mutating).toBe(true);
     expect(def.steps({} as OnboardParams).map((s) => s.name)).toEqual([
       "attest-target", "preflight-scopes", "check", "record-provisional", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
-      "provision-repo-credential", "apply-appproject", "apply-admission-policy", "await-build-namespace", "provision-build-rbac", "provision-dns",
+      "provision-repo-credential", "await-build-namespace", "provision-smtp-ops-grant", "provision-dns",
       "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-workflow", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",
     ]);
@@ -104,8 +116,12 @@ describe("onboard run definition", () => {
   //
   // The scripted reader is what the LIVE watch answers for an Application its ApplicationSet has not
   // generated: every expected name reads Missing. The assertion is the OUTCOME — the run stops at
-  // the wait, and nothing was written into a namespace nobody confirmed.
-  it("refuses when GitOps has not rendered the build namespace, without writing a single grant", async () => {
+  // the wait, and nothing of the unit's build stands.
+  //
+  // THE WAIT MATTERS MORE NOW THAN IT DID, not less: since hostyour-cloud#174 that same Application
+  // renders the two build grants as well, so it is this wait — and nothing else — that puts them
+  // there before the release cycle is triggered.
+  it("refuses when GitOps has not rendered the build namespace", async () => {
     const rbac = new FakeBuildRbacWriter();
     const prt = ports({ buildArgo: new FakeMasterArgoReader(), buildRbac: rbac });
     const p = buildOnlyParams();
@@ -127,7 +143,7 @@ describe("onboard run definition", () => {
 
   it("the build-only form is a SUBSET of the same chain — no attest, no provisioning of a target, no deployment watch", () => {
     expect(makeOnboardDef(ports()).steps(buildOnlyParams()).map((s) => s.name)).toEqual([
-      "preflight-scopes", "check", "write-registration", "seed-repo-pat", "await-build-namespace", "provision-build-rbac",
+      "preflight-scopes", "check", "write-registration", "seed-repo-pat", "await-build-namespace",
       "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-build", "record",
     ]);
   });
@@ -189,13 +205,10 @@ describe("onboard run definition", () => {
     expect(seeder.buildRepoPats).toEqual([{ consumerName: "acme", pat: "github_pat_test" }]);
     expect(logs.some((l) => l.includes("attested and left untouched"))).toBe(true);
 
-    // only the two build-namespace grants — a build-only unit has no Applications to argo-sync
-    expect((prt.buildRbac as FakeBuildRbacWriter).keys()).toEqual([
-      "Role acme-build/acme-build-eventlistener",
-      "Role acme-build/acme-build-manager-read",
-      "RoleBinding acme-build/acme-build-eventlistener",
-      "RoleBinding acme-build/acme-build-manager-read",
-    ]);
+    // NOTHING is written by hand. The two build-namespace grants stand inside the Application
+    // await-build-namespace waited for (hostyour-cloud#174 consumer-build in unit mode), and a
+    // build-only unit has no stage registration, so it claims no service and gets no mail-ops grant.
+    expect((prt.buildRbac as FakeBuildRbacWriter).keys()).toEqual([]);
 
     // the release run was watched in the UNIT's own namespace and the record ties tag to builds
     expect(logs.some((l) => l.includes(`release ${MINTED_TAG} proven through the injected cycle`))).toBe(true);
@@ -214,37 +227,40 @@ describe("onboard run definition", () => {
     await expect(step(blankDns).run(ctx(p, "provision-dns", []))).rejects.toThrow(/has no A record of its own/);
   });
 
-  it("apply-appproject writes the consumer's isolation AppProject into argocd", async () => {
+  // THE ONBOARD WRITES NO FENCE OF ITS OWN, and this is the assertion that says so. Since
+  // hostyour-cloud#174 the isolation AppProject, the admission policy with its Binding, the argo-sync
+  // grant and the two `<name>-build` grants are rendered from the registration write-registration
+  // commits, so a Manager that wrote any of them would be the SECOND writer of an object a reconciler
+  // owns — the two would take turns replacing each other on every sync.
+  it("writes NO AppProject and NO grant of its own for a unit that claims no service", async () => {
     seedClusters();
     const projects = new FakeMasterProjectWriter();
-    await runAll(params(), ports({ projects }), []);
-    const project = projects.get("argocd", "acme");
-    expect(project?.metadata.namespace).toBe("argocd");
-    expect(project?.spec.destinations).toEqual([{ server: "*", namespace: "acme" }]);
+    const buildRbac = new FakeBuildRbacWriter();
+    await runAll(params(), ports({ projects, buildRbac }), []);
+    expect(projects.get("argocd", "acme"), "the AppProject is clusters/units/reconciler's to render").toBeUndefined();
+    expect(buildRbac.keys()).toEqual([]);
   });
 
-  it("provision-build-rbac writes the six grant objects for a deployable unit", async () => {
+  // The ONE per-unit fence no reconciler can render: it stands in the relay's namespace on the
+  // MASTER, and the reconciler managing a slave-hosted unit is registered for one namespace.
+  it("provision-smtp-ops-grant writes the mail-ops grant, and only for a unit that attests smtp-ops", async () => {
     seedClusters();
     const buildRbac = new FakeBuildRbacWriter();
-    await runAll(params(), ports({ buildRbac }), []);
+    await runAll(smtpOpsParams(), { ...ports({ buildRbac }), runner: smtpOpsRunner() }, []);
     expect(buildRbac.keys()).toEqual([
-      "Role acme-build/acme-build-eventlistener",
-      "Role acme-build/acme-build-manager-read",
-      "Role argocd/acme-argo-sync",
-      "RoleBinding acme-build/acme-build-eventlistener",
-      "RoleBinding acme-build/acme-build-manager-read",
-      "RoleBinding argocd/acme-argo-sync",
+      "Role postfix/acme-smtp-ops",
+      "RoleBinding postfix/acme-smtp-ops",
     ]);
-    const sync = buildRbac.get("Role", "argocd", "acme-argo-sync") as RoleManifest;
-    expect(sync.rules[0]!.resourceNames).toEqual(["acme-dev", "acme-test", "acme-prod"]);
+    const grant = buildRbac.get("Role", "postfix", "acme-smtp-ops") as RoleManifest;
+    expect(grant.rules.map((r) => r.resources[0])).toEqual(["pods", "pods/log", "pods/exec"]);
   });
 
-  it("a build-grant write that fails aborts the onboard AFTER the registration was committed — the abort cleanup removes it", async () => {
+  it("a grant write that fails aborts the onboard AFTER the registration was committed — the abort cleanup removes it", async () => {
     seedClusters();
     const buildRbac = new FakeBuildRbacWriter();
     buildRbac.failApply(new Error("forbidden: cannot create Role"));
-    const prt = ports({ buildRbac });
-    await expect(runAll(params(), prt, [])).rejects.toThrow(/cannot create Role/);
+    const prt = { ...ports({ buildRbac }), runner: smtpOpsRunner() };
+    await expect(runAll(smtpOpsParams(), prt, [])).rejects.toThrow(/cannot create Role/);
     // the registration comes FIRST; the abort's registered cleanup is what takes it back.
     expect(await prt.registrations.readRegistration("prod", "acme")).not.toBeNull();
     const cleanup = makeOnboardDef(prt).cleanups!(params()).find((c) => c.name === "remove-consumer-registration")!;
@@ -285,10 +301,13 @@ describe("onboard run definition", () => {
     const steps = makeOnboardDef(prt).steps(p);
     const byName = (n: string) => steps.find((s) => s.name === n)!;
     await byName("attest-target").run(ctx(p, "attest-target", []));
-    await byName("apply-appproject").run(ctx(p, "apply-appproject", []));
     await byName("watch-deployment").run(ctx(p, "watch-deployment", []));
     await byName("smoke").run(ctx(p, "smoke", []));
-    expect(slaveProjects.get("s2", "acme")?.metadata.name).toBe("acme");
+    // The resolver is what routes every remaining step at a slave-hosted unit — the deployment watch
+    // reads the per-slave ArgoCD namespace, the smoke the slave's own cluster. Nothing writes a
+    // project there any more: the AppProject is rendered into that same namespace by the reconciler
+    // instance that manages it.
+    expect(slaveProjects.get("s2", "acme")).toBeUndefined();
     expect(resolver.resolved.every((c) => c === "cls_s2")).toBe(true);
   });
 

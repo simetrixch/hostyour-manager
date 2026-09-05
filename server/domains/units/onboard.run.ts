@@ -22,8 +22,8 @@ import { seedRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { seedPostgresSuperuserStep } from "./onboard-seed-postgres.ts";
 import { seedMongodbInstanceStep } from "./onboard-seed-mongodb.ts";
 import {
-  attestTargetStep, seedSecretsStep, provisionRepoCredentialStep, applyAppProjectStep, applyAdmissionPolicyStep,
-  provisionBuildRbacStep, provisionDnsStep, smokeStep, recordProvisionalStep, recordInventoryStep, removeCeremonySecretsCleanup,
+  attestTargetStep, seedSecretsStep, provisionRepoCredentialStep,
+  provisionSmtpOpsGrantStep, provisionDnsStep, smokeStep, recordProvisionalStep, recordInventoryStep, removeCeremonySecretsCleanup,
 } from "./onboard-steps.ts";
 import { deployableOnboardCleanups, buildOnlyOnboardCleanups, assertOnboardAbortable } from "./onboard-abort.ts";
 import {
@@ -320,17 +320,21 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
     // because the mongo image creates its root user from it at first init and never again.
     seedMongodbInstanceStep(ports, p),
     seedRepoPatStep(ports, p),
-    // The provisioning block: the four per-unit objects the Manager writes outside
-    // any chart — the ArgoCD repository credential, the AppProject, the admission boundary and the
-    // build grants. All must stand BEFORE the release cycle is triggered: the moment the deploy ref
-    // is pushed, the EventListener needs its create grant, the pipeline its sync grant, and ArgoCD
-    // the project + the repo credential — a cycle started on missing ground fails where nobody is
-    // watching.
+    // The provisioning block: the TWO per-unit objects the Manager still writes outside any chart.
+    // The ArgoCD repository credential, because its value is a PAT and no chart may carry one; and
+    // the mail-ops grant, because it lands in the relay's namespace on the MASTER, which the
+    // reconciler of a slave-hosted unit cannot reach. The other five — the isolation AppProject, the
+    // admission boundary, the argo-sync grant and the two build-namespace grants — are rendered from
+    // the registration write-registration commits above (hostyour-cloud#174).
+    //
+    // WHAT ORDERS THEM NOW. The two build grants stand inside the Application await-build-namespace
+    // waits for, so they are ordered by a wait that was already here. The AppProject, the policy and
+    // the argo-sync grant come from a second ApplicationSet nothing waits on — and what holds that is
+    // watch-deployment below, which cannot read Synced+Healthy for a unit whose AppProject is absent:
+    // ArgoCD refuses an Application whose project does not exist and retries until it does.
     provisionRepoCredentialStep(ports, p),
-    applyAppProjectStep(ports, p),
-    applyAdmissionPolicyStep(ports, p),
     awaitBuildNamespaceStep(ports, p),
-    provisionBuildRbacStep(ports, p),
+    provisionSmtpOpsGrantStep(ports, p),
     // The unit's public address, before the release cycle: the deployment the cycle
     // produces must come up resolvable — cert issuance (HTTP-01) needs the host to resolve.
     provisionDnsStep(ports, p),
@@ -372,13 +376,12 @@ function buildOnlySteps(ports: OnboardPorts, p: BuildOnlyOnboardParams): Step[] 
     ...(p.ungated ? [] : [checkStep(ports, p)]),
     writeBuildRegistrationStep(ports, p),
     seedRepoPatStep(ports, p),
-    // The two build-namespace grants are load-bearing in this form too: hostyour-cloud ships no
-    // Role/RoleBinding in the consumer-build chart (its serviceaccount template says so), so without
-    // them the EventListener cannot create the release PipelineRun and the manager cannot watch
-    // it — the trigger below would fire into nothing. The argo-sync grant is not rendered (a
-    // build-only unit has no Applications to sync).
+    // The build Application carries the two build-namespace grants now (hostyour-cloud#174), so this
+    // wait is what puts them there: without them the EventListener cannot create the release
+    // PipelineRun and the manager cannot watch it, and the trigger below would fire into nothing. A
+    // build-only unit gets nothing else — it has no Applications to sync, no namespace to run a
+    // dashboard in and no stage registration to claim a service on.
     awaitBuildNamespaceStep(ports, p),
-    provisionBuildRbacStep(ports, p),
     injectReleaseKitStep(ports, p),
     setupWebhookStep(ports, p),
     triggerReleaseStep(ports, p, release),

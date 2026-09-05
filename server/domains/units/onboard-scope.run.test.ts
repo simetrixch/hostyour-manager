@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "../../../shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { provisionDnsStep, deleteBuildRbacCleanup } from "./onboard-steps.ts";
+import { provisionDnsStep, deleteSmtpOpsGrantCleanup } from "./onboard-steps.ts";
 import { OnboardParams, type OnboardPorts, type DeployableOnboardParams } from "./onboard.run.ts";
 import { Registrations, type ClusterStageResolver } from "./registrations.ts";
-import { renderBuildRbac } from "./build-rbac.ts";
+import { renderSmtpOpsGrant } from "./build-rbac.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeClusterReader, FakeMasterArgoReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
@@ -43,6 +43,11 @@ function params(over: Partial<OnboardParams> = {}): OnboardParams {
     report: { contractVersion: "1.5", runnerVersion: "t", repoURL: REPO, requestedRef: SHA, resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest: null, dependencies: [], gates: [], verdict: "pass", reportHash: "h", sandbox: { mustFailTargets: [], mustFailTargetsDeclaredListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true } },
     argoAppName: "acme-prod", ...over,
   });
+}
+
+/** The same unit, claiming the one service the Manager still writes a grant for. */
+function smtpOpsParams(): DeployableOnboardParams {
+  return params({ services: ["smtp-ops"] }) as DeployableOnboardParams;
 }
 
 /** s1 carries prod (the stage being onboarded), s2 carries dev (the stage that is already
@@ -97,29 +102,39 @@ describe("onboard scope — a second stage beside a live one", () => {
     expect(dns.record("acme.example.com", "A")).toBe("203.0.113.10");
   });
 
-  it("the abort cleanup keeps the unit's build-namespace grants while another stage stands, and takes only this stage's argo-sync", async () => {
+  it("the abort cleanup keeps the unit's mail-ops grant while another stage stands", async () => {
     const reg = new Registrations(new FakePlatformRepo(), twoStageClusterStage);
     await seedDevStage(reg);
-    // The grants as dev's onboard left them; this run's provision-build-rbac REPLACED the acme-build
-    // pair rather than creating it, so those two objects are not this run's to take back.
+    // The grant as dev's onboard left it; this run's provision-smtp-ops-grant REPLACED it rather than
+    // creating it, so the object is not this run's to take back. It is the unit's, not the stage's: a
+    // queue dashboard runs in the unit's namespace whatever stage it was onboarded at.
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac(renderBuildRbac({ name: "acme", argoNamespace: "argocd" }));
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
     const logs: string[] = [];
-    const cleanup = deleteBuildRbacCleanup({ registrations: reg, resolver: resolver(), buildRbac } as unknown as OnboardPorts, params());
-    await cleanup.run(ctx("delete-build-rbac", logs));
-    expect(buildRbac.get("Role", "acme-build", "acme-build-eventlistener")).toBeTruthy();
-    expect(buildRbac.get("RoleBinding", "acme-build", "acme-build-manager-read")).toBeTruthy();
-    expect(buildRbac.get("Role", "argocd", "acme-argo-sync")).toBeUndefined(); // this stage's own
-    expect(logs.some((l) => l.includes("the build-namespace grants for acme kept") && l.includes("dev"))).toBe(true);
+    const cleanup = deleteSmtpOpsGrantCleanup({ registrations: reg, resolver: resolver(), buildRbac } as unknown as OnboardPorts, smtpOpsParams());
+    await cleanup.run(ctx("delete-smtp-ops-grant", logs));
+    expect(buildRbac.get("Role", "postfix", "acme-smtp-ops")).toBeTruthy();
+    expect(buildRbac.get("RoleBinding", "postfix", "acme-smtp-ops")).toBeTruthy();
+    expect(logs.some((l) => l.includes("mail-ops grant for acme kept") && l.includes("another stage"))).toBe(true);
   });
 
-  it("the abort cleanup takes ALL of the grants when the unit stands at no other stage", async () => {
+  it("the abort cleanup takes the grant when the unit stands at no other stage", async () => {
     const reg = new Registrations(new FakePlatformRepo(), twoStageClusterStage); // an empty tree
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac(renderBuildRbac({ name: "acme", argoNamespace: "argocd" }));
-    const cleanup = deleteBuildRbacCleanup({ registrations: reg, resolver: resolver(), buildRbac } as unknown as OnboardPorts, params());
-    await cleanup.run(ctx("delete-build-rbac", []));
-    expect(buildRbac.get("Role", "acme-build", "acme-build-eventlistener")).toBeUndefined();
-    expect(buildRbac.get("Role", "argocd", "acme-argo-sync")).toBeUndefined();
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    const cleanup = deleteSmtpOpsGrantCleanup({ registrations: reg, resolver: resolver(), buildRbac } as unknown as OnboardPorts, smtpOpsParams());
+    await cleanup.run(ctx("delete-smtp-ops-grant", []));
+    expect(buildRbac.keys()).toEqual([]);
+  });
+
+  // A unit that claims nothing never had one, and the cleanup says so instead of reading a tree.
+  it("the abort cleanup writes nothing back for a unit that never claimed smtp-ops", async () => {
+    const buildRbac = new FakeBuildRbacWriter();
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    const logs: string[] = [];
+    const cleanup = deleteSmtpOpsGrantCleanup({ buildRbac } as unknown as OnboardPorts, params() as DeployableOnboardParams);
+    await cleanup.run(ctx("delete-smtp-ops-grant", logs));
+    expect(buildRbac.keys()).toHaveLength(2);
+    expect(logs.some((l) => l.includes("claims no smtp-ops"))).toBe(true);
   });
 });

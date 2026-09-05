@@ -10,6 +10,14 @@
 // WHOLE list below and the rollback runs registration-removal FIRST, then the prune wait, then the
 // object deletes. The per-step arming this replaces produced the reverse: the AppProject went while
 // the generated Application still referenced it, and nothing ever waited for the prune.
+//
+// AND THE LIST IS SHORTER THAN IT WAS, because most of what an onboard used to WRITE it no longer
+// writes. Since hostyour-cloud#174 the isolation AppProject, the admission policy with its Binding,
+// the argo-sync grant and the two `<name>-build` grants are rendered from the registration, so
+// removing that registration is what takes them: ArgoCD's own prune, waited for right here, is the
+// compensation. What is left to delete by hand is what no reconciler renders — the repository
+// credential, whose value is a PAT, and the mail-ops grant, which stands in the relay's namespace on
+// the master where a slave-hosted unit's reconciler cannot reach.
 import { eq, and } from "drizzle-orm";
 import type { Cleanup } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
@@ -17,8 +25,8 @@ import { apps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { AppStatus } from "../../../shared/enums.ts";
 import {
-  removeRegistrationCleanup, watchConsumerPruneCleanup, deleteAppProjectCleanup, deleteAdmissionPolicyCleanup,
-  deleteBuildRbacCleanup, deleteRepoCredentialCleanup, removeDnsCleanup, removeBuildRegistrationCleanup,
+  removeRegistrationCleanup, watchConsumerPruneCleanup, deleteSmtpOpsGrantCleanup,
+  deleteRepoCredentialCleanup, removeDnsCleanup, removeBuildRegistrationCleanup,
 } from "./onboard-steps.ts";
 import { removeWebhookCleanup } from "./onboard-webhook.ts";
 // Type-only, so there is no runtime import cycle back into onboard.run.ts — the create-tenant-abort.ts shape.
@@ -36,9 +44,7 @@ export function deployableOnboardCleanups(ports: OnboardPorts, p: DeployableOnbo
   return [
     removeRegistrationCleanup(ports, p),
     watchConsumerPruneCleanup(ports, p),
-    deleteAppProjectCleanup(ports, p),
-    deleteAdmissionPolicyCleanup(ports, p),
-    deleteBuildRbacCleanup(ports, p),
+    deleteSmtpOpsGrantCleanup(ports, p),
     deleteRepoCredentialCleanup(ports, p),
     removeDnsCleanup(ports, p),
     removeWebhookCleanup(ports, p),
@@ -52,7 +58,6 @@ export function deployableOnboardCleanups(ports: OnboardPorts, p: DeployableOnbo
 export function buildOnlyOnboardCleanups(ports: OnboardPorts, p: OnboardParams): Cleanup[] {
   return [
     removeBuildRegistrationCleanup(ports, p),
-    deleteBuildRbacCleanup(ports, p),
     removeWebhookCleanup(ports, p),
   ];
 }
@@ -100,8 +105,9 @@ export async function assertOnboardAbortable(ports: OnboardPorts, p: OnboardPara
   if ((await ports.registrations.readRegistration(p.stage, p.consumerName)) === null) return;
   const rollback =
     `aborting this onboard would run its rollback: git-rm the registration, wait for ArgoCD to prune the generated Application ` +
-    `(the prune deletes the consumer's ServiceClaim, and its deprovision drops the consumer's databases and user), then delete the AppProject, ` +
-    `the admission policy, the build grants, the repository credential and the DNS record`;
+    `(the prune deletes the consumer's ServiceClaim, and its deprovision drops the consumer's databases and user, and takes the unit's ` +
+    `AppProject, admission policy and grants with the registration they render from), then delete the mail-ops grant, the repository ` +
+    `credential and the DNS record`;
   const row = db
     .select({ status: apps.status })
     .from(apps)

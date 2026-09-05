@@ -4,8 +4,7 @@ import type { RunDefinition, Step } from "../../executor/types.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { AppError, errNotFound } from "../../kernel/errors.ts";
 import { consumerArgoAppName } from "../../../shared/consumer.ts";
-import { consumerAdmissionPolicyName } from "./admission-policy.ts";
-import { renderBuildRbac, renderConsumerArgoSync, renderSmtpOpsGrant } from "./build-rbac.ts";
+import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "./build-rbac.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { attestTargetStep, clearRelocationHold, loadAppCluster, unitStaysRegistered, type LifecyclePorts } from "./lifecycle.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
@@ -22,8 +21,16 @@ import { removeReleaseKit } from "./onboard-release-kit.ts";
 import { assertNoOrphans } from "./offboard-orphans.ts";
 
 // offboard: remove the consumers/** pointer, wait for the master ArgoCD to
-// prune, delete the isolation AppProject, delete the (now-empty) target-cluster namespace, destroy
-// the Vault secrets, and mark the row offboarded. No gate-runner — it fits the standard synchronous
+// prune, delete the (now-empty) target-cluster namespace, destroy the Vault secrets, and mark the row
+// offboarded.
+//
+// WHAT THE PRUNE TAKES, AND WHY THIS RUN KIND IS SHORTER THAN IT WAS. Since hostyour-cloud#174 the
+// isolation AppProject, the admission policy with its Binding, the argo-sync grant and the two
+// `<name>-build` grants are RENDERED from the registration this run removes, so removing it is what
+// deletes them and watch-removal is what this run waits on. Four delete steps went with that. What is
+// left to delete by hand is the two objects no reconciler renders: the repository credential, whose
+// value is a PAT, and the mail-ops grant, which stands in `postfix` on the master where a
+// slave-hosted unit's reconciler cannot reach. No gate-runner — it fits the standard synchronous
 // plan() path. mutating: true ⇒ attest-target is the first step. A settled consumer row is
 // NEVER hard-deleted — offboard flips its status to "offboarded" (a soft, re-onboardable state).
 // The row is soft, but the SECRETS are not: offboard destroys this stage's Vault entries outright,
@@ -42,13 +49,13 @@ import { assertNoOrphans } from "./offboard-orphans.ts";
 // <name>-build namespace's two grants, secret/build/<name>/repo-pat, the ONE build webhook on the
 // consumer repo and the release kit in it. The per-unit steps ask unitStaysRegistered (lifecycle.ts) and
 // keep their object while another <stage>.yaml stands, so offboarding prod leaves a unit that still
-// stands at dev able to build, release and deploy there.
+// stands at dev able to build, release and deploy there. The mail-ops grant is per UNIT for the same
+// reason: a dashboard runs in the unit's namespace whatever stage it was onboarded at.
 
 export const OffboardParams = z.object({ appId: z.string().startsWith("app_") });
 export type OffboardParams = z.infer<typeof OffboardParams>;
 
-/** offboard deletes the isolation AppProject via the resolved projectWriter,
- *  deletes the target-cluster namespace via the resolved clusterReader (the namespace ArgoCD's
+/** offboard deletes the target-cluster namespace via the resolved clusterReader (the namespace ArgoCD's
  *  CreateNamespace=true created but never prunes), and additionally removes the consumer's
  *  Vault entries — the consumer-tier ceremony secrets of this stage, plus the build-tier repo PAT once no
  *  other stage stands — so on top of the lifecycle set it carries the VaultSeeder (the same adapter
@@ -63,10 +70,9 @@ export type OffboardPorts = LifecyclePorts & {
    *  consumer repo with the unit's LAST stage (self-contained, fail-soft). Optional: absent ⇒ the
    *  remove-release-kit step logs + skips (never blocks offboard). */
   consumerRepo?: ConsumerRepo;
-  /** The build-grant writer — offboard deletes this stage's argo-sync Role + RoleBinding, and the
-   *  `<name>-build` pair with the unit's LAST stage (fail-soft), then READS the same grants back in
-   *  assert-no-orphans. Optional: absent ⇒ the delete-build-rbac step logs + skips (never blocks
-   *  offboard) and the scan reports that it could not look. */
+  /** The build-grant writer — offboard deletes the unit's mail-ops grant with its LAST stage
+   *  (fail-soft), then READS it back in assert-no-orphans. Optional: absent ⇒ the delete-smtp-ops-grant
+   *  step logs + skips (never blocks offboard) and the scan reports that it could not look. */
   buildRbac?: BuildRbacWriter;
   /** The repository-credential writer — offboard deletes the unit's ArgoCD repository Secret (the
    *  inverse of provision-repo-credential) and reads it back in assert-no-orphans. Fail-soft like the
@@ -127,38 +133,6 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
       },
     },
     {
-      name: "delete-admission-policy",
-      title: "Delete the per-consumer admission policy",
-      run: async (ctx) => {
-        // The inverse of apply-admission-policy. It runs on the TARGET cluster (the policy is
-        // cluster-scoped and was armed there), and BEFORE the namespace delete for the same reason
-        // the project delete does: nothing is left fencing a unit that no longer exists.
-        const ac = loadAppCluster(ctx.db, appId);
-        const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
-        const { deleted } = await clusterReader.deleteAdmissionPolicy(consumerAdmissionPolicyName(ac.name));
-        ctx.checkpoint({ admissionPolicy: consumerAdmissionPolicyName(ac.name), deleted });
-        ctx.log("meta", deleted ? `admission policy for ${ac.name} deleted` : `no admission policy for ${ac.name} — already absent`);
-      },
-    },
-    {
-      name: "delete-appproject",
-      title: "Delete the per-consumer isolation AppProject",
-      run: async (ctx) => {
-        // After the Application is pruned, the isolation project has no more consumer Application
-        // referencing it — delete it. Idempotent: an already-absent project resolves deleted:false.
-        const ac = loadAppCluster(ctx.db, appId);
-        const { projectWriter, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
-        const { deleted } = await projectWriter.deleteAppProject(argoNamespace, ac.name);
-        ctx.checkpoint({ appProject: ac.name, deleted });
-        ctx.log(
-          "meta",
-          deleted
-            ? `AppProject ${ac.name} deleted from ${argoNamespace} — the consumer's isolation project is removed`
-            : `AppProject ${ac.name} was already absent in ${argoNamespace} — nothing to delete`,
-        );
-      },
-    },
-    {
       name: "delete-repo-credential",
       title: "Delete the ArgoCD repository credential",
       run: async (ctx) => {
@@ -182,41 +156,45 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
       },
     },
     {
-      name: "delete-build-rbac",
-      title: "Delete the build grants of this stage (the unit's own go with its last stage)",
+      name: "delete-smtp-ops-grant",
+      title: "Delete the unit's mail-ops grant (it goes with the unit's last stage)",
       run: async (ctx) => {
-        // The inverse of provision-build-rbac, and the ONE step that spans both scopes. The argo-sync
-        // grant sits in the target cluster's ArgoCD namespace and names this stage's Application, so it
-        // goes now. The other two sit in `<name>-build`, which is stage-free — one build namespace per
-        // unit — so they go only with the unit's last stage: taking them earlier would leave the
-        // surviving stage's release with no way to create its PipelineRun. Neither scope is ever pruned
-        // by removing the registration; the Manager wrote all of them outside any chart.
+        // The inverse of provision-smtp-ops-grant, and the one grant a reconciler cannot render: it
+        // stands in the relay's namespace ON THE MASTER, and the reconciler of a slave-hosted unit is
+        // registered for exactly one namespace. Nothing prunes it when the registration goes.
+        //
+        // PER UNIT AND NOT PER STAGE. A queue dashboard runs in the unit's namespace whatever stage it
+        // was onboarded at, so the grant goes only with the unit's last stage — taking it earlier
+        // would blind a surviving stage's dashboard to the relay it was granted.
+        //
+        // Removed UNCONDITIONALLY rather than on a claim, because this run is keyed on the appId and
+        // never reads services[] — and the delete is idempotent, so a unit that never claimed
+        // smtp-ops simply has nothing there. That direction is the safe one: the alternative leaves
+        // pods/exec in the relay's namespace bound to a ServiceAccount whose namespace is being
+        // deleted.
+        //
         // Fail-soft — a teardown must not stall on a grant that was never provisioned, on a cluster
-        // surface that is already down, or on a registration tree it cannot read; what is left behind is
-        // an unbound Role, not access. The tree read sits INSIDE the fail-soft body deliberately: a read
-        // that fails keeps every grant, which is the direction that cannot strip a surviving stage.
+        // surface that is already down, or on a registration tree it cannot read; what is left behind
+        // is an unbound Role, not access, and assert-no-orphans reads it back. The tree read sits
+        // INSIDE the fail-soft body deliberately: a read that fails keeps the grant, which is the
+        // direction that cannot strip a surviving stage.
         const ac = loadAppCluster(ctx.db, appId);
         if (!ports.buildRbac) {
-          ctx.log("meta", `no build RBAC writer wired — the grants for ${ac.name} are left as they are`);
+          ctx.log("meta", `no build RBAC writer wired — the mail-ops grant for ${ac.name} is left as it is`);
           return;
         }
         try {
-          const { argoNamespace } = await ports.resolver.resolve(ac.clusterId);
-          const stageOnly = await unitStaysRegistered(ctx, ports.registrations, ac, "the build-namespace grants");
-          // The mail-OPS grant goes with the unit's last stage, like the build-namespace grants: it
-          // is the unit's, not this stage's. Removed UNCONDITIONALLY rather than on a claim, because
-          // this run is keyed on the appId and never reads services[] — and the delete is idempotent,
-          // so a unit that never claimed smtp-ops simply has nothing there. That direction is the
-          // safe one: the alternative leaves pods/exec in the relay's namespace bound to a
-          // ServiceAccount whose namespace is being deleted.
-          const grants = stageOnly
-            ? [renderConsumerArgoSync({ name: ac.name, argoNamespace })]
-            : [...renderBuildRbac({ name: ac.name, argoNamespace }), renderSmtpOpsGrant({ name: ac.name })];
-          const { deleted } = await ports.buildRbac.deleteBuildRbac(grants);
-          ctx.checkpoint({ buildRbacDeleted: deleted, scope: stageOnly ? "stage" : "unit" });
-          ctx.log("meta", deleted ? `${deleted} build grant object(s) for ${ac.name} deleted` : `no build grants for ${ac.name} — already absent`);
+          const stageOnly = await unitStaysRegistered(ctx, ports.registrations, ac, "the mail-ops grant");
+          if (stageOnly) {
+            ctx.checkpoint({ smtpOpsGrantDeleted: 0, scope: "stage" });
+            ctx.log("meta", `mail-ops grant for ${ac.name} kept — the unit still stands at another stage and the grant is the unit's`);
+            return;
+          }
+          const { deleted } = await ports.buildRbac.deleteBuildRbac([renderSmtpOpsGrant({ name: ac.name })]);
+          ctx.checkpoint({ smtpOpsGrantDeleted: deleted, scope: "unit" });
+          ctx.log("meta", deleted ? `${deleted} mail-ops grant object(s) for ${ac.name} deleted from ${RELAY_NAMESPACE}` : `no mail-ops grant for ${ac.name} — already absent`);
         } catch (err) {
-          ctx.log("meta", `could not delete the build grants for ${ac.name} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
+          ctx.log("meta", `could not delete the mail-ops grant for ${ac.name} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
         }
       },
     },

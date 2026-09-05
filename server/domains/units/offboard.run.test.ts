@@ -4,8 +4,7 @@ import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
-import { renderConsumerAppProject } from "./appproject.ts";
-import { renderBuildRbac } from "./build-rbac.ts";
+import { renderSmtpOpsGrant } from "./build-rbac.ts";
 import { Registrations, type ClusterStageResolver } from "./registrations.ts";
 import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { FakePlatformRepo, FakeConsumerRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
@@ -121,12 +120,16 @@ describe("offboard run definition", () => {
     expect(def.mutating).toBe(true);
     expect(plan.targetKind).toBe("app");
     expect(plan.targetId).toBe("app_1");
-    // delete-admission-policy sits right after watch-removal, BEFORE delete-appproject: the inverse of
-    // apply-admission-policy, removed once the prune is confirmed. delete-namespace sits right after
-    // delete-appproject: both tear down the consumer's empty shell (the AppProject on the master, the
-    // namespace on the TARGET cluster). It MUST come after watch-removal — ArgoCD's CreateNamespace=true
-    // never deletes the namespace on prune, so the Run deletes it, but only after the workloads are gone
-    // (nothing live is stripped).
+    // THE TWO DELETES ARE THE TWO OBJECTS NO RECONCILER RENDERS, and there used to be four. Since
+    // hostyour-cloud#174 the isolation AppProject, the admission policy with its Binding, the argo-sync
+    // grant and the two `<name>-build` grants are rendered from the registration remove-registration
+    // takes away, so watch-removal is what removes them and delete-admission-policy/delete-appproject
+    // went with them. What is left by hand is the repository credential (its value is a PAT) and the
+    // mail-ops grant (it stands in the relay's namespace on the MASTER, which a slave-hosted unit's
+    // reconciler cannot reach).
+    // delete-namespace MUST come after watch-removal — ArgoCD's CreateNamespace=true never deletes the
+    // namespace on prune, so the Run deletes it, but only after the workloads are gone (nothing live is
+    // stripped).
     // assert-no-orphans is the LAST step before record-offboard: it reads back everything the deletes
     // above were supposed to remove, and a leftover fails the run rather than settle the row.
     // remove-repo-pat runs AFTER the prune (the ArgoCD repository ESO may still need the PAT while
@@ -135,7 +138,7 @@ describe("offboard run definition", () => {
     // after watch-removal (the consumer's own pods read that entry via ESO until the app is pruned)
     // and before record-offboard (which flips the row to the re-onboardable state — a surviving
     // entry plus a re-onboardable row is the silent-inheritance bug, since the seed is cas=0).
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-registration", "watch-removal", "delete-admission-policy", "delete-appproject", "delete-repo-credential", "delete-build-rbac", "delete-namespace", "remove-dns", "remove-webhook", "remove-release-kit", "remove-repo-pat", "remove-app-secrets", "remove-database-secrets", "assert-no-orphans", "record-offboard"]);
+    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-registration", "watch-removal", "delete-repo-credential", "delete-smtp-ops-grant", "delete-namespace", "remove-dns", "remove-webhook", "remove-release-kit", "remove-repo-pat", "remove-app-secrets", "remove-database-secrets", "assert-no-orphans", "record-offboard"]);
     expect(plan.locks).toEqual([{ resource: "git-branch", key: FAKE_BOOKS_BRANCH }, { resource: "git-branch", key: "s1.example" }, { resource: "master-kube", key: "m" }]);
     expect(plan.requiredSecrets).toEqual([]);
   });
@@ -180,43 +183,44 @@ describe("offboard run definition", () => {
     expect(cleared).toBeLessThan(removed);
   });
 
-  it("delete-appproject removes the pre-seeded isolation AppProject (idempotent when absent)", async () => {
+  // NOTHING OF THE UNIT'S FENCES IS DELETED BY HAND ANY MORE, and this is the assertion that says so:
+  // a pre-seeded AppProject standing in the writer is left exactly where it is, because taking it
+  // would be this run reaching into an object clusters/units/reconciler renders and ArgoCD prunes.
+  it("leaves the isolation AppProject to the prune — no step of this run touches it", async () => {
     seedApp();
     const projects = new FakeMasterProjectWriter();
-    await projects.applyAppProject("argocd", renderConsumerAppProject({ name: "acme", namespace: "acme", repoURL: "https://github.com/x/acme.git", platformRepoURL: "https://github.com/x/hostyour-cloud.git", argoNamespace: "argocd" }));
-    expect(projects.get("argocd", "acme")).toBeDefined();
-
+    await projects.applyAppProject("argocd", { apiVersion: "argoproj.io/v1alpha1", kind: "AppProject", metadata: { name: "acme", namespace: "argocd", labels: { "hostyour.cloud/consumer": "true" } }, spec: { description: "d", sourceRepos: [], destinations: [], clusterResourceWhitelist: [], namespaceResourceBlacklist: [], roles: [] } });
     const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
-    const del = makeOffboardDef(ports(reg, { projects })).steps({ appId: "app_1" }).find((s) => s.name === "delete-appproject")!;
-    await del.run(ctx("delete-appproject", []));
-    expect(projects.get("argocd", "acme")).toBeUndefined();
-
-    // idempotent: a second delete on the now-absent project does not throw
-    await del.run(ctx("delete-appproject", []));
+    const prt = ports(reg, { projects });
+    for (const step of makeOffboardDef(prt).steps({ appId: "app_1" })) {
+      if (step.name === "assert-no-orphans" || step.name === "attest-target") continue;
+      await step.run(ctx(step.name, [])).catch(() => undefined);
+    }
+    expect(projects.get("argocd", "acme"), "the AppProject goes with the registration, through ArgoCD's own prune").toBeDefined();
   });
 
-  it("delete-build-rbac removes exactly the grants the onboard provisioned, and is idempotent when they are absent", async () => {
+  it("delete-smtp-ops-grant removes the mail-ops grant, and is idempotent when it is absent", async () => {
     seedApp();
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac(renderBuildRbac({ name: "acme", argoNamespace: "argocd" }));
-    expect(buildRbac.keys()).toHaveLength(6);
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    expect(buildRbac.keys()).toEqual(["Role postfix/acme-smtp-ops", "RoleBinding postfix/acme-smtp-ops"]);
 
     const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
-    const del = makeOffboardDef(ports(reg, { buildRbac })).steps({ appId: "app_1" }).find((s) => s.name === "delete-build-rbac")!;
-    await del.run(ctx("delete-build-rbac", []));
+    const del = makeOffboardDef(ports(reg, { buildRbac })).steps({ appId: "app_1" }).find((s) => s.name === "delete-smtp-ops-grant")!;
+    await del.run(ctx("delete-smtp-ops-grant", []));
     expect(buildRbac.keys()).toEqual([]);
 
-    // idempotent: a second delete on the now-absent grants does not throw
-    await del.run(ctx("delete-build-rbac", []));
+    // idempotent: a second delete on the now-absent grant does not throw
+    await del.run(ctx("delete-smtp-ops-grant", []));
   });
 
-  it("delete-build-rbac is FAIL-SOFT — a writer that throws is logged and the teardown continues", async () => {
+  it("delete-smtp-ops-grant is FAIL-SOFT — a writer that throws is logged and the teardown continues", async () => {
     seedApp();
     const throwing = { applyBuildRbac: () => Promise.reject(new Error("x")), deleteBuildRbac: () => Promise.reject(new Error("rbac api down")), listBuildRbac: () => Promise.resolve([]) };
     const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
-    const del = makeOffboardDef(ports(reg, { buildRbac: throwing })).steps({ appId: "app_1" }).find((s) => s.name === "delete-build-rbac")!;
+    const del = makeOffboardDef(ports(reg, { buildRbac: throwing })).steps({ appId: "app_1" }).find((s) => s.name === "delete-smtp-ops-grant")!;
     const logs: string[] = [];
-    await del.run(ctx("delete-build-rbac", logs));
+    await del.run(ctx("delete-smtp-ops-grant", logs));
     expect(logs.some((l) => l.includes("rbac api down"))).toBe(true);
   });
 
@@ -249,13 +253,12 @@ describe("offboard run definition", () => {
 
   it("deletes the namespace only AFTER watch-removal (nothing live is stripped before the prune)", async () => {
     // The prune (watch-removal) throws when the workloads never go Missing, so a run that leaves them
-    // lingering never reaches delete-namespace. Pin the ordering: it sits after watch-removal (and after
-    // delete-appproject), so the delete only ever reaps the already-empty shell.
+    // lingering never reaches delete-namespace. Pin the ordering: it sits after watch-removal, so the
+    // delete only ever reaps the already-empty shell.
     seedApp();
     const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage))).steps({ appId: "app_1" });
     const del = steps.findIndex((s) => s.name === "delete-namespace");
     expect(del).toBeGreaterThan(steps.findIndex((s) => s.name === "watch-removal"));
-    expect(del).toBeGreaterThan(steps.findIndex((s) => s.name === "delete-appproject"));
   });
 
   it("remove-repo-pat deletes the local build-tier entry and revokes the sealed clone credential", async () => {

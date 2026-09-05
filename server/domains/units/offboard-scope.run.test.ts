@@ -5,7 +5,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
 import { renderConsumerAppProject } from "./appproject.ts";
-import { renderBuildRbac, renderConsumerArgoSync } from "./build-rbac.ts";
+import { renderSmtpOpsGrant } from "./build-rbac.ts";
 import { Registrations, type ClusterStageResolver } from "./registrations.ts";
 import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
@@ -20,11 +20,12 @@ import type { VaultSeeder, VaultSeedOutcome, BuildRepoPatDeleteInput, AppSecrets
 // The SCOPE half of offboard — split from offboard.run.test.ts, whose fixtures are all single-stage.
 // An offboard removes ONE STAGE of a unit, and a unit deployed at two stages is two of some things and
 // one of others. Per stage, because a cluster carries exactly one stage and the unit's stages therefore
-// stand on different clusters: the registration, the Application, the AppProject, the repository
-// credential, the admission policy, the namespace, the DNS record, the argo-sync grant, the
-// <stage>/consumer/<name>/* Vault entries and the apps row. Per UNIT, one copy shared by every stage:
-// the `<name>-build` namespace's two grants, secret/build/<name>/repo-pat, the ONE build webhook on the
-// consumer repo, and the release kit committed into it. These tests hold both halves: offboarding prod
+// stand on different clusters: the registration, the Application, the repository credential, the
+// namespace, the DNS record, the <stage>/consumer/<name>/* Vault entries and the apps row. Per UNIT,
+// one copy shared by every stage: the mail-ops grant in the relay's namespace,
+// secret/build/<name>/repo-pat, the ONE build webhook on the consumer repo, and the release kit
+// committed into it. (The AppProject, the admission policy and the three build grants are on neither
+// list any more: they render from the registration and go with it, hostyour-cloud#174.) These tests hold both halves: offboarding prod
 // while dev stands leaves dev everything it releases and deploys through, and offboarding dev afterwards
 // — the unit's last stage — takes the shared set with it.
 
@@ -84,12 +85,11 @@ function seedDevApp(): void {
   db.db.insert(apps).values({ id: "app_2", clusterId: "cls_2", name: "acme", stage: "dev", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_dev" }).run();
 }
 
-/** The build grants as the two onboards left them: ONE `acme-build` namespace shared by both stages
- *  (four objects), plus one argo-sync pair per stage in ITS cluster's own ArgoCD namespace. */
+/** The one grant the Manager still writes, as the two onboards left it: ONE mail-ops pair for the
+ *  unit, in the relay's namespace, shared by both stages. */
 async function seedBuildGrants(): Promise<FakeBuildRbacWriter> {
   const buildRbac = new FakeBuildRbacWriter();
-  await buildRbac.applyBuildRbac(renderBuildRbac({ name: "acme", argoNamespace: "argocd" }));
-  await buildRbac.applyBuildRbac([renderConsumerArgoSync({ name: "acme", argoNamespace: "s2" })]);
+  await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
   return buildRbac;
 }
 
@@ -155,7 +155,6 @@ describe("offboard scope — one stage of a two-stage unit", () => {
 
     // PER STAGE — prod's own objects are gone.
     expect(await reg.readRegistration("prod", "acme")).toBeNull();
-    expect(projects.get("argocd", "acme")).toBeUndefined();
     expect(dns.record("acme.s1.example", "A")).toBeUndefined();
     expect(seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]);
     expect(db.db.select().from(apps).where(eq(apps.id, "app_1")).get()?.status).toBe("offboarded");
@@ -167,19 +166,15 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     expect(await reg.readRegistration("dev", "acme")).not.toBeNull();
     expect(platform.read(platform.booksBranch, "registrations/acme/build.yaml")).not.toBeNull();
     expect(buildRbac.keys()).toEqual([
-      "Role acme-build/acme-build-eventlistener",
-      "Role acme-build/acme-build-manager-read",
-      "Role s2/acme-argo-sync",
-      "RoleBinding acme-build/acme-build-eventlistener",
-      "RoleBinding acme-build/acme-build-manager-read",
-      "RoleBinding s2/acme-argo-sync",
+      "Role postfix/acme-smtp-ops",
+      "RoleBinding postfix/acme-smtp-ops",
     ]);
     expect(github.hooksFor("x", "acme")).toHaveLength(1);
     expect(github.deletedCalls).toEqual([]);
     expect(consumerRepo.commits).toEqual([]);
     expect(seeder.deleted).toEqual([]);
     expect(dns.record("acme.s2.example", "A")).toBeDefined();
-    // One skip line per per-unit cleanup: the build-namespace grants, the webhook, the release kit, the PAT.
+    // One skip line per per-unit cleanup: the mail-ops grant, the webhook, the release kit, the PAT.
     expect(logs.filter((l) => l.includes("stays registered at dev"))).toHaveLength(4);
   });
 

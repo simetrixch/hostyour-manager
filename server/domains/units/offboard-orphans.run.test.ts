@@ -4,9 +4,7 @@ import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
-import { renderConsumerAppProject } from "./appproject.ts";
-import { renderBuildRbac, renderConsumerArgoSync } from "./build-rbac.ts";
-import { renderConsumerAdmissionPolicy } from "./admission-policy.ts";
+import { renderSmtpOpsGrant } from "./build-rbac.ts";
 import { renderConsumerRepoCredential } from "./repo-credential.ts";
 import { Registrations, type ClusterStageResolver } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -17,13 +15,17 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { VaultSeeder, VaultSeedOutcome } from "./vault-seeder.ts";
 
-// assert-no-orphans, the offboard's one measuring step. It reads back the objects the MANAGER wrote
-// outside any chart — the isolation AppProject, the ArgoCD repository Secret, the admission policy and
-// the build grants — plus the registration and the unit's DNS record, because no ArgoCD prune reaches
-// any of them and two of the steps that remove them are fail-soft. The pair of tests below is the
-// whole point of the step: the SAME `acme-build` grants standing are an orphan when the unit has left
-// the platform and a deliberate remainder while another stage still releases through them, and the
-// registration tree is what tells the two apart.
+// assert-no-orphans, the offboard's one measuring step. It reads back the TWO objects the Manager
+// still writes outside any chart — the ArgoCD repository Secret, whose value is a PAT, and the
+// mail-ops grant, which stands in the relay's namespace on the master where a slave-hosted unit's
+// reconciler cannot reach — plus the registration and the unit's DNS record, because no ArgoCD prune
+// reaches any of them and both delete steps are fail-soft. Everything else a unit owns is rendered
+// from its registration since hostyour-cloud#174 and goes with it, so it is not read here at all: a
+// slow prune would otherwise be reported as a leftover.
+//
+// The pair of tests below is the whole point of the step: the SAME mail-ops grant standing is an
+// orphan when the unit has left the platform and a deliberate remainder while another stage still
+// mails through it, and the registration tree is what tells the two apart.
 
 const REPO = "https://github.com/x/acme.git";
 
@@ -104,40 +106,29 @@ describe("offboard assert-no-orphans", () => {
     const reg = new Registrations(new FakePlatformRepo(), twoStageClusterStage);
     await seedRegistrationsAndRemoveProd(reg, false); // acme has left the platform: prod was its only stage
 
-    // The world a teardown leaves when the cluster refuses its writes: the isolation project, the
-    // repository Secret, the admission boundary and every build grant are still standing, and so is the
-    // unit's address. Each of them was WRITTEN by this manager outside any chart, so nothing else
-    // will ever take them away.
-    const projects = new FakeMasterProjectWriter();
-    await projects.applyAppProject("argocd", renderConsumerAppProject({ name: "acme", namespace: "acme", repoURL: REPO, platformRepoURL: "https://github.com/x/hostyour-cloud.git", argoNamespace: "argocd" }));
+    // The world a teardown leaves when the cluster refuses its writes: the repository Secret and the
+    // mail-ops grant are still standing, and so is the unit's address. Each was WRITTEN by this
+    // manager outside any chart, so nothing else will ever take them away.
     const repoCredential = new FakeRepoCredentialWriter();
     await repoCredential.applyRepoCredential(renderConsumerRepoCredential({ consumerName: "acme", argoNamespace: "argocd", repoURL: REPO, pat: "github_pat_test" }));
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac(renderBuildRbac({ name: "acme", argoNamespace: "argocd" }));
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 3 } });
-    const { policy, binding } = renderConsumerAdmissionPolicy({ name: "acme", namespace: "acme", unitApex: "s1.example", argoAppName: "acme-prod" });
-    await cluster.applyAdmissionPolicy(policy, binding);
     const dns = new FakeDnsProvider();
     dns.seed("acme.s1.example", "A", "203.0.113.10");
 
-    const step = scanStep(ports(reg, { cluster, projects, buildRbac, repoCredential, dns }));
+    const step = scanStep(ports(reg, { cluster, projects: new FakeMasterProjectWriter(), buildRbac, repoCredential, dns }));
     const failure = await step.run(ctx([])).then(() => null, (e: Error) => e);
     expect(failure).not.toBeNull();
     const message = failure!.message;
-    expect(message).toMatch(/left 10 object\(s\) standing on s1\.example/);
+    expect(message).toMatch(/left 4 object\(s\) standing on s1\.example/);
 
     // Every leftover is NAMED with where it stands — a report of what is gone would be useless here.
     for (const object of [
-      "AppProject argocd/acme",
       "ArgoCD repository Secret argocd/repo-acme",
       "DNS A acme.s1.example",
-      "Role acme-build/acme-build-eventlistener",
-      "Role acme-build/acme-build-manager-read",
-      "Role argocd/acme-argo-sync",
-      "RoleBinding acme-build/acme-build-eventlistener",
-      "RoleBinding acme-build/acme-build-manager-read",
-      "RoleBinding argocd/acme-argo-sync",
-      "admission policy consumer-acme",
+      "Role postfix/acme-smtp-ops",
+      "RoleBinding postfix/acme-smtp-ops",
     ]) {
       expect(message).toContain(object);
     }
@@ -145,17 +136,39 @@ describe("offboard assert-no-orphans", () => {
     expect(message).not.toContain("registrations/acme/prod.yaml");
   });
 
+  // THE FENCES ARE SOMEBODY ELSE'S OBJECTS NOW, and this is what says so. An AppProject and an
+  // admission policy still standing at the moment the scan runs are the NORMAL state of a prune that
+  // has not finished — ArgoCD's clock, not this run's — so flagging them would fail a correct
+  // offboard on a slow cluster.
+  it("does not look at the objects a reconciler renders, so a prune still in flight is not a leftover", async () => {
+    seedApp();
+    const reg = new Registrations(new FakePlatformRepo(), twoStageClusterStage);
+    await seedRegistrationsAndRemoveProd(reg, false);
+
+    const projects = new FakeMasterProjectWriter();
+    await projects.applyAppProject("argocd", { apiVersion: "argoproj.io/v1alpha1", kind: "AppProject", metadata: { name: "acme", namespace: "argocd", labels: { "hostyour.cloud/consumer": "true" } }, spec: { description: "d", sourceRepos: [], destinations: [], clusterResourceWhitelist: [], namespaceResourceBlacklist: [], roles: [] } });
+
+    const logs: string[] = [];
+    const step = scanStep(ports(reg, {
+      cluster: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 3 } }),
+      projects,
+      buildRbac: new FakeBuildRbacWriter(),
+      repoCredential: new FakeRepoCredentialWriter(),
+      dns: new FakeDnsProvider(),
+    }));
+    await expect(step.run(ctx(logs))).resolves.toBeUndefined();
+    expect(projects.get("argocd", "acme"), "and the scan takes nothing away either").toBeDefined();
+  });
+
   it("passes when only the remainders another stage needs are standing, and says they are kept on purpose", async () => {
     seedApp();
     const reg = new Registrations(new FakePlatformRepo(), twoStageClusterStage);
     await seedRegistrationsAndRemoveProd(reg, true); // acme still stands at dev
 
-    // The exact objects the previous test flagged as orphans, standing for the exact same reason they
-    // were never deleted: there is ONE `acme-build` namespace per unit, and dev releases through it.
-    // Only prod's own argo-sync grant went, with prod.
+    // The exact object the previous test flagged as an orphan, standing for the exact same reason it
+    // was never deleted: there is ONE mail-ops grant per unit, and dev mails through it.
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac(renderBuildRbac({ name: "acme", argoNamespace: "argocd" }));
-    await buildRbac.deleteBuildRbac([renderConsumerArgoSync({ name: "acme", argoNamespace: "argocd" })]);
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
 
     const logs: string[] = [];
     const step = scanStep(ports(reg, {
@@ -168,13 +181,11 @@ describe("offboard assert-no-orphans", () => {
     await expect(step.run(ctx(logs))).resolves.toBeUndefined();
 
     expect(buildRbac.keys()).toEqual([
-      "Role acme-build/acme-build-eventlistener",
-      "Role acme-build/acme-build-manager-read",
-      "RoleBinding acme-build/acme-build-eventlistener",
-      "RoleBinding acme-build/acme-build-manager-read",
+      "Role postfix/acme-smtp-ops",
+      "RoleBinding postfix/acme-smtp-ops",
     ]);
     const line = logs.find((l) => l.startsWith("nothing of acme (prod) is left standing"))!;
-    expect(line).toContain("kept on purpose because the unit still stands at dev: the acme-build grants");
+    expect(line).toContain("kept on purpose because the unit still stands at dev: the postfix grant");
     expect(line).toContain("the apps row is kept as soft state");
   });
 
@@ -182,13 +193,13 @@ describe("offboard assert-no-orphans", () => {
     seedApp();
     const reg = new Registrations(new FakePlatformRepo(), twoStageClusterStage);
     await seedRegistrationsAndRemoveProd(reg, false);
-    const projects = new FakeMasterProjectWriter();
-    await projects.applyAppProject("argocd", renderConsumerAppProject({ name: "acme", namespace: "acme", repoURL: REPO, platformRepoURL: "https://github.com/x/hostyour-cloud.git", argoNamespace: "argocd" }));
+    const buildRbac = new FakeBuildRbacWriter();
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
 
     const world = {
       cluster: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 3 } }),
-      projects,
-      buildRbac: new FakeBuildRbacWriter(),
+      projects: new FakeMasterProjectWriter(),
+      buildRbac,
       repoCredential: new FakeRepoCredentialWriter(),
       dns: new FakeDnsProvider(),
     };
@@ -199,8 +210,8 @@ describe("offboard assert-no-orphans", () => {
     await expect(steps[scan]!.run(ctx([]))).rejects.toThrow(/deliberately NOT recorded offboarded/);
     expect(db.db.select().from(apps).where(eq(apps.id, "app_1")).get()?.status).toBe("active");
 
-    // Deleting the project is the repair, and re-running the step is how the run continues.
-    await projects.deleteAppProject("argocd", "acme");
+    // Deleting the grant is the repair, and re-running the step is how the run continues.
+    await buildRbac.deleteBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
     await expect(steps[scan]!.run(ctx([]))).resolves.toBeUndefined();
   });
 });

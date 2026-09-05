@@ -1,15 +1,24 @@
-// A unit's build RBAC — the three grants its release cycle needs, rendered here and applied ONCE at
-// onboarding beside the AppProject and the admission policy. Two of the three belong to the UNIT and
-// the third to the unit AT ONE STAGE; the scopes are set out below, and calling the set "the
-// per-unit build RBAC" is what made a one-stage teardown delete all three.
+// A unit's build RBAC — the three grants its release cycle needs, plus the ONE mail-ops grant a unit
+// that attests `smtp-ops` gets. Two of the three build grants belong to the UNIT and the third to the
+// unit AT ONE STAGE; the scopes are set out below, and calling the set "the per-unit build RBAC" is
+// what made a one-stage teardown delete all three.
 //
-// WHY imperatively, and not as chart templates like everything else: the unit's AppProject blacklists
-// Role and RoleBinding (appproject.ts), so nothing the unit deploys through ArgoCD can create them —
-// which is the point, since a unit that could mint its own Role could grant itself anything. The
-// the manager is therefore the only writer left, and it writes them the same way it writes the other
-// two fences: before the registration exists, idempotently, with a delete inverse.
+// WHO APPLIES WHAT, AND IT IS NOT ONE ANSWER ANY MORE. All three build grants are rendered from the
+// registration since hostyour-cloud#174 — the two `<name>-build` ones by clusters/inventories/consumer-build
+// in unit mode (under the names that chart already used, `eventlistener-create-pipelineruns` and
+// `manager-read-pipelineruns`), and the argo-sync one by clusters/units/reconciler. So the onboard,
+// the offboard and the purge write none of them, and renderBuildRbac/renderConsumerArgoSync keep ONE
+// caller here: relocation-world-consumer.ts, which arms a TARGET cluster while the registration still
+// points at the SOURCE and clears the source's argo-sync grant afterwards — two moments at which no
+// chart can render either, because the ApplicationSets select on the registration's `cluster`.
 //
-// The three grants, each a Role plus the Binding that arms it:
+// renderSmtpOpsGrant is the exception, and the reason is a destination rather than a preference: it
+// lands in the relay's namespace ON THE MASTER, and the reconciler that manages a slave-hosted unit
+// is registered for exactly one namespace, so it cannot reach `postfix` at all. The Manager is
+// therefore still its only writer, with the onboard's provision-smtp-ops-grant and the removal run
+// kinds' delete-smtp-ops-grant as its inverse.
+//
+// The three build grants, each a Role plus the Binding that arms it:
 //
 //   1. EventListener — create PipelineRuns in <name>-build. The webhook the unit's release ref fires
 //      lands on the shared EventListener, which then has to create a PipelineRun in the unit's OWN

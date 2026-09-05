@@ -4,8 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makePurgeDef, type PurgePorts, type PurgeParams } from "./purge.run.ts";
-import { renderConsumerAppProject } from "./appproject.ts";
-import { renderBuildRbac, renderConsumerArgoSync } from "./build-rbac.ts";
+import { renderSmtpOpsGrant } from "./build-rbac.ts";
 import { Registrations, type ClusterStageResolver } from "./registrations.ts";
 import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { FakePlatformRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
@@ -111,7 +110,7 @@ async function runAll(prt: PurgePorts, logs: string[], creds?: CredentialStore):
   for (const step of makePurgeDef(prt).steps(PARAMS)) await step.run(ctx(step.name, logs, creds));
 }
 
-const STEP_ORDER = ["attest-target", "remove-registration", "watch-removal", "delete-admission-policy", "delete-appproject", "delete-repo-credential", "delete-build-rbac", "delete-namespace", "remove-webhook", "remove-dns", "remove-release-kit", "remove-repo-pat", "remove-app-secrets", "remove-database-secrets", "assert-no-orphans", "record-purge"];
+const STEP_ORDER = ["attest-target", "remove-registration", "watch-removal", "delete-repo-credential", "delete-smtp-ops-grant", "delete-namespace", "remove-webhook", "remove-dns", "remove-release-kit", "remove-repo-pat", "remove-app-secrets", "remove-database-secrets", "assert-no-orphans", "record-purge"];
 
 describe("purge run definition", () => {
   it("plans with cluster targetKind, the ordered steps, and git-branch + master-kube locks — with NO app row", async () => {
@@ -153,19 +152,19 @@ describe("purge run definition", () => {
     seedCluster(); // NO app row
     const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
     // A partial onboard that reached write-registration but died before record-inventory: registration
-    // present, NO row. Also pre-seed the isolation AppProject so delete-appproject has something to reap.
+    // present, NO row. Also pre-seed the mail-ops grant so delete-smtp-ops-grant has something to reap.
     await seedRegistration(reg);
-    const projects = new FakeMasterProjectWriter();
-    await projects.applyAppProject("argocd", renderConsumerAppProject({ name: "acme", namespace: "acme", repoURL: "https://github.com/x/acme.git", platformRepoURL: "https://github.com/x/hostyour-cloud.git", argoNamespace: "argocd" }));
+    const buildRbac = new FakeBuildRbacWriter();
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
     const seeder = new FakeSeeder();
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
 
     const logs: string[] = [];
-    await runAll(ports(reg, { projects, seeder, cluster }), logs);
+    await runAll(ports(reg, { buildRbac, seeder, cluster }), logs);
 
     // Every artifact reaped, by name, with no row anywhere:
     expect(await reg.readRegistration("prod", "acme")).toBeNull(); // registration gone
-    expect(projects.get("argocd", "acme")).toBeUndefined(); // AppProject gone
+    expect(buildRbac.keys()).toEqual([]); // the mail-ops grant gone (the AppProject goes with the registration)
     expect(cluster.deletedNamespaces).toEqual(["acme"]); // namespace reaped (→ ServiceClaim → mongo deprovision)
     expect(seeder.deleted).toEqual([{ consumerName: "acme" }]); // repo PAT (the local build tier)
     expect(seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]); // ceremony secrets
@@ -177,24 +176,24 @@ describe("purge run definition", () => {
   it("refuses to record the row while a fail-soft delete left an object standing — the backstop settles nothing offboard would not", async () => {
     // An operator reaches for purge exactly when offboard refused at ITS scan. If purge flipped the row
     // without looking, the weaker run kind would settle the state the stricter one declined to: the
-    // consumer would stop appearing as active while its AppProject and grants stood on the cluster.
+    // consumer would stop appearing as active while its mail-ops grant stood in the relay's namespace.
     seedApp();
     const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
     await seedRegistration(reg);
-    // The AppProject delete answers, but leaves the project behind — the shape a fail-soft delete has
-    // after a cluster-side refusal it only logged about.
-    const projects = new FakeMasterProjectWriter();
-    await projects.applyAppProject("argocd", renderConsumerAppProject({ name: "acme", namespace: "acme", repoURL: "https://github.com/x/acme.git", platformRepoURL: "https://github.com/x/hostyour-cloud.git", argoNamespace: "argocd" }));
-    projects.deleteAppProject = async () => ({ deleted: false });
+    // The grant delete answers, but leaves the Role behind — the shape a fail-soft delete has after a
+    // cluster-side refusal it only logged about.
+    const buildRbac = new FakeBuildRbacWriter();
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    buildRbac.deleteBuildRbac = async () => ({ deleted: 0 });
 
     const logs: string[] = [];
-    await expect(runAll(ports(reg, { projects }), logs)).rejects.toThrow(/the consumer-purge of acme \(prod\) left 1 object\(s\) standing/);
+    await expect(runAll(ports(reg, { buildRbac }), logs)).rejects.toThrow(/the consumer-purge of acme \(prod\) left 2 object\(s\) standing/);
     // The row stays active: a row saying the consumer left is what makes the leftover unfindable.
     expect(db.db.select().from(apps).get()?.status).toBe("active");
   });
 
   it("does NOT require an inventory row — the whole run is a no-op-safe teardown even when nothing exists", async () => {
-    seedCluster(); // orphan died BEFORE write-registration: no registration, no AppProject, no namespace, no row
+    seedCluster(); // orphan died BEFORE write-registration: no registration, no grant, no namespace, no row
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, absentNamespaces: ["acme"] });
     const logs: string[] = [];
     // Nothing seeded beyond the cluster — every step must fail-soft and the run must complete.
@@ -224,14 +223,14 @@ describe("purge run definition", () => {
     expect(argo.watched).toEqual(["argocd/acme-prod"]);
   });
 
-  it("delete-appproject reaps the pre-seeded isolation AppProject and is idempotent when absent", async () => {
+  it("delete-smtp-ops-grant reaps the pre-seeded mail-ops grant and is idempotent when absent", async () => {
     seedCluster();
-    const projects = new FakeMasterProjectWriter();
-    await projects.applyAppProject("argocd", renderConsumerAppProject({ name: "acme", namespace: "acme", repoURL: "https://github.com/x/acme.git", platformRepoURL: "https://github.com/x/hostyour-cloud.git", argoNamespace: "argocd" }));
-    const del = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { projects })).steps(PARAMS).find((s) => s.name === "delete-appproject")!;
-    await del.run(ctx("delete-appproject", []));
-    expect(projects.get("argocd", "acme")).toBeUndefined();
-    await del.run(ctx("delete-appproject", [])); // second delete on the absent project: no throw
+    const buildRbac = new FakeBuildRbacWriter();
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    const del = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { buildRbac })).steps(PARAMS).find((s) => s.name === "delete-smtp-ops-grant")!;
+    await del.run(ctx("delete-smtp-ops-grant", []));
+    expect(buildRbac.keys()).toEqual([]);
+    await del.run(ctx("delete-smtp-ops-grant", [])); // second delete on the absent grant: no throw
   });
 
   it("delete-namespace deletes the target-cluster namespace named for the consumer, and is idempotent", async () => {
@@ -395,8 +394,7 @@ describe("purge run definition", () => {
     }
 
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac(renderBuildRbac({ name: "acme", argoNamespace: "argocd" }));
-    await buildRbac.applyBuildRbac([renderConsumerArgoSync({ name: "acme", argoNamespace: "s2" })]);
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
     const github = new FakeGitHubConsumer();
     github.seedHook("x", "acme", BUILD_HOOK_URL);
     const consumerRepo = new FakeConsumerRepo();
@@ -414,14 +412,11 @@ describe("purge run definition", () => {
     expect(await reg.readRegistration("prod", "acme")).toBeNull();
     expect(await reg.readRegistration("dev", "acme")).not.toBeNull();
     expect(platform.read(platform.booksBranch, "registrations/acme/build.yaml")).not.toBeNull();
-    // Only prod's argo-sync pair went: the build namespace's four grants and dev's own pair stand.
+    // The mail-ops grant is the UNIT's, and the unit still stands at dev, so it stays exactly where it
+    // is: taking it here would blind the surviving stage's queue dashboard to the relay it was granted.
     expect(buildRbac.keys()).toEqual([
-      "Role acme-build/acme-build-eventlistener",
-      "Role acme-build/acme-build-manager-read",
-      "Role s2/acme-argo-sync",
-      "RoleBinding acme-build/acme-build-eventlistener",
-      "RoleBinding acme-build/acme-build-manager-read",
-      "RoleBinding s2/acme-argo-sync",
+      "Role postfix/acme-smtp-ops",
+      "RoleBinding postfix/acme-smtp-ops",
     ]);
     expect(github.hooksFor("x", "acme")).toHaveLength(1);
     expect(consumerRepo.commits).toEqual([]);

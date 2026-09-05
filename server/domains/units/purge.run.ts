@@ -6,8 +6,7 @@ import { apps, clusters } from "../../db/schema/inventory.ts";
 import { AppError, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { consumerArgoAppName } from "../../../shared/consumer.ts";
-import { consumerAdmissionPolicyName } from "./admission-policy.ts";
-import { renderBuildRbac, renderConsumerArgoSync } from "./build-rbac.ts";
+import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "./build-rbac.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { assertDeployState, clearRelocationHold, unitStaysRegistered, type LifecyclePorts } from "./lifecycle.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
@@ -222,37 +221,6 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
       },
     },
     {
-      name: "delete-admission-policy",
-      title: "Delete the per-consumer admission policy",
-      run: async (ctx) => {
-        // Same inverse the offboard runs, and idempotent for the same reason a purge needs everywhere:
-        // an orphan may never have had a policy at all.
-        const t = loadPurgeTarget(ctx.db, p);
-        const { clusterReader } = await ports.resolver.resolve(t.clusterId);
-        const { deleted } = await clusterReader.deleteAdmissionPolicy(consumerAdmissionPolicyName(t.name));
-        ctx.checkpoint({ admissionPolicy: consumerAdmissionPolicyName(t.name), deleted });
-        ctx.log("meta", deleted ? `admission policy for ${t.name} deleted` : `no admission policy for ${t.name} — already absent`);
-      },
-    },
-    {
-      name: "delete-appproject",
-      title: "Delete the per-consumer isolation AppProject",
-      run: async (ctx) => {
-        // Manager-managed (never pruned by the pointer removal) — delete it explicitly. Idempotent:
-        // an already-absent project resolves deleted:false. By G1 the project name == the consumer name.
-        const t = loadPurgeTarget(ctx.db, p);
-        const { projectWriter, argoNamespace } = await ports.resolver.resolve(t.clusterId);
-        const { deleted } = await projectWriter.deleteAppProject(argoNamespace, t.name);
-        ctx.checkpoint({ appProject: t.name, deleted });
-        ctx.log(
-          "meta",
-          deleted
-            ? `AppProject ${t.name} deleted from ${argoNamespace} — the consumer's isolation project is removed`
-            : `AppProject ${t.name} was already absent in ${argoNamespace} — nothing to delete`,
-        );
-      },
-    },
-    {
       name: "delete-repo-credential",
       title: "Delete the ArgoCD repository credential",
       run: async (ctx) => {
@@ -275,31 +243,36 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
       },
     },
     {
-      name: "delete-build-rbac",
-      title: "Delete the build grants of this stage (the unit's own go with its last stage)",
+      name: "delete-smtp-ops-grant",
+      title: "Delete the unit's mail-ops grant (it goes with the unit's last stage)",
       run: async (ctx) => {
         // The same inverse offboard runs, derived from the NAME alone — an orphan may have died before
-        // any of the grants existed, so an absent set is the normal case. Two scopes, like there: the
-        // argo-sync grant belongs to this stage's ArgoCD namespace and goes now; the two grants in the
-        // stage-free `<name>-build` namespace belong to the unit and go with its last stage, or a purge
-        // of one stage would strand the surviving stage's release with no way to create a PipelineRun.
-        // Fail-soft like the rest of the teardown: what is left behind is an unbound Role, not access.
-        // The tree read sits INSIDE the fail-soft body deliberately: a read that fails keeps every grant,
-        // which is the direction that cannot strip a surviving stage.
+        // the grant existed, so an absent one is the normal case. Per UNIT and not per stage: the
+        // dashboard it arms runs in the unit's namespace whatever stage it was onboarded at, so a purge
+        // of one stage would blind a surviving stage's dashboard. Fail-soft like the rest of the
+        // teardown, and the tree read sits INSIDE that body deliberately: a read that fails keeps the
+        // grant, which is the direction that cannot strip a surviving stage.
+        //
+        // It is the one per-unit fence a reconciler cannot render — the relay's namespace stands on the
+        // MASTER and a slave-hosted unit's reconciler is registered for one namespace — so it is the
+        // one this run still deletes by hand (hostyour-cloud#174).
         const t = loadPurgeTarget(ctx.db, p);
         if (!ports.buildRbac) {
-          ctx.log("meta", `no build RBAC writer wired — the grants for ${t.name} are left as they are`);
+          ctx.log("meta", `no build RBAC writer wired — the mail-ops grant for ${t.name} is left as it is`);
           return;
         }
         try {
-          const { argoNamespace } = await ports.resolver.resolve(t.clusterId);
-          const stageOnly = await unitStaysRegistered(ctx, ports.registrations, t, "the build-namespace grants");
-          const grants = stageOnly ? [renderConsumerArgoSync({ name: t.name, argoNamespace })] : renderBuildRbac({ name: t.name, argoNamespace });
-          const { deleted } = await ports.buildRbac.deleteBuildRbac(grants);
-          ctx.checkpoint({ buildRbacDeleted: deleted, scope: stageOnly ? "stage" : "unit" });
-          ctx.log("meta", deleted ? `${deleted} build grant object(s) for ${t.name} deleted` : `no build grants for ${t.name} — already absent`);
+          const stageOnly = await unitStaysRegistered(ctx, ports.registrations, t, "the mail-ops grant");
+          if (stageOnly) {
+            ctx.checkpoint({ smtpOpsGrantDeleted: 0, scope: "stage" });
+            ctx.log("meta", `mail-ops grant for ${t.name} kept — the unit still stands at another stage and the grant is the unit's`);
+            return;
+          }
+          const { deleted } = await ports.buildRbac.deleteBuildRbac([renderSmtpOpsGrant({ name: t.name })]);
+          ctx.checkpoint({ smtpOpsGrantDeleted: deleted, scope: "unit" });
+          ctx.log("meta", deleted ? `${deleted} mail-ops grant object(s) for ${t.name} deleted from ${RELAY_NAMESPACE}` : `no mail-ops grant for ${t.name} — already absent`);
         } catch (err) {
-          ctx.log("meta", `could not delete the build grants for ${t.name} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
+          ctx.log("meta", `could not delete the mail-ops grant for ${t.name} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
         }
       },
     },
