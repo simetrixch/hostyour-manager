@@ -23,6 +23,24 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 const MASTER = "m1.example.com";
 const SLAVE = "s1.example.com";
 
+/** The map template of the sibling checkout — the OTHER writer of this file. Named at module scope
+ *  because the map-writer contract case reads it and FULL_MAP below is held against it.
+ *
+ *  Absent beside a WORKTREE, which stands one directory deeper than the main checkout the siblings
+ *  are laid out beside, so that case skips there. It is ONE of the three skips this repository's
+ *  suite is allowed to carry, and the refusal in serve-fixture.ts is what keeps a fourth from
+ *  appearing that nobody notices (#111). */
+const mapTpl = fileURLToPath(new URL("../../../../hostyour-deploy/ansiwise/templates/cluster-map.tpl", import.meta.url));
+
+/** The keys a map file states under `global:`, read off the TEXT — the block where both writers of
+ *  this file actually drifted, and the one the guard on the top block cannot reach.
+ *  Indent-two `key:` lines only — a deeper line is a value inside one of them, and a comment never
+ *  matches. */
+function globalKeysOf(text: string): string[] {
+  const block = text.split(/^global:$/m)[1] ?? "";
+  return [...block.matchAll(/^ {2}([A-Za-z][A-Za-z0-9-]*):/gm)].map((m) => m[1] ?? "").filter((k) => k !== "").sort();
+}
+
 const masterMap = `stage: prod\nrole: master\n\nglobal:\n  domain: ${MASTER}\n  buildPlane: ${MASTER}\n`;
 const slaveMap = `stage: prod\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n  buildPlane: ${MASTER}\n  master: ${MASTER}\n`;
 
@@ -191,49 +209,54 @@ describe("removeSlaveMarkingPart", () => {
   });
 });
 
-describe("map rewrite — a writer keeps every value the map carried", () => {
-  const TAG = "1.2.0-stable-20260728120000";
+const TAG = "1.2.0-stable-20260728120000";
 
-  // THE MAP AS THE TEMPLATE ACTUALLY WRITES IT (hostyour-deploy ansiwise/templates/cluster-map.tpl),
-  // not the four fields this module happens to name. The schema lets `global` through on purpose,
-  // so a chart can add a value without failing every map read — but a writer that emits only what
-  // it understands turns that permission into DATA LOSS the moment anything rewrites the file, and
-  // mark-slave rewrites a map on every deploy. Driven through writeClusterMarking, the one writer
-  // of this file, with ONE field moved so the write is not skipped as a no-op — the rewrite every
-  // deploy makes onto the books branch, which is the only branch an installation keeps maps on.
-  const FULL_MAP = [
-    "stage: prod", "role: master", "booksCluster: m1.example.com", `release: ${TAG}`, "",
-    "global:",
-    "  domain: m1.example.com",
-    "  clusterName: m1",
-    "  booksCluster: m1.example.com",
-    "  buildPlane: m1.example.com",
-    "  unitApex: example.com",
-    "  platformDomain: example.com",
-    "  alertRecipients: ['ops@example.com']",
-    "  catalogUrl: https://github.com/acme/acme-catalog.git",
-    // THE SAME REPOSITORY AS owner/name, which is a different thing to read: every argocd file of
-    // the platform stamps the bare owner/name into a URL of its own, so the map states both and a
-    // writer that dropped this one would leave the next slave's branch cut with nothing to stamp.
-    "  catalogRepo: acme/acme-catalog",
-    "  letsencryptEmail: ops@example.com",
-    "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
-    "  nodeCidrs: [203.0.113.7/32]",
-    "  vaultKubernetesAuthPath: kubernetes-m1",
-    "  registryPullUser: acme-pull",
-    "  registryPushUser: acme-push",
-    "  endpoints:",
-    "    registry:",
-    "      host: zot.m1.example.com",
-    "    mail: {url: 'https://post.example.com'}",
-    "    vault: {url: 'https://vault.m1.example.com'}",
-    "    idp: {url: 'https://idp.m1.example.com'}",
-    "    tailnet: {url: 'https://tale.m1.example.com'}",
-    "  servicesLocal:",
-    "    registry: true",
-    "    vault: true",
-    "    observability: true",
-  ].join("\n") + "\n";
+// THE MAP AS THE TEMPLATE ACTUALLY WRITES IT (hostyour-deploy ansiwise/templates/cluster-map.tpl),
+// not the four fields this module happens to name. The schema lets `global` through on purpose,
+// so a chart can add a value without failing every map read — but a writer that emits only what
+// it understands turns that permission into DATA LOSS the moment anything rewrites the file, and
+// mark-slave rewrites a map on every deploy. Driven through writeClusterMarking, the one writer
+// of this file, with ONE field moved so the write is not skipped as a no-op — the rewrite every
+// deploy makes onto the books branch, which is the only branch an installation keeps maps on.
+const FULL_MAP = [
+  "stage: prod", "role: master", "booksCluster: m1.example.com", `release: ${TAG}`, "",
+  "global:",
+  "  domain: m1.example.com",
+  "  clusterName: m1",
+  "  booksCluster: m1.example.com",
+  "  buildPlane: m1.example.com",
+  "  unitApex: example.com",
+  "  platformDomain: example.com",
+  "  alertRecipients: ['ops@example.com']",
+  "  catalogUrl: https://github.com/acme/acme-catalog.git",
+  // THE SAME REPOSITORY AS owner/name, which is a different thing to read: every argocd file of
+  // the platform stamps the bare owner/name into a URL of its own, so the map states both and a
+  // writer that dropped this one would leave the next slave's branch cut with nothing to stamp.
+  "  catalogRepo: acme/acme-catalog",
+  // WHICH AUTHORITY ISSUES THIS INSTALLATION'S CERTIFICATES. A rewrite that dropped it hands the
+  // next regeneration nothing, the answer falls to the program's default of platform-local, and
+  // every certificate is reissued from the cluster's own root while the run reports itself green.
+  "  clusterIssuer: letsencrypt-production",
+  "  letsencryptEmail: ops@example.com",
+  "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
+  "  nodeCidrs: [203.0.113.7/32]",
+  "  vaultKubernetesAuthPath: kubernetes-m1",
+  "  registryPullUser: acme-pull",
+  "  registryPushUser: acme-push",
+  "  endpoints:",
+  "    registry:",
+  "      host: zot.m1.example.com",
+  "    mail: {url: 'https://post.example.com'}",
+  "    vault: {url: 'https://vault.m1.example.com'}",
+  "    idp: {url: 'https://idp.m1.example.com'}",
+  "    tailnet: {url: 'https://tale.m1.example.com'}",
+  "  servicesLocal:",
+  "    registry: true",
+  "    vault: true",
+  "    observability: true",
+].join("\n") + "\n";
+
+describe("map rewrite — a writer keeps every value the map carried", () => {
 
   it("keeps every value the map carried, including the ones this module does not name", async () => {
     const repo = repoWith({ [MASTER]: FULL_MAP });
@@ -241,24 +264,26 @@ describe("map rewrite — a writer keeps every value the map carried", () => {
     await writeClusterMarking(repo, { ...marking, apiHost: "203.0.113.7" }, "run_1");
     const after = repo.read(repo.booksBranch, clusterMapPath(MASTER)) ?? "";
 
-    // Each of these is read by a chart. A rewrite that drops one leaves an installation whose charts
-    // render against a value that is simply gone, and nothing between here and the render says so.
+    // THE VALUES THAT WERE ACTUALLY LOST, each one by name — a regression list and not a coverage
+    // one. What makes the coverage automatic is the case in "map-writer contract" below, which
+    // refuses a template `global:` key FULL_MAP does not carry: without it this list was the only
+    // thing standing for coverage, and it rotted the way a list of names does — the template gained
+    // `clusterIssuer`, which decides which authority issues an installation's certificates, and
+    // nothing here noticed for as long as it took somebody to look.
     for (const kept of [
       "clusterName: m1", "vaultKubernetesAuthPath: kubernetes-m1",
       "registryPullUser: acme-pull", "registryPushUser: acme-push",
-      "host: zot.m1.example.com", "vault.m1.example.com", "idp.m1.example.com",
-      "tale.m1.example.com", "servicesLocal",
-      // FULL_MAP above states every key the map template writes, so this list can name every one
-      // of them — which is the whole point of the case. Two were lost in exactly this way before
-      // anybody thought to look: letsencryptEmail and letsencryptServer were read and never
-      // written, and alertRecipients was written in the wrong shape.
-      "catalogRepo: acme/acme-catalog",
+      "host: zot.m1.example.com", "post.example.com",
+      "clusterIssuer: letsencrypt-production",
       "letsencryptEmail: ops@example.com",
       "letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
-      "nodeCidrs:", "203.0.113.7/32",
-      "post.example.com",
+      "203.0.113.7/32",
+      // THE SAME REPOSITORY, TWICE: catalogUrl is composed from catalogRepo, so the two stand or
+      // fall together and a writer that emitted only one would satisfy neither reader.
+      "catalogRepo: acme/acme-catalog", "catalogUrl: https://github.com/acme/acme-catalog.git",
       // The release pin is a key this manager never writes, so a rewrite that lost it would erase
-      // the only statement of which platform release the cluster stands on.
+      // the only statement of which platform release the cluster stands on. It is a TOP-LEVEL key,
+      // which the `global:` comparison above does not reach.
       `release: ${TAG}`,
     ]) expect(after, `the rewrite dropped ${kept}`).toContain(kept);
     // THE ONE THAT GOT AWAY. It was joined on a comma while reading and written back as a plain
@@ -298,9 +323,12 @@ describe("map-writer contract", () => {
   // the same layout as a dev machine) and asserts every key the template emits is a key the
   // schema declares. Without it, a field the template gains is invisible here until a fresh
   // installation's map fails every read.
-  const mapTpl = fileURLToPath(new URL("../../../../hostyour-deploy/ansiwise/templates/cluster-map.tpl", import.meta.url));
-
-  it.skipIf(!existsSync(mapTpl))("every key the map template writes is declared in the schema", () => {
+  // ONE CASE AND ONE SKIP, because both halves ask the same question of the same file and a second
+  // skipping case is a second line of green output nobody reads. The top block is held against the
+  // SCHEMA, which is strict there; the `global:` block is held against the map this suite proves a
+  // rewrite on, because the schema cannot hold it — `global` is `.passthrough()`, so every key the
+  // template could emit is one the schema accepts, and no probe can make a schema comparison fail.
+  it.skipIf(!existsSync(mapTpl))("every key the map template writes is declared in the schema, and every key it writes under `global:` is one the rewrite is proven on", () => {
     const text = readFileSync(mapTpl, "utf8");
 
     // A template line is `key: <slot>` at column 0; comment lines start with '#' and never match.
@@ -331,6 +359,23 @@ describe("map-writer contract", () => {
     expect(
       [...fKeys],
       "the extraction found a key in a shape it was never taught — this counter-probe exists to prove it CANNOT, so that the toContain(\"fqdn\") guard above is the only thing standing between a rewritten template and a silently empty comparison",
+    ).toEqual([]);
+
+    // ---- THE `global:` BLOCK, where both writers actually drifted. The case above reaches the top
+    // block only: its extraction is column-0 keys, and it says so. Every incident of this class the
+    // issues record happened one level down — a slave map carrying ten of seventeen keys (apps4,
+    // 2026-08-29), a slave map carrying the master's nodeCidrs — and nothing looked there.
+    //
+    // FULL_MAP is the map the rewrite above is proven on, so a key the template writes that FULL_MAP
+    // does not carry is a key that proof never touches. That is not hypothetical: this was a
+    // hand-written list of names until now, and the list rotted the way a list does — the template
+    // gained `clusterIssuer`, which decides which authority issues an installation's certificates,
+    // and the fixture went on passing without it.
+    const fromTemplate = globalKeysOf(text);
+    expect(fromTemplate, "the extraction found no global keys — the template moved or changed shape").toContain("domain");
+    expect(
+      fromTemplate.filter((k) => !globalKeysOf(FULL_MAP).includes(k)),
+      "the map template writes global keys the map this suite proves a rewrite on does not carry — add them to FULL_MAP, or the rewrite is proven against a map no installation has",
     ).toEqual([]);
   });
 });
