@@ -13,11 +13,10 @@ import { readServerAuthorizedKeys } from "../../../shared/operator-keys.ts";
 import { serverCredFlags } from "../inventory/write.ts";
 import {
   STEP_NAMES, REDEPLOY_STEP_NAMES, PARAMS, EMIT_ARGOCD_TOKEN, EMIT_REVIEWER_TOKEN, EMIT_CREDS_JSON,
-  ELEVATION_PASSWORD, SLAVE_ID, MINT_AUTHKEY, ANSIWISE_PIN, IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY,
+  ELEVATION_PASSWORD, SLAVE_ID, MINT_AUTHKEY, IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY,
   TAILNET_PROBE_JOINED, FIXTURE_REGISTRY_HOST, pullDocumentFor, type Harness,
 } from "./deploy-slave.fixture.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
-import { ANSIWISE_SERVICE_PORT } from "./defs/place-ansiwise.ts";
 import {
   elevationOnly, expectProven, expectAbsent, machineWroteDown,
   deployWorld, liveSlaveWorld, recordWindow, startedRuns, settled,
@@ -83,15 +82,6 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       await h.executor.approve(r.runId, elevationOnly());
       await h.executor.settle(r.runId);
       expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
-
-      // hm#22, on the whole run kind: the deployment that makes the machine is the deployment that
-      // leaves it SERVING. Nobody typed a command after this run, and the unit is enabled — so a
-      // restart brings it back — running, and starting the PINNED binary on the address the manager
-      // dials, all four read off the machine and not off the installer.
-      expect(h.hosts.serviceEnabled).toBe(true);
-      expect(h.hosts.serviceActive).toBe(true);
-      expect(h.hosts.serviceExecVersion).toBe(ANSIWISE_PIN);
-      expect(h.hosts.serviceExecListen).toBe(`100.64.0.11:${ANSIWISE_SERVICE_PORT}`);
 
       // The machines' OWN records: dry + run per program, every one green — the registration on the
       // master's surface, the machine layer, the join and the emit on the slave's. NO BRANCH PROGRAM
@@ -393,15 +383,16 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       expect(rows[0]?.slaveId).toBe(1);
     });
 
-    it("INNOCENT CASE (redeploy, slave arm, machine reset at the provider): the machine holding no address of the private network is joined, and then binds its own resident surface", { timeout: 300_000 }, async () => {
+    it("INNOCENT CASE (redeploy, slave arm, machine reset at the provider): the machine holding no address of the private network is joined, and the coordinator's answer reaches its row", { timeout: 300_000 }, async () => {
       // THE MACHINE AN OWNER ACTUALLY REDEPLOYS, and the same rows as the test above: he resets the
       // box at the hosting provider and nothing in this manager moves — the cluster stays active and
       // the server stays healthy, which is the pair that offers Redeploy and offers nothing else.
       // What comes back carries the image's own key and no line of this manager's, a daemon taking a
       // password again, a clock nobody set to synchronise — and a tailnet client on no network at
-      // all. That last one is the fact no row states and the one everything after the machine layer
-      // stands on: the resident ansiwise service binds an address of that network and refuses every
-      // other, so a redeploy that joined nothing could never finish this machine.
+      // all. That last one is the fact no row states, and the cluster map's `apiHost` is what stands
+      // on it: the master's in-cluster components dial the slave's kube-apiserver on the private
+      // address the coordinator gave it (deploy-slave.kit.ts slaveApiHost), so a redeploy that joined
+      // nothing would commit a map pointing at an address this machine does not hold.
       const h = await liveSlaveWorld(serve(), {
         authorizedKeys: [IMAGE_KEY_LINE],
         passwordLogin: "yes",
@@ -418,7 +409,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // The two steps this machine's whole membership stands between, by their own errors FIRST: a
       // bare status assertion would go red saying only that something did.
       expect(stepColumn(h.db, r.runId, "join-if-absent", "error") ?? "").toBe("");
-      expect(stepColumn(h.db, r.runId, "enable-ansiwise-service", "error") ?? "").toBe("");
+      expect(stepColumn(h.db, r.runId, "declare-tailnet-address", "error") ?? "").toBe("");
       expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
 
       // WHAT THE STEP READ AND WHAT IT THEN DID: the client said it was on no network, so this run
@@ -433,16 +424,6 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // between, and would refuse this whole run on.
       const master = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
       expect(master.some((c) => c.includes("nodes delete -i 1 --force"))).toBe(true);
-
-      // THE POINT OF THE JOIN, read off the machine rather than off the run: the surface is enabled,
-      // it is running, and it stands on an address of the private network — the one the coordinator
-      // says it gave this machine. What a machine that holds no such address does with that same
-      // install is a fact of the machine and is measured where the machine is the subject: the unit
-      // installs, the service manager then says it is not running, and the placement refuses to
-      // report it ready (place-ansiwise.service.test.ts, serviceStartsAfterInstall false).
-      expect(h.hosts.serviceEnabled).toBe(true);
-      expect(h.hosts.serviceActive).toBe(true);
-      expect(h.hosts.serviceExecListen).toBe(`100.64.0.11:${ANSIWISE_SERVICE_PORT}`);
 
       // AND THE JOIN ARMED NOTHING, although this one really acted. A deployment arms `remove-slave`
       // around its own join, and against a machine whose cluster is live that compensation takes the
@@ -467,7 +448,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // already decided. Here the reading IS the decision, and both ways of guessing it are
       // destructive: joining a machine that turns out to be on the network hands a live cluster a
       // fresh address and mints a credential nothing can un-mint, and joining nothing on one that is
-      // off it leaves the resident surface binding an address the machine does not hold.
+      // off it leaves the cluster map naming an address the machine does not hold.
       const h = await liveSlaveWorld(serve(), { tailnetProbeExit: 1 });
 
       const runId = await settled(h, "cluster-redeploy", { serverId: SLAVE_ID }, elevationOnly());

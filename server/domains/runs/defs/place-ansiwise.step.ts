@@ -1,25 +1,22 @@
-import { randomBytes } from "node:crypto";
 import type { Step, StepCtx } from "../../../executor/types.ts";
 import type { servers } from "../../../db/schema/inventory.ts";
-import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
+import { errNotConfigured } from "../../../kernel/errors.ts";
 import { readAnsiwisePin } from "../../inventory/ansiwise-pin.ts";
 import { loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { requireElevationPassword, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 import {
-  placeAnsiwise, installAnsiwiseService, ensureServiceToken, isServiceAddress, assertWord, handRunRoot,
-  VERSION_PLACEHOLDER, NAME_PLACEHOLDER, ANSIWISE_SERVICE_PORT,
+  placeAnsiwise, assertWord, handRunRoot, VERSION_PLACEHOLDER, NAME_PLACEHOLDER,
   type PlacementMachine, type BootstrapVerdict,
 } from "./place-ansiwise.ts";
 import type { ReleaseDownloads } from "../../../adapters/downloads/port.ts";
 import { refreshCatalogue } from "./machine-catalogue.ts";
-import { isMasterRole } from "../../../../shared/enums.ts";
 
-// The manager's half of the BOOTSTRAP: the two steps deploy-slave and redeploy run, and the
-// resolution only a manager can do. The bootstrap itself (place-ansiwise.ts) takes a machine and
-// values and holds no run, no database and no session; what stands here is where those values come
-// from in THIS manager — the pin off clusters/platform/versions.yaml, the release address off the
-// installation's settings, the service address off the server row — and how a run's cached SSH
-// session satisfies the four things a placement asks of a machine.
+// The manager's half of the BOOTSTRAP: the step deploy-slave, redeploy and cluster-deploy-master
+// each run, and the resolution only a manager can do. The bootstrap itself (place-ansiwise.ts) takes
+// a machine and values and holds no run, no database and no session; what stands here is where those
+// values come from in THIS manager — the pin off clusters/platform/versions.yaml and the release
+// address off the installation's settings — and how a run's cached SSH session satisfies the four
+// things a placement asks of a machine.
 //
 // Split out of deploy-slave.ts under the file-size doctrine (files ≤400 lines), beside
 // deploy-slave.mgmt.ts, deploy-slave.verify.ts and deploy-slave.attest.ts.
@@ -114,130 +111,8 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
   };
 }
 
-/** `enable-ansiwise-service` — the machine's own resident surface, switched on once it has the two
- *  facts a bare one has not got: an address in the tailnet to stand on, and the token file
- *  deploy-platform-services wrote. It composes no unit and no command inside one: `installAnsiwiseService`
- *  invokes `ansiwise-rest install-service`, which is the one thing that knows what a unit has to
- *  carry (place-ansiwise.ts, THE UNIT IS NOT COMPOSED HERE).
- *
- *  THE BOOTSTRAP RUNS AGAIN FIRST, and it is the same call the step above makes. On a machine the
- *  first step already placed it measures both executables, finds the pin, and transfers nothing — so
- *  what this costs is two questions. What it BUYS is the one fact the service placement cannot get
- *  anywhere else: whether the executable under the unit was replaced in this run, which is what
- *  decides the restart. A service keeps the inode it started from, so a machine whose file was just
- *  replaced serves the old code with the new file answering the new version beside it.
- *
- *  WHY IT IS A SECOND STEP AND NOT THE FIRST ONE, and the reason is about the MACHINE and not about
- *  the row. A machine cannot bind an address it does not hold, and it holds no tailnet address until
- *  the join above put it on the network — outright on a deployment, and on a redeploy only where the
- *  same step read that the machine holds none (defs/tailnet.kit.ts); the binary refuses every other
- *  one (`--listen` outside 100.64.0.0/10). What changes about the ROW in between is exactly one
- *  column, written by exactly one step: `declare-tailnet-address` (deploy-slave.address.ts) asks the
- *  COORDINATOR which address it gave this machine and puts that in `tailnetHost` — the coordinator
- *  assigned it, so the value is still the platform's own statement and not the host's account of
- *  itself. `read-membership` writes `tailnetState` and `tailnetJson` and nothing else
- *  (runs/tailnet-probe.ts `recordTailnetReading`), and those stay a READING: the address in them is
- *  what the machine says, which is the one thing this column may not be.
- *
- *  THE ADDRESS IS THE ONE THE MANAGER WILL DIAL, stated here and bound there: the server row's
- *  tailnetHost with ANSIWISE_SERVICE_PORT after it, which is exactly what an `{ kind: "address" }`
- *  wire (adapters/ansiwise/port.ts) is opened on. Reading it off the machine instead would make the
- *  address the service stands on and the address the manager dials two readings of one value. What
- *  the placement DOES read off the machine is the address the standing unit already starts on, and it
- *  reads it to find out whether it has to install again — never to decide where the surface goes. */
-export function enableAnsiwiseServiceStep(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): Step {
-  return {
-    name: "enable-ansiwise-service",
-    title: "Enable the machine's own ansiwise service, so the surface outlives the session",
-    run: async (ctx) => {
-      const server = loadServer(ctx.db, target.serverId);
-      if (!server.tailnetHost) {
-        throw errValidation(
-          `server ${server.name} carries no tailnet address, and the resident ansiwise service may stand on no other ` +
-          "one — the manager presents its token in a plain HTTP header. The step before this one (declare-tailnet-address) " +
-          "asks the coordinator which address it gave this machine and writes exactly this column, so an empty column " +
-          "here means that reading did not happen: run this deployment from a plan that carries that step, or put " +
-          `${server.name}'s address in 100.64.0.0/10 on its row by hand if the coordinator cannot be reached at all`,
-        );
-      }
-      // The shape, refused HERE because this is where the field is, and the field carries none of its
-      // own: tailnetHost is `z.string().min(1)` (inventory/write.ts) and its other reader takes a
-      // name (`mark-slave` below, an apiHost). The binary reads this one as four numbers, so a
-      // MagicDNS name is legal on the row and refused on the machine — and the operator is told which
-      // of the two he wrote.
-      const listen = `${server.tailnetHost}:${ANSIWISE_SERVICE_PORT}`;
-      if (!isServiceAddress(listen)) {
-        throw errValidation(
-          `server ${server.name} carries the tailnet address "${server.tailnetHost}", and the resident ansiwise service ` +
-          "stands on four numbers or on nothing: ServiceInstallation reads the host as four numbers and refuses " +
-          "everything outside 100.64.0.0/10 (ansiwise-cli lib/service_installation.dart), so a MagicDNS name is refused " +
-          `on the machine after this has reached it. Put ${server.name}'s ADDRESS on its row — the cluster map's ` +
-          "apiHost, which reads the same column, takes a name and is why one was accepted there",
-        );
-      }
-      const bootstrap = await runBootstrap(ctx, ports, server);
-      const machine = await placementMachine(ctx, server.name);
-      // A machine carrying the master part has the file already — its own deploy-platform-services
-      // wrote it out of the books cluster's Vault, and this manager may not write a second value
-      // over one that entry stands behind. Everywhere else nothing writes it at all.
-      const token = isMasterRole(server.role)
-        ? { placed: false }
-        : await ensureServiceToken(machine, requireElevationPassword(ctx), () => serviceTokenFor(ctx, server));
-      const placed = await installAnsiwiseService(machine, {
-        version: bootstrap.version,
-        listen,
-        elevationPassword: requireElevationPassword(ctx),
-        replaced: bootstrap.placed,
-      });
-      ctx.checkpoint({ ...bootstrap, service: true, installed: placed, tokenPlaced: token.placed });
-    },
-  };
-}
-
-/** What a sealed service token is filed under, one per server row. */
-const SERVICE_TOKEN_FP = "ansiwise-service-token";
-
-/** The token THIS manager holds for a machine's resident surface: the one it sealed before, or a
- *  fresh one sealed now.
- *
- *  READ BEFORE MINTED, and that ordering is the whole of it. The surface authenticates one value and
- *  the manager presents one value, so a second mint for a machine that already has a sealed token
- *  would leave the two disagreeing — and the disagreement would show up as a surface that refuses
- *  its own manager. A machine whose file was lost is therefore given back what this manager already
- *  holds, not something new.
- *
- *  ONE PER SERVER, never one per installation. The books cluster's own entry at
- *  `<stage>/manager-host/ansiwise` is a single value because a single machine reads it; carrying that
- *  value onto every slave would make each machine's file a credential for every other machine's
- *  program surface. Sealed against the server row, the blast radius of a file somebody reads is the
- *  machine it stands on. */
-async function serviceTokenFor(ctx: StepCtx, server: typeof servers.$inferSelect): Promise<string> {
-  const held = (await ctx.creds.list({ serverId: server.id, kind: "other", excludeRotated: true }))
-    .find((c) => c.fingerprint === SERVICE_TOKEN_FP);
-  if (held) {
-    const known = await ctx.creds.withOpened(
-      held.id,
-      { purpose: "cluster-deploy-slave:service-token", runId: ctx.runId },
-      (plain) => Promise.resolve(plain.toString("utf8").trim()),
-    );
-    if (known.length > 0) return known;
-  }
-  // base64url, so every character is one WORD_RE admits and nothing has to be quoted to reach the
-  // machine — 32 bytes, the length the surface's own token check takes without an opinion.
-  const minted = randomBytes(32).toString("base64url");
-  await ctx.creds.seal({
-    kind: "other",
-    label: `resident ansiwise surface token for ${server.name}`,
-    plaintext: Buffer.from(minted, "utf8"),
-    fingerprint: SERVICE_TOKEN_FP,
-    serverId: server.id,
-  });
-  return minted;
-}
-
 /** The bootstrap's manager half: the pin and the address resolved out of this installation, and the
- *  run's cached session made into the machine it reaches. Both steps call it, which is what makes the
- *  second one measure what the first one left rather than assume it. */
+ *  run's cached session made into the machine it reaches. */
 async function runBootstrap(
   ctx: StepCtx,
   ports: DeploySlavePorts & AnsiwisePorts,
@@ -278,10 +153,7 @@ async function placementMachine(ctx: StepCtx, name: string): Promise<PlacementMa
         timeoutMs: o.timeoutMs,
         onStdout: (line) => {
           out.push(line);
-          // WHAT A MACHINE ANSWERS GOES INTO THE RUN'S RECORD, and a command answering a credential
-          // would put it there for ever — on the screen, in the record, and in whatever an operator
-          // pastes out of it. The value still reaches the caller through `out`.
-          if (o.secretOutput !== true) ctx.log("stdout", line);
+          ctx.log("stdout", line);
         },
         onStderr: (line) => ctx.log("stderr", line),
         ...(o.stdin !== undefined ? { stdin: o.stdin } : {}),

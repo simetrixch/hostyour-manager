@@ -7,7 +7,7 @@ import { generateServerKeypair } from "../../adapters/ssh/keygen.ts";
 import { startFakeSshServer, type FakeSshServer } from "../../adapters/ssh/testing/fake-server.ts";
 import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused } from "../../adapters/ansiwise/port.ts";
-import { ansiwiseBinaries, NO_BINARY, startServe, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
+import { ansiwiseBinaries, NO_BINARY, openChannel, placeInstallation, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { isServe } from "./ansiwise-serve.fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 
@@ -63,18 +63,19 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   let serve: ServeFixture;
   let ssh: FakeSshServer;
-  /** Reads the machine's records directly — the ADDRESS wire, dialing the resident surface. */
+  /** Reads the machine's records directly, over a conversation of its own: one `serve` for the whole
+   *  file, held open beside the ones the runs themselves open. */
   let observer: AnsiwiseClient;
 
   beforeAll(async () => {
-    serve = await startServe(bin as { tool: string; rest: string }, fixturePrograms());
+    serve = await placeInstallation(bin as { tool: string; rest: string }, fixturePrograms());
     // The channel form of the surface, and it is the real one (serveConversation): the binary's
     // own stdio is the connection, exactly what an SSH exec channel hands a process.
     ssh = await startFakeSshServer({
       authorizedKeys: [key.publicLine],
       conversations: { "ansiwise-rest serve": serveConversation(serve) },
     });
-    observer = new AnsiwiseClient({ kind: "address", host: "127.0.0.1", port: serve.port, token: serve.token });
+    observer = new AnsiwiseClient(openChannel(serve));
   }, 60_000);
 
   afterAll(async () => {
@@ -92,7 +93,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       auth: { kind: "key", privateKey: key.privateOpenSsh },
     });
     const channel = await session.openChannel("ansiwise-rest serve", { signal: new AbortController().signal });
-    const client = new AnsiwiseClient({ kind: "channel", stream: channel.stream });
+    const client = new AnsiwiseClient(channel.stream);
     try {
       const programs = await client.programs();
       expect(programs.map((p) => p.name).sort()).toEqual([

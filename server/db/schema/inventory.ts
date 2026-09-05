@@ -32,8 +32,7 @@ export const servers = sqliteTable("servers", {
   // depend on that answer: the pod-CIDR guard derives the cluster LAN as the /24 around it, and the
   // boot seed reconciles the master's row from MASTER_LAN_HOST on every start. It is also not
   // tailnet_json.address below — that is a READING taken off the host's own CLIENT, and the whole
-  // point of this column is that it is not the machine's account of itself: the manager dials this
-  // address with its token in a plain HTTP header.
+  // point of this column is that it is not the machine's account of itself.
   //
   // WHO STATES IT. A person may, when the server row is created (inventory/write.ts). Where nobody
   // did, the run asks the COORDINATOR — `declare-tailnet-address` (runs/defs/deploy-slave.address.ts)

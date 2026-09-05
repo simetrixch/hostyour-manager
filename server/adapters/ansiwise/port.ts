@@ -5,22 +5,13 @@
 // NDJSON for a run's events. What is typed here is only what the manager READS — the schemas
 // keep the fields the steps act on and drop the rest, so a machine that grows a field does not
 // break a manager that never looked at it.
+//
+// AND THERE IS NO ADDRESS HERE, WHICH IS THE POINT. The client is handed an already-open
+// conversation with `ansiwise-rest serve` and nothing else, so a host, a port and a bearer token
+// cannot be given to it at all: the manager reaches a machine over the session sshd has already
+// authenticated, and the type is what says there is no second way (simetrixch/ansiwise-cli#14).
 
-import type { Duplex } from "node:stream";
 import { z } from "zod";
-
-/** Where the bytes come from — one client, two ways of getting them.
- *
- *  `channel` is an ALREADY-OPEN conversation with `ansiwise-rest serve` — an SSH exec channel whose
- *  stdin/stdout are the connection (SshSession.openChannel). Opening it is the SSH layer's job;
- *  this client only speaks HTTP over it. `address` dials a listening resident service
- *  (`ansiwise-rest service --listen`); `token` is the service token the resident surface is secured
- *  with, sent as `Authorization: Bearer`. REQUIRED on an address and absent on a channel: an
- *  address is authenticated by nothing until this says otherwise, and the SSH session already
- *  authenticated. */
-export type AnsiwiseWire =
-  | { kind: "channel"; stream: Duplex }
-  | { kind: "address"; host: string; port: number; token: string };
 
 /** One declared answer of a program (`GET /programs/{name}`.answers[]) — what the manager reads
  *  to know WHICH answers to compose, so the answer list lives in the machine's own catalogue and

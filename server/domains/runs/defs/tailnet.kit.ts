@@ -354,9 +354,11 @@ export function readMembershipStep(serverId: string): Step {
  *  is what makes that join safe to compose at all.
  *
  *  WHY THE TWO HALVES CANNOT BE SEPARATED. A machine reinstalled at the hosting provider holds no
- *  membership, and the resident ansiwise surface a deployment ends by switching on binds an address
- *  from that network and refuses every other one (place-ansiwise.step.ts) — so without a join such a
- *  machine cannot be finished. A machine that never lost its membership must not be joined for it:
+ *  membership, and the cluster map a deployment commits names the private address the coordinator
+ *  gave it as the slave's `apiHost` — what the master's own in-cluster components dial its
+ *  kube-apiserver on (deploy-slave.kit.ts `slaveApiHost`, deploy-slave.address.ts) — so without a
+ *  join such a machine is finished onto an address nothing answers. A machine that never lost its
+ *  membership must not be joined for it:
  *  the join program discards the node key as its first act, so it hands a LIVE slave a fresh address
  *  the cluster map and the master's reconciler are still pointing away from, and it mints a
  *  credential at the coordinator that nothing can un-mint.
@@ -407,8 +409,8 @@ export function joinIfAbsentStep(target: SlaveTarget, serverId: string, ports: T
           throw errValidation(
             `${server.name} did not answer the membership probe, and this step joins a host or leaves it alone on that ` +
             "one reading: joining a machine that is already on the private network hands a live cluster a fresh address " +
-            "and mints a credential that cannot be un-minted, and joining nothing on a machine that is off it leaves the " +
-            "resident ansiwise service binding an address the machine does not hold. The line above says how far the " +
+            "and mints a credential that cannot be un-minted, and joining nothing on a machine that is off it leaves its " +
+            "cluster map naming an address the machine does not hold. The line above says how far the " +
             "probe came; fix that, then retry the step",
           );
         }

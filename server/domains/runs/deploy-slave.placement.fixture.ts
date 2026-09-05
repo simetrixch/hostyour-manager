@@ -1,12 +1,12 @@
 import { DownloadFailed, type ReleaseDownloads } from "../../adapters/downloads/port.ts";
 import type { HostsScript } from "./deploy-slave.fixture.ts";
-import { PATH_HOME } from "./defs/place-ansiwise.ts";
+import { ANSIWISE_REST_TOOL, ANSIWISE_SESSION_PROGRAM, PATH_HOME } from "./defs/place-ansiwise.ts";
 import { CATALOG_CHECKOUT } from "./defs/machine-state.ts";
 
 // THE SCRIPTED MACHINE'S BOOTSTRAP HALF: what it answers when it is asked which release each of its
-// two executables is, what a file transfer does to it, and what the serving binary's install-service
-// leaves behind. It reads and writes the SAME HostsScript the rest of the scripted machine does — a
-// machine with two states would let a placement leave one of them behind.
+// two executables is, what a file transfer does to it, and what it says to a program of the serving
+// binary that does not exist. It reads and writes the SAME HostsScript the rest of the scripted
+// machine does — a machine with two states would let a placement leave one of them behind.
 //
 // EVERY ANSWER COMES OFF WHAT WAS ACTUALLY WRITTEN, never off what the step meant to write. The
 // bytes a release address serves SAY which executable and which version they are, the transfer puts
@@ -15,10 +15,10 @@ import { CATALOG_CHECKOUT } from "./defs/machine-state.ts";
 // so. A fixture that recorded the step's intention instead would agree with every one of those.
 
 /** WHERE the scripted operating account's home is, spelled out. The manager writes a RELATIVE SFTP
- *  path and names the file in a command with `~/` in front of it; the machine resolves both to this,
- *  and install-service writes the RESOLVED path into the unit — so a unit's `ExecStart` and the word
- *  a command was composed with are deliberately two different strings here, which is what makes the
- *  bootstrap's "ask the file the unit names" real rather than a string comparison in disguise. */
+ *  path and names the file in a command with `~/` in front of it, and the machine resolves both to
+ *  this — so what a transfer wrote and the word a command was composed with are deliberately two
+ *  different strings here, which is what makes the bootstrap's reading of a placed file real rather
+ *  than a string comparison in disguise. */
 export const SCRIPTED_HOME = "/home/ubuntu";
 
 /** The bytes a release serves for one asset. They carry the name and the version because that is the
@@ -86,13 +86,12 @@ function executableNamed(word: string): string | undefined {
 /** How this fixture keeps a file that stands on the machine's path apart from the home copy. */
 export const ON_PATH = "path:";
 
-/** The scripted machine's answer to one bootstrap or service command, or undefined where the command
- *  is not one this half of the fixture knows — the exec table then goes on to the rest. */
+/** The scripted machine's answer to one bootstrap command, or undefined where the command is not one
+ *  this half of the fixture knows — the exec table then goes on to the rest. */
 export function answerPlacementCommand(
   f: HostsScript,
   host: string,
   command: string,
-  stdin?: string,
 ): { out: string; code: number } | undefined {
   const words = command.split(" ");
 
@@ -121,42 +120,17 @@ export function answerPlacementCommand(
   const catalogue = answerCatalogueCommand(f, words);
   if (catalogue !== undefined) return catalogue;
 
-  if (command === "systemctl is-enabled ansiwise.service") {
-    return { out: f.serviceEnabled ? "enabled" : "disabled", code: f.serviceEnabled ? 0 : 1 };
-  }
-  if (command === "systemctl is-active ansiwise.service") {
-    return { out: f.serviceActive ? "active" : "inactive", code: f.serviceActive ? 0 : 3 };
-  }
-  if (command === "systemctl show -p ExecStart ansiwise.service") {
-    return { out: execStartLine(f), code: 0 };
-  }
-
-  // The token, read with the run's own elevation. A machine that has not been through the program
-  // that mints it answers nothing and fails — which is the refusal the caller names by name.
-  if (command === "sudo -S cat /etc/ansiwise/service-token") {
-    return f.serviceToken === undefined
-      ? { out: "", code: 1 }
-      : { out: f.serviceToken, code: 0 };
-  }
-
-  // The manager writing a token onto a machine whose own programs never mint one. What lands in the
-  // file is what stood on standard input AFTER the line sudo took for the password — the machine
-  // splits it exactly where sudo splits it, so a caller that put the value anywhere else writes
-  // nothing here. Remembered, so the `cat` above reads back what was actually written.
-  if (command === "sudo -S install -D -m 600 -o root -g root /dev/stdin /etc/ansiwise/service-token") {
-    const payload = (stdin ?? "").split("\n").slice(1).join("\n");
-    if (payload.length === 0) return { out: "install: reading /dev/stdin: no bytes", code: 1 };
-    f.serviceToken = payload;
-    return { out: "", code: 0 };
-  }
-
-  if (command === "sudo -S systemctl restart ansiwise.service") {
-    f.serviceRunningVersion = f.serviceActive ? f.serviceExecVersion : undefined;
-    return { out: "", code: 0 };
-  }
-
-  if (words[1] === "install-service") {
-    return installService(f, host, words);
+  // THE SERVING BINARY HAS ONE PROGRAM, and this is where a manager that invokes a second one is
+  // caught. The real binary answers every other word with this sentence and exits 64
+  // (ansiwise-cli bin/ansiwise_rest.dart, simetrixch/ansiwise-cli#14), so the scripted machine does
+  // too: a step that composed `install-service` again — or any word somebody invents next — fails
+  // HERE, in every suite that drives a deployment, instead of on a customer's machine three systems
+  // away. It is a rule and not a list: the accepted word is the one the manager declares, and every
+  // other is refused without this fixture having to know what it is called.
+  const program = words[1];
+  if (executableNamed(words[0] ?? "") === ANSIWISE_REST_TOOL
+    && program !== undefined && !program.startsWith("--") && program !== ANSIWISE_SESSION_PROGRAM) {
+    return { out: `${ANSIWISE_REST_TOOL} has no program called "${program}"`, code: 64 };
   }
   return undefined;
 }
@@ -205,41 +179,4 @@ function answerCatalogueCommand(f: HostsScript, words: string[]): { out: string;
     return { out: `HEAD is now at ${f.catalogueHead}`, code: 0 };
   }
   return undefined;
-}
-
-/** What `systemctl show -p ExecStart ansiwise.service` writes on the scripted machine. The whole
- *  line, not the two fields the manager reads out of it: a reading that took a shortcut through this
- *  would be answered in its own words instead of the service manager's. */
-function execStartLine(f: HostsScript): string {
-  if (f.serviceExecPath === undefined) return "ExecStart=";
-  const listen = f.serviceExecListen === undefined ? "" : `--listen ${f.serviceExecListen} `;
-  return `ExecStart={ path=${f.serviceExecPath} ; argv[]=${f.serviceExecPath} service ${listen}` +
-    "--service-token-file /etc/ansiwise/service-token --programs /srv/ansiwise-catalog/ansiwise/programs " +
-    "--config /srv/ansiwise-catalog/ansiwise.yaml ; ignore_errors=no ; pid=0 }";
-}
-
-/** The serving binary placing its own unit, modelled on what the real one does: it refuses a caller
- *  that is not the serving binary, refuses an invocation with no token in the envelope, writes a unit
- *  whose `ExecStart` names THE FILE IT WAS RUN AS resolved to an absolute path, and ends at
- *  `systemctl enable --now` — which starts a unit that is not running and does NOTHING to one that
- *  is. That last one is why the caller restarts, and why this fixture keeps the running version apart
- *  from the unit's. */
-function installService(f: HostsScript, host: string, words: string[]): { out: string; code: number } {
-  const named = executableNamed(words[0] ?? "");
-  if (named !== "ansiwise-rest") {
-    return {
-      out: `ansiwise has no program called "install-service"`,
-      code: 64,
-    };
-  }
-  const version = versionOf(fileAt(f, host, named));
-  if (version === undefined) return { out: "", code: 127 };
-  const wasActive = f.serviceActive;
-  f.serviceExecPath = `${SCRIPTED_HOME}/${named}`;
-  f.serviceExecVersion = version;
-  f.serviceExecListen = words[words.indexOf("--listen") + 1];
-  f.serviceEnabled = true;
-  f.serviceActive = f.serviceStartsAfterInstall;
-  if (!wasActive) f.serviceRunningVersion = f.serviceActive ? version : undefined;
-  return { out: `${f.serviceExecPath} is written and ansiwise.service comes back after a restart`, code: 0 };
 }

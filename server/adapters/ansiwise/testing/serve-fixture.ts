@@ -4,11 +4,17 @@
 // starts the actual binaries on it.
 //
 // TWO BINARIES, AND THE FIXTURE CARRIES BOTH BECAUSE A MACHINE HAS TO. The surface is
-// `ansiwise-rest`: `service` on an address, `serve` over one session's own pipes. It starts every
+// `ansiwise-rest`, and it has one program: `serve`, over one session's own pipes. It starts every
 // run as a DETACHED CHILD of the deployment tool and refuses to come up at all when `ansiwise` is
 // not standing BESIDE it, exiting 78 (ansiwise-cli bin/ansiwise_rest.dart,
 // `deploymentToolBesideThis`). So both are copied into the fixture directory, side by side, exactly
 // as place-ansiwise puts them side by side in a machine's home.
+//
+// NOTHING HERE LISTENS, AND NOTHING HERE HOLDS A CREDENTIAL. The installation is placed once and
+// every caller opens `serve` on it for itself, so the fixture proves the manager against the door
+// the manager actually uses. It started `ansiwise-rest service --listen 127.0.0.1:0` until
+// simetrixch/ansiwise-cli#14 deleted that program: the only proof this repository had against the
+// real engine was standing on the door nothing dialled.
 //
 // WHERE THEY COME FROM: $ANSIWISE_BIN / $ANSIWISE_REST_BIN, or the sibling checkout's build output
 // (../ansiwise-cli/build/). Absent ⇒ the suites that need them REFUSE THE RUN, unless the person
@@ -21,11 +27,10 @@
 // the workstation and the record semantics are still the real engine's.
 
 import { Duplex } from "node:stream";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { copyFileSync, statSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, parse, resolve } from "node:path";
-import { createServer, connect, type Server } from "node:net";
 
 /** The variable a person sets to be let through WITHOUT the binaries — the one way past the refusal
  *  below, and deliberately the only one. Somebody who cannot build the sibling Dart checkout has to
@@ -144,30 +149,19 @@ export function programYaml(name: string, rows: ProbeRow[]): string {
   ].join("\n");
 }
 
-/** The credential every caller on the fixture's address presents.
- *
- *  A fixture that served open would prove the transport against a surface nobody will run: an
- *  address is authenticated by nothing until a token says otherwise, and the binary refuses to bind
- *  one without a token file behind it. */
-export const FIXTURE_SERVICE_TOKEN = "a-token-for-the-transport-proof";
-
 export interface ServeFixture {
-  /** The listening surface's address. */
-  port: number;
-  /** What a caller on that address must present. */
-  token: string;
-  /** The SERVING binary itself, for a caller that wants the CHANNEL form: spawn it and its own stdio
-   *  is the connection, which is what an SSH exec channel gives. */
+  /** The SERVING binary itself: spawn it and its own stdio is the connection, which is what an SSH
+   *  exec channel gives (openChannel below). */
   exe: string;
   /** The installation the binary runs from. */
   dir: string;
-  /** Delete the installation, the serve process, and every run record the machine wrote. */
+  /** Delete the installation and every run record the machine wrote. */
   close(): Promise<void>;
 }
 
-/** Build an installation carrying [programs] and start the real serving binary on it, listening on
- *  an OS-chosen port. */
-export async function startServe(
+/** Build the installation [programs] stand in and put both real binaries beside each other in it.
+ *  Nothing is started here: a caller opens `serve` on it with [openChannel]. */
+export async function placeInstallation(
   binaries: { tool: string; rest: string },
   programs: Record<string, string>,
 ): Promise<ServeFixture> {
@@ -193,40 +187,13 @@ export async function startServe(
     writeFileSync(join(dir, "programs", `${name}.yaml`), yaml);
   }
 
-  const tokenFile = join(dir, "service-token");
-  writeFileSync(tokenFile, FIXTURE_SERVICE_TOKEN);
-  // `service` and NOT `serve`: the two doors are two PROGRAMS of this binary and neither can turn
-  // into the other. `service` stands on an address and demands a token; `serve` speaks over one
-  // session's own pipes and takes neither (ansiwise-cli lib/src/rest/resident_service.dart).
-  const child: ChildProcess = spawn(
-    exe,
-    ["service", "--listen", "127.0.0.1:0", "--service-token-file", tokenFile],
-    { cwd: dir },
-  );
-  const port = await new Promise<number>((res, rej) => {
-    let out = "";
-    let err = "";
-    child.stdout?.on("data", (d: Buffer) => {
-      out += d.toString("utf8");
-      const m = /serving on 127\.0\.0\.1:(\d+)/.exec(out);
-      if (m) res(Number(m[1]));
-    });
-    child.stderr?.on("data", (d: Buffer) => (err += d.toString("utf8")));
-    child.on("exit", (code) => rej(new Error(`ansiwise-rest service exited ${code} before binding — a binary that knows no such program predates the split into two, and 78 is the serving binary refusing to start with no ansiwise beside it; rebuild the sibling checkout\n${out}${err}`)));
-    setTimeout(() => rej(new Error(`ansiwise-rest service did not bind within 20s\n${out}${err}`)), 20_000).unref();
-  });
-
   return {
-    port,
-    token: FIXTURE_SERVICE_TOKEN,
     exe,
     dir,
     close: async (): Promise<void> => {
-      // Windows keeps the executable locked until the process is GONE, so the removal waits for
-      // the exit rather than racing it.
-      const exited = new Promise<void>((res) => (child.exitCode !== null ? res() : child.once("exit", () => res())));
-      child.kill();
-      await exited;
+      // Windows keeps an executable locked until the process holding it is GONE. Every process this
+      // fixture's callers started is a `serve` of its own, killed when its conversation closed, so
+      // the removal waits for the last of them rather than racing it.
       for (let attempt = 0; ; attempt++) {
         try {
           rmSync(dir, { recursive: true, force: true });
@@ -276,57 +243,12 @@ function clearLeakedRunRecords(dir: string): void {
   rmSync(runRoot(dir), { recursive: true, force: true });
 }
 
-export interface StartSpacer {
-  port: number;
-  close(): void;
-}
-
-/** A pass-through TCP proxy in front of the serve listener that holds every `POST /runs` back
- *  by [delayMs] before forwarding it.
+/** THE SURFACE, as a duplex: spawn the SERVING binary and its own standard input and output are the
+ *  connection — which is exactly what an SSH exec channel hands a process. It is `ansiwise-rest
+ *  serve`; the deployment tool answers "no program is called serve".
  *
- *  WHY IT EXISTS: the machine names a run by second + pid (ansiwise-cli _newRunId), so two runs
- *  STARTED within the same second collide onto one record — a real defect for the resident
- *  service, handed to ansiwise-cli. Real programs never trip it (a dry run of deploy-cluster
- *  takes minutes); the fixture's measuring programs finish in milliseconds, so without spacing
- *  the starts the tests would prove the collision instead of the transport. */
-export function startSpacer(targetPort: number, delayMs = 1_100): Promise<StartSpacer> {
-  const server: Server = createServer((downstream) => {
-    const upstream = connect(targetPort, "127.0.0.1");
-    // Chunks stay IN ORDER through the delay: a held-back request start must not be overtaken
-    // by its own body arriving in a later chunk, so every chunk rides one promise chain.
-    let chain: Promise<void> = Promise.resolve();
-    const forward = (wait: number, act: () => void): void => {
-      chain = chain.then(() => new Promise<void>((r) => setTimeout(r, wait))).then(act);
-    };
-    downstream.on("data", (chunk: Buffer) => {
-      forward(chunk.toString("latin1").startsWith("POST /runs") ? delayMs : 0, () => void upstream.write(chunk));
-    });
-    downstream.on("end", () => forward(0, () => upstream.end()));
-    upstream.pipe(downstream);
-    const drop = (): void => {
-      downstream.destroy();
-      upstream.destroy();
-    };
-    downstream.on("error", drop);
-    upstream.on("error", drop);
-  });
-  return new Promise((res) => {
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address();
-      res({
-        port: addr !== null && typeof addr === "object" ? addr.port : 0,
-        close: (): void => void server.close(),
-      });
-    });
-  });
-}
-
-/** The CHANNEL form of the surface, as a duplex: spawn the SERVING binary and its own standard input
- *  and output are the connection — which is exactly what an SSH exec channel hands a process. It is
- *  `ansiwise-rest serve`; the deployment tool answers "no program is called serve".
- *
- *  No token rides here. A session is authenticated by sshd, and a machine at its first installation
- *  holds no token yet, so the channel door demands none by construction. */
+ *  No credential rides here, and there is nowhere for one to ride: a session is authenticated by
+ *  sshd before this process exists, and `serve` is the binary's only program. */
 export function openChannel(fixture: ServeFixture): Duplex {
   const child = spawn(fixture.exe, ["serve", "--programs", "programs", "--config", "ansiwise.yaml"], {
     cwd: fixture.dir,

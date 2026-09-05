@@ -99,7 +99,7 @@ export const STEP_NAMES = [
   "slave-preflight", "disable-password-login", "purge-bootstrap-password",
   "mark-slave",
   "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services",
-  "rejoin", "read-membership", "declare-tailnet-address", "enable-ansiwise-service", "create-mgmt",
+  "rejoin", "read-membership", "declare-tailnet-address", "create-mgmt",
   "gitops-handoff", "verify-slave", "register",
 ];
 /** The redeploy slave arm: the SAME list, with the outright join in the MEASURED form that reads the
@@ -226,31 +226,9 @@ export interface HostsScript extends FirstContactScript {
   hostAddressesOut: string;
   hostAddressesExit: number;
   // ---- what the machine carries of the BOOTSTRAP (place-ansiwise). Every one of these is written
-  // by a file transfer or by the serving binary's own install-service and read back by asking the
-  // file — so a second run of a step measures what the first one left, and a double-run assertion is
-  // about idempotence rather than about a value the test changed in between.
-  /** What the service manager on the machine says about ansiwise.service: the two facts asked
-   *  separately, because a unit that is enabled and dead and one that runs and is not enabled are two
-   *  different machines and neither is the one a caller asked for. */
-  serviceEnabled: boolean;
-  serviceActive: boolean;
-  /** What the unit STARTS, which is what `systemctl show -p ExecStart` answers: the absolute file its
-   *  command names and the address on that command's `--listen`. install-service composes that
-   *  command out of the binary it was run as and the options it was given, so both are written by the
-   *  invocation the step made. undefined is a machine whose service manager knows no such unit. */
-  serviceExecPath: string | undefined;
-  serviceExecVersion: string | undefined;
-  serviceExecListen: string | undefined;
-  /** The version of the executable the RUNNING process is, which is NOT what the unit says while a
-   *  unit was rewritten and the process kept going: install-service ends at `systemctl enable --now`,
-   *  and `--now` starts a unit that is not active and does nothing to one that is. Only a restart
-   *  moves this. Nothing the manager asks reads it — it is the machine the report is about, and a
-   *  test asserts it off the machine directly. */
-  serviceRunningVersion: string | undefined;
-  /** The value at /etc/ansiwise/service-token, or undefined for a machine that has not been through
-   *  the run that mints it — the machine the service placement has to refuse rather than enable a
-   *  unit that cannot read its own credential. */
-  serviceToken: string | undefined;
+  // by a file transfer and read back by asking the file — so a second run of a step measures what
+  // the first one left, and a double-run assertion is about idempotence rather than about a value
+  // the test changed in between.
   /** The catalogue checkout at /srv/ansiwise-catalog, as the machine holds it. `catalogueBranch`
    *  undefined is a machine that carries NO catalogue — `test -d` answers no and nothing else about
    *  the checkout is asked. `catalogueRemoteHead` is what origin/<branch> stands on, so a reset
@@ -273,10 +251,6 @@ export interface HostsScript extends FirstContactScript {
   /** What `git fetch origin <branch>` answers in the catalogue — non-zero is a machine whose own
    *  read credential no longer opens its origin, or a tree git refuses as somebody else's. */
   catalogueFetchExit: number;
-  /** Whether the service the install-service invocation enabled actually COMES UP. False is what a
-   *  unit that installs cleanly and then fails to bind looks like: install-service exits zero and the
-   *  service manager says the machine is not serving. */
-  serviceStartsAfterInstall: boolean;
   /** One-shot exec fault injections: the FIRST exec whose command contains `match` REJECTS
    *  with Error(`message`) and the entry is consumed — e.g. a transport-level
    *  "(SSH) Channel open failure" mid-verify (the MaxSessions incident). */
@@ -325,17 +299,7 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
       "4: cni0    inet 10.1.32.1/24 brd 10.1.32.255 scope global cni0",
     ].join(String.fromCharCode(10)),
     hostAddressesExit: 0,
-    // A slave as deploy-slave meets it: adopted, and carrying neither executable yet. No surface of
-    // its own, and the token file already there — enable-ansiwise-service stands AFTER
-    // run-deploy-platform-services in the list, and that program's file_from_vault row is what writes it.
-    serviceEnabled: false,
-    serviceActive: false,
-    serviceExecPath: undefined,
-    serviceExecVersion: undefined,
-    serviceExecListen: undefined,
-    serviceRunningVersion: undefined,
-    serviceToken: "scripted-service-token",
-    serviceStartsAfterInstall: true,
+    // A slave as deploy-slave meets it: adopted, and carrying neither executable yet.
     catalogueBranch: "main",
     catalogueClonesOnto: "main",
     catalogueCloneExit: 0,
@@ -385,10 +349,10 @@ export function hostsFactory(f: HostsScript): SshFactory {
       if (command.includes("dc-dns-probe-")) { emit(f.dnsOut); return done(); }
       if (command.includes("dc-slave-preflight-")) { emit(f.preflightOut); return done(); }
       if (command.startsWith("curl") && command.includes("/v1/sys/health")) { emit(f.vaultCode); return done(f.vaultExit); }
-      // ---- the bootstrap every program act stands on, and the machine's own resident surface. Every
+      // ---- the bootstrap every program act stands on. Every
       // answer is read off what the file transfer actually wrote (deploy-slave.placement.fixture.ts),
       // so a step that transferred nothing is answered by a machine carrying nothing.
-      const placement = answerPlacementCommand(f, host, command, o.stdin?.toString("utf8"));
+      const placement = answerPlacementCommand(f, host, command);
       if (placement !== undefined) {
         emit(placement.out);
         return done(placement.code);

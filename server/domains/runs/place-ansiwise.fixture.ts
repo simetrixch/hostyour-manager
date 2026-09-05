@@ -8,12 +8,10 @@ import {
 import { statedTarget, type DeploySlavePorts } from "./defs/deploy-slave.kit.ts";
 import { ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 
-// What the two bootstrap suites share: the values a placement is stated with, the ports record the
-// manager's half reads them out of, and one step run against the scripted slave. Both suites drive
-// the SAME mechanism (place-ansiwise.ts) through the SAME two steps (deploy-slave.ts), so a second
-// copy of this would be two scripted machines that could disagree about what a placed one looks
-// like — place-ansiwise.test.ts is about the two executables, place-ansiwise.service.test.ts about
-// the machine's own resident surface.
+// What the bootstrap suite is stated with: the values a placement takes, the ports record the
+// manager's half reads them out of, and one step run against the scripted slave. It is a file of its
+// own because the scripted machine and the ports record are what a second bootstrap suite would have
+// to copy, and two scripted machines could disagree about what a placed one looks like.
 
 /** The ports the step takes, with one of them left out where a test is about an installation that
  *  did not configure it, or a manager that was built without a release reader at all. */

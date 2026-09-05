@@ -7,12 +7,12 @@ import {
   scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx, stepOf, type Harness,
 } from "./deploy-slave.fixture.ts";
 
-// THE ADDRESS THE MANAGER WILL DIAL, and where it is allowed to come from.
+// THE ADDRESS THE MASTER'S CLUSTER WILL DIAL, and where it is allowed to come from.
 //
-// `servers.tailnetHost` is where this manager opens a wire and presents its token in a plain HTTP
-// header. The address has to be the one the machine actually holds — the resident service binds it
-// — while not being the machine's own account of itself. The coordinator is both: it assigned the
-// address, and it is not the host being deployed.
+// `servers.tailnetHost` is the slave's `apiHost` in the cluster map. The address has to be the one
+// the machine actually holds — its kube-apiserver answers there — while not being the machine's own
+// account of itself. The coordinator is both: it assigned the address, and it is not the host being
+// deployed.
 //
 // The column cannot be filled by hand on a first deployment. headscale 0.29.2 takes no address on
 // `preauthkeys create` and has no `nodes` subcommand that sets one, so the value first exists when
@@ -74,8 +74,8 @@ describe("the address the coordinator gave this machine", () => {
   });
 
   it("picks the IPv4 by shape and not by position", async () => {
-    // The listing happens to put the IPv4 first today. The resident service binds four numbers, so
-    // the choice is made on what the address IS.
+    // The listing happens to put the IPv4 first today. A cluster map's apiHost carries four numbers,
+    // so the choice is made on what the address IS.
     const hosts = coordinator(listing([{ name: OWNER, owner: OWNER, ips: ["fd7a:115c:a1e0::9", "100.64.0.9"] }]));
     const h = await world(hosts);
 

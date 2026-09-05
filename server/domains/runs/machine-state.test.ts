@@ -4,7 +4,6 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { REMOTE_COMMANDS, REMOTE_SCRIPTS } from "./remote-scripts.fixture.ts";
-import { installServiceArgv } from "./defs/place-ansiwise.ts";
 import {
   MACHINE_STATE, MANAGER_HANDS_OVER, PLATFORM_STATE_ROOTS,
 } from "./defs/machine-state.ts";
@@ -30,11 +29,13 @@ import {
 //
 //   THE SURFACE HALF reads every script this manager uploads and every command line it composes
 //   under a name (remote-scripts.fixture.ts, whose SET is held complete by remote-syntax.test.ts's
-//   own census), plus the argument list that places the resident service. Every absolute path in
-//   them has to be answered: the registry, the machine's own operating system, or one of the two
-//   files this platform writes into a directory the machine already has. What it does NOT reach is a
-//   command written INLINE at a call site — remote-syntax.test.ts holds every one of those to a
-//   single line, so it is a line the reader of the call site sees whole.
+//   own census). Every absolute path in them has to be answered: the registry, the machine's own
+//   operating system, or one of the two files this platform writes into a directory the machine
+//   already has. What it does NOT reach is a command written INLINE at a call site —
+//   remote-syntax.test.ts holds every one of those to a single line, so it is a line the reader of
+//   the call site sees whole — nor an argument list the placement composes for `machine.run`, which
+//   no census reads. The one of those that carried absolute paths was `installServiceArgv`, named
+//   here by hand until simetrixch/ansiwise-cli#14 deleted the program it invoked.
 //
 //   NEITHER HALF ASKS A MACHINE. What is proven here is that no path reaches a machine from this
 //   repository without an ownership answer. Whether the account can actually write each of them ON A
@@ -139,14 +140,7 @@ const inside = (path: string, entry: string): boolean => path === entry || path.
 
 /** Every absolute path this manager sends to a machine, keyed by what sends it. */
 function surfacePaths(): { symbol: string; path: string }[] {
-  const rendered = [
-    ...REMOTE_SCRIPTS,
-    ...REMOTE_COMMANDS,
-    {
-      symbol: "installServiceArgv",
-      text: installServiceArgv({ executable: "~/ansiwise-rest", listen: "100.64.0.11:9953" }).join(" "),
-    },
-  ];
+  const rendered = [...REMOTE_SCRIPTS, ...REMOTE_COMMANDS];
   return rendered.flatMap((r) =>
     [...new Set(r.text.match(ABSOLUTE_PATH) ?? [])].map((path) => ({ symbol: r.symbol, path })));
 }

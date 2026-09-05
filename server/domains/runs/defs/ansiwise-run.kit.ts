@@ -69,11 +69,11 @@ export const RECORD_APPEARS_POLL_MS = 250;
  *  stdio then speaks HTTP. WHICH checkout the service reads its programs from is that command's to
  *  say — configuration, never an assumption baked in here.
  *
- *  IT IS `ansiwise-rest serve` AND NOT `ansiwise-rest serve`. `serve` is the SESSION door of the serving
- *  binary — the surface over one session's own standard input and output, standing on no address and
- *  demanding no token because sshd authenticated the caller before the process existed (ansiwise-cli
- *  lib/src/rest/resident_service.dart `sessionProgram`). The deployment tool answers `no program is
- *  called serve`, because it runs programs of a catalogue and `serve` is not one. */
+ *  IT IS `ansiwise-rest` AND NOT `ansiwise`. `serve` is the serving binary's ONE program — the
+ *  surface over one session's own standard input and output, standing on no address and demanding no
+ *  token because sshd authenticated the caller before the process existed (ansiwise-cli
+ *  bin/ansiwise_rest.dart `sessionProgram`). The deployment tool answers `no program is called
+ *  serve`, because it runs programs of a catalogue and `serve` is not one. */
 export interface AnsiwisePorts {
   ansiwiseServeCommand?: string;
   /** WHERE a machine's two executables are fetched from, with `<name>` standing for which of the
@@ -251,7 +251,7 @@ export async function openServeConversation(
     signal,
     onStderr: (line) => ctx.log("stderr", `serve: ${line}`),
   });
-  const client = new AnsiwiseClient({ kind: "channel", stream: channel.stream });
+  const client = new AnsiwiseClient(channel.stream);
   return {
     client,
     close: (): void => {

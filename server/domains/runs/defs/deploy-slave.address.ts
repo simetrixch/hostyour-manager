@@ -10,14 +10,15 @@ import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { loadMaster, loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { coordinatorNodesOf, describeNode, ipv4Of } from "./tailnet.coordinator.ts";
 
-// THE ADDRESS THE MANAGER WILL DIAL, taken from the one that handed it out.
+// THE ADDRESS THE MASTER'S CLUSTER WILL DIAL, taken from the one that handed it out.
 //
-// `servers.tailnetHost` is where this manager opens a wire and presents its token in a plain HTTP
-// header (place-ansiwise.step.ts, enableAnsiwiseServiceStep). Two things have to be true of it at
-// once, and they pull in opposite directions:
+// `servers.tailnetHost` is the slave's `apiHost` in the cluster map (deploy-slave.kit.ts
+// `slaveApiHost`): what the master's own in-cluster components — its per-slave ArgoCD, Vault on every
+// ESO login, the shared dashboard, the Manager's own kube client — reach this machine's
+// kube-apiserver on. Two things have to be true of it at once, and they pull in opposite directions:
 //
-//   it must be the address the machine ACTUALLY holds — the resident service binds it, and a
-//       machine cannot bind an address it was not given;
+//   it must be the address the machine ACTUALLY holds — its kube-apiserver answers there, and a
+//       machine cannot answer on an address it was not given;
 //   it must NOT be the machine's own account of itself — the host this manager is about to trust
 //       may not be the host that names where the trust goes.
 //
@@ -109,16 +110,16 @@ export function declareTailnetAddressStep(target: SlaveTarget, serverId: string,
       // something else that joined under the same name.
       if (mine.length > 1) {
         throw errValidation(
-          `the coordinator lists ${mine.length} nodes owned by "${owner}": ${mine.map(describeNode).join(" and ")}. This ` +
-          "manager presents its token at the address on the row, so it may not choose between them — delete the node " +
+          `the coordinator lists ${mine.length} nodes owned by "${owner}": ${mine.map(describeNode).join(" and ")}. The ` +
+          "cluster map carries one address for this machine, so this step may not choose between them — delete the node " +
           "that is not this machine at the coordinator, then run this step again",
         );
       }
       const address = ipv4Of(mine[0]!);
       if (address === undefined) {
         throw errValidation(
-          `the coordinator lists ${describeNode(mine[0]!)} for "${owner}" but no IPv4 among its addresses — the resident ` +
-          "ansiwise service binds four numbers and nothing else, so there is no address here to declare",
+          `the coordinator lists ${describeNode(mine[0]!)} for "${owner}" but no IPv4 among its addresses — a cluster ` +
+          "map's apiHost carries four numbers and nothing else, so there is no address here to declare",
         );
       }
 

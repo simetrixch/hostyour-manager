@@ -50,9 +50,9 @@ import {
 //
 //                     THE TAILNET JOIN IS MEASURED HERE AND NOT A BIRTH ACT, and that is what lets
 //                     this arm finish on the machine it is asked for. A machine reset at the provider
-//                     holds no membership, and the resident ansiwise surface this arm switches on
-//                     binds an address of that network and no other — so a redeploy that joined
-//                     nothing could never finish one. It reads the machine's own client
+//                     holds no membership, and the cluster map this arm's declare-tailnet-address
+//                     writes names an address of that network and no other — so a redeploy that
+//                     joined nothing could never finish one. It reads the machine's own client
 //                     and joins only where that says the machine is off the network, so a live slave
 //                     is neither logged out nor handed a fresh address (deploy-slave.ts, the join;
 //                     tailnet.kit.ts joinIfAbsentStep for what the reading decides).
@@ -68,9 +68,8 @@ import {
 //
 //                     AND NO JOIN, MEASURED OR OTHERWISE. Every act of this arm reaches the machine
 //                     over the session the plan opens on servers.host or servers.lan_host, and the
-//                     arm composes neither the resident surface nor the address declaration — so
-//                     nothing here binds a private address and nothing here fails for the want of
-//                     one. A master's join is also not a free reading to act on: the join program
+//                     arm composes no address declaration — so nothing here needs a private address
+//                     and nothing here fails for the want of one. A master's join is also not a free reading to act on: the join program
 //                     re-signs the machine's serving certificate, which makes MicroK8s re-issue and
 //                     restart the control plane under it (tailnet.kit.ts). `cluster-tailnet-rejoin`
 //                     takes a master as its target and performs exactly that, on its own approval

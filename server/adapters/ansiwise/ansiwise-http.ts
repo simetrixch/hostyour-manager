@@ -5,19 +5,18 @@
 // the same trick for its port-forward agents (ssh2/lib/http-agents.js), including the noop
 // socket methods a non-socket stream has to grow — that file is the precedent this follows.
 //
-// ONE REQUEST AT A TIME, IN ORDER. Both wires get an Agent with maxSockets: 1, so requests
-// queue on the one connection instead of interleaving. On a channel that is forced anyway —
-// one conversation is one byte stream — and against the surface it is the honest shape: the
-// serving loop answers strictly sequentially (channel_http_server.dart), so a second in-flight
-// request would only wait invisibly on the machine instead of visibly here.
+// ONE REQUEST AT A TIME, IN ORDER. The Agent takes maxSockets: 1, so requests queue on the one
+// connection instead of interleaving. On a channel that is forced anyway — one conversation is one
+// byte stream — and it is the honest shape besides: the serving loop answers strictly sequentially
+// (channel_http_server.dart), so a second in-flight request would only wait invisibly on the
+// machine instead of visibly here.
 
 import http from "node:http";
 import type { Duplex } from "node:stream";
 import { z } from "zod";
 import {
   AnsiwiseProgram, AnsiwiseRunAccepted, AnsiwiseRunRecord, AnsiwiseEvent,
-  AnsiwiseRefused, AnsiwiseUnreachable,
-  type AnsiwiseWire, type AnsiwiseStart,
+  AnsiwiseRefused, AnsiwiseUnreachable, type AnsiwiseStart,
 } from "./port.ts";
 
 const ProgramList = z.object({ programs: z.array(AnsiwiseProgram) });
@@ -60,26 +59,20 @@ export interface AnsiwiseCallOptions {
   signal?: AbortSignal;
 }
 
+/** Never dialed — the agent ignores them — but they name the connection in Node's pool and in the
+ *  Host header, so they are a word and not an address someone could mistake for one. */
+const CONVERSATION = { host: "ansiwise", port: 80 };
+
 export class AnsiwiseClient {
   readonly #agent: http.Agent;
-  readonly #host: string;
-  readonly #port: number;
-  readonly #headers: Record<string, string>;
 
-  constructor(wire: AnsiwiseWire) {
-    if (wire.kind === "channel") {
-      this.#agent = new ChannelAgent(wire.stream);
-      // Never dialed — the agent ignores them — but they name the connection in Node's pool and
-      // in the Host header, so they are a word and not an address someone could mistake for one.
-      this.#host = "ansiwise";
-      this.#port = 80;
-      this.#headers = {};
-    } else {
-      this.#agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
-      this.#host = wire.host;
-      this.#port = wire.port;
-      this.#headers = wire.token === undefined ? {} : { authorization: `Bearer ${wire.token}` };
-    }
+  /** [conversation] is an ALREADY-OPEN exchange with `ansiwise-rest serve`, whose stdin and stdout
+   *  are the connection — an SSH exec channel (SshSession.openChannel) in a run, the binary's own
+   *  stdio in a test. Opening it is the caller's job; this client only speaks HTTP over it, and it
+   *  takes nothing else: there is no address to dial and no credential to present, because sshd
+   *  authenticated the caller before the process on the far side existed. */
+  constructor(conversation: Duplex) {
+    this.#agent = new ChannelAgent(conversation);
   }
 
   /** `GET /programs` — what this machine can be asked to run. */
@@ -169,12 +162,11 @@ export class AnsiwiseClient {
       const req = http.request(
         {
           agent: this.#agent,
-          host: this.#host,
-          port: this.#port,
+          host: CONVERSATION.host,
+          port: CONVERSATION.port,
           method,
           path,
           headers: {
-            ...this.#headers,
             accept: "application/json, application/x-ndjson",
             ...(body === undefined ? {} : { "content-type": "application/json", "content-length": Buffer.byteLength(body) }),
           },

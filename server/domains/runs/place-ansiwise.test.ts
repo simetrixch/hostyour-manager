@@ -7,12 +7,12 @@ import { assetBytes, ScriptedReleases, SCRIPTED_HOME } from "./deploy-slave.plac
 import { ports, placeCtx, target, transferred, onPath, commands } from "./place-ansiwise.fixture.ts";
 import { placeAnsiwiseStep } from "./defs/place-ansiwise.step.ts";
 import {
-  placeAnsiwise, downloadAddress, assertWord, ensureServiceToken,
+  placeAnsiwise, downloadAddress, assertWord,
   ANSIWISE_EXECUTABLES, ANSIWISE_TOOL, ANSIWISE_REST_TOOL, EXECUTABLE_MODE, BOOTSTRAP_HOME, PATH_HOME,
   NAME_PLACEHOLDER, VERSION_PLACEHOLDER,
   type PlacementMachine,
 } from "./defs/place-ansiwise.ts";
-import { CATALOG_CHECKOUT, SERVICE_TOKEN_FILE } from "./defs/machine-state.ts";
+import { CATALOG_CHECKOUT } from "./defs/machine-state.ts";
 
 // place-ansiwise is the BOOTSTRAP, and what is held down here is that it is a file transfer and
 // nothing else. Everything a machine is given after this is given by a program of its own catalogue;
@@ -225,7 +225,7 @@ describe("what may stand in a command on the machine", () => {
     for (const bad of ['1.0"; rm -rf /', "$(id)", "a b", "x|y", "a&&b", "back`tick", "glob*", "new\nline", ""]) {
       expect(() => assertWord(bad, "version"), bad).toThrow(/is not one plain word/);
     }
-    for (const good of ["0.1.0-alpha-20260823000709", "~/ansiwise-rest", "/etc/ansiwise/service-token", "--listen", "100.64.0.11:9953"]) {
+    for (const good of ["0.1.0-alpha-20260823000709", "~/ansiwise-rest", "/usr/local/bin/ansiwise", "/var/lib/ansiwise/runs", "ubuntu"]) {
       expect(() => assertWord(good, "word"), good).not.toThrow();
     }
   });
@@ -491,75 +491,5 @@ describe("place-ansiwise: the catalogue the engine is judged by", () => {
 
     expect(hosts.catalogueHead).toBe("ccc3333");
     expect(said.some((l) => l.includes("already stood on the head of main at ccc3333"))).toBe(true);
-  });
-});
-
-// ===================== the token a machine's own programs never write =====================
-//
-// SERVICE_TOKEN_FILE is written by two rows of deploy-platform-services, and both are gated on the
-// books being here — so on a cluster that keeps none, the program runs green and the file never comes
-// into being. Until the first slave every machine this manager deployed kept the books, which is why
-// nothing had ever asked. What is held here is the manager's half: it writes one where there is none,
-// it leaves one that stands, and the value never reaches the machine by any path an unprivileged
-// account could read.
-
-/** A machine that answers what the script says and remembers everything it was asked. */
-function scriptedMachine(answers: { token?: string; writeCode?: number }): {
-  machine: PlacementMachine; sent: { argv: readonly string[]; stdin: string }[]; said: string[];
-} {
-  const sent: { argv: readonly string[]; stdin: string }[] = [];
-  const said: string[] = [];
-  const machine: PlacementMachine = {
-    name: "apps4",
-    putFile: () => Promise.reject(new Error("no file may be put on the way to a root-owned token")),
-    run: (argv, o) => {
-      sent.push({ argv, stdin: o.stdin?.toString("utf8") ?? "" });
-      if (argv.includes("cat")) return Promise.resolve({ code: answers.token === undefined ? 1 : 0, stdout: answers.token ?? "" });
-      return Promise.resolve({ code: answers.writeCode ?? 0, stdout: answers.writeCode ? "install: cannot create regular file" : "" });
-    },
-    log: (line) => said.push(line),
-  };
-  return { machine, sent, said };
-}
-
-describe("the token a machine's own programs never write", () => {
-  it("INNOCENT CASE: a machine that already answers one is left exactly as it stands, and nothing is asked for a value", async () => {
-    const { machine, sent } = scriptedMachine({ token: "already-standing" });
-    let asked = 0;
-    const r = await ensureServiceToken(machine, ELEVATION_PASSWORD, () => { asked += 1; return Promise.resolve("fresh"); });
-    expect(r.placed).toBe(false);
-    expect(asked).toBe(0); // the store is never opened for a machine that needs nothing
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.argv).toEqual(["sudo", "-S", "cat", SERVICE_TOKEN_FILE]);
-  });
-
-  it("writes one where there is none — root-owned, 0600, and the value on standard input alone", async () => {
-    const { machine, sent, said } = scriptedMachine({});
-    const r = await ensureServiceToken(machine, ELEVATION_PASSWORD, () => Promise.resolve("a-minted-token"));
-    expect(r.placed).toBe(true);
-    expect(sent).toHaveLength(2);
-    expect(sent[1]?.argv).toEqual([
-      "sudo", "-S", "install", "-D", "-m", "600", "-o", "root", "-g", "root", "/dev/stdin", SERVICE_TOKEN_FILE,
-    ]);
-    // the elevation password, then the value — and the value stands in no argument of any command
-    expect(sent[1]?.stdin).toBe(`${ELEVATION_PASSWORD}
-a-minted-token`);
-    for (const c of sent) expect(c.argv.join(" ")).not.toContain("a-minted-token");
-    // nor in what an operator reads
-    expect(said.join(" ")).not.toContain("a-minted-token");
-    expect(said.join(" ")).toContain(SERVICE_TOKEN_FILE);
-  });
-
-  it("PLANTED DEFECT: a machine that refuses the write is named, and nothing reports a placement", async () => {
-    const { machine } = scriptedMachine({ writeCode: 1 });
-    await expect(ensureServiceToken(machine, ELEVATION_PASSWORD, () => Promise.resolve("a-minted-token")))
-      .rejects.toThrow(/apps4 carries no .*service-token and would not take one/);
-  });
-
-  it("PLANTED DEFECT: a value that is not one plain word is refused before the machine is reached", async () => {
-    const { machine, sent } = scriptedMachine({});
-    await expect(ensureServiceToken(machine, ELEVATION_PASSWORD, () => Promise.resolve("two words")))
-      .rejects.toThrow();
-    expect(sent).toHaveLength(1); // the read, and nothing after it
   });
 });

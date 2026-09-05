@@ -25,7 +25,7 @@ import {
   removeSudoersStep, type FirstContactInput,
 } from "./manager-key.kit.ts";
 import { disablePasswordLoginStep, purgeBootstrapPasswordStep } from "./password-login.kit.ts";
-import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
+import { placeAnsiwiseStep } from "./place-ansiwise.step.ts";
 import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
 import { SLAVE_API_PORT, DATA_DISK_COMMAND, HOST_ADDRESS_COMMAND, dataDiskFrom, hostAddressesFrom } from "./deploy-slave.remote.ts";
 import { rejoinStep, joinIfAbsentStep, readMembershipStep } from "./tailnet.kit.ts";
@@ -67,10 +67,7 @@ import { masterSlavePartSteps, masterSlavePartPlan } from "./deploy-slave.master
 // Before the first of those programs, place-ansiwise puts the binary they are driven through, the
 // catalogue they are read from and the platform checkout they act on onto the slave: a bare machine
 // carries none of them, and every program step would otherwise open a conversation with a command
-// that is not there. After the last of them and after the join,
-// enable-ansiwise-service runs the SAME placement once more to switch the machine's own resident
-// surface on — the fourth thing that placement places, and the one that needs an address the machine
-// only holds once it is on the private network.
+// that is not there.
 //
 // mutating: true ⇒ the attest-target law (guards.ts assertGuardsArmed) requires
 // steps()[0].name === "attest-target".
@@ -615,7 +612,6 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // measured that the machine holds one or put it back on the network, and the step right above is
     // what states which address that is. Everything before this reached the machine over a held-open
     // session; this is what makes the machine reachable without one, across a restart.
-    enableAnsiwiseServiceStep(target, ports),
     createMgmtStep(target, ports),
     {
       name: "gitops-handoff",

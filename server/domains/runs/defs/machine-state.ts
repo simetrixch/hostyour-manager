@@ -61,8 +61,8 @@ export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
 /** WHERE the catalogue stands on the machine: the checkout the serving binary reads its programs and
  *  its `ansiwise.yaml` from. The machine's own path and not this module's invention — the
  *  `git_clone` row of `deploy-platform-services`, the LAST deployment program, brings the catalogue
- *  forward at exactly this path, and the resident service is given `--programs` out of it. A machine
- *  that carries none is given one before any program runs at all, by `refreshCatalogue`
+ *  forward at exactly this path, and the session the manager opens is given `--programs` out of it.
+ *  A machine that carries none is given one before any program runs at all, by `refreshCatalogue`
  *  (defs/machine-catalogue.ts) or, on a first master, by hostyour-cloud's own installer. */
 export const CATALOG_CHECKOUT = "/srv/ansiwise-catalog";
 
@@ -72,8 +72,7 @@ export const CATALOG_PROGRAMS = `${CATALOG_CHECKOUT}/ansiwise/programs`;
 
 /** The file naming which plugins the installation turns on, inside the same checkout. It has to be
  *  named because the option's default is `ansiwise.yaml` RELATIVE to the directory the process runs
- *  in, and nothing here runs in the catalogue: see THE WORKING DIRECTORY IS NOT THE CATALOGUE at
- *  defs/place-ansiwise.ts `installServiceArgv`. */
+ *  in, and nothing this manager starts runs in the catalogue. */
 export const CATALOG_CONFIG = `${CATALOG_CHECKOUT}/ansiwise.yaml`;
 
 /** Where the engine keeps every run's record on a machine, and the directory above it.
@@ -85,11 +84,6 @@ export const ANSIWISE_STATE_ROOT = "/var/lib/ansiwise";
 
 /** See [ANSIWISE_STATE_ROOT]. */
 export const ANSIWISE_RUN_ROOT = `${ANSIWISE_STATE_ROOT}/runs`;
-
-/** The file the resident service reads its token out of, and the file install-service writes it to.
- *  The machine's own: the `file_from_vault` row of the program that mints it writes this path out of
- *  the entry at `<stage>/manager-host/ansiwise`. */
-export const SERVICE_TOKEN_FILE = "/etc/ansiwise/service-token";
 
 /** Which account a path belongs to. `operator` is the account the manager reaches the machine as —
  *  the rule's answer, and the answer for everything this platform creates a place for. `root` is
@@ -125,7 +119,7 @@ export const MACHINE_STATE: readonly MachineStateEntry[] = [
     handover: "bootstrap",
     what:
       "the engine's own state root. The first raised run on a machine creates it as root, and every " +
-      "run this manager drives is started by the resident service as the operating account",
+      "run this manager drives is started over its own session as the operating account",
   },
   {
     path: ANSIWISE_RUN_ROOT,
@@ -141,7 +135,7 @@ export const MACHINE_STATE: readonly MachineStateEntry[] = [
     owner: "operator",
     handover: "elsewhere",
     what:
-      "the catalogue the resident service reads its programs and its plugin list out of, brought " +
+      "the catalogue the serving binary reads its programs and its plugin list out of, brought " +
       "forward by the `git_clone` row of deploy-platform-services and put there in the first place " +
       "by this manager's own refreshCatalogue",
   },
@@ -153,16 +147,6 @@ export const MACHINE_STATE: readonly MachineStateEntry[] = [
       "the platform tree every deployment program acts on, cloned by a `git_clone` row that hands it " +
       "over after the clone rather than before — git recreates as root everything it is made to " +
       "write into a directory handed over first",
-  },
-  {
-    path: SERVICE_TOKEN_FILE,
-    owner: "root",
-    handover: "elsewhere",
-    what:
-      "the token the resident service authenticates callers with, written by a program's " +
-      "`file_from_vault` row. ROOT, because the service reads it as root and the value is a " +
-      "standing credential for the machine's whole program surface — an account that could read it " +
-      "could drive every program on the machine without the elevation password",
   },
 ];
 

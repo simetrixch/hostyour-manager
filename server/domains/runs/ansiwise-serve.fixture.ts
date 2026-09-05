@@ -12,6 +12,7 @@ import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseRunRecord } from "../../adapters/ansiwise/port.ts";
 import { openChannel, programYaml, runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET, RECORD_APPEARS_POLL_MS, RECORD_APPEARS_TIMEOUT_MS } from "./defs/ansiwise-run.kit.ts";
+import { ANSIWISE_REST_TOOL, ANSIWISE_SESSION_PROGRAM } from "./defs/place-ansiwise.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import {
   makeHarness, scriptedHosts, logger, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID,
@@ -202,7 +203,8 @@ export function fixturePrograms(): Record<string, string> {
  *  to `master`: a serve started without it makes a slave claim to be a master, and the first program
  *  declared for a slave is then thrown out of Runner.run before it writes one event. The prefix says
  *  WHICH conversation this was; what it told the machine about itself is asserted where measured. */
-export const isServe = (command: string): boolean => command.startsWith("ansiwise-rest serve");
+export const isServe = (command: string): boolean =>
+  command.startsWith(`${ANSIWISE_REST_TOOL} ${ANSIWISE_SESSION_PROGRAM}`);
 
 export function serveConversation(serve: ServeFixture): Conversation {
   return (stream) => {
@@ -502,9 +504,14 @@ export async function recordAppeared(client: AnsiwiseClient, id: string): Promis
   }
 }
 
-/** POST over the address wire — a run a TEST starts itself, to hand the step a checkpoint. */
+/** POST over a conversation of the TEST'S own — a run a test starts itself, to hand the step a
+ *  checkpoint.
+ *
+ *  ITS OWN `serve`, AND THAT IS WHAT IT MEASURES. The run is a DETACHED child of the process that
+ *  accepted it, so closing this conversation ends the surface that took the request and leaves the
+ *  run going — which is exactly the machine `orphaned-end.ansiwise.suite.ts` is about. */
 export async function observerStart(serve: ServeFixture, start: { program: string; mode: "dry" | "run"; answers: Record<string, string> }): Promise<{ run: string; fingerprint: string }> {
-  const client = new AnsiwiseClient({ kind: "address", host: "127.0.0.1", port: serve.port, token: serve.token });
+  const client = new AnsiwiseClient(openChannel(serve));
   try {
     return await client.start({ ...start, elevationPassword: "pw" });
   } finally {
