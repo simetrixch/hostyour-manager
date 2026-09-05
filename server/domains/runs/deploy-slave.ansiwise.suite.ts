@@ -14,12 +14,12 @@ import { serverCredFlags } from "../inventory/write.ts";
 import {
   STEP_NAMES, REDEPLOY_STEP_NAMES, PARAMS, EMIT_ARGOCD_TOKEN, EMIT_REVIEWER_TOKEN, EMIT_CREDS_JSON,
   ELEVATION_PASSWORD, SLAVE_ID, MINT_AUTHKEY, ANSIWISE_PIN, IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY,
-  TAILNET_PROBE_JOINED, type Harness,
+  TAILNET_PROBE_JOINED, FIXTURE_REGISTRY_HOST, pullDocumentFor, type Harness,
 } from "./deploy-slave.fixture.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import { ANSIWISE_SERVICE_PORT } from "./defs/place-ansiwise.ts";
 import {
-  elevationOnly, expectProven, expectAbsent,
+  elevationOnly, expectProven, expectAbsent, machineWroteDown,
   deployWorld, liveSlaveWorld, recordWindow, startedRuns, settled,
 } from "./ansiwise-serve.fixture.ts";
 
@@ -195,6 +195,28 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       expect(dump).not.toContain(MINT_AUTHKEY);
       expect(dump).not.toContain(ELEVATION_PASSWORD);
       expect(dump).not.toContain(BOOTSTRAP_PASSWORD);
+
+      // THE REGISTRY PULL CREDENTIAL REACHED THE MACHINE AND TOUCHED NO DISK ON IT. It is the one
+      // value a cluster keeping no books cannot read off a file of its own, and it now travels as a
+      // declared-secret ANSWER of deploy-cluster rather than as a file this manager writes and takes
+      // away again. Three places are read, and each is a place it used to be able to stand:
+      //   - no file was PUT on any machine carrying it, which is what the removed steps did;
+      //   - no command sent to any machine carries it, so nothing echoed it into a file either;
+      //   - the machine's OWN run root does not carry it, because deploy-cluster declares the
+      //     answer `secret` and the engine redacts a declared secret in every record it writes —
+      //     which is exactly what a file-sourced value can never be.
+      // The value the manager composes is the fixture harness's own pull document narrowed to the
+      // address BOTH cluster maps name, so this compares the same bytes the run sent.
+      const pullDocument = pullDocumentFor(FIXTURE_REGISTRY_HOST);
+      const wroteDown = machineWroteDown(serve());
+      expect(h.hosts.files.map((f) => `${f.path} ${f.content}`).join("\n")).not.toContain(pullDocument);
+      expect(h.hosts.log.map((l) => l.command).join("\n")).not.toContain(pullDocument);
+      expect(wroteDown).not.toContain(pullDocument);
+      expect(dump).not.toContain(pullDocument);
+      // AND IT DID ARRIVE, which is the half an absence assertion cannot state on its own: the
+      // fixture's deploy-cluster declares `registry_pull_dockerconfigjson` REQUIRED and judges its
+      // shape with a step of its own, so the green deploy-cluster record asserted above is the proof
+      // that the machine was handed this document and not nothing.
     });
 
     it("PLANTED DEFECT (deploy-slave): a TAMPERED credentials file goes red on the machine's own dry run of register-slave — nothing is registered, and the tokens still leak nowhere", { timeout: 300_000 }, async () => {
@@ -217,6 +239,25 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       expect(dump).not.toContain(EMIT_REVIEWER_TOKEN);
     });
 
+    it("PLANTED DEFECT (deploy-slave): a manager holding no pull configuration STOPS at deploy-cluster — no machine run of it starts, and no cluster is installed without its mirror", { timeout: 300_000 }, async () => {
+      // THE DEGRADATION THIS RUN KIND MAY NOT PRODUCE. A cluster that keeps no books reads the
+      // registry pull credential off no file of its own, and the machine's own row for it is
+      // SATISFIED when the credential is simply absent: it warns, writes no mirror, and the cluster
+      // then pulls every image from the rate-limited public path with nothing anywhere saying so.
+      // So the value not being there is a refusal on this side, before deploy-cluster is asked to
+      // do anything — the same shape as the answer being composed and the machine's own catalogue
+      // declaring no such answer, which composeAnswers would otherwise drop in silence.
+      const h = await deployWorld(serve(), { withoutCarriedValues: true });
+
+      const runId = await settled(h, "cluster-deploy-slave", PARAMS, elevationOnly());
+      expect(getRun(h.db.db, runId)?.status).toBe("failed");
+      expect(stepColumn(h.db, runId, "run-deploy-cluster", "error")).toMatch(/no pull configuration of its own/);
+      // deploy-host ran; deploy-cluster was never asked, in either mode.
+      const all = await observer().runs();
+      expectProven(serve(), h.db, runId, all, ["deploy-host"]);
+      expectAbsent(h.db, runId, all, ["deploy-cluster", "deploy-platform-services"]);
+    });
+
     it("abort-with-cleanup (deploy-slave): the map's slave part goes FIRST, then the remove-slave program on the master's record — and the marking cleanup finds nothing left, while the machine stays reachable", { timeout: 300_000 }, async () => {
       const h = await deployWorld(serve());
       h.hosts.credsOut = EMIT_CREDS_JSON.replace("TFMtQ0EtREFUQQ==", "VEFNUEVSRUQ="); // park at create-mgmt with every cleanup armed
@@ -231,11 +272,11 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
         const cp = JSON.parse(stepColumn(h.db, runId, step, "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
         expect(cp.__cleanups, step).toEqual([name]);
       }
-      // ...AND THE FOUR STEPS THAT USED TO ARM ONE NOW ARM NOTHING. Each of them acts on the SLAVE,
-      // and a half-finished run on the slave is finished by running the run again — so a
+      // ...AND THE THREE STEPS THAT USED TO ARM ONE NOW ARM NOTHING. Each of them acts on the
+      // SLAVE, and a half-finished run on the slave is finished by running the run again — so a
       // compensation there either takes away what the retry needs (the key line, the shut password
-      // door) or undoes what the retry redoes anyway (the snap, the input file).
-      for (const step of ["install-key", "disable-password-login", "place-input", "run-deploy-cluster"] as const) {
+      // door) or undoes what the retry redoes anyway (the snap).
+      for (const step of ["install-key", "disable-password-login", "run-deploy-cluster"] as const) {
         const cp = JSON.parse(stepColumn(h.db, runId, step, "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
         expect(cp.__cleanups, step).toBeUndefined();
       }

@@ -61,6 +61,10 @@ export interface ProbeRow {
   /** The regular expression the answer must match — '.+' passes anything non-empty, '$a' ("end
    *  then a") can never match and is the planted red. */
   pattern: string;
+  /** Declared `secret: true`, so the engine keeps the value out of every record it writes and out of
+   *  the description it hands back. The engine refuses a secret answer that also carries a default,
+   *  by name, when the installation is parsed — which is why a secret row is a required row. */
+  secret?: boolean;
 }
 
 export function programYaml(name: string, rows: ProbeRow[]): string {
@@ -73,6 +77,7 @@ export function programYaml(name: string, rows: ProbeRow[]): string {
       `  - name: ${r.answer}`,
       "    kind: text",
       `    describes: the ${r.answer} this fixture measures`,
+      ...(r.secret === true ? ["    secret: true"] : []),
     ]),
     "steps:",
     ...rows.flatMap((r) => [

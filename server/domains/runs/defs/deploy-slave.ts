@@ -7,6 +7,7 @@ import { STAGE, CLUSTER_TIER, isMasterRole } from "../../../../shared/enums.ts";
 import { errValidation, errNotConfigured } from "../../../kernel/errors.ts";
 import { execCapture, remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
+import { registerSecret } from "../../../security/redact.ts";
 import { PREFLIGHT_SCRIPT, parsePreflightOutput, makeCheck, hardenPreflightForSlave, podCidrOverlapCheck, formatNicsLine } from "../preflight.ts";
 import { hasHardFailure, type PreflightReport } from "../../../../shared/preflight.ts";
 import {
@@ -27,7 +28,6 @@ import { disablePasswordLoginStep, purgeBootstrapPasswordStep } from "./password
 import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
 import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
 import { SLAVE_API_PORT, DATA_DISK_COMMAND, HOST_ADDRESS_COMMAND, dataDiskFrom, hostAddressesFrom } from "./deploy-slave.remote.ts";
-import { placeInputStep, dropInputStep } from "./deploy-slave.input.ts";
 import { rejoinStep, joinIfAbsentStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
 import { clusterShortName, resolveClusterMarking, writeClusterMarking, projectClusterMarking, type ClusterMarking } from "../../inventory/cluster-marking.ts";
@@ -124,7 +124,8 @@ function armed(cleanup: Cleanup, step: Step): Step {
 }
 
 /** Answers the DEF is authoritative for on the machine-layer programs, read off the machine's OWN
- *  cluster map — the record mark-slave wrote earlier in the same run (and re-reads on a redeploy).
+ *  cluster map — the record mark-slave wrote earlier in the same run (and re-reads on a redeploy) —
+ *  plus the ONE value that stands in no map at all, the registry pull credential (below).
  *  books_fqdn is the master's domain (deploy-cluster/-gitops default it to the machine's own,
  *  which for a slave would install a second books keeper); build_plane_fqdn is the map's, whose
  *  self-naming form the programs read the same way as "this machine".
@@ -133,7 +134,8 @@ function armed(cleanup: Cleanup, step: Step): Step {
  *  arm (deploy-slave.master.ts) composes this one rather than a second copy: its map names no books
  *  cluster, so books_fqdn is omitted and the programs default to the machine's own — which for that
  *  machine is the right answer, because it IS where the books are kept. */
-export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts): ExtraAnswers {
+export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): ExtraAnswers {
+  const pull = registryPullAnswer(target, ports);
   return async (ctx) => {
     const { domain } = target.resolve(ctx.db);
     const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
@@ -157,8 +159,63 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
       ...(installation?.letsencryptEmail !== undefined ? { letsencrypt_email: installation.letsencryptEmail } : {}),
       ...(installation?.letsencryptServer !== undefined ? { letsencrypt_server: installation.letsencryptServer } : {}),
       ...(await dataDisk(ctx)),
+      ...(await pull(ctx)),
     };
   };
+}
+
+/** The name `deploy-cluster` declares the registry pull credential under, and the ONE answer of that
+ *  program this manager holds a secret for. Every other answer it sends is a fact of the inventory
+ *  or of a cluster map. */
+export const REGISTRY_PULL_ANSWER = "registry_pull_dockerconfigjson";
+
+/** THE VALUE A CLUSTER THAT KEEPS NO BOOKS STILL READS, handed over as an answer of the run.
+ *
+ *  A cluster pulls its images through the installation's own registry, and `deploy-cluster`'s
+ *  `write_containerd_registry_mirror` row is what writes that mirror. On the cluster that keeps the
+ *  books the row reads the credential out of `secrets/secrets.<stage>`, the installation's
+ *  hand-filled input, which that cluster's own branch program writes. A cluster that keeps none has
+ *  no such file and never can: it is gitignored, so no branch carries it.
+ *
+ *  THE VALUE IS NOT COPIED OFF ANOTHER MACHINE. It is already this manager's own — the mounted
+ *  manager-registry-pull document its own image is pulled with, templated in the manager chart
+ *  against the installation's registry address — so nothing here reads another cluster's secrets.
+ *
+ *  AND IT NEVER TOUCHES A DISK ON THE MACHINE. It is a DECLARED SECRET answer: the engine redacts a
+ *  declared-secret answer in every record it writes, which is a thing a file-sourced value cannot
+ *  be, and it lives exactly as long as the machine run does. */
+export function registryPullAnswer(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): ExtraAnswers {
+  return async (ctx) => {
+    const { domain } = target.resolve(ctx.db);
+    if (ports.pullConfiguration === undefined) {
+      throw errNotConfigured(
+        "this manager holds no pull configuration of its own, and a cluster that keeps no books reads one off no " +
+        "file — give the manager the mounted manager-registry-pull dockerconfigjson its own chart already declares",
+      );
+    }
+    const pull = await ports.pullConfiguration(await registryHostOf(ports, domain));
+    registerSecret(ctx.runId, Buffer.from(pull, "utf8"));
+    return { [REGISTRY_PULL_ANSWER]: pull };
+  };
+}
+
+/** The registry a cluster pulls through, off its own map — `zot.<build plane>`, in the one place
+ *  this installation writes it down. Read rather than composed here, so the address the mirror is
+ *  written for and the address the charts pull from are one statement. */
+async function registryHostOf(ports: DeploySlavePorts, domain: string): Promise<string> {
+  const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
+  const endpoints = marking.globalRest?.["endpoints"];
+  const host = typeof endpoints === "object" && endpoints !== null
+    ? (endpoints as { registry?: { host?: unknown } }).registry?.host
+    : undefined;
+  if (typeof host !== "string" || host.length === 0) {
+    throw errValidation(
+      `${domain}'s cluster map states no global.endpoints.registry.host, and that address is what this machine's ` +
+      "container runtime is pointed at — the map is written by mark-slave from the master's, so a master whose own " +
+      "map carries no registry endpoint is what to fix",
+    );
+  }
+  return host;
 }
 
 /** deploy-host's operator_public_key: the public half of the key this manager holds for the machine
@@ -516,20 +573,23 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // it read that tree as it stands and deliberately fetch nothing themselves. Its own
     // install_packages row is what puts `git` on the machine for that row.
     ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(sid, ports) }),
-    // The two values a cluster keeping no books reads off its machine, composed out of what this
-    // manager already holds and put there for the length of the run. It stands HERE because the
-    // first row that reads one of them is deploy-cluster's containerd mirror; drop-input below
-    // takes it away once the last one has run, and a run that dies before drop-input leaves the file
-    // for the next run of this list to overwrite.
-    placeInputStep(target, ports),
     // Nothing is armed around it: taking MicroK8s off again is a destructive act whose only effect
     // on a retry is a second install of the same snap, and the step measures before it acts.
-    ansiwiseProgramStep(target, "deploy-cluster", ports, { extra: machineAnswers }),
+    //
+    // WHY THE PULL CREDENTIAL IS REQUIRED ON THIS ARM AND ON NO OTHER: a cluster that keeps no books
+    // reads it off no file of its own, and the machine's own row for it is SATISFIED when there is no
+    // file — it warns and writes no mirror, so the machine pulls from the public registry and nothing
+    // says so. An answer the program does not declare is dropped by composeAnswers in silence, which
+    // would be that same degradation reached from this side. Named here, the step stops before the
+    // dry run instead. A machine that keeps the books still has the file its own branch program
+    // wrote, so the same answer going missing there is a fact and not a failure.
+    ansiwiseProgramStep(target, "deploy-cluster", ports, {
+      extra: machineAnswers,
+      requiredAnswers: [REGISTRY_PULL_ANSWER],
+    }),
     // deploy-platform-services also declares elevation_password — the ENGINE fills that one from the
     // password the POST carries beside the answers; sending it as an answer is refused.
     ansiwiseProgramStep(target, "deploy-platform-services", ports, { extra: machineAnswers }),
-    // Both programs that read them have run.
-    dropInputStep(target),
     // THE JOIN, and WHICH join is the one thing this guard still decides. A deployment joins the
     // machine outright: mint on the master, carry the credential over the session, spend it in ONE
     // program run on the slave (the tailnet kit's own step, because a first join is the same act —
@@ -713,8 +773,7 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
   //     same list shuts the password door and destroys the sealed bootstrap password, so removing it
   //     leaves a machine nothing can reach;
   //   - the shut password door is the state every later run kind of this manager needs;
-  //   - MicroK8s is reinstalled by the same program on the next run;
-  //   - the input file is overwritten by place-input, which measures what the machine holds first.
+  //   - MicroK8s is reinstalled by the same program on the next run.
   // So an aborted first install leaves a machine reachable by this manager's key and by nobody
   // else — the state its own retry starts from.
   //

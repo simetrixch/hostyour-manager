@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import type { Conversation } from "../../adapters/ssh/testing/fake-server.ts";
@@ -15,7 +15,8 @@ import { ANSIWISE_ELEVATION_SECRET, RECORD_APPEARS_POLL_MS, RECORD_APPEARS_TIMEO
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import {
   makeHarness, scriptedHosts, logger, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID,
-  IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY, MASTER_PUBLIC_KEY, type Harness, type HostsScript,
+  IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY, MASTER_PUBLIC_KEY, FIXTURE_REGISTRY_HOST, pullDocumentFor,
+  type Harness, type HostsScript,
 } from "./deploy-slave.fixture.ts";
 import type { DbHandle } from "../../db/client.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -56,6 +57,7 @@ export const composedAnswers = (email: string): Record<string, string> => ({
   letsencrypt_server: MAP_LETSENCRYPT_SERVER,
   books_fqdn: MASTER_FQDN,
   build_plane_fqdn: MASTER_FQDN,
+  registry_pull_dockerconfigjson: pullDocumentFor(FIXTURE_REGISTRY_HOST),
 });
 
 /** The master's own cluster map, re-seeded with a different mailbox for the certificate authority —
@@ -117,6 +119,13 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "letsencrypt_server", pattern: "^https://" },
       { answer: "books_fqdn", pattern: "^m1\\.example\\.com$" },
       { answer: "build_plane_fqdn", pattern: "^m1\\.example\\.com$" },
+      // THE CREDENTIAL, MEASURED LIKE THE REST AND DECLARED `secret`. Both arms send it: a machine
+      // that keeps the books also pulls through the installation's own registry, and the manager
+      // holds the one document either of them needs. The pattern is the shape of the base64
+      // dockerconfigjson the manager composes, so a run that sent nothing, or sent something that is
+      // not that document, is refused at the machine's own door. `secret` is what keeps the value
+      // out of every record the engine writes — a thing a file-sourced credential can never be.
+      { answer: "registry_pull_dockerconfigjson", pattern: "^[A-Za-z0-9+/=]{16,}$", secret: true },
     ]),
     // elevation_password is deliberately NOT declared, although the real deploy-platform-services declares
     // it: the ENGINE fills that answer from the password the POST carries beside the answers
@@ -278,9 +287,12 @@ export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean
  *  would WRITE on a real machine is stood in by the scripted side: the two credential files the
  *  manager `cat`s over the session. The map the join reads its coordinator address from is not
  *  seeded here — the run's own marking step writes it, on the books branch, before the join. */
-export async function deployWorld(serve: ServeFixture): Promise<Harness> {
+export async function deployWorld(serve: ServeFixture, opts: { withoutCarriedValues?: boolean } = {}): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
-  return makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve", marking: false });
+  return makeHarness({
+    hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve", marking: false,
+    ...(opts.withoutCarriedValues === true ? { withoutCarriedValues: true } : {}),
+  });
 }
 
 /** A slave that already IS one — redeploy's slave arm acts on this. The default marking rides
@@ -386,6 +398,22 @@ export function recordWindow(all: AnsiwiseRunRecord[], started: StartedRun[]): A
     if (mine.has(r.id)) oldest = i;
   });
   return oldest === -1 ? [] : all.slice(0, oldest + 1);
+}
+
+/** EVERYTHING THE MACHINE WROTE DOWN, as one string: every file under the engine's own run root,
+ *  which is where a run's header, its answers and its events land on the box.
+ *
+ *  A secret is kept out of this manager's own surface by the redactor, and that is a claim about
+ *  THIS process. What a value put on the far end leaves behind is a different claim, and the run
+ *  root is the only place to read it: an answer the program declares `secret` is redacted there by
+ *  the engine, and one that arrived as a file was never an answer at all. */
+export function machineWroteDown(serve: ServeFixture): string {
+  const root = runRoot(serve.dir);
+  if (!existsSync(root)) return "";
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => readFileSync(join(e.parentPath, e.name), "utf8"))
+    .join("\n");
 }
 
 /** The GREEN modes [window] holds for [program], sorted — `["dry", "run"]` is the proven-then-

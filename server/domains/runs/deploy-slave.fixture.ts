@@ -63,6 +63,17 @@ export const PARAMS = { serverId: SLAVE_ID, stage: FIXTURE_STAGE, domain: SLAVE_
 export const CATALOGUE_ORIGIN_URL = "https://github.com/acme/acme-deploy.git";
 export const PULL_AUTH = "cHVsbGVyOnB1bGwtcGFzc3dvcmQ=";
 
+/** The document the manager's own mounted pull configuration is narrowed to for ONE registry
+ *  address — what `pullConfiguration` below answers, spelled once so a test asserting where the
+ *  value may and may not stand compares the same bytes the harness composes. */
+export function pullDocumentFor(registryHost: string): string {
+  return Buffer.from(JSON.stringify({ auths: { [registryHost]: { auth: PULL_AUTH } } }), "utf8").toString("base64");
+}
+
+/** The address every fixture cluster map names as the registry this installation pulls through
+ *  (cluster-maps.fixture.ts `endpoints.registry.host`, on the master's map and on the slave's). */
+export const FIXTURE_REGISTRY_HOST = "zot.m1.example.com";
+
 /** The whole of what deploying a slave is, in order: the attest, then the six FIRST-CONTACT steps,
  *  then the preflight, then the two doors the run shuts, and then the machine layer over the
  *  deployment programs. This run kind takes a machine from wherever it stands — a box this manager
@@ -82,8 +93,7 @@ export const STEP_NAMES = [
   "prove-elevation", "generate-key", "install-key", "verify-key-login", "enable-ntp", "remove-sudoers",
   "slave-preflight", "disable-password-login", "purge-bootstrap-password",
   "mark-slave",
-  "place-ansiwise", "run-deploy-host", "place-input", "run-deploy-cluster",
-  "run-deploy-platform-services", "drop-input",
+  "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services",
   "rejoin", "read-membership", "declare-tailnet-address", "enable-ansiwise-service", "create-mgmt",
   "gitops-handoff", "verify-slave", "register",
 ];
@@ -213,9 +223,6 @@ export interface HostsScript extends FirstContactScript {
    *  over the other two. */
   hostAddressesOut: string;
   hostAddressesExit: number;
-  /** What `cat` of the placed input answers on this machine. Empty is a machine carrying none,
-   *  which is every machine before place-input has run on it. */
-  inputOut: string;
   // ---- what the machine carries of the BOOTSTRAP (place-ansiwise). Every one of these is written
   // by a file transfer or by the serving binary's own install-service and read back by asking the
   // file — so a second run of a step measures what the first one left, and a double-run assertion is
@@ -319,7 +326,6 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
       "4: cni0    inet 10.1.32.1/24 brd 10.1.32.255 scope global cni0",
     ].join(String.fromCharCode(10)),
     hostAddressesExit: 0,
-    inputOut: "",
     // A slave as deploy-slave meets it: adopted, and carrying neither executable yet. No surface of
     // its own, and the token file already there — enable-ansiwise-service stands AFTER
     // run-deploy-platform-services in the list, and that program's file_from_vault row is what writes it.
@@ -413,9 +419,6 @@ export function hostsFactory(f: HostsScript): SshFactory {
       // because that is where the step reads it: a measurement is read back whole, not followed line
       // by line as a program run is.
       if (command === HOST_ADDRESS_COMMAND) return { code: f.hostAddressesExit, stdoutTail: f.hostAddressesOut, stderrTail: "" };
-      // ---- the input the manager places for the length of a run. Answered on stdoutTail, because
-      // that is where the step reads it back to decide whether it has anything to write.
-      if (command.startsWith("cat ") && command.includes("secrets/secrets")) { emit(f.inputOut); return done(); }
       // ---- cleanups. The reset MEASURES before it acts, and the machine answers `snap list` as one
       // that carries the snap: the compensation is armed by deploy-cluster, which is the step that
       // installs it, so by the time an abort can run this the snap is there. Answered here rather
@@ -538,12 +541,11 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
     // WHAT THIS MANAGER HOLDS FOR A MACHINE THAT KEEPS NO BOOKS: the address it clones a catalogue
     // from, and its own pull document narrowed to one address. Both are the composition root's
     // (wire.ts). `withoutCarriedValues` is the manager that holds neither, whose whole point is that
-    // place-input refuses by name rather than letting the machine's own programs refuse by file and
-    // key three steps later.
+    // the deploy-cluster step refuses by name rather than letting the machine install a cluster with
+    // no mirror and pull from the public registry with nothing saying so.
     ...(opts.withoutCarriedValues ? {} : {
       catalogueOrigin: { repoURL: CATALOGUE_ORIGIN_URL },
-      pullConfiguration: async (registryHost: string) =>
-        Buffer.from(JSON.stringify({ auths: { [registryHost]: { auth: PULL_AUTH } } }), "utf8").toString("base64"),
+      pullConfiguration: async (registryHost: string) => pullDocumentFor(registryHost),
     }),
   };
   const executor = new Executor({

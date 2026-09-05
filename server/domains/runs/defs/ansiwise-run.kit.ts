@@ -276,6 +276,16 @@ export type ExtraAnswers = (ctx: StepCtx) => Promise<Record<string, string | str
 export interface ProgramStepOpts {
   /** Answers the DEF is authoritative for beyond the inventory — see ExtraAnswers. */
   extra?: ExtraAnswers;
+  /** Answer names this run may not proceed without, checked after the answers are composed and
+   *  before the dry run is started.
+   *
+   *  WHY IT EXISTS AT ALL, when composeAnswers already sends everything a program declares:
+   *  composeAnswers sends only what the program declares, so an answer the DEF composes and the
+   *  program does not declare is dropped with nothing said. For a fact of the inventory that is
+   *  right — a program that does not ask is a program that does not need it. For a value whose
+   *  absence changes what the machine BUILDS while every step still reports green, it is the
+   *  silent degradation this manager may not produce: the step names the answer and stops. */
+  requiredAnswers?: string[];
   /** Run the program on the MASTER's surface instead of the run's owned host — the master-side
    *  act of a two-machine run kind (deploy-slave's branch cut). The master must be declared on the
    *  plan's targets, exactly like every other aux session. */
@@ -311,9 +321,23 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
       const machine: ServeMachine = master
         ? masterMachine(ctx.db, master)
         : { role: loadServer(ctx.db, target.serverId).role, fqdn: "" };
+      // COMPOSED BEFORE THE CHANNEL IS OPENED. Every one of these is a fact this manager already
+      // holds — an inventory row, a cluster map, its own mounted configuration — so a manager that
+      // cannot state one has nothing to say to the machine, and opening a conversation first would
+      // spawn a serve on the far end only to hang up on it without a request.
+      const extraAnswers = opts.extra ? await opts.extra(ctx) : {};
       const conversation = await openServeConversation(ctx, session, ports, signal, machine);
       try {
-        const answers = await composeAnswers(ctx, conversation.client, program, target, signal, opts.extra);
+        const answers = await composeAnswers(ctx, conversation.client, program, target, signal, async () => extraAnswers);
+        const missing = (opts.requiredAnswers ?? []).filter((name) => answers[name] === undefined);
+        if (missing.length > 0) {
+          throw errValidation(
+            `${program} on this machine was not given ${missing.join(", ")}, and this run may not act without it. ` +
+            "Either the machine's catalogue declares no answer of that name — read `GET /programs/" + program +
+            "` on the machine and compare it with the catalogue this installation pins — or this manager composed " +
+            "none. Nothing was acted on",
+          );
+        }
         const password = requireElevationPassword(ctx);
 
         const dry = await programPhase(ctx, conversation.client, cp, "dry", { program, answers, password, signal, save });
