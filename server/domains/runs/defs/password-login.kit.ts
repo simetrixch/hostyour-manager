@@ -342,15 +342,18 @@ function verifyKeyLoginStep(secretName: string): Step {
  * running daemon never read would be reported here as a shut door.
  *
  * TWO THINGS DECIDE THE COMPENSATION, and each answers a question the other cannot. `arm` is the
- * COMPOSING DEFINITION's answer to whether an abort of this run may put the door back at all — a run
- * that establishes a machine wants it back, a run that re-measures a machine already carrying live
- * workloads must not reopen a door that installation deliberately shut, and only the definition
- * knows which of the two it is. It also has to be the definition's answer for a second reason: the
- * executor resolves a registered compensation by NAME against that definition's own cleanups(), so a
- * step arming one a definition does not implement kills the abort with a missing step. The first
- * READING answers the narrower question of whether there is anything to put back: the compensation
- * is armed unless this run measured the door already shut, because only a measurement can say there
- * is not, and an unreadable reading arms it, since an unmeasured door is not a shut one.
+ * COMPOSING DEFINITION's answer to whether an abort of this run may put the door back at all, and
+ * only ONE definition answers yes: `cluster-password-login-disable` (defs/password-login.ts), where
+ * the door is the subject of the run and an abort owes the operator the door they had. Every
+ * installing list answers no — a shut door is the state each of them exists to establish and the
+ * state every later run kind of this manager needs, so putting it back would undo the act rather
+ * than repair the run, on a machine this manager can already reach with its own key. It also has to
+ * be the definition's answer for a second reason: the executor resolves a registered compensation by
+ * NAME against that definition's own cleanups(), so a step arming one a definition does not
+ * implement kills the abort with a missing step. The first READING answers the narrower question of
+ * whether there is anything to put back: where the definition arms at all, the compensation is
+ * registered unless this run measured the door already shut, because only a measurement can say
+ * there is not, and an unreadable reading arms it, since an unmeasured door is not a shut one.
  *
  * THE SECOND READING IS TAKEN ONLY WHERE THE SCRIPT ACTED. Its whole purpose is to replace a row
  * that would otherwise describe a host the act has changed, and a script that reported it wrote

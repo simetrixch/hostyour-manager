@@ -136,12 +136,11 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const names = (def.cleanups?.({ ...PARAMS, tier: "rehearsal" }) ?? []).map((c) => c.name);
     // The executor resolves a persisted __cleanups entry by NAME against the definition's own list,
     // so a name a step can register and this list does not carry ends an abort with a step that has
-    // no implementation. First contact adds two of them: install-key, which puts this manager's only
-    // way in onto the machine, and disable-password-login, which shuts the door that opened it.
-    expect(names.sort()).toEqual([
-      "drop-input", "microk8s-reset-slave", "remove-installed-key",
-      "remove-slave", "remove-slave-marking", "restore-password-login",
-    ]);
+    // no implementation. TWO NAMES, and both act on the MASTER's books: what a half-finished run
+    // left on the slave is finished by running the run again, and the acts an abort used to undo
+    // there — the key line, the shut password door, the snap, the input file — are each either what
+    // the retry needs or what the retry redoes. First contact adds NONE of them.
+    expect(names.sort()).toEqual(["remove-slave", "remove-slave-marking"]);
     // THE OTHER SIDE OF THE SAME RULE, and it is why the arming is the composing definition's
     // decision rather than the step's: redeploy's slave arm runs these very steps and implements no
     // compensating action at all, so every one of them has to be held back there. What that arm

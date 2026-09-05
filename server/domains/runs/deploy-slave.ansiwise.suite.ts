@@ -217,7 +217,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       expect(dump).not.toContain(EMIT_REVIEWER_TOKEN);
     });
 
-    it("abort-with-cleanup (deploy-slave): the map's slave part goes FIRST, then the remove-slave program on the master's record, then the snap purge — and the marking cleanup finds nothing left", { timeout: 300_000 }, async () => {
+    it("abort-with-cleanup (deploy-slave): the map's slave part goes FIRST, then the remove-slave program on the master's record — and the marking cleanup finds nothing left, while the machine stays reachable", { timeout: 300_000 }, async () => {
       const h = await deployWorld(serve());
       h.hosts.credsOut = EMIT_CREDS_JSON.replace("TFMtQ0EtREFUQQ==", "VEFNUEVSRUQ="); // park at create-mgmt with every cleanup armed
       const runId = await settled(h, "cluster-deploy-slave", PARAMS, elevationOnly());
@@ -225,23 +225,28 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
 
       // Each arming step persisted exactly its own cleanup name (__cleanups)...
       for (const [step, name] of [
-        ["install-key", "remove-installed-key"],
-        ["disable-password-login", "restore-password-login"],
         ["mark-slave", "remove-slave-marking"],
-        ["run-deploy-cluster", "microk8s-reset-slave"],
         ["rejoin", "remove-slave"],
       ] as const) {
         const cp = JSON.parse(stepColumn(h.db, runId, step, "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
         expect(cp.__cleanups, step).toEqual([name]);
       }
+      // ...AND THE FOUR STEPS THAT USED TO ARM ONE NOW ARM NOTHING. Each of them acts on the SLAVE,
+      // and a half-finished run on the slave is finished by running the run again — so a
+      // compensation there either takes away what the retry needs (the key line, the shut password
+      // door) or undoes what the retry redoes anyway (the snap, the input file).
+      for (const step of ["install-key", "disable-password-login", "place-input", "run-deploy-cluster"] as const) {
+        const cp = JSON.parse(stepColumn(h.db, runId, step, "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
+        expect(cp.__cleanups, step).toBeUndefined();
+      }
 
       const logMark = h.hosts.log.length;
-      // THE CLEANUPS ARE HELD TO THE SAME ROUTE AS THE RUN. The machine grants nothing without a
-      // password (FirstContactScript.adopted defaults to false, and it stays false here), so the two
-      // root acts below — putting the sshd door back, and taking MicroK8s off — reach root the only
-      // way anything here does: a `sudo -S` carrying the run's own elevation password, which the
-      // scripted machine refuses without. That is why the abort re-supplies it: a failed run's
-      // secrets were wiped with the run, exactly as a retry re-supplies them.
+      // THE CLEANUP IS HELD TO THE SAME ROUTE AS THE RUN. The machine grants nothing without a
+      // password (FirstContactScript.adopted defaults to false, and it stays false here), so
+      // remove-slave — which drives a program on the master's own surface — reaches root the only
+      // way anything here does: with the run's own elevation password, which the scripted machine
+      // refuses without. That is why the abort re-supplies it: a failed run's secrets were wiped with
+      // the run, exactly as a retry re-supplies them.
       await h.executor.abortWithCleanup(runId, elevationOnly());
       await h.executor.settle(runId);
 
@@ -249,27 +254,17 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       expect(run?.status).toBe("cancelled");
       const cleanupSteps = run?.steps.filter((s) => s.name.startsWith("cleanup:")) ?? [];
       expect(cleanupSteps.map((s) => s.name)).toEqual([
-        "cleanup:remove-slave", "cleanup:microk8s-reset-slave", "cleanup:drop-input", "cleanup:remove-slave-marking",
-        "cleanup:restore-password-login", "cleanup:remove-installed-key",
-      ]); // reverse registration order — the map cleanup was armed FIRST among the slave acts
-      // (mark-slave), so it runs LAST of them, and drop-input stands where place-input armed it: after
-      // the map, before deploy-cluster
+        "cleanup:remove-slave", "cleanup:remove-slave-marking",
+      ]); // reverse registration order — the map cleanup was armed FIRST (mark-slave), so it runs LAST
       expect(cleanupSteps.every((s) => s.status === "ok")).toBe(true);
 
-      // AND THE LAST TWO ARE THE POINT OF THE ORDER. First contact arms them first — install-key
-      // before anything else on the machine, disable-password-login right after the preflight — so
-      // they run last and in that order: the machine takes passwords again BEFORE the key this manager
-      // reaches it with is taken off it. Reverse them and the compensation that reopens the door has
-      // no session left to reopen it over, and an abort of a first install leaves a box reachable by
-      // nobody rather than exactly as reachable as it was found.
-      expect(cleanupSteps.map((s) => s.name).slice(-2)).toEqual([
-        "cleanup:restore-password-login", "cleanup:remove-installed-key",
-      ]);
-      // Read off the machine, which is where "as reachable as it was found" is a fact: the daemon takes
-      // a password again and this manager's own key line is gone, while the image's provisioning key —
-      // which this manager did not place and does not remove — is untouched.
-      expect(h.hosts.passwordLogin).toBe("yes");
-      expect(h.hosts.authorizedKeys).toEqual([IMAGE_KEY_LINE]);
+      // WHAT THE ABORT LEAVES THE MACHINE AS, read off the machine, which is where it is a fact: the
+      // daemon still takes no password and this manager's own key line still stands beside the
+      // image's provisioning key. That is the state every later run kind of this manager needs and
+      // the state this run's own retry starts from — reachable by this manager and by nobody else.
+      expect(h.hosts.passwordLogin).toBe("no");
+      expect(h.hosts.authorizedKeys).toContain(IMAGE_KEY_LINE);
+      expect(h.hosts.authorizedKeys).toHaveLength(2);
 
       // The map keeps the cluster's identity and loses ONLY the slave part — dropped by the
       // remove-slave cleanup itself, FIRST (the program's own contract), so the marking cleanup
@@ -283,9 +278,9 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
 
       // The removal itself is a machine act, dry-proven then run on the master's own record...
       expectProven(serve(), h.db, runId, await observer().runs(), ["remove-slave"]);
-      // ...and the destructive snap purge ran on the SLAVE.
+      // ...and NOTHING was sent to the slave: the abort's whole surface is the master's books.
       const tail = h.hosts.log.slice(logMark);
-      expect(tail.find((l) => l.command.includes("snap remove --purge microk8s"))?.host).toBe("10.1.1.11");
+      expect(tail.filter((l) => l.host === "10.1.1.11")).toEqual([]);
     });
 
     it("INNOCENT CASE (redeploy, slave arm): the live slave is re-reconciled over the programs — no branch cut, no join, a fresh emit re-points the registration, and nothing is armed", { timeout: 300_000 }, async () => {

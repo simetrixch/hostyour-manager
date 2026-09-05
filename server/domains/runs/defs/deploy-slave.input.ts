@@ -1,4 +1,4 @@
-import type { Step, StepCtx, Cleanup } from "../../../executor/types.ts";
+import type { Step, StepCtx } from "../../../executor/types.ts";
 import { errValidation, errNotConfigured } from "../../../kernel/errors.ts";
 import { registerSecret } from "../../../security/redact.ts";
 import { resolveClusterMarking } from "../../inventory/cluster-marking.ts";
@@ -105,17 +105,6 @@ async function removeInput(ctx: StepCtx, path: string): Promise<void> {
   }
 }
 
-/** The compensating action of the placement, resolved by NAME on an abort — so it derives the path
- *  from the run's own answers rather than closing over one: the executor rebuilds a cleanup out of
- *  the persisted name, and a closure would not survive that. */
-export const dropInputCleanup: Cleanup = {
-  name: "drop-input",
-  title: "Take the placed values off the machine",
-  run: async (ctx: StepCtx) => {
-    await removeInput(ctx, inputFile(String(ctx.params.stage)));
-  },
-};
-
 /** `place-input`: compose the value out of what this manager holds and put it on the machine.
  *
  *  It stands after run-deploy-host and before deploy-cluster, because the row that reads it is that
@@ -141,8 +130,6 @@ export function placeInputStep(target: SlaveTarget, ports: DeploySlavePorts & An
       for (const line of lines) registerSecret(ctx.runId, Buffer.from(line, "utf8"));
       registerSecret(ctx.runId, Buffer.from(pull, "utf8"));
 
-      // ARMED BEFORE THE WRITE, so a run that dies at the next step does not leave it standing.
-      ctx.registerCleanup(dropInputCleanup);
       const wanted = fileFor(lines);
       if ((await whatTheMachineHolds(ctx, path)) === wanted) {
         ctx.log("meta", `${path} already carries ${KEYS_A_SLAVE_READS.join(" and ")} — nothing to write`);
@@ -160,9 +147,11 @@ export function placeInputStep(target: SlaveTarget, ports: DeploySlavePorts & An
 
 /** `drop-input`: take it away once the last program that reads it has run.
  *
- *  A STEP AND NOT ONLY THE CLEANUP ABOVE, because the cleanup runs when a run FAILS and this is the
- *  ordinary end: the file's whole life is then visible in the run's own step list, which is where
- *  somebody looks to ask whether it is still there. */
+ *  A STEP AND THE ONLY THING THAT REMOVES IT. A run that dies before this step leaves the file
+ *  standing, and the next run of the same list overwrites it — `place-input` writes the whole file
+ *  and measures what the machine holds first. So the file's whole life stands in the run's own step
+ *  list, which is where somebody looks to ask whether it is still there, rather than half in a
+ *  compensation an abort has to be asked for. */
 export function dropInputStep(target: SlaveTarget): Step {
   return {
     name: "drop-input",

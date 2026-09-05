@@ -143,11 +143,9 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
     // needs no key at all — it opens the same door itself.
     proveElevationStep(firstContact),
     generateKeyStep(firstContact),
-    // NOTHING IS ARMED, and install-key is where that decision is made rather than assumed: the kit
-    // takes the arming as an answer from the composing definition, because the executor resolves a
-    // registered compensation by NAME against that definition's own cleanups(). This one implements
-    // none, and a machine whose cluster is live must keep the only way in this manager has.
-    installKeyStep(firstContact, { arm: false }),
+    // NOTHING IS ARMED, here or in the kit: a machine whose cluster is live must keep the only way
+    // in this manager has, and this definition implements no compensation at all.
+    installKeyStep(firstContact),
     verifyKeyLoginStep(firstContact),
     enableNtpStep(firstContact),
     // Last of the key steps, and it may only stand here because every root command this arm sends

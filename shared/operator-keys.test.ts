@@ -9,9 +9,10 @@ import type { AuthorizedKeyFact } from "./api-types.ts";
 // The two properties this file exists for.
 //
 //   THE MARKERS CANNOT REACH EACH OTHER. Removing an operator's key must never strip the line this
-//   manager logs in with, and `remove-installed-key` must never strip a human's key. Both
-//   directions are asserted, and the pattern anchoring is asserted with them — an unanchored match
-//   on "pat" would take "pat-laptop" off the host too.
+//   manager logs in with — the one way in a machine keeps once its password door is shut, and one
+//   nothing in this codebase puts back. Both directions are asserted, so a removal written against
+//   either marker is held, and the pattern anchoring is asserted with them — an unanchored match on
+//   "pat" would take "pat-laptop" off the host too.
 //
 //   A LINE IS READ THE WAY sshd READS IT. An authorized_keys entry may carry an options prefix, and
 //   the naive "second field is the blob" split fingerprints the string "ssh-ed25519" for such a
@@ -35,7 +36,7 @@ describe("the two markers", () => {
     // `-operator` in between, so that substring never occurs in it.
     expect(operator.includes("hostyour:")).toBe(false);
     expect(manager.includes(OPERATOR_MARKER_PREFIX)).toBe(false);
-    // The pattern `remove-installed-key` deletes by is the manager marker as a plain substring.
+    // A removal written against the manager marker would match it as a plain substring.
     const managerLine = `ssh-ed25519 ${BLOB_A} ${manager}`;
     const operatorLine = operatorKeyLine(`ssh-ed25519 ${BLOB_B}`, "s1");
     expect(operatorLine.includes(manager)).toBe(false);

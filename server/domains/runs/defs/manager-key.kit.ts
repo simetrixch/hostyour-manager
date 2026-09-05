@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { Cleanup, Step, StepCtx } from "../../../executor/types.ts";
+import type { Step, StepCtx } from "../../../executor/types.ts";
 import { servers } from "../../../db/schema/inventory.ts";
 import { AuthFailedError, HostKeyMismatchError, type SshSession } from "../../../adapters/ssh/port.ts";
 import { generateServerKeypair } from "../../../adapters/ssh/keygen.ts";
@@ -111,19 +111,6 @@ export async function openDoor(ctx: StepCtx, secretName: string): Promise<SshSes
   }
 }
 
-/** Take this manager's own key line off the host again. Deletes by the marker its key carries and by
- *  nothing else: the operator-key run kinds write a marker starting `hostyour-operator:`, and this
- *  one is `hostyour` followed immediately by a colon, so neither pattern can reach the other's line. */
-export const removeInstalledKeyCleanup: Cleanup = {
-  name: "remove-installed-key",
-  title: "Remove the installed SSH key",
-  run: async (ctx: StepCtx) => {
-    const server = loadServer(ctx.db, String(ctx.params.serverId));
-    const session = await ctx.ssh();
-    await remoteExec(ctx, session, `sed -i '\\#${managerKeyMarker(server.name)}#d' ~/.ssh/authorized_keys`);
-  },
-};
-
 /**
  * Prove the machine account reaches root with the password this run carries, and prove it BEFORE
  * anything is written. Every deployment program raises its own commands with that same password, so
@@ -215,18 +202,15 @@ export function generateKeyStep(input: FirstContactInput): Step {
  * working way in no run kind here can remove — a machine must not have to wait for somebody to press
  * a button before that is visible.
  *
- * AND THE SAME MEASUREMENT DECIDES THE COMPENSATION. `options.arm` is the composing definition's
- * answer to whether an abort of this run may take the key line off at all — and it has to be the
- * definition's, because the executor resolves a registered compensation by NAME against that
- * definition's own cleanups(), so a step arming one a definition does not implement kills the abort
- * with a missing step. The grep answers the narrower question of whether there is a line of THIS
- * run's to take off: a host already carrying the key was written to by an earlier run, and taking
- * that line off would leave a machine nothing can reach — no session opens without it once the
- * password door is shut, and the sealed bootstrap password is destroyed by the same list. So the
- * compensation is registered on the appending path alone, and registered BEFORE the append, so a
- * command that fails after writing is compensated by the run that sent it.
+ * NOTHING UNDOES THIS STEP, on any run kind that composes it. The key line is what every session
+ * after it is opened with — ctx.ssh() authenticates with the sealed ssh_key credential and with
+ * nothing else — and the same lists shut the daemon's password door and destroy the sealed bootstrap
+ * password. So a compensation that took the line off again would leave a machine nothing can reach,
+ * on exactly the run that failed and most needs to be reached. What an aborted install leaves behind
+ * is a machine reachable by this manager and by nobody else, which is the state its retry and every
+ * later run kind need anyway.
  */
-export function installKeyStep(input: FirstContactInput, options: { arm: boolean }): Step {
+export function installKeyStep(input: FirstContactInput): Step {
   return {
     name: "install-key",
     title: "Install this manager's key on the machine",
@@ -245,9 +229,8 @@ export function installKeyStep(input: FirstContactInput, options: { arm: boolean
       }
       const present = await remoteExec(ctx, session, `grep -qF '${pub}' ~/.ssh/authorized_keys`);
       if (present.code === 0) {
-        ctx.log("meta", `The key this manager holds for ${server.name} already stands in ~/.ssh/authorized_keys, so nothing is appended and no removal of it is armed — the line is an earlier run's, and an abort of this one leaves the machine reachable.`);
+        ctx.log("meta", `The key this manager holds for ${server.name} already stands in ~/.ssh/authorized_keys, so nothing is appended.`);
       } else {
-        if (options.arm) ctx.registerCleanup(removeInstalledKeyCleanup);
         await remoteCmd(ctx, session, `echo '${pub}' >> ~/.ssh/authorized_keys`);
         ctx.log("meta", `Appended this manager's key to ~/.ssh/authorized_keys on ${server.name}.`);
       }

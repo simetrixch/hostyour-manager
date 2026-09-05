@@ -26,10 +26,10 @@ import {
 //                         when nobody was placing anything.
 //
 // THIS MANAGER'S OWN KEY IS NEVER A TARGET. It lives in the same file under a different marker
-// (`hostyour:<server name>`), it is what every one of these runs travels over, and the acts
-// prove it survived by reading the file on both sides of the edit. It is removed by exactly one
-// thing in this codebase: `remove-installed-key`, the compensation a deployment arms on its first
-// install of that key (domains/runs/defs/manager-key.kit.ts).
+// (`hostyour:<server name>`), it is what every one of these runs travels over, and the acts prove it
+// survived by reading the file on both sides of the edit. NOTHING in this codebase removes it: the
+// line is the only way in a machine keeps once its password door is shut, so no run kind and no
+// compensation takes it off (domains/runs/defs/manager-key.kit.ts installKeyStep).
 //
 // All three are `mutating`, so attest-target is pinned as step 0 and cannot be skipped. For the two
 // acts that is the usual reason — a run that changes which credentials a machine accepts proves

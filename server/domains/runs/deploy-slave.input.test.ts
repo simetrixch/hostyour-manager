@@ -116,15 +116,17 @@ describe("the value a machine keeping no books reads", () => {
     expect(h.hosts.log.slice(mark).some((l) => l.command === `rm -f ${PATH}`), "the file is removed").toBe(true);
   });
 
-  it("arms that removal BEFORE the write, so a run that dies next does not leave it standing", async () => {
-    // Everything between place-input and drop-input can fail — the whole machine layer stands
-    // there. The cleanup is what makes the file's life bounded by the run rather than by success.
+  it("arms NOTHING, because the next run of the same list overwrites the file it would have removed", async () => {
+    // Everything between place-input and drop-input can fail — the whole machine layer stands there
+    // — so a run that dies leaves the file standing. That is deliberate: place-input measures what
+    // the machine holds and writes the whole file, so a retry redoes exactly what a compensation
+    // would have undone, and an abort no longer has to reach the slave to tidy it.
     const h = await world();
     const armed: string[] = [];
 
     await stepOf(h, "place-input").run(hostedStepCtx(h, { registerCleanup: (c) => armed.push(c.name) }));
 
-    expect(armed).toEqual(["drop-input"]);
+    expect(armed).toEqual([]);
   });
 
   it("refuses NAMED where this manager holds no pull configuration of its own", async () => {

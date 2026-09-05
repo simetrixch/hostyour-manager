@@ -231,7 +231,7 @@ describe("manager-key kit", () => {
 
   describe("the steps measure before they act", () => {
     const list = (input: { serverId: string; secretName: string }): Step[] => [
-      proveElevationStep(input), generateKeyStep(input), installKeyStep(input, { arm: true }),
+      proveElevationStep(input), generateKeyStep(input), installKeyStep(input),
       verifyKeyLoginStep(input), enableNtpStep(input), removeSudoersStep(input),
     ];
 
@@ -289,44 +289,32 @@ describe("manager-key kit", () => {
       expect(said).toMatch(/there is nothing to take back and nothing was written/);
     });
 
-    // WHAT AN ABORT MAY TAKE BACK, and the reason it is the step's own measurement that decides.
-    // `remove-installed-key` deletes this manager's key line from the machine, and on a machine
-    // whose password door a run already shut and whose sealed bootstrap password that run already
-    // destroyed, that line is the last way in. So a run that found the line already standing — the
-    // second deploy of the same machine — must arm nothing: what it would delete belongs to the run
-    // before it.
+    // NOTHING TAKES THE KEY LINE BACK, and this is where that is held. The line is what every
+    // session after this step is opened with, and the lists that compose it also shut the daemon's
+    // password door and destroy the sealed bootstrap password — so a compensation that deleted the
+    // line would leave a machine nothing can reach, on exactly the run that failed. The case below
+    // is the APPENDING path, which is the only one a compensation could ever have been registered
+    // on: re-arm it and this goes red.
     const KEY_LINE = "ssh-ed25519 AAAAmanager hostyour:s5";
     const input = { serverId: SERVER_ID, secretName: SECRET };
 
-    it("arms the removal of the key line it appended", async () => {
+    it("appends the line and registers NO compensation for it — an abort must leave the machine reachable", async () => {
       const b = bench();
       await sealKey(b.store, KEY_LINE);
-      await installKeyStep(input, { arm: true }).run(b.ctx("install-key"));
+      await installKeyStep(input).run(b.ctx("install-key"));
 
       expect(b.host.authorizedKeys).toEqual([KEY_LINE]);
-      expect(b.rc.registeredCleanups().map((c) => c.name)).toEqual(["remove-installed-key"]);
+      expect(b.rc.registeredCleanups()).toEqual([]);
     });
 
-    it("arms NOTHING where the line already stands — an abort of this run must not delete an earlier run's key", async () => {
+    it("appends nothing where the line already stands, and says so", async () => {
       const b = bench({ host: { ...freshHost(), authorizedKeys: [KEY_LINE] } });
       await sealKey(b.store, KEY_LINE);
-      await installKeyStep(input, { arm: true }).run(b.ctx("install-key"));
+      await installKeyStep(input).run(b.ctx("install-key"));
 
       expect(b.host.commands.filter((c) => c.includes(">> ~/.ssh/authorized_keys"))).toEqual([]);
       expect(b.rc.registeredCleanups()).toEqual([]);
-      expect(b.meta().some((t) => t.includes("no removal of it is armed"))).toBe(true);
-    });
-
-    it("arms nothing on a definition that implements no such compensation, even where it appends", async () => {
-      // The redeploy definition and the master arm both answer `arm: false`, and the executor
-      // resolves a registered name against the definition's own cleanups() — so a step arming one
-      // there would end an abort with a step that has no implementation.
-      const b = bench();
-      await sealKey(b.store, KEY_LINE);
-      await installKeyStep(input, { arm: false }).run(b.ctx("install-key"));
-
-      expect(b.host.authorizedKeys).toEqual([KEY_LINE]);
-      expect(b.rc.registeredCleanups()).toEqual([]);
+      expect(b.meta().some((t) => t.includes("already stands in ~/.ssh/authorized_keys"))).toBe(true);
     });
 
     it("prove-elevation writes nothing on a machine whose login account IS root", async () => {

@@ -44,13 +44,12 @@ import type { DeploySlaveParams } from "./deploy-slave.ts";
 // carry the part already; the only domain is that master's own, and the only stage is its cluster's.
 //
 // NOT ONE COMPENSATING ACTION IS ARMED, and this is the reason the arm is a file of its own rather
-// than a flag on the other one. Every compensation a first install arms acts on the machine the run
-// owns, and here that machine is the control host: `microk8s-reset-slave` would take MicroK8s off the
-// cluster this manager's own platform runs on, `remove-slave` would run the master's removal program
-// against the master, `remove-slave-marking` would strip the map of the books-keeping cluster, and
-// `remove-installed-key` would delete the line every other run kind reaches this host through. So the
-// arm registers none of them: what a half-finished run leaves behind is finished by running it
-// again, never by undoing it.
+// than a flag on the other one. The two the slave arm arms both act on the master's books, and here
+// the machine those books describe IS the machine the run owns: `remove-slave` would run the
+// master's removal program against the master, and `remove-slave-marking` would strip the map of the
+// books-keeping cluster. So the arm registers neither: what a half-finished run leaves behind is
+// finished by running it again, never by undoing it — which is the rule the slave arm now follows
+// for everything it leaves on a slave too.
 //
 // THE DOORS ARE LEFT AS THE MACHINE KEEPS THEM. Neither `disable-password-login` nor
 // `purge-bootstrap-password` stands in the list, and `enable-ntp` does not either: shutting the
@@ -303,12 +302,10 @@ export function masterSlavePartSteps(params: DeploySlaveParams, ports: DeploySla
     // ---- FIRST CONTACT: the manager's own key on the machine, measured before anything is written.
     proveElevationStep(firstContact),
     generateKeyStep(firstContact),
-    // install-key is the only one of these that leaves anything on the machine, and the kit takes the
-    // arming of its compensation as an answer from the composing definition. This arm answers no: the
-    // key it would take back is the line every other run kind of this manager reaches the control
-    // host through, and an abort that removed it would leave the machine this installation is
-    // operated from reachable by nobody.
-    installKeyStep(firstContact, { arm: false }),
+    // install-key is the only one of these that leaves anything on the machine, and nothing takes it
+    // back: the line is what every other run kind of this manager reaches the control host through,
+    // so removing it would leave the machine this installation is operated from reachable by nobody.
+    installKeyStep(firstContact),
     verifyKeyLoginStep(firstContact),
     // Last of the key steps, and it may stand here for the same reason it may on the other arm:
     // every root command this run sends afterwards is raised with the password the run carries —

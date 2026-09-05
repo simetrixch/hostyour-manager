@@ -4,7 +4,6 @@ import type { Db } from "../../../db/client.ts";
 import type { StepCtx, Cleanup } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { errValidation, errNotFound } from "../../../kernel/errors.ts";
-import { remoteCmd, remoteExec, requirePassword } from "../../../executor/stepkit.ts";
 import { MASTER_ROLES, type Stage, type ClusterTier } from "../../../../shared/enums.ts";
 import { errNotConfigured } from "../../../kernel/errors.ts";
 import type { PlatformRepo } from "../../../adapters/git/port.ts";
@@ -258,39 +257,14 @@ export function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<voi
 
 // Compensating actions. Registered at runtime by the step that creates the resource —
 // BEFORE its mutating remote call, because a step that dies halfway leaves a partial
-// resource only the cleanup can compensate (all three tolerate already-absent state, so
+// resource only the cleanup can compensate (both tolerate already-absent state, so
 // early registration is safe). The executor resolves the persisted __cleanups names against
-// cleanups(); they run ONLY on an explicit
-// abort-with-cleanup, never automatically — microk8s-reset-slave is destructive by design.
-
-/** Take MicroK8s off the machine the run owns. Built per run because it needs the name the machine's
- *  password rides under: the removal is a root act, and it is raised with that password like every
- *  other root command this manager sends, so the machine needs no standing rule for it. An abort is
- *  what re-supplies the password — a terminal run's secrets went with the run — and without it this
- *  compensation refuses by name rather than being refused by the machine
- *  (executor/executor.ts abortWithCleanup). */
-export function microk8sResetSlaveCleanup(secretName: string): Cleanup {
-  return {
-    name: "microk8s-reset-slave",
-    title: "Remove MicroK8s from the slave (DESTRUCTIVE)",
-    run: async (ctx: StepCtx) => {
-      const session = await ctx.ssh(); // the slave (the run's ownsHost target)
-      // MEASURE, THEN ACT, and the measurement is deliberately NOT raised: `snap list` reads a
-      // catalogue every account on the machine may read, so asking it as the login user is the same
-      // answer for one round trip less of the password. Only the removal is a root act.
-      const present = await remoteExec(ctx, session, "snap list microk8s", { timeoutMs: 60_000 });
-      if (present.code !== 0) {
-        ctx.log("meta", "the machine carries no microk8s snap — the reset found nothing to remove and wrote nothing.");
-        return;
-      }
-      // Only the snap goes. The two checkouts — the platform tree at /srv/hostyour-cloud and the
-      // catalogue at /srv/ansiwise-catalog — and the binary beside them are what a retry of the run
-      // resumes onto, all three placed idempotently by place-ansiwise, so removing them would buy a
-      // second download and two more clones and nothing else.
-      await remoteCmd(ctx, session, "snap remove --purge microk8s", { timeoutMs: 10 * 60_000, elevation: requirePassword(ctx, secretName) });
-    },
-  };
-}
+// cleanups(); they run ONLY on an explicit abort-with-cleanup, never automatically.
+//
+// BOTH OF THEM ACT ON THE MASTER'S BOOKS, and that is the whole of what an abort of a slave install
+// undoes now. What a run leaves on the SLAVE is finished by running the run again — every step of
+// that list measures before it acts — so an abort takes away nothing the machine needs and nothing a
+// retry would have to be talked out of.
 
 /** The git-side inverse of the map write: drop the slave part again, which takes the cluster out of the
  *  master's slaves ApplicationSet and cascades the teardown of its management plane. The map itself

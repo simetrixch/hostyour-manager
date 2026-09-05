@@ -12,7 +12,7 @@ import { hasHardFailure, type PreflightReport } from "../../../../shared/preflig
 import {
   APP_SYNC_TIMEOUT_MS, APP_SYNC_POLL_MS,
   loadServer, loadMaster, masterFqdnOf, slaveApiHost, sleepUnlessAborted,
-  microk8sResetSlaveCleanup, removeSlaveMarkingCleanup, requirePlatformRepo, statedTarget,
+  removeSlaveMarkingCleanup, requirePlatformRepo, statedTarget,
   type DeploySlavePorts, type SlaveInstallInput, type SlaveTarget,
 } from "./deploy-slave.kit.ts";
 import {
@@ -21,13 +21,13 @@ import {
 } from "./ansiwise-run.kit.ts";
 import {
   proveElevationStep, generateKeyStep, installKeyStep, verifyKeyLoginStep, enableNtpStep,
-  removeSudoersStep, removeInstalledKeyCleanup, type FirstContactInput,
+  removeSudoersStep, type FirstContactInput,
 } from "./manager-key.kit.ts";
-import { disablePasswordLoginStep, purgeBootstrapPasswordStep, restorePasswordLoginCleanup } from "./password-login.kit.ts";
+import { disablePasswordLoginStep, purgeBootstrapPasswordStep } from "./password-login.kit.ts";
 import { placeAnsiwiseStep, enableAnsiwiseServiceStep } from "./place-ansiwise.step.ts";
 import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
 import { SLAVE_API_PORT, DATA_DISK_COMMAND, HOST_ADDRESS_COMMAND, dataDiskFrom, hostAddressesFrom } from "./deploy-slave.remote.ts";
-import { placeInputStep, dropInputStep, dropInputCleanup } from "./deploy-slave.input.ts";
+import { placeInputStep, dropInputStep } from "./deploy-slave.input.ts";
 import { rejoinStep, joinIfAbsentStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
 import { clusterShortName, resolveClusterMarking, writeClusterMarking, projectClusterMarking, type ClusterMarking } from "../../inventory/cluster-marking.ts";
@@ -113,8 +113,7 @@ export interface DeploySlaveDefPorts extends DeploySlavePorts, AnsiwisePorts {
  *  cannot know which compensating action the RUN KIND arms around it. Registered before the first
  *  mutating act, because a step that dies halfway leaves a partial resource only the cleanup can
  *  compensate (every cleanup here tolerates already-absent state, so early registration is safe). */
-function armed(cleanup: Cleanup | undefined, step: Step): Step {
-  if (!cleanup) return step;
+function armed(cleanup: Cleanup, step: Step): Step {
   return {
     ...step,
     run: async (ctx) => {
@@ -262,13 +261,11 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // authenticates with the key install-key puts there and verify-key-login proves.
     proveElevationStep(firstContact),
     generateKeyStep(firstContact),
-    // install-key is the only one of the key steps that leaves anything on the machine, so it is the
-    // only one with a compensation — and the kit takes the arming as an answer from here, because
-    // taking this manager's only way in off a machine is right after a first install that failed and
-    // wrong after a redeploy that did. `arm` is this definition's half of that; the step's own
-    // measurement is the other, and it withholds the removal on a machine whose key line an earlier
-    // run of this same list appended (manager-key.kit.ts).
-    installKeyStep(firstContact, { arm: !redeploying }),
+    // install-key is the one key step that leaves anything on the machine, and NOTHING TAKES IT BACK.
+    // The key line is what every session after it is opened with, and this same list shuts the
+    // daemon's password door and destroys the sealed bootstrap password — so an abort that removed
+    // the line would leave a machine nothing can reach, on exactly the run that failed.
+    installKeyStep(firstContact),
     verifyKeyLoginStep(firstContact),
     enableNtpStep(firstContact),
     // Last of the key steps, and it may only stand here because every root command this run sends
@@ -370,11 +367,14 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // Run the list a second time and each of the three measures first and finds its work done, so
     // the order is a property of one pass rather than a state a retry has to be talked out of.
     //
-    // NEVER ARMED ON A REDEPLOY. Putting the password door back on a live slave would reopen a door
-    // that machine's own installation deliberately shut, and the redeploy definition implements no
-    // such compensation anyway — a step that armed one there would kill the abort naming a step that
-    // does not exist.
-    disablePasswordLoginStep(sid, { arm: !redeploying, secretName: firstContact.secretName }),
+    // NEVER ARMED, ON EITHER ARM. A shut password door is the state every later run kind of this
+    // manager needs, so putting it back is not a repair of a failed install — it is undoing the one
+    // act that install existed to perform, on a machine this manager can already reach with its own
+    // key. The step keeps the option because the standalone run kind
+    // `cluster-password-login-disable` DOES arm it (defs/password-login.kit.ts, defs/password-
+    // login.ts): there the door is the subject of the run, and an abort of it owes the operator the
+    // door they had.
+    disablePasswordLoginStep(sid, { arm: false, secretName: firstContact.secretName }),
     // No compensation at all, on either arm: a destroyed credential cannot be put back, and this run
     // holds the operator's password in memory rather than a copy of the machine's sealed one.
     purgeBootstrapPasswordStep(sid),
@@ -519,10 +519,12 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // The two values a cluster keeping no books reads off its machine, composed out of what this
     // manager already holds and put there for the length of the run. It stands HERE because the
     // first row that reads one of them is deploy-cluster's containerd mirror; drop-input below
-    // takes it away once the last one has run.
+    // takes it away once the last one has run, and a run that dies before drop-input leaves the file
+    // for the next run of this list to overwrite.
     placeInputStep(target, ports),
-    armed(redeploying ? undefined : microk8sResetSlaveCleanup(ANSIWISE_ELEVATION_SECRET),
-      ansiwiseProgramStep(target, "deploy-cluster", ports, { extra: machineAnswers })),
+    // Nothing is armed around it: taking MicroK8s off again is a destructive act whose only effect
+    // on a retry is a second install of the same snap, and the step measures before it acts.
+    ansiwiseProgramStep(target, "deploy-cluster", ports, { extra: machineAnswers }),
     // deploy-platform-services also declares elevation_password — the ENGINE fills that one from the
     // password the POST carries beside the answers; sending it as an answer is refused.
     ansiwiseProgramStep(target, "deploy-platform-services", ports, { extra: machineAnswers }),
@@ -697,42 +699,34 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
   // Every compensating action this run's steps may register, and each one has to be here: the
   // executor resolves the persisted __cleanups by NAME against this list, so a name it does not
   // carry ends an abort with a step that has no implementation. They run in reverse registration
-  // order on an explicit abort-with-cleanup:
-  // remove-slave (armed by the join, before the first master-side per-slave state) →
-  // microk8s-reset-slave (deploy-cluster) → drop-input (place-input, which takes the two placed
-  // values off a machine whose run died before drop-input could) → remove-slave-marking (mark-slave —
-  // by then remove-slave has already dropped the map's slave part itself, FIRST, which
-  // is that program's own contract, so this one finds nothing left to drop) →
-  // restore-password-login (disable-password-login) → remove-installed-key (install-key, armed
-  // first and so run last). THAT ORDER IS THE POINT of the last two: the machine takes passwords
-  // again before the key this manager reaches it with is taken off it, so an abort of a first
-  // install leaves the box exactly as reachable as it was found rather than reachable by nobody.
-  // AND EACH OF THE TWO IS ARMED ONLY WHERE THIS RUN'S OWN MEASUREMENT FOUND IT SOMETHING TO PUT
-  // BACK, which is what makes that sentence true of the SECOND run of a machine as well as the
-  // first: a run that read the key line already standing and the password door already shut arms
-  // neither, so aborting it takes away neither the line an earlier run appended nor a door that run
-  // deliberately shut. A run that measured nothing to compensate has nothing to compensate.
-  // TWO OF THEM ARE ROOT ACTS ON A MACHINE THAT GRANTS THIS MANAGER NOTHING WITHOUT A PASSWORD —
-  // putting the sshd door back, and taking MicroK8s off — so the abort has to be given the run's
-  // password again (executor/executor.ts abortWithCleanup); without it each refuses by name and
-  // nothing behind it runs, which is the loud form of the same fact rather than a machine
-  // half-restored.
-  // attest-target, the key steps before install-key, slave-preflight, purge-bootstrap-password and
-  // the checkout steps arm nothing: a generated key that was never installed leaves nothing on the
-  // machine, a destroyed credential cannot be put back, the install branch on the remote is the
-  // operator's to keep, and the binary, the catalogue and the checkout place-ansiwise puts on the
-  // machine are what a retry resumes onto — a cleanup that removed them would buy a second download
-  // and two more clones.
+  // order on an explicit abort-with-cleanup: remove-slave (armed by the join, before the first
+  // master-side per-slave state exists) → remove-slave-marking (armed by mark-slave, before the map
+  // write — by then remove-slave has already dropped the map's slave part itself, FIRST, which is
+  // that program's own contract, so this one finds nothing left to drop).
   //
-  // THE MASTER ARM REGISTERS NOT ONE OF THEM, so this list is the pure-slave arm's alone. Every
-  // action in it acts on the machine the run OWNS, and on that arm the owned machine is the control
-  // host: the reset would take MicroK8s off the cluster this manager's own platform runs on
-  // (deploy-slave.master.ts). The list stays whole because the executor resolves persisted names
-  // against it, and a run of either arm may hold names from a run of its own.
-  cleanups: () => [
-    microk8sResetSlaveCleanup(ANSIWISE_ELEVATION_SECRET), removeSlaveCleanup(ports), removeSlaveMarkingCleanup(ports), dropInputCleanup,
-    restorePasswordLoginCleanup(ANSIWISE_ELEVATION_SECRET), removeInstalledKeyCleanup,
-  ],
+  // BOTH OF THEM ACT ON THE MASTER'S BOOKS, AND THAT IS THE WHOLE LIST. What a half-finished run
+  // left on the SLAVE is finished by running the run again, which is the rule the master arm has
+  // always stated (deploy-slave.master.ts) and the reason every step of this list is written
+  // measure-then-act. A compensation that undid one of those acts would take away something the
+  // retry needs and buy nothing:
+  //   - the key line install-key appended is what every session after it is opened with, and this
+  //     same list shuts the password door and destroys the sealed bootstrap password, so removing it
+  //     leaves a machine nothing can reach;
+  //   - the shut password door is the state every later run kind of this manager needs;
+  //   - MicroK8s is reinstalled by the same program on the next run;
+  //   - the input file is overwritten by place-input, which measures what the machine holds first.
+  // So an aborted first install leaves a machine reachable by this manager's key and by nobody
+  // else — the state its own retry starts from.
+  //
+  // remove-slave IS A ROOT ACT ON A MACHINE THAT GRANTS THIS MANAGER NOTHING WITHOUT A PASSWORD, so
+  // the abort has to be given the run's password again (executor/executor.ts abortWithCleanup);
+  // without it the cleanup refuses by name, which is the loud form of the same fact rather than a
+  // master left half-registered.
+  //
+  // THE MASTER ARM REGISTERS NEITHER, so this list is the pure-slave arm's alone. The list stays
+  // whole because the executor resolves persisted names against it, and a run of either arm may hold
+  // names from a run of its own.
+  cleanups: () => [removeSlaveCleanup(ports), removeSlaveMarkingCleanup(ports)],
   onTerminal: (status, { db, params }) => {
     if (status === "succeeded") return; // the register step set the terminal states
     const sid = String(params.serverId);
