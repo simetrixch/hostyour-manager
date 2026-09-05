@@ -74,13 +74,28 @@ export function ansiwiseBinaries(): { tool: string; rest: string } | undefined {
 function binaryNamed(variable: string, name: string): string | undefined {
   const named = process.env[variable];
   if (named && isFile(named)) return named;
-  for (const candidate of [
-    resolve(process.cwd(), "..", "ansiwise-cli", "build", name),
-    resolve(process.cwd(), "..", "ansiwise-cli", "build", `${name}.exe`),
-  ]) {
+  for (const candidate of siblingCandidates(name)) {
     if (isFile(candidate)) return candidate;
   }
   return undefined;
+}
+
+/** THE SIBLING IS FOUND BY WALKING UP, not by one `..`, because the work is done in WORKTREES. A
+ *  checkout stands beside `ansiwise-cli`; a worktree of it stands two levels deeper, under
+ *  `.worktrees/hostyour-manager/<branch>/`, and one `..` from there names `.worktrees/ansiwise-cli`,
+ *  which is nothing. The fallback therefore held everywhere except where every change is actually
+ *  built — measured when the pre-push hook refused this very commit. Walking up asks the same
+ *  question at each level and stops at the first tree that answers, so a worktree at any depth is
+ *  covered without naming one. */
+function* siblingCandidates(name: string): Generator<string> {
+  let directory = process.cwd();
+  for (;;) {
+    yield resolve(directory, "..", "ansiwise-cli", "build", name);
+    yield resolve(directory, "..", "ansiwise-cli", "build", `${name}.exe`);
+    const up = resolve(directory, "..");
+    if (up === directory) return;
+    directory = up;
+  }
 }
 
 function isFile(path: string): boolean {
