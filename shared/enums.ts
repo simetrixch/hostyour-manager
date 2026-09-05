@@ -242,10 +242,11 @@ export type ClusterStatus = (typeof CLUSTER_STATUS)[number];
 // Lifecycle of a slave's master-side management plane (the per-slave namespaced
 // ArgoCD + Vault surface — see shared/plane.ts). The column is clusters.plane_state.
 //
-// Four literals, not five: there is no plane-removal path in the product at all, so a "removing"
-// literal would name a state the platform cannot reach, and any reader handling it would be
-// handling nothing. The column is plain SQLite text with no CHECK constraint, so this list is a
-// TypeScript-side narrowing only; nothing stored depends on it.
+// Four literals, not five. `cluster-remove-slave` takes a plane down, and it ends at "absent" — the
+// state the column already starts at — in ONE step that either removed the plane or failed. A
+// "removing" literal would name the gap between two steps that does not exist, and any reader
+// handling it would be handling nothing. The column is plain SQLite text with no CHECK constraint,
+// so this list is a TypeScript-side narrowing only; nothing stored depends on it.
 export const PLANE_STATE = ["absent", "creating", "verifying", "ready"] as const;
 
 // Whether a SERVER is a member of the tailnet — the private network between the master and its
@@ -347,7 +348,11 @@ export const RUN_KIND = [
   // reachable by key is a state deploying establishes and never an act of its own — and
   // `cluster-redeploy` rebuilds the machine layer of a cluster that is already live. Distinct on
   // purpose: each answers a different question, and a boolean on another run kind hides that.
-  "cluster-deploy-slave", "cluster-redeploy",
+  // `cluster-remove-slave` is the inverse of the first: it takes a slave OUT of the installation —
+  // the master's whole per-slave management plane, then the cluster's map, then the rows. Every one
+  // of its acts is on the MASTER and none on the slave, because a slave being removed is very often
+  // a machine that no longer answers at all.
+  "cluster-deploy-slave", "cluster-redeploy", "cluster-remove-slave",
   // The tailnet run kinds, on a host that is already deployed. Three repairs and a reading, not one
   // with a switch: `cluster-tailnet-disconnect` takes the host off the private network and leaves it
   // there, `cluster-tailnet-reconnect` puts it back with the credential the host still holds, and
@@ -418,7 +423,7 @@ export type RunKind = (typeof RUN_KIND)[number];
 export const RUN_FAMILY = {
   fixture: ["noop"],
   cluster: [
-    "cluster-deploy-slave", "cluster-redeploy",
+    "cluster-deploy-slave", "cluster-redeploy", "cluster-remove-slave",
     "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin", "cluster-tailnet-read",
     "cluster-password-login-disable", "cluster-password-login-enable",
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",

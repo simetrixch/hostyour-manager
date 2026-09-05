@@ -5,6 +5,7 @@ import { noopDef } from "./defs/noop.run.ts";
 import { makeDeploySlaveDef, type DeploySlavePorts } from "./defs/deploy-slave.ts";
 import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
+import { makeRemoveSlaveDef } from "./defs/remove-slave.ts";
 import { makeTailnetDisconnectDef, makeTailnetReadDef, makeTailnetReconnectDef, makeTailnetRejoinDef } from "./defs/tailnet.ts";
 import { passwordLoginDisableDef, passwordLoginEnableDef } from "./defs/password-login.ts";
 import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from "./defs/operator-key.ts";
@@ -36,6 +37,10 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // machine layer of a cluster that is already live.
   register(runDefinitions, makeDeploySlaveDef(ports));
   register(runDefinitions, makeRedeployDef(ports));
+  // The inverse of the first: take a slave OUT of the installation. Every act is on the MASTER —
+  // the remove-slave program, the books branch, the rows — so it takes the same ports the two
+  // above do and reaches the slave not at all.
+  register(runDefinitions, makeRemoveSlaveDef(ports));
   // The tailnet run kinds, on a host that is already deployed: leave the private network, come
   // back with the credential the host holds, or be logged out and joined again with one the master
   // mints. Every act is a program of the machine's own catalogue driven over `ansiwise-rest serve`, so

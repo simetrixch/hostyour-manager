@@ -148,6 +148,11 @@ export const deploySlave = (serverId: string, opts: { stage: string; domain: str
  *  the FQDN and the stage are what that server's active cluster row already says, so there is nothing
  *  for the operator to re-state and nothing to get wrong. */
 export const redeploySlave = (serverId: string): Promise<{ runId: string }> => planRun("cluster-redeploy", { serverId });
+/** Take a slave OUT of the installation: the master's whole per-slave management plane, the
+ *  cluster's map, then the rows. It takes ONLY the server for the same reason redeploy does. Every
+ *  act runs on the MASTER and the slave is not reached at all, which is what makes it the run kind
+ *  for a machine that has stopped answering. */
+export const removeSlave = (serverId: string): Promise<{ runId: string }> => planRun("cluster-remove-slave", { serverId });
 
 // The three tailnet repair run kinds and the reading beside them. Each takes ONLY the server: the
 // address they reach it on is the public one and the plan states it, and a rejoin reads the FQDN and

@@ -17,6 +17,7 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   noop: [],
   "cluster-deploy-slave": [],
   "cluster-redeploy": [],
+  "cluster-remove-slave": [],
   "cluster-tailnet-disconnect": [],
   "cluster-tailnet-reconnect": [],
   "cluster-tailnet-rejoin": [],

@@ -223,56 +223,73 @@ export function createMgmtStep(target: SlaveTarget, ports: DeploySlavePorts & An
   };
 }
 
-/** The compensating action for everything the master holds about one slave: the remove-slave
- *  program — coordinator membership, the consumable entries, the auth mount with its roles, the
- *  policies, the role widening, the reconciler project. The map's slave part is dropped FIRST,
- *  which is the program's own contract: dropping it is what tears the generated per-slave instance
- *  down, so the reconciler project is already unreferenced when the program deletes it (the
- *  remove-slave-marking cleanup that runs later then finds nothing left to drop). Built per run
- *  because a cleanup carries no ports of its own. */
+/** EVERYTHING THE MASTER HOLDS ABOUT ONE SLAVE, taken down: the remove-slave program — coordinator
+ *  membership, the consumable entries, the auth mount with its roles, the policies, the role
+ *  widening, the reconciler project. The map's slave part is dropped FIRST, which is the program's
+ *  own contract: dropping it is what tears the generated per-slave instance down, so the reconciler
+ *  project is already unreferenced when the program deletes it (the remove-slave-marking cleanup
+ *  that runs later then finds nothing left to drop).
+ *
+ *  TWO CALLERS, ONE ACT. It is the compensating action `cluster-deploy-slave` arms (below) and the
+ *  middle step of `cluster-remove-slave` (remove-slave.ts), which differ only in where the three
+ *  facts come from — a cleanup reads them off the run's params, a run kind off the cluster row. A
+ *  second implementation of a destructive act is how the deliberate one and the one a person
+ *  actually gets stop being the same thing. */
+export async function takeSlavePlaneDown(
+  ctx: StepCtx,
+  ports: DeploySlavePorts & AnsiwisePorts,
+  slave: { serverId: string; domain: string; stage: Stage },
+): Promise<void> {
+  const { serverId, domain, stage } = slave;
+  const { changed } = await removeSlaveMarkingPart(requirePlatformRepo(ports), domain, ctx.runId);
+  ctx.log("meta", changed
+    ? `dropped the slave part of ${clusterMapPath(domain)} — the generated per-slave instance goes before its project`
+    : `${clusterMapPath(domain)} carries no slave part — straight to the program`);
+
+  const password = requireElevationPassword(ctx);
+  const master = loadMaster(ctx.db);
+  const session = await ctx.ssh(master.id);
+  const budget = AbortSignal.timeout(ANSIWISE_PROGRAM_TIMEOUT_MS);
+  const signal = AbortSignal.any([ctx.signal, budget]);
+  const conversation = await openServeConversation(ctx, session, ports, signal, masterMachine(ctx.db, master));
+  try {
+    // The cluster row may already be gone or parked — the answers need only the three facts the
+    // caller states, so the target is the stated one, never the active-cluster lookup.
+    const target = statedTarget(serverId, domain, stage);
+    const cp: ProgramCheckpoint = { program: REMOVE_PROGRAM };
+    const nosave = (): void => undefined;
+    const answers = await composeAnswers(ctx, conversation.client, REMOVE_PROGRAM, target, signal, async () => ({ slave_fqdn: domain, master_fqdn: masterFqdnOf(ctx.db, loadMaster(ctx.db)) }));
+    const dry = await programPhase(ctx, conversation.client, cp, "dry", { program: REMOVE_PROGRAM, answers, password, signal, save: nosave });
+    if (dry.exitCode !== 0) {
+      throw errValidation(
+        `the DRY run of ${REMOVE_PROGRAM} on the master is not green (run ${dry.id}, exit ${dry.exitCode}) — ` +
+        "nothing was destroyed (a coordinator that will not answer stops it here); fix what the machine named, then run it again",
+      );
+    }
+    const live = await programPhase(ctx, conversation.client, cp, "run", { program: REMOVE_PROGRAM, answers, password, signal, save: nosave });
+    if (live.exitCode !== 0) {
+      throw errValidation(
+        `the ${REMOVE_PROGRAM} run on the master failed (run ${live.id}, exit ${live.exitCode}) — read the run log; ` +
+        "running the removal again once the machine answers completes it",
+      );
+    }
+    ctx.log("meta", `${REMOVE_PROGRAM}: dry ${dry.id} proved it, run ${live.id} performed it — the slave's management plane is gone from the master`);
+  } finally {
+    conversation.close();
+  }
+}
+
+/** The compensating action `cluster-deploy-slave` arms before it builds the management plane: the
+ *  act above, over the three facts the run's own params state. Built per run because a cleanup
+ *  carries no ports of its own. */
 export function removeSlaveCleanup(ports: DeploySlavePorts & AnsiwisePorts): Cleanup {
   return {
     name: "remove-slave",
     title: "Remove the slave's management plane from the master (map part, then the remove-slave program)",
-    run: async (ctx: StepCtx) => {
-      const domain = String(ctx.params.domain);
-      const stage = String(ctx.params.stage) as Stage;
-      const { changed } = await removeSlaveMarkingPart(requirePlatformRepo(ports), domain, ctx.runId);
-      ctx.log("meta", changed
-        ? `dropped the slave part of ${clusterMapPath(domain)} — the generated per-slave instance goes before its project`
-        : `${clusterMapPath(domain)} carries no slave part — straight to the program`);
-
-      const password = requireElevationPassword(ctx);
-      const master = loadMaster(ctx.db);
-      const session = await ctx.ssh(master.id);
-      const budget = AbortSignal.timeout(ANSIWISE_PROGRAM_TIMEOUT_MS);
-      const signal = AbortSignal.any([ctx.signal, budget]);
-      const conversation = await openServeConversation(ctx, session, ports, signal, masterMachine(ctx.db, master));
-      try {
-        // The cluster row may already be gone or parked — the answers need only what the params
-        // state, so the target is the stated one, never the active-cluster lookup.
-        const target = statedTarget(String(ctx.params.serverId), domain, stage);
-        const cp: ProgramCheckpoint = { program: REMOVE_PROGRAM };
-        const nosave = (): void => undefined;
-        const answers = await composeAnswers(ctx, conversation.client, REMOVE_PROGRAM, target, signal, async () => ({ slave_fqdn: domain, master_fqdn: masterFqdnOf(ctx.db, loadMaster(ctx.db)) }));
-        const dry = await programPhase(ctx, conversation.client, cp, "dry", { program: REMOVE_PROGRAM, answers, password, signal, save: nosave });
-        if (dry.exitCode !== 0) {
-          throw errValidation(
-            `the DRY run of ${REMOVE_PROGRAM} on the master is not green (run ${dry.id}, exit ${dry.exitCode}) — ` +
-            "nothing was destroyed (a coordinator that will not answer stops it here); fix what the machine named, then run the cleanup again",
-          );
-        }
-        const live = await programPhase(ctx, conversation.client, cp, "run", { program: REMOVE_PROGRAM, answers, password, signal, save: nosave });
-        if (live.exitCode !== 0) {
-          throw errValidation(
-            `the ${REMOVE_PROGRAM} run on the master failed (run ${live.id}, exit ${live.exitCode}) — read the run log; ` +
-            "running the removal again once the machine answers completes it",
-          );
-        }
-        ctx.log("meta", `${REMOVE_PROGRAM}: dry ${dry.id} proved it, run ${live.id} performed it — the slave's management plane is gone from the master`);
-      } finally {
-        conversation.close();
-      }
-    },
+    run: async (ctx: StepCtx) => takeSlavePlaneDown(ctx, ports, {
+      serverId: String(ctx.params.serverId),
+      domain: String(ctx.params.domain),
+      stage: String(ctx.params.stage) as Stage,
+    }),
   };
 }

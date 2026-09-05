@@ -522,6 +522,31 @@ export async function writeClusterMarking(
   return { changed: true };
 }
 
+/** TAKE THE MAP AWAY — the cluster itself is gone. `cluster-remove-slave`'s last act on the books
+ *  branch, after the slave part has been dropped and the master has torn the management plane down.
+ *
+ *  A MAP OUTLIVING ITS CLUSTER IS A GHOST, and an expensive one: `indexMarkings` folds every map on
+ *  every read, so a file for a machine nobody operates any more answers questions about roles and
+ *  stages for as long as it stands, and one that cannot be parsed fails every read there is. A
+ *  cluster with no map is what a cluster that does not exist looks like.
+ *
+ *  Tolerates an absent file, so a re-run of the step converges instead of failing on its own work. */
+export async function removeClusterMarking(
+  repo: PlatformRepo,
+  fqdn: string,
+  runId: string,
+): Promise<{ changed: boolean }> {
+  const { byFqdn } = await indexMarkings(repo);
+  if (!byFqdn.has(fqdn)) return { changed: false };
+  await repo.withBranch(repo.booksBranch, (books) =>
+    books.commit({
+      message: `revert(clusters): remove ${clusterShortName(fqdn)}'s map — the cluster is gone [${runId}]`,
+      remove: [clusterMapPath(fqdn)],
+    }),
+  );
+  return { changed: true };
+}
+
 /** The inverse: drop the slave part, leaving the cluster marked but unreachable — the master's
  *  slaves ApplicationSet stops generating for it, which IS the teardown of its management plane.
  *  The map itself STAYS: the cluster still has a role, a stage and a build plane. Tolerates an

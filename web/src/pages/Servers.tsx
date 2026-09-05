@@ -4,7 +4,7 @@ import type { RunView, ServerView } from "../../../shared/api-types.ts";
 import { isMasterRole } from "../../../shared/enums.ts";
 import type { ServerStatus } from "../../../shared/enums.ts";
 import {
-  listServers, listRuns, createServer, deleteServerById, deploySlave, redeploySlave,
+  listServers, listRuns, createServer, deleteServerById, deploySlave, redeploySlave, removeSlave,
   disconnectTailnet, reconnectTailnet, rejoinTailnet, readTailnet, disablePasswordLogin, enablePasswordLogin,
   readAuthorizedKeys, restateMachineIdentity,
 } from "../api.ts";
@@ -311,6 +311,12 @@ export function Servers() {
                     // A LIVE cluster carries the run kind that acts on one: redeploy rebuilds its
                     // machine layer in place, distinct from the destructive Delete.
                     const showRedeploy = lc.next === "clusters";
+                    // AND THE INVERSE OF DEPLOYING, offered on the same rule: a slave this
+                    // installation operates is one it can stop operating. The run plans and then
+                    // waits at its approve screen, whose summary and warnings say what is destroyed
+                    // on the master and what is left standing on the machine — so the click here
+                    // starts a decision rather than making one.
+                    const showRemove = lc.next === "clusters";
                     // DELETE IS OFFERED ON A ROW NO DEPLOYMENT HAS REACHED, because that is the row a
                     // delete can act on: the first step of a deployment writes a cluster row for the
                     // machine, and deleteServer refuses while one stands (domains/inventory/write.ts).
@@ -332,7 +338,7 @@ export function Servers() {
                           ))}
                         </ol>
                         <p className="servercard__state">{lc.state}</p>
-                        {(showDeploy || showClusters || showRedeploy || showDelete ||
+                        {(showDeploy || showClusters || showRedeploy || showRemove || showDelete ||
                           tnOffer.read || tnOffer.disconnect || tnOffer.reconnect || tnOffer.rejoin) && (
                           <div className="actions">
                             {showDeploy && (
@@ -357,6 +363,16 @@ export function Servers() {
                                 title="Rebuild the machine layer in place (idempotent) — no version change. Brief kube-apiserver blip while kubelite restarts."
                               >
                                 Redeploy
+                              </button>
+                            )}
+                            {showRemove && (
+                              <button
+                                type="button"
+                                className="btn btn--danger"
+                                onClick={() => void planServerRunKind(() => removeSlave(s.id))}
+                                title="Take this slave out of the installation: the master's per-slave management plane, the cluster's map and the inventory rows. Every act runs on the master; the machine itself is left standing. Read the approve screen before you confirm."
+                              >
+                                Remove this slave
                               </button>
                             )}
                             <TailnetActions
