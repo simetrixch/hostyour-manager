@@ -38,8 +38,8 @@ import { findUnknownProgram } from "./place-ansiwise.ts";
  *  person on the other. Every run kind states it by this name. */
 export const ANSIWISE_ELEVATION_SECRET = MACHINE_PASSWORD_SECRET;
 
-/** One program's wall clock, dry and run each. The cold-install budget the host run
- *  used to get, for the same reason: a redeploy may bring a MicroK8s channel change with it.
+/** One program's wall clock, dry and run each. It is the cold-install budget, for every program:
+ *  a redeploy may bring a MicroK8s channel change with it.
  *  Expiry fails the STEP only — the machine run keeps going detached, and a retry re-attaches
  *  to it rather than starting a second one. */
 export const ANSIWISE_PROGRAM_TIMEOUT_MS = 45 * 60_000;
@@ -47,7 +47,7 @@ export const ANSIWISE_PROGRAM_TIMEOUT_MS = 45 * 60_000;
 /** How long a run that has been ACCEPTED is given to write its record before this manager stops
  *  waiting for it. Read together with the sleep below, which is what the wait is spent in.
  *
- *  IT IS THREE MINUTES AND IT USED TO BE TEN SECONDS. Everything a run does between being accepted
+ *  IT IS THREE MINUTES, AND TEN SECONDS IS NOT ENOUGH. Everything a run does between being accepted
  *  and writing its header happens in the detached child, not in the door that answered: the
  *  catalogue is parsed off disk, the program's answer conditions are MEASURED AGAINST THE MACHINE
  *  through real shell and HTTP calls, `git rev-parse HEAD` is spawned, and the gate lists the run
@@ -416,11 +416,10 @@ export async function composeAnswers(
     switch (name) {
       case "fqdn": return resolved().domain;
       case "stage": return resolved().stage;
-      // The row's role, WHOLE. This used to flatten "master+slave" to "master", and that flattening
-      // is what kept the combined role unreachable downstream: the branch programs stamp the
-      // ApplicationSet selection and rewrite the cluster map from exactly this answer, so a machine
-      // carrying both parts was stamped as a pure master and never rendered the slave part's
-      // workloads. The catalogue's programs allow the combined word on their role answers.
+      // The row's role, WHOLE. Flattening "master+slave" to "master" here makes the combined role
+      // unreachable downstream: the branch programs stamp the ApplicationSet selection and rewrite
+      // the cluster map from exactly this answer, so a machine carrying both parts is stamped as a
+      // pure master and never renders the slave part's workloads. The catalogue's programs allow the combined word on their role answers.
       case "role": return server.role;
       case "operator_user": return server.sshUser;
       default: return undefined;

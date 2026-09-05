@@ -297,8 +297,8 @@ export function provisionRepoCredentialStep(ports: OnboardPorts, p: DeployableOn
  *  relay's own namespace — for a unit whose stage registration attests `smtp-ops`, and register the
  *  delete inverse. A unit that claims nothing writes nothing and the step says so.
  *
- *  IT IS THE ONE PER-UNIT OBJECT LEFT THAT NO RECONCILER RENDERS, and that is why it alone stands
- *  where a whole apply of four object kinds used to. The other five — the isolation AppProject, the
+ *  IT IS THE ONE PER-UNIT OBJECT NO RECONCILER RENDERS, and that is why it alone is applied here.
+ *  The other five — the isolation AppProject, the
  *  admission policy with its Binding, the argo-sync grant and the two `<name>-build` grants — are
  *  rendered from the registration this run already commits (hostyour-cloud#174: a fence is rendered by
  *  the reconciler that manages the namespace it lands in). This grant lands in `postfix` ON THE

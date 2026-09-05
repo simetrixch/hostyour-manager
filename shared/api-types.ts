@@ -640,12 +640,12 @@ export interface TenantLiveView {
  * THE ONE DECLARATION of each shape below, consumed by BOTH ends: the server domain module returns these
  * exact types (server/domains/units/tenant-orphans.ts and tenant-registrations.ts) and the web client
  * reads them (web/src/api.ts and the tenant/run screens). They live here — a pure, zod-free module, the
- * same reason ACTIVATION_RESULT_MARKER does — because the alternative was tried and failed: each of them
- * was declared once in the domain module and hand-mirrored again in the browser, and when the server's
- * run-tenant-state union gained a `not-deployed` member the mirror was never updated. Nothing linked the
- * two, so `npm run check` stayed green, the unknown state fell through the run callout's ternary chain
- * into the arm meant for an offboarded tenant, and that arm read `row` off an answer that carries none —
- * a TypeError that unmounted the entire Run screen for the commonest create-tenant failure there is. The
+ * same reason ACTIVATION_RESULT_MARKER does — because the alternative fails silently: declared once in
+ * the domain module and hand-mirrored again in the browser, a union that gains a member on the server
+ * leaves the mirror behind. Nothing links the two, so `npm run check` stays green, the unknown state
+ * falls through the run callout's ternary chain into the arm meant for an offboarded tenant, and that
+ * arm reads `row` off an answer that carries none — a TypeError that unmounts the entire Run screen for
+ * the commonest create-tenant failure there is. The
  * server's zod schemas (which additionally validate what a wire type cannot express — the guid alphabet,
  * the cls_ id prefix) are checked against these declarations at their own declaration sites, so the
  * PARSED shape and the WIRE shape cannot drift either. */

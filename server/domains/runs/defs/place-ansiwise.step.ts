@@ -93,9 +93,9 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
       // catalogue ON THE MACHINE, and the catalogue is refreshed by a row of a program that is
       // itself read out of the catalogue — so without this a pin move reaches an installed machine
       // one program after the row that asserts it. A machine carrying no catalogue is untouched,
-      // which is what keeps the birth of a machine out of this: putting the row into the first
-      // program a machine runs was tried and reverted, because it needs an answer the client's
-      // first-master flow does not send, and nothing here asks a program for anything.
+      // which is what keeps the birth of a machine out of this: the row cannot go into the first
+      // program a machine runs, because it needs an answer the client's first-master flow does not
+      // send, and nothing here asks a program for anything.
       const catalogue = await refreshCatalogue(
         await placementMachine(ctx, server.name),
         ports.catalogueOrigin === undefined
@@ -143,11 +143,10 @@ async function runBootstrap(
  *
  *  AND NO LIST NAMES A PROGRAM THE ENGINE DOES NOT CARRY. Being the one place every placement
  *  argument list leaves through is what makes this the place to hold that: a rule applied at each of
- *  the four sites that COMPOSE a list would be a rule the fifth site never learns. The word that
- *  proved it was `install-service`, which stood in an argument list here until
- *  simetrixch/ansiwise-cli#14 deleted the program — and every check in this repository stayed green,
- *  because the scripted machine answered an unknown command with exit 0 and no census read an
- *  argument list at all. */
+ *  the four sites that COMPOSE a list would be a rule the fifth site never learns. Without it a word
+ *  the engine no longer carries stands in an argument list while every check in this repository
+ *  stays green, because a scripted machine answers an unknown command with exit 0 and no census
+ *  reads an argument list at all. */
 async function placementMachine(ctx: StepCtx, name: string): Promise<PlacementMachine> {
   const session = await ctx.ssh();
   return {

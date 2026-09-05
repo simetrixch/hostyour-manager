@@ -426,10 +426,10 @@
      terminal ends where the navigation beside it ends, at the bottom of the screen, and stays there
      however long the run gets.
 
-     TWO ATTEMPTS BEFORE THIS ONE MISSED IT. Capping the log at `min(38rem, 70vh)` left it stopping
-     short of the steps; tying it to the steps column made it GROW with the run — nineteen steps on
-     a slave deployment — which is the opposite of what a live log is for. Neither is a height: one
-     was a guess, the other was the other column's.
+     NEITHER OF THE TWO OBVIOUS SPELLINGS IS A HEIGHT. Capping the log at `min(38rem, 70vh)` leaves
+     it stopping short of the steps; tying it to the steps column makes it GROW with the run —
+     nineteen steps on a slave deployment — which is the opposite of what a live log is for. One is
+     a guess, the other is the other column's.
 
      The height NAMES the two tokens .content pads with (shell.css, at 768px up), so the screen ends
      where its own padding ends rather than at a number picked to look like it. */

@@ -5,13 +5,13 @@ import type { RunKind } from "../../shared/enums.ts";
  * Every run kind's plan-time guards, total over RUN_KIND — the Record type forces compile-time
  * exhaustiveness, so a new kind cannot forget to declare its guards.
  *
- * EVERY LIST IS EMPTY TODAY, and that is a fact about this build rather than a gap in it. The three
- * guards this table used to hold all asked the same first question — is `keystore.mode` `plaintext`?
- * — and returned unless it was. No booted manager answers yes: the composition root builds the
+ * EVERY LIST IS EMPTY TODAY, and that is a fact about this build rather than a gap in it. A guard
+ * asking whether `keystore.mode` is `plaintext` — and returning unless it is — refuses nothing that
+ * can reach here. No booted manager answers yes: the composition root builds the
  * credential store with a Vault client where the installation configures one and with a local data
  * key where it does not (boot/wire.ts, jobs/registry-reaper.ts), and the manager chart configures
  * one unconditionally. `plaintext` is what a test that constructs the store with neither gets. A
- * guard that cannot refuse is read as a protection and is none, so the three went.
+ * guard that cannot refuse is read as a protection and is none, so no such guard stands here.
  */
 export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   noop: [],
@@ -75,9 +75,8 @@ export function isMutatingPrecondition(def: AnyRunDefinition | undefined, stepNa
 /**
  * Backs the guards.armed self-check: every registered mutating def starts with attest-target.
  *
- * It asserts nothing about KIND_GUARDS. It used to require a guard on four kinds, and that half went
- * with the three guards themselves: a demand that a table hold an entry is only worth making while
- * the entry can refuse something.
+ * It asserts nothing about KIND_GUARDS: a demand that a table hold an entry is only worth making
+ * while the entry can refuse something, and no entry stands there today.
  */
 export function assertGuardsArmed(runDefinitions: Map<RunKind, AnyRunDefinition>): void {
   for (const def of runDefinitions.values()) {

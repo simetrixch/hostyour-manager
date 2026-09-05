@@ -251,9 +251,9 @@ class Ssh2Session implements SshSession {
    *  client.sftp() opens a NEW session channel per call, and sshd caps CONCURRENT channels
    *  per connection (OpenSSH MaxSessions, default 10) — exec channels close with their
    *  command, but an un-end()ed SFTP channel stays open for the connection's lifetime.
-   *  Before this cleanup every putFile leaked its channel, so a long polling step that
-   *  uploads a diagnostic script each minute (verify-slave) exhausted the cap after ~10
-   *  uploads and every later channel open died with "(SSH) Channel open failure". */
+   *  A putFile that leaks its channel lets a long polling step which uploads a diagnostic
+   *  script each minute (verify-slave) exhaust the cap after ~10 uploads, and every later
+   *  channel open then dies with "(SSH) Channel open failure". */
   putFile(remotePath: string, content: Buffer, mode: number, opts: { signal: AbortSignal }): Promise<void> {
     return new Promise((resolve, reject) => {
       if (opts.signal.aborted) {

@@ -31,13 +31,12 @@ import {
 } from "./kube-map.ts";
 
 const ARGO = { group: "argoproj.io", version: "v1alpha1", plural: "applications" } as const;
-/** THE VERSION THE INSTALLATION'S CRD ACTUALLY SERVES, and it is not the one this used to name.
+/** THE VERSION THE INSTALLATION'S CRD ACTUALLY SERVES.
  *  The vendored CRD serves `v1` and marks `v1beta1` `served: false` (hostyour-cloud
  *  clusters/inventories/external-secrets/templates/crd-externalsecret.yaml), and every ExternalSecret
- *  this platform renders is `external-secrets.io/v1`. An unserved version answers 404, which the
- *  reading below used to take for "the CRD is not installed, so zero ExternalSecrets exist, so all of
- *  them are Ready" — a smoke result that read `true` on every cluster whatever the ExternalSecrets
- *  said. */
+ *  this platform renders is `external-secrets.io/v1`. An unserved version answers 404, and a reading
+ *  that takes that for "the CRD is not installed, so zero ExternalSecrets exist, so all of them are
+ *  Ready" is a smoke result that reads `true` on every cluster whatever the ExternalSecrets say. */
 const EXTERNAL_SECRETS = { group: "external-secrets.io", version: "v1", plural: "externalsecrets" } as const;
 /** The two CLUSTER-scoped halves of a unit's admission boundary. Written as a pair (a policy without
  *  its binding enforces nothing) and deleted as a pair. */

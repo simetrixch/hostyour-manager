@@ -23,9 +23,7 @@ import { clusterMapPath } from "../../../../shared/cluster-values.ts";
  *  GITHUB_REPO + GITHUB_WRITE_PAT — absent, the map step fails LOUD with what to configure rather
  *  than deploying a slave the master can never reach.
  *
- *  THE CLONE ADDRESS IS GONE FROM HERE, and it is worth saying why rather than leaving a hole. This
- *  port used to carry the address a MACHINE clones the platform tree from, because place-ansiwise
- *  cloned it with composed bash. Nothing in this manager clones a tree onto a machine any more — a
+ *  THIS PORT CARRIES NO CLONE ADDRESS. Nothing in this manager clones a tree onto a machine — a
  *  clone is a `git_clone` row of a program, which reads its origin and its credential out of the
  *  machine's own settings files by NAME (hostyour-deploy ansiwise/programs/deploy-platform-services.yaml) rather
  *  than taking either through a caller. */
@@ -62,10 +60,10 @@ export interface DeploySlavePorts {
   /** WHAT THIS RUN KIND READS ARGOCD THROUGH — the SAME port every unit run kind already takes, and
    *  not a second shape for the same job.
    *
-   *  Three steps of a cluster deployment used to read ArgoCD by running `microk8s kubectl` over the
-   *  master's SSH session, raising every one of those reads to root with the machine's elevation
-   *  password, every ten seconds, for up to thirty minutes. They read it through the Manager pod's
-   *  own ServiceAccount now, which is where the RBAC for it already stands.
+   *  Three steps of a cluster deployment read ArgoCD. Reading it by running `microk8s kubectl` over
+   *  the master's SSH session raises every one of those reads to root with the machine's elevation
+   *  password, every ten seconds, for up to thirty minutes; through the Manager pod's own
+   *  ServiceAccount none of them is raised at all, and that is where the RBAC for it already stands.
    *
    *  OPTIONAL for the reason platformRepo is: a Manager built without in-cluster access registers the
    *  run kinds and fails loud at the first watch, which is a sentence an operator can act on, rather

@@ -105,9 +105,8 @@ export const STEP_NAMES = [
 /** The redeploy slave arm: the SAME list, with the outright join in the MEASURED form that reads the
  *  machine's membership and puts a machine holding none back on the network (`join-if-absent`).
  *
- *  NOTHING IS SUBTRACTED ANY MORE, and that is what dropping the slave branch left behind: the one
- *  birth act this list used to hold was the branch cut with its checkout preparation, and a pure
- *  slave has no branch to cut. Neither first contact nor the membership read was ever subtracted
+ *  NOTHING IS SUBTRACTED, because a pure slave has no branch to cut and the branch cut with its
+ *  checkout preparation is the only birth act this list would hold. Neither first contact nor the membership read was ever subtracted
  *  either, because neither is a birth act: every first-contact step measures before it acts, so on a
  *  live slave they read a key that is installed, a login that works and doors that are already shut,
  *  and each says so; and a redeploy owes the card a reading of the membership as much as a

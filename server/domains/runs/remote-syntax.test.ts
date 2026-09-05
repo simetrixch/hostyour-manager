@@ -215,8 +215,8 @@ describe("the census: every shell a run sends to a host is in the collection", (
 //
 // AND A TEMPLATE IS READ AS THE TEXT IT WILL BE. `${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}` is what the
 // deleted invocation actually looked like — nobody writes an executable's path as a bare literal —
-// so a census reading templates as their source text would have missed the one defect it exists for.
-// It was measured missing it before this stood here. Every `const NAME = "…"` in the shipped source
+// so a census reading templates as their source text misses the one defect it exists for.
+// Every `const NAME = "…"` in the shipped source
 // is collected first and substituted in, which is a rule over this repository's own declarations and
 // not a list of the names that matter. A substitution nothing declares becomes a word no rule can
 // match, which is the honest reading: what stands there is decided at runtime.

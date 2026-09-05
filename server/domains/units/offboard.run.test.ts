@@ -120,11 +120,10 @@ describe("offboard run definition", () => {
     expect(def.mutating).toBe(true);
     expect(plan.targetKind).toBe("app");
     expect(plan.targetId).toBe("app_1");
-    // THE TWO DELETES ARE THE TWO OBJECTS NO RECONCILER RENDERS, and there used to be four. Since
-    // hostyour-cloud#174 the isolation AppProject, the admission policy with its Binding, the argo-sync
-    // grant and the two `<name>-build` grants are rendered from the registration remove-registration
-    // takes away, so watch-removal is what removes them and delete-admission-policy/delete-appproject
-    // went with them. What is left by hand is the repository credential (its value is a PAT) and the
+    // THE TWO DELETES ARE THE TWO OBJECTS NO RECONCILER RENDERS. The isolation AppProject, the
+    // admission policy with its Binding, the argo-sync grant and the two `<name>-build` grants are
+    // rendered from the registration remove-registration takes away, so watch-removal is what
+    // removes them and this run deletes neither. What is left by hand is the repository credential (its value is a PAT) and the
     // mail-ops grant (it stands in the relay's namespace on the MASTER, which a slave-hosted unit's
     // reconciler cannot reach).
     // delete-namespace MUST come after watch-removal — ArgoCD's CreateNamespace=true never deletes the

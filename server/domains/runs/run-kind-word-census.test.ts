@@ -5,13 +5,10 @@ import { fileURLToPath } from "node:url";
 
 // A census over the WORD, beside the census over the run kind list in run-definitions-census.test.ts.
 // shared/enums.ts names the type RunKind and every literal in RUN_KIND; "verb" is borrowed from
-// grammar and names nothing in this codebase. Under the two patterns below it stood 562 times across
-// 128 files before #15, which removed 379 of them across 91 — measured with this census, because the
-// figure #15's own ticket carried was produced by a different pattern and does not reproduce.
-// Nothing then stopped the word standing in web/, so onboard-abort.ts told an operator "Offboard is
-// the removal run kind for a serving consumer" while PurgeTenantDialog.tsx said "verb" about the
-// same act in the next dialog.
-// The sweep is #20; this is what keeps it swept.
+// grammar and names nothing in this codebase. Left unswept it spreads: one file tells an operator
+// "Offboard is the removal run kind for a serving consumer" while the dialog beside it says "verb"
+// about the same act. This census is what keeps the tree swept, and it counts under the two
+// patterns below rather than by a substring search.
 //
 // Two shapes are searched, because the word arrived in both. In prose and in a prop name it is the
 // plain English word, `\bverbs?\b`. In an identifier it is a camelCase segment — `tailnetVerbOffer`,

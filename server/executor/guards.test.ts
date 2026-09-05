@@ -17,11 +17,11 @@ import { RUN_KIND, type RunKind } from "../../shared/enums.ts";
 
 // THE PLAN-TIME GUARD MECHANISM, and the fact that no run kind uses it today.
 //
-// Three guards used to stand in KIND_GUARDS and all three asked the same first question: is
-// `keystore.mode` `plaintext`? They returned unless it was, and no booted manager answers yes — the
-// composition root supplies the credential store with a Vault client or with a local data key and
-// never with neither (boot/store-backend.ts, proved in boot/store-backend.test.ts). A guard that
-// cannot refuse reads as a protection and is none, so the three went.
+// A guard asking whether `keystore.mode` is `plaintext` refuses nothing: no booted manager answers
+// yes, because the composition root supplies the credential store with a Vault client or with a
+// local data key and never with neither (boot/store-backend.ts, proved in
+// boot/store-backend.test.ts). A guard that cannot refuse reads as a protection and is none, so
+// this table holds no such entry.
 //
 // WHAT IS MEASURED HERE IS THEREFORE THE MECHANISM, not a policy: that the table is total over
 // RUN_KIND, that every entry is empty, that a guard placed in it really does refuse on BOTH plan

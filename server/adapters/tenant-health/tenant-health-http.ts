@@ -18,8 +18,8 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 /** Reads the administrator count out of a parsed body.
  *
- * Two spellings are accepted because the endpoint predates this reader — the operator that used to
- * poll it read `adminCount`, and the auth service answers `admins`. Returns null when neither is
+ * Two spellings are accepted because the endpoint predates this reader: an older poller reads
+ * `adminCount`, and the auth service answers `admins`. Returns null when neither is
  * present as a non-negative whole number, which the caller turns into "reached, unreadable" rather
  * than into a zero: a body this cannot parse is not evidence that nobody can administer the tenant. */
 export function adminsIn(json: unknown): number | null {

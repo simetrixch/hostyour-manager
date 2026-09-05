@@ -129,8 +129,8 @@ export const TenantRegistrationSchema = z
     apps: z.array(TenantAppSchema).default([]),
     // EVERY member this tenant has, resolved: the standing members the tenant product declared at
     // create time, and one per selected app. This is what the ApplicationSet fans out over — one
-    // Application per element — and it is the reason there is ONE appset per stage where there used
-    // to be four, each naming a chart of one product.
+    // Application per element — and it is what lets ONE appset per stage stand where a set naming
+    // one product's chart each would need four.
     //
     // Recorded, not re-derived. Every teardown, purge and relocation needs to know which namespaces
     // and AppProjects this tenant owns, and re-reading the product manifest would answer for the

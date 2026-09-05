@@ -82,8 +82,8 @@ describe("place-ansiwise", () => {
       for (const word of command.split(" ")) expect(() => assertWord(word, "word")).not.toThrow();
       expect(command).not.toMatch(/bash|sh -c|[;&|<>$`(){}*?[\]'"\\]/);
     }
-    // And nothing was written to the machine that is not one of the two executables. The composed
-    // script used to be a file on the machine's disk for as long as the placement ran.
+    // And nothing was written to the machine that is not one of the two executables: a composed
+    // script would be a file on the machine's disk for as long as the placement runs.
     expect(transferred(hosts).map((f) => f.path).sort()).toEqual([...ANSIWISE_EXECUTABLES].sort());
   });
 

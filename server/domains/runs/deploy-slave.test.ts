@@ -303,11 +303,11 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   });
 
   it("a SECOND slave is PLANNED, whatever this manager already holds a cluster bearer for", async () => {
-    // The gate that used to refuse exactly this asked whether keystore.mode is `plaintext`, which is
-    // the mode a harness gets and no booted manager can have (boot/store-backend.test.ts). It went
-    // with the other two, and this case is what would go red if one came back: a machine already
-    // deployed, its harvested cluster-admin bearer already sealed, and a second machine planned
-    // against the same manager.
+    // A gate refusing exactly this by asking whether keystore.mode is `plaintext` refuses nothing:
+    // that is the mode a harness gets and no booted manager can have (boot/store-backend.test.ts).
+    // This case is what would go red if such a guard were armed again: a machine already deployed,
+    // its harvested cluster-admin bearer already sealed, and a second machine planned against the
+    // same manager.
     const { db, executor } = await makeHarness();
     db.db.insert(servers).values({ id: "srv_other", name: "s2", host: "s2.example.com", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_other", serverId: "srv_other", stage: "prod", domain: "s2.example.com", status: "active", slaveId: 7 }).run();

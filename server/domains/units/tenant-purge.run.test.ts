@@ -201,8 +201,8 @@ describe("tenant-purge plan", () => {
     expect(params.target.watchNames).toEqual(WATCH);
     expect(plan.summary).not.toContain("no inventory row");
     // The plan says which STATE the rows are settled to, and says it where the operator approves
-    //: "purged", not the "offboarded" every other removal writes. It used to
-    // promise "mark the tenant + its app rows offboarded", which is what made a finished purge read as an
+    //: "purged", not the "offboarded" every other removal writes. A plan promising
+    // "mark the tenant + its app rows offboarded" makes a finished purge read as an
     // offboard on every screen afterwards.
     expect(plan.summary).toContain("mark the tenant + its app rows PURGED");
     expect(plan.summary).toContain("drops off the Tenants list and offers no further removal");

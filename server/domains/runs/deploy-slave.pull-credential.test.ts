@@ -61,9 +61,8 @@ describe("the registry pull credential a machine keeping no books is handed", ()
 
     expect(h.hosts.files.map((f) => `${f.path} ${f.content}`).filter((w) => w.includes(value))).toEqual([]);
     expect(h.hosts.log.map((l) => `${l.host} ${l.command}`).filter((w) => w.includes(value))).toEqual([]);
-    // AND NO SESSION WAS OPENED AT ALL. The file this replaces was read back off the machine before
-    // it was written, so composing the value used to be a reason to talk to a machine; it is not one
-    // any more, and a reading that came back would be a machine mid-run holding the same credential.
+    // AND NO SESSION WAS OPENED AT ALL. Composing this value is no reason to talk to a machine, and
+    // a reading that came back would be a machine mid-run holding the same credential.
     expect(h.hosts.files).toEqual([]);
     expect(h.hosts.log).toEqual([]);
   });

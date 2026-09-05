@@ -10,13 +10,13 @@ import {
   seedMasterCluster, drainToNextTimer, type Harness,
 } from "./deploy-slave.fixture.ts";
 
-// THE THREE STEPS THAT READ ARGOCD, and the one thing they no longer do.
+// THE THREE STEPS THAT READ ARGOCD, and the one thing none of them does.
 //
-// gitops-handoff, verify-slave's two master-side HARD gates and argocd-follow used to read ArgoCD by
-// running `microk8s kubectl` over an SSH session, raising every one of those reads to root with the
-// machine's elevation password, every ten seconds, for up to thirty minutes. They read it through
-// the Manager pod's own ServiceAccount now — the same port every consumer and tenant run kind
-// already resolves through, and the RBAC for both reads already stands on the Manager's grants.
+// gitops-handoff, verify-slave's two master-side HARD gates and argocd-follow read ArgoCD through
+// the Manager pod's own ServiceAccount — the same port every consumer and tenant run kind already
+// resolves through, and the RBAC for both reads already stands on the Manager's grants. Reading it
+// by running `microk8s kubectl` over an SSH session instead would raise every one of those reads to
+// root with the machine's elevation password, every ten seconds, for up to thirty minutes.
 //
 // WHAT IS MEASURED HERE is therefore where the read went, not what it returned: no command reaches
 // the master from these steps at all, and the reader really was asked. The planted defect at the

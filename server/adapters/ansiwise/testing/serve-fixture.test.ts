@@ -6,9 +6,9 @@ import { ansiwiseBinaries, MAY_SKIP_REAL_SERVE, NO_BINARY } from "./serve-fixtur
 
 // THE GATE THE REAL-SERVE SUITES ASK, AND THE ONE PLACE THAT CAN MAKE THEM VANISH.
 //
-// A green run that skipped the real-serve file reads exactly like a green run that passed it, and
-// two tests of that file were red on master for a day underneath such a green (#110, #111). So the
-// absence of the binaries is a REFUSAL and not a skip, and the concession for somebody who cannot
+// A green run that skipped the real-serve file reads exactly like a green run that passed it, so a
+// red test of that file can stand under such a green unnoticed. The absence of the binaries is
+// therefore a REFUSAL and not a skip, and the concession for somebody who cannot
 // build them is one named variable rather than the default. This file is what holds that: it is in
 // the in-process project, so it runs on every machine whether the binaries are there or not.
 //

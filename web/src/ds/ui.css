@@ -525,8 +525,8 @@
 /* A TENANT a tenant-purge deprovisioned (status "purged"). It shares the neutral
    tone with .badge--offboarded on purpose: both are terminal, nothing of either tenant is deployed, and
    a louder tone would read as an alarm about a removal that went exactly as asked. The WORD is the
-   distinction the operator needs, and the two words are what the states now carry — before this one
-   existed a purge settled its rows to "offboarded" and the badge could not tell them apart at all. */
+   distinction the operator needs, and the two words are what the states carry — settled to one word
+   the badge could not tell a purge and an offboard apart at all. */
 .badge--purged {
   --c: var(--neutral);
 }

@@ -111,8 +111,8 @@ describe("VaultSelfSeeder seed (the consumer's ceremony secrets)", () => {
       // Drop it and the write silently becomes an overwrite: the caller re-mints every `generate:`
       // key on every run, so a re-onboard would rotate a LIVE consumer's signing keys underneath
       // pods that read their env once at start. Assert the exact body so that regression cannot
-      // pass. (An earlier test in this repo asserted a portless vaultServer and thereby FROZE a
-      // real bug — a test that asserts the broken shape is worse than no test.)
+      // pass. A test that asserts the broken shape — a portless vaultServer, say — freezes the bug
+      // instead of catching it, and is worse than no test.
       expect(recorded[1]!.body).toEqual({ data: { API_KEY: "xyz" }, options: { cas: 0 } });
       expect(recorded[2]!.token).toBe("s.tok123");
     });

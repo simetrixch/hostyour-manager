@@ -73,9 +73,9 @@ export async function wire(): Promise<Wired> {
   // Tekton gate-runner config (ONBOARD_GATE_MANAGER_ADDR) + platform repo are both configured
   // (else defs=[] and the mutating consumer routes answer 501). See wire-units.ts.
   // THE MASTER-LOCAL KUBE CLIENTS AND THE ONE RESOLVER OVER THEM, built here and handed to everything
-  // that needs them. Both families used to build their own trio and their own resolver from the same
-  // input, so a cluster run kind could reach neither: both stood behind a family's own configuration
-  // guard, and a cluster deployment must not depend on consumer onboarding being configured.
+  // that needs them. A family building its own trio and its own resolver from the same input puts
+  // both behind that family's configuration guard, and a cluster run kind can then reach neither —
+  // while a cluster deployment must not depend on consumer onboarding being configured.
   const masterKube = masterKubeClients(config);
   const resolver = makeClusterKubeResolver({
     db: db.db,

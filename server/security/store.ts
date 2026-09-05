@@ -277,7 +277,7 @@ export class CredentialStore {
   }
 
   /** HARD-delete a credential row — the plaintext blob is removed, not just revoked
-   *. Used to fully remove a server leaving the inventory. Audited. Idempotent. */
+   *. Used by the full removal of a server leaving the inventory. Audited. Idempotent. */
   async purge(id: string): Promise<void> {
     const row = this.db.select().from(credentials).where(eq(credentials.id, id)).get();
     if (!row) return;

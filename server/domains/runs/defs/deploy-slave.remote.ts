@@ -189,11 +189,11 @@ export function dataDiskFrom(mountTable: string): { storage_mount: string; stora
 
 /** WHERE THIS MACHINE CAN BE REACHED, each address on its own as a `/32`.
  *
- *  THE MASTER'S ADDRESSES USED TO STAND IN A SLAVE'S MAP. `global.nodeCidrs` is what the gate
- *  sandbox draws its fence from, and a slave's whole map is composed from the master's — so the
- *  fence around a slave named the master's machine and left the slave's own outside it. Nothing
- *  reported it: the list was not empty, so the reader that refuses to render on an empty list had
- *  something to render.
+ *  INHERITING THE MASTER'S ADDRESSES PUTS THE WRONG FENCE AROUND A SLAVE. `global.nodeCidrs` is
+ *  what the gate sandbox draws its fence from, and a slave's whole map is composed from the
+ *  master's — so a map that does not override this key fences the master's machine and leaves the
+ *  slave's own outside it. Nothing reports it: the list is not empty, so the reader that refuses to
+ *  render on an empty list has something to render.
  *
  *  THE SAME READING measure_host_addresses takes on a master, because the two write one file and a
  *  second lifting of the same fact must not read it a second way: every global-scope IPv4 address

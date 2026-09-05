@@ -185,9 +185,9 @@ export function buildUnits(
   db: Db,
   logger: Logger,
   /** The master-local clients and the ONE per-cluster resolver over them, built in the composition
-   *  root (boot/wire.ts) rather than per family. Each family used to construct its own trio and its
-   *  own resolver from the same input; a cluster run kind then had no way to reach one at all,
-   *  because both stood behind a family's own configuration guard. */
+   *  root (boot/wire.ts) rather than per family. A family constructing its own trio and its own
+   *  resolver from the same input puts both behind that family's configuration guard, and a cluster
+   *  run kind then has no way to reach one at all. */
   kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
 ): UnitsWiring {
   // ONE activation client for the whole manager — a plain fetch to a consumer's / tenant's OWN public

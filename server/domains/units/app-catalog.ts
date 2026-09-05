@@ -38,8 +38,8 @@ export const RESERVED_OVERLAY_NAMES = new Set<string>(["dev", "test", "prod", "c
  *  accepts (a defensive belt against a stray/renamed file); de-dupe + sort for a stable picker order.
  *
  *  It does NOT exclude names that collide with a standing member, and cannot: the catalog is the
- *  PRODUCT's list of app types, while the standing members are a fact about ONE tenant. It used to
- *  drop {auth, jobs, report} here, which is three component names of one product filtered out of every
+ *  PRODUCT's list of app types, while the standing members are a fact about ONE tenant. Dropping
+ *  {auth, jobs, report} here would be three component names of one product filtered out of every
  *  catalog of every product. The collision is caught where both sides are known — the superRefine on
  *  TenantRegistrationSchema, which holds an app name against that tenant's own members. */
 export function parseAppCatalog(entries: string[]): string[] {

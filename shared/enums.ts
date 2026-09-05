@@ -15,9 +15,8 @@
 //
 // THERE IS NO STATUS FOR BEING TAKEN OVER. A machine is written down, deployed, and serving; being
 // reachable by this manager's own key is something the deployment establishes on its way through
-// rather than a position of its own. The run kind that used to write such a status is gone, and a
-// status nothing writes is a state the screen has to explain and the reader has to learn for
-// nothing.
+// rather than a position of its own. No run kind writes such a status, and a status nothing writes
+// is a state the screen has to explain and the reader has to learn for nothing.
 export const SERVER_STATUS = ["bare", "ready", "provisioning",
   "healthy", "degraded", "draining", "undeployed"] as const;
 export type ServerStatus = (typeof SERVER_STATUS)[number];

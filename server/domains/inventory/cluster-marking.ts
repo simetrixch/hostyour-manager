@@ -246,10 +246,10 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
     ...(g.apiPort !== undefined ? { apiPort: g.apiPort } : {}),
     ...(g.unitApex !== undefined ? { unitApex: g.unitApex } : {}),
     ...(g.platformDomain !== undefined ? { platformDomain: g.platformDomain } : {}),
-    // A LIST STAYS A LIST. It used to be joined on a comma here and written back as a plain scalar,
-    // so the first rewrite of a map turned ['a@x', 'b@x'] into `a@x,b@x` — one mailbox that is two,
-    // and a value the alert route cannot range over at all. A scalar is still accepted, because a
-    // map may have been written that way before this, and it is split on the same comma.
+    // A LIST STAYS A LIST. Joined on a comma here and written back as a plain scalar, the first
+    // rewrite of a map turns ['a@x', 'b@x'] into `a@x,b@x` — one mailbox that is two, and a value
+    // the alert route cannot range over at all. A scalar is accepted all the same, because a map
+    // may be written that way by hand, and it is split on the same comma.
     ...(g.alertRecipients !== undefined
       ? { alertRecipients: (Array.isArray(g.alertRecipients) ? g.alertRecipients : g.alertRecipients.split(","))
           .map((m) => m.trim()).filter((m) => m.length > 0) }
@@ -462,8 +462,8 @@ function serializeMarking(m: ClusterMarking): string {
 /** The fields on which a marking and its reparse disagree, each with both sides — empty when they
  *  agree.
  *
- *  IT NAMES THEM because the guard that uses it used to say only that a map "diverged", and a
- *  writer reading that has to bisect the serializer to find out which of seventeen keys moved.
+ *  IT NAMES THEM because a guard saying only that a map "diverged" leaves the writer reading it to
+ *  bisect the serializer to find out which of seventeen keys moved.
  *
  *  `header` is out: it is the file's own explanation, not a fact about the cluster, and the
  *  round-trip reparses a body that carries no comments — comparing it would fail every write. */

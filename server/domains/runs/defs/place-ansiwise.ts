@@ -109,10 +109,9 @@ export const ANSIWISE_EXECUTABLES = [ANSIWISE_TOOL, ANSIWISE_REST_TOOL] as const
  *  lives, and not an exemption from the rule.
  *
  *  IT IS NOT A COPY OF THE DART SOURCE, and that is the whole difficulty this answers. A word
- *  written down here would be a second statement of the engine's surface, which is the same defect
- *  one level up: `installServiceArgv` was such a statement, it was correct on the day it was written
- *  and wrong three releases later, and nothing in this repository noticed
- *  (simetrixch/ansiwise-cli#14). So engine-programs.ansiwise.test.ts asks the REAL binary the sibling
+ *  written down here would be a second statement of the engine's surface: correct on the day it is
+ *  written, wrong the release the engine drops that program, and nothing in this repository would
+ *  notice. So engine-programs.ansiwise.test.ts asks the REAL binary the sibling
  *  checkout built: refused a word, the binary names its own set on the line `it serves: …`, and that
  *  is what this record is compared against. A program deleted from the engine therefore turns this
  *  repository red where the binary stands, instead of reaching a machine as a word it no longer
@@ -480,9 +479,9 @@ function describeExecutables(version: string): string {
 
 /** What each executable answers when it is asked which release it is.
  *
- *  ASKED, NEVER DERIVED FROM A FILE NAME. The version used to be read out of the name a symlink
- *  pointed at, which was a statement this module wrote and this module read back — so it said what
- *  the placement had INTENDED and never what the file is. Both binaries answer their release tag on
+ *  ASKED, NEVER DERIVED FROM A FILE NAME. A version read out of the name a symlink points at is a
+ *  statement this module wrote and this module reads back, so it says what the placement INTENDED
+ *  and never what the file is. Both binaries answer their release tag on
  *  one line and nothing else on it (ansiwise-cli lib/installation.dart `answeredVersion`), and it is
  *  answered before a program is looked for, so it works on a machine carrying no catalogue at all. */
 async function readVersions(

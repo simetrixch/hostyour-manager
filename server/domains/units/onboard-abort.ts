@@ -8,11 +8,10 @@
 // ORDER. abortWithCleanup runs a run's registered cleanups in reverse STEP order but keeps ONE step's
 // registrations in the order they were written (executor/cleanup.ts) — so write-registration arms the
 // WHOLE list below and the rollback runs registration-removal FIRST, then the prune wait, then the
-// object deletes. The per-step arming this replaces produced the reverse: the AppProject went while
-// the generated Application still referenced it, and nothing ever waited for the prune.
+// object deletes. Per-step arming produces the reverse: the AppProject goes while the generated
+// Application still references it, and nothing waits for the prune.
 //
-// AND THE LIST IS SHORTER THAN IT WAS, because most of what an onboard used to WRITE it no longer
-// writes. Since hostyour-cloud#174 the isolation AppProject, the admission policy with its Binding,
+// AND THE LIST IS SHORT, because an onboard writes little. The isolation AppProject, the admission policy with its Binding,
 // the argo-sync grant and the two `<name>-build` grants are rendered from the registration, so
 // removing that registration is what takes them: ArgoCD's own prune, waited for right here, is the
 // compensation. What is left to delete by hand is what no reconciler renders — the repository

@@ -216,9 +216,9 @@ describe("Executor recovery — retry / skip / abort-with-cleanup", () => {
       const runId = await refusedAtGate(executor);
       expect(getRun(db.db, runId)?.steps.find((s) => s.name === "attest-target")?.status).toBe("failed");
 
-      // The run screen feeds its skip dialog exactly the failed steps, so this is the ONE click that used
-      // to turn the refusal into "proceed": the step went skipped, the run went running, and the loop —
-      // which passes over skipped rows — walked straight into the mutations the gate refused.
+      // The run screen feeds its skip dialog exactly the failed steps, so this is the ONE click that
+      // would turn the refusal into "proceed": the step goes skipped, the run goes running, and the
+      // loop — which passes over skipped rows — walks straight into the mutations the gate refused.
       await expect(executor.skipStep(runId, "attest-target", "I know, proceed anyway")).rejects.toThrow(/cannot be skipped/);
       await executor.settle(runId);
 

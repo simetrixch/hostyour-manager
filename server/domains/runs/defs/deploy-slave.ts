@@ -449,11 +449,11 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         if (!/^[a-z0-9._:-]+$/i.test(apiHost)) {
           throw errValidation(`server ${server.name} has a malformed API address "${apiHost}" — fix the inventory row (tailnetHost, lanHost or host)`);
         }
-        // THE INSTALLATION, WITH THIS MACHINE'S FACTS OVER IT. A slave's map used to be built from
-        // a handful of fields copied by name, and everything not named was simply absent: of the
-        // seventeen keys a master's map carries, a slave's had ten. What went missing were the
-        // things every program on that machine reads — the address of the secret store among them,
-        // which is why its own machine layer stopped at "is not on this host" (apps4, 2026-08-29).
+        // THE INSTALLATION, WITH THIS MACHINE'S FACTS OVER IT. Building a slave's map from a
+        // handful of fields copied by name leaves everything not named simply absent — ten of the
+        // seventeen keys a master's map carries. What goes missing is what every program on that
+        // machine reads, the address of the secret store among them, and its own machine layer then
+        // stops at "is not on this host".
         //
         // So the master's map is the ground and the overrides below are the whole of what differs.
         // A key added to a master's map from now on reaches a slave without anybody remembering to

@@ -1,5 +1,5 @@
-// WHO OWNS WHAT THIS PLATFORM LEAVES ON A MACHINE. One sentence, decided by the product owner on
-// 2026-08-27, and every writer in this repository follows it:
+// WHO OWNS WHAT THIS PLATFORM LEAVES ON A MACHINE. One sentence, and every writer in this
+// repository follows it:
 //
 //   Everything this platform puts on a machine belongs to the account the manager reaches it as —
 //   the checkouts under /srv, the catalogue, /var/lib/ansiwise, and anything added later. Root may

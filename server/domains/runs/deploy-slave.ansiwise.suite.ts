@@ -262,7 +262,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
         const cp = JSON.parse(stepColumn(h.db, runId, step, "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
         expect(cp.__cleanups, step).toEqual([name]);
       }
-      // ...AND THE THREE STEPS THAT USED TO ARM ONE NOW ARM NOTHING. Each of them acts on the
+      // ...AND THE THREE STEPS THAT COULD ARM ONE ARM NOTHING. Each of them acts on the
       // SLAVE, and a half-finished run on the slave is finished by running the run again — so a
       // compensation there either takes away what the retry needs (the key line, the shut password
       // door) or undoes what the retry redoes anyway (the snap).

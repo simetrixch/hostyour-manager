@@ -11,9 +11,8 @@ import { ENGINE_PROGRAMS, ANSIWISE_REST_TOOL, ANSIWISE_TOOL } from "./defs/place
 //
 // This manager composes command lines naming the engine's binaries, and ENGINE_PROGRAMS is what says
 // which words those binaries answer. Written down and left alone, that record is a SECOND statement
-// of a fact that lives somewhere else — which is exactly the defect it was added to catch:
-// `installServiceArgv` was such a statement, it was true on the day it was written, and
-// simetrixch/ansiwise-cli#14 deleted the program underneath it without one check here going red.
+// of a fact that lives somewhere else: true on the day it is written, and false the release the
+// engine deletes the program underneath it, with no check here going red.
 //
 // SO IT IS ASKED, AND ASKED OF THE ARTEFACT. Refused a word it does not carry, `ansiwise-rest` names
 // its own set on the line `it serves: …` and exits 64 (ansiwise-cli bin/ansiwise_rest.dart) — before
@@ -23,10 +22,10 @@ import { ENGINE_PROGRAMS, ANSIWISE_REST_TOOL, ANSIWISE_TOOL } from "./defs/place
 //
 // THE BUILD AND NOT THE SOURCE, deliberately. hostyour-deploy's check reaches into ../ansiwise-cli
 // for a Dart SUITE, which reads that repository's source. What reaches a machine is the compiled
-// binary, and the two can differ: measured while this was written, the build standing beside this
-// checkout was three programs ahead of its own source, so every real-serve test in this repository
-// was proving the manager against a door the engine no longer has. Reading the source would have
-// called that tree green; asking the binary does not.
+// binary, and the two can differ: a build standing beside this checkout can be several programs
+// ahead of its own source, and every real-serve test in this repository would then be proving the
+// manager against a door the engine no longer has. Reading the source calls such a tree green;
+// asking the binary does not.
 //
 // IT STARTS NO INSTALLATION AND NO SERVE. The word is refused before anything is opened, so this
 // file touches no run root and cannot collide with the suite that does — it is a `.ansiwise.` file
