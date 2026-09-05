@@ -26,10 +26,7 @@ import { removeSudoersScript, SUDOERS_DROP_IN } from "./defs/manager-key.kit.ts"
 import {
   CERTS_CMD,
   SECRET_STORES_CMD,
-  argoAppsCmd,
   dnsProbeScript,
-  externalSecretsCmd,
-  forceSyncExternalSecretsCmd,
   slaveDiagScript,
 } from "./defs/deploy-slave.remote.ts";
 
@@ -78,7 +75,4 @@ export const REMOTE_SCRIPTS: readonly RemoteScript[] = [
 export const REMOTE_COMMANDS: readonly RemoteScript[] = [
   { symbol: "SECRET_STORES_CMD", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: SECRET_STORES_CMD },
   { symbol: "CERTS_CMD", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: CERTS_CMD },
-  { symbol: "argoAppsCmd", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: argoAppsCmd(SLAVE_FQDN) },
-  { symbol: "externalSecretsCmd", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: externalSecretsCmd(SLAVE_FQDN) },
-  { symbol: "forceSyncExternalSecretsCmd", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: forceSyncExternalSecretsCmd(SLAVE_FQDN) },
 ];

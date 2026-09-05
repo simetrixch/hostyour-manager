@@ -1,18 +1,16 @@
 import { eq } from "drizzle-orm";
-import type { Step, StepCtx } from "../../../executor/types.ts";
+import type { Step } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
-import type { SshSession } from "../../../adapters/ssh/port.ts";
+import type { ArgoApplicationRow } from "../../../adapters/kube/port.ts";
 import { clusters, servers } from "../../../db/schema/inventory.ts";
-import { errValidation } from "../../../kernel/errors.ts";
-import { execCapture } from "../../../executor/stepkit.ts";
+import { AppError, errValidation } from "../../../kernel/errors.ts";
 import { attestMachineId } from "../../../executor/attest.ts";
 import { ATTEST_TARGET_STEP } from "../../../executor/guards.ts";
-import { isMasterRole } from "../../../../shared/enums.ts";
-import { clusterShortName } from "../../inventory/cluster-marking.ts";
-import { argoAppsCmd, parsePipeRows } from "./deploy-slave.remote.ts";
-import { loadServer, loadMaster, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
+import {
+  loadServer, requireResolver, sleepUnlessAborted, type DeploySlavePorts, type SlaveTarget,
+} from "./deploy-slave.kit.ts";
 import { openDoor } from "./manager-key.kit.ts";
-import { requireElevationPassword, ANSIWISE_ELEVATION_SECRET } from "./ansiwise-run.kit.ts";
+import { ANSIWISE_ELEVATION_SECRET } from "./ansiwise-run.kit.ts";
 
 // The building blocks the run kinds that act on a LIVE cluster share:
 //
@@ -34,21 +32,6 @@ const ARGOCD_FOLLOW_TIMEOUT_MS = 30 * 60_000;
 
 /** Poll cadence of the follow — slow enough to keep the run log readable. */
 const ARGOCD_FOLLOW_POLL_MS = 10_000;
-
-/** WHERE a cluster's Applications live, and over which session they are read. A cluster carrying the
- *  MASTER part operates its own ArgoCD in namespace `argocd` on itself. A pure slave has no ArgoCD of
- *  its own: its Application CRs live in the per-slave instance in namespace <name> ON THE MASTER,
- *  which is why the session and the namespace are decided together and never separately. */
-async function argoSurface(ctx: StepCtx, target: SlaveTarget): Promise<{ session: SshSession; namespace: string; where: string }> {
-  const { domain } = target.resolve(ctx.db);
-  const server = loadServer(ctx.db, target.serverId);
-  if (isMasterRole(server.role)) {
-    return { session: await ctx.ssh(), namespace: "argocd", where: `ns argocd on ${server.name}` };
-  }
-  const master = loadMaster(ctx.db);
-  const name = clusterShortName(domain);
-  return { session: await ctx.ssh(master.id), namespace: name, where: `ns ${name} on ${master.name}` };
-}
 
 /** The fail-closed precondition of every run kind that acts on a LIVE cluster: the cluster row is
  *  active (the target lookup refuses anything else) and the machine answering on that host is still
@@ -86,42 +69,51 @@ export function attestClusterStep(target: SlaveTarget): Step {
  *  abortable; zero Applications means the appset has not generated yet and is retried, never read as
  *  "nothing to wait for".
  *
- *  IT REACHES THE CLUSTER THE SAME WAY ITS NEIGHBOURS DO: with the elevation password the run
- *  asked for at approve, which is what the program steps raise every one of their commands
- *  with. Asking for `sudo -n` instead rests on a standing rule no run kind here writes — so on a
- *  master installed by ansiwise-client, which carries none, the last step of a redeploy would be
- *  refused while every step before it had gone green. Measured on a first master:
- *  /etc/sudoers.d/ held only a README, and the run said "sudo: interactive authentication is
- *  required" under a line telling the operator the cluster was not answering yet. */
-export function argocdFollowStep(target: SlaveTarget): Step {
+ *  IT SENDS THE CLUSTER NOTHING. The Applications are read over the Manager pod's own
+ *  ServiceAccount, through the same resolver every unit run kind reaches ArgoCD with, and both the
+ *  reader and the namespace come from ONE resolve: `argoNamespace` is `argocd` for a target carrying
+ *  the master part and the per-slave instance's namespace on the master for a slave, and pairing
+ *  them anywhere else would put that pairing one rename away from coming apart
+ *  (domains/units/cluster-kube.ts). What this used to do was run `microk8s kubectl` over the
+ *  target's SSH session every ten seconds for up to thirty minutes, raising every one of those
+ *  reads to root with the machine's elevation password. */
+export function argocdFollowStep(target: SlaveTarget, ports: DeploySlavePorts): Step {
   return {
     name: "argocd-follow",
     title: "Follow ArgoCD until the cluster's applications are Synced and Healthy",
     run: async (ctx) => {
-      const { session, namespace, where } = await argoSurface(ctx, target);
-      const elevation = requireElevationPassword(ctx);
+      const { cluster } = loadActiveCluster(ctx.db, target.serverId);
+      const { argoReader, argoNamespace } = await requireResolver(ports).resolve(cluster.id);
+      const where = `ns ${argoNamespace}`;
       const deadline = Date.now() + ARGOCD_FOLLOW_TIMEOUT_MS;
       for (;;) {
-        const read = await execCapture(ctx, session, argoAppsCmd(namespace), { timeoutMs: 60_000, elevation });
-        const rows = read.code === 0 ? parsePipeRows(read.out) : [];
-        const pending = rows.filter((row) => row[1] !== "Synced" || row[2] !== "Healthy");
-        if (read.code === 0 && rows.length > 0 && pending.length === 0) {
-          ctx.checkpoint({ namespace, applications: rows.length });
-          ctx.log("meta", `all ${rows.length} applications in ${where} are Synced + Healthy — the cluster runs its branch's state`);
-          return;
+        // A kube read that failed is a failing TICK and not a step death. This step runs right after
+        // deploy-platform-services restarted kubelite on the master arm, and the Manager's own
+        // reader is on that API server: the pod loses it mid-follow by design (ansiwise-run.kit.ts
+        // says so where the restart is driven). The retry ends at the same deadline.
+        let rows: ArgoApplicationRow[] | undefined;
+        let refusal = "";
+        try {
+          rows = await argoReader.listApplications(argoNamespace);
+        } catch (e) {
+          if (!(e instanceof AppError) || e.code !== "UPSTREAM") throw e;
+          refusal = `the kube API did not answer — ${e.message}`;
         }
-        // A non-zero exit names the command and points at the log, and guesses at no cause: the
-        // reading that guessed "not answering yet?" was printed under a REFUSED elevation for as
-        // long as this step used `sudo -n`, and it sent the operator to look at the cluster.
-        const detail = read.code !== 0
-          ? `kubectl exit ${read.code} reading ${where} — the run log above carries what it said`
-          : rows.length === 0
+        if (rows !== undefined) {
+          const pending = rows.filter((row) => row.sync !== "Synced" || row.health !== "Healthy");
+          if (rows.length > 0 && pending.length === 0) {
+            ctx.checkpoint({ namespace: argoNamespace, applications: rows.length });
+            ctx.log("meta", `all ${rows.length} applications in ${where} are Synced + Healthy — the cluster runs its branch's state`);
+            return;
+          }
+          refusal = rows.length === 0
             ? "no Applications generated yet"
-            : `${rows.length - pending.length}/${rows.length} ready — pending: ${pending.slice(0, 5).map((row) => `${row[0] ?? "?"} (${row[1] ?? "?"}/${row[2] ?? "?"})`).join(", ")}`;
-        if (Date.now() >= deadline) {
-          throw errValidation(`the applications in ${where} did not converge within ${ARGOCD_FOLLOW_TIMEOUT_MS / 60_000} min — last state: ${detail}`);
+            : `${rows.length - pending.length}/${rows.length} ready — pending: ${pending.slice(0, 5).map((row) => `${row.name} (${row.sync}/${row.health})`).join(", ")}`;
         }
-        ctx.log("meta", `waiting for ${where} to converge (${detail})`);
+        if (Date.now() >= deadline) {
+          throw errValidation(`the applications in ${where} did not converge within ${ARGOCD_FOLLOW_TIMEOUT_MS / 60_000} min — last state: ${refusal}`);
+        }
+        ctx.log("meta", `waiting for ${where} to converge (${refusal})`);
         await sleepUnlessAborted(ARGOCD_FOLLOW_POLL_MS, ctx.signal);
       }
     },

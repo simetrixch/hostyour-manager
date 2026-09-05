@@ -127,8 +127,26 @@ export function targetedRevisionFor(s: ArgoAppStatus, repoURL: string): string |
  *  name (an expected name whose CR does not exist yet reads Missing; see watchApplicationSet). */
 export type ArgoAppStatusMap = ReadonlyMap<string, ArgoAppStatus>;
 
+/** One Application a namespace HOLDS, as a listing reports it: its name beside the same status
+ *  every other read of an Application answers with.
+ *
+ *  IT IS NOT THE SHAPE `watchApplicationSet` ANSWERS WITH, and the difference is the whole reason
+ *  this exists. That map is keyed by the caller's EXPECTED names and throws away anything found
+ *  under a name not in that list (kube-map.ts mapApplicationSet), which is right for a fan-out whose
+ *  members the caller can name. A gate that waits on an ApplicationSet cannot name them — the set
+ *  generates them — and reads zero found as "still generating". Asked with an empty expected list,
+ *  that map is empty and every `every`-shaped predicate over it is vacuously true on the first
+ *  tick. */
+export interface ArgoApplicationRow extends ArgoAppStatus {
+  name: string;
+}
+
 export interface MasterArgoReader {
   getApplication(namespace: string, name: string): Promise<ArgoAppStatus | null>;
+  /** Every Application the namespace HOLDS, in the order the API server lists them. What it returns
+   *  is what it FINDS, so a caller counting a set nobody can name — an ApplicationSet's own output —
+   *  can tell "none generated yet" from "all converged". */
+  listApplications(namespace: string): Promise<ArgoApplicationRow[]>;
   /** Watch until `until(status)` holds or the timeout fires; returns the last observed status.
    *  On timeout the returned status simply fails `until` — the caller decides it is a failure.
    *  An optional `failFast(status)` stops the poll EARLY when a status is terminally failed (a
@@ -172,6 +190,25 @@ export interface SmokeResult {
   namespaceExists: boolean;
   workloads: WorkloadStatus[];
   externalSecretsReady: boolean; // every ExternalSecret Ready=True (SecretSynced)
+}
+
+/** One ExternalSecret a namespace holds: what it is called, whether ESO reports it Ready, WHY it
+ *  says so, and which Secret it materializes.
+ *
+ *  THE REASON AND THE TARGET ARE WHAT A BOOLEAN CANNOT SAY. `SmokeResult.externalSecretsReady`
+ *  collapses a whole namespace to one bit, so a gate built on it can report that something is stuck
+ *  and never which credential it is — and the credential's name is the whole of what an operator
+ *  acts on at two in the morning. */
+export interface ExternalSecretRow {
+  name: string;
+  /** The `Ready` condition reads `True`. An ExternalSecret carrying no Ready condition at all — one
+   *  ESO has not looked at yet — is not ready. */
+  ready: boolean;
+  /** The Ready condition's `reason`, or the empty text where there is no such condition. */
+  reason: string;
+  /** `.spec.target.name` — the Secret this materializes into, or the empty text where the
+   *  ExternalSecret names none (ESO then uses its own name). */
+  targetSecret: string;
 }
 
 /** kube-system/hostyour-cloud-deploy-state, written by the installer on every deploy — attest-target
@@ -222,6 +259,9 @@ export interface JobResult {
 
 export interface ClusterReader {
   smoke(namespace: string): Promise<SmokeResult>;
+  /** Every ExternalSecret in `namespace`, one row each. `smoke`'s `externalSecretsReady` is derived
+   *  from exactly these rows, so the bit and the rows can never disagree. */
+  listExternalSecrets(namespace: string): Promise<ExternalSecretRow[]>;
   /** Run ONE Job to completion in `namespace` and return its outcome + collected pod log. The job
    *  carrier of the move/backup/restore mechanism: dumps, restores and listings all run as in-cluster
    *  Jobs of the pinned dbtools image, because the databases are reachable there and the Manager

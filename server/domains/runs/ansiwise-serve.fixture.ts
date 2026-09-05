@@ -15,7 +15,7 @@ import { ANSIWISE_ELEVATION_SECRET, RECORD_APPEARS_POLL_MS, RECORD_APPEARS_TIMEO
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import {
   makeHarness, scriptedHosts, logger, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID,
-  IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY, MASTER_PUBLIC_KEY, FIXTURE_REGISTRY_HOST, pullDocumentFor,
+  IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY, MASTER_PUBLIC_KEY, FIXTURE_REGISTRY_HOST, pullDocumentFor, seedMasterCluster,
   type Harness, type HostsScript,
 } from "./deploy-slave.fixture.ts";
 import type { DbHandle } from "../../db/client.ts";
@@ -289,10 +289,14 @@ export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean
  *  seeded here — the run's own marking step writes it, on the books branch, before the join. */
 export async function deployWorld(serve: ServeFixture, opts: { withoutCarriedValues?: boolean } = {}): Promise<Harness> {
   const hosts = scriptedHosts({ openConversation: async () => openChannel(serve) });
-  return makeHarness({
+  const h = await makeHarness({
     hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve", marking: false,
     ...(opts.withoutCarriedValues === true ? { withoutCarriedValues: true } : {}),
   });
+  // The master's own cluster row, as boot seeds it on every installation: gitops-handoff and
+  // verify-slave read the master's ArgoCD through it (defs/deploy-slave.kit.ts masterClusterId).
+  seedMasterCluster(h);
+  return h;
 }
 
 /** A slave that already IS one — redeploy's slave arm acts on this. The default marking rides
@@ -327,6 +331,7 @@ export async function liveSlaveWorld(serve: ServeFixture, overrides: Partial<Hos
     id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1, planeState: "ready",
   }).run();
   h.db.db.update(servers).set({ status: "healthy" }).where(eq(servers.id, SLAVE_ID)).run();
+  seedMasterCluster(h);
   return h;
 }
 

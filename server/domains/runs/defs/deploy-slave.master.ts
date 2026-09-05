@@ -332,7 +332,7 @@ export function masterSlavePartSteps(params: DeploySlaveParams, ports: DeploySla
     ansiwiseProgramStep(target, "deploy-platform-services", ports, { extra: machineAnswers }),
     // What the cluster's own reconciler makes of the branch it now stands on. A cluster carrying the
     // master part operates its own ArgoCD, so the follow reads this machine and no other.
-    argocdFollowStep(target),
+    argocdFollowStep(target, ports),
   ];
 }
 

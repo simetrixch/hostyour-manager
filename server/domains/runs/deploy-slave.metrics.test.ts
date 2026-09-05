@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { clusters } from "../../db/schema/inventory.ts";
 import { FakeMetricsQuery } from "../../adapters/metrics/testing/fake.ts";
 import {
-  SLAVE_ID, PARAMS, makeHarness, disposeHarnesses, hostedStepCtx, scriptedHosts, stepOf,
+  SLAVE_ID, PARAMS, makeHarness, disposeHarnesses, hostedStepCtx, scriptedHosts, stepOf, seedMasterCluster,
   type Harness,
 } from "./deploy-slave.fixture.ts";
 
@@ -31,6 +31,8 @@ describe("verify-slave: the metrics probe over HTTP", () => {
     h.db.db.insert(clusters).values({
       id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
     }).run();
+    // The master's own cluster row: the two master-side gates resolve their kube access through it.
+    seedMasterCluster(h);
     return h;
   }
 

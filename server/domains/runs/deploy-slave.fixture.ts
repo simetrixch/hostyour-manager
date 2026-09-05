@@ -15,19 +15,24 @@ import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { ANSIWISE_PIN_PATH } from "../inventory/ansiwise-pin.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
-import { servers } from "../../db/schema/inventory.ts";
+import { servers, clusters } from "../../db/schema/inventory.ts";
 import { meta } from "../../db/schema/meta.ts";
 import { AuthFailedError, ExecFailedError } from "../../adapters/ssh/port.ts";
 import type { SshFactory, SshSession, SshTarget, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
 import { answerPlacementCommand, ScriptedReleases } from "./deploy-slave.placement.fixture.ts";
 import { FakeMetricsQuery } from "../../adapters/metrics/testing/fake.ts";
+import type { FakeMasterArgoReader, FakeClusterReader, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
+// What the master's ArgoCD holds, beside the harness rather than inside it — a suite that drives a
+// gate reads what stands there off this, and the harness only wires it in.
+export { MASTER_ARGO_NS, SLAVE_ARGO_NS, argoRow, externalSecretRow } from "./deploy-slave.kube.fixture.ts";
+import { masterKubeFakes } from "./deploy-slave.kube.fixture.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { VERIFY_SLAVE_TIMEOUT_MS } from "./defs/deploy-slave.verify.ts";
 import { HOST_ADDRESS_COMMAND } from "./defs/deploy-slave.remote.ts";
 // The maps this harness seeds, beside the harness rather than inside it — a fixture map is read
 // by suites that never touch a harness, and it is the one thing here that states a real file.
 export { SLAVE_MARKING_YAML, MASTER_MARKING_YAML } from "./cluster-maps.fixture.ts";
-import { SLAVE_MARKING_YAML, MASTER_MARKING_YAML, SLAVE_FQDN, FIXTURE_STAGE } from "./cluster-maps.fixture.ts";
+import { SLAVE_MARKING_YAML, MASTER_MARKING_YAML, SLAVE_FQDN, MASTER_FQDN, FIXTURE_STAGE } from "./cluster-maps.fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { fingerprintPublicKey } from "../../security/fingerprint.ts";
@@ -210,10 +215,7 @@ export interface HostsScript extends FirstContactScript {
    *  asked. Non-zero is the case where the coordinator will not let go — the run has to stop there,
    *  because joining anyway puts a second node under one name. */
   coordinatorDeleteExit: number;
-  appSyncOut: string;      // "Synced" ends gitops-handoff's wait immediately
-  externalSecretsOut: string; // verify HARD gate 0 (master): `name|Ready|reason` rows in ns <name>
   diagOut: string;         // verify diagnostic bundle (master, runs only while a gate is failing)
-  argoAppsOut: string;     // verify HARD gate 1 (master): `name|sync|health` rows in ns <name>
   secretStoresOut: string; // verify HARD gate 2 (slave): `ns/name|Ready` rows
   certsOut: string;        // verify SOFT (slave): `ns/name|Ready` rows
   /** WHAT `ip -4 -o addr show scope global` PRINTS ON THIS MACHINE — what mark-slave reads the
@@ -314,10 +316,7 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     }]),
     coordinatorNodesExit: 0,
     coordinatorDeleteExit: 0,
-    appSyncOut: "Synced",
-    externalSecretsOut: "cluster-slave|True|SecretSynced\nrepo-platform|True|SecretSynced\nrepo-catalog|True|SecretSynced",
     diagOut: "==== verify-slave diagnostics (ns s1) ====",
-    argoAppsOut: "root-applications|Synced|Healthy\nplatform-apps-prod|Synced|Healthy",
     secretStoresOut: "external-secrets/vault-backend|True\nredis/vault-backend|True",
     certsOut: "redis/redis-tls|True",
     hostAddressesOut: [
@@ -406,13 +405,10 @@ export function hostsFactory(f: HostsScript): SshFactory {
       // a workload of the master's cluster, and the machine being deployed is never asked.
       if (command.includes("headscale") && command.includes("nodes list")) { emit(f.coordinatorNodesOut); return done(f.coordinatorNodesExit); }
       if (command.includes("headscale") && command.includes("nodes delete")) return done(f.coordinatorDeleteExit);
-      // ---- gitops-handoff
-      if (command.includes("get application ")) { emit(f.appSyncOut); return done(); }
-      // ---- verify-slave (three HARD gates + diagnostics + two SOFT checks)
-      if (command.includes("annotate externalsecrets.external-secrets.io")) return done();
-      if (command.includes("get externalsecrets.external-secrets.io")) { emit(f.externalSecretsOut); return done(); }
+      // ---- verify-slave. The master-side gates send this machine nothing at all now: they read
+      // the master's ArgoCD and its ExternalSecrets through the kube port (the resolver below).
+      // What is left on a session is the diagnostic bundle and the two SLAVE-side reads.
       if (command.includes("dc-slave-diag-")) { emit(f.diagOut); return done(); }
-      if (command.includes("applications.argoproj.io")) { emit(f.argoAppsOut); return done(); }
       if (command.includes("secretstores.external-secrets.io")) { emit(f.secretStoresOut); return done(); }
       if (command.includes("certificates.cert-manager.io")) { emit(f.certsOut); return done(); }
       // ---- mark-slave's own reading of the machine. Answered on stdoutTail and not through `emit`,
@@ -468,6 +464,14 @@ export interface Harness {
    *  test says what comes back. undefined is a manager that was given NO address — the outcome that
    *  must never read like an address that answered nothing (makeHarness `metrics: false`). */
   metrics?: FakeMetricsQuery;
+  /** WHAT THE THREE ARGOCD STEPS READ THROUGH. gitops-handoff, verify-slave's two master-side gates
+   *  and argocd-follow reach the master's ArgoCD over the Manager pod's own kube access, so a test
+   *  scripts what the master HOLDS here rather than what a `microk8s kubectl` line printed.
+   *  `argo` and `cluster` are the master-local pair the resolver hands back for every cluster of
+   *  this harness; `resolver` records which cluster ids were resolved. */
+  argo: FakeMasterArgoReader;
+  cluster: FakeClusterReader;
+  resolver: FakeClusterKubeResolver;
 }
 
 
@@ -521,13 +525,16 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   // pin that is missing or malformed seeds over this.
   platformRepo.seed(PRODUCT_BRANCH, ANSIWISE_PIN_PATH, opts.versionsYaml ?? VERSIONS_YAML);
   const releases = new ScriptedReleases();
+  // What the master's ArgoCD and its ExternalSecrets hold, beside the harness (the file-size
+  // doctrine, and the same shape the placement and first-contact halves take).
+  const { argo, cluster, resolver } = masterKubeFakes();
   // A manager that WAS given a query address, because that is every deployed one; `metrics: false`
   // is the manager that was not, and its whole point is that the check says so rather than passing.
   const metrics = opts.metrics === false ? undefined : opts.metrics ?? new FakeMetricsQuery();
   // THE PORT SET, built once and kept on the harness: a step driven directly (stepOf) has to be
   // driven through the same ports the executor was given, or a test proves a manager nobody ships.
   const runPorts = {
-    db: db.db, platformRepo,
+    db: db.db, platformRepo, resolver,
     // What deploy-host's git_clone row is answered with, as the composition root builds it from
     // GITHUB_OWNER + GITHUB_REPO. A machine cannot read it off a checkout that does not exist yet.
     platformOrigin: PLATFORM_ORIGIN,
@@ -580,7 +587,19 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
     }).run();
     await store.seal({ kind: "ssh_key", label: "master key", plaintext: Buffer.from("fake-master-key"), fingerprint: fingerprintPublicKey(MASTER_PUBLIC_KEY), serverId: MASTER_ID, publicKey: MASTER_PUBLIC_KEY });
   }
-  return { db, executor, store, hosts, platformRepo, releases, runPorts, ...(metrics ? { metrics } : {}) };
+  return { db, executor, store, hosts, platformRepo, releases, runPorts, argo, cluster, resolver, ...(metrics ? { metrics } : {}) };
+}
+
+/** The MASTER's own cluster row, as `seedMaster` writes it at boot on every real installation.
+ *
+ *  A step that reads the master's ArgoCD resolves through THIS row (defs/deploy-slave.kit.ts
+ *  masterClusterId), so a world that leaves it out is a world where those steps refuse by name. It
+ *  is not seeded by `makeHarness` itself because several suites seed a master cluster of their own,
+ *  in a status their case is about, and two inserts would clash on clusters_server_uq. */
+export function seedMasterCluster(h: Harness): void {
+  h.db.db.insert(clusters).values({
+    id: "cls_master", serverId: MASTER_ID, stage: FIXTURE_STAGE, domain: MASTER_FQDN, status: "active",
+  }).run();
 }
 
 /** One step out of the deploy-slave definition's own list, for driving it directly.

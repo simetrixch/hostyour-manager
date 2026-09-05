@@ -6,6 +6,9 @@ import { openDb, type DbHandle } from "../db/client.ts";
 import { parseConfig, type Config } from "../kernel/config.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { CredentialStore } from "../security/store.ts";
+import { masterKubeClients } from "./master-kube.ts";
+import { KubeClusterReader } from "../adapters/kube/kube.ts";
+import { makeClusterKubeResolver } from "../domains/units/cluster-kube.ts";
 import { RunEventBus } from "../executor/bus.ts";
 import { buildRunDefinitions } from "../domains/runs/run-definitions.ts";
 import { buildUnits } from "./wire-units.ts";
@@ -58,8 +61,15 @@ describe("boot self-checks", () => {
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
-    const onboarding = buildUnits(onboardingConfig, store, db.db, logger);
-    const runDefinitions = buildRunDefinitions({ db: db.db, ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}) }, onboarding.defs);
+    const master = masterKubeClients(onboardingConfig);
+    const resolver = makeClusterKubeResolver({
+      db: db.db,
+      master,
+      openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
+      buildClusterReader: (input) => new KubeClusterReader(input),
+    });
+    const onboarding = buildUnits(onboardingConfig, store, db.db, logger, { master, resolver });
+    const runDefinitions = buildRunDefinitions({ db: db.db, resolver, ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}) }, onboarding.defs);
     return { db, store, bus: new RunEventBus(), runDefinitions };
   }
   afterEach(() => {

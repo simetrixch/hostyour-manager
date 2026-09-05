@@ -6,7 +6,6 @@ import type { Db } from "../db/client.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
 import { GitRepoReader, GitPlatformRepo, GitConsumerRepo } from "../adapters/git/git.ts";
 import type { PlatformRepo } from "../adapters/git/port.ts";
-import { KubeMasterArgoReader, KubeClusterReader, KubeMasterProjectWriter } from "../adapters/kube/kube.ts";
 import { KubeBuildRbacWriter } from "../adapters/kube/kube-rbac.ts";
 import { KubeRepoCredentialWriter } from "../adapters/kube/kube-repo-credential.ts";
 import { CloudflareDns } from "../adapters/dns/cloudflare-dns.ts";
@@ -17,8 +16,8 @@ import { unitApexFromChain } from "../domains/units/admission-policy.ts";
 import type { Stage } from "../../shared/enums.ts";
 import { buildPlaneFqdnFromMarkings } from "../domains/inventory/cluster-marking.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
-import { makeClusterKubeResolver } from "../domains/units/cluster-kube.ts";
 import type { ClusterKubeResolver } from "../adapters/kube/port.ts";
+import { masterKubeInput, type MasterKubeClients } from "./master-kube.ts";
 import { TektonGateRunner } from "../adapters/gate-runner/gate-runner-tekton.ts";
 import { HttpRegistryProbe, REGISTRY_PULL_DOCKERCONFIG_PATH } from "../adapters/registry/registry-http.ts";
 import { TektonBuildPlane } from "../adapters/build-plane/build-plane-tekton.ts";
@@ -180,14 +179,17 @@ interface Family {
   ensureBooksBranch?: () => Promise<void>;
 }
 
-/** The master (self-cluster) kube access every master-local client is built from: the pod
- *  ServiceAccount's in-cluster credentials by default, or the KUBECONFIG_PATH file when that
- *  explicit dev/test override is set (kube.ts buildKubeConfig dispatches on the variant). */
-function masterKubeInput(config: Config): { kubeconfigPath: string } | { inCluster: true } {
-  return config.kubeconfigPath !== undefined ? { kubeconfigPath: config.kubeconfigPath } : { inCluster: true };
-}
-
-export function buildUnits(config: Config, store: CredentialStore, db: Db, logger: Logger): UnitsWiring {
+export function buildUnits(
+  config: Config,
+  store: CredentialStore,
+  db: Db,
+  logger: Logger,
+  /** The master-local clients and the ONE per-cluster resolver over them, built in the composition
+   *  root (boot/wire.ts) rather than per family. Each family used to construct its own trio and its
+   *  own resolver from the same input; a cluster run kind then had no way to reach one at all,
+   *  because both stood behind a family's own configuration guard. */
+  kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
+): UnitsWiring {
   // ONE activation client for the whole manager — a plain fetch to a consumer's / tenant's OWN public
   // ingress (no config gate; the target host is the unit's own). Constructed here and shared by BOTH
   // families' invite steps (consumer onboard-activate + tenant create-tenant-activate) so there is a
@@ -266,8 +268,8 @@ export function buildUnits(config: Config, store: CredentialStore, db: Db, logge
       ? { self: { addr: config.vault.addr, k8sAuthMount: config.vault.k8sAuthMount, k8sRole: config.vault.k8sRole, saTokenPath: config.vault.saTokenPath } }
       : {},
   );
-  const tenant = buildTenantOnboarding(config, store, db, activator, logger, platformRepo, clusterStage, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder);
-  const consumer = buildConsumerOnboarding(config, store, db, activator, logger, platformRepo, clusterStage, dns, relocation, tenant.tenantRegistrations, seeder);
+  const tenant = buildTenantOnboarding(config, activator, logger, platformRepo, clusterStage, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, kube);
+  const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, clusterStage, dns, relocation, tenant.tenantRegistrations, seeder, kube);
   // The sanctioned type-erasure (registrations.ts): each typed RunDefinition<P> is stored executor-facing
   // as AnyRunDefinition; the executor parses params via paramsSchema before plan()/steps(). Both
   // families share one flat defs[] — the run kinds are disjoint, so buildRunDefinitions keys them apart.
@@ -295,7 +297,6 @@ export function buildUnits(config: Config, store: CredentialStore, db: Db, logge
 function buildConsumerOnboarding(
   config: Config,
   store: CredentialStore,
-  db: Db,
   activator: Activator,
   logger: Logger,
   platformRepo: PlatformRepo | undefined,
@@ -306,6 +307,8 @@ function buildConsumerOnboarding(
   /** The SAME seeder the tenant family writes through — built once in buildUnits, because there is
    *  one Vault and one Manager identity. */
   seeder: VaultSeeder,
+  /** The master-local clients and the one resolver over them, built in the composition root. */
+  kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
 ): Family {
   if (!config.onboarding || !config.github || !platformRepo || !clusterStage) return { defs: [], enabled: false };
 
@@ -348,25 +351,12 @@ function buildConsumerOnboarding(
       if (reaped > 0) logger.info({ reaped }, "gate-runner: reaped orphaned gate-run objects left by a previous process");
     })
     .catch((e: unknown) => logger.warn({ err: e }, "gate-runner: orphan sweep failed — leftover gate-run objects (including credential Secrets) may still stand"));
-  const argo = new KubeMasterArgoReader(masterKubeInput(config));
-  // The pod SA's in-cluster access covers the master's self-cluster (the owner's OWN apps). A
-  // slave's namespace smoke needs that slave's cluster-admin bearer (plane creds) —
-  // per-cluster ClusterReader resolution is the remaining multi-cluster wiring (multi-cluster integration).
-  const cluster = new KubeClusterReader(masterKubeInput(config));
-  // The Manager's one writing kube client: the per-consumer isolation AppProject on the master's
-  // argocd namespace, over the pod SA's in-cluster access (the CR is master-local).
-  const projects = new KubeMasterProjectWriter(masterKubeInput(config));
-  // The per-cluster kube resolver: master reuses the trio above
-  // verbatim (behavior-identical); a slave gets a per-slave ClusterReader over its harvested
-  // bearer + sealed CA bundle, while argo/projects STAY master-local (the slave's Application CRs
-  // + AppProject live in the per-slave ArgoCD instance ON the master). Injected alongside the single
-  // clients; the resolver switches the steps to resolve per target cluster.
-  const resolver = makeClusterKubeResolver({
-    db,
-    master: { clusterReader: cluster, argoReader: argo, projectWriter: projects },
-    openCredential,
-    buildClusterReader: (input) => new KubeClusterReader(input),
-  });
+  // The master-local trio and the per-cluster resolver over it, both built in the composition root:
+  // master reuses the trio verbatim, a slave gets a per-slave ClusterReader over its harvested bearer
+  // + sealed CA bundle, while argo/projects STAY master-local (the slave's Application CRs +
+  // AppProject live in the per-slave ArgoCD instance ON the master).
+  const { argoReader: argo } = kube.master;
+  const { resolver } = kube;
 
   // The per-call consumer-PAT GitHub client: the scope preflight, the build webhook
   // (create at onboard, remove at offboard/purge) AND the release workflow dispatch + watch. ONE
@@ -526,8 +516,6 @@ function buildConsumerOnboarding(
 // ---- Tenant (multi-app) onboarding: catalog + the manager-side HelmRenderer ----
 function buildTenantOnboarding(
   config: Config,
-  store: CredentialStore,
-  db: Db,
   activator: Activator,
   logger: Logger,
   platformRepo: PlatformRepo | undefined,
@@ -540,6 +528,8 @@ function buildTenantOnboarding(
    *  seeds the tenant's crypto entry with it and tenant-purge destroys the same entry, so the writer and
    *  the destroyer are provably the same object. */
   seeder: VaultSeeder,
+  /** The master-local clients and the one resolver over them, built in the composition root. */
+  kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
 ): Family {
   // A tenant registration names a cluster, and that name is checked against the cluster's marking at
   // the writer — so without a resolver for those markings the family stays off rather than writing a
@@ -601,19 +591,10 @@ function buildTenantOnboarding(
   // is there, the sync succeeds and nothing is created.
   const ensureBooksBranch = (): Promise<void> => deployRepo.withBranch(deployRepo.booksBranch, async () => undefined);
   const tenantRegistrations = new TenantRegistrations(deployRepo, clusterStage);
-  const argo = new KubeMasterArgoReader(masterKubeInput(config));
-  const cluster = new KubeClusterReader(masterKubeInput(config));
-  const projects = new KubeMasterProjectWriter(masterKubeInput(config));
-  // The per-cluster kube resolver — tenants only ever land on slaves
-  // (POLICY), so per-slave resolution is the path that matters here; the master trio still backs
-  // the master-local argoReader/projectWriter. openCredential opens the sealed per-slave bearer from
-  // the credential store (the SAME shape the consumer path uses). The steps reach it through the resolver.
-  const resolver = makeClusterKubeResolver({
-    db,
-    master: { clusterReader: cluster, argoReader: argo, projectWriter: projects },
-    openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
-    buildClusterReader: (input) => new KubeClusterReader(input),
-  });
+  // Tenants only ever land on slaves (POLICY), so per-slave resolution is the path that matters
+  // here; the master trio still backs the master-local argoReader/projectWriter. Both come from the
+  // composition root — one resolver serves this family, the consumer family and the cluster run kinds.
+  const { resolver } = kube;
 
   // The ensure-images gate: the registrations probe reads the mounted manager-registry-pull
   // dockerconfigjson — the SAME pull credential the pod's imagePullSecrets reference — and answers

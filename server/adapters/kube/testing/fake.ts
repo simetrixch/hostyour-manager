@@ -1,6 +1,6 @@
 // In-memory kube fakes for the onboarding domain tests — no cluster, no network. Script the
 // Application status the master watch observes, and the smoke/deploy-state a cluster read returns.
-import type { MasterArgoReader, ArgoAppStatus, ArgoAppStatusMap, ClusterReader, SmokeResult, DeployState, MasterProjectWriter, AppProjectManifest, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, ClusterKubeResolver, ResolvedClusterKube, BuildRbacWriter, BuildRbacGrant, BuildRbacObject, RoleManifest, RoleBindingManifest, RepoCredentialWriter, RepoCredentialManifest, JobSpec, JobResult } from "../port.ts";
+import type { MasterArgoReader, ArgoAppStatus, ArgoAppStatusMap, ArgoApplicationRow, ExternalSecretRow, ClusterReader, SmokeResult, DeployState, MasterProjectWriter, AppProjectManifest, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, ClusterKubeResolver, ResolvedClusterKube, BuildRbacWriter, BuildRbacGrant, BuildRbacObject, RoleManifest, RoleBindingManifest, RepoCredentialWriter, RepoCredentialManifest, JobSpec, JobResult } from "../port.ts";
 import { assertWritableProjectName, isManagerOwned, MISSING_APP_STATUS } from "../kube-map.ts";
 import { AppError, errValidation } from "../../../kernel/errors.ts";
 
@@ -17,7 +17,39 @@ export class FakeMasterArgoReader implements MasterArgoReader {
    *  of failing where it was added. It is opt-in precisely because the default — an unscripted name
    *  reads Missing — is the completeness gate the live watch has, and a test about that gate must
    *  keep it. `statuses` still wins per name where both are given. */
-  constructor(private scripted: { status?: ArgoAppStatus | null; statuses?: ReadonlyMap<string, ArgoAppStatus>; everyName?: ArgoAppStatus; throwOnGet?: Error; throwOnSet?: Error } = {}) {}
+  constructor(private scripted: {
+    status?: ArgoAppStatus | null;
+    statuses?: ReadonlyMap<string, ArgoAppStatus>;
+    everyName?: ArgoAppStatus;
+    throwOnGet?: Error;
+    throwOnSet?: Error;
+    /** What a namespace HOLDS, per namespace — what listApplications answers. An unlisted namespace
+     *  reads [], which is the "the ApplicationSet has not generated anything yet" case every caller
+     *  of the list retries on rather than passing. */
+    applicationsByNamespace?: Record<string, readonly ArgoApplicationRow[]>;
+    /** Makes listApplications THROW — the UPSTREAM a kube API answers a list with while it is
+     *  restarting. A gate that polls has to read that as a failing tick, not as a step death. */
+    throwOnList?: Error | undefined;
+  } = {}) {}
+
+  /** Script what a namespace holds; a later call replaces it, so a test can converge a loop. */
+  setApplications(namespace: string, rows: readonly ArgoApplicationRow[]): void {
+    this.scripted = { ...this.scripted, applicationsByNamespace: { ...this.scripted.applicationsByNamespace, [namespace]: rows } };
+  }
+
+  /** Make the NEXT list throw, or stop throwing when given undefined. */
+  setListFailure(error: Error | undefined): void {
+    this.scripted = { ...this.scripted, ...(error ? { throwOnList: error } : { throwOnList: undefined }) };
+  }
+
+  /** Every namespace listApplications was asked for, in order. */
+  readonly listed: string[] = [];
+
+  async listApplications(namespace: string): Promise<ArgoApplicationRow[]> {
+    this.listed.push(namespace);
+    if (this.scripted.throwOnList) throw this.scripted.throwOnList;
+    return [...(this.scripted.applicationsByNamespace?.[namespace] ?? [])];
+  }
 
   setStatus(status: ArgoAppStatus | null): void {
     this.scripted = { ...this.scripted, status };
@@ -108,8 +140,36 @@ export class FakeClusterReader implements ClusterReader {
       jobResults?: Record<string, JobResult>;
       /** The PVC names of a namespace — what listPersistentVolumeClaims answers; unlisted reads []. */
       pvcsByNamespace?: Record<string, readonly string[]>;
+      /** The ExternalSecrets a namespace holds — what listExternalSecrets answers; unlisted reads [],
+       *  which is the "the sync has not applied them yet" case a gate retries on. */
+      externalSecretsByNamespace?: Record<string, readonly ExternalSecretRow[]>;
+      /** Makes listExternalSecrets THROW — the UPSTREAM a kube API answers a list with while it is
+       *  restarting, which a polling gate must read as a failing tick. */
+      throwOnListExternalSecrets?: Error | undefined;
     } = {},
   ) {}
+
+  /** Every namespace listExternalSecrets was asked for, in order. */
+  readonly listedExternalSecrets: string[] = [];
+
+  /** Script what a namespace holds; a later call replaces it, so a test can converge a loop. */
+  setExternalSecrets(namespace: string, rows: readonly ExternalSecretRow[]): void {
+    this.scripted = {
+      ...this.scripted,
+      externalSecretsByNamespace: { ...this.scripted.externalSecretsByNamespace, [namespace]: rows },
+    };
+  }
+
+  /** Make the NEXT list throw, or stop throwing when given undefined. */
+  setExternalSecretsFailure(error: Error | undefined): void {
+    this.scripted = { ...this.scripted, ...(error ? { throwOnListExternalSecrets: error } : { throwOnListExternalSecrets: undefined }) };
+  }
+
+  async listExternalSecrets(namespace: string): Promise<ExternalSecretRow[]> {
+    this.listedExternalSecrets.push(namespace);
+    if (this.scripted.throwOnListExternalSecrets) throw this.scripted.throwOnListExternalSecrets;
+    return [...(this.scripted.externalSecretsByNamespace?.[namespace] ?? [])];
+  }
 
   /** The admission boundary as it stands, keyed by policy name — what apply wrote, minus what delete
    *  removed. Lets a test read back the CEL clauses the onboard actually armed. */

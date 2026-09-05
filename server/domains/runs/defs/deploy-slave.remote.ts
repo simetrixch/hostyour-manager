@@ -4,8 +4,11 @@ import { z } from "zod";
 // steps still ship to the two hosts, plus the contracts they parse back. Everything that BUILDS
 // the slave is a deployment PROGRAM of the machine's own catalogue (hostyour-deploy
 // ansiwise/programs/) driven over `ansiwise-rest serve` — what stands here is only what the manager
-// does around those programs: the DNS probe, the credentials-file handover, and the verify/handoff
-// kubectl reads. NOTHING HERE TOUCHES A CHECKOUT: /srv/hostyour-cloud is moved by deploy-host's own
+// does around those programs: the DNS probe, the credentials-file handover, the two gates that read
+// the SLAVE's own cluster, and the master-side diagnostic bundle. What is NOT here any more is
+// every read of the MASTER's ArgoCD: those go through the Manager pod's own kube access
+// (adapters/kube/port.ts), so no gate that polls for half an hour raises anything to root.
+// NOTHING HERE TOUCHES A CHECKOUT: /srv/hostyour-cloud is moved by deploy-host's own
 // git_clone row and by nothing this manager uploads. Pure string builders + zod contracts, no IO,
 // no db: the def
 // composes them, tests golden them.
@@ -64,38 +67,6 @@ export const MgmtCredsBlob = z.object({
 });
 
 // ============================== the verify-slave remote surface ============================
-
-/** Every Application ArgoCD drives for a cluster, one `name|sync|health` row per line — the
- *  `argocd-follow` step's whole reading, and verify-slave's HARD gate 1. WHERE it runs is the
- *  caller's: a cluster carrying the master part operates its own ArgoCD in namespace `argocd` on
- *  itself, while a pure slave's Application CRs live in namespace <name> on the master. */
-export function argoAppsCmd(name: string): string {
-  return `microk8s kubectl -n ${name} get applications.argoproj.io -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.sync.status}{"|"}{.status.health.status}{"\\n"}{end}'`;
-}
-
-/** Every ExternalSecret in the slave's ArgoCD namespace ON THE MASTER, one
- *  `name|<Ready status>|<reason>` row per line (step 6 HARD gate 0). They materialize the
- *  instance's credentials out of the master's Vault, and the gate holds ALL of them rather than a
- *  list of names — a credential added to that chart must not slip past a reader that knows two.
- *  Without the repository credential the instance cannot even FETCH the private repo, and
- *  root-applications then sits at Unknown/Unknown, which is how the first live run died. Gate 0
- *  makes a stuck or failing ESO delivery a NAMED failure instead of that opaque timeout. */
-export function externalSecretsCmd(name: string): string {
-  return `microk8s kubectl -n ${name} get externalsecrets.external-secrets.io -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"|"}{.status.conditions[?(@.type=="Ready")].reason}{"\\n"}{end}'`;
-}
-
-/** Kick every ExternalSecret in ns <name> out of ESO's exponential error backoff: an annotation
- *  change forces an IMMEDIATE re-reconcile. Every ExternalSecret on this platform carries
- *  refreshInterval "0" (no periodic Vault read at all — hostyour-cloud
- *  charts/external-secret/templates/externalsecret.yaml), so a transient early failure otherwise
- *  parks the next retry MINUTES away (controller-runtime doubles per failure up to ~16 min) — the
- *  leading suspect for the recorded 14-minute Unknown/Unknown stall.
- *  This is a BACKOFF kick, not part of replacing a value: it acts on an ExternalSecret that has never synced
- *  successfully, where the reconcile has to fetch. On one that already holds a value the annotation
- *  is not what re-reads Vault — deleting the target Secret is. Harmless when healthy. */
-export function forceSyncExternalSecretsCmd(name: string): string {
-  return `microk8s kubectl -n ${name} annotate externalsecrets.external-secrets.io --all force-sync=$(date +%s) --overwrite`;
-}
 
 // The step-6 diagnostic bundle (master side, ns <name>) — run while a HARD gate is failing
 // (rate-limited) and once right before it throws, so the run log always carries the ACTUAL

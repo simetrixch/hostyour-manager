@@ -5,19 +5,19 @@ import type { Db } from "../../../db/client.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { STAGE, isMasterRole } from "../../../../shared/enums.ts";
 import { errValidation, errNotConfigured } from "../../../kernel/errors.ts";
-import { execCapture, remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
+import { remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
 import { registerSecret } from "../../../security/redact.ts";
 import { PREFLIGHT_SCRIPT, parsePreflightOutput, makeCheck, hardenPreflightForSlave, podCidrOverlapCheck, formatNicsLine } from "../preflight.ts";
 import { hasHardFailure, type PreflightReport } from "../../../../shared/preflight.ts";
 import {
-  APP_SYNC_TIMEOUT_MS, APP_SYNC_POLL_MS,
-  loadServer, loadMaster, masterFqdnOf, slaveApiHost, sleepUnlessAborted,
-  removeSlaveMarkingCleanup, requirePlatformRepo, statedTarget,
+  APP_SYNC_TIMEOUT_MS,
+  loadServer, loadMaster, masterFqdnOf, masterClusterId, slaveApiHost,
+  removeSlaveMarkingCleanup, requirePlatformRepo, requireResolver, statedTarget,
   type DeploySlavePorts, type SlaveInstallInput, type SlaveTarget,
 } from "./deploy-slave.kit.ts";
 import {
-  ansiwiseProgramStep, requireElevationPassword, ANSIWISE_ELEVATION_SECRET,
+  ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET,
   type AnsiwisePorts, type ExtraAnswers,
 } from "./ansiwise-run.kit.ts";
 import {
@@ -624,21 +624,24 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         // the master's ArgoCD has GENERATED (slaves-appset) and SYNCED Application <name>-apps.
         // The map landed BEFORE register-slave created the AppProject, so the generated
         // Application legitimately waits on that missing project and syncs once it exists.
+        //
+        // READ THROUGH THE MASTER'S OWN CLUSTER, over the Manager pod's ServiceAccount. The
+        // namespace is the resolver's answer and not a literal: `argoNamespace` and the trio it
+        // comes with are decided together, and two spellings of that pairing are one rename away
+        // from coming apart (domains/units/cluster-kube.ts says so where the constant lives).
         const { domain } = target.resolve(ctx.db);
-        const master = loadMaster(ctx.db);
-        const mSession = await ctx.ssh(master.id);
-        const elevation = requireElevationPassword(ctx); // the master's cluster, raised the same way every other read of it is
+        const { argoReader, argoNamespace } = await requireResolver(ports).resolve(masterClusterId(ctx.db));
         const appName = `${clusterShortName(domain)}-apps`;
-        const deadline = Date.now() + APP_SYNC_TIMEOUT_MS;
-        for (;;) {
-          const read = await execCapture(ctx, mSession, `microk8s kubectl -n argocd get application ${appName} -o jsonpath={.status.sync.status}`, { timeoutMs: 30_000, elevation });
-          const sync = read.out.trim();
-          if (read.code === 0 && sync === "Synced") break;
-          if (Date.now() >= deadline) {
-            throw errValidation(`Application ${appName} did not reach Synced within ${APP_SYNC_TIMEOUT_MS / 60_000} min — check the master's ArgoCD (slaves-appset) and the pushed map ${clusterMapPath(domain)}`);
-          }
-          ctx.log("meta", `waiting for Application ${appName} to appear + sync (currently: ${sync || "absent"})`);
-          await sleepUnlessAborted(APP_SYNC_POLL_MS, ctx.signal);
+        // watchApplication polls on its OWN cadence and writes nothing per tick, so the step's
+        // budget is what it is given and the log carries one line rather than one every ten seconds.
+        const last = await argoReader.watchApplication(
+          argoNamespace,
+          appName,
+          (status) => status.sync === "Synced",
+          { timeoutMs: APP_SYNC_TIMEOUT_MS, signal: ctx.signal },
+        );
+        if (last.sync !== "Synced") {
+          throw errValidation(`Application ${appName} did not reach Synced within ${APP_SYNC_TIMEOUT_MS / 60_000} min (last: ${last.sync}/${last.health}) — check the master's ArgoCD (slaves-appset) and the pushed map ${clusterMapPath(domain)}`);
         }
         ctx.checkpoint({ appName });
         ctx.log("meta", `Application ${appName} is Synced — the ${clusterShortName(domain)} slave-ArgoCD now drives the slave from branch ${domain}`);

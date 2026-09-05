@@ -5,6 +5,8 @@ import { describe, it, expect } from "vitest";
 import {
   mapArgoStatus,
   mapApplicationSet,
+  mapApplications,
+  mapExternalSecrets,
   MISSING_APP_STATUS,
   mapDeployment,
   mapStatefulSet,
@@ -343,21 +345,70 @@ describe("workload mappers", () => {
   });
 });
 
+describe("mapExternalSecrets", () => {
+  const raw = (name: string, status: string, reason: string, target?: string) => ({
+    metadata: { name },
+    ...(target !== undefined ? { spec: { target: { name: target } } } : {}),
+    status: { conditions: [{ type: "Ready", status, reason }] },
+  });
+
+  it("carries the name, the Ready verdict, its reason and the Secret the spec targets", () => {
+    expect(mapExternalSecrets([raw("repo-platform", "False", "SecretSyncedError", "repo-platform-creds")])).toEqual([
+      { name: "repo-platform", ready: false, reason: "SecretSyncedError", targetSecret: "repo-platform-creds" },
+    ]);
+  });
+
+  it("an ExternalSecret with no Ready condition at all is NOT ready, and names no reason", () => {
+    // ESO has not looked at it yet. Fail closed: reading it as ready would let a gate pass on a
+    // credential that has never been fetched.
+    expect(mapExternalSecrets([{ metadata: { name: "fresh" } }])).toEqual([
+      { name: "fresh", ready: false, reason: "", targetSecret: "" },
+    ]);
+  });
+
+  it("drops an item with no name, because a row nobody can name tells an operator nothing", () => {
+    expect(mapExternalSecrets([{ status: { conditions: [] } }, raw("cluster-slave", "True", "SecretSynced")])).toEqual([
+      { name: "cluster-slave", ready: true, reason: "SecretSynced", targetSecret: "" },
+    ]);
+  });
+});
+
 describe("externalSecretsAllReady", () => {
-  const ready = { status: { conditions: [{ type: "Ready", status: "True", reason: "SecretSynced" }] } };
-  const notReady = { status: { conditions: [{ type: "Ready", status: "False", reason: "SecretSyncedError" }] } };
+  const ready = { name: "a", ready: true, reason: "SecretSynced", targetSecret: "" };
+  const notReady = { name: "b", ready: false, reason: "SecretSyncedError", targetSecret: "" };
 
   it("zero ExternalSecrets is ready", () => {
     expect(externalSecretsAllReady([])).toBe(true);
   });
 
-  it("all Ready=True is ready; one unready item flips it", () => {
+  it("all Ready is ready; one unready row flips it", () => {
     expect(externalSecretsAllReady([ready, ready])).toBe(true);
     expect(externalSecretsAllReady([ready, notReady])).toBe(false);
   });
+});
 
-  it("an item without status/conditions counts as not ready (fail closed)", () => {
-    expect(externalSecretsAllReady([{}])).toBe(false);
+describe("mapApplications", () => {
+  const raw = (name: string, sync: string, health: string) => ({
+    metadata: { name },
+    status: { sync: { status: sync, revision: "abc" }, health: { status: health } },
+  });
+
+  it("keeps every Application the list found, under its own name", () => {
+    const rows = mapApplications([raw("s1-apps", "Synced", "Healthy"), raw("s1-obs", "OutOfSync", "Progressing")]);
+    expect(rows.map((r) => [r.name, r.sync, r.health])).toEqual([
+      ["s1-apps", "Synced", "Healthy"],
+      ["s1-obs", "OutOfSync", "Progressing"],
+    ]);
+  });
+
+  it("keeps a name the caller never expected — the difference from mapApplicationSet", () => {
+    // mapApplicationSet discards anything outside its expected list; this one answers a caller that
+    // cannot name the set at all, because an ApplicationSet generated it.
+    expect(mapApplications([raw("generated-later", "Synced", "Healthy")]).map((r) => r.name)).toEqual(["generated-later"]);
+  });
+
+  it("drops an item with no name", () => {
+    expect(mapApplications([{ status: {} }])).toEqual([]);
   });
 });
 

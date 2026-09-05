@@ -185,10 +185,12 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(events).toContain("deploy-cluster: dry ");
     expect(events).toContain("deploy-platform-services: dry ");
     expect(events).toContain("machine run finished: exit 0");
-    // The conversation went over the machine's serve surface, and the follow still read ArgoCD.
+    // The conversation went over the machine's serve surface, and the follow read ArgoCD through the
+    // kube port instead of over that session: no `kubectl` reaches this machine at all any more.
     const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
     expect(onMaster.filter(isServe)).toHaveLength(3); // one conversation per program step
-    expect(onMaster.some((c) => c.includes("-n argocd get applications.argoproj.io"))).toBe(true);
+    expect(onMaster.filter((c) => c.includes("kubectl"))).toEqual([]);
+    expect(h.argo.listed).toContain("argocd");
 
     // The machine's OWN records: dry + run per program, every one green. This is the record an
     // operator on the machine reads — the manager reported nothing the machine does not stand behind.
@@ -276,13 +278,16 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expectProven(serve, h.db, runId, await observer.runs(), ["deploy-host", "deploy-cluster", "deploy-platform-services"]);
   });
 
-  it("reads the master's cluster with the password the RUN carries — on a machine that grants no passwordless route at all", { timeout: 180_000 }, async () => {
+  it("raises what it still raises with the password the RUN carries, on standard input — on a machine that grants no passwordless route at all", { timeout: 180_000 }, async () => {
     // THE MACHINE THIS RUNS ON: /etc/sudoers.d/ holds nothing. That is what ansiwise-client leaves
-    // behind, so it is what a FIRST MASTER is — measured on a real one, a README and no
-    // rule — and the scripted host refuses every `sudo -n` on it exactly as that machine does.
-    // `argocd-follow` reaching the cluster that way is refused there while every step
-    // before it has gone green, with "sudo: interactive authentication is required" printed under a
-    // line telling the operator the cluster was not answering yet.
+    // behind, so it is what a FIRST MASTER is — measured on a real one, a README and no rule — and
+    // the scripted host refuses every `sudo -n` on it exactly as that machine does.
+    //
+    // WHAT THIS MEASURED BEFORE was `argocd-follow` reading the cluster that way, which is exactly
+    // the read that moved to the kube port. The password-on-standard-input proof MOVES with it to a
+    // raised command that still runs on this host in the same arm — `prove-elevation`'s
+    // `-- /usr/bin/id -u` (defs/manager-key.kit.ts) — rather than going green because what it
+    // measured is gone.
     const h = await liveMaster(serve);
     expect(h.hosts.adopted).toBe(false);
 
@@ -292,13 +297,18 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(stepColumn(h.db, runId, "argocd-follow", "error") ?? "").toBe("");
     expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
 
-    // AND THE CLUSTER WAS REALLY READ, over the master's own session: a run that never reached the
-    // follow would pass both assertions above by doing nothing. The password rode on standard input
-    // and nowhere else — an argument list is readable by every process listing on the machine.
-    const reads = h.hosts.log.filter((l) => l.host === "m1.example.com" && l.command.includes("get applications.argoproj.io"));
-    expect(reads).not.toEqual([]);
-    expect(reads.filter((l) => l.stdin === undefined).map((l) => l.command)).toEqual([]);
-    expect(reads.some((l) => l.command.includes(ELEVATION_PASSWORD))).toBe(false);
+    // The raised read really happened, and the password rode on standard input and nowhere else —
+    // an argument list is readable by every process listing on the machine.
+    const raised = h.hosts.log.filter((l) => l.host === "m1.example.com" && l.command.includes("/usr/bin/id -u"));
+    expect(raised).not.toEqual([]);
+    expect(raised.filter((l) => l.stdin === undefined).map((l) => l.command)).toEqual([]);
+    expect(raised.some((l) => l.command.includes(ELEVATION_PASSWORD))).toBe(false);
+
+    // AND THE FOLLOW SENT THIS MACHINE NOTHING. It read the master's ArgoCD over the pod's own
+    // access instead — a run that never reached the follow would pass the two assertions above by
+    // doing nothing, so the read is asserted on the reader.
+    expect(h.hosts.log.filter((l) => l.command.includes("applications.argoproj.io"))).toEqual([]);
+    expect(h.argo.listed).toContain("argocd");
   });
 
   it("PLANTED DEFECT (redeploy): a mailbox the MAP states badly makes the dry red and FAILS the step before anything is acted on — no run-mode machine run starts", { timeout: 60_000 }, async () => {

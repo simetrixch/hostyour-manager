@@ -8,6 +8,7 @@ import { MASTER_ROLES, type Stage } from "../../../../shared/enums.ts";
 import { errNotConfigured } from "../../../kernel/errors.ts";
 import type { PlatformRepo } from "../../../adapters/git/port.ts";
 import type { MetricsQuery } from "../../../adapters/metrics/port.ts";
+import type { ClusterKubeResolver } from "../../../adapters/kube/port.ts";
 import { removeSlaveMarkingPart } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 
@@ -58,6 +59,32 @@ export interface DeploySlavePorts {
    *  watch a window close, and a window nobody can shorten is one nothing holds against its own
    *  behaviour. Absent means the two minutes a real deployment is given. */
   metricsFirstSeriesMs?: number;
+  /** WHAT THIS RUN KIND READS ARGOCD THROUGH — the SAME port every unit run kind already takes, and
+   *  not a second shape for the same job.
+   *
+   *  Three steps of a cluster deployment used to read ArgoCD by running `microk8s kubectl` over the
+   *  master's SSH session, raising every one of those reads to root with the machine's elevation
+   *  password, every ten seconds, for up to thirty minutes. They read it through the Manager pod's
+   *  own ServiceAccount now, which is where the RBAC for it already stands.
+   *
+   *  OPTIONAL for the reason platformRepo is: a Manager built without in-cluster access registers the
+   *  run kinds and fails loud at the first watch, which is a sentence an operator can act on, rather
+   *  than a whole run kind disappearing from the map. */
+  resolver?: ClusterKubeResolver;
+}
+
+/** The resolver, or the loud refusal a step gives without it — the same shape requirePlatformRepo
+ *  has, for the same reason. */
+export function requireResolver(ports: DeploySlavePorts): ClusterKubeResolver {
+  if (!ports.resolver) {
+    throw errNotConfigured(
+      "this Manager has no in-cluster kube access, and this step reads the master's ArgoCD through it — the same " +
+      "access every consumer and tenant run kind resolves through. It is the pod's own ServiceAccount in a deployed " +
+      "Manager and KUBECONFIG_PATH in a development one; a process that was given neither cannot read an Application " +
+      "at all, and reading it over the machine's session instead is what this step stopped doing",
+    );
+  }
+  return ports.resolver;
 }
 
 /** WHICH run kind is driving the shared slave step list. The steps are the same either way — what
@@ -152,6 +179,27 @@ export function loadMaster(db: Db): typeof servers.$inferSelect {
   const row = db.select().from(servers).where(inArray(servers.role, [...MASTER_ROLES])).get();
   if (!row) throw errValidation("no master server registered — the platform needs exactly one role=master server (this manager's host) before a slave can be deployed");
   return row;
+}
+
+/** The id of the MASTER's own cluster row — what a resolve is keyed on when a step has to reach the
+ *  master's ArgoCD rather than a target's.
+ *
+ *  IT IS LOOKED UP AND REFUSED BY NAME HERE, because the resolver's own refusal names only an id
+ *  (domains/units/cluster-kube.ts) and an operator reading "cluster undefined" learns nothing.
+ *  `seed-master.ts` inserts this row at boot from MASTER_FQDN, so a Manager missing it is one that
+ *  was started without that setting or whose seeding was refused by a domain clash — both of which
+ *  the boot log named at the time. */
+export function masterClusterId(db: Db): string {
+  const master = loadMaster(db);
+  const cluster = db.select().from(clusters).where(eq(clusters.serverId, master.id)).get();
+  if (!cluster) {
+    throw errValidation(
+      `the master ${master.name} carries no cluster row, and this step reads the master's ArgoCD through it — ` +
+      "boot seeds that row from MASTER_FQDN (boot/seed-master.ts), so set it and restart the Manager, or clear the " +
+      "stray clusters row the boot log named when it refused to seed",
+    );
+  }
+  return cluster.id;
 }
 
 /** The master's FQDN (for `--master <fqdn>` and vault.<fqdn>): authoritative source is the

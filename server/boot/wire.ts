@@ -10,6 +10,9 @@ import { seedUnitSizes } from "../domains/units/unit-size.ts";
 import { createApp } from "../http/app.ts";
 import { CredentialStore } from "../security/store.ts";
 import { storeBackend } from "./store-backend.ts";
+import { masterKubeClients } from "./master-kube.ts";
+import { KubeClusterReader } from "../adapters/kube/kube.ts";
+import { makeClusterKubeResolver } from "../domains/units/cluster-kube.ts";
 import { RunEventBus } from "../executor/bus.ts";
 import { Executor } from "../executor/executor.ts";
 import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-definitions.ts";
@@ -69,9 +72,24 @@ export async function wire(): Promise<Wired> {
   // Consumer onboarding: construct the real adapters and register the Run family — but only when the
   // Tekton gate-runner config (ONBOARD_GATE_MANAGER_ADDR) + platform repo are both configured
   // (else defs=[] and the mutating consumer routes answer 501). See wire-units.ts.
-  const units = buildUnits(config, store, db.db, logger);
+  // THE MASTER-LOCAL KUBE CLIENTS AND THE ONE RESOLVER OVER THEM, built here and handed to everything
+  // that needs them. Both families used to build their own trio and their own resolver from the same
+  // input, so a cluster run kind could reach neither: both stood behind a family's own configuration
+  // guard, and a cluster deployment must not depend on consumer onboarding being configured.
+  const masterKube = masterKubeClients(config);
+  const resolver = makeClusterKubeResolver({
+    db: db.db,
+    master: masterKube,
+    openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
+    buildClusterReader: (input) => new KubeClusterReader(input),
+  });
+  const units = buildUnits(config, store, db.db, logger, { master: masterKube, resolver });
   const runDefinitions = buildRunDefinitions({
     db: db.db,
+    // WHAT THE CLUSTER RUN KINDS READ ARGOCD THROUGH. gitops-handoff, verify-slave and argocd-follow
+    // reach the master's ArgoCD and its ExternalSecrets over the pod's own ServiceAccount, the same
+    // way every unit run kind does — never over an SSH session raised with the machine's password.
+    resolver,
     ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}),
     // The SAME two settings the platform repo above is built from, as the machine's programs are
     // answered with it: `owner/name`. deploy-host's git_clone row cannot read this off the machine,

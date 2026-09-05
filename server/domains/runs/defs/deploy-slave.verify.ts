@@ -1,17 +1,14 @@
 import { eq } from "drizzle-orm";
 import type { Step, StepCtx } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
-import { errValidation } from "../../../kernel/errors.ts";
+import { AppError, errValidation } from "../../../kernel/errors.ts";
 import { execCapture, remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
 import { ClusterPlaneV0, SlaveKubeAccess } from "../../../../shared/plane.ts";
 import {
-  APP_SYNC_POLL_MS, loadServer, loadMaster, masterFqdnOf, requireSlaveCluster,
+  APP_SYNC_POLL_MS, loadServer, loadMaster, masterFqdnOf, masterClusterId, requireSlaveCluster, requireResolver,
   credLabels, newestCredId, sleepUnlessAborted, type DeploySlavePorts, type SlaveTarget,
 } from "./deploy-slave.kit.ts";
-import {
-  argoAppsCmd, externalSecretsCmd, forceSyncExternalSecretsCmd,
-  slaveDiagScript, SECRET_STORES_CMD, CERTS_CMD, parsePipeRows,
-} from "./deploy-slave.remote.ts";
+import { slaveDiagScript, SECRET_STORES_CMD, CERTS_CMD, parsePipeRows } from "./deploy-slave.remote.ts";
 import { requireElevationPassword } from "./ansiwise-run.kit.ts";
 
 // deploy-slave steps 6-7 (the last two steps): the
@@ -19,14 +16,18 @@ import { requireElevationPassword } from "./ansiwise-run.kit.ts";
 // (files ≤400 lines); deploy-slave.ts composes these into its step list.
 //
 // verify-slave's checks, HARD vs SOFT:
-//   HARD 0  every ExternalSecret in ns <name> on the master reports Ready (master kubectl)
-//           — the instance's repo + cluster credentials; a not-yet-Ready ES is force-sync
-//           annotated (rate-limited) to break ESO's exponential error backoff, the leading
-//           suspect for the first live run's 14-minute root-applications Unknown stall
-//   HARD 1  every Application in ns <name> is Synced AND Healthy        (master kubectl)
+//   HARD 0  every ExternalSecret in ns <name> on the master reports Ready (the master's KUBE PORT)
+//           — the instance's repo + cluster credentials
+//   HARD 1  every Application in ns <name> is Synced AND Healthy        (the master's KUBE PORT)
 //   HARD 2  every ESO SecretStore on the slave reports Ready            (slave kubectl)
 //   SOFT 1  master Prometheus has an up{cluster="<fqdn>"} series        (promtool exec)
 //   SOFT 2  every cert-manager Certificate on the slave is Ready        (slave kubectl)
+//
+// THE TWO MASTER-SIDE GATES SEND THE MASTER NOTHING. They read the master's ArgoCD and its
+// ExternalSecrets over the Manager pod's own ServiceAccount, which is where the RBAC for both
+// already stands. What still goes to the master over SSH, raised with the machine's password, is
+// the diagnostic bundle below — once a minute while a HARD gate is failing, and once more right
+// before the throw.
 // The HARD gates share ONE bounded retry window (cold-bootstrap races: the appset sync
 // backoff maxes at 3m, then the slave-ArgoCD itself deploys and the slave pulls images); the
 // SOFT checks degrade to meta notes — observability niceties must not fail a healthy plane.
@@ -47,7 +48,6 @@ export const VERIFY_SLAVE_TIMEOUT_MS = 30 * 60_000;
  *  ExternalSecret gets a force-sync kick. Rate-limited so the 10s poll cadence stays
  *  readable in the run log. */
 export const VERIFY_DIAG_EVERY_MS = 60_000;
-export const ES_KICK_EVERY_MS = 2 * 60_000;
 
 /** Bounded, abortable convergence loop (step 6's retry window): the probe reports ok
  *  or a human-readable detail; an expired deadline turns the last detail into a HARD fail.
@@ -74,8 +74,18 @@ async function pollUntil(
     try {
       r = await probe();
     } catch (e) {
-      if (!isChannelOpenFailure(e)) throw e;
-      r = { ok: false, detail: `transient SSH channel refusal — ${(e as Error).message}` };
+      if (isChannelOpenFailure(e)) {
+        r = { ok: false, detail: `transient SSH channel refusal — ${(e as Error).message}` };
+      } else if (isUpstream(e)) {
+        // A kube read that failed is a failing TICK and not a step death, the same way a refused SSH
+        // channel is. The gate below runs right after deploy-platform-services restarted kubelite,
+        // and the Manager's own reader is on that API server: the pod loses it mid-poll by design
+        // (ansiwise-run.kit.ts says so where the restart is driven). The retry ends at the same
+        // deadline, and the last detail names what the API server said.
+        r = { ok: false, detail: `the kube API did not answer — ${(e as Error).message}` };
+      } else {
+        throw e;
+      }
     }
     if (r.ok) return;
     if (Date.now() >= deadline) {
@@ -98,6 +108,12 @@ function isChannelOpenFailure(e: unknown): boolean {
   return e instanceof Error && e.name !== "AbortError" && /channel open failure/i.test(e.message);
 }
 
+/** The kube port's own failure: every list and get it makes turns a kube API error into UPSTREAM
+ *  (adapters/kube/kube.ts). Read as a failing tick rather than a step death — see the loop above. */
+function isUpstream(e: unknown): boolean {
+  return e instanceof AppError && e.code === "UPSTREAM";
+}
+
 const cell = (v: string | undefined): string => (v !== undefined && v !== "" ? v : "?");
 
 /** Step 6 `verify-slave` (stateless, re-runnable). */
@@ -114,7 +130,14 @@ export function verifySlaveStep(target: SlaveTarget, ports: DeploySlavePorts): S
       localTx(ctx, (tx) => tx.update(clusters).set({ planeState: "verifying" }).where(eq(clusters.id, cluster.id)).run());
       const mSession = await ctx.ssh(master.id);
       const slave = await ctx.ssh(); // the slave (the run's ownsHost target)
-      const elevation = requireElevationPassword(ctx); // every cluster read below is raised with it
+      // The master's ArgoCD and its ExternalSecrets, read over the Manager pod's own ServiceAccount.
+      // The NAMESPACE is the slave's own short name and not the resolver's `argoNamespace`: the
+      // per-slave instance lives in ns <name> ON the master, and the slave's OWN cluster cannot be
+      // resolved here at all - `register`, which writes its plane, runs after this step.
+      const masterKube = await requireResolver(ports).resolve(masterClusterId(ctx.db));
+      // The diagnostic bundle below is the ONE thing this step still sends the master, and this is
+      // what raises it.
+      const elevation = requireElevationPassword(ctx);
       const deadline = Date.now() + VERIFY_SLAVE_TIMEOUT_MS; // ONE window for all HARD gates
 
       // The shared master-side diagnostic bundle (rate-limited by pollUntil): conditions,
@@ -128,28 +151,23 @@ export function verifySlaveStep(target: SlaveTarget, ports: DeploySlavePorts): S
       // MASTER — the repository credentials and the remote cluster registration. The gate counts
       // what it finds rather than naming them, so a credential the chart gains is gated too, and one
       // it loses does not leave this step waiting for a row nothing writes. Without the repository
-      // credential the
-      // instance cannot even FETCH the private repo — root-applications then sits at
-      // Unknown/Unknown, which is exactly how the first live run died. A not-yet-Ready ES is
-      // kicked with the chart's own force-sync annotation idiom (rate-limited): an annotation
-      // change forces an immediate ESO re-reconcile, breaking the controller-runtime error
-      // backoff that can otherwise park the next retry up to ~16 minutes away.
+      // credential the instance cannot even FETCH the private repo — root-applications then sits at
+      // Unknown/Unknown, which is exactly how the first live run died.
+      //
+      // THE FORCE-SYNC KICK IS GONE with the SSH read it rode on. Keeping it would need a write
+      // method on the cluster port and the right to `patch` external-secrets.io/externalsecrets in the
+      // Manager's grants, which would make the pod ServiceAccount a writer of ExternalSecrets on
+      // every cluster. The gate itself is unchanged: it holds until every ExternalSecret is Ready,
+      // inside the same window, which already outlasts the backoff ceiling the kick was written
+      // against — and that the backoff was ever the cause rests on a comment nobody measured.
       let extSecrets = 0;
-      let lastKickAt = 0;
       await pollUntil(ctx, `${name} ExternalSecrets Ready (repo + cluster credentials)`, deadline, async () => {
-        const { code, out } = await execCapture(ctx, mSession, externalSecretsCmd(name), { timeoutMs: 30_000, elevation });
-        if (code !== 0) return { ok: false, detail: `kubectl exit ${code} reading ns ${name} — the run log above carries what it said` };
-        const rows = parsePipeRows(out);
+        const rows = await masterKube.clusterReader.listExternalSecrets(name);
         if (rows.length === 0) return { ok: false, detail: `no ExternalSecrets in ns ${name} yet (the ${name}-apps sync may still be applying)` };
         extSecrets = rows.length;
-        const notReady = rows.filter((r) => r[1] !== "True");
+        const notReady = rows.filter((r) => !r.ready);
         if (notReady.length === 0) return { ok: true, detail: "" };
-        if (Date.now() - lastKickAt >= ES_KICK_EVERY_MS) {
-          lastKickAt = Date.now();
-          ctx.log("meta", `force-sync annotating the ${name} ExternalSecrets (breaks a possible ESO error backoff)`);
-          await execCapture(ctx, mSession, forceSyncExternalSecretsCmd(name), { timeoutMs: 30_000, elevation });
-        }
-        return { ok: false, detail: `${extSecrets - notReady.length}/${extSecrets} Ready — pending: ${notReady.slice(0, 5).map((r) => `${cell(r[0])} (${cell(r[2])})`).join(", ")}` };
+        return { ok: false, detail: `${extSecrets - notReady.length}/${extSecrets} Ready — pending: ${notReady.slice(0, 5).map((r) => `${r.name} (${cell(r.reason)})`).join(", ")}` };
       }, diagnose);
       ctx.log("meta", `${name}: all ${extSecrets} ExternalSecrets Ready — the instance's repo + cluster credentials are materialized`);
 
@@ -158,14 +176,12 @@ export function verifySlaveStep(target: SlaveTarget, ports: DeploySlavePorts): S
       // and every app on the slave branch converged. Zero Applications = still generating ⇒ retry.
       let apps = 0;
       await pollUntil(ctx, `${name} applications Synced+Healthy`, deadline, async () => {
-        const { code, out } = await execCapture(ctx, mSession, argoAppsCmd(name), { timeoutMs: 30_000, elevation });
-        if (code !== 0) return { ok: false, detail: `kubectl exit ${code} reading ns ${name} — the run log above carries what it said` };
-        const rows = parsePipeRows(out);
+        const rows = await masterKube.argoReader.listApplications(name);
         if (rows.length === 0) return { ok: false, detail: `no Applications in ns ${name} yet (appset still generating)` };
         apps = rows.length;
-        const pending = rows.filter((r) => r[1] !== "Synced" || r[2] !== "Healthy");
+        const pending = rows.filter((r) => r.sync !== "Synced" || r.health !== "Healthy");
         if (pending.length === 0) return { ok: true, detail: "" };
-        return { ok: false, detail: `${apps - pending.length}/${apps} ready — pending: ${pending.slice(0, 5).map((r) => `${cell(r[0])} (${cell(r[1])}/${cell(r[2])})`).join(", ")}` };
+        return { ok: false, detail: `${apps - pending.length}/${apps} ready — pending: ${pending.slice(0, 5).map((r) => `${r.name} (${r.sync}/${r.health})`).join(", ")}` };
       }, diagnose);
       ctx.log("meta", `${name}: all ${apps} generated Applications are Synced + Healthy`);
 

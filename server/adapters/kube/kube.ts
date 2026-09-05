@@ -9,7 +9,10 @@
 // the methods here are thin IO shells — they NEED a live cluster and are integration-tested
 // on the live clusters, never unit-tested. Scripted fakes for domain tests live in testing/fake.ts.
 import { KubeConfig, CoreV1Api, AppsV1Api, BatchV1Api, CustomObjectsApi, ApiException, setHeaderOptions, PatchStrategy } from "@kubernetes/client-node";
-import type { MasterArgoReader, ClusterReader, ArgoAppStatus, ArgoAppStatusMap, SmokeResult, DeployState, WorkloadStatus, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, JobSpec, JobResult } from "./port.ts";
+import type {
+  MasterArgoReader, ClusterReader, ArgoAppStatus, ArgoAppStatusMap, ArgoApplicationRow, ExternalSecretRow,
+  SmokeResult, DeployState, WorkloadStatus, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, JobSpec, JobResult,
+} from "./port.ts";
 import { RESTART_ANNOTATION } from "./port.ts";
 import { runKubeJob } from "./kube-job.ts";
 import * as ns from "./kube-namespace.ts";
@@ -22,11 +25,20 @@ import {
   mapStatefulSet,
   mapDaemonSet,
   externalSecretsAllReady,
+  mapApplications,
+  mapExternalSecrets,
   mapDeployState,
 } from "./kube-map.ts";
 
 const ARGO = { group: "argoproj.io", version: "v1alpha1", plural: "applications" } as const;
-const EXTERNAL_SECRETS = { group: "external-secrets.io", version: "v1beta1", plural: "externalsecrets" } as const;
+/** THE VERSION THE INSTALLATION'S CRD ACTUALLY SERVES, and it is not the one this used to name.
+ *  The vendored CRD serves `v1` and marks `v1beta1` `served: false` (hostyour-cloud
+ *  clusters/inventories/external-secrets/templates/crd-externalsecret.yaml), and every ExternalSecret
+ *  this platform renders is `external-secrets.io/v1`. An unserved version answers 404, which the
+ *  reading below used to take for "the CRD is not installed, so zero ExternalSecrets exist, so all of
+ *  them are Ready" — a smoke result that read `true` on every cluster whatever the ExternalSecrets
+ *  said. */
+const EXTERNAL_SECRETS = { group: "external-secrets.io", version: "v1", plural: "externalsecrets" } as const;
 /** The two CLUSTER-scoped halves of a unit's admission boundary. Written as a pair (a policy without
  *  its binding enforces nothing) and deleted as a pair. */
 const ADMISSION_POLICY = { group: "admissionregistration.k8s.io", version: "v1", plural: "validatingadmissionpolicies" } as const;
@@ -199,6 +211,18 @@ export class KubeMasterArgoReader implements MasterArgoReader {
     return last;
   }
 
+  /** Every Application namespace HOLDS — what the list finds, not what a caller expected. NEEDS a
+   *  live cluster; the mapping is pure (kube-map.ts mapApplications). */
+  async listApplications(namespace: string): Promise<ArgoApplicationRow[]> {
+    let raw: unknown;
+    try {
+      raw = await this.custom.listNamespacedCustomObject({ ...ARGO, namespace });
+    } catch (e) {
+      throw upstream(`list Argo Applications in ${namespace}`, e);
+    }
+    return mapApplications((raw as { items?: unknown[] }).items ?? []);
+  }
+
   /** Poll a SET of Applications (a tenant fan-out): one list per pollMs tick (filtered by
    *  `labelSelector` when given, e.g. platform/tenant=<guid>) mapped by the pure mapApplicationSet,
    *  which fills every EXPECTED name still absent with Missing (the completeness gate). Loops until
@@ -271,18 +295,20 @@ export class KubeClusterReader implements ClusterReader {
       // "zero ExternalSecrets" answer — the caller already fails the smoke on namespaceExists.
       return { namespaceExists: false, workloads: [], externalSecretsReady: true };
     }
-    const [deployments, statefulSets, daemonSets, externalSecretsReady] = await Promise.all([
+    const [deployments, statefulSets, daemonSets, externalSecrets] = await Promise.all([
       this.list("Deployments", namespace, () => this.apps.listNamespacedDeployment({ namespace })),
       this.list("StatefulSets", namespace, () => this.apps.listNamespacedStatefulSet({ namespace })),
       this.list("DaemonSets", namespace, () => this.apps.listNamespacedDaemonSet({ namespace })),
-      this.externalSecretsReady(namespace),
+      // The SAME rows a caller reads by name, collapsed to the one bit this result carries — never a
+      // second pass with a reading of its own.
+      this.listExternalSecrets(namespace),
     ]);
     const workloads: WorkloadStatus[] = [
       ...deployments.items.map(mapDeployment),
       ...statefulSets.items.map(mapStatefulSet),
       ...daemonSets.items.map(mapDaemonSet),
     ];
-    return { namespaceExists: true, workloads, externalSecretsReady };
+    return { namespaceExists: true, workloads, externalSecretsReady: externalSecretsAllReady(externalSecrets) };
   }
 
   /** NEEDS a live cluster — integration-tested on the live clusters. Absent ConfigMap → null, so
@@ -504,18 +530,17 @@ export class KubeClusterReader implements ClusterReader {
     }
   }
 
-  private async externalSecretsReady(namespace: string): Promise<boolean> {
+  /** Every ExternalSecret in `namespace`, one row each. A 404 means the ExternalSecret CRD is not
+   *  installed on this cluster at all, and a cluster that knows no such kind holds none of them. */
+  async listExternalSecrets(namespace: string): Promise<ExternalSecretRow[]> {
     let raw: unknown;
     try {
       raw = await this.custom.listNamespacedCustomObject({ ...EXTERNAL_SECRETS, namespace });
     } catch (e) {
-      // 404 here means the ExternalSecret CRD is not installed at all — zero ExternalSecrets
-      // exist, and zero ExternalSecrets is Ready by the port contract.
-      if (isNotFound(e)) return true;
+      if (isNotFound(e)) return [];
       throw upstream(`list ExternalSecrets in ${namespace}`, e);
     }
-    const items = (raw as { items?: unknown[] }).items ?? [];
-    return externalSecretsAllReady(items);
+    return mapExternalSecrets((raw as { items?: unknown[] }).items ?? []);
   }
 }
 

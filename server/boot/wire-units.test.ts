@@ -12,6 +12,9 @@ import { openDb, type DbHandle } from "../db/client.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { parseConfig } from "../kernel/config.ts";
 import { CredentialStore } from "../security/store.ts";
+import { masterKubeClients } from "./master-kube.ts";
+import { KubeClusterReader } from "../adapters/kube/kube.ts";
+import { makeClusterKubeResolver } from "../domains/units/cluster-kube.ts";
 import { buildUnits } from "./wire-units.ts";
 import { RUN_FAMILY } from "../../shared/enums.ts";
 import type { StepCtx } from "../executor/types.ts";
@@ -82,7 +85,16 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     handles.push(h);
     const logger = createLogger(config);
     const store = new CredentialStore({ db: h.db, logger });
-    return [config, store, h.db, logger];
+    // The master-local trio and the one resolver over them are the composition root's now
+    // (boot/master-kube.ts, boot/wire.ts), so this fixture hands buildUnits the same pair.
+    const master = masterKubeClients(config);
+    const resolver = makeClusterKubeResolver({
+      db: h.db,
+      master,
+      openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
+      buildClusterReader: (input) => new KubeClusterReader(input),
+    });
+    return [config, store, h.db, logger, { master, resolver }];
   }
 
   it("enables BOTH families WITHOUT a kubeconfig — in-cluster (pod SA) is the default kube access", () => {

@@ -170,7 +170,7 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
     // declares letsencrypt_email and letsencrypt_server with no default, so the machine refuses by
     // name rather than proceeding on something this manager invented.
     ...MASTER_ARM_PROGRAMS.map((program) => ansiwiseProgramStep(target, program, ports, { extra: machineAnswers })),
-    argocdFollowStep(target),
+    argocdFollowStep(target, ports),
   ];
 }
 

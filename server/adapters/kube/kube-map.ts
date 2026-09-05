@@ -3,7 +3,9 @@
 // hand-built raw objects, so the live calls in kube.ts stay thin (integration-tested on the
 // live clusters). The Raw* shapes are structural subsets of the @kubernetes/client-node models
 // (every field optional), so the live code passes V1Deployment & friends straight in.
-import type { ArgoAppStatus, ArgoSyncSource, ArgoTargetSource, WorkloadStatus, DeployState } from "./port.ts";
+import type {
+  ArgoAppStatus, ArgoApplicationRow, ArgoSyncSource, ArgoTargetSource, ExternalSecretRow, WorkloadStatus, DeployState,
+} from "./port.ts";
 import { MANAGER_PROJECT_LABELS, RESERVED_PROJECT_NAMES } from "./port.ts";
 import { ARGO_SYNC, ARGO_HEALTH } from "../../../shared/enums.ts";
 import { errValidation } from "../../kernel/errors.ts";
@@ -148,6 +150,19 @@ export function mapApplicationSet(rawItems: readonly unknown[], expected: readon
   return byName;
 }
 
+/** Every Application a list tick found, keyed by nothing: the row carries its own name, and a name
+ *  the caller did not expect is KEPT. That is the difference from mapApplicationSet above, which
+ *  answers a caller that can name its set; this answers one that counts what a generator produced. */
+export function mapApplications(rawItems: readonly unknown[]): ArgoApplicationRow[] {
+  const rows: ArgoApplicationRow[] = [];
+  for (const raw of rawItems) {
+    const name = asObject<{ metadata?: { name?: string } }>(raw).metadata?.name;
+    if (typeof name !== "string" || name === "") continue;
+    rows.push({ name, ...mapArgoStatus(raw) });
+  }
+  return rows;
+}
+
 // ---- Workloads (apps/v1) -------------------------------------------------------------------
 
 export interface RawDeployment {
@@ -195,18 +210,41 @@ function workload(kind: string, name: string | undefined, ready: number, desired
   return { kind, name: name ?? "(unnamed)", available, desired, ready, message };
 }
 
-// ---- ExternalSecrets (external-secrets.io/v1beta1) -----------------------------------------
+// ---- ExternalSecrets (external-secrets.io/v1) ----------------------------------------------
 
 interface RawExternalSecret {
+  metadata?: { name?: string };
+  spec?: { target?: { name?: string } };
   status?: { conditions?: RawCondition[] };
 }
 
-/** True when EVERY ExternalSecret carries a Ready=True condition (SecretSynced). Zero
- *  ExternalSecrets is ready — a namespace without secrets has nothing that could be unsynced. */
-export function externalSecretsAllReady(items: readonly unknown[]): boolean {
-  return items.every((raw) =>
-    (asObject<RawExternalSecret>(raw).status?.conditions ?? []).some((c) => c.type === "Ready" && c.status === "True"),
-  );
+/** Every ExternalSecret a list tick found, one row each: the name, whether the Ready condition
+ *  reads True, that condition's reason, and the Secret the spec targets.
+ *
+ *  ONE MAPPER AND NOT TWO. `SmokeResult.externalSecretsReady` is derived from these rows
+ *  (kube.ts), so the bit a smoke reports and the rows a gate names cannot drift apart — which they
+ *  would the first time one of two readings learned about a condition the other did not. */
+export function mapExternalSecrets(rawItems: readonly unknown[]): ExternalSecretRow[] {
+  const rows: ExternalSecretRow[] = [];
+  for (const raw of rawItems) {
+    const item = asObject<RawExternalSecret>(raw);
+    const name = item.metadata?.name;
+    if (typeof name !== "string" || name === "") continue;
+    const ready = (item.status?.conditions ?? []).find((c) => c.type === "Ready");
+    rows.push({
+      name,
+      ready: ready?.status === "True",
+      reason: ready?.reason ?? "",
+      targetSecret: item.spec?.target?.name ?? "",
+    });
+  }
+  return rows;
+}
+
+/** True when EVERY row reports Ready. Zero ExternalSecrets is ready — a namespace without secrets
+ *  has nothing that could be unsynced. */
+export function externalSecretsAllReady(rows: readonly ExternalSecretRow[]): boolean {
+  return rows.every((row) => row.ready);
 }
 
 // ---- Deploy-state ConfigMap (kube-system/hostyour-cloud-deploy-state) --------------------------

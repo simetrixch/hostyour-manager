@@ -18,7 +18,8 @@ import { serverCredFlags } from "../inventory/write.ts";
 import {
   SLAVE_ID, MASTER_ID, PARAMS, STEP_NAMES, HEALTHY_SLAVE_PREFLIGHT, MASTER_MARKING_YAML,
   ELEVATION_PASSWORD, SLAVE_PUBLIC_KEY, scriptedHosts, makeHarness, disposeHarnesses, hostedStepCtx,
-  bareStepCtx, drainToVerifyDeadline, drainToNextTimer, stepOf,
+  bareStepCtx, drainToVerifyDeadline, drainToNextTimer, stepOf, seedMasterCluster,
+  SLAVE_ARGO_NS, argoRow, externalSecretRow,
   type Harness,
 } from "./deploy-slave.fixture.ts";
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
@@ -326,6 +327,8 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     h.db.db.insert(clusters).values({
       id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
     }).run();
+    // The master's own cluster row: the two master-side gates resolve their kube access through it.
+    seedMasterCluster(h);
     return h;
   }
 
@@ -342,22 +345,47 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   }
 
   it("verify-slave HARD-fails when an app is not Synced (the bounded retry window expires), with the diagnostics taken", async () => {
-    const h = await verifyWorld({ argoAppsOut: "root-applications|OutOfSync|Progressing\nplatform-apps-prod|Synced|Healthy" });
+    const h = await verifyWorld();
+    h.argo.setApplications(SLAVE_ARGO_NS, [argoRow("root-applications", "OutOfSync", "Progressing"), argoRow("platform-apps-prod")]);
     const err = await expireVerify(h);
     expect(String((err as Error).message)).toMatch(/s1 applications Synced\+Healthy did not converge/);
     expect(String((err as Error).message)).toContain("root-applications (OutOfSync/Progressing)");
-    // The master-side diagnostic bundle ran while the gate was failing AND right before the throw.
-    expect(h.hosts.log.filter((l) => l.host === "m1.example.com" && l.command.includes("dc-slave-diag-")).length).toBeGreaterThanOrEqual(1);
+    // The master-side diagnostic bundle ran while the gate was failing AND right before the throw —
+    // and it is the ONLY thing this step still sends the master.
+    const toMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
+    expect(toMaster.filter((c) => c.includes("dc-slave-diag-")).length).toBeGreaterThanOrEqual(1);
+    expect(toMaster.filter((c) => !c.includes("dc-slave-diag-"))).toEqual([]);
   });
 
-  it("verify-slave HARD gate 0: a never-Ready ExternalSecret fails NAMED, after force-sync kicks", async () => {
-    const h = await verifyWorld({ externalSecretsOut: "cluster-slave|True|SecretSynced\nrepo-platform|False|SecretSyncedError" });
+  it("verify-slave HARD gate 0: a never-Ready ExternalSecret fails NAMED, and gate 1 is never reached", async () => {
+    const h = await verifyWorld();
+    h.cluster.setExternalSecrets(SLAVE_ARGO_NS, [externalSecretRow("cluster-slave"), externalSecretRow("repo-platform", false)]);
     const err = await expireVerify(h);
     expect(String((err as Error).message)).toMatch(/s1 ExternalSecrets Ready \(repo \+ cluster credentials\) did not converge/);
     expect(String((err as Error).message)).toContain("repo-platform (SecretSyncedError)");
-    // The backoff-breaking kick fired on the master, and gate 1 was never reached.
-    expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command.includes("annotate externalsecrets.external-secrets.io --all force-sync="))).toBe(true);
-    expect(h.hosts.log.some((l) => l.command.includes("get applications.argoproj.io"))).toBe(false);
+    // Gate 1 stands behind gate 0 and never listed anything.
+    expect(h.argo.listed).toEqual([]);
+  });
+
+  it("verify-slave PLANTED DEFECT: a kube read that throws is a failing TICK, and the gate converges on the next one", async () => {
+    // The master's API server goes away mid-poll BY DESIGN — deploy-platform-services restarts
+    // kubelite and the Manager's own pod is on that API server. A gate that died on the first
+    // UPSTREAM would fail a deployment for the restart the deployment itself asked for.
+    const h = await verifyWorld();
+    h.cluster.setExternalSecretsFailure(new AppError("UPSTREAM", "list ExternalSecrets in s1: connect ECONNREFUSED"));
+    const step = stepOf(h, "verify-slave");
+    vi.useFakeTimers();
+    try {
+      const done = step.run(hostedStepCtx(h));
+      await drainToNextTimer();
+      h.cluster.setExternalSecretsFailure(undefined); // the API server is back
+      await vi.advanceTimersByTimeAsync(15_000);
+      await done;
+    } finally {
+      vi.useRealTimers();
+    }
+    // It really did read twice: the refused tick and the one that converged.
+    expect(h.cluster.listedExternalSecrets.length).toBeGreaterThanOrEqual(2);
   });
 
   it("verify-slave HARD-fails when a slave ESO SecretStore never reaches Ready", async () => {
@@ -373,7 +401,10 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     // channel, so a refused open must be a FAILING POLL (retried on the next cadence tick), never
     // a step death.
     const h = await verifyWorld();
-    h.hosts.execFaults.push({ match: "get externalsecrets.external-secrets.io", message: "(SSH) Channel open failure: open failed" });
+    // The fault is planted on a read that still goes over a session — HARD 2, the slave's own
+    // SecretStores. The two master-side gates send no command at all any more, so a fault planted
+    // on one of those would sit there unconsumed and prove nothing.
+    h.hosts.execFaults.push({ match: "get secretstores.external-secrets.io", message: "(SSH) Channel open failure: open failed" });
     const step = stepOf(h, "verify-slave");
     vi.useFakeTimers();
     try {

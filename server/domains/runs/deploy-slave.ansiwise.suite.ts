@@ -385,8 +385,9 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       expect(h.hosts.authorizedKeys).toEqual([IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY]);
       expect(h.hosts.log.filter((l) => l.command.includes(">> ~/.ssh/authorized_keys"))).toEqual([]);
 
-      // The row stayed active + single + same ordinal (re-reconciled in place, never re-inserted).
-      const rows = h.db.db.select().from(clusters).all();
+      // The SLAVE's row stayed active + single + same ordinal (re-reconciled in place, never
+      // re-inserted). The master's own row stands beside it, as boot seeds it on every installation.
+      const rows = h.db.db.select().from(clusters).where(eq(clusters.serverId, SLAVE_ID)).all();
       expect(rows).toHaveLength(1);
       expect(rows[0]?.status).toBe("active");
       expect(rows[0]?.slaveId).toBe(1);
