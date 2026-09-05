@@ -10,6 +10,7 @@ import type { Stage } from "../../../../shared/enums.ts";
 import { MACHINE_PASSWORD_SECRET } from "../../../../shared/approve.ts";
 import { loadServer, loadMaster, masterFqdnOf, masterStageOf, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { CATALOG_CHECKOUT, CATALOG_PROGRAMS } from "./machine-state.ts";
+import { findUnknownProgram } from "./place-ansiwise.ts";
 
 // Driving one ansiwise PROGRAM on a machine, through the machine's own REST surface — the step
 // that replaces `setup.sh --<stage>` on hosts whose machine layer is delivered by the
@@ -134,6 +135,20 @@ export function requireServeCommand(ports: AnsiwisePorts): string {
       "ANSIWISE_SERVE_COMMAND names --role, --fqdn or --stage, and those three are not the installation's to state: one " +
       "command serves every machine this manager reaches, while what a machine IS differs per machine and is written on " +
       "its inventory row. This manager appends all three from that row — take them out of the configured command",
+    );
+  }
+  // AND THE WORD IT STARTS HAS TO BE A PROGRAM THE BINARY HAS. Until this stood here, the only thing
+  // held against this command was those three options: any other word passed, reached the machine,
+  // and was answered there with exit 64 — by which point the run has failed on a machine and the
+  // operator is looking at the machine. The engine's set is not written down twice for this; see
+  // ENGINE_PROGRAMS, which is read off the binary itself.
+  const unknown = findUnknownProgram(ports.ansiwiseServeCommand.split(/\s+/));
+  if (unknown !== undefined) {
+    throw errNotConfigured(
+      `ANSIWISE_SERVE_COMMAND names \`${unknown.tool} ${unknown.word}\`, and ${unknown.tool} has no program called ` +
+      `"${unknown.word}" — it serves: ${unknown.serves.join(", ")}. Every step that reaches a machine's deployment ` +
+      "programs starts this command over the session, so a machine would answer the word with exit 64 and each of " +
+      "those steps would fail there rather than here",
     );
   }
   return ports.ansiwiseServeCommand;

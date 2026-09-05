@@ -47,9 +47,10 @@ export default defineConfig({
           name: "real-serve",
           include: ["server/**/*.ansiwise.test.ts"],
           environment: "node",
-          // ALONE, AND ONE FILE AT A TIME. There is one such file today; a second would start a
-          // second serve fixture, and the engine's run root is per-drive — a fixture's close()
-          // removes the whole of it, so two running together would delete each other's records.
+          // ALONE, AND ONE FILE AT A TIME. Two files that each start a serve fixture cannot run
+          // together: the engine's run root is per-drive and a fixture's close() removes the whole
+          // of it, so they would delete each other's records. This is what a file joining this
+          // project is given rather than what it has to remember.
           fileParallelism: false,
           sequence: { groupOrder: 1 },
         },

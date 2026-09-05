@@ -97,6 +97,78 @@ export const ANSIWISE_SESSION_PROGRAM = "serve";
  *  having: see BOTH EXECUTABLES in the header. */
 export const ANSIWISE_EXECUTABLES = [ANSIWISE_TOOL, ANSIWISE_REST_TOOL] as const;
 
+/** WHICH WORDS AN ENGINE BINARY ANSWERS AS A PROGRAM, for the binaries whose set is a fact of the
+ *  BUILD rather than of a machine.
+ *
+ *  ONE ENTRY, AND THE OTHER BINARY'S ABSENCE IS THE STATEMENT. `ansiwise-rest` decides a word before
+ *  it opens a configuration or a catalogue, so what it serves is settled where it is compiled.
+ *  `ansiwise` resolves a word against the CATALOGUE STANDING ON THE MACHINE (ansiwise-cli
+ *  bin/ansiwise.dart, `catalogue.byName` → `no program is called "<word>"`, listing what that
+ *  machine carries), so no set written here could ever be true of it and none is written. A binary
+ *  this record does not carry is one no word can be held against — a fact about where the answer
+ *  lives, and not an exemption from the rule.
+ *
+ *  IT IS NOT A COPY OF THE DART SOURCE, and that is the whole difficulty this answers. A word
+ *  written down here would be a second statement of the engine's surface, which is the same defect
+ *  one level up: `installServiceArgv` was such a statement, it was correct on the day it was written
+ *  and wrong three releases later, and nothing in this repository noticed
+ *  (simetrixch/ansiwise-cli#14). So engine-programs.ansiwise.test.ts asks the REAL binary the sibling
+ *  checkout built: refused a word, the binary names its own set on the line `it serves: …`, and that
+ *  is what this record is compared against. A program deleted from the engine therefore turns this
+ *  repository red where the binary stands, instead of reaching a machine as a word it no longer
+ *  knows. */
+export const ENGINE_PROGRAMS: ReadonlyMap<string, readonly string[]> = new Map([
+  [ANSIWISE_REST_TOOL, [ANSIWISE_SESSION_PROGRAM] as readonly string[]],
+]);
+
+/** An invocation this manager composed for an engine binary that carries no such program. */
+export interface UnknownProgram {
+  /** The binary, under the name the command spells it — the file name, so a path and a bare name are
+   *  one finding. */
+  tool: string;
+  /** The word standing where a program belongs. */
+  word: string;
+  /** What that binary DOES serve, because a refusal that only says no leaves the reader guessing. */
+  serves: readonly string[];
+}
+
+/** A program word [words] names that its binary does not carry — the first one, or undefined where
+ *  every engine invocation in the list names a program the binary has.
+ *
+ *  A RULE AND NOT A LIST. It knows no call site, no run kind and no sender: any word list this
+ *  repository writes is read the same way, so it does not matter whether the words reach a machine
+ *  as an uploaded script, a composed command line, an argument list or a configured command — nor
+ *  which sixth route somebody adds next.
+ *
+ *  WHAT IT READS is a token whose file name is a binary [ENGINE_PROGRAMS] carries, and the word
+ *  standing after it. An option is not a program (`--version` is answered before a program is looked
+ *  for at all), and neither is anything that is not one bare lower-case word — so a path, a value or
+ *  a shell operator is read past, and `install -m 755 ~/ansiwise-rest /usr/local/bin/ansiwise-rest`
+ *  names no program.
+ *
+ *  WHAT IT CANNOT READ is a name this repository did not write: a command that composes the binary's
+ *  name at runtime out of a value from outside this process carries no token to match on. Nothing
+ *  here does that today, and the reason it may not start is that this would go quiet about it rather
+ *  than red. */
+export function findUnknownProgram(words: readonly string[]): UnknownProgram | undefined {
+  for (const [at, word] of words.entries()) {
+    const tool = word.slice(word.lastIndexOf("/") + 1);
+    const serves = ENGINE_PROGRAMS.get(tool);
+    if (serves === undefined) continue;
+    const next = words[at + 1];
+    if (next === undefined || !PROGRAM_WORD_RE.test(next) || serves.includes(next)) continue;
+    return { tool, word: next, serves };
+  }
+  return undefined;
+}
+
+/** THE SHAPE OF A PROGRAM NAME, which is how a program word is told from everything else that can
+ *  stand after an executable. The engine's own programs are lower-case words joined by hyphens
+ *  (`serve`, `deploy-cluster`, `remove-slave`), and nothing else in a command line looks like that:
+ *  an option carries its dashes in front, a path carries a slash, a value carries an `=`, a digit or
+ *  a capital. */
+const PROGRAM_WORD_RE = /^[a-z][a-z0-9-]*$/;
+
 /** What the download address writes where the pinned version belongs. One placeholder and one
  *  source: the address says WHERE a release is fetched from, the pin says WHICH — so the two can
  *  never state different versions. */

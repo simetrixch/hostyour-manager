@@ -33,9 +33,12 @@ import {
 //   operating system, or one of the two files this platform writes into a directory the machine
 //   already has. What it does NOT reach is a command written INLINE at a call site —
 //   remote-syntax.test.ts holds every one of those to a single line, so it is a line the reader of
-//   the call site sees whole — nor an argument list the placement composes for `machine.run`, which
-//   no census reads. The one of those that carried absolute paths was `installServiceArgv`, named
-//   here by hand until simetrixch/ansiwise-cli#14 deleted the program it invoked.
+//   the call site sees whole — nor an argument list the placement composes for `machine.run`. The one
+//   of those that carried absolute paths was `installServiceArgv`, named here by hand until
+//   simetrixch/ansiwise-cli#14 deleted the program it invoked. Those argument lists ARE read now, by
+//   the second census in remote-syntax.test.ts, but only for the program word in them: that census
+//   asks which binary a word invokes and never which paths a command carries, so a path written into
+//   an argument list is still answered by nobody.
 //
 //   NEITHER HALF ASKS A MACHINE. What is proven here is that no path reaches a machine from this
 //   repository without an ownership answer. Whether the account can actually write each of them ON A

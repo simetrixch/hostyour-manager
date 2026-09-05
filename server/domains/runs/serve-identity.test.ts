@@ -77,4 +77,16 @@ describe("requireServeCommand — whose statement the role is", () => {
   it("refuses an absent command by naming what it is for", () => {
     expect(() => requireServeCommand({})).toThrow(/ANSIWISE_SERVE_COMMAND is not configured/);
   });
+
+  it("PLANTED DEFECT: refuses a command starting a program the serving binary does not carry", () => {
+    // The word that proved this class was `install-service`, which the engine carried until
+    // simetrixch/ansiwise-cli#14 and this manager went on composing afterwards. Until this guard
+    // stood here the only thing held against the configured command was --role/--fqdn/--stage, so
+    // any other word passed, reached the machine and was answered there with exit 64 — by which
+    // point the operator is reading a failure on a machine.
+    for (const bad of ["~/ansiwise-rest install-service --answers -", "cd /srv/x && ~/ansiwise-rest service --listen 127.0.0.1:9953"]) {
+      expect(() => requireServeCommand({ ansiwiseServeCommand: bad }), bad)
+        .toThrow(/ansiwise-rest has no program called "(install-)?service" — it serves: serve/);
+    }
+  });
 });

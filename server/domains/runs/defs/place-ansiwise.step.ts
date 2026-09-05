@@ -1,11 +1,11 @@
 import type { Step, StepCtx } from "../../../executor/types.ts";
 import type { servers } from "../../../db/schema/inventory.ts";
-import { errNotConfigured } from "../../../kernel/errors.ts";
+import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { readAnsiwisePin } from "../../inventory/ansiwise-pin.ts";
 import { loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { requireElevationPassword, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 import {
-  placeAnsiwise, assertWord, handRunRoot, VERSION_PLACEHOLDER, NAME_PLACEHOLDER,
+  placeAnsiwise, assertWord, findUnknownProgram, handRunRoot, VERSION_PLACEHOLDER, NAME_PLACEHOLDER,
   type PlacementMachine, type BootstrapVerdict,
 } from "./place-ansiwise.ts";
 import type { ReleaseDownloads } from "../../../adapters/downloads/port.ts";
@@ -139,7 +139,15 @@ async function runBootstrap(
  *  place-ansiwise.ts's own guard first. That guard refuses whitespace and everything a shell reads as
  *  syntax, so what is handed to `exec` is a line whose words are exactly the words that were composed
  *  — there is no quoting here because there is nothing quotable to quote, and a quoter would be the
- *  shell composer this whole change removed. */
+ *  shell composer this whole change removed.
+ *
+ *  AND NO LIST NAMES A PROGRAM THE ENGINE DOES NOT CARRY. Being the one place every placement
+ *  argument list leaves through is what makes this the place to hold that: a rule applied at each of
+ *  the four sites that COMPOSE a list would be a rule the fifth site never learns. The word that
+ *  proved it was `install-service`, which stood in an argument list here until
+ *  simetrixch/ansiwise-cli#14 deleted the program — and every check in this repository stayed green,
+ *  because the scripted machine answered an unknown command with exit 0 and no census read an
+ *  argument list at all. */
 async function placementMachine(ctx: StepCtx, name: string): Promise<PlacementMachine> {
   const session = await ctx.ssh();
   return {
@@ -147,6 +155,14 @@ async function placementMachine(ctx: StepCtx, name: string): Promise<PlacementMa
     putFile: (remotePath, content, mode) => session.putFile(remotePath, content, mode, { signal: ctx.signal }),
     run: async (argv, o) => {
       for (const word of argv) assertWord(word, "word of a command on the machine");
+      const unknown = findUnknownProgram(argv);
+      if (unknown !== undefined) {
+        throw errValidation(
+          `this run would send ${name} the command \`${argv.join(" ")}\`, and ${unknown.tool} has no program called ` +
+          `"${unknown.word}" — it serves: ${unknown.serves.join(", ")}. The machine would answer exit 64, and the run ` +
+          "would report a failure three systems away from the word that caused it",
+        );
+      }
       const out: string[] = [];
       const result = await session.exec(argv.join(" "), {
         signal: ctx.signal,

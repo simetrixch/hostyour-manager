@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { DISABLE_SCRIPT } from "./defs/password-login.kit.ts";
 import { REMOTE_COMMANDS, REMOTE_SCRIPTS } from "./remote-scripts.fixture.ts";
+import {
+  findUnknownProgram, ANSIWISE_REST_TOOL, ANSIWISE_SESSION_PROGRAM, ANSIWISE_TOOL,
+  BOOTSTRAP_HOME, PATH_HOME, EXECUTABLE_MODE,
+} from "./defs/place-ansiwise.ts";
 
 // WHAT THIS MANAGER SHIPS TO A MACHINE, READ BY THE PROGRAM THAT WILL READ IT THERE.
 //
@@ -185,6 +189,158 @@ describe("the census: every shell a run sends to a host is in the collection", (
     const collected = [...new Set(collection().map((s) => s.symbol))].sort();
     expect(sent.filter((s) => !collected.includes(s)), `sent by a run and never parsed here — add it to ${name}`).toEqual([]);
     expect(collected.filter((s) => !sent.includes(s)), `parsed here but no run sends it — the entry outlived its call site`).toEqual([]);
+  });
+});
+
+// ── THE SECOND READER: the engine, and the words this manager composes for it ─────────────────────
+//
+// `bash` is not the only program that reads what this repository ships. A command line naming one of
+// the engine's binaries is read by THAT binary, which answers a word it does not carry with exit 64
+// and a sentence — on the machine, three systems away from the line that composed it.
+//
+// WHY THIS CENSUS DOES NOT WALK SENDERS. The one above does, and that is right for bash: a script is
+// shell BECAUSE something uploaded it as shell. A program word is wrong wherever it is written,
+// whoever sends it, so this reads WORD LISTS out of the shipped source and asks nothing about how
+// they travel. That matters because the senders are not two families but five — `remoteScript` and
+// `remoteScriptCapture`; `remoteCmd`, `remoteExec` and `execCapture`; `PlacementMachine.run`'s
+// argument lists; raw `session.exec` at nine call sites that bypass stepkit entirely; and the
+// installation's own ANSIWISE_SERVE_COMMAND — and SENDERS above reaches only the first two, because
+// it matches an identifier call and the rest are property-access calls or configuration. The word
+// that went unnoticed (`install-service`, simetrixch/ansiwise-cli#14) stood in the third of those.
+//
+// WHAT A WORD LIST IS: an ARRAY whose elements are text is one list, in its own order; any other
+// piece of text is its own contents split on whitespace. So `[`${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`,
+// "install-service"]` and `` `cd /srv/x && ~/ansiwise-rest install-service` `` are the same finding,
+// which is what lets this be one rule over both routes rather than two rules over two shapes.
+//
+// AND A TEMPLATE IS READ AS THE TEXT IT WILL BE. `${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}` is what the
+// deleted invocation actually looked like — nobody writes an executable's path as a bare literal —
+// so a census reading templates as their source text would have missed the one defect it exists for.
+// It was measured missing it before this stood here. Every `const NAME = "…"` in the shipped source
+// is collected first and substituted in, which is a rule over this repository's own declarations and
+// not a list of the names that matter. A substitution nothing declares becomes a word no rule can
+// match, which is the honest reading: what stands there is decided at runtime.
+//
+// WHAT IT CANNOT REACH is text this repository never spells — a binary named from a value that
+// arrives from outside the process. Nothing composes one today, and that is stated where the
+// predicate is (defs/place-ansiwise.ts findUnknownProgram).
+
+/** One word list as this repository wrote it, with where a reader finds it. */
+interface WordList {
+  where: string; // repo-relative file:line
+  words: string[];
+  source: string;
+}
+
+/** What a substitution nothing declares resolves to: a character no command line carries, so the
+ *  word it stands in can match neither an executable nor a program name. */
+const UNRESOLVED = "\u0000";
+
+/** Every `const NAME = "…"` the shipped source declares. One map for the whole tree rather than one
+ *  per file, because a word is composed out of constants imported from wherever they are declared. */
+function constants(files: readonly string[]): Map<string, string> {
+  const known = new Map<string, string>();
+  for (const file of files) {
+    const sf = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.ESNext, true);
+    const visit = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
+        && node.initializer !== undefined && ts.isStringLiteralLike(node.initializer)) {
+        known.set(node.name.text, node.initializer.text);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  return known;
+}
+
+/** The text [node] will BE, or undefined where it is not text at all. */
+function textOf(node: ts.Node, sf: ts.SourceFile, known: Map<string, string>): string | undefined {
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (!ts.isTemplateExpression(node)) return undefined;
+  return node.head.text + node.templateSpans
+    .map((span) => (known.get(span.expression.getText(sf)) ?? UNRESOLVED) + span.literal.text)
+    .join("");
+}
+
+/** Every word list in the shipped source under server/. Tests and fixtures are out, for the reason
+ *  they are out of the census above and out of machine-state.test.ts's declaration half: they model
+ *  what a MACHINE answers, and a model composed out of our own constants would agree with us by
+ *  construction. */
+function wordLists(): WordList[] {
+  // A FIXTURE IS OUT, and it is the same exemption machine-state.test.ts states for its own halves:
+  // a fixture models what a MACHINE or the real engine ANSWERS, so it spells the engine's refusals
+  // on purpose — `ansiwise-rest has no program called "…"` is a sentence there and not a command.
+  const files = sourceFiles(SERVER_ROOT).filter((f) => !f.endsWith(".fixture.ts"));
+  const known = constants(files);
+  const found: WordList[] = [];
+  for (const file of files) {
+    const sf = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.ESNext, true);
+    const at = (node: ts.Node): string =>
+      `${relative(REPO_ROOT, file).split("\\").join("/")}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`;
+    const visit = (node: ts.Node): void => {
+      const elements = ts.isArrayLiteralExpression(node)
+        ? node.elements.map((e) => textOf(e, sf, known))
+        : undefined;
+      if (elements !== undefined && elements.length > 1 && elements.every((w) => w !== undefined)) {
+        found.push({ where: at(node), words: elements as string[], source: node.getText(sf).replaceAll("\n", " ") });
+      } else {
+        const text = textOf(node, sf, known);
+        if (text !== undefined) {
+          found.push({ where: at(node), words: text.split(/\s+/).filter((w) => w.length > 0), source: text.replaceAll("\n", " ") });
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  return found;
+}
+
+describe("the second census: no word this manager composes names a program the engine does not carry", () => {
+  const lists = wordLists();
+
+  it("finds word lists at all (a census over nothing would pass by measuring nothing)", () => {
+    expect(lists.length).toBeGreaterThan(100);
+    // The engine's own names have to be among them, or this is reading a tree it does not recognise.
+    expect(lists.some((l) => l.words.includes(ANSIWISE_REST_TOOL))).toBe(true);
+  });
+
+  it("every engine invocation in the shipped source names a program that binary has", () => {
+    const wrong = lists
+      .map((l) => ({ l, bad: findUnknownProgram(l.words) }))
+      .filter((x) => x.bad !== undefined)
+      .map((x) => `${x.l.where}: ${x.bad?.tool} has no program called "${x.bad?.word}" (it serves: ${x.bad?.serves.join(", ")}) — ${x.l.source}`);
+    expect(
+      wrong,
+      "these compose a command naming a program the engine does not carry, so a machine answers them with exit 64 — " +
+        "the engine's set is read off the binary itself (engine-programs.ansiwise.test.ts)",
+    ).toEqual([]);
+  });
+
+  // THE PLANT, in the exact shape the deleted one had: the argument list place-ansiwise composed for
+  // the resident door, which reached a machine and every check here stayed green.
+  it("refuses a planted invocation of a program the engine does not carry, naming the word", () => {
+    const planted = [`${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`, "install-service", "--listen", "127.0.0.1:9953"];
+    expect(findUnknownProgram(planted)).toEqual({
+      tool: ANSIWISE_REST_TOOL,
+      word: "install-service",
+      serves: [ANSIWISE_SESSION_PROGRAM],
+    });
+    // The same word inside a command LINE, because that is the other shape it reaches a machine in.
+    expect(findUnknownProgram(`cd /srv/x && ${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL} install-service --answers -`.split(" "))?.word)
+      .toBe("install-service");
+  });
+
+  // The innocent cases beside it, so a green answer above is the source and not a predicate that
+  // finds nothing. Each of these is a real list this repository sends today.
+  it.each([
+    ["the version reading, whose word is an option", [`${PATH_HOME}${ANSIWISE_REST_TOOL}`, "--version"]],
+    ["the raised copy, whose next word is a path", ["sudo", "-S", "install", "-m", EXECUTABLE_MODE.toString(8), `${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`, `${PATH_HOME}${ANSIWISE_REST_TOOL}`]],
+    ["the serve command an installation configures", ["cd", "/srv/ansiwise-catalog", "&&", `${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`, ANSIWISE_SESSION_PROGRAM, "--programs", "ansiwise/programs"]],
+    ["the deployment tool, whose programs are the machine's catalogue and not this repository's to know", [ANSIWISE_TOOL, "deploy-cluster", "--mode", "test"]],
+  ])("reads past %s", (_what, words) => {
+    expect(findUnknownProgram(words)).toBeUndefined();
   });
 });
 
