@@ -223,8 +223,9 @@ export function serveConversation(serve: ServeFixture): Conversation {
  *
  *  Its machine carries no sudoers drop-in, like every other world here — see
  *  FirstContactScript.adopted (deploy-slave.first-contact.fixture.ts).
- *  A first master is installed by ansiwise-client, which writes no such file, so on a real one the
- *  only way to root is the elevation password the run itself carries.
+ *  A first master is installed by hostyour-cloud lifecycle/install-machine driving lifecycle/driver.sh,
+ *  which writes no such file, so on a real one the only way to root is the elevation password the run
+ *  itself carries.
  *
  *  AND THE MACHINE LOOKS LIKE A LIVE MASTER, which is what the first-contact steps at the head of
  *  that arm are re-measured against: this manager's key already stands in its authorized_keys and

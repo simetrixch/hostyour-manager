@@ -230,7 +230,8 @@ async function registryHostOf(ports: DeploySlavePorts, domain: string): Promise<
  *  and whose release-cluster then refused because the file it records into was not there.
  *
  *  A machine being born as a master is the one case that takes `master`, and it is not this manager's
- *  case: it has no cluster row yet and is installed by ansiwise-client, which answers this itself. */
+ *  case: it has no cluster row yet and is installed by hostyour-cloud lifecycle/install-machine, which
+ *  answers this itself. */
 /** Everything deploy-host is owed that the machine cannot answer itself: the two checkout answers
  *  above and the public half of the key this manager reaches the machine with. ONE `extra`, because
  *  a program step takes one — and both run kinds that drive deploy-host owe the machine all three.

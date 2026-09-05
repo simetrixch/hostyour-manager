@@ -279,9 +279,10 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
   });
 
   it("raises what it still raises with the password the RUN carries, on standard input — on a machine that grants no passwordless route at all", { timeout: 180_000 }, async () => {
-    // THE MACHINE THIS RUNS ON: /etc/sudoers.d/ holds nothing. That is what ansiwise-client leaves
-    // behind, so it is what a FIRST MASTER is — measured on a real one, a README and no rule — and
-    // the scripted host refuses every `sudo -n` on it exactly as that machine does.
+    // THE MACHINE THIS RUNS ON: /etc/sudoers.d/ holds nothing. That is what hostyour-cloud
+    // lifecycle/install-machine leaves behind, so it is what a FIRST MASTER is — measured on a real
+    // one, a README and no rule — and the scripted host refuses every `sudo -n` on it exactly as that
+    // machine does.
     //
     // WHAT THIS MEASURED BEFORE was `argocd-follow` reading the cluster that way, which is exactly
     // the read that moved to the kube port. The password-on-standard-input proof MOVES with it to a

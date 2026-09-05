@@ -37,8 +37,8 @@ export interface FirstContactScript {
    *  and the file `remove-sudoers` really takes off it.
    *
    *  IT DEFAULTS TO `false`, the machine that grants NOTHING without a password. That is what a
-   *  first master installed by ansiwise-client really is (measured on one on 2026-08-27: a README
-   *  in /etc/sudoers.d/ and no rule), and it is what every machine a deployment touches is left as —
+   *  first master installed by hostyour-cloud lifecycle/install-machine really is (measured on one on
+   *  2026-08-27: a README in /etc/sudoers.d/ and no rule), and it is what every machine a deployment touches is left as —
    *  so a run proven here works on both, and a step that reaches for a standing rule is refused here
    *  instead of months later on somebody's machine. `true` is the machine an OLDER install left the
    *  file on, which is the only reason `remove-sudoers` has anything to remove; no step and no

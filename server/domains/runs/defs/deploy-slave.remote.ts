@@ -21,8 +21,8 @@ import { z } from "zod";
 // leave the rest of the script prompting a terminal that is not there.
 // The route that is NOT taken is `sudo -n`, answered only by a standing sudoers rule no run kind
 // here writes and `remove-sudoers` takes off. A machine carries no such rule of this platform's
-// making — a first master, installed by ansiwise-client, never had one — and the one row that used
-// to grant these is granted to nobody now.
+// making — a first master, installed by hostyour-cloud lifecycle/install-machine, never had one — and
+// the one row that used to grant these is granted to nobody now.
 
 /** The MicroK8s kube-apiserver port — a platform constant (the emit-cluster-credentials answer
  *  and the cluster map's apiPort carry the same value). */
