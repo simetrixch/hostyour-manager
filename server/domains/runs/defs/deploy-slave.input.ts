@@ -9,8 +9,8 @@ import { inputFile } from "./machine-state.ts";
 // THE VALUE A CLUSTER THAT KEEPS NO BOOKS STILL READS, put there for the length of the run.
 //
 // secrets/secrets.<stage> is the one hand-filled input of an installation. It is gitignored, so it
-// cannot travel on a branch, and it is written by deploy-branch and regenerate-branch — the branch
-// programs of the cluster that keeps the books — and by nothing else. Everything seeded out of it
+// cannot travel on a branch, and it is written by deploy-branch — the branch program of the
+// cluster that keeps the books — and by nothing else. Everything seeded out of it
 // into the secret store belongs to that cluster and now says so (books_here_in_answers, in the
 // catalogue's deploy-platform-services).
 //

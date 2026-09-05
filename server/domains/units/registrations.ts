@@ -121,34 +121,25 @@ export function serializePointer<T extends object>(schema: z.ZodType<T>, entry: 
  *  tenant-registrations.ts readTenant states for the tenant half, and for its reason: a registration
  *  written by hand, with comments and block-style lists, still folds.
  *
- *  ONE registration is always written by hand. `registrations/hostyour-manager/build.yaml` is
- *  rendered from the deployment programs' `ansiwise/templates/platform-build-registration.tpl` by
- *  their `ansiwise/programs/deploy-branch.yaml:695-701` on a first installation, because the
- *  unit it registers is the one whose image this process runs — nothing is up yet that could write
- *  it. Under the flat reader that file failed on its first comment line, and listAttestedBuildNames
- *  throws where the stage scan skips, so gate G16 (validate.ts:234) refuses EVERY OTHER consumer's
- *  onboarding on a fresh installation, with a message about build-name uniqueness.
+ *  THIS PROCESS IS THE ONLY WRITER OF registrations/**, and that is what the reader may rest on.
+ *  `registrations/hostyour-manager/build.yaml` was once rendered onto the branch from a template of
+ *  the deployment programs, in a commented dialect the flat reader failed on at its first comment
+ *  line — which is where the asymmetry above comes from and why it stays. That template is gone and
+ *  no program renders a registration any more: the catalogue's `onboard-manager` asks this Manager
+ *  to onboard its own unit over the route every other consumer takes, so the file arrives in
+ *  serializePointer's own dialect, and `deploy-branch` — the one program that writes an install
+ *  branch — names no registrations path, down to the directory list its commit row carries. Nothing
+ *  puts a hand-written form back over what commitRegistration and flip() wrote.
  *
- *  FOLDING IT IS NECESSARY AND NOT SUFFICIENT — THE REFUSAL IS STILL STANDING. The template writes
- *  `suspended: "false"` at platform-build-registration.tpl:31; this reader folds that file and
- *  ConsumerRegistrationSchema then refuses it on `suspended` with `Invalid input: expected boolean,
- *  received string`, which listAttestedBuildNames converts to the same errValidation as before. G16
- *  keeps refusing until that one template line reads `suspended: false`. The quotes buy nothing: the
- *  build fan-out selects on matchLabels `suspended: "false"` over a git FILES generator
- *  (hostyour-cloud apps/consumer-build/files/applicationset.yaml), and the boolean form
- *  serializePointer writes has matched that selector for every unit in every installation — flip()
- *  below records that same fact.
+ *  THE QUOTES AROUND `suspended` BUY NOTHING, which is why flip() writes the boolean. The build
+ *  fan-out selects on matchLabels `suspended: "false"` over a git FILES generator (hostyour-cloud
+ *  apps/consumer-build/files/applicationset.yaml), and the boolean form serializePointer writes has
+ *  matched that selector for every unit in every installation.
  *
  *  THE TENANT PATH IS ON THIS READ TOO. wire-units.ts:615 passes
  *  `() => registrations.listAttestedBuildNames()` with NO exceptUnit, so create-tenant.run.ts:628
- *  scans every unit including this one: on a fresh installation the FIRST TENANT fails here as well,
- *  not only the first other consumer.
- *
- *  TWO WRITERS STAND OVER THIS ONE FILE AND NOTHING ARBITRATES. commitRegistration and flip() emit it
- *  in serializePointer's flat `key: <json>` dialect, while deploy-branch.yaml:695-701 and
- *  regenerate-branch.yaml:517-522 render the template to the same path unconditionally and
- *  regenerate-branch.yaml:535-539 commits `registrations` — so the next installer run puts the
- *  commented form back over whatever this process wrote.
+ *  scans every unit including this one, and a registration this reader cannot fold refuses the first
+ *  tenant as readily as the first other consumer.
  *
  *  A document that is not a mapping is INTERNAL: a registration is an object, so a scalar or a list
  *  at the top level is a file that is not one. */

@@ -48,7 +48,7 @@ describe("cluster-deploy-slave, master arm — the plan, what it says, and where
     expect(plan.steps.map((s) => s.name)).toEqual([
       "attest-target",
       "prove-elevation", "generate-key", "install-key", "verify-key-login", "remove-sudoers",
-      "place-ansiwise", "run-regenerate-branch", "project-marking",
+      "place-ansiwise", "run-deploy-branch", "project-marking",
       "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow",
     ]);
     // The machine IS the master, so there is no master-side half and no per-slave Vault surgery for
@@ -94,7 +94,7 @@ describe("cluster-deploy-slave, master arm — the plan, what it says, and where
     h.db.db.update(servers).set({ role: MASTER_AND_SLAVE_ROLE }).where(eq(servers.id, MASTER_ID)).run();
     const def = buildRunDefinitions(h.runPorts).get("cluster-deploy-slave") as AnyRunDefinition;
     expect(def.steps({ ...MASTER_PARAMS, tier: "rehearsal" }).map((s) => s.name))
-      .toContain("run-regenerate-branch");
+      .toContain("run-deploy-branch");
   });
 
   it("refuses a machine that is not this manager's own master", async () => {

@@ -173,7 +173,7 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
  *
  *  THE BRANCH IS THE INSTALLATION'S, never the trunk. Every machine's live tree stands on the
  *  installation's one install branch — the books, named after the cluster carrying the master part.
- *  That is what its reconciler follows and what release-cluster and regenerate-branch read the
+ *  That is what its reconciler follows and what release-cluster and deploy-branch read the
  *  release out of. Answering `master` here would move the live tree onto the trunk — measured on
  *  apps3, whose tree stood on master for twelve hours while ArgoCD went on reconciling from origin,
  *  and whose release-cluster then refused because the file it records into was not there.

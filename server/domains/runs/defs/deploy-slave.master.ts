@@ -58,7 +58,7 @@ import type { DeploySlaveParams } from "./deploy-slave.ts";
 // own (`cluster-password-login-disable`, which admits the master), and a machine that has been
 // keeping a platform running keeps its own clock.
 
-/** The role a machine standing under BOTH parts carries — the answer `regenerate-branch` is given,
+/** The role a machine standing under BOTH parts carries — the answer `deploy-branch` is given,
  *  and the value the regenerated map must come back stating. Named once, because the run answers it
  *  and then measures for it, and a word typed twice is a word that can disagree with itself. */
 export const MASTER_AND_SLAVE_ROLE = "master+slave" satisfies ServerRole;
@@ -153,7 +153,7 @@ export function masterSelfTarget(serverId: string, stated: { domain: string; sta
   };
 }
 
-/** What `regenerate-branch` is answered with, and every value of it is READ rather than asked for.
+/** What `deploy-branch` is answered with, and every value of it is READ rather than asked for.
  *
  *  THE PROGRAM IS THE ONE THE LIFECYCLE DRIVES FROM A CONFIG FILE, and this manager holds no such
  *  file. What it holds instead is the installation's own cluster map, which is where those answers
@@ -180,7 +180,7 @@ export function masterSelfTarget(serverId: string, stated: { domain: string; sta
  *
  *  `cluster_issuer` — every other answer here is spread only where the map carries it, so an absent
  *  one leaves the program's own default standing. That is harmless for a value whose default is
- *  inert and destructive for this one: regenerate-branch defaults it to platform-local, writes it
+ *  inert and destructive for this one: deploy-branch defaults it to platform-local, writes it
  *  into configs/config.<stage> and into the base certificate, and the run then reissues every
  *  address of the installation from the cluster's own root. Measured on apps6 on 2026-09-04 in
  *  run_01M1NP396FB7E7DHCRQ3F10E59, which deleted the platform-acme issuer and reported itself
@@ -281,7 +281,7 @@ function projectMarkingStep(target: SlaveTarget, ports: DeploySlavePorts): Step 
  *  login that works, write nothing, and each says so in a full sentence. They are in the list because
  *  a run states what it measured, not because the master is expected to need them.
  *
- *  THE ORDER IS WHAT MAKES THE THREE PROGRAMS DELIVER BOTH PARTS. `regenerate-branch` puts the
+ *  THE ORDER IS WHAT MAKES THE THREE PROGRAMS DELIVER BOTH PARTS. `deploy-branch` puts the
  *  combined role into the map on the machine's own branch, `project-marking` moves the inventory row
  *  onto that map, and only then do the machine-layer programs run — each of which is driven over a
  *  serve identity carrying the row's role and reads the map the branch now holds. Run in any other
@@ -321,8 +321,10 @@ export function masterSlavePartSteps(params: DeploySlaveParams, ports: DeploySla
     // THE ACT THIS ARM EXISTS FOR: the machine's own branch, regenerated under the combined role.
     // The program rewrites the branch from the trunk and stamps this installation into it, the map
     // among what it stamps — so the slave part arrives as a property of the branch the machine
-    // already reads, and not as a second branch beside it.
-    ansiwiseProgramStep(target, "regenerate-branch", ports, { extra: branchAnswers(target, sid, ports) }),
+    // already reads, and not as a second branch beside it. It is the one branch program: it asks the
+    // remote whether it publishes this master's branch and stands the checkout on it, which for a
+    // master this manager has been reaching is always the answer.
+    ansiwiseProgramStep(target, "deploy-branch", ports, { extra: branchAnswers(target, sid, ports) }),
     projectMarkingStep(target, ports),
     // ---- the machine layer, exactly as every cluster gets it: the three deployment programs on the
     // machine's own surface, each dry-proven then run. deploy-host is owed the two checkout answers
