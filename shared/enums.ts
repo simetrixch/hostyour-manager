@@ -239,9 +239,6 @@ export const CLUSTER_STATUS = ["planned", "provisioning", "active",
   "rebuilding", "removing", "removed"] as const;
 export type ClusterStatus = (typeof CLUSTER_STATUS)[number];
 
-export const CLUSTER_TIER = ["rehearsal", "real"] as const; // default "rehearsal"
-export type ClusterTier = (typeof CLUSTER_TIER)[number];
-
 // Lifecycle of a slave's master-side management plane (the per-slave namespaced
 // ArgoCD + Vault surface — see shared/plane.ts). The column is clusters.plane_state.
 //

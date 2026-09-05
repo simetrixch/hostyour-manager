@@ -3,7 +3,7 @@ import { eq, and } from "drizzle-orm";
 import type { Step, StepCtx, Cleanup, RunDefinition } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
-import { STAGE, CLUSTER_TIER, isMasterRole } from "../../../../shared/enums.ts";
+import { STAGE, isMasterRole } from "../../../../shared/enums.ts";
 import { errValidation, errNotConfigured } from "../../../kernel/errors.ts";
 import { execCapture, remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
 import { resolveTransport } from "../../../executor/transport.ts";
@@ -73,8 +73,7 @@ import { masterSlavePartSteps, masterSlavePartPlan } from "./deploy-slave.master
 // only holds once it is on the private network.
 //
 // mutating: true ⇒ the attest-target law (guards.ts assertGuardsArmed) requires
-// steps()[0].name === "attest-target", and slaveCryptoGate restricts a plaintext-keystore install
-// to the single rehearsal slave.
+// steps()[0].name === "attest-target".
 //
 // The remaining remote scripts live in deploy-slave.remote.ts, the shared step-kit in
 // deploy-slave.kit.ts, the credential handshake in deploy-slave.mgmt.ts, verify-slave + register
@@ -85,9 +84,6 @@ export const DeploySlaveParams = z.object({
   stage: z.enum(STAGE),
   /** The slave's FQDN == its install branch == clusters.domain (one branch per slave). */
   domain: z.string().regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, "must be a lowercase FQDN"),
-  /** Defaults to rehearsal so the parsed params satisfy slaveCryptoGate's literal check
-   *  (a `real` slave is refused until the keystore hardening lifts the gate). */
-  tier: z.enum(CLUSTER_TIER).default("rehearsal"),
   /** Explicit ordinal — used by a retry after a failed run (it is never recycled) or to take on a
    *  slave provisioned by hand. Omitted ⇒ attest-target allocates max(slave_id)+1. */
   slaveId: z.number().int().positive().optional(),
@@ -667,7 +663,6 @@ function installInput(params: DeploySlaveParams): SlaveInstallInput {
     target: statedTarget(params.serverId, params.domain, params.stage),
     mode: "deploy",
     slaveId: params.slaveId,
-    tier: params.tier,
   };
 }
 
@@ -716,7 +711,7 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
       // the machine yet it also opens the very first login and installs one.
       summary:
         `Deploy "${slave.name}" (${dialled.host}) as ${params.stage} slave ${params.domain}` +
-        `${params.slaveId !== undefined ? ` (slaveId ${params.slaveId})` : ""} [tier ${params.tier}]: ` +
+        `${params.slaveId !== undefined ? ` (slaveId ${params.slaveId})` : ""}: ` +
         `${stepDefs.length} steps over two hosts — the slave (first contact, then the machine-layer programs on its own ` +
         `ansiwise surface) and the master "${master.name}" (the books and the registration). ` +
         `The password you enter raises every root command of this run, and where this manager holds no key for ` +

@@ -229,7 +229,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
   app.get("/api/consumers/targets", (c) =>
     c.json(
       db
-        .select({ id: clusters.id, domain: clusters.domain, stage: clusters.stage, tier: clusters.tier, status: clusters.status })
+        .select({ id: clusters.id, domain: clusters.domain, stage: clusters.stage, status: clusters.status })
         .from(clusters)
         .where(eq(clusters.status, "active"))
         .all(),
@@ -547,7 +547,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   app.get("/api/tenants/targets", (c) =>
     c.json(
       db
-        .select({ id: clusters.id, domain: clusters.domain, stage: clusters.stage, tier: clusters.tier, status: clusters.status })
+        .select({ id: clusters.id, domain: clusters.domain, stage: clusters.stage, status: clusters.status })
         .from(clusters)
         .where(eq(clusters.status, "active"))
         .all(),

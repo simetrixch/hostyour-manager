@@ -145,12 +145,12 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
     const cid = clsId();
     try {
       db.insert(clusters)
-        .values({ id: cid, serverId: master.id, stage: m.stage, domain: m.fqdn, status: "active", tier: m.tier, slaveId: null })
+        .values({ id: cid, serverId: master.id, stage: m.stage, domain: m.fqdn, status: "active", slaveId: null })
         .run();
       // Audit + log ONLY on a real insert (inside the try) so a clash below never writes a false
       // "seeded" record.
-      writeAudit(db, { actor: "system", action: "cluster.master_seeded", targetKind: "cluster", targetId: cid, detail: { serverId: master.id, domain: m.fqdn, stage: m.stage, tier: m.tier } });
-      logger.info({ id: cid, serverId: master.id, domain: m.fqdn, stage: m.stage, tier: m.tier }, "seeded the master self-cluster row (this control host)");
+      writeAudit(db, { actor: "system", action: "cluster.master_seeded", targetKind: "cluster", targetId: cid, detail: { serverId: master.id, domain: m.fqdn, stage: m.stage } });
+      logger.info({ id: cid, serverId: master.id, domain: m.fqdn, stage: m.stage }, "seeded the master self-cluster row (this control host)");
     } catch (err) {
       // A stray clusters row already owns this domain (clusters_domain_uq). Degrade loudly — never
       // crash boot; the operator resolves the conflict and restarts. Do NOT return: the master
@@ -165,12 +165,12 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
         throw err;
       }
     }
-  } else if (cluster.stage !== m.stage || cluster.domain !== m.fqdn || cluster.tier !== m.tier) {
-    // Reconcile config drift onto the existing self-cluster row (stage/domain/tier can change
-    // across installs), mirroring the role=master server-row reconcile above.
-    db.update(clusters).set({ stage: m.stage, domain: m.fqdn, tier: m.tier }).where(eq(clusters.id, cluster.id)).run();
-    writeAudit(db, { actor: "system", action: "cluster.master_reconciled", targetKind: "cluster", targetId: cluster.id, detail: { domain: m.fqdn, stage: m.stage, tier: m.tier } });
-    logger.warn({ id: cluster.id, domain: m.fqdn, stage: m.stage, tier: m.tier }, "reconciled the master self-cluster row to the configured MASTER_* values");
+  } else if (cluster.stage !== m.stage || cluster.domain !== m.fqdn) {
+    // Reconcile config drift onto the existing self-cluster row (stage/domain can change across
+    // installs), mirroring the role=master server-row reconcile above.
+    db.update(clusters).set({ stage: m.stage, domain: m.fqdn }).where(eq(clusters.id, cluster.id)).run();
+    writeAudit(db, { actor: "system", action: "cluster.master_reconciled", targetKind: "cluster", targetId: cluster.id, detail: { domain: m.fqdn, stage: m.stage } });
+    logger.warn({ id: cluster.id, domain: m.fqdn, stage: m.stage }, "reconciled the master self-cluster row to the configured MASTER_* values");
   }
 
   // ---- 2+3. Pin the host key + seal the self-SSH key — factored into the re-runnable

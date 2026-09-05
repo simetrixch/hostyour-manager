@@ -113,7 +113,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     //     Put either ahead of it and a machine whose key never took is reachable by nobody.
     const { db } = await makeHarness();
     const def = buildRunDefinitions({ db: db.db }).get("cluster-deploy-slave") as AnyRunDefinition;
-    const list = def.steps({ ...PARAMS, tier: "rehearsal" }).map((s: Step) => s.name);
+    const list = def.steps({ ...PARAMS }).map((s: Step) => s.name);
     const at = (name: string): number => {
       const i = list.indexOf(name);
       expect(i, `${name} is not in the deploy-slave step list`).toBeGreaterThanOrEqual(0);
@@ -133,7 +133,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const { db } = await makeHarness();
     const definitions = buildRunDefinitions({ db: db.db });
     const def = definitions.get("cluster-deploy-slave") as AnyRunDefinition;
-    const names = (def.cleanups?.({ ...PARAMS, tier: "rehearsal" }) ?? []).map((c) => c.name);
+    const names = (def.cleanups?.({ ...PARAMS }) ?? []).map((c) => c.name);
     // The executor resolves a persisted __cleanups entry by NAME against the definition's own list,
     // so a name a step can register and this list does not carry ends an abort with a step that has
     // no implementation. TWO NAMES, and both act on the MASTER's books: what a half-finished run
@@ -301,25 +301,21 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(db.db.select().from(clusters).get()?.status).toBe("planned");
   });
 
-  it("slaveCryptoGate: a real-tier slave is refused under the plaintext keystore", async () => {
-    const { executor } = await makeHarness(); // no meta row ⇒ keystore.mode defaults plaintext
-    const err = await executor.plan("cluster-deploy-slave", { ...PARAMS, tier: "real" }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(AppError);
-    expect((err as AppError).code).toBe("PLAN_REFUSED");
-  });
-
-  it("slaveCryptoGate: a SECOND slave is refused under the plaintext keystore", async () => {
+  it("a SECOND slave is PLANNED, whatever this manager already holds a cluster bearer for", async () => {
+    // The gate that used to refuse exactly this asked whether keystore.mode is `plaintext`, which is
+    // the mode a harness gets and no booted manager can have (boot/store-backend.test.ts). It went
+    // with the other two, and this case is what would go red if one came back: a machine already
+    // deployed, its harvested cluster-admin bearer already sealed, and a second machine planned
+    // against the same manager.
     const { db, executor } = await makeHarness();
     db.db.insert(servers).values({ id: "srv_other", name: "s2", host: "s2.example.com", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_other", serverId: "srv_other", stage: "prod", domain: "s2.example.com", status: "active", slaveId: 7 }).run();
-    // What the gate counts is the cluster-admin bearer create-mgmt harvested off that machine, which
-    // is the thing a plaintext keystore would expose — the cluster row beside it says only where its
-    // installation stands (executor/guards.ts).
     db.sqlite.prepare("INSERT INTO credentials (id, kind, label, server_id, encrypted_blob, fingerprint) VALUES (?,?,?,?,?,?)")
       .run("cred_other", "kubeconfig", "s2 cluster bearer (argocd-manager)", "srv_other", "plain:v0:t", "sha256:t");
-    const err = await executor.plan("cluster-deploy-slave", PARAMS).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(AppError);
-    expect((err as AppError).code).toBe("PLAN_REFUSED");
+
+    const { plan } = await executor.plan("cluster-deploy-slave", PARAMS);
+
+    expect(plan.steps.map((s: { name: string }) => s.name)).toEqual(STEP_NAMES);
   });
 
   // ---- verify-slave (HARD vs SOFT), driven directly under fake timers ------------------------

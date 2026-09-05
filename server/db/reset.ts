@@ -29,8 +29,9 @@ const WIPE_ORDER = [
 //   operators — op_system/op_emergency are seeded by the BASELINE MIGRATION only and runs.started_by
 //     references them, so a wipe would leave every later run without a startable actor.
 //   meta — meta.session.key IS the resetting operator's live session, and keystore.mode is what the
-//     executor's slaveCryptoGate reads; wiping either signs the operator out mid-reset and makes the
-//     gate read "plaintext" whatever mode the keystore is really in.
+//     Clusters page reports the keystore as; wiping either signs the operator out mid-reset and
+//     makes the page read "plaintext" whatever mode the keystore is really in until the next boot
+//     rewrites the row.
 //   __drizzle_migrations — the migrator's own ledger. Emptied, the next openDb replays the baseline
 //     against tables that already exist and the Manager stops booting.
 //   unit_sizes — EDITED data, not derived data. The boot seed would refill it, which is exactly the

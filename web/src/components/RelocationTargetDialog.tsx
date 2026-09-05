@@ -8,7 +8,6 @@ export interface RelocationTargetView {
   id: string;
   domain: string;
   stage: string;
-  tier: string;
   status: string;
 }
 
@@ -79,7 +78,7 @@ export function RelocationTargetDialog(props: {
               <option value="">— choose a cluster —</option>
               {admitted.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.domain} · {t.stage} · {t.tier}
+                  {t.domain} · {t.stage}
                 </option>
               ))}
             </select>

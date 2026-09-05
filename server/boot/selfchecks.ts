@@ -79,9 +79,10 @@ function checkStoreMode(store: CredentialStore): void {
   if (mode !== "plaintext" && mode !== "passphrase" && mode !== "keyfile" && mode !== "vault") {
     throw new Error(`unknown keystore.mode: ${String(mode)}`);
   }
-  // 'plaintext' arms the persistent UI banner + the crypto gate (surfaced on
-  // ClustersView.storeMode). 'keyfile'/'vault' are secured: the credential value is encrypted at
-  // rest, locally under a data key or by Vault. The check asserts the mode is set and known.
+  // 'plaintext' arms the persistent UI banner (surfaced on ClustersView.storeMode).
+  // 'keyfile'/'vault' are secured: the credential value is encrypted at rest, locally under a data
+  // key or by Vault, and one of those two is what a booted manager always has
+  // (boot/store-backend.ts). The check asserts the mode is set and known.
 }
 
 function checkRedactCanary(): void {

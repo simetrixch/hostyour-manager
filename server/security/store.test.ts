@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { openDb } from "../db/client.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { parseConfig } from "../kernel/config.ts";
-import { CredentialStore, holdsManagerKey, serversHoldingClusterKey } from "./store.ts";
+import { CredentialStore, holdsManagerKey } from "./store.ts";
 import { runAsActor } from "../kernel/actor.ts";
 
 const logger = createLogger(
@@ -223,20 +223,4 @@ describe("what a planner may read off the credentials table", () => {
     expect(holdsManagerKey(db, "srv_a")).toBe(false);
   });
 
-  it("serversHoldingClusterKey names each machine once, and only for the cluster bearer", async () => {
-    const { db, store } = fresh();
-    expect(serversHoldingClusterKey(db)).toEqual([]);
-    // The reviewer JWT a deployment seals beside the bearer is kind "other": it is not the cluster
-    // access key, so it names no machine here.
-    await store.seal({ kind: "other", label: "s1 vault reviewer JWT", plaintext: Buffer.from("jwt"), fingerprint: "sha256:j", serverId: "srv_a" });
-    expect(serversHoldingClusterKey(db)).toEqual([]);
-    const bearer = await store.seal({ kind: "kubeconfig", label: "s1 cluster bearer (argocd-manager)", plaintext: Buffer.from("t"), fingerprint: "sha256:t", serverId: "srv_a" });
-    expect(serversHoldingClusterKey(db)).toEqual(["srv_a"]);
-    // A re-emitted token rotates the row in place and leaves the superseded one standing; the
-    // machine is still one machine.
-    await store.rotate(bearer.id, { plaintext: Buffer.from("t2"), fingerprint: "sha256:t2" });
-    expect(serversHoldingClusterKey(db)).toEqual(["srv_a"]);
-    await store.seal({ kind: "kubeconfig", label: "s2 cluster bearer (argocd-manager)", plaintext: Buffer.from("u"), fingerprint: "sha256:u", serverId: "srv_b" });
-    expect(serversHoldingClusterKey(db).sort()).toEqual(["srv_a", "srv_b"]);
-  });
 });

@@ -220,7 +220,6 @@ export interface OnboardTargetView {
   id: string;
   domain: string;
   stage: string;
-  tier: string;
   status: string;
 }
 export interface ConsumerView {
@@ -386,7 +385,6 @@ export interface TenantTargetView {
   id: string;
   domain: string;
   stage: string;
-  tier: string;
   status: string;
 }
 /** One tenant list/detail row — the tenant identity + its lifecycle state instead of a consumer's

@@ -9,8 +9,7 @@ import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
 import { seedUnitSizes } from "../domains/units/unit-size.ts";
 import { createApp } from "../http/app.ts";
 import { CredentialStore } from "../security/store.ts";
-import { loadOrCreateDataKey } from "../kernel/datakey.ts";
-import { VaultKvClient } from "../adapters/vault/vault-kv.ts";
+import { storeBackend } from "./store-backend.ts";
 import { RunEventBus } from "../executor/bus.ts";
 import { Executor } from "../executor/executor.ts";
 import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-definitions.ts";
@@ -63,12 +62,9 @@ export async function wire(): Promise<Wired> {
   const logger = createLogger(config);
   const db = openDb(config.dbFile);
   // Secrets backend: Vault when configured (prod), else a local keyfile-encrypted
-  // store (dev). Either way the store API is identical to every caller.
-  const store = new CredentialStore({
-    db: db.db,
-    logger,
-    ...(config.vault ? { vault: new VaultKvClient(config.vault) } : { dataKey: loadOrCreateDataKey(config.dataDir) }),
-  });
+  // store (dev). Either way the store API is identical to every caller, and one of the two is
+  // always supplied (boot/store-backend.ts).
+  const store = new CredentialStore({ db: db.db, logger, ...storeBackend(config) });
   const bus = new RunEventBus();
   // Consumer onboarding: construct the real adapters and register the Run family — but only when the
   // Tekton gate-runner config (ONBOARD_GATE_MANAGER_ADDR) + platform repo are both configured

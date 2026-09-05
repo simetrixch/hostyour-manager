@@ -97,24 +97,6 @@ export function holdsManagerKey(db: Db, serverId: string): boolean {
 }
 
 /**
- * The servers whose CLUSTER ACCESS KEY this manager stores, one id per server.
- *
- * That key is the `kubeconfig` credential a deployment seals when it harvests a slave's
- * cluster-admin bearer (domains/runs/defs/deploy-slave.mgmt.ts, create-mgmt) — the only credential
- * of that kind anything seals, and the one thing a plaintext keystore would expose to whoever can
- * read the database file. Revoked rows are left out because their value is no longer a way into
- * anything; a rotated row is not, because its blob is still there and still that same server's.
- */
-export function serversHoldingClusterKey(db: Db): string[] {
-  const rows = db
-    .selectDistinct({ serverId: credentials.serverId })
-    .from(credentials)
-    .where(and(eq(credentials.kind, "kubeconfig"), isNull(credentials.revokedAt)))
-    .all();
-  return rows.map((r) => r.serverId).filter((id): id is string => id !== null);
-}
-
-/**
  * The credential store. While the keystore is plaintext, seal/open are a
  * pass-through: no key, no unlock ceremony. The API shape does not depend on the mode, so a caller
  * written against it keeps working when the mode changes underneath it. No envelope lifecycle

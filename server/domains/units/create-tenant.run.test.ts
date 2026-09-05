@@ -206,7 +206,7 @@ function planCtx(): PlanStreamCtx {
 // only an ACTIVE cluster.
 function seedSlave(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active", tier: "rehearsal" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
 }
 
 // The slave plus the master self-cluster. `masterRole` picks which member of the word list carries
@@ -214,7 +214,7 @@ function seedSlave(): void {
 function seedClusters(masterRole: "master" | "master+slave" = "master"): void {
   seedSlave();
   db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: masterRole, status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", status: "active", tier: "rehearsal" }).run();
+  db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", status: "active" }).run();
 }
 
 async function runAll(p: CreateTenantParams, prt: TenantOnboardPorts, logs: string[]): Promise<void> {

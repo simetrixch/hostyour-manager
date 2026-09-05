@@ -14,8 +14,7 @@ import { createLogger } from "../kernel/logger.ts";
 import { openDb } from "../db/client.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
 import { CredentialStore } from "../security/store.ts";
-import { loadOrCreateDataKey } from "../kernel/datakey.ts";
-import { VaultKvClient } from "../adapters/vault/vault-kv.ts";
+import { storeBackend } from "../boot/store-backend.ts";
 import { createGitHubPlatform, type GitHubPlatformConfig } from "../adapters/github-platform/github-platform-http.ts";
 import { GitPlatformRepo, GitRepoReader } from "../adapters/git/git.ts";
 import { HttpRegistryMaintenance } from "../adapters/registry/registry-http.ts";
@@ -77,11 +76,7 @@ async function main(): Promise<void> {
   // The unit charts are read under each unit's OWN sealed repo credential, so the reaper needs the
   // same credential store the server runs on — same backend selection, same keystore.
   const db = openDb(config.dbFile);
-  const store = new CredentialStore({
-    db: db.db,
-    logger,
-    ...(config.vault ? { vault: new VaultKvClient(config.vault) } : { dataKey: loadOrCreateDataKey(config.dataDir) }),
-  });
+  const store = new CredentialStore({ db: db.db, logger, ...storeBackend(config) });
 
   // WHERE the registrations of class (a) stand: this installation's books branch. The reaper runs
   // with an emptyDir DATA_DIR, so its database is empty on every run and MASTER_FQDN is the only

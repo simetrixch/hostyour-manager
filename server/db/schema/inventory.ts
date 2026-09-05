@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import {
   SERVER_STATUS, SERVER_ROLE, SERVER_TAILNET_STATE, SERVER_PASSWORD_LOGIN_STATE, SERVER_AUTHORIZED_KEYS_STATE,
   STAGE, APP_STATUS, TENANT_STATUS, TENANT_ADMIN_STATE,
-  APP_PROVENANCE, CLUSTER_STATUS, CLUSTER_TIER, PLANE_STATE,
+  APP_PROVENANCE, CLUSTER_STATUS, PLANE_STATE,
 } from "../../../shared/enums.ts";
 
 const now = sql`(unixepoch('subsec') * 1000)`;
@@ -115,7 +115,6 @@ export const clusters = sqliteTable("clusters", {
   stage: text("stage", { enum: STAGE }).notNull(),
   domain: text("domain").notNull(),                                // == install branch == plane.branch
   status: text("status", { enum: CLUSTER_STATUS }).notNull().default("planned"),
-  tier: text("tier", { enum: CLUSTER_TIER }).notNull().default("rehearsal"), // one-way audited promotion
   slaveId: integer("slave_id"),                                    // internal ordinal; NEVER in a resource name; NULL for the master
   planeState: text("plane_state", { enum: PLANE_STATE }).notNull().default("absent"),
   // ClusterPlaneV0 (shared/plane.ts). TWO steps of the deploy-slave Run write it: create-mgmt folds

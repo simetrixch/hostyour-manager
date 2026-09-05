@@ -127,7 +127,7 @@ describe("boot/seed-master — master self-registration", () => {
     expect(await store.list({ serverId: "srv_existing", kind: "ssh_key" })).toHaveLength(1);
   });
 
-  it("seeds the master self-cluster row (status active, slaveId NULL, stage/tier from config)", async () => {
+  it("seeds the master self-cluster row (status active, slaveId NULL, stage from config)", async () => {
     const { db, store, dir } = setup();
     const key = generateServerKeypair("m1-master");
     const keyFile = join(dir, "master-ssh-key");
@@ -135,7 +135,7 @@ describe("boot/seed-master — master self-registration", () => {
 
     await seedMaster(db.db, store, cfg({
       MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1",
-      MASTER_STAGE: "test", MASTER_TIER: "rehearsal",
+      MASTER_STAGE: "test",
       MASTER_SSH_KEY_FILE: keyFile, MASTER_SSH_HOST_KEY_FP: FP,
     }), logger);
 
@@ -143,34 +143,33 @@ describe("boot/seed-master — master self-registration", () => {
     const cls = db.db.select().from(clusters).where(eq(clusters.serverId, srv!.id)).get();
     expect(cls).toMatchObject({
       serverId: srv!.id, domain: "m1.example.com", status: "active",
-      stage: "test", tier: "rehearsal", planeState: "absent",
+      stage: "test", planeState: "absent",
     });
     expect(cls?.slaveId).toBeNull(); // the master carries no slave ordinal
   });
 
-  it("defaults the self-cluster tier to rehearsal (the crypto gate keeps m1 rehearsal)", async () => {
+  it("seeds the row with no key file at all — the degrade path still writes the self-cluster", async () => {
     const { db, store } = setup();
-    // No MASTER_TIER ⇒ config default "rehearsal"; no key file ⇒ row still seeded (degrade path).
     await seedMaster(db.db, store, cfg({
       MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1", MASTER_STAGE: "prod",
     }), logger);
     const cls = db.db.select().from(clusters).get();
-    expect(cls).toMatchObject({ tier: "rehearsal", stage: "prod", status: "active" });
+    expect(cls).toMatchObject({ stage: "prod", status: "active" });
   });
 
   it("is idempotent — a second run inserts no duplicate self-cluster row and reconciles drift", async () => {
     const { db, store } = setup();
     await seedMaster(db.db, store, cfg({
-      MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1", MASTER_STAGE: "test", MASTER_TIER: "rehearsal",
+      MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1", MASTER_STAGE: "test",
     }), logger);
-    // A later boot with a changed stage/tier reconciles the SAME row (no duplicate).
+    // A later boot with a changed stage reconciles the SAME row (no duplicate).
     await seedMaster(db.db, store, cfg({
-      MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1", MASTER_STAGE: "prod", MASTER_TIER: "real",
+      MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1", MASTER_STAGE: "prod",
     }), logger);
 
     const rows = db.db.select().from(clusters).all();
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ stage: "prod", tier: "real", domain: "m1.example.com", status: "active" });
+    expect(rows[0]).toMatchObject({ stage: "prod", domain: "m1.example.com", status: "active" });
   });
 
   it("degrades gracefully when the key file is absent: row seeded, no key, re-seals on a later boot", async () => {

@@ -502,8 +502,8 @@ export function disposeHarnesses(): void {
 }
 
 // FK-safe seeding (clusters.server_id → servers.id): servers + their ssh keys first.
-// keystore: "keyfile" opens the crypto gate for tests that need a SECOND plan of the same slave
-// (under plaintext the gate counts the first run's leftover planned row as a live slave).
+// keystore: which mode the meta row is seeded with, for a case that reads what the Clusters page
+// reports about the keystore. No plan is decided by it.
 export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string; versionsYaml?: string; metrics?: FakeMetricsQuery | false; withoutCarriedValues?: boolean } = {}): Promise<Harness> {
   const hosts = opts.hosts ?? scriptedHosts();
   const dir = mkdtempSync(join(tmpdir(), "mgr-ds-"));
@@ -590,7 +590,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
  *  outcome apart from the others is exactly what the suites use this for. */
 export function stepOf(h: Harness, name: string): Step {
   const def = buildRunDefinitions(h.runPorts).get("cluster-deploy-slave") as AnyRunDefinition;
-  const step = def.steps({ ...PARAMS, tier: "rehearsal" }).find((candidate: Step) => candidate.name === name);
+  const step = def.steps({ ...PARAMS }).find((candidate: Step) => candidate.name === name);
   if (!step) throw new Error(`no step ${name}`);
   return step;
 }
@@ -621,7 +621,7 @@ export function bareStepCtx(db: DbHandle, store: CredentialStore): StepCtx {
     stepName: "register",
     db: db.db,
     creds: store,
-    params: { ...PARAMS, tier: "rehearsal" },
+    params: { ...PARAMS },
     // The one secret every cluster run kind carries from approve through to its last step: the
     // password its steps raise a root command with. A context answering nothing here would make
     // every such step refuse before it ran, and the refusal would be about the fixture.

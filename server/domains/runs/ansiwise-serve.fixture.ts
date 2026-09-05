@@ -244,7 +244,7 @@ export async function liveMaster(serve: ServeFixture, overrides: Partial<HostsSc
   h.db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, MASTER_ID)).run();
   h.db.db.insert(clusters).values({
     id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com",
-    status: "active", tier: "rehearsal", planeState: "ready",
+    status: "active", planeState: "ready",
   }).run();
   return h;
 }

@@ -357,14 +357,6 @@
           "autoincrement": false,
           "default": "'planned'"
         },
-        "tier": {
-          "name": "tier",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'rehearsal'"
-        },
         "slave_id": {
           "name": "slave_id",
           "type": "integer",

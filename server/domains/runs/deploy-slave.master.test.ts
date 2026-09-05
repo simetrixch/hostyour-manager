@@ -34,7 +34,7 @@ async function masterWithLiveCluster(): Promise<Harness> {
   const h = await makeHarness();
   h.db.db.insert(clusters).values({
     id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: MASTER_DOMAIN,
-    status: "active", tier: "rehearsal", planeState: "ready",
+    status: "active", planeState: "ready",
   }).run();
   return h;
 }
@@ -93,7 +93,7 @@ describe("cluster-deploy-slave, master arm — the plan, what it says, and where
     const h = await masterWithLiveCluster();
     h.db.db.update(servers).set({ role: MASTER_AND_SLAVE_ROLE }).where(eq(servers.id, MASTER_ID)).run();
     const def = buildRunDefinitions(h.runPorts).get("cluster-deploy-slave") as AnyRunDefinition;
-    expect(def.steps({ ...MASTER_PARAMS, tier: "rehearsal" }).map((s) => s.name))
+    expect(def.steps({ ...MASTER_PARAMS }).map((s) => s.name))
       .toContain("run-deploy-branch");
   });
 
@@ -113,7 +113,7 @@ describe("cluster-deploy-slave, master arm — the plan, what it says, and where
     expect((none as AppError).message).toContain("records no cluster for it");
 
     h.db.db.insert(clusters).values({
-      id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: MASTER_DOMAIN, status: "planned", tier: "rehearsal",
+      id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: MASTER_DOMAIN, status: "planned",
     }).run();
     const notLive = await h.executor.plan("cluster-deploy-slave", MASTER_PARAMS).catch((e: unknown) => e);
     expect((notLive as AppError).message).toContain("takes the slave part on its own LIVE cluster");

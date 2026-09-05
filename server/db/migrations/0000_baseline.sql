@@ -88,7 +88,6 @@ CREATE TABLE `clusters` (
 	`stage` text NOT NULL,
 	`domain` text NOT NULL,
 	`status` text DEFAULT 'planned' NOT NULL,
-	`tier` text DEFAULT 'rehearsal' NOT NULL,
 	`slave_id` integer,
 	`plane_state` text DEFAULT 'absent' NOT NULL,
 	`plane_json` text,

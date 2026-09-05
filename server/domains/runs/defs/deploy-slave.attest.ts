@@ -168,7 +168,7 @@ export function attestTargetStep(input: SlaveInstallInput): Step {
           const clusterId = clsId();
           // Conceptually planned→provisioning; inserted directly at provisioning inside the
           // same tx (planeState stays at its 'absent' default until create-mgmt).
-          tx.insert(clusters).values({ id: clusterId, serverId: sid, stage, domain, status: "provisioning", tier: input.tier ?? "rehearsal", slaveId }).run();
+          tx.insert(clusters).values({ id: clusterId, serverId: sid, stage, domain, status: "provisioning", slaveId }).run();
           tx.update(servers).set({ status: "provisioning" }).where(eq(servers.id, sid)).run();
           return { clusterId, slaveId, resumed: false };
         });

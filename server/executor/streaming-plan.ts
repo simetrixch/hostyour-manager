@@ -134,11 +134,11 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
       return;
     }
     const params = def.paramsSchema.parse(result.params);
-    // Security gate parity with executor.plan(): run the kind's KIND_GUARDS against the RESOLVED
-    // params before the plan is frozen. Without this the crypto gate is dead on the streaming path —
-    // a create-tenant/add-app (or onboard) planned via planStream would skip its plaintext-keystore
-    // refusal, since only executor.plan() ran runGuards. A refusal throws here and the catch below
-    // settles the run failed, exactly like a rejected validation.
+    // Guard parity with executor.plan(): run the kind's KIND_GUARDS against the RESOLVED params
+    // before the plan is frozen. A kind planned through planStream works its params out DURING the
+    // plan, so a guard keyed on a resolved field would never fire if only executor.plan() called
+    // runGuards. A refusal throws here and the catch below settles the run failed, exactly like a
+    // rejected validation.
     await runGuards(def.kind, params, { db: deps.db });
     const impls = def.steps(params);
     if (impls.map((s) => s.name).join(",") !== result.plan.steps.map((s) => s.name).join(",")) {

@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { z } from "zod";
-import { STAGE, CLUSTER_TIER } from "../../shared/enums.ts";
+import { STAGE } from "../../shared/enums.ts";
 
 /** The longest path a UNIX socket can stand on. `sun_path` in `struct sockaddr_un` is 108 bytes on
  *  Linux (man 7 unix) and a pathname socket is NUL-terminated inside it, so 107 are usable. Over
@@ -122,10 +122,6 @@ const EnvSchema = z.object({
   // environment, injected by the Deployment as .Values.global.env; REQUIRED whenever MASTER_FQDN
   // is set (same guard as MASTER_SSH_USER — a master row without a stage cannot seed its cluster).
   MASTER_STAGE: z.enum(STAGE).optional(),
-  // The self-cluster's tier (rehearsal|real). Defaults to "rehearsal": the crypto gate
-  // refuses onboarding to a non-rehearsal cluster under a plaintext keystore, so the master stays
-  // rehearsal until the keystore is hardened. Promotion to "real" is a one-way audited step.
-  MASTER_TIER: z.enum(CLUSTER_TIER).default("rehearsal"),
   // GitHub repo access for the Branches view + the Reset wizard (delete install branches).
   // GITHUB_REPO is "owner/repo". GITHUB_WRITE_PAT is a fine-grained PAT with Contents: read+write
   // on THIS repo — but a token DEDICATED to the Manager host: it is NOT the platform's
@@ -338,10 +334,9 @@ export interface Config {
     keyFile?: string;
     hostKeyFp?: string;
     hostKeyFpFile?: string;
-    /** The self-cluster's stage (the deployed environment) and tier — seed-master.ts uses these to
-     *  seed a clusters row for the control host itself (slaveId=NULL). tier defaults to "rehearsal". */
+    /** The self-cluster's stage, which is the deployed environment — seed-master.ts uses it to seed
+     *  a clusters row for the control host itself (slaveId=NULL). */
     stage: (typeof STAGE)[number];
-    tier: (typeof CLUSTER_TIER)[number];
   };
   /** Present ⇒ the Branches view + Reset wizard can talk to GitHub. Absent ⇒ those routes report
    *  "not configured". owner/repo from GITHUB_REPO; token is the Manager-dedicated,
@@ -474,7 +469,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
         }
       : {}),
     // MASTER_FQDN, MASTER_SSH_USER and MASTER_STAGE are guaranteed together by the schema refines
-    // above (MASTER_TIER always has its "rehearsal" default). The triple guard narrows all three.
+    // above. The triple guard narrows all three.
     ...(e.MASTER_FQDN && e.MASTER_SSH_USER && e.MASTER_STAGE
       ? {
           master: {
@@ -482,7 +477,6 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
             sshUser: e.MASTER_SSH_USER,
             sshPort: e.MASTER_SSH_PORT,
             stage: e.MASTER_STAGE,
-            tier: e.MASTER_TIER,
             ...(e.MASTER_LAN_HOST ? { lanHost: e.MASTER_LAN_HOST } : {}),
             ...(e.MASTER_SSH_KEY_FILE ? { keyFile: e.MASTER_SSH_KEY_FILE } : {}),
             ...(e.MASTER_SSH_HOST_KEY_FP ? { hostKeyFp: e.MASTER_SSH_HOST_KEY_FP } : {}),

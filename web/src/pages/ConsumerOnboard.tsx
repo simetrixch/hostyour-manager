@@ -198,7 +198,7 @@ export function ConsumerOnboard() {
                 </option>
                 {admittedTargets.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.domain} · {t.stage} · {t.tier}
+                    {t.domain} · {t.stage}
                   </option>
                 ))}
               </select>

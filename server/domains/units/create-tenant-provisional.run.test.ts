@@ -194,7 +194,7 @@ function ctx(p: CreateTenantParams, stepName: string, opts: { runId?: string; lo
 
 function seedClusters(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active", tier: "rehearsal" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
 }
 
 const stepNamed = (prt: TenantOnboardPorts, p: CreateTenantParams, name: string): Step => {

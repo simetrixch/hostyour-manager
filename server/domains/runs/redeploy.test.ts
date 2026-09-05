@@ -32,7 +32,7 @@ async function masterWithLiveCluster(): Promise<Harness> {
   const h = await makeHarness();
   h.db.db.insert(clusters).values({
     id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: MASTER_FQDN,
-    status: "active", tier: "rehearsal", planeState: "ready",
+    status: "active", planeState: "ready",
   }).run();
   return h;
 }
@@ -112,7 +112,7 @@ describe("cluster-redeploy, master arm — what a person supplies and what the m
     h.db.db.update(servers).set({ role: "master" }).where(eq(servers.id, MASTER_ID)).run();
     h.db.db.insert(clusters).values({
       id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: MASTER_FQDN,
-      status: "planned", tier: "rehearsal",
+      status: "planned",
     }).run();
 
     const refused = await machineAnswersOf(h).catch((e: unknown) => e);

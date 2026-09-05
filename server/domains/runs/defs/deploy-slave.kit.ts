@@ -4,7 +4,7 @@ import type { Db } from "../../../db/client.ts";
 import type { StepCtx, Cleanup } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { errValidation, errNotFound } from "../../../kernel/errors.ts";
-import { MASTER_ROLES, type Stage, type ClusterTier } from "../../../../shared/enums.ts";
+import { MASTER_ROLES, type Stage } from "../../../../shared/enums.ts";
 import { errNotConfigured } from "../../../kernel/errors.ts";
 import type { PlatformRepo } from "../../../adapters/git/port.ts";
 import type { MetricsQuery } from "../../../adapters/metrics/port.ts";
@@ -100,13 +100,12 @@ export function activeClusterTarget(serverId: string): SlaveTarget {
   };
 }
 
-/** What the shared slave step list needs beyond its ports. `slaveId`/`tier` describe the cluster ROW
- *  the attest step inserts, so they are deploy-only: a redeploy finds the row already there. */
+/** What the shared slave step list needs beyond its ports. `slaveId` describes the cluster ROW the
+ *  attest step inserts, so it is deploy-only: a redeploy finds the row already there. */
 export interface SlaveInstallInput {
   target: SlaveTarget;
   mode: SlaveInstallMode;
   slaveId?: number | undefined;
-  tier?: ClusterTier | undefined;
 }
 
 export function requirePlatformRepo(ports: DeploySlavePorts): PlatformRepo {
