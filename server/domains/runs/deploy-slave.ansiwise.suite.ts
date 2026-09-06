@@ -248,7 +248,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       expectAbsent(h.db, runId, all, ["deploy-cluster", "deploy-platform-services"]);
     });
 
-    it("abort-with-cleanup (deploy-slave): the map's slave part goes FIRST, then the remove-slave program on the master's record — and the marking cleanup finds nothing left, while the machine stays reachable", { timeout: 300_000 }, async () => {
+    it("abort-with-cleanup (deploy-slave): the master's books first, then the machine PUT BACK — stripped, its password door open again, and this manager's key line off it last", { timeout: 300_000 }, async () => {
       const h = await deployWorld(serve());
       h.hosts.credsOut = EMIT_CREDS_JSON.replace("TFMtQ0EtREFUQQ==", "VEFNUEVSRUQ="); // park at create-mgmt with every cleanup armed
       const runId = await settled(h, "cluster-deploy-slave", PARAMS, elevationOnly());
@@ -256,19 +256,22 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
 
       // Each arming step persisted exactly its own cleanup name (__cleanups)...
       for (const [step, name] of [
+        ["install-key", "remove-manager-key"],
+        ["disable-password-login", "restore-password-login"],
         ["mark-slave", "remove-slave-marking"],
+        ["place-ansiwise", "leave-host"],
         ["rejoin", "remove-slave"],
       ] as const) {
         const cp = JSON.parse(stepColumn(h.db, runId, step, "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
         expect(cp.__cleanups, step).toEqual([name]);
       }
-      // ...AND THE THREE STEPS THAT COULD ARM ONE ARM NOTHING. Each of them acts on the
-      // SLAVE, and a half-finished run on the slave is finished by running the run again — so a
-      // compensation there either takes away what the retry needs (the key line, the shut password
-      // door) or undoes what the retry redoes anyway (the snap).
-      for (const step of ["install-key", "disable-password-login", "run-deploy-cluster"] as const) {
-        const cp = JSON.parse(stepColumn(h.db, runId, step, "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
-        expect(cp.__cleanups, step).toBeUndefined();
+      // ...AND THE STEP THAT LOOKS LIKE IT SHOULD ARMS NOTHING. The snap deploy-cluster installs is
+      // taken off by leave-host, which is armed one step earlier and acts on what the machine
+      // CARRIES rather than on a list of what this run got to — so a run that died in deploy-cluster
+      // and a run that died in deploy-platform-services are put back by the same act.
+      {
+        const cp = JSON.parse(stepColumn(h.db, runId, "run-deploy-cluster", "checkpoint_json") ?? "{}") as { __cleanups?: string[] };
+        expect(cp.__cleanups).toBeUndefined();
       }
 
       const logMark = h.hosts.log.length;
@@ -284,18 +287,34 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       const run = getRun(h.db.db, runId);
       expect(run?.status).toBe("cancelled");
       const cleanupSteps = run?.steps.filter((s) => s.name.startsWith("cleanup:")) ?? [];
+      // REVERSE REGISTRATION ORDER, and this list IS the reason the arming steps stand where they do:
+      // the master's books go first, then the machine is stripped while both routes to it are still
+      // open, then the password door goes back on, and this manager's key line — armed by the FIRST
+      // step of the whole run — comes off last of everything.
       expect(cleanupSteps.map((s) => s.name)).toEqual([
-        "cleanup:remove-slave", "cleanup:remove-slave-marking",
-      ]); // reverse registration order — the map cleanup was armed FIRST (mark-slave), so it runs LAST
+        "cleanup:remove-slave", "cleanup:leave-host", "cleanup:remove-slave-marking",
+        "cleanup:restore-password-login", "cleanup:remove-manager-key",
+      ]);
       expect(cleanupSteps.every((s) => s.status === "ok")).toBe(true);
 
-      // WHAT THE ABORT LEAVES THE MACHINE AS, read off the machine, which is where it is a fact: the
-      // daemon still takes no password and this manager's own key line still stands beside the
-      // image's provisioning key. That is the state every later run kind of this manager needs and
-      // the state this run's own retry starts from — reachable by this manager and by nobody else.
-      expect(h.hosts.passwordLogin).toBe("no");
-      expect(h.hosts.authorizedKeys).toContain(IMAGE_KEY_LINE);
-      expect(h.hosts.authorizedKeys).toHaveLength(2);
+      // WHAT THE ABORT LEAVES THE MACHINE AS, read off the machine, which is where it is a fact. The
+      // daemon takes a password again, this manager's own key line is gone, and the image's own
+      // provisioning key — a way in this platform never wrote and may not touch — is untouched. A
+      // fresh first contact meets exactly the machine the run started from.
+      expect(h.hosts.passwordLogin).toBe("yes");
+      expect(h.hosts.authorizedKeys).toEqual([IMAGE_KEY_LINE]);
+      // And nothing this platform wrote is left: no catalogue, and neither executable answers
+      // `--version` any more (deploy-slave.placement.fixture.ts deletes the file the send names, so
+      // this is read off what the machine holds rather than off a command it was given).
+      expect(h.hosts.catalogueBranch).toBeUndefined();
+      expect(h.hosts.files.filter((f) => f.path.includes("ansiwise"))).toEqual([]);
+      // THE ROW FOLLOWS THE MACHINE. A manager still holding a key for a box that no longer takes
+      // one would offer run kinds that die at their first session, so the key is purged and the
+      // server goes back to `bare` — what a machine nothing has reached is.
+      const left = h.db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
+      expect(left?.status).toBe("bare");
+      expect(left?.adoptedAt).toBeNull();
+      expect((await serverCredFlags(h.store)).get(SLAVE_ID)?.hasKey ?? false).toBe(false);
 
       // The map keeps the cluster's identity and loses ONLY the slave part — dropped by the
       // remove-slave cleanup itself, FIRST (the program's own contract), so the marking cleanup
@@ -309,9 +328,15 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
 
       // The removal itself is a machine act, dry-proven then run on the master's own record...
       expectProven(serve(), h.db, runId, await observer().runs(), ["remove-slave"]);
-      // ...and NOTHING was sent to the slave: the abort's whole surface is the master's books.
-      const tail = h.hosts.log.slice(logMark);
-      expect(tail.filter((l) => l.host === "10.1.1.11")).toEqual([]);
+      // ...and what reaches the SLAVE is the leave, over this manager's own session and over no
+      // program at all: the engine is one of the things being taken off, so nothing here could be
+      // driven through it. Two scripts and one command line — the machine stripped, the two
+      // executables, and the key-line filter.
+      const tail = h.hosts.log.slice(logMark).filter((l) => l.host === "10.1.1.11").map((l) => l.command);
+      expect(tail.filter(isServe)).toEqual([]);
+      expect(tail.filter((c) => c.startsWith("sudo -S -p '' bash /tmp/dc-leave-host-"))).toHaveLength(1);
+      expect(tail.filter((c) => c.startsWith("bash /tmp/dc-leave-manager-key-"))).toHaveLength(1);
+      expect(tail.some((c) => c.includes("rm -f") && c.includes("ansiwise-rest"))).toBe(true);
     });
 
     it("INNOCENT CASE (redeploy, slave arm): the live slave is re-reconciled over the programs — no branch cut, no join, a fresh emit re-points the registration, and nothing is armed", { timeout: 300_000 }, async () => {

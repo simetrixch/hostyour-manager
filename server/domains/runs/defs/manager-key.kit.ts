@@ -7,6 +7,7 @@ import { AppError, errValidation } from "../../../kernel/errors.ts";
 import { execCapture, localTx, remoteCmd, remoteExec, remoteScriptCapture, requirePassword } from "../../../executor/stepkit.ts";
 import { managerKeyMarker } from "../../../../shared/operator-keys.ts";
 import { recordAuthorizedKeysReading } from "../operator-keys-probe.ts";
+import { removeManagerKeyCleanup } from "./leave-host.kit.ts";
 import { loadServer } from "./deploy-slave.kit.ts";
 
 // FIRST CONTACT: the door this manager reaches a machine through, and the steps that make its own
@@ -28,6 +29,10 @@ import { loadServer } from "./deploy-slave.kit.ts";
 // run put on the machine. Two facts settle it and neither can stand for the other — the composing
 // definition says whether an abort of this run may take the key line off at all, and the step's own
 // measurement says whether there is a line of this run's to take off.
+//
+// WHAT THE KEY LINE IS UNDONE BY stands in defs/leave-host.kit.ts and not here, beside the other act
+// that puts a machine back: taking the line off is one half of leaving a machine, and the two halves
+// are read together or the order between them is nobody's.
 
 /** The drop-in that grants a machine account a standing set of passwordless-root commands, and the
  *  only file `remove-sudoers` deletes. Every root command in this kit is raised with the password the
@@ -202,15 +207,25 @@ export function generateKeyStep(input: FirstContactInput): Step {
  * working way in no run kind here can remove — a machine must not have to wait for somebody to press
  * a button before that is visible.
  *
- * NOTHING UNDOES THIS STEP, on any run kind that composes it. The key line is what every session
- * after it is opened with — ctx.ssh() authenticates with the sealed ssh_key credential and with
- * nothing else — and the same lists shut the daemon's password door and destroy the sealed bootstrap
- * password. So a compensation that took the line off again would leave a machine nothing can reach,
- * on exactly the run that failed and most needs to be reached. What an aborted install leaves behind
- * is a machine reachable by this manager and by nobody else, which is the state its retry and every
- * later run kind need anyway.
+ * TWO THINGS DECIDE THE COMPENSATION, the way they decide `disable-password-login`'s, and each
+ * answers a question the other cannot. `arm` is the COMPOSING DEFINITION's answer to whether an
+ * abort of this run may take the line off at all: a deployment answers yes, because leaving a
+ * machine means putting it back and a key line nobody removes is a way into the box for whoever
+ * takes it next; a redeploy answers no, because the machine it runs against is a LIVE slave that
+ * this manager reaches over exactly that line. It has to be the definition's answer for a second
+ * reason too — the executor resolves a registered compensation by NAME against that definition's own
+ * cleanups(), so a step arming one a definition does not implement kills the abort with a missing
+ * step. The step's own MEASUREMENT answers the narrower question of whether there is a line of THIS
+ * run's to take off: where the definition arms at all, the compensation is registered unless this
+ * step found the line already standing, because a line an EARLIER run put there is not this run's to
+ * undo.
+ *
+ * WHERE IT IS ARMED IT RUNS LAST, and that is not this step's doing. The compensations run in
+ * reverse registration order and this step stands at the head of every list that composes it, so
+ * everything an abort does on the machine happens while the route this line IS is still open
+ * (defs/leave-host.kit.ts).
  */
-export function installKeyStep(input: FirstContactInput): Step {
+export function installKeyStep(input: FirstContactInput, options: { arm: boolean }): Step {
   return {
     name: "install-key",
     title: "Install this manager's key on the machine",
@@ -231,6 +246,7 @@ export function installKeyStep(input: FirstContactInput): Step {
       if (present.code === 0) {
         ctx.log("meta", `The key this manager holds for ${server.name} already stands in ~/.ssh/authorized_keys, so nothing is appended.`);
       } else {
+        if (options.arm) ctx.registerCleanup(removeManagerKeyCleanup);
         await remoteCmd(ctx, session, `echo '${pub}' >> ~/.ssh/authorized_keys`);
         ctx.log("meta", `Appended this manager's key to ~/.ssh/authorized_keys on ${server.name}.`);
       }

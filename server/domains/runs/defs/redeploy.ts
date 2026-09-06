@@ -144,7 +144,7 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
     generateKeyStep(firstContact),
     // NOTHING IS ARMED, here or in the kit: a machine whose cluster is live must keep the only way
     // in this manager has, and this definition implements no compensation at all.
-    installKeyStep(firstContact),
+    installKeyStep(firstContact, { arm: false }),
     verifyKeyLoginStep(firstContact),
     enableNtpStep(firstContact),
     // Last of the key steps, and it may only stand here because every root command this arm sends

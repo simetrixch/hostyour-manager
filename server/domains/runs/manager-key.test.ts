@@ -231,7 +231,7 @@ describe("manager-key kit", () => {
 
   describe("the steps measure before they act", () => {
     const list = (input: { serverId: string; secretName: string }): Step[] => [
-      proveElevationStep(input), generateKeyStep(input), installKeyStep(input),
+      proveElevationStep(input), generateKeyStep(input), installKeyStep(input, { arm: false }),
       verifyKeyLoginStep(input), enableNtpStep(input), removeSudoersStep(input),
     ];
 
@@ -289,31 +289,38 @@ describe("manager-key kit", () => {
       expect(said).toMatch(/there is nothing to take back and nothing was written/);
     });
 
-    // NOTHING TAKES THE KEY LINE BACK, and this is where that is held. The line is what every
-    // session after this step is opened with, and the lists that compose it also shut the daemon's
-    // password door and destroy the sealed bootstrap password — so a compensation that deleted the
-    // line would leave a machine nothing can reach, on exactly the run that failed. The case below
-    // is the APPENDING path, which is the only one a compensation could ever have been registered
-    // on: re-arm it and this goes red.
+    // WHAT DECIDES THE COMPENSATION, and it takes both facts. `arm` is the composing definition's
+    // answer to whether an abort of that run may take the line off at all; the step's own
+    // measurement answers whether there is a line of THIS run's to take off. Neither can stand for
+    // the other, and the three cases below are the three ways they combine.
     const KEY_LINE = "ssh-ed25519 AAAAmanager hostyour:s5";
     const input = { serverId: SERVER_ID, secretName: SECRET };
 
-    it("appends the line and registers NO compensation for it — an abort must leave the machine reachable", async () => {
+    it("appends the line and arms remove-manager-key where the definition allows it — leaving the machine takes it back off", async () => {
       const b = bench();
       await sealKey(b.store, KEY_LINE);
-      await installKeyStep(input).run(b.ctx("install-key"));
+      await installKeyStep(input, { arm: true }).run(b.ctx("install-key"));
 
       expect(b.host.authorizedKeys).toEqual([KEY_LINE]);
-      expect(b.rc.registeredCleanups()).toEqual([]);
+      expect(b.rc.registeredCleanups().map((c) => c.name)).toEqual(["remove-manager-key"]);
     });
 
-    it("appends nothing where the line already stands, and says so", async () => {
+    it("appends the line and arms NOTHING where the definition holds it back — a live machine keeps the only way in this manager has", async () => {
+      const b = bench();
+      await sealKey(b.store, KEY_LINE);
+      await installKeyStep(input, { arm: false }).run(b.ctx("install-key"));
+
+      expect(b.host.authorizedKeys).toEqual([KEY_LINE]);
+      expect(b.rc.registeredCleanups().map((c) => c.name)).toEqual([]);
+    });
+
+    it("appends nothing where the line already stands, and arms nothing even where it may — an EARLIER run's line is not this run's to undo", async () => {
       const b = bench({ host: { ...freshHost(), authorizedKeys: [KEY_LINE] } });
       await sealKey(b.store, KEY_LINE);
-      await installKeyStep(input).run(b.ctx("install-key"));
+      await installKeyStep(input, { arm: true }).run(b.ctx("install-key"));
 
       expect(b.host.commands.filter((c) => c.includes(">> ~/.ssh/authorized_keys"))).toEqual([]);
-      expect(b.rc.registeredCleanups()).toEqual([]);
+      expect(b.rc.registeredCleanups().map((c) => c.name)).toEqual([]);
       expect(b.meta().some((t) => t.includes("already stands in ~/.ssh/authorized_keys"))).toBe(true);
     });
 

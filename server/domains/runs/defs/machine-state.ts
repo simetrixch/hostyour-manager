@@ -75,6 +75,13 @@ export const CATALOG_PROGRAMS = `${CATALOG_CHECKOUT}/ansiwise/programs`;
  *  in, and nothing this manager starts runs in the catalogue. */
 export const CATALOG_CONFIG = `${CATALOG_CHECKOUT}/ansiwise.yaml`;
 
+/** The one snap this platform installs on a machine: the cluster distribution, put there by the
+ *  `install_snap` row of `deploy-cluster` in the installation's catalogue. It is not a path, so
+ *  nothing below reads it, and it stands here for the reason every path here does — a machine
+ *  leaving this platform has to be told what to take off, and the name it is published under is a
+ *  fact of the catalogue rather than of this repository. */
+export const PLATFORM_SNAP = "microk8s";
+
 /** Where the engine keeps every run's record on a machine, and the directory above it.
  *
  *  ansiwise-core's `RunDirectory.defaultRoot` names the second, and its recorder creates the run's

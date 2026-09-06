@@ -137,11 +137,15 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const names = (def.cleanups?.({ ...PARAMS }) ?? []).map((c) => c.name);
     // The executor resolves a persisted __cleanups entry by NAME against the definition's own list,
     // so a name a step can register and this list does not carry ends an abort with a step that has
-    // no implementation. TWO NAMES, and both act on the MASTER's books: what a half-finished run
-    // left on the slave is finished by running the run again, and the acts an abort used to undo
-    // there — the key line, the shut password door, the snap, the input file — are each either what
-    // the retry needs or what the retry redoes. First contact adds NONE of them.
-    expect(names.sort()).toEqual(["remove-slave", "remove-slave-marking"]);
+    // no implementation. FIVE NAMES, because an abort with cleanup LEAVES the machine: two act on
+    // the master's books and three put the machine itself back — everything this platform wrote on
+    // it, the password door it shut, and the key line it appended.
+    expect(names.sort()).toEqual([
+      "leave-host", "remove-manager-key", "remove-slave", "remove-slave-marking", "restore-password-login",
+    ]);
+    // WHICH ORDER THEY RUN IN is not this list's to say — the executor runs them in reverse
+    // REGISTRATION order, so it is decided by where the arming steps stand and is read off a real
+    // abort in deploy-slave.ansiwise.suite.ts.
     // THE OTHER SIDE OF THE SAME RULE, and it is why the arming is the composing definition's
     // decision rather than the step's: redeploy's slave arm runs these very steps and implements no
     // compensating action at all, so every one of them has to be held back there. What that arm

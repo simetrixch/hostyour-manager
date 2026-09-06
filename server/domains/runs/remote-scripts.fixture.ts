@@ -23,6 +23,8 @@ import { TAILNET_PROBE_SCRIPT } from "./tailnet-probe.ts";
 import { DISABLE_SCRIPT, ENABLE_SCRIPT } from "./defs/password-login.kit.ts";
 import { placeScript, removeScript } from "./defs/operator-key.kit.ts";
 import { removeSudoersScript, SUDOERS_DROP_IN } from "./defs/manager-key.kit.ts";
+import { LEAVE_HOST_SCRIPT, removeManagerKeyScript } from "./defs/leave-host.kit.ts";
+import { operatorKeyMarker } from "../../../shared/operator-keys.ts";
 import {
   CERTS_CMD,
   SECRET_STORES_CMD,
@@ -58,7 +60,12 @@ export const REMOTE_SCRIPTS: readonly RemoteScript[] = [
   { symbol: "DISABLE_SCRIPT", module: "server/domains/runs/defs/password-login.kit.ts", text: DISABLE_SCRIPT },
   { symbol: "removeSudoersScript", module: "server/domains/runs/defs/manager-key.kit.ts", text: removeSudoersScript(SUDOERS_DROP_IN) },
   { symbol: "placeScript", module: "server/domains/runs/defs/operator-key.kit.ts", text: placeScript(PUBLIC_KEY, "operator-1") },
-  { symbol: "removeScript", module: "server/domains/runs/defs/operator-key.kit.ts", text: removeScript("operator-1") },
+  { symbol: "removeScript", module: "server/domains/runs/defs/operator-key.kit.ts", text: removeScript(operatorKeyMarker("operator-1")) },
+  // THE SAME FILTER AIMED AT THE OTHER MARKER, and it is parsed on its own because it edits the file
+  // this manager's OWN way in stands in: an operator's marker and a machine's are two patterns, and
+  // one of them widening is a machine nothing can reach.
+  { symbol: "removeManagerKeyScript", module: "server/domains/runs/defs/leave-host.kit.ts", text: removeManagerKeyScript("s1") },
+  { symbol: "LEAVE_HOST_SCRIPT", module: "server/domains/runs/defs/leave-host.kit.ts", text: LEAVE_HOST_SCRIPT },
   { symbol: "dnsProbeScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: dnsProbeScript(SLAVE_FQDN) },
   { symbol: "slaveDiagScript", module: "server/domains/runs/defs/deploy-slave.remote.ts", text: slaveDiagScript(SLAVE_FQDN) },
 ];

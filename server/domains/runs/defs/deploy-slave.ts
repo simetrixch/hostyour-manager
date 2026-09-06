@@ -24,7 +24,8 @@ import {
   proveElevationStep, generateKeyStep, installKeyStep, verifyKeyLoginStep, enableNtpStep,
   removeSudoersStep, type FirstContactInput,
 } from "./manager-key.kit.ts";
-import { disablePasswordLoginStep, purgeBootstrapPasswordStep } from "./password-login.kit.ts";
+import { disablePasswordLoginStep, purgeBootstrapPasswordStep, restorePasswordLoginCleanup } from "./password-login.kit.ts";
+import { leaveHostCleanup, removeManagerKeyCleanup } from "./leave-host.kit.ts";
 import { placeAnsiwiseStep } from "./place-ansiwise.step.ts";
 import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
 import { SLAVE_API_PORT, DATA_DISK_COMMAND, HOST_ADDRESS_COMMAND, dataDiskFrom, hostAddressesFrom } from "./deploy-slave.remote.ts";
@@ -312,11 +313,13 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // authenticates with the key install-key puts there and verify-key-login proves.
     proveElevationStep(firstContact),
     generateKeyStep(firstContact),
-    // install-key is the one key step that leaves anything on the machine, and NOTHING TAKES IT BACK.
-    // The key line is what every session after it is opened with, and this same list shuts the
-    // daemon's password door and destroys the sealed bootstrap password — so an abort that removed
-    // the line would leave a machine nothing can reach, on exactly the run that failed.
-    installKeyStep(firstContact),
+    // install-key is the one key step that leaves anything on the machine, and on a DEPLOYMENT it
+    // arms the act that takes it back: an aborted first install ends by leaving the machine, and a
+    // key line nobody removes is a way into the box for whoever owns it next. Armed HERE and
+    // therefore run LAST — the compensations run in reverse registration order, so everything else
+    // the abort does on the machine happens while this line is still the route to it. A REDEPLOY
+    // arms nothing: there the machine is a live slave this manager reaches over exactly that line.
+    installKeyStep(firstContact, { arm: !redeploying }),
     verifyKeyLoginStep(firstContact),
     enableNtpStep(firstContact),
     // Last of the key steps, and it may only stand here because every root command this run sends
@@ -418,16 +421,16 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // Run the list a second time and each of the three measures first and finds its work done, so
     // the order is a property of one pass rather than a state a retry has to be talked out of.
     //
-    // NEVER ARMED, ON EITHER ARM. A shut password door is the state every later run kind of this
-    // manager needs, so putting it back is not a repair of a failed install — it is undoing the one
-    // act that install existed to perform, on a machine this manager can already reach with its own
-    // key. The step keeps the option because the standalone run kind
-    // `cluster-password-login-disable` DOES arm it (defs/password-login.kit.ts, defs/password-
-    // login.ts): there the door is the subject of the run, and an abort of it owes the operator the
-    // door they had.
-    disablePasswordLoginStep(sid, { arm: false, secretName: firstContact.secretName }),
+    // ARMED ON A DEPLOYMENT, NEVER ON A REDEPLOY. A shut password door is the state every later run
+    // kind of this manager needs, so a redeploy putting it back would undo the one act the install
+    // existed to perform on a machine that is live. An aborted first install is the other case
+    // entirely: it ends by LEAVING the machine, and a machine left with its password door shut and
+    // this manager's key line gone is a machine nobody can reach at all. So the door goes back on,
+    // one compensation before the key line comes off (defs/leave-host.kit.ts states the order).
+    disablePasswordLoginStep(sid, { arm: !redeploying, secretName: firstContact.secretName }),
     // No compensation at all, on either arm: a destroyed credential cannot be put back, and this run
-    // holds the operator's password in memory rather than a copy of the machine's sealed one.
+    // holds the operator's password in memory rather than a copy of the machine's sealed one. It is
+    // the one thing leaving a machine cannot restore, and `remove-manager-key` says so by name.
     purgeBootstrapPasswordStep(sid),
     {
       name: "mark-slave",
@@ -556,7 +559,15 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // because none of them can run without all three: `ansiwise-rest serve` is a binary reading a
     // catalogue, and a machine at its first installation carries none of them. Idempotent by
     // measurement, which is what lets a redeploy run the same step against a machine that carries them.
-    placeAnsiwiseStep(target, ports),
+    //
+    // leave-host is armed HERE, before the first thing this platform writes on the machine, and it
+    // covers everything the three programs below write as well: it acts on the paths
+    // defs/machine-state.ts declares rather than on a list of what a run got to, so a run that died
+    // in deploy-cluster and one that died in deploy-platform-services are put back by the same act.
+    // A redeploy arms nothing — stripping a live slave is not a repair of a failed run.
+    ...(redeploying
+      ? [placeAnsiwiseStep(target, ports)]
+      : [armed(leaveHostCleanup(firstContact.secretName), placeAnsiwiseStep(target, ports))]),
     // ---- the machine layer, exactly as every cluster gets it: the three deployment programs on
     // the slave's own surface, each dry-proven then run.
     //
@@ -717,7 +728,10 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
         `The password you enter raises every root command of this run, and where this manager holds no key for ` +
         `"${slave.name}" it also opens the first login and installs one. It is held in memory for the length of the run ` +
         `and stored nowhere. The machine is left taking key logins only, with the bootstrap password sealed beside its ` +
-        `row destroyed and no standing passwordless-root grant of this manager's on it.`,
+        `row destroyed and no standing passwordless-root grant of this manager's on it. ` +
+        `Aborting this run with cleanup puts "${slave.name}" back instead: this manager's key line, the shut password ` +
+        `door and everything this platform wrote on it are taken off, and the bootstrap password — which nothing can ` +
+        `put back — is named so you can set a new one.`,
       steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
       // BOTH hosts are declared so ctx.ssh(slave) AND ctx.ssh(master) pass the plan gate;
       // only the slave is owned (server:<slave> lock derives from ownsHost).
@@ -753,34 +767,48 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
     : deploySlaveSteps(installInput(params), ports),
   // Every compensating action this run's steps may register, and each one has to be here: the
   // executor resolves the persisted __cleanups by NAME against this list, so a name it does not
-  // carry ends an abort with a step that has no implementation. They run in reverse registration
-  // order on an explicit abort-with-cleanup: remove-slave (armed by the join, before the first
-  // master-side per-slave state exists) → remove-slave-marking (armed by mark-slave, before the map
-  // write — by then remove-slave has already dropped the map's slave part itself, FIRST, which is
-  // that program's own contract, so this one finds nothing left to drop).
+  // carry ends an abort with a step that has no implementation.
   //
-  // BOTH OF THEM ACT ON THE MASTER'S BOOKS, AND THAT IS THE WHOLE LIST. What a half-finished run
-  // left on the SLAVE is finished by running the run again, which is the rule the master arm has
-  // always stated (deploy-slave.master.ts) and the reason every step of this list is written
-  // measure-then-act. A compensation that undid one of those acts would take away something the
-  // retry needs and buy nothing:
-  //   - the key line install-key appended is what every session after it is opened with, and this
-  //     same list shuts the password door and destroys the sealed bootstrap password, so removing it
-  //     leaves a machine nothing can reach;
-  //   - the shut password door is the state every later run kind of this manager needs;
-  //   - MicroK8s is reinstalled by the same program on the next run.
-  // So an aborted first install leaves a machine reachable by this manager's key and by nobody
-  // else — the state its own retry starts from.
+  // AN ABORT WITH CLEANUP LEAVES THE MACHINE, and the five acts below are what leaving one is. They
+  // run in REVERSE registration order, and that order is the whole of what makes them safe — each
+  // one runs while the route the next one needs is still open:
   //
-  // remove-slave IS A ROOT ACT ON A MACHINE THAT GRANTS THIS MANAGER NOTHING WITHOUT A PASSWORD, so
-  // the abort has to be given the run's password again (executor/executor.ts abortWithCleanup);
-  // without it the cleanup refuses by name, which is the loud form of the same fact rather than a
-  // master left half-registered.
+  //   remove-slave           armed by the join, before the first master-side per-slave state exists.
+  //                          The master's per-slave management plane, the map's slave part FIRST
+  //                          (that program's own contract).
+  //   remove-slave-marking   armed by mark-slave, before the map write. By here remove-slave has
+  //                          already dropped the slave part, so this finds nothing left to drop.
+  //   leave-host             armed by place-ansiwise, before the first thing written on the machine.
+  //                          Every path defs/machine-state.ts declares, the two engine executables,
+  //                          the cluster snap with its data, the private-network membership.
+  //   restore-password-login armed by disable-password-login, unless it measured the door already
+  //                          shut. A machine left with no password door and no key line answers
+  //                          nobody, so the door goes back on before the line goes.
+  //   remove-manager-key     armed by install-key, unless the line was already standing. LAST,
+  //                          because it is the route every act above travels; it also purges the
+  //                          sealed private half and puts the server row back at `bare`.
   //
-  // THE MASTER ARM REGISTERS NEITHER, so this list is the pure-slave arm's alone. The list stays
+  // WHAT LEAVING CANNOT PUT BACK is named where the acts are (defs/leave-host.kit.ts): the destroyed
+  // bootstrap password, the packages deploy-host installed, and the clock sources it wrote. Each is
+  // said out loud in the run log rather than passed over.
+  //
+  // FOUR OF THE FIVE ARE ROOT ACTS ON A MACHINE THAT GRANTS THIS MANAGER NOTHING WITHOUT A PASSWORD,
+  // so the abort has to be given the run's password again (executor/executor.ts abortWithCleanup);
+  // without it they refuse by name, which is the loud form of the same fact rather than a master left
+  // half-registered or a machine left half-stripped. remove-manager-key is the one that needs none:
+  // it edits the login account's own file, which is what keeps the last act from being the one that
+  // fails for want of a secret.
+  //
+  // THE MASTER ARM REGISTERS NONE OF THEM, so this list is the pure-slave arm's alone. The list stays
   // whole because the executor resolves persisted names against it, and a run of either arm may hold
   // names from a run of its own.
-  cleanups: () => [removeSlaveCleanup(ports), removeSlaveMarkingCleanup(ports)],
+  cleanups: () => [
+    removeSlaveCleanup(ports),
+    removeSlaveMarkingCleanup(ports),
+    leaveHostCleanup(ANSIWISE_ELEVATION_SECRET),
+    restorePasswordLoginCleanup(ANSIWISE_ELEVATION_SECRET),
+    removeManagerKeyCleanup,
+  ],
   onTerminal: (status, { db, params }) => {
     if (status === "succeeded") return; // the register step set the terminal states
     const sid = String(params.serverId);

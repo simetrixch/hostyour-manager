@@ -117,6 +117,24 @@ export function answerPlacementCommand(
     return { out: "", code: 0 };
   }
 
+  // `rm -f <executable>…` — the leave taking both executables off, the home copy and the path copy
+  // alike. Answered by actually deleting them, so the `--version` reading above answers 127
+  // afterwards because the machine holds nothing rather than because this fixture remembered a
+  // command.
+  //
+  // MATCHED ON `rm -f` WHEREVER IT STANDS, because a raised command carries `sudo -S -p ''` in front
+  // of it (executor/stepkit.ts `raised`) and a fixture keyed on that prefix would answer a different
+  // question every time the prefix changed. What decides is the OPERANDS: every one of them has to
+  // name a place an executable of this platform stands, so the `rm -f /tmp/dc-…` that follows every
+  // uploaded script falls through to the rest of the table rather than being read as a removal.
+  const rm = words.indexOf("rm");
+  if (rm !== -1 && words[rm + 1] === "-f") {
+    const named = words.slice(rm + 2).map((word) => executableNamed(word));
+    if (named.length === 0 || named.some((name) => name === undefined)) return undefined;
+    f.files = f.files.filter((x) => !(x.host === host && named.includes(x.path)));
+    return { out: "", code: 0 };
+  }
+
   const catalogue = answerCatalogueCommand(f, words);
   if (catalogue !== undefined) return catalogue;
 

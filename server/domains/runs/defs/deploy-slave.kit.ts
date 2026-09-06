@@ -87,9 +87,11 @@ export function requireResolver(ports: DeploySlavePorts): ClusterKubeResolver {
 
 /** WHICH run kind is driving the shared slave step list. The steps are the same either way — what
  *  differs is what a failure means. `deploy` installs a slave that is not live yet, so every step
- *  that creates something arms the compensating action that undoes it. `redeploy` reconciles a slave
- *  that IS live, and arms none of them: `snap remove --purge microk8s`, `--slave-remove` and dropping
- *  the slave part of the cluster map each undo a WORKING slave rather than a half-finished install. */
+ *  that creates something arms the compensating action that undoes it, and an abort with cleanup
+ *  LEAVES the machine (defs/leave-host.kit.ts). `redeploy` reconciles a slave that IS live and arms
+ *  none of them: taking the key line off, opening the password door, stripping the machine and
+ *  dropping the slave part of the cluster map each undo a WORKING slave rather than a half-finished
+ *  install. */
 export type SlaveInstallMode = "deploy" | "redeploy";
 
 /** WHAT the shared slave step list acts on, and when it may know it. The server is always named by
@@ -306,10 +308,10 @@ export function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<voi
 // early registration is safe). The executor resolves the persisted __cleanups names against
 // cleanups(); they run ONLY on an explicit abort-with-cleanup, never automatically.
 //
-// BOTH OF THEM ACT ON THE MASTER'S BOOKS, and that is the whole of what an abort of a slave install
-// undoes now. What a run leaves on the SLAVE is finished by running the run again — every step of
-// that list measures before it acts — so an abort takes away nothing the machine needs and nothing a
-// retry would have to be talked out of.
+// THE ONE BELOW ACTS ON THE MASTER'S BOOKS. What an abort does to the SLAVE is three more
+// compensating actions, and they live with the acts that put a machine back
+// (defs/leave-host.kit.ts): a run aborted with cleanup leaves the machine, and leaving it means the
+// key line, the password door and everything this platform wrote go with the master-side plane.
 
 /** The git-side inverse of the map write: drop the slave part again, which takes the cluster out of the
  *  master's slaves ApplicationSet and cascades the teardown of its management plane. The map itself

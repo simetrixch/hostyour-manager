@@ -41,22 +41,24 @@ import { loadServer } from "./deploy-slave.kit.ts";
 // own has gone.
 
 /** The pattern an act filters by: whitespace, the marker, and the end of the line. Anchored because
- *  a bare substring match would treat every label that merely STARTS the same way as the same key.
- *  The label charset (shared/operator-keys.ts) holds no regular-expression metacharacter and no
- *  quote, which is what makes interpolating it into this pattern — and into the single-quoted shell
+ *  a bare substring match would treat every marker that merely STARTS the same way as the same key —
+ *  `hostyour:s1` against `hostyour:s11`, and an operator's `hostyour-operator:pat` against
+ *  `hostyour-operator:pat-laptop`. Both marker grammars (shared/operator-keys.ts) are lowercase
+ *  letters, digits, hyphens and one colon, so neither holds a regular-expression metacharacter nor a
+ *  quote, which is what makes interpolating one into this pattern — and into the single-quoted shell
  *  string below — safe rather than merely tidy. */
-function markerPattern(label: string): string {
-  return `[[:space:]]${operatorKeyMarker(label)}[[:space:]]*$`;
+function markerPattern(marker: string): string {
+  return `[[:space:]]${marker}[[:space:]]*$`;
 }
 
 /** Everything both acts do before they differ: make sure the file exists with the modes sshd
- *  insists on, filter this operator's own lines out of a copy, and refuse to go on unless exactly
- *  those lines went. Leaves the result in "$tmp" and the original still in place. */
-function filterPreamble(label: string): string {
+ *  insists on, filter the marker's own lines out of a copy, and refuse to go on unless exactly those
+ *  lines went. Leaves the result in "$tmp" and the original still in place. */
+function filterPreamble(marker: string): string {
   return `#!/usr/bin/env bash
 set -euo pipefail
 ak="$HOME/.ssh/authorized_keys"
-pattern='${markerPattern(label)}'
+pattern='${markerPattern(marker)}'
 # grep -c '' counts lines including a final one with no newline, which wc -l does not.
 count() { grep -c '' "$1" 2>/dev/null || true; }
 mkdir -p "$HOME/.ssh"
@@ -77,7 +79,7 @@ before="$(count "$ak")"
 after="$(count "$tmp")"
 [ "$((before - hits))" = "$after" ] || {
   rm -f "$tmp"
-  echo "the filter would drop $((before - after)) line(s) but only $hits carry this operator's marker — NOTHING was written" >&2
+  echo "the filter would drop $((before - after)) line(s) but only $hits carry the marker '${marker}' — NOTHING was written" >&2
   exit 1
 }`;
 }
@@ -96,7 +98,7 @@ after="$(count "$tmp")"
  *  prints, so the filtered copy always ends in one and the new line cannot be joined onto the last
  *  key — which would destroy both. */
 export function placeScript(publicKey: string, label: string): string {
-  return `${filterPreamble(label)}
+  return `${filterPreamble(operatorKeyMarker(label))}
 printf '%s\\n' '${operatorKeyLine(publicKey, label)}' >> "$tmp"
 install -m 600 "$tmp" "$ak"
 rm -f "$tmp"
@@ -105,16 +107,22 @@ echo "the key for '${label}' is in $ak ($(count "$ak") line(s) total)"
 `;
 }
 
-/** Take the operator's key off the host. Removing a key that was never there is a SUCCESS: the act
- *  states a postcondition — this label has no line in this file — and a host that never carried one
- *  already satisfies it. What it does not do is claim the KEY is gone; that verdict is the step's,
- *  taken from the file read back afterwards. */
-export function removeScript(label: string): string {
-  return `${filterPreamble(label)}
+/** Take a marked key off the host. Removing a key that was never there is a SUCCESS: the act states
+ *  a postcondition — this marker has no line in this file — and a host that never carried one
+ *  already satisfies it. What it does not do is claim the KEY is gone; that verdict is the caller's,
+ *  taken from the file read back afterwards.
+ *
+ *  IT TAKES THE MARKER AND NOT A LABEL, because the same filter takes this manager's OWN key line off
+ *  a machine being left (defs/leave-host.kit.ts), and that line carries `hostyour:<server name>`
+ *  rather than an operator's label. Everything that makes the removal safe is a property of the
+ *  filter and not of which marker it is aimed at, so one implementation covers both — and a second
+ *  one, aimed at a file where this manager's own way in stands, is where the two would drift apart. */
+export function removeScript(marker: string): string {
+  return `${filterPreamble(marker)}
 install -m 600 "$tmp" "$ak"
 rm -f "$tmp"
-grep -q -e "$pattern" "$ak" && { echo "a line carrying this operator's marker is still in $ak" >&2; exit 1; }
-echo "no line for '${label}' is in $ak ($hits removed, $(count "$ak") line(s) left)"
+grep -q -e "$pattern" "$ak" && { echo "a line carrying the marker '${marker}' is still in $ak" >&2; exit 1; }
+echo "no line carrying '${marker}' is in $ak ($hits removed, $(count "$ak") line(s) left)"
 `;
 }
 
@@ -177,7 +185,7 @@ function actStep(kind: OperatorKeyKind, target: OperatorKeyTarget): Step {
       if (place && !held) ctx.registerCleanup(removeOperatorKeyCleanup);
       const r = place
         ? await remoteScript(ctx, session, "cluster-operator-key-place", placeScript(key.publicKey, key.label), { timeoutMs: 60_000 })
-        : await remoteScript(ctx, session, "cluster-operator-key-remove", removeScript(key.label), { timeoutMs: 60_000 });
+        : await remoteScript(ctx, session, "cluster-operator-key-remove", removeScript(operatorKeyMarker(key.label)), { timeoutMs: 60_000 });
       const after = await recordAuthorizedKeysReading(ctx, session, target.serverId);
 
       // The one failure this whole run kind is shaped around: an edit that took this manager's own
@@ -215,7 +223,7 @@ export const removeOperatorKeyCleanup: Cleanup = {
     const serverId = String(ctx.params.serverId);
     const key = loadOperatorKey(ctx.db, String(ctx.params.operatorKeyId));
     const session = await ctx.ssh();
-    const r = await remoteScript(ctx, session, "cluster-operator-key-remove", removeScript(key.label), { timeoutMs: 60_000 });
+    const r = await remoteScript(ctx, session, "cluster-operator-key-remove", removeScript(operatorKeyMarker(key.label)), { timeoutMs: 60_000 });
     await recordAuthorizedKeysReading(ctx, session, serverId);
     if (r.code !== 0) throw errValidation(`the operator key could not be taken back off (exit ${r.code}) — see the run log`);
   },

@@ -174,11 +174,13 @@ export function answerFirstContactCommand(
     f.authorizedKeys = [...(f.authorizedKeys ?? []), appended];
     return ok();
   }
-  // The compensation's own edit, by the marker this manager's key line carries and by nothing else.
-  const dropped = /^sed -i '\\#([^#]+)#d' ~\/\.ssh\/authorized_keys$/.exec(command)?.[1];
-  if (dropped !== undefined) {
-    f.authorizedKeys = (f.authorizedKeys ?? []).filter((l) => !l.includes(dropped));
-    return ok();
+  // remove-manager-key's own edit: the marker filter, aimed at this manager's line and at nothing
+  // else. The machine keeps every line that does not carry it, which is what the compensation is
+  // asserted on — the image's own provisioning key is still a way in and this must not touch it.
+  if (ran("leave-manager-key")) {
+    const before = f.authorizedKeys ?? [];
+    f.authorizedKeys = before.filter((l) => !l.includes(MANAGER_KEY_COMMENT));
+    return ok(`no line carrying '${MANAGER_KEY_COMMENT}' is in $ak (${before.length - f.authorizedKeys.length} removed)`);
   }
   if (ran("authorized-keys-probe")) {
     return ok(f.authorizedKeys === undefined

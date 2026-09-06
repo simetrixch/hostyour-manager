@@ -258,6 +258,14 @@ export interface HostsScript extends FirstContactScript {
    *  ansiwise program steps hands back a Duplex carrying the REAL `ansiwise-rest serve` (a socket to
    *  its listener). The default refuses: the scripted hosts hold no conversations. */
   openConversation: (command: string) => Promise<Duplex>;
+  /** WHAT THIS MACHINE WILL NOT GIVE UP when a run leaves it, in the words the leave prints. Empty
+   *  is the machine that gives up everything, which is what a leave reports as clean. A non-empty
+   *  list is the machine that keeps something — a snap the daemon is still holding, a directory a
+   *  mount sits under — and the compensation refuses to report the machine as put back while any
+   *  line stands. Written out in this fixture's own words rather than composed from
+   *  defs/machine-state.ts, because a model built out of our own constants would agree with us by
+   *  construction instead of by measurement. */
+  leftBehind: string[];
   /** Every exec and every conversation, with what the caller put on the command's STANDARD INPUT
    *  where it sent any. The credentials of a placement ride that input and nothing else — they may
    *  reach no file and no argument list — so a caller that composed them and then did not hand them
@@ -306,6 +314,7 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     catalogueRemoteHead: "bbb2222",
     catalogueFetchExit: 0,
     execFaults: [],
+    leftBehind: [],
     openConversation: (command) => Promise.reject(new Error(`no conversation scripted for "${command}"`)),
     log: [],
     files: [],
@@ -378,12 +387,20 @@ export function hostsFactory(f: HostsScript): SshFactory {
       // because that is where the step reads it: a measurement is read back whole, not followed line
       // by line as a program run is.
       if (command === HOST_ADDRESS_COMMAND) return { code: f.hostAddressesExit, stdoutTail: f.hostAddressesOut, stderrTail: "" };
-      // ---- cleanups. The reset MEASURES before it acts, and the machine answers `snap list` as one
-      // that carries the snap: the compensation is armed by deploy-cluster, which is the step that
-      // installs it, so by the time an abort can run this the snap is there. Answered here rather
-      // than by falling through, because it is what decides whether the destructive half runs at all.
-      if (command === "snap list microk8s") return done();
-      if (command.includes("snap remove --purge microk8s")) return done();
+      // ---- leaving the machine. The whole script is raised and run in one send, so what the
+      // fixture models is the STATE it leaves behind and the report the compensation reads off it:
+      // the catalogue is gone (a machine carrying none is what `catalogueBranch: undefined` is), and
+      // every line the step counts is printed. `leftBehind` is the machine that will not give
+      // something up — its lines are what turn a leave into a failure naming what stayed.
+      if (command.includes("bash /tmp/dc-leave-host-")) {
+        if (f.leftBehind.length > 0) {
+          emit(f.leftBehind.map((what) => `KEPT ${what}`).join("\n"));
+          return done(1);
+        }
+        f.catalogueBranch = undefined;
+        emit("LEAVE clean");
+        return done();
+      }
       return done();
     };
     const session: SshSession = {
