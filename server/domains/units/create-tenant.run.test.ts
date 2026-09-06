@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
-import { TenantRegistrations, CATALOG_CHART_BRANCH } from "./tenant-registrations.ts";
+import { TenantRegistrations } from "./tenant-registrations.ts";
 import type { ClusterStageResolver } from "./registrations.ts";
 import { memberAppProject, tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -340,19 +340,19 @@ describe("create-tenant streaming planner", () => {
     expect(result.plan.steps.map((s) => s.name)).toEqual(def.steps(result.params).map((s) => s.name));
   });
 
-  it("validates the member CHARTS at the trunk while the registration is locked on the books branch — the two are not one value", async () => {
-    // catalog carries both, and they are different kinds of thing: the charts are product, the
-    // same ones for every installation, and the registrations are this installation's books. One
-    // constant for both is what would have moved the charts onto a branch nothing maintains the
-    // moment the registrations moved — silently, since every render would still resolve.
+  it("validates the member CHARTS at the same books branch the registration is locked on, and never at the trunk", async () => {
+    // ONE REVISION OF THE CATALOG, because a member Application names that repository twice — its
+    // pins source and its chart source — and ArgoCD's repo-server generates no manifest for an
+    // Application whose two sources resolve one repository to two commits. Rendering the gates over
+    // the trunk instead would approve a chart the cluster never reads.
     seedClusters();
     const reader = repoWithManifest();
     const result = await makeCreateTenantDef(ports({ repo: reader }))
       .planStream!({ clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
-    expect(reader.clones.map((c) => c.ref)).toEqual([CATALOG_CHART_BRANCH]);
-    expect(CATALOG_CHART_BRANCH).toBe(PRODUCT_BRANCH);
+    expect(reader.clones.map((c) => c.ref)).toEqual([FAKE_BOOKS_BRANCH]);
+    expect(FAKE_BOOKS_BRANCH).not.toBe(PRODUCT_BRANCH);
     expect(result.plan.locks).toContainEqual({ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` });
   });
 

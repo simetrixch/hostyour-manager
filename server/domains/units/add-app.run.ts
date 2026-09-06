@@ -16,7 +16,6 @@ import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy } from "./admission-policy.ts";
 import { renderTenantArgoSync, tenantSyncUnits } from "./build-rbac.ts";
 import { memberApplication, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
-import { CATALOG_CHART_BRANCH } from "./tenant-registrations.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
@@ -320,7 +319,9 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       const outcome = await validateTenant(
         {
           repoURL: ports.catalogRepoUrl,
-          ref: CATALOG_CHART_BRANCH,
+          // The revision the member Application will read its chart at, and therefore the only one
+          // worth rendering the gates over (tenant-registrations.ts, the `branch` getter).
+          ref: ports.registrations.branch,
           stage: tc.stage,
           apps: [{ name: req.app }],
           probeGuid: tc.guid,

@@ -17,7 +17,7 @@ import { assertDeployState } from "./lifecycle.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { renderTenantArgoSync, tenantSyncUnits } from "./build-rbac.ts";
-import { CATALOG_CHART_BRANCH, type TenantRegistrations } from "./tenant-registrations.ts";
+import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { mintTenantCrypto, TENANT_CRYPTO_PROPERTIES } from "./tenant-crypto-mint.ts";
@@ -597,7 +597,9 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       const outcome = await validateTenant(
         {
           repoURL: ports.catalogRepoUrl,
-          ref: CATALOG_CHART_BRANCH,
+          // The revision every member Application will read its chart at, and therefore the only one
+          // worth rendering the gates over (tenant-registrations.ts, the `branch` getter).
+          ref: ports.registrations.branch,
           stage: rc.stage,
           apps: req.apps,
           probeGuid: guid,

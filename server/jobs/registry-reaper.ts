@@ -28,14 +28,15 @@ const DEFAULT_PUSH_DOCKERCONFIG_PATH = "/etc/manager/registry-push/.dockerconfig
 /** One GitOps repo as a carrier: its branch list over the REST API, its files over a persistent
  *  worktree. `workRoot` is its own so the reaper never collides with the onboarding worktrees, and the
  *  two carrier repos never collide with each other. The search READS (search.ts, CarrierRepo), so
- *  neither carrier mints a branch: a books branch missing here means the floor cannot be built, and
- *  the reaper must fail closed on that rather than scan a ref it created itself. */
+ *  neither carrier mints a branch and neither carries the trunk into one: a books branch missing
+ *  here means the floor cannot be built, and the reaper must fail closed on that rather than scan a
+ *  ref it wrote itself. */
 function carrierRepo(cfg: GitHubPlatformConfig, dataDir: string, workRootName: string, books: string): CarrierRepo {
   const github = createGitHubPlatform(cfg);
   const repo = new GitPlatformRepo({
     platformRepoURL: `https://github.com/${cfg.owner}/${cfg.repo}.git`,
     booksBranch: books,
-    createsBooksBranch: false,
+    carriesTrunkToBooksBranch: false,
     workRoot: join(dataDir, workRootName),
     credentialId: `${workRootName}-pat`,
     openCredential: () => Promise.resolve(Buffer.from(cfg.token, "utf8")),

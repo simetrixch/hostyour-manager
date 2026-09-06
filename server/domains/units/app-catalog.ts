@@ -55,10 +55,10 @@ export function parseAppCatalog(entries: string[]): string[] {
   return [...names].sort();
 }
 
-/** What a single catalog fetch needs: the same catalog pin + read credential validateTenant clones
- *  with. ref is the trunk (CATALOG_CHART_BRANCH — the charts are product, not installation state,
- *  so they never move to the books branch); the catalog is not pin-sensitive — it reflects
- *  the current tip, since it only ever GROWS the set of names the wizard may offer. */
+/** What a single catalog fetch needs: the same catalog ref + read credential validateTenant clones
+ *  with. That ref is this installation's books branch in the catalog, which is where its member
+ *  charts stand (tenant-registrations.ts, the `branch` getter), so the wizard offers the app types
+ *  this installation can actually deploy and no others. */
 export interface ListAppCatalogDeps {
   repo: RepoReader;
   repoURL: string;

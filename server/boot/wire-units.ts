@@ -28,7 +28,7 @@ import type { Activator } from "../adapters/activation/port.ts";
 import { HttpGitHubConsumer } from "../adapters/github-consumer/github-consumer-http.ts";
 import { HelmCliRenderer } from "../adapters/helm/helm.ts";
 import { Registrations, clusterStageFromMarkings } from "../domains/units/registrations.ts";
-import { TenantRegistrations, CATALOG_CHART_BRANCH } from "../domains/units/tenant-registrations.ts";
+import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
 import type { ClusterStageResolver } from "../domains/units/registrations.ts";
 import { makeOnboardDef, type OnboardPorts } from "../domains/units/onboard.run.ts";
 import { makeOffboardDef } from "../domains/units/offboard.run.ts";
@@ -128,12 +128,12 @@ export interface UnitsWiring {
    *  Undefined when tenant onboarding is not configured; the scan route then degrades to an empty
    *  result with a reason. */
   tenantRegistrations?: TenantRegistrations;
-  /** Bring the catalog's books branch into being at boot. The tenant ApplicationSet's git generator
-   *  reads that branch from the moment the installation is deployed, and without this it comes into
-   *  being only on the first tenant registration — so a correct fresh installation shows the
-   *  ApplicationSet, and the root Application above it, in error. Undefined when tenant onboarding is
-   *  not configured; there is then no catalog to write into. */
-  ensureBooksBranch?: () => Promise<void>;
+  /** Bring the catalog's books branch into being, and to the catalog's trunk, at boot. The tenant
+   *  ApplicationSet's git generator reads that branch from the moment the installation is deployed,
+   *  and every member Application reads its chart there too, so without this the ApplicationSet has
+   *  no revision to resolve on a fresh installation and the charts never move afterwards. Undefined
+   *  when tenant onboarding is not configured; there is then no catalog to write into. */
+  carryTrunkToBooksBranch?: () => Promise<void>;
   /** The CONSUMER family's registration registrations, threaded to registerConsumerRoutes so the
    *  operator-triggered DETECTED scan (GET /api/consumers/detected) can diff the
    *  LIVE registrations/** against the inventory — the consumer twin of tenantRegistrations above, and the
@@ -172,11 +172,12 @@ interface Family {
   /** Present only for the consumer family — the registration registrations its detected-scan read route
    *  diffs against the inventory. Undefined when the family is not configured. */
   registrations?: Registrations;
-  /** Present only for the tenant family — bring the catalog's books branch into being, so the tenant
-   *  ApplicationSet's git generator has a revision to resolve before the first tenant exists. It
-   *  crosses as a closure because buildUnits is synchronous and the boot that awaits it is not.
-   *  Undefined when the family is not configured — there is then no catalog to write into. */
-  ensureBooksBranch?: () => Promise<void>;
+  /** Present only for the tenant family — bring the catalog's books branch into being and to the
+   *  catalog's trunk, so the tenant ApplicationSet's git generator has a revision to resolve before
+   *  the first tenant exists and the member charts on that revision are the current ones. It crosses
+   *  as a closure because buildUnits is synchronous and the boot that awaits it is not. Undefined
+   *  when the family is not configured — there is then no catalog to write into. */
+  carryTrunkToBooksBranch?: () => Promise<void>;
 }
 
 export function buildUnits(
@@ -214,9 +215,10 @@ export function buildUnits(
     ? new GitPlatformRepo({
       platformRepoURL: `https://github.com/${config.github.owner}/${config.github.repo}.git`,
       booksBranch: books,
-      // the deploy-branch program cuts and stamps this branch; a missing one is a fault to raise,
-      // never a branch to mint from the trunk (adapters/git/git.ts, createsBooksBranch).
-      createsBooksBranch: false,
+      // the deploy-branch program cuts this branch, stamps it and merges each release into it; a
+      // missing one is a fault to raise, never a branch to mint from the trunk, and the product
+      // reaches it there and not here (adapters/git/git.ts, carriesTrunkToBooksBranch).
+      carriesTrunkToBooksBranch: false,
       workRoot: join(config.dataDir, "onboard-git"),
       credentialId: "platform-write-pat",
       openCredential: () => Promise.resolve(Buffer.from(config.github!.token, "utf8")),
@@ -285,7 +287,7 @@ export function buildUnits(
     ...(tenant.catalogRepoUrl ? { catalogRepoUrl: tenant.catalogRepoUrl } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
-    ...(tenant.ensureBooksBranch ? { ensureBooksBranch: tenant.ensureBooksBranch } : {}),
+    ...(tenant.carryTrunkToBooksBranch ? { carryTrunkToBooksBranch: tenant.carryTrunkToBooksBranch } : {}),
     // The shared activation client is always constructed above — surface it for the tenant invite route.
     activator,
     ...(resolveUnitApex ? { resolveUnitApex } : {}),
@@ -544,48 +546,62 @@ function buildTenantOnboarding(
   const openDeployToken = (): Promise<Buffer> => Promise.resolve(Buffer.from(deployToken, "utf8"));
 
   const repo = new GitRepoReader({ openCredential: openDeployToken });
+  // ONE INSTALLATION, ONE BOOKS BRANCH NAME, IN BOTH REPOSITORIES, so the name is taken off the
+  // platform repo rather than resolved a second time here and the two can never disagree. In
+  // catalog it is the revision every member chart is read at — by the Manager below and by every
+  // member Application (hostyour-cloud clusters/argocd/files/tenants-appset.yaml), which is one
+  // revision because ArgoCD's repo-server generates nothing for an Application naming one
+  // repository twice at two commits.
+  const books = platformRepo.booksBranch;
   // The create-tenant wizard's app-type catalog: the SAME reader + read credential validateTenant clones
-  // with, pointed at charts/example-engine/values-<app>.yaml on the default branch, cached with a short
-  // TTL and fail-soft (a fetch error logs + serves []/stale, so the wizard never blank-screens).
+  // with, pointed at charts/example-engine/values-<app>.yaml on the books branch, cached with a short
+  // TTL and fail-soft (a fetch error logs + serves []/stale, so the wizard never blank-screens). The
+  // branch and not the trunk, so the wizard offers the app types this installation can actually
+  // deploy: a chart that reached the catalog's trunk after the last carry is not on the branch the
+  // member Application would read it from.
   const appCatalog = makeAppCatalogProvider({
     repo,
     repoURL,
-    ref: CATALOG_CHART_BRANCH,
+    ref: books,
     credentialId: "catalog-read-pat",
     warn: (fields, msg) => logger.warn(fields, msg),
   });
   const helm = new HelmCliRenderer(); // trusted first-party charts render manager-side (no sandbox)
   // A SECOND GitPlatformRepo, bound to catalog, with a DISTINCT workRoot: worktreeDir keys only
-  // on the branch, and the two repos' books branches carry the SAME name — one installation, one
-  // books branch, in both repositories — so sharing the consumer onboard-git root would put two
-  // repositories in one worktree. The name is taken off the platform repo instead of resolved a
-  // second time, so the two can never disagree. commitPush opts into a bounded exponential backoff
-  // because many tenant lifecycle runs plus Tekton's own deploy-bump commits contend on this ONE
-  // shared branch.
+  // on the branch, and the two repos' books branches carry the SAME name, so sharing the consumer
+  // onboard-git root would put two repositories in one worktree. commitPush opts into a bounded
+  // exponential backoff because many tenant lifecycle runs plus Tekton's own deploy-bump commits
+  // contend on this ONE shared branch.
   const deployRepo = new GitPlatformRepo({
     platformRepoURL: repoURL,
-    booksBranch: platformRepo.booksBranch,
+    booksBranch: books,
     // catalog has no installer and no stamper, so this adapter is the only thing that can bring
-    // the branch its tenant ApplicationSet generators read into being (adapters/git/git.ts).
-    createsBooksBranch: true,
+    // the branch its tenant ApplicationSet generators read into being, and the only thing that can
+    // bring the catalog's trunk into it afterwards (adapters/git/git.ts).
+    carriesTrunkToBooksBranch: true,
     workRoot: join(config.dataDir, "tenant-git"),
     credentialId: "catalog-write-pat",
     openCredential: openDeployToken,
     pushBackoff: { retries: 6, baseDelayMs: 250, maxDelayMs: 8_000 },
   });
-  // Bring the books branch into being at BOOT rather than at the first tenant registration. The
-  // tenant ApplicationSet's git generator reads that branch from the moment the installation is
-  // deployed, and a generator whose revision resolves to nothing puts the ApplicationSet — and the
-  // root Application above it — in error. Measured on a fresh install: `tenants-dev` was the one
-  // ApplicationSet in error on a platform where every other Application was Synced and Healthy, and
-  // nothing anywhere said the red was expected until somebody onboarded a tenant. A health view that
-  // is red about a correct installation teaches the reader to ignore the colour.
+  // Bring the books branch into being, and to the catalog's trunk, at BOOT. Two reasons, and the
+  // act is one call (adapters/git/git.ts carryTrunkToBooksBranch).
   //
-  // A no-op turn is what drives it: resetToOrigin mints the branch when origin does not carry it and
-  // this adapter opted in (adapters/git/git.ts createsBooksBranch), so this needs no new act and no
-  // new port method — it only moves the moment the existing one runs. On every later boot the branch
-  // is there, the sync succeeds and nothing is created.
-  const ensureBooksBranch = (): Promise<void> => deployRepo.withBranch(deployRepo.booksBranch, async () => undefined);
+  // INTO BEING, rather than at the first tenant registration: the tenant ApplicationSet's git
+  // generator reads that branch from the moment the installation is deployed, and a generator whose
+  // revision resolves to nothing puts the ApplicationSet — and the root Application above it — in
+  // error. Measured on a fresh install: `tenants-dev` was the one ApplicationSet in error on a
+  // platform where every other Application was Synced and Healthy, and nothing anywhere said the red
+  // was expected until somebody onboarded a tenant. A health view that is red about a correct
+  // installation teaches the reader to ignore the colour.
+  //
+  // TO THE TRUNK, because every member Application reads its CHART off this branch and not off the
+  // catalog's trunk — one repository at one revision, or ArgoCD's repo-server generates no manifest
+  // at all. Nothing else in any repository merges the trunk into it, so without this call an
+  // installation would run the member charts of the day its books branch was born, forever. THIS IS
+  // THE ONLY MOMENT AN INSTALLATION MOVES ONTO NEWER MEMBER CHARTS: a change on the catalog's trunk
+  // reaches a tenant at the Manager's next boot and at no other time.
+  const carryTrunkToBooksBranch = (): Promise<void> => deployRepo.carryTrunkToBooksBranch();
   const tenantRegistrations = new TenantRegistrations(deployRepo, clusterStage);
   // Tenants only ever land on slaves (POLICY), so per-slave resolution is the path that matters
   // here; the master trio still backs the master-local argoReader/projectWriter. Both come from the
@@ -697,5 +713,5 @@ function buildTenantOnboarding(
   // (GET /api/tenants/:id/live), and scan the LIVE tenant pointers for orphans (GET /api/tenants/orphans)
   // through the very registrations the runs commit pointers with — all the same instances (and the same one
   // repoURL the appsets are rendered from) the runs use, never a second one.
-  return { defs, enabled: true, resolver, catalogRepoUrl: repoURL, appCatalog, tenantRegistrations, ensureBooksBranch };
+  return { defs, enabled: true, resolver, catalogRepoUrl: repoURL, appCatalog, tenantRegistrations, carryTrunkToBooksBranch };
 }

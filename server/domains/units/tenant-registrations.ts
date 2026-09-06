@@ -34,21 +34,9 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 // to the browser verbatim, so it is declared once in shared/api-types.ts and used here rather than
 // declared here and mirrored there — see that file's tenants section for what a mirror costs.
 import type { SkippedTenantPointerView } from "../../../shared/api-types.ts";
-import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { serializePointer, makeRegistrationGuard, trailer, type ClusterStageResolver, assertClusterStage } from "./registrations.ts";
-
-/** The branch catalog's member CHARTS are read at — the trunk, because a chart is product: the
- *  same twenty charts serve every tenant of every installation, and the app-type catalog and the
- *  manager-side render both want the current tip.
- *
- *  This is NOT where a tenant REGISTRATION goes. That is installation state and stands on this
- *  installation's books branch (`repo.booksBranch` below, shared/branches.ts) — the two were one
- *  constant, and one constant meant that moving the registrations off the trunk would have taken the
- *  charts with them, silently, and every member render would have followed a branch nothing
- *  maintains. Two names, so a reader cannot conflate them again. */
-export const CATALOG_CHART_BRANCH = PRODUCT_BRANCH;
 
 /** registrations/<guid>/<stage>.yaml — the ONE per-tenant-per-stage file. The guid segment mirrors
  *  shared/tenant.ts:guid (12 chars of Crockford base32 minus i/l/o/u). */
@@ -114,8 +102,12 @@ export class TenantRegistrations {
   /** The branch every read and every commit below stands on — this installation's books in
    *  catalog, resolved once when the repo port was built, and the same name hostyour-cloud's
    *  books carry (one installation, one books branch, in both repositories). Exposed for the
-   *  git-branch LOCK every tenant run claims: keyed on anything but the branch actually written, the
-   *  lock serializes nothing. */
+   *  git-branch LOCK every tenant run claims — keyed on anything but the branch actually written, the
+   *  lock serializes nothing — and as THE REVISION OF THE CATALOG THIS INSTALLATION READS: the member
+   *  charts stand here too, because every source of a member Application names one revision of the
+   *  catalog or ArgoCD's repo-server generates no manifest for it at all (hostyour-cloud
+   *  clusters/argocd/files/tenants-appset.yaml). A gate that rendered the catalog's trunk instead
+   *  would approve a chart the cluster never reads. */
   get branch(): string {
     return this.repo.booksBranch;
   }

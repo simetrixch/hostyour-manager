@@ -1,61 +1,19 @@
 // Real integration tests for the concrete git adapter (git.ts): local file:// fixture repos
 // only — no network, no clusters, no credentials (the askpass path needs a token store and is
 // covered by the VALIDATION guard test here plus the domain fakes elsewhere).
+//
+// The books branch — the one branch this adapter creates and carries the trunk into — is its own
+// subject, in git-books-branch.test.ts.
 import { describe, it, expect, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { computeBackoffMs, GitConsumerRepo, GitPlatformRepo, GitRepoReader, type PushBackoff } from "./git.ts";
+import { pathToFileURL } from "node:url";
+import { commitAll, dropRoots, git, makeOrigin, newRoot } from "./testing/origin-fixture.ts";
 
 const SLOW = 60_000;
-const roots: string[] = [];
 
-function newRoot(): string {
-  const r = mkdtempSync(join(tmpdir(), "git-impl-"));
-  roots.push(r);
-  return r;
-}
-
-afterEach(() => {
-  for (const r of roots.splice(0)) {
-    try {
-      rmSync(r, { recursive: true, force: true, maxRetries: 5 });
-    } catch {
-      // Windows can hold transient locks on .git objects; leaked tmp dirs are harmless.
-    }
-  }
-});
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.autocrlf", GIT_CONFIG_VALUE_0: "false" },
-  });
-}
-
-function commitAll(cwd: string, message: string): void {
-  git(cwd, "add", ".");
-  git(cwd, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", message);
-}
-
-/** A bare file:// origin seeded (via a throwaway clone) with hello.txt + deploy/platform.yaml on `main`. */
-function makeOrigin(): { originDir: string; originURL: string; seed: string; sha: string } {
-  const root = newRoot();
-  git(root, "init", "-q", "--bare", "-b", "main", "origin.git");
-  const originDir = join(root, "origin.git");
-  git(root, "init", "-q", "-b", "main", "seed");
-  const seed = join(root, "seed");
-  writeFileSync(join(seed, "hello.txt"), "hello platform\n");
-  mkdirSync(join(seed, "deploy"));
-  writeFileSync(join(seed, "deploy", "platform.yaml"), "kind: ConsumerManifest\n");
-  commitAll(seed, "c1");
-  git(seed, "remote", "add", "origin", originDir);
-  git(seed, "push", "-q", "origin", "main");
-  return { originDir, originURL: pathToFileURL(originDir).href, seed, sha: git(seed, "rev-parse", "HEAD").trim() };
-}
+afterEach(dropRoots);
 
 describe("GitRepoReader", () => {
   const reader = new GitRepoReader({ allowFileURLs: true });
@@ -111,121 +69,11 @@ describe("GitPlatformRepo", () => {
   // The adapter refuses to be built on the trunk, so this is never "master".
   const BOOKS = "m1.example.com";
 
-  // createsBooksBranch defaults to the catalog shape (nothing else cuts that branch); the one
-  // test that needs the hostyour-cloud shape says so.
-  function makeRepo(originURL: string, createsBooksBranch = true): GitPlatformRepo {
-    return new GitPlatformRepo({ platformRepoURL: originURL, booksBranch: BOOKS, createsBooksBranch, workRoot: join(newRoot(), "work"), allowFileURLs: true });
+  // The branch this adapter may create and carry the trunk into is its own subject, in
+  // git-books-branch.test.ts; here it is on, because that is the shape the tenant catalog is built in.
+  function makeRepo(originURL: string): GitPlatformRepo {
+    return new GitPlatformRepo({ platformRepoURL: originURL, booksBranch: BOOKS, carriesTrunkToBooksBranch: true, workRoot: join(newRoot(), "work"), allowFileURLs: true });
   }
-
-  /** A bare file:// origin carrying ONLY the trunk — the state catalog is in before any
-   *  installation exists: one branch, `master`, with the product on it and no books anywhere. */
-  function makeTrunkOnlyOrigin(): { originDir: string; originURL: string; trunkSha: string } {
-    const root = newRoot();
-    git(root, "init", "-q", "--bare", "-b", "master", "origin.git");
-    const originDir = join(root, "origin.git");
-    git(root, "init", "-q", "-b", "master", "seed");
-    const seed = join(root, "seed");
-    mkdirSync(join(seed, "charts"));
-    writeFileSync(join(seed, "charts", "Chart.yaml"), "name: example-engine\n");
-    commitAll(seed, "the product");
-    git(seed, "remote", "add", "origin", originDir);
-    git(seed, "push", "-q", "origin", "master");
-    return { originDir, originURL: pathToFileURL(originDir).href, trunkSha: git(seed, "rev-parse", "HEAD").trim() };
-  }
-
-  it(
-    "CREATES the books branch from the trunk when the remote does not carry it yet, and only that one",
-    async () => {
-      // catalog has no installer and no stamper: nothing but this adapter ever creates the
-      // branch its tenant registrations stand on. Without this, the first tenant registration of
-      // every installation dies on a ref that is not there — and so does the ApplicationSet
-      // generator that reads it.
-      const { originDir, originURL, trunkSha } = makeTrunkOnlyOrigin();
-      expect(git(originDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split("\n").filter(Boolean)).toEqual(["master"]);
-
-      const repo = makeRepo(originURL);
-      const commit = await repo.withBranch(BOOKS, async (books) => {
-        // Created at the trunk's head — no commit invented, and the product is simply there.
-        expect(git(originDir, "rev-parse", BOOKS).trim()).toBe(trunkSha);
-        expect(await books.readFile("charts/Chart.yaml")).toBe("name: example-engine\n");
-
-        // It is a normal branch afterwards: a registration commits and pushes onto it, and the trunk
-        // does not move.
-        return (
-          await books.commit({
-            message: "create-tenant(zsjs023ctne0): prod on s1 [run_1]",
-            write: [{ path: "registrations/zsjs023ctne0/prod.yaml", content: 'cluster: "s1"\n' }],
-          })
-        ).commit;
-      });
-      expect(git(originDir, "rev-parse", BOOKS).trim()).toBe(commit);
-      expect(git(originDir, "rev-parse", "master").trim()).toBe(trunkSha);
-
-      // A branch that is NOT the declared books branch is never minted, whatever asks for it: a
-      // typo would otherwise fork the books into a branch no generator reads.
-      await expect(repo.withBranch("s1.example.com", async () => undefined)).rejects.toThrow();
-      expect(git(originDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split("\n").filter(Boolean).sort()).toEqual([BOOKS, "master"]);
-    },
-    SLOW,
-  );
-
-  it(
-    "a turn that writes NOTHING still brings the books branch into being, and a second one moves nothing",
-    async () => {
-      // This is the shape boot uses (boot/wire-units.ts ensureBooksBranch): the branch has to exist
-      // before the first tenant, because the tenant ApplicationSet's git generator reads it from the
-      // moment the installation is deployed and an unresolvable revision puts the ApplicationSet — and
-      // the root Application above it — in error. Nothing is committed: the branch simply starts where
-      // the product stands, and the generator then resolves to an empty file list instead of failing.
-      const { originDir, originURL, trunkSha } = makeTrunkOnlyOrigin();
-      const repo = makeRepo(originURL);
-
-      await repo.withBranch(repo.booksBranch, async () => undefined);
-      expect(git(originDir, "rev-parse", BOOKS).trim()).toBe(trunkSha);
-      // One ref, not a commit: the branch must carry the trunk's own head, with nothing added.
-      expect(git(originDir, "rev-list", "--count", BOOKS).trim()).toBe(git(originDir, "rev-list", "--count", "master").trim());
-
-      // Every later boot: the branch is there, the sync succeeds, and nothing is created or moved.
-      await repo.withBranch(repo.booksBranch, async () => undefined);
-      expect(git(originDir, "rev-parse", BOOKS).trim()).toBe(trunkSha);
-      expect(git(originDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split("\n").filter(Boolean).sort()).toEqual([BOOKS, "master"]);
-    },
-    SLOW,
-  );
-
-  it(
-    "the same empty turn against a repository an installer cuts the branch in RAISES instead of minting",
-    async () => {
-      // The boot call must never become a way for hostyour-cloud's books branch — which IS the master
-      // cluster's stamped install branch — to be re-created from the unstamped trunk.
-      const { originDir, originURL } = makeTrunkOnlyOrigin();
-      const repo = makeRepo(originURL, false);
-      await expect(repo.withBranch(repo.booksBranch, async () => undefined)).rejects.toThrow(/does not exist/);
-      expect(git(originDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split("\n").filter(Boolean)).toEqual(["master"]);
-    },
-    SLOW,
-  );
-
-  it(
-    "REFUSES to create the books branch for a repository an installer cuts it in — the trunk is never published under its name",
-    async () => {
-      // hostyour-cloud's books branch IS the master cluster's install branch: the deploy-branch
-      // program retargets every ArgoCD revision onto it, stamps the FQDN over the placeholder and
-      // prunes the other two stages. Minting it from the trunk head would publish the unstamped
-      // product under the name that cluster's own ArgoCD tracks, and the cluster would re-render
-      // from it. So the absence is reported and the remote is left exactly as it was.
-      const { originDir, originURL } = makeTrunkOnlyOrigin();
-      const repo = makeRepo(originURL, false);
-      await expect(repo.withBranch(BOOKS, async () => undefined)).rejects.toThrow(/deploy-branch program/);
-      expect(git(originDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split("\n").filter(Boolean)).toEqual(["master"]);
-    },
-    SLOW,
-  );
-
-  it("refuses to be built with the trunk as its books branch — the books never stand on the product branch", () => {
-    expect(() => new GitPlatformRepo({ platformRepoURL: "https://github.com/x/y.git", booksBranch: "master", createsBooksBranch: true, workRoot: newRoot() }))
-      .toThrow(/may not be "master"/);
-  });
 
   it(
     "a turn round-trips read + commit; a fresh worktree root sees the pushed commit",

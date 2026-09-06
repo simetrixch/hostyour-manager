@@ -7,9 +7,10 @@
 //  - GitPlatformRepo keeps one persistent worktree per branch under deps.workRoot: fetch +
 //    hard-reset to origin/<branch>, then commit + push with a bounded pull-rebase retry (with an
 //    opt-in exponential backoff — deps.pushBackoff — for the contended books branch in
-//    catalog). It is also the only place a books branch is CREATED, and only for the
-//    repository that opted in (deps.createsBooksBranch). (The registrations path guard + write
-//    serializer live in the domain.)
+//    catalog). It is also the only place a books branch is CREATED and the only place the trunk is
+//    CARRIED INTO one, and only for the repository that opted in
+//    (deps.carriesTrunkToBooksBranch). (The registrations path guard + write serializer live in the
+//    domain.)
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -23,6 +24,11 @@ import { listWorkdirDir, readWorkdirFile, safePath } from "./git-workdir.ts";
 
 const SHA40 = /^[0-9a-f]{40}$/;
 const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
+/** Where a fetch of the product branch is written in a worktree, and the ref the two acts that reach
+ *  the trunk read it back from — creating the books branch at its head, and carrying it into one that
+ *  already stands. A remote-tracking ref, so neither act can be confused with a local branch. */
+const TRUNK = `refs/remotes/origin/${PRODUCT_BRANCH}`;
 
 // Ref-name safety for a name that becomes part of a refspec: the same shape a branch must have, plus
 // git's own two refusals (".." opens a range, ".lock" collides with the ref lock file).
@@ -64,6 +70,15 @@ export interface GitRepoReaderDeps {
  *  machine writes on the manager's behalf carries the same name as what the manager writes itself. */
 export const MANAGER_COMMITTER_NAME = 'hostyour-manager';
 export const MANAGER_COMMITTER_EMAIL = 'manager@hostyour';
+
+/** The two -c flags that make a commit or a tag this manager's, for whichever adapter is writing.
+ *  One function and not one per class: two spellings of the same actor turn "did a person write this
+ *  or did the manager?" into a guess for whoever reads the branch. */
+function identity(deps: { committerName?: string; committerEmail?: string }): string[] {
+  const name = deps.committerName ?? MANAGER_COMMITTER_NAME;
+  const email = deps.committerEmail ?? MANAGER_COMMITTER_EMAIL;
+  return ["-c", `user.name=${name}`, "-c", `user.email=${email}`];
+}
 
 export class GitRepoReader implements RepoReader {
   constructor(private readonly deps: GitRepoReaderDeps = {}) {}
@@ -154,20 +169,26 @@ export interface GitPlatformRepoDeps {
    *  Required, with no default: a default would be the trunk, and the trunk is the one branch the
    *  books may never touch. It is also the ONLY branch this adapter will ever create. */
   booksBranch: string;
-  /** Does this adapter mint `booksBranch` when origin does not carry it? The answer is a property of
-   *  the REPOSITORY, not of the branch, and getting it wrong destroys a cluster — which is why it is
-   *  required with no default and stated at both call sites (boot/wire-units.ts).
+  /** Is this adapter what brings `booksBranch` to the trunk — minting it at the trunk's head when
+   *  origin does not carry it, and merging the trunk into it when it does (carryTrunkToBooksBranch)?
+   *  The answer is a property of the REPOSITORY, not of the branch, and getting it wrong destroys a
+   *  cluster — which is why it is required with no default and stated at both call sites
+   *  (boot/wire-units.ts).
    *
    *  FALSE for hostyour-cloud: there the books branch IS the master cluster's install branch, which
-   *  the deploy-branch program cuts and stamps — every ArgoCD revision retargeted onto it, the FQDN
-   *  substituted for the placeholder, the other two stages pruned. Re-minting it from the trunk head
-   *  would put the unstamped product back under a name the cluster's own ArgoCD tracks, and the whole
-   *  cluster would re-render from it. Its absence is an operator-visible fault, so it is raised.
+   *  the deploy-branch program cuts, stamps and merges each release into — every ArgoCD revision
+   *  retargeted onto it, the FQDN substituted for the placeholder, the other two stages pruned.
+   *  Re-minting it from the trunk head, or merging the trunk into it here, would put the unstamped
+   *  product back under a name the cluster's own ArgoCD tracks, and the whole cluster would
+   *  re-render from it. Its absence is an operator-visible fault, so it is raised.
    *
-   *  TRUE for catalog: nothing there cuts it. No installer, no stamper, and the tenant
-   *  ApplicationSet generators read it, so without this the first tenant registration would fail on a
-   *  ref that never comes into being. */
-  createsBooksBranch: boolean;
+   *  TRUE for catalog: nothing there cuts it and nothing there advances it. No installer, no
+   *  stamper, and the tenant ApplicationSet generators read it, so without this the first tenant
+   *  registration would fail on a ref that never comes into being — and every member Application
+   *  reads its CHART off this branch too (hostyour-cloud clusters/argocd/files/tenants-appset.yaml),
+   *  so a branch that never took the trunk in would freeze every tenant on the charts of the day it
+   *  was born. */
+  carriesTrunkToBooksBranch: boolean;
   /** Persistent base dir; one worktree per branch lives under it. */
   workRoot: string;
   /** Optional fetch/push credential, opened per use via openCredential (same askpass path as the reader). */
@@ -191,18 +212,6 @@ export class GitPlatformRepo implements PlatformRepo {
 
   get booksBranch(): string {
     return this.deps.booksBranch;
-  }
-
-  private identity(): string[] {
-    const name = this.deps.committerName ?? MANAGER_COMMITTER_NAME;
-    const email = this.deps.committerEmail ?? MANAGER_COMMITTER_EMAIL;
-    return ["-c", `user.name=${name}`, "-c", `user.email=${email}`];
-  }
-
-  private assertBranch(branch: string): void {
-    if (!BRANCH_RE.test(branch) || branch.includes("..") || branch.endsWith(".lock")) {
-      throw errValidation(`invalid branch name: "${branch}"`);
-    }
   }
 
   // Filesystem-safe per-branch dir: a readable slug plus a short hash so distinct branches
@@ -236,6 +245,11 @@ export class GitPlatformRepo implements PlatformRepo {
     await this.run(dir, ["clean", "-qfd"]);
   }
 
+  /** The product branch into TRUNK, so the two acts that reach it read a ref this checkout has. */
+  private fetchTrunk(dir: string): Promise<string> {
+    return this.withCred((env) => this.run(dir, ["fetch", "-q", "origin", `+refs/heads/${PRODUCT_BRANCH}:${TRUNK}`], env));
+  }
+
   /** Does origin carry this branch? Asked only after a fetch already failed, so the extra round trip
    *  costs nothing on the normal path — and it is the ONE question that separates "the branch is not
    *  there yet" from a network, credential or repository failure, which must never be answered by
@@ -251,8 +265,8 @@ export class GitPlatformRepo implements PlatformRepo {
    * Manager writes onto it afterwards is a normal commit.
    *
    * This exists because in catalog NOTHING else creates it, which is exactly what
-   * `deps.createsBooksBranch` states — see it for why the same call on hostyour-cloud must raise
-   * instead. It is narrow twice over: only the repository that opted in, and within it only
+   * `deps.carriesTrunkToBooksBranch` states — see it for why the same call on hostyour-cloud must
+   * raise instead. It is narrow twice over: only the repository that opted in, and within it only
    * `deps.booksBranch`, is ever created.
    *
    * A books branch that is WRONG rather than absent — MASTER_FQDN mistyped, or left standing after a
@@ -262,10 +276,9 @@ export class GitPlatformRepo implements PlatformRepo {
    * behind in catalog is an unread branch, never a rewritten cluster.
    */
   private async createBooksBranch(dir: string, branch: string): Promise<void> {
-    const trunk = `refs/remotes/origin/${PRODUCT_BRANCH}`;
-    await this.withCred((env) => this.run(dir, ["fetch", "-q", "origin", `+refs/heads/${PRODUCT_BRANCH}:${trunk}`], env));
-    const head = (await this.run(dir, ["rev-parse", trunk])).trim();
-    if (!SHA40.test(head)) throw errValidation(`git rev-parse ${trunk} returned a non-SHA: "${head}"`);
+    await this.fetchTrunk(dir);
+    const head = (await this.run(dir, ["rev-parse", TRUNK])).trim();
+    if (!SHA40.test(head)) throw errValidation(`git rev-parse ${TRUNK} returned a non-SHA: "${head}"`);
     try {
       await this.withCred((env) => this.run(dir, ["push", "-q", "origin", `${head}:refs/heads/${branch}`], env));
     } catch (e) {
@@ -274,6 +287,58 @@ export class GitPlatformRepo implements PlatformRepo {
       // still an error, and one that must be loud rather than leave the books unwritable.
       if (!(await this.remoteHasBranch(dir, branch))) throw e;
     }
+  }
+
+  /**
+   * BRING THE BOOKS BRANCH TO THE TRUNK — create it at the trunk's head where origin does not carry
+   * it, and merge the trunk into it where it does. This is the whole of what
+   * `deps.carriesTrunkToBooksBranch` claims, and it is the only path by which the product reaches
+   * that branch.
+   *
+   * WHY A MERGE AND NOT A RESET. The branch holds what only this installation has: its tenant
+   * registrations, and the per-chart image pins the release pipeline writes beside them. A reset to
+   * the trunk would delete both. A merge keeps everything only the branch has, takes in everything
+   * only the trunk has, and stops on exactly the overlaps with git naming the paths. That is the
+   * shape the platform's own install branch is brought forward with, and it is why nothing here
+   * resolves a conflict: only a person can say whether the branch's byte or the product's stands.
+   *
+   * WHY THIS IS AN ACT AND NOT PART OF EVERY TURN. Every read of the branch would otherwise be a
+   * write, and the registry reaper walks it read-only to build the floor of tags it may not delete —
+   * a floor standing on commits the reaper itself pushed measures nothing. So a caller runs this
+   * (boot/wire.ts) and opening the branch never does.
+   *
+   * WHAT IT DOES NOT DO. It does not retry a rejected push. A writer that lands on the branch
+   * between the merge and the push leaves the trunk uncarried until the next call, which is a branch
+   * one product state behind and never a wrong one; the caller reports the failure and carries on.
+   */
+  async carryTrunkToBooksBranch(): Promise<void> {
+    const branch = this.deps.booksBranch;
+    if (!this.deps.carriesTrunkToBooksBranch) throw errValidation(`nothing may merge the trunk into "${branch}" on ${this.deps.platformRepoURL} — that books branch is the install branch of the cluster holding the master role, cut and stamped by the deploy-branch program, and the product reaches it by that program's own merge. A merge from here would publish the unstamped trunk under the name the cluster's own ArgoCD tracks.`);
+    await this.withBranch(branch, async () => {
+      // withBranch has already minted the branch where origin did not carry it and hard-reset this
+      // directory to origin/<branch>. worktreeDir is a pure function of the branch name, so this is
+      // that same directory, and the turn holds it for as long as this callback runs.
+      const dir = this.worktreeDir(branch);
+      await this.fetchTrunk(dir);
+      // No "is it already carried?" question ahead of these two: git answers it itself. A merge with
+      // nothing to bring in is "Already up to date" and exit 0, and the push that follows it is
+      // "Everything up-to-date" and exit 0. Asking first would add a round trip and a second place
+      // for the answer to be wrong.
+      //
+      // A CONFLICT IS NAMED BY ITS PATHS. git writes them on stdout and runGit reports a failure with
+      // stderr, so the paths would otherwise reach the operator as "git -c failed" and nothing else —
+      // a refusal nobody can act on. They are read back out of the index instead. The conflicted
+      // worktree is left as it is: the next turn on this branch hard-resets it (resetToOrigin), and
+      // nothing reads the directory outside a turn.
+      try {
+        await this.run(dir, [...identity(this.deps), "merge", "-q", "--no-edit", TRUNK]);
+      } catch (e) {
+        const clashing = (await this.run(dir, ["diff", "--name-only", "--diff-filter=U"])).trim().split("\n").filter(Boolean);
+        if (clashing.length === 0) throw e;
+        throw errValidation(`the trunk of ${this.deps.platformRepoURL} and this installation's books branch "${branch}" there both wrote ${clashing.join(", ")}, so the product cannot be carried into it. Only a person can say which of the two stands: settle those paths on the branch and the next carry goes through.`);
+      }
+      await this.withCred((env) => this.run(dir, ["push", "-q", "origin", `refs/heads/${branch}:refs/heads/${branch}`], env));
+    });
   }
 
   /** The tail of the turn queue for one worktree directory, one entry per branch this process has
@@ -286,7 +351,7 @@ export class GitPlatformRepo implements PlatformRepo {
   private readonly turns = new Map<string, Promise<unknown>>();
 
   async withBranch<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T> {
-    this.assertBranch(branch);
+    assertRefName(branch, "branch");
     assertRepoURL(this.deps.platformRepoURL, this.deps.allowFileURLs);
     const dir = this.worktreeDir(branch);
     const prior = this.turns.get(dir) ?? Promise.resolve();
@@ -321,7 +386,7 @@ export class GitPlatformRepo implements PlatformRepo {
       // A probe that cannot answer counts as "the branch is there": the original failure then
       // surfaces below, instead of being replaced by a second one from the probe itself.
       if (branch === this.deps.booksBranch && !(await this.remoteHasBranch(dir, branch).catch(() => true))) {
-        if (!this.deps.createsBooksBranch) {
+        if (!this.deps.carriesTrunkToBooksBranch) {
           // hostyour-cloud: an installer cuts this branch and a stamper specialises it, so its absence
           // is a fault to report and never a gap to fill — minting it here would publish the
           // unstamped trunk under the name the cluster's own ArgoCD tracks.
@@ -368,7 +433,7 @@ export class GitPlatformRepo implements PlatformRepo {
       if (!SHA40.test(head)) throw errValidation(`git rev-parse returned a non-SHA: "${head}"`);
       return { commit: head };
     }
-    await this.run(dir, [...this.identity(), "commit", "-q", "-m", input.message]);
+    await this.run(dir, [...identity(this.deps), "commit", "-q", "-m", input.message]);
     const pushRefspec = `refs/heads/${branch}:refs/heads/${branch}`;
     const maxRetries = this.deps.pushBackoff?.retries ?? DEFAULT_PUSH_RETRIES;
     for (let attempt = 0; ; attempt++) {
@@ -386,7 +451,7 @@ export class GitPlatformRepo implements PlatformRepo {
         const backoff = computeBackoffMs(attempt, this.deps.pushBackoff);
         if (backoff > 0) await sleep(Math.floor(Math.random() * backoff));
         try {
-          await this.withCred((env) => this.run(dir, [...this.identity(), "pull", "-q", "--rebase", "origin", branch], env));
+          await this.withCred((env) => this.run(dir, [...identity(this.deps), "pull", "-q", "--rebase", "origin", branch], env));
         } catch (rebaseErr) {
           await this.run(dir, ["rebase", "--abort"]).catch(() => undefined); // best-effort unwedge
           throw rebaseErr;
@@ -421,7 +486,7 @@ export class GitPlatformRepo implements PlatformRepo {
     // A local tag left behind by an attempt that died between `tag` and `push` would make the create
     // fail; the remote has just been shown not to carry it, so the local one names nothing published.
     await this.run(dir, ["tag", "-d", input.tag]).catch(() => undefined);
-    await this.run(dir, [...this.identity(), "tag", "-a", input.tag, "-m", input.message, commit]);
+    await this.run(dir, [...identity(this.deps), "tag", "-a", input.tag, "-m", input.message, commit]);
     await this.withCred((env) => this.run(dir, ["push", "origin", ref], env));
     return { tag: input.tag, commit, minted: true };
   }
@@ -452,18 +517,6 @@ export interface GitConsumerRepoDeps {
 export class GitConsumerRepo implements ConsumerRepo {
   constructor(private readonly deps: GitConsumerRepoDeps) {}
 
-  private identity(): string[] {
-    const name = this.deps.committerName ?? MANAGER_COMMITTER_NAME;
-    const email = this.deps.committerEmail ?? MANAGER_COMMITTER_EMAIL;
-    return ["-c", `user.name=${name}`, "-c", `user.email=${email}`];
-  }
-
-  private assertBranch(branch: string): void {
-    if (!BRANCH_RE.test(branch) || branch.includes("..") || branch.endsWith(".lock")) {
-      throw errValidation(`invalid branch name: "${branch}"`);
-    }
-  }
-
   async open(input: { repoURL: string; credentialId: string; signal?: AbortSignal }): Promise<ConsumerRepoSession> {
     const { repoURL, credentialId } = input;
     assertRepoURL(repoURL, this.deps.allowFileURLs);
@@ -477,7 +530,7 @@ export class GitConsumerRepo implements ConsumerRepo {
         const m = HEAD_SYMREF_RE.exec(out);
         if (!m?.[1]) throw errValidation(`could not resolve the default branch of ${repoURL} (git ls-remote --symref HEAD returned no "ref: refs/heads/<branch>")`);
         const resolved = m[1];
-        this.assertBranch(resolved);
+        assertRefName(resolved, "branch");
         await run(["init", "-q"], env);
         await run(["remote", "add", "origin", repoURL], env);
         await run(["fetch", "-q", "origin", resolved], env);
@@ -510,7 +563,7 @@ export class GitConsumerRepo implements ConsumerRepo {
     remove?: string[];
     signal?: AbortSignal;
   }): Promise<{ commit: string; changed: boolean }> {
-    this.assertBranch(input.branch);
+    assertRefName(input.branch, "branch");
     const dir = input.workdir;
     const run = (args: string[], env?: Record<string, string>) =>
       runGit(args, { cwd: dir, ...(env ? { env } : {}), ...(input.signal ? { signal: input.signal } : {}) });
@@ -539,7 +592,7 @@ export class GitConsumerRepo implements ConsumerRepo {
       if (!SHA40.test(head)) throw errValidation(`git rev-parse returned a non-SHA: "${head}"`);
       return { commit: head, changed: false };
     }
-    await run([...this.identity(), "commit", "-q", "-m", input.message]);
+    await run([...identity(this.deps), "commit", "-q", "-m", input.message]);
     const pushRefspec = `refs/heads/${input.branch}:refs/heads/${input.branch}`;
     // The consumer repo has no busy-branch contention, so it keeps the original 3-retry, no-wait push
     // loop. A push the credential is not authorized for (a PAT without contents:write) is NOT a
@@ -553,7 +606,7 @@ export class GitConsumerRepo implements ConsumerRepo {
         const nonFastForward = /non-fast-forward|fetch first|\[rejected\]|failed to push/i.test(msg);
         if (attempt >= DEFAULT_PUSH_RETRIES || !nonFastForward) throw e;
         try {
-          await withCred((env) => run([...this.identity(), "pull", "-q", "--rebase", "origin", input.branch], env));
+          await withCred((env) => run([...identity(this.deps), "pull", "-q", "--rebase", "origin", input.branch], env));
         } catch (rebaseErr) {
           await run(["rebase", "--abort"]).catch(() => undefined); // best-effort unwedge
           throw rebaseErr;
