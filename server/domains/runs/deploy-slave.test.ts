@@ -174,16 +174,24 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(db.db.select().from(clusters).all()).toHaveLength(0);
   });
 
-  it("hard-fails attest-target when the DNS wildcard does not resolve", async () => {
-    const hosts = scriptedHosts({ dnsOut: "DNS_WILDCARD none" });
-    const { db, executor } = await makeHarness({ hosts });
-    const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
-    await executor.approve(runId, elevationOnly());
-    await executor.settle(runId);
-    expect(getRun(db.db, runId)?.status).toBe("failed");
-    expect(stepColumn(db, runId, "attest-target", "error")).toMatch(/DNS wildcard \*\.s1\.example\.com does not resolve/);
-    // DNS fails BEFORE the tx — nothing was allocated
-    expect(db.db.select().from(clusters).all()).toHaveLength(0);
+  it("hard-fails attest-target when the DNS wildcard does not resolve, and when the probe answered no address", async () => {
+    // The second line is what a machine sends when dig reaches no resolver: dig writes
+    // `;; no servers could be reached` on standard OUTPUT, so the probe's line carries a sentence
+    // where an address belongs. Read as its first word it is `;;`, which passes any check that asks
+    // only whether something resolved — and the record was never looked up at all.
+    for (const [dnsOut, refusal] of [
+      ["DNS_WILDCARD none", /DNS wildcard \*\.s1\.example\.com does not resolve/],
+      ["DNS_WILDCARD ;; no servers could be reached", /answered ";; no servers could be reached", which is not an address/],
+    ] as const) {
+      const { db, executor } = await makeHarness({ hosts: scriptedHosts({ dnsOut }) });
+      const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
+      await executor.approve(runId, elevationOnly());
+      await executor.settle(runId);
+      expect(getRun(db.db, runId)?.status).toBe("failed");
+      expect(stepColumn(db, runId, "attest-target", "error")).toMatch(refusal);
+      // DNS fails BEFORE the tx — nothing was allocated
+      expect(db.db.select().from(clusters).all()).toHaveLength(0);
+    }
   });
 
   it("hard-fails attest-target when the box behind the address is NOT the machine recorded here", async () => {

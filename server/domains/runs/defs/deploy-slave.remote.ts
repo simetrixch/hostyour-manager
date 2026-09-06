@@ -34,12 +34,19 @@ export const SLAVE_API_PORT = 16443;
 // the slave's observed public_ip (that comparison would hard-fail every NAT slave). Runs on
 // the slave so it also proves the slave's own resolver sees the record (cert-manager and the
 // in-cluster ACME solver resolve from there). Prefers public DNS (1.1.1.1) when dig exists.
+//
+// WHAT DIG SAYS WHEN IT REACHES NO RESOLVER GOES TO STANDARD OUTPUT: `;; no servers could be
+// reached` is a line of the answer and not of the error stream, so the last line of an unanswered
+// query is a sentence. The filter keeps only lines made of the characters an address is written
+// with, which leaves `$ip` empty on that sentence — and empty is what the fallback below tests for,
+// so the machine's own resolver still gets its turn. Without the filter that fallback never runs,
+// because a sentence is not empty.
 export function dnsProbeScript(domain: string): string {
   return `#!/usr/bin/env bash
 probe="dc-wildcard-probe.${domain}"
 ip=""
 if command -v dig >/dev/null 2>&1; then
-  ip=$(dig +short A "$probe" @1.1.1.1 2>/dev/null | tail -1)
+  ip=$(dig +short A "$probe" @1.1.1.1 2>/dev/null | grep -E '^[0-9a-fA-F.:]+$' | tail -1)
 fi
 if [ -z "$ip" ]; then
   ip=$(getent ahostsv4 "$probe" 2>/dev/null | awk '{print $1; exit}')

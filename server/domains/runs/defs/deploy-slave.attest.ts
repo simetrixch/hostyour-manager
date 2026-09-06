@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { eq, and, sql } from "drizzle-orm";
 import type { Step } from "../../../executor/types.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
@@ -133,12 +134,20 @@ export function attestTargetStep(input: SlaveInstallInput): Step {
       // nothing resolves is a cluster no certificate authority and no client can reach.
       // Resolvable-check ONLY: see dnsProbeScript — a NAT slave's wildcard resolves to the
       // shared public ingress, not the slave's own IP, so we never compare addresses.
+      // WHAT IS READ IS THE WHOLE REST OF THE LINE, AND IT HAS TO BE AN ADDRESS. A resolver the
+      // machine cannot reach prints its error where the address belongs (see dnsProbeScript), and
+      // the first word of that error, `;;`, satisfies a reader that asks only whether something
+      // stands there. isIP is node's own reading of an address, so this step accepts the same set
+      // as the rest of the process rather than a pattern of its own.
       const dns = await remoteScriptCapture(ctx, session, "dns-probe", dnsProbeScript(domain), { timeoutMs: 30_000 });
-      const resolved = /^DNS_WILDCARD (\S+)/m.exec(dns.stdout)?.[1];
-      if (!resolved || resolved === "none") {
+      const answered = /^DNS_WILDCARD (.+)$/m.exec(dns.stdout)?.[1]?.trim();
+      if (!answered || answered === "none") {
         throw errValidation(`DNS wildcard *.${domain} does not resolve — create the record first (behind NAT it points at the shared public ingress IP)`);
       }
-      ctx.log("meta", `DNS wildcard *.${domain} resolves (→ ${resolved})`);
+      if (isIP(answered) === 0) {
+        throw errValidation(`the wildcard probe for *.${domain} answered "${answered}", which is not an address — nothing was established about the record; a resolver the machine cannot reach prints its error where the address belongs, so check the machine's own DNS before retrying`);
+      }
+      ctx.log("meta", `DNS wildcard *.${domain} resolves (→ ${answered})`);
 
       // ---- machine identity: record on first deploy, verify after —
       // a stranger VM on a recycled IP hard-fails here, before anything destructive.
