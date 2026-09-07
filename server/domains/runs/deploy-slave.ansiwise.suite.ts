@@ -5,6 +5,7 @@ import { getRun, readEvents } from "../../executor/read.ts";
 import type { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import type { ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { isServe } from "./ansiwise-serve.fixture.ts";
+import { takeSlavePlaneDown } from "./defs/deploy-slave.mgmt.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
@@ -19,7 +20,7 @@ import {
 import { stepColumn } from "../../executor/run-rows.fixture.ts";
 import {
   elevationOnly, expectProven, expectAbsent, machineWroteDown,
-  deployWorld, liveSlaveWorld, recordWindow, startedRuns, settled,
+  deployWorld, liveSlaveWorld, recordWindow, startedRuns, settled, programStepCtx,
 } from "./ansiwise-serve.fixture.ts";
 
 // DEPLOYING A SLAVE, END TO END, and re-deploying one that already is: the four journeys that drive
@@ -337,6 +338,42 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       expect(tail.filter((c) => c.startsWith("sudo -S -p '' bash /tmp/dc-leave-host-"))).toHaveLength(1);
       expect(tail.filter((c) => c.startsWith("bash /tmp/dc-leave-manager-key-"))).toHaveLength(1);
       expect(tail.some((c) => c.includes("rm -f") && c.includes("ansiwise-rest"))).toBe(true);
+    });
+
+    it("a remove-slave cleanup whose own clock runs out NAMES the program, the machine run and what a retry of it does — never the bare word the abort carries", { timeout: 120_000 }, async () => {
+      // WHAT IT STANDS FOR, measured on apps3 (#119): the master accepted the cleanup's remove-slave
+      // run, wrote `run-started`, and wrote nothing after it. The engine's event stream ends when a
+      // run does and a run that stops writing never ends it (ansiwise-core FileRunStore.events says
+      // so in its own words), so the step's own clock is the only thing that brings the cleanup
+      // back — and what it came back with was `aborted`, one word, with no program, no machine run
+      // and no next act in it.
+      const h = await deployWorld(serve());
+      const before = (await observer().runs()).map((r) => r.id);
+      const ctx = programStepCtx(serve(), h, {
+        secrets: elevationOnly(),
+        log: () => undefined,
+        readCheckpoint: () => undefined,
+        checkpoint: () => undefined,
+      });
+
+      // The expiry is the branch under test and nothing else here is, so the clock is a millisecond:
+      // a test spending the real 45 minutes proves the same thing more slowly (the same reason
+      // programPhase's recordAppearsMs is a parameter).
+      const expired = takeSlavePlaneDown(ctx, h.runPorts, { serverId: SLAVE_ID, domain: "s1.example.com", stage: "prod" }, 1);
+
+      // Each of these is a thing the operator could not act on without: WHICH program was being
+      // driven and where, that the clock is what ended this rather than the machine, and that a
+      // retry of a cleanup starts a fresh removal instead of re-attaching — the cleanup keeps no
+      // checkpoint (nosave), so the sentence its two siblings say would be wrong here.
+      await expect(expired).rejects.toThrow(/remove-slave on the master did not finish within/);
+      await expect(expired).rejects.toThrow(/FRESH removal rather than re-attaching/);
+      await expect(expired).rejects.toThrow(/idempotent end to end/);
+      // And it never reports a machine run it did not start — read off the MASTER, which is where
+      // that is a fact: the clock ran out before the POST, so its own store gained nothing. The
+      // store is the whole file's (one run root per drive), so what is compared is what it held
+      // before this test, never an emptiness no test in this file could have.
+      await expect(expired).rejects.toThrow(/no machine run of it was started/);
+      expect((await observer().runs()).map((r) => r.id)).toEqual(before);
     });
 
     it("INNOCENT CASE (redeploy, slave arm): the live slave is re-reconciled over the programs — no branch cut, no join, a fresh emit re-points the registration, and nothing is armed", { timeout: 300_000 }, async () => {

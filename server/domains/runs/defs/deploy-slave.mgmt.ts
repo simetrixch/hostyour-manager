@@ -234,11 +234,17 @@ export function createMgmtStep(target: SlaveTarget, ports: DeploySlavePorts & An
  *  middle step of `cluster-remove-slave` (remove-slave.ts), which differ only in where the three
  *  facts come from — a cleanup reads them off the run's params, a run kind off the cluster row. A
  *  second implementation of a destructive act is how the deliberate one and the one a person
- *  actually gets stop being the same thing. */
+ *  actually gets stop being the same thing.
+ *
+ *  [budgetMs] is the act's own wall clock, kept apart from ctx.signal so that a cancel stays a
+ *  cancel and an expiry names itself. It is a parameter for the reason programPhase's
+ *  `recordAppearsMs` is one: absent everywhere but in the suite that has to REACH the expiry, and
+ *  a test spending the real 45 minutes proves the same thing more slowly. */
 export async function takeSlavePlaneDown(
   ctx: StepCtx,
   ports: DeploySlavePorts & AnsiwisePorts,
   slave: { serverId: string; domain: string; stage: Stage },
+  budgetMs: number = ANSIWISE_PROGRAM_TIMEOUT_MS,
 ): Promise<void> {
   const { serverId, domain, stage } = slave;
   const { changed } = await removeSlaveMarkingPart(requirePlatformRepo(ports), domain, ctx.runId);
@@ -249,33 +255,57 @@ export async function takeSlavePlaneDown(
   const password = requireElevationPassword(ctx);
   const master = loadMaster(ctx.db);
   const session = await ctx.ssh(master.id);
-  const budget = AbortSignal.timeout(ANSIWISE_PROGRAM_TIMEOUT_MS);
+  const budget = AbortSignal.timeout(budgetMs);
   const signal = AbortSignal.any([ctx.signal, budget]);
-  const conversation = await openServeConversation(ctx, session, ports, signal, masterMachine(ctx.db, master));
+  const cp: ProgramCheckpoint = { program: REMOVE_PROGRAM };
   try {
-    // The cluster row may already be gone or parked — the answers need only the three facts the
-    // caller states, so the target is the stated one, never the active-cluster lookup.
-    const target = statedTarget(serverId, domain, stage);
-    const cp: ProgramCheckpoint = { program: REMOVE_PROGRAM };
-    const nosave = (): void => undefined;
-    const answers = await composeAnswers(ctx, conversation.client, REMOVE_PROGRAM, target, signal, async () => ({ slave_fqdn: domain, master_fqdn: masterFqdnOf(ctx.db, loadMaster(ctx.db)) }));
-    const dry = await programPhase(ctx, conversation.client, cp, "dry", { program: REMOVE_PROGRAM, answers, password, signal, save: nosave });
-    if (dry.exitCode !== 0) {
+    const conversation = await openServeConversation(ctx, session, ports, signal, masterMachine(ctx.db, master));
+    try {
+      // The cluster row may already be gone or parked — the answers need only the three facts the
+      // caller states, so the target is the stated one, never the active-cluster lookup.
+      const target = statedTarget(serverId, domain, stage);
+      const nosave = (): void => undefined;
+      const answers = await composeAnswers(ctx, conversation.client, REMOVE_PROGRAM, target, signal, async () => ({ slave_fqdn: domain, master_fqdn: masterFqdnOf(ctx.db, loadMaster(ctx.db)) }));
+      const dry = await programPhase(ctx, conversation.client, cp, "dry", { program: REMOVE_PROGRAM, answers, password, signal, save: nosave });
+      if (dry.exitCode !== 0) {
+        throw errValidation(
+          `the DRY run of ${REMOVE_PROGRAM} on the master is not green (run ${dry.id}, exit ${dry.exitCode}) — ` +
+          "nothing was destroyed (a coordinator that will not answer stops it here); fix what the machine named, then run it again",
+        );
+      }
+      const live = await programPhase(ctx, conversation.client, cp, "run", { program: REMOVE_PROGRAM, answers, password, signal, save: nosave });
+      if (live.exitCode !== 0) {
+        throw errValidation(
+          `the ${REMOVE_PROGRAM} run on the master failed (run ${live.id}, exit ${live.exitCode}) — read the run log; ` +
+          "running the removal again once the machine answers completes it",
+        );
+      }
+      ctx.log("meta", `${REMOVE_PROGRAM}: dry ${dry.id} proved it, run ${live.id} performed it — the slave's management plane is gone from the master`);
+    } finally {
+      conversation.close();
+    }
+  } catch (err) {
+    if (budget.aborted && !ctx.signal.aborted) {
+      // The machine run this was following is DETACHED and keeps going — the engine's own event
+      // stream ends when the run does and a run that stops writing never ends it, so the step's
+      // clock is the only thing that brings this back. Measured on apps3 (#119): the master wrote
+      // `run-started` and nothing after it, and what the operator got out of the expiry was the
+      // word the abort carries and nothing else — no program, no machine run, no next act.
+      //
+      // AND A RETRY OF THIS ONE STARTS A FRESH REMOVAL, which is where the sentence its two
+      // siblings say (`ansiwiseProgramStep`, create-mgmt above) would be wrong here: they persist
+      // a checkpoint and re-attach to the run in flight, and this keeps none (nosave), because a
+      // cleanup is re-run by aborting again rather than by retrying a step. The program is
+      // idempotent end to end, so a fresh removal is what completes it.
+      const followed = cp.live?.id ?? cp.dry?.id;
       throw errValidation(
-        `the DRY run of ${REMOVE_PROGRAM} on the master is not green (run ${dry.id}, exit ${dry.exitCode}) — ` +
-        "nothing was destroyed (a coordinator that will not answer stops it here); fix what the machine named, then run it again",
+        `${REMOVE_PROGRAM} on the master did not finish within ${budgetMs >= 60_000 ? `${budgetMs / 60_000} min` : `${budgetMs}ms`}` +
+        `${followed === undefined ? " — no machine run of it was started" : `, following machine run ${followed}, which is detached and may still be going`}. ` +
+        `Read the master's own record for it, and abort the run again to remove the slave's management plane: this cleanup holds no ` +
+        "checkpoint, so it starts a FRESH removal rather than re-attaching, and the program is idempotent end to end",
       );
     }
-    const live = await programPhase(ctx, conversation.client, cp, "run", { program: REMOVE_PROGRAM, answers, password, signal, save: nosave });
-    if (live.exitCode !== 0) {
-      throw errValidation(
-        `the ${REMOVE_PROGRAM} run on the master failed (run ${live.id}, exit ${live.exitCode}) — read the run log; ` +
-        "running the removal again once the machine answers completes it",
-      );
-    }
-    ctx.log("meta", `${REMOVE_PROGRAM}: dry ${dry.id} proved it, run ${live.id} performed it — the slave's management plane is gone from the master`);
-  } finally {
-    conversation.close();
+    throw err;
   }
 }
 
