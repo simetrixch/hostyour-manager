@@ -103,6 +103,9 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     for (const want of [
       "letsencryptEmail: ops@example.com",
       "letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
+      // The time servers, still a list: this machine's own deploy-host is answered with them out of
+      // this file on every later run of it.
+      "timeSources: ['ntp1.example.com', 'ntp2.example.com']",
       "registryPullUser: puller",
       "registryPushUser: pusher",
       "url: https://vault.m1.example.com",

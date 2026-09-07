@@ -239,6 +239,10 @@ const FULL_MAP = [
   "  clusterIssuer: letsencrypt-production",
   "  letsencryptEmail: ops@example.com",
   "  letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
+  // THE TIME SERVERS OF THE INSTALLATION, a list for the reason the recipients above are one: a
+  // rewrite that put them back as a joined scalar would name one server whose name has a comma in
+  // it, and the machine told that asks the time of nothing.
+  "  timeSources: ['ntp1.example.com', 'ntp2.example.com']",
   "  nodeCidrs: [203.0.113.7/32]",
   "  vaultKubernetesAuthPath: kubernetes-m1",
   "  registryPullUser: acme-pull",
@@ -292,6 +296,7 @@ describe("map rewrite — a writer keeps every value the map carried", () => {
     // stopped rendering at `range can't iterate over ops@example.com`. It stood outside the list
     // above, so the case that exists to catch exactly this could not see it.
     expect(after, "the recipients stay a list").toContain("alertRecipients: ['ops@example.com']");
+    expect(after, "the time sources stay a list").toContain("timeSources: ['ntp1.example.com', 'ntp2.example.com']");
   });
 
   it("keeps SEVERAL mailboxes as several, which one comma-joined scalar cannot say", async () => {

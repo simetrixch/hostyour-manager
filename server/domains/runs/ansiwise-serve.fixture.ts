@@ -160,6 +160,11 @@ export function fixturePrograms(): Record<string, string> {
       // clusters/active/<fqdn>.yaml, measured on a real one.
       { answer: "platform_repo", pattern: "^acme/platform$" },
       { answer: "platform_branch", pattern: "^m1\.example\.com$" },
+      // THE INSTALLATION'S TIME SERVERS, which no machine can be asked for: they stand in the
+      // master's cluster map and nowhere on the box. A LIST, so it carries no pattern — a required
+      // answer the caller does not send stops the run at the door, which is the whole defect this
+      // row stands for (apps4, 2026-09-07: `deploy-host: needs the answer "time_sources"`).
+      { answer: "time_sources", kind: "text_list" },
     ]),
     "emit-cluster-credentials": programYaml("emit-cluster-credentials", [
       { answer: "api_server_url", pattern: "^https://100\\.64\\.0\\.11:16443$" },

@@ -129,6 +129,11 @@ const ClusterMarkingFileSchema = z.object({
     clusterIssuer: z.string().min(1).optional(),
     letsencryptEmail: z.string().min(1).optional(),
     letsencryptServer: z.string().min(1).optional(),
+    // THE TIME SERVERS OF THIS INSTALLATION, read for the same reason as the three above: a machine
+    // added later is told them from here instead of being asked for them again. A list, the shape
+    // the map template writes, and never empty — deploy-host refuses a machine that would ask the
+    // time of nothing. Optional because the maps that predate the key are still valid markings.
+    timeSources: z.array(z.string().min(1)).min(1).optional(),
     endpoints: z.object({}).passthrough().optional(),
   // PASSTHROUGH, and only here. The global block carries every value the charts of this platform
   // read, and this process has no business refusing a key a chart added — it would fail every map
@@ -186,6 +191,9 @@ export interface ClusterMarking {
   clusterIssuer?: string;
   letsencryptEmail?: string;
   letsencryptServer?: string;
+  /** The time servers the machines of this installation ask the time of. Handed to the
+   *  machine-layer programs of a machine that joins later, the way the three above are. */
+  timeSources?: string[];
   /** Everything `global` carried that this module does not name, carried VERBATIM. The schema lets
    *  the block through on purpose, so a chart may add a value without failing every map read on the
    *  release that introduces it - but a writer that emits only what it understands turns that
@@ -210,7 +218,7 @@ function headerOf(text: string): string | undefined {
 const NAMED_GLOBALS = new Set([
   "domain", "booksCluster", "buildPlane", "master", "apiHost", "apiPort",
   "unitApex", "platformDomain", "alertRecipients", "catalogUrl",
-  "clusterIssuer", "letsencryptEmail", "letsencryptServer",
+  "clusterIssuer", "letsencryptEmail", "letsencryptServer", "timeSources",
 ]);
 
 function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking {
@@ -259,6 +267,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
     ...(g.clusterIssuer !== undefined ? { clusterIssuer: g.clusterIssuer } : {}),
     ...(g.letsencryptEmail !== undefined ? { letsencryptEmail: g.letsencryptEmail } : {}),
     ...(g.letsencryptServer !== undefined ? { letsencryptServer: g.letsencryptServer } : {}),
+    ...(g.timeSources !== undefined ? { timeSources: g.timeSources } : {}),
     ...(Object.keys(rest).length > 0 ? { globalRest: rest } : {}),
   };
 }
@@ -413,6 +422,10 @@ function serializeMarking(m: ClusterMarking): string {
     ...(m.clusterIssuer !== undefined ? ([["clusterIssuer", m.clusterIssuer]] as [string, string][]) : []),
     ...(m.letsencryptEmail !== undefined ? ([["letsencryptEmail", m.letsencryptEmail]] as [string, string][]) : []),
     ...(m.letsencryptServer !== undefined ? ([["letsencryptServer", m.letsencryptServer]] as [string, string][]) : []),
+    // A LIST, in the flow shape the map template writes it in, for the reason alertRecipients is.
+    ...(m.timeSources !== undefined && m.timeSources.length > 0
+      ? ([["timeSources", asYaml(`[${m.timeSources.map((s) => `'${s.replaceAll("'", "''")}'`).join(", ")}]`)]] as [string, { yaml: string }][])
+      : []),
   ];
   // PLAIN scalars, the shape the map template emits — the other writer of this file. Quoting
   // parses identically but shows every line as changed in the diff of a map's first rewrite, which

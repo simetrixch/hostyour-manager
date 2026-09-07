@@ -230,6 +230,7 @@ export function branchAnswers(target: SlaveTarget, serverId: string, ports: Depl
       cluster_issuer: marking.clusterIssuer,
       ...(marking.letsencryptEmail !== undefined ? { letsencrypt_email: marking.letsencryptEmail } : {}),
       ...(marking.letsencryptServer !== undefined ? { letsencrypt_server: marking.letsencryptServer } : {}),
+      ...(marking.timeSources !== undefined ? { time_sources: marking.timeSources } : {}),
       role: MASTER_AND_SLAVE_ROLE,
     };
   };

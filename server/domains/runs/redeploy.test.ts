@@ -3,10 +3,10 @@ import { eq } from "drizzle-orm";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
-import { slaveMachineAnswers } from "./defs/deploy-slave.ts";
+import { slaveMachineAnswers, hostAnswers } from "./defs/deploy-slave.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import {
-  MASTER_FQDN, MASTER_MARKING_YAML, MAP_LETSENCRYPT_EMAIL, MAP_LETSENCRYPT_SERVER,
+  MASTER_FQDN, MASTER_MARKING_YAML, MAP_LETSENCRYPT_EMAIL, MAP_LETSENCRYPT_SERVER, MAP_TIME_SOURCES,
 } from "./cluster-maps.fixture.ts";
 import {
   MASTER_ID, makeHarness, disposeHarnesses, hostedStepCtx, type Harness,
@@ -103,6 +103,22 @@ describe("cluster-redeploy, master arm — what a person supplies and what the m
     // absent pair means those two were missing and not that the reader stopped reading.
     expect(answers.books_fqdn).toBe(MASTER_FQDN);
     expect(answers.build_plane_fqdn).toBe(MASTER_FQDN);
+  });
+
+  it("answers deploy-host with the installation's time servers, and a map that records none refuses by name", async () => {
+    // THE ONE ANSWER NO MACHINE CAN GIVE. deploy-host has required time_sources since
+    // hostyour-deploy#22, a box knows only what the distribution named, and the installation's own
+    // servers stand in its cluster map. A map written before the key existed is what an installation
+    // generated earlier carries, and the run stops here naming the key and the file rather than on
+    // the machine (apps4, 2026-09-07: `deploy-host: needs the answer "time_sources"`).
+    const h = await masterWithLiveCluster();
+    expect(await hostAnswers(MASTER_ID, h.runPorts)(hostedStepCtx(h)))
+      .toMatchObject({ time_sources: ["ntp1.example.com", "ntp2.example.com"] });
+
+    h.platformRepo.seed(h.platformRepo.booksBranch, clusterMapPath(MASTER_FQDN), mapWithout(`  timeSources: ${MAP_TIME_SOURCES}`));
+
+    await expect(hostAnswers(MASTER_ID, h.runPorts)(hostedStepCtx(h)))
+      .rejects.toThrow(/states no global\.timeSources/);
   });
 
   it("refuses a server whose cluster is not live, before any answer is composed", async () => {

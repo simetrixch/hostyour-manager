@@ -525,9 +525,9 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   it("the master's map is what mark-slave inherits from — MASTER_MARKING_YAML carries every field the composition reads", () => {
     // A fixture drift guard: the composition reads buildPlane, unitApex, platformDomain,
-    // alertRecipients and catalogUrl off the master's map; a fixture that lost one would turn
-    // the inheritance tests above green for the wrong reason.
-    for (const key of ["buildPlane", "unitApex", "platformDomain", "alertRecipients", "catalogUrl"]) {
+    // alertRecipients, catalogUrl and timeSources off the master's map; a fixture that lost one
+    // would turn the inheritance tests above green for the wrong reason.
+    for (const key of ["buildPlane", "unitApex", "platformDomain", "alertRecipients", "catalogUrl", "timeSources"]) {
       expect(MASTER_MARKING_YAML).toContain(`${key}: `);
     }
   });

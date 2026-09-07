@@ -20,6 +20,10 @@ export const FIXTURE_STAGE = "prod";
  *  map states, and a value spelled twice is a value that can disagree with itself. */
 export const MAP_LETSENCRYPT_EMAIL = "ops@example.com";
 export const MAP_LETSENCRYPT_SERVER = "https://acme-v02.api.letsencrypt.org/directory";
+/** The time servers every machine of this installation asks the time of, in the flow shape both
+ *  writers of a map put a list down in. A machine added later is answered with them from the
+ *  master's map, so the line stands in both maps below and the value is stated once. */
+export const MAP_TIME_SOURCES = "['ntp1.example.com', 'ntp2.example.com']";
 /** Where the tailnet coordinator answers — `tale.<books cluster>`, one coordinator per installation,
  *  so every cluster map of it states the same address. Named here because a test that re-seeds a map
  *  with a DIFFERENT coordinator has to replace the line this states. */
@@ -49,6 +53,7 @@ export const SLAVE_MARKING_YAML = [
   "  clusterIssuer: platform-acme",
   `  letsencryptEmail: ${MAP_LETSENCRYPT_EMAIL}`,
   `  letsencryptServer: ${MAP_LETSENCRYPT_SERVER}`,
+  `  timeSources: ${MAP_TIME_SOURCES}`,
   "  vaultKubernetesAuthPath: kubernetes-s1",
   "  nodeCidrs: [198.51.100.11/32]",
   "  endpoints:",
@@ -100,6 +105,7 @@ export const MASTER_MARKING_YAML = [
   "  clusterIssuer: platform-acme",
   `  letsencryptEmail: ${MAP_LETSENCRYPT_EMAIL}`,
   `  letsencryptServer: ${MAP_LETSENCRYPT_SERVER}`,
+  `  timeSources: ${MAP_TIME_SOURCES}`,
   "  vaultKubernetesAuthPath: kubernetes-m1",
   "  registryPullUser: puller",
   "  registryPushUser: pusher",

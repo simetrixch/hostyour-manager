@@ -117,8 +117,16 @@ function isFile(path: string): boolean {
 export interface ProbeRow {
   answer: string;
   /** The regular expression the answer must match — '.+' passes anything non-empty, '$a' ("end
-   *  then a") can never match and is the planted red. */
-  pattern: string;
+   *  then a") can never match and is the planted red.
+   *
+   *  ABSENT ON A `text_list` ROW, and that is what such a row costs: require_answer_matches reads
+   *  its answer as TEXT (ansiwise-host require_answer_matches.dart), so a list handed to it fails
+   *  inside the step instead of measuring anything. A row without a pattern is measured by being
+   *  REQUIRED — an answer the caller does not send stops the run at the door, by name. */
+  pattern?: string;
+  /** The kind the program declares the answer as. `text` unless the caller sends a LIST, which the
+   *  engine refuses against a `text` declaration. */
+  kind?: "text" | "text_list";
   /** Declared `secret: true`, so the engine keeps the value out of every record it writes and out of
    *  the description it hands back. The engine refuses a secret answer that also carries a default,
    *  by name, when the installation is parsed — which is why a secret row is a required row. */
@@ -133,12 +141,12 @@ export function programYaml(name: string, rows: ProbeRow[]): string {
     "answers:",
     ...[...byAnswer.values()].flatMap((r) => [
       `  - name: ${r.answer}`,
-      "    kind: text",
+      `    kind: ${r.kind ?? "text"}`,
       `    describes: the ${r.answer} this fixture measures`,
       ...(r.secret === true ? ["    secret: true"] : []),
     ]),
     "steps:",
-    ...rows.flatMap((r) => [
+    ...rows.filter((r) => r.pattern !== undefined).flatMap((r) => [
       "  - step: require_answer_matches",
       `    answer: ${r.answer}`,
       `    pattern: '${r.pattern}'`,

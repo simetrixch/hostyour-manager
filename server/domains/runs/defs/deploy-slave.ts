@@ -231,16 +231,30 @@ async function registryHostOf(ports: DeploySlavePorts, domain: string): Promise<
  *  case: it has no cluster row yet and is installed by hostyour-cloud lifecycle/install-machine, which
  *  answers this itself. */
 /** Everything deploy-host is owed that the machine cannot answer itself: the two checkout answers
- *  above and the public half of the key this manager reaches the machine with. ONE `extra`, because
- *  a program step takes one — and both run kinds that drive deploy-host owe the machine all three.
+ *  above, the public half of the key this manager reaches the machine with, and the installation's
+ *  time servers. ONE `extra`, because a program step takes one — and both run kinds that drive
+ *  deploy-host owe the machine all four.
  *
  *  Note the DIFFERENT sources, which is why they are composed rather than read from one place: the
- *  repository is this installation's setting, the branch is the master's cluster row, and the key is
- *  a sealed credential. */
+ *  repository is this installation's setting, the branch is the master's cluster row, the key is a
+ *  sealed credential, and the time servers stand in the master's cluster map. */
 export function hostAnswers(serverId: string, ports: DeploySlavePorts): ExtraAnswers {
   const checkout = checkoutAnswers(ports);
   const key = operatorKeyAnswer(serverId);
-  return async (ctx) => ({ ...(await checkout(ctx)), ...(await key(ctx)) });
+  return async (ctx) => {
+    // THE TIME SERVERS, off the MASTER's map. They are the installation's answer and not the
+    // machine's — the same reason the certificate authority is read from there — and a box that has
+    // just been reached knows none of them.
+    const repo = requirePlatformRepo(ports);
+    const masterFqdn = masterFqdnOf(ctx.db, loadMaster(ctx.db));
+    const { timeSources } = await resolveClusterMarking(repo, masterFqdn);
+    if (timeSources === undefined) {
+      throw errValidation(
+        `${clusterMapPath(masterFqdn)} on ${repo.booksBranch} states no global.timeSources, and deploy-host is answered with it: a machine asked for no time servers keeps a clock nothing corrects, and the program refuses rather than installing onto one. The master's own regeneration (deploy-branch) writes the key into that map — regenerate the master's branch, then run this again`,
+      );
+    }
+    return { ...(await checkout(ctx)), ...(await key(ctx)), time_sources: timeSources };
+  };
 }
 
 export function checkoutAnswers(ports: DeploySlavePorts): ExtraAnswers {
