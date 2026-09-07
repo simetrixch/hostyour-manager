@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import type { Plan, RunDefinition, Step } from "../../../executor/types.ts";
+import type { Cleanup, Plan, RunDefinition, Step, StepCtx } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { errValidation } from "../../../kernel/errors.ts";
@@ -8,10 +8,13 @@ import { localTx } from "../../../executor/stepkit.ts";
 import { attestMachineId } from "../../../executor/attest.ts";
 import { isMasterRole } from "../../../../shared/enums.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
+import { holdsManagerKey } from "../../../security/store.ts";
 import { removeClusterMarking } from "../../inventory/cluster-marking.ts";
 import { ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 import { loadServer, loadMaster, masterFqdnOf, requirePlatformRepo, type DeploySlavePorts } from "./deploy-slave.kit.ts";
 import { takeSlavePlaneDown } from "./deploy-slave.mgmt.ts";
+import { leaveHostCleanup, removeManagerKeyCleanup } from "./leave-host.kit.ts";
+import { restorePasswordLoginCleanup } from "./password-login.kit.ts";
 
 // cluster-remove-slave — TAKING A SLAVE OUT OF AN INSTALLATION, as a run.
 //
@@ -28,12 +31,25 @@ import { takeSlavePlaneDown } from "./deploy-slave.mgmt.ts";
 // takeSlavePlaneDown (deploy-slave.mgmt.ts). A removal an operator starts and a removal an abort
 // performs must be the SAME removal, or the deliberate one is the one nobody has exercised.
 //
-// IT RUNS ON THE MASTER, and every step of it does. The slave itself is touched by nothing here —
-// no session is opened to it, no program runs on it, and its machine layer is left exactly as it
-// stands. A slave being removed is very often a machine that no longer answers at all (that is the
-// ordinary reason to remove one), so a run that needed it to answer would refuse precisely the case
-// it exists for. What is left on a machine that still answers is a cluster with no management plane
-// on the master: inert, and the machine is then re-installed or thrown away.
+// LEAVING A MACHINE PUTS IT BACK, and this run kind leaves one. The three machine-side acts are the
+// SAME code an aborted cluster-deploy-slave runs (defs/leave-host.kit.ts, defs/password-login.kit.ts):
+// everything this platform wrote off the machine, the password door back on, and this manager's key
+// line off it and out of the store. A machine that leaves an installation with our key still in its
+// authorized_keys and its password door still shut is a machine nobody but us can reach and that we
+// no longer operate, which is the state the owner's decision of 2026-09-06 names.
+//
+// THE ORDER IS THE ABORT'S, for the same reason it is the abort's: each act runs while the route the
+// next one needs is still open. The master-side removal goes FIRST, while the coordinator still
+// knows the node; then the machine is stripped over a session both routes are open for; then the
+// password door goes back on; then the key line comes off, LAST, because it is the route every act
+// above travels. The map and the rows follow, because they describe what has already happened.
+//
+// A SLAVE THAT NO LONGER ANSWERS IS THE ORDINARY CASE, and it is the reason a machine gets removed
+// at all. So every machine-side step MEASURES FIRST — does this manager hold a key for the machine,
+// and does that key open a session — and where it does not, it says which act it is skipping and on
+// which machine, and the run goes on with the master side and the rows. No machine-side step ever
+// fails the run for a machine that is gone, and none of them guesses that a machine is gone from a
+// row: `status` says where a deployment stands and is written by runs that never opened a session.
 //
 // A MASTER+SLAVE IS REFUSED, by name, at step 0. Taking the slave part off a machine that also
 // carries the master part leaves a live master whose branch and machine layer were installed under
@@ -118,6 +134,56 @@ function removePlaneStep(serverId: string, ports: RemoveSlavePorts): Step {
   };
 }
 
+/** THE MEASUREMENT EVERY MACHINE-SIDE STEP TAKES FIRST: can this manager still reach the slave over
+ *  its own key? Two absences, and the log says which one it is, because they are undone differently
+ *  — a machine no key is sealed for is one an earlier removal already took the key off, and a
+ *  machine that answers nothing is one that is gone or off the network.
+ *
+ *  IT IS ASKED OF THE CREDENTIAL AND OF THE SESSION, never of `servers.status`: the status column
+ *  says where a deployment stands and is moved by runs that opened no session at all, so a machine
+ *  reading `healthy` may answer nothing and a machine reading `undeployed` may answer at once.
+ *
+ *  The session it opens is the one the act then uses — ctx.ssh() hands back the session it cached
+ *  for this host, so measuring costs one connect and not two. */
+async function slaveAnswers(ctx: StepCtx, act: string): Promise<boolean> {
+  const server = loadServer(ctx.db, String(ctx.params.serverId));
+  if (!holdsManagerKey(ctx.db, server.id)) {
+    ctx.log("meta",
+      `${act} is skipped: this manager holds no SSH key for ${server.name} any more, so there is no route to it. ` +
+      `Whatever stands on that machine stays on it; the master side of this removal goes on.`);
+    return false;
+  }
+  try {
+    await ctx.ssh();
+    return true;
+  } catch (err) {
+    ctx.log("meta",
+      `${act} is skipped: ${server.name} does not answer this manager's key (${err instanceof Error ? err.message : String(err)}). ` +
+      `That is the ordinary reason a slave is removed; whatever stands on that machine stays on it, and the master side of ` +
+      `this removal goes on.`);
+    return false;
+  }
+}
+
+/** One of cluster-deploy-slave's compensating actions, run as a STEP of this run kind. The same
+ *  function and not a copy of it: a machine put back by a deliberate removal and a machine put back
+ *  by an aborted install must be put back the same way, or the deliberate one is the one nobody has
+ *  exercised. A Cleanup and a Step are the same shape (executor/types.ts), so the only thing this
+ *  adds is the measurement in front. */
+function machineSideStep(act: Cleanup): Step {
+  return {
+    name: act.name,
+    title: act.title,
+    run: async (ctx) => {
+      if (!await slaveAnswers(ctx, act.name)) {
+        ctx.checkpoint({ act: act.name, reached: false });
+        return;
+      }
+      await act.run(ctx);
+    },
+  };
+}
+
 /** The map file, after the plane is down. Last of the git acts, because dropping the slave part is
  *  what tears the generated per-slave Application down and the program above needs that to have
  *  happened; only once the master holds nothing about this cluster is the file describing nothing. */
@@ -143,20 +209,30 @@ function dropClusterMapStep(serverId: string, ports: RemoveSlavePorts): Step {
  *  surface that no longer existed.
  *
  *  The plane goes to `absent` and its JSON with it — every id in it names a Vault mount and an
- *  ArgoCD namespace the program has just deleted. The server goes to `undeployed`: the machine may
- *  well still be running, and what is true of it is that this installation no longer deploys it. */
+ *  ArgoCD namespace the program has just deleted.
+ *
+ *  THE SERVER'S OWN ROW IS WRITTEN BY WHICHEVER OF THE TWO THINGS HAPPENED. A machine that was put
+ *  back already stands at `bare`: remove-manager-key set it there when it took the last route off,
+ *  and that is what a machine nothing has reached is. Writing `undeployed` over it would say this
+ *  installation still holds something on a machine it holds nothing on, and a fresh first contact
+ *  reads `bare` as the state to start from. A machine that never answered keeps whatever the
+ *  deployment left on it, so it goes to `undeployed`: it may well still be running, and what is true
+ *  of it is that this installation no longer deploys it. */
 function retireRowsStep(serverId: string): Step {
   return {
     name: "retire-rows",
-    title: "Retire the inventory (cluster removed, plane absent, server undeployed)",
+    title: "Retire the inventory (cluster removed, plane absent, the server as its machine now stands)",
     run: async (ctx) => {
       const { server, cluster } = resolveRemoval(ctx.db, serverId);
+      const putBack = server.status === "bare";
       localTx(ctx, (tx) => {
         tx.update(clusters).set({ status: "removed", planeState: "absent", planeJson: null }).where(eq(clusters.id, cluster.id)).run();
-        tx.update(servers).set({ status: "undeployed" }).where(eq(servers.id, serverId)).run();
+        if (!putBack) tx.update(servers).set({ status: "undeployed" }).where(eq(servers.id, serverId)).run();
       });
-      ctx.checkpoint({ clusterId: cluster.id, clusterStatus: "removed", serverStatus: "undeployed" });
-      ctx.log("meta", `cluster ${cluster.id} (${cluster.domain}) is removed and ${server.name} is undeployed — this installation operates it no longer`);
+      ctx.checkpoint({ clusterId: cluster.id, clusterStatus: "removed", serverStatus: putBack ? "bare" : "undeployed" });
+      ctx.log("meta", putBack
+        ? `cluster ${cluster.id} (${cluster.domain}) is removed and ${server.name} stands at bare — it was put back and this installation holds nothing on it`
+        : `cluster ${cluster.id} (${cluster.domain}) is removed and ${server.name} is undeployed — this installation operates it no longer`);
     },
   };
 }
@@ -165,6 +241,9 @@ export function removeSlaveSteps(serverId: string, ports: RemoveSlavePorts): Ste
   return [
     attestTargetStep(serverId),
     removePlaneStep(serverId, ports),
+    machineSideStep(leaveHostCleanup(ANSIWISE_ELEVATION_SECRET)),
+    machineSideStep(restorePasswordLoginCleanup(ANSIWISE_ELEVATION_SECRET)),
+    machineSideStep(removeManagerKeyCleanup),
     dropClusterMapStep(serverId, ports),
     retireRowsStep(serverId),
   ];
@@ -184,23 +263,29 @@ export function makeRemoveSlaveDef(ports: RemoveSlavePorts): RunDefinition<Remov
         targetId: params.serverId,
         summary:
           `Remove the slave "${server.name}" (${cluster.domain}, ${cluster.stage}) from the installation ` +
-          `"${master.name}" keeps the books for: ${stepDefs.length} steps, EVERY ONE OF THEM ON THE MASTER. ` +
-          `The remove-slave program takes the coordinator membership, the auth mount and its roles, the policies and the ` +
-          `per-slave reconciler project off "${master.name}"; the cluster's map then goes off the books branch, and this ` +
-          `manager's rows follow — cluster ${cluster.id} to 'removed', ${server.name} to 'undeployed'. ` +
-          `THE SLAVE ITSELF IS NOT TOUCHED: no session is opened to it and its machine layer is left standing, inert. ` +
-          `Nothing here is undone by a later run — putting this machine back is a fresh deployment, which allocates a new ` +
-          `ordinal, because an ordinal is never recycled. ` +
-          `The password you enter raises every root command this run sends to "${master.name}" and the master's own ` +
+          `"${master.name}" keeps the books for, and PUT THE MACHINE BACK: ${stepDefs.length} steps over two machines. ` +
+          `On "${master.name}": the remove-slave program takes the coordinator membership, the auth mount and its roles, ` +
+          `the policies and the per-slave reconciler project off it. ` +
+          `On "${server.name}", IF IT STILL ANSWERS this manager's key: everything this platform wrote goes off it — the ` +
+          `paths it owns, both engine executables, the cluster snap with its data and the private-network membership — ` +
+          `then password login goes back on, then this manager's key line comes off the machine and out of the store. ` +
+          `IF IT DOES NOT ANSWER, each of those three steps says so by name and the run goes on: a slave that is gone is ` +
+          `the ordinary reason to remove one, and nothing here fails on it. ` +
+          `The cluster's map then goes off the books branch and this manager's rows follow — cluster ${cluster.id} to ` +
+          `'removed', and ${server.name} to 'bare' where it was put back or 'undeployed' where it never answered. ` +
+          `Nothing here is undone by a later run — putting this machine back into service is a fresh deployment, which ` +
+          `allocates a new ordinal, because an ordinal is never recycled. ` +
+          `The password you enter raises every root command this run sends to either machine and the master's own ` +
           `programs; it is held in memory for the length of the run and stored nowhere.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
-        // The MASTER is the host every act runs on, and this run owns it for its duration: the
-        // remove-slave program rewrites Vault and the reconciler's projects on it. The slave is
-        // named as a target it does NOT own, because the run decides its fate and reaches it not at
-        // all — an operator reading the card has to see both machines the run is about.
+        // BOTH MACHINES ARE OWNED, and the run holds a `server:<id>` lock on each for its duration
+        // (executor/locks.ts deriveServerLocks): the remove-slave program rewrites Vault and the
+        // reconciler's projects on the master, and the machine-side steps strip the slave and take
+        // the way in off it. A second run touching either while this one is stripping it is what the
+        // locks are for.
         targets: [
-          { serverId: master.id, ownsHost: true, label: `${master.name} (${master.role}) — every act runs here` },
-          { serverId: server.id, ownsHost: false, label: `${server.name} (${server.role}) — removed, never reached` },
+          { serverId: master.id, ownsHost: true, label: `${master.name} (${master.role}) — the master side runs here` },
+          { serverId: server.id, ownsHost: true, label: `${server.name} (${server.role}) — removed, and put back where it answers` },
         ],
         locks: [
           { resource: "git-branch", key: masterFqdnOf(db, master) },
@@ -208,7 +293,9 @@ export function makeRemoveSlaveDef(ports: RemoveSlavePorts): RunDefinition<Remov
         ],
         warnings: [
           `This is not reversible. The per-slave Vault mount, its policies and the ${server.name} reconciler project are destroyed on ${master.name}, and the credentials sealed for them stop naming anything.`,
-          `${server.name} keeps whatever the deployment left on it. It is not wiped, not shut down and not disconnected from the private network — removing a slave from the installation and decommissioning a machine are two acts.`,
+          `Where ${server.name} answers, this run takes this manager's key off it and puts password login back on. After that the only way in is a password somebody sets at the machine: the bootstrap password the deployment destroyed cannot be minted again.`,
+          `Where ${server.name} does not answer, it keeps everything the deployment left on it, this manager's key line included. It is not wiped and not shut down — removing a slave from the installation and decommissioning a machine are two acts.`,
+          `Three things no leave puts back, on a machine that does answer: the destroyed bootstrap password, the packages deploy-host installed (git, openssl, curl, jq, apache2-utils) and the clock sources it wrote. Nothing recorded what the machine had before them.`,
         ],
         requiredSecrets: [ANSIWISE_ELEVATION_SECRET],
       };
