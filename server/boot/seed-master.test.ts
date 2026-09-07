@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
+import { pino } from "pino";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,6 +53,12 @@ describe("boot/seed-master — master self-registration", () => {
 
   function cfg(extra: Record<string, string>): Config {
     return parseConfig({ ...BASE_ENV, ...extra } as unknown as NodeJS.ProcessEnv);
+  }
+
+  /** What the master's row says about itself — `degraded` while its self-SSH key is not sealed,
+   *  because a Manager that cannot open a session to its own host deploys no slave at all. */
+  function statusOf(db: DbHandle, id: string): string | undefined {
+    return db.db.select().from(servers).where(eq(servers.id, id)).get()?.status;
   }
 
   it("no-op when MASTER_FQDN is unset (dev/tests): no master row, no key", async () => {
@@ -326,30 +333,92 @@ describe("boot/seed-master — master self-registration", () => {
     expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
   });
 
-  it("the background reconcile is BOUNDED: it gives up after the window; a later boot still heals", async () => {
+  it("does NOT stop at the twenty-minute window that used to close: material an hour late still seals", async () => {
     vi.useFakeTimers();
     const { db, store, dir } = setup();
-    const keyFile = join(dir, "never-arrives-key");
-    const fpFile = join(dir, "never-arrives-fp");
+    const keyFile = join(dir, "late-key");
+    const fpFile = join(dir, "late-fp");
     const config = cfg({
       MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1",
       MASTER_SSH_KEY_FILE: keyFile, MASTER_SSH_HOST_KEY_FP_FILE: fpFile,
     });
     await seedMaster(db.db, store, config, logger);
+    const row = db.db.select().from(servers).where(eq(servers.role, "master")).get();
 
-    await vi.advanceTimersByTimeAsync(21 * 60_000); // past RECONCILE_MAX_MS — the timer must be dead
+    // An hour with nothing to converge — three times the window the old bound closed after.
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(0);
+    expect(statusOf(db, row!.id)).toBe("degraded"); // and the row says why, meanwhile
 
-    // Material arrives AFTER the window: the dead timer must NOT seal anything…
+    // The certificate lands / the ESO secret lands, an hour after boot and with nobody restarting
+    // the pod. This is the apps1 case: the trust the seal needed arrived after the window closed.
     const key = generateServerKeypair("m1-master");
     writeFileSync(keyFile, key.privateOpenSsh);
     writeFileSync(fpFile, FP);
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    await vi.advanceTimersByTimeAsync(3 * 60_000); // one wait at the ceiling
+
+    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
+    expect(statusOf(db, row!.id)).toBe("healthy");
+  });
+
+  it("doubles the wait after every failed attempt and stops growing at three minutes", async () => {
+    vi.useFakeTimers();
+    const { db, store, dir } = setup();
+    const config = cfg({
+      MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1",
+      MASTER_SSH_KEY_FILE: join(dir, "never-arrives-key"), MASTER_SSH_HOST_KEY_FP: FP,
+    });
+    // Every attempt reads the store; counting those reads counts the attempts without asserting
+    // anything about how the schedule is built.
+    let reads = 0;
+    const real = store.list.bind(store);
+    vi.spyOn(store, "list").mockImplementation(async (f) => { reads++; return real(f); });
+    const attempted = (): boolean => { const n = reads; reads = 0; return n > 0; };
+
+    await seedMaster(db.db, store, config, logger); // the boot attempt
+    attempted();
+
+    for (const wait of [20_000, 40_000, 80_000, 160_000, 180_000, 180_000]) {
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect(attempted()).toBe(false); // the counter-probe: one millisecond early is still waiting
+      await vi.advanceTimersByTimeAsync(1);
+      expect(attempted()).toBe(true);
+    }
+  });
+
+  it("a seal the credential store refuses is retried, and every failure names the cause", async () => {
+    vi.useFakeTimers();
+    const { db, store, dir } = setup();
+    const key = generateServerKeypair("m1-master");
+    const keyFile = join(dir, "master-ssh-key");
+    writeFileSync(keyFile, key.privateOpenSsh);
+    const config = cfg({
+      MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1",
+      MASTER_SSH_KEY_FILE: keyFile, MASTER_SSH_HOST_KEY_FP: FP,
+    });
+    // What VaultKvClient hands up when the installation's own authority is not trusted.
+    const CAUSE = "vault put could not reach https://vault.m1.example: fetch failed: unable to verify the first certificate (UNABLE_TO_VERIFY_LEAF_SIGNATURE)";
+    vi.spyOn(store, "seal")
+      .mockRejectedValueOnce(new Error(CAUSE))
+      .mockRejectedValueOnce(new Error(CAUSE))
+      .mockRejectedValueOnce(new Error(CAUSE));
+    const written: string[] = [];
+    const capture = pino({ level: "debug" }, { write: (line: string) => { written.push(line); } });
+
+    await seedMaster(db.db, store, config, capture); // the boot attempt fails
     const row = db.db.select().from(servers).where(eq(servers.role, "master")).get();
     expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(0);
+    expect(statusOf(db, row!.id)).toBe("degraded");
+    expect(written.filter((l) => l.includes(CAUSE))).toHaveLength(1);
 
-    // …but the documented recovery (a pod restart ⇒ another seedMaster) still works.
-    await seedMaster(db.db, store, config, logger);
+    await vi.advanceTimersByTimeAsync(60_000); // the 20s and the 40s attempts, both refused
+    expect(written.filter((l) => l.includes(CAUSE))).toHaveLength(3);
+    // The counter-probe: the line carries the certificate, not only Node's own word for it.
+    expect(written.some((l) => l.includes("fetch failed") && !l.includes("certificate"))).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(80_000); // the fourth attempt: the store accepts
     expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
+    expect(statusOf(db, row!.id)).toBe("healthy");
   });
 
   it("the fp FILE (fresh) wins over the fp env (static)", async () => {

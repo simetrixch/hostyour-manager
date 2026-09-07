@@ -25,32 +25,42 @@ import { MASTER_ROLES } from "../../shared/enums.ts";
 //
 // Idempotent + degrade-friendly: safe to run on every boot. If the dedicated secret (hence the
 // key file / host-key fp) is not present yet on first boot, the row is still seeded and a
-// BOUNDED background reconcile keeps retrying the pin+seal IN-PROCESS until the secret
-// materializes. Waiting for "a later boot" is not a strategy: nothing restarts the pod on its
-// own, and the prod ESO/Vault-role ordering race (secret lands minutes after boot) leaves the
-// master unpinned + unsealed forever. The fp is therefore also read from a FILE — kubelet
-// refreshes secret-volume files in a running pod, while an env var never does; that file is
-// what makes restart-free convergence possible.
+// background reconcile keeps retrying the pin+seal IN-PROCESS until the secret materializes.
+// Waiting for "a later boot" is not a strategy: nothing restarts the pod on its own, and the prod
+// ESO/Vault-role ordering race (secret lands minutes after boot) leaves the master unpinned +
+// unsealed forever. The fp is therefore also read from a FILE — kubelet refreshes secret-volume
+// files in a running pod, while an env var never does; that file is what makes restart-free
+// convergence possible.
 
 const MASTER_KEY_LABEL = "master SSH key (self)";
 
-// Background reconcile bounds. 20s ≈ converge within one tick of the material landing (ESO
-// retry + kubelet volume sync are each O(1min)) without hammering sqlite/Vault; 20min covers
-// the slowest observed fresh-install tail (Argo sync waves, ESO login retries after seed-vault
-// writes the role, Vault warm-up) with margin — beyond that something is genuinely broken and
-// the final error log tells the operator what to do. ≤60 attempts ⇒ bounded log volume.
-const RECONCILE_INTERVAL_MS = 20_000;
-const RECONCILE_MAX_MS = 20 * 60_000;
+// The reconcile's schedule: the FIRST wait, and the ceiling every later wait grows toward by
+// doubling. 20s ≈ converge within one attempt of the material landing (ESO retry + kubelet volume
+// sync are each O(1min)) without hammering sqlite/Vault. Three minutes is the ceiling, so a Manager
+// that has been failing for an hour is still asking, and the failure it logs each time arrives at
+// most 20 times an hour — the growing wait IS the rate limit, and nothing else throttles the log.
+//
+// IT HAS NO DEADLINE, and that is the shape of it. A Manager whose master key is not sealed can
+// deploy nothing at all: ctx.ssh(master) has no credential, so deploy-slave refuses at its first
+// step. Giving up therefore does not leave the Manager doing less work, it leaves it doing NONE of
+// its work, in a state only an operator who reads the log and restarts the pod can leave. That
+// happened: on an installation issuing from an authority it minted for itself, every seal failed
+// TLS verification, 64 attempts were logged over 20 minutes, the window closed, and the certificate
+// the process would have trusted was in place four minutes later with nothing left running to see
+// it.
+const RECONCILE_FIRST_WAIT_MS = 20_000;
+const RECONCILE_MAX_WAIT_MS = 3 * 60_000;
 
 type MasterConfig = NonNullable<Config["master"]>;
 
-let reconcileTimer: NodeJS.Timeout | undefined; // module-level single-flight: one interval per process
+let reconcileTimer: NodeJS.Timeout | undefined; // module-level single-flight: one reconcile per process
 
-/** Stop a pending background reconcile. Exported for tests (afterEach) — the timer is unref()'d,
- *  so production shutdown never needs it. */
+/** Stop a pending background reconcile. Exported for tests (afterEach) and for the reset route,
+ *  which stops it before re-seeding a running pod — the timer is unref()'d, so production shutdown
+ *  never needs it. */
 export function stopMasterReconcile(): void {
   if (reconcileTimer) {
-    clearInterval(reconcileTimer);
+    clearTimeout(reconcileTimer);
     reconcileTimer = undefined;
   }
 }
@@ -78,8 +88,9 @@ function readHostKeyFp(m: MasterConfig): { fp: string; fromFile: boolean } | und
 /** Insert/reconcile the role=master row, pin its host key, and seal/rotate the self-SSH key.
  *  No-op when config.master is unset (dev/tests). Never throws for an operational miss
  *  (unreadable/rotated key, name collision, drift) — it logs and returns so boot proceeds; only
- *  a genuine DB fault propagates. If the secret material is not there yet, a bounded unref'd
- *  background reconcile retries pin+seal in-process (no pod restart needed). */
+ *  a genuine DB fault propagates. If the secret material is not there yet, or the credential store
+ *  refuses the seal, an unref'd background reconcile retries pin+seal in-process until it converges
+ *  (no pod restart needed). */
 export async function seedMaster(db: Db, creds: CredentialStore, config: Config, logger: Logger): Promise<void> {
   const m = config.master;
   if (!m) return; // no MASTER_FQDN → nothing to seed
@@ -176,16 +187,48 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
   // ---- 2+3. Pin the host key + seal the self-SSH key — factored into the re-runnable
   // convergeMaster() so the background reconcile can retry it when the ESO secret materializes
   // only after boot. Scheduled only when a key file is configured (without one, retrying can
-  // never seal anything) and only until converged or the bounded window closes.
+  // never seal anything). It runs until it converges; nothing else can make the Manager usable.
   const converged = await convergeMaster(db, creds, master.id, m, logger);
   if (!converged && m.keyFile) scheduleMasterReconcile(db, creds, master.id, m, logger);
 }
 
-/** Re-runnable pin+seal unit (steps 2+3). Returns true when there is nothing left THIS process
- *  can converge — normally: host key pinned AND the mounted key sealed. Never throws for an
- *  operational miss; a genuine DB fault propagates to the caller (boot fails loud; the
- *  reconcile timer catches + logs instead of crashing a running server). */
+/** Re-runnable pin+seal unit (steps 2+3), plus the one thing the master's row is made to say about
+ *  the result. Returns true when there is nothing left THIS process can converge — normally: host
+ *  key pinned AND the mounted key sealed. Never throws for an operational miss; a genuine DB fault
+ *  propagates to the caller (boot fails loud; the reconcile catches + logs instead of crashing a
+ *  running server). */
 async function convergeMaster(db: Db, creds: CredentialStore, masterId: string, m: MasterConfig, logger: Logger): Promise<boolean> {
+  const done = await pinAndSeal(db, creds, masterId, m, logger);
+  await stateMasterKey(db, creds, masterId, logger);
+  return done;
+}
+
+/** What the master's row says while its self-SSH key is not sealed, and what it says once it is.
+ *  Read out of the store rather than tracked in a flag, because the store is what deploy-slave asks.
+ *
+ *  `healthy` on an unsealed master is a claim the process cannot make: the Manager cannot open an
+ *  SSH session to its own host, so every deploy-slave onto this installation refuses at its first
+ *  step. The operator's screen then shows the machine carrying `degraded` and, beside it, no "key
+ *  installed" chip — which is the reason, on the one page the question is asked from.
+ *
+ *  ONLY these two literals are ever written here. A row a run parked at `provisioning`, `ready`,
+ *  `bare` or `undeployed` is that run's own account of the machine, and this seed does not overwrite
+ *  it. */
+async function stateMasterKey(db: Db, creds: CredentialStore, masterId: string, logger: Logger): Promise<void> {
+  const sealed = (await creds.list({ serverId: masterId, kind: "ssh_key", excludeRotated: true })).length > 0;
+  const row = db.select().from(servers).where(eq(servers.id, masterId)).get();
+  if (!row) return;
+  const want = sealed ? "healthy" : "degraded";
+  if (row.status === want || (row.status !== "healthy" && row.status !== "degraded")) return;
+  db.update(servers).set({ status: want }).where(eq(servers.id, masterId)).run();
+  if (sealed) {
+    logger.info({ id: masterId }, "master row back to healthy — its self-SSH key is sealed, so deploy-slave can reach this host");
+  } else {
+    logger.warn({ id: masterId }, "master row set to degraded — its self-SSH key is NOT sealed yet, so deploy-slave to this host refuses; the reconcile keeps trying and logs why each attempt failed");
+  }
+}
+
+async function pinAndSeal(db: Db, creds: CredentialStore, masterId: string, m: MasterConfig, logger: Logger): Promise<boolean> {
   let master = db.select().from(servers).where(eq(servers.id, masterId)).get();
   if (!master) {
     logger.warn({ id: masterId }, "role=master row vanished while converging — stopping (the next boot re-seeds it)");
@@ -256,7 +299,7 @@ async function convergeMaster(db: Db, creds: CredentialStore, masterId: string, 
     try {
       pub = derivePublicKey(priv); // reads the bytes BEFORE seal()/rotate() zero them
     } catch (err) {
-      logger.warn({ id: master.id, err: err instanceof Error ? err.message : String(err) }, "master SSH key file is not a valid OpenSSH private key — deploy-slave will fail until it is fixed (retried while the reconcile window is open)");
+      logger.warn({ id: master.id, err: err instanceof Error ? err.message : String(err) }, "master SSH key file is not a valid OpenSSH private key — deploy-slave will fail until it is fixed (the reconcile keeps retrying)");
       return false;
     }
 
@@ -291,45 +334,45 @@ async function convergeMaster(db: Db, creds: CredentialStore, masterId: string, 
   }
 }
 
-/** Bounded restart-free self-heal: retry convergeMaster every RECONCILE_INTERVAL_MS until it
- *  converges or RECONCILE_MAX_MS elapses. unref()'d — never keeps the process alive. Overlap is
- *  triply excluded: module-level single-flight (one interval per process), a per-tick inFlight
- *  guard (one async attempt at a time), and the single-replica deployment (RWO sqlite ⇒ no
- *  cross-pod concurrency). A timer tick must NEVER crash the server: even a DB fault only logs
- *  here, and the deadline check at the top of every tick bounds the retries — even a HUNG
- *  attempt (e.g. a Vault call with no client timeout) cannot extend the window. */
+/** Restart-free self-heal that does not give up: retry convergeMaster after RECONCILE_FIRST_WAIT_MS,
+ *  then after twice the wait before it, up to RECONCILE_MAX_WAIT_MS, until it converges. unref()'d —
+ *  never keeps the process alive.
+ *
+ *  A CHAIN OF TIMEOUTS AND NOT AN INTERVAL, because the next wait is armed only once the attempt
+ *  before it has settled. That is what makes the growing wait real, and it removes the overlap guard
+ *  an interval needed: a slow Vault call can no longer meet the next tick. What is left excluding
+ *  overlap is the module-level single-flight below and the single-replica deployment (RWO sqlite ⇒
+ *  no cross-pod concurrency).
+ *
+ *  An attempt must NEVER crash the server: even a DB fault only logs here. */
 function scheduleMasterReconcile(db: Db, creds: CredentialStore, masterId: string, m: MasterConfig, logger: Logger): void {
   if (reconcileTimer) return; // single-flight (seedMaster runs once per boot; belt-and-braces)
-  const deadline = Date.now() + RECONCILE_MAX_MS;
-  let inFlight = false;
-  logger.info(
-    { id: masterId, intervalSeconds: RECONCILE_INTERVAL_MS / 1000, maxMinutes: RECONCILE_MAX_MS / 60_000 },
-    "master not fully converged (host-key pin and/or sealed key pending, ESO secret late?) — starting the background reconcile; it stops on success or timeout",
-  );
-  reconcileTimer = setInterval(() => {
-    // Deadline FIRST (before the inFlight skip): once the window closed, stop the interval
-    // itself — a slow or hung attempt must not keep it alive past the bound.
-    if (Date.now() >= deadline) {
-      stopMasterReconcile();
-      logger.error({ id: masterId }, "master did NOT converge within the reconcile window — deploy-slave to the master stays broken; check the manager-master-key ExternalSecret (ESO) and Vault, then restart the Manager pod");
-      return;
-    }
-    if (inFlight) return; // never overlap a slow attempt (e.g. a hanging Vault call) with the next tick
-    inFlight = true;
+  let wait = RECONCILE_FIRST_WAIT_MS;
+  const arm = (): void => {
+    reconcileTimer = setTimeout(attempt, wait);
+    reconcileTimer.unref();
+  };
+  const attempt = (): void => {
     void (async () => {
       try {
         if (await convergeMaster(db, creds, masterId, m, logger)) {
           stopMasterReconcile();
           logger.info({ id: masterId }, "master background reconcile finished — nothing left to converge (normally: host key pinned + self-SSH key sealed)");
+          return;
         }
       } catch (err) {
-        // Never crash the server from a timer tick; the next tick's deadline check still
-        // bounds the retries.
         logger.error({ id: masterId, err: err instanceof Error ? err.message : String(err) }, "master background reconcile attempt failed");
-      } finally {
-        inFlight = false;
       }
+      // A stop that landed while this attempt was awaiting must not be re-armed: the reset route
+      // stops the reconcile before it re-seeds, and a test stops it between cases.
+      if (reconcileTimer === undefined) return;
+      wait = Math.min(wait * 2, RECONCILE_MAX_WAIT_MS);
+      arm();
     })();
-  }, RECONCILE_INTERVAL_MS);
-  reconcileTimer.unref();
+  };
+  logger.info(
+    { id: masterId, firstWaitSeconds: RECONCILE_FIRST_WAIT_MS / 1000, maxWaitSeconds: RECONCILE_MAX_WAIT_MS / 1000 },
+    "master not fully converged (host-key pin and/or sealed key pending, ESO secret late?) — starting the background reconcile; it doubles its wait up to the ceiling and stops only once it converges",
+  );
+  arm();
 }

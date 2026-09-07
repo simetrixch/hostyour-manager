@@ -276,6 +276,19 @@ export function Servers() {
                     <Link to={`/runs/${run.id}`}>{runLine(run)} →</Link>
                   </p>
                 )}
+                {/* WHY A MASTER SITS AT `degraded`, said in words. The badge above carries the row's
+                    status and the chips carry what this manager holds for the machine, but a master
+                    whose own SSH key is not sealed shows only an absent chip — and an absent thing is
+                    not a sentence anybody reads. This states it: the Manager cannot open a session to
+                    its own host, so every deploy-slave of this installation refuses at its first step
+                    (server/boot/seed-master.ts writes the status and keeps trying). */}
+                {isMasterRole(s.role) && !s.hasKey && (
+                  <p className="servercard__state">
+                    This manager&apos;s own SSH key to this host is not sealed in the credential store yet, so deploying a
+                    slave refuses at its first step. It keeps trying on its own — no restart is needed — and the
+                    Manager&apos;s log names why each attempt failed.
+                  </p>
+                )}
                 {/* THE MASTER'S OWN ROW. The block below is the SLAVE lifecycle — its stages and every
                     sentence in LIFECYCLE are written about a machine becoming a slave, so a master's
                     card cannot show it. This row is where a machine carrying the master part states

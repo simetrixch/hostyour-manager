@@ -129,9 +129,10 @@ export async function wire(): Promise<Wired> {
     actor: runActor,
   });
   // Master self-registration (seed-master.ts): make a fresh DB carry the role=master row +
-  // its self-SSH key so deploy-slave works with zero manual SQL. If the ESO secret is late, a
-  // bounded background reconcile inside seedMaster converges pin+seal without a pod restart
-  // (unref'd — if a later blocking check fails boot, the exiting process is not held open).
+  // its self-SSH key so deploy-slave works with zero manual SQL. If the ESO secret is late, or the
+  // credential store cannot be reached, a background reconcile inside seedMaster keeps converging
+  // pin+seal without a pod restart (unref'd — if a later blocking check fails boot, the exiting
+  // process is not held open).
   // Degrade-friendly by design;
   // a genuine DB fault still surfaces (boot fails loud rather than running half-seeded).
   // The tenant administrator check: a run started on a timer. It is here rather than in a
