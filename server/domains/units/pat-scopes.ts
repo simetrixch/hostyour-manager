@@ -7,6 +7,10 @@
 //   workflow         — commit .github/workflows/release.yml (GitHub refuses to let a PAT create/update
 //                      a workflow file without it)
 //   admin:repo_hook  — create the build webhook (push → Tekton)
+//   read:packages    — authenticate the build's npm install at npm.pkg.github.com: consumer-build
+//                      composes the .npmrc a build mounts from this PAT (build/<unit>/repo-pat#pat as
+//                      the host's _authToken), so a Containerfile installing a scoped package from
+//                      GitHub Packages fails inside the Tekton build without it (#123)
 //
 // This module is the SINGLE source of truth for that set. Without the preflight-scopes gate the scopes
 // are discovered REACTIVELY — the run fails at setup-webhook for a missing admin:repo_hook, then (once
@@ -17,7 +21,7 @@
 // Pure: no IO. The adapter reads the raw X-OAuth-Scopes list; this module decides what is required.
 
 /** The classic-PAT scopes an onboard requires on the consumer repo, in canonical (message) order. */
-export const REQUIRED_CONSUMER_PAT_SCOPES = ["repo", "workflow", "admin:repo_hook"] as const;
+export const REQUIRED_CONSUMER_PAT_SCOPES = ["repo", "workflow", "admin:repo_hook", "read:packages"] as const;
 
 export type ConsumerPatScope = (typeof REQUIRED_CONSUMER_PAT_SCOPES)[number];
 
@@ -26,6 +30,7 @@ export const CONSUMER_PAT_SCOPE_REASONS: Readonly<Record<ConsumerPatScope, strin
   repo: "clone the repo and push the release scripts",
   workflow: "commit the release workflow (.github/workflows/release.yml)",
   "admin:repo_hook": "create the build webhook (push → Tekton)",
+  "read:packages": "authenticate the build's npm install at npm.pkg.github.com (the build plane mounts this PAT as the .npmrc token)",
 };
 
 // Which GRANTED scopes satisfy each REQUIRED one. A granted parent scope covers a required capability
@@ -34,10 +39,12 @@ export const CONSUMER_PAT_SCOPE_REASONS: Readonly<Record<ConsumerPatScope, strin
 // rejected. `repo` and `workflow` have no narrower equivalent that still works here, so each is only
 // satisfied by itself. A granted `repo` implies its OWN sub-scopes but NEVER `workflow` or
 // `admin:repo_hook` (both are separate top-level classic scopes), so membership is the right test.
+// `read:packages` is satisfied by `write:packages` too, which GitHub grants together with read.
 const SATISFIED_BY: Readonly<Record<ConsumerPatScope, readonly string[]>> = {
   repo: ["repo"],
   workflow: ["workflow"],
   "admin:repo_hook": ["admin:repo_hook", "write:repo_hook"],
+  "read:packages": ["read:packages", "write:packages"],
 };
 
 /** The required scopes NOT granted by a token, in canonical order (empty ⇒ the token is sufficient).

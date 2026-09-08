@@ -63,13 +63,13 @@ describe("onboard preflight-scopes step", () => {
 
   it("FAILS when only admin:repo_hook is missing (the historic swissbookai gap), naming exactly it", async () => {
     const github = new FakeGitHubConsumer();
-    github.tokenScopes = { classic: true, scopes: ["repo", "workflow"] };
+    github.tokenScopes = { classic: true, scopes: ["repo", "workflow", "read:packages"] };
     await expect(step({ github }).run(ctx([]))).rejects.toThrow(/missing the scope admin:repo_hook/);
   });
 
   it("accepts the narrower write:repo_hook in place of admin:repo_hook", async () => {
     const github = new FakeGitHubConsumer();
-    github.tokenScopes = { classic: true, scopes: ["repo", "workflow", "write:repo_hook"] };
+    github.tokenScopes = { classic: true, scopes: ["repo", "workflow", "write:repo_hook", "read:packages"] };
     const logs: string[] = [];
     await step({ github }).run(ctx(logs));
     expect(logs.some((l) => l.includes("scopes OK"))).toBe(true);

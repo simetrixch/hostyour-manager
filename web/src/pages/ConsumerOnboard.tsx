@@ -224,7 +224,7 @@ export function ConsumerOnboard() {
           <span className="field__label">Repository PAT</span>
           <input type="password" value={repoPat} onChange={(e) => setRepoPat(e.target.value)} placeholder="github_pat_…" autoComplete="off" required />
           <span className="field__hint">
-            The one GitHub PAT for this consumer (repo + workflow + admin:repo_hook). The Manager seals it, clones
+            The one GitHub PAT for this consumer (repo + workflow + admin:repo_hook + read:packages). The Manager seals it, clones
             and pushes with it, and seeds it for the unit&apos;s build — it never appears in logs or the sandbox.
           </span>
         </label>

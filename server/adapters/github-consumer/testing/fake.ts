@@ -49,7 +49,7 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   scopeError = false;
   /** What readTokenScopes returns — default: a classic PAT with all three required scopes present. A
    *  preflight-scopes test overrides this to drive the missing-scope / fine-grained paths. */
-  tokenScopes: TokenScopes = { classic: true, scopes: ["repo", "workflow", "admin:repo_hook"] };
+  tokenScopes: TokenScopes = { classic: true, scopes: ["repo", "workflow", "admin:repo_hook", "read:packages"] };
   /** When true, readTokenScopes throws WebhookScopeError (the PAT is invalid/expired — a 401). */
   tokenInvalid = false;
 

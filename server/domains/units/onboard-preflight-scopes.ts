@@ -22,13 +22,13 @@ import { errValidation } from "../../kernel/errors.ts";
 import { REQUIRED_CONSUMER_PAT_SCOPES, missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
 
 /** The onboard `preflight-scopes` step: verify the consumer PAT carries EVERY right the onboard needs
- *  on the consumer repo — repo + workflow + admin:repo_hook — up front, before any mutation, and fail
+ *  on the consumer repo — repo + workflow + admin:repo_hook + read:packages — up front, before any mutation, and fail
  *  with the COMPLETE missing set (never one scope at a time). Fail-closed on an unwired client, a
  *  fine-grained/invalid token, or any missing scope. */
 export function preflightScopesStep(ports: OnboardPorts, p: OnboardParams): Step {
   return {
     name: "preflight-scopes",
-    title: "Pre-flight the consumer PAT scopes (repo + workflow + admin:repo_hook)",
+    title: "Pre-flight the consumer PAT scopes (repo + workflow + admin:repo_hook + read:packages)",
     run: async (ctx) => {
       // Fail-loud wiring gap (setup-webhook precedent): the scope check reuses the per-call consumer-PAT
       // GitHub client, which onboard UNCONDITIONALLY needs (setup-webhook fails without it), so an
