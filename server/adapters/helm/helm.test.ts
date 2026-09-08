@@ -152,7 +152,7 @@ describe("helmTemplateArgs", () => {
     // is load-bearing, not cosmetic.
     const args = helmTemplateArgs(req);
     expect(args).toEqual([
-      "template", "zsjs023ctne0-auth", "charts/example-auth", "--namespace", "zsjs023ctne0-auth", "--include-crds",
+      "template", "zsjs023ctne0-auth", "charts/example-auth", "--namespace", "zsjs023ctne0-auth", "--include-crds", "--dependency-update",
       "-f", join("charts/example-auth", "values.yaml"),
       "-f", join("charts/example-auth", "values-prod.yaml"),
     ]);

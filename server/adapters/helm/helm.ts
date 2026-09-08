@@ -110,12 +110,18 @@ export function parseHelmDocs(yamlStream: string): RenderedDoc[] {
  *  --include-crds so the validator renders EXACTLY what ArgoCD deploys: ArgoCD renders Helm sources
  *  with CRDs included (helm.skipCrds=false by default), but plain `helm template` omits crds/, so
  *  without it a chart's crds/ content (applied verbatim by helm) would deploy unvalidated.
+ *  --dependency-update so a chart's DECLARED dependencies are resolved into the clone's own charts/
+ *  before the render, which is what ArgoCD's repo-server does at deploy time. The tenant catalogue's
+ *  member charts depend on a sibling library chart as file://../<lib> and ignore the package and the
+ *  lock on purpose, so a clean clone carries the library's source and never its package; plain
+ *  `helm template` refuses such a chart outright ("found in Chart.yaml, but missing in charts/
+ *  directory"), and T2 named every member broken while ArgoCD would have deployed it (#121).
  *  Exported for unit tests — the chartPath join is load-bearing. */
 export function helmTemplateArgs(req: HelmRenderRequest, overrideFile?: string): string[] {
   const valueArgs: string[] = [];
   for (const f of req.valueFiles) valueArgs.push("-f", join(req.chartPath, f));
   if (overrideFile !== undefined) valueArgs.push("-f", overrideFile);
-  return ["template", req.releaseName, req.chartPath, "--namespace", req.namespace, "--include-crds", ...valueArgs];
+  return ["template", req.releaseName, req.chartPath, "--namespace", req.namespace, "--include-crds", "--dependency-update", ...valueArgs];
 }
 
 export class HelmCliRenderer implements HelmRenderer {

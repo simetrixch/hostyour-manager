@@ -231,6 +231,9 @@ export function branchAnswers(target: SlaveTarget, serverId: string, ports: Depl
       ...(marking.letsencryptEmail !== undefined ? { letsencrypt_email: marking.letsencryptEmail } : {}),
       ...(marking.letsencryptServer !== undefined ? { letsencrypt_server: marking.letsencryptServer } : {}),
       ...(marking.timeSources !== undefined ? { time_sources: marking.timeSources } : {}),
+      // Where units reach the installation's mail service, the master's answer handed on: a
+      // tenant's members require it, and the slave's map is what its fan-out reads (#122).
+      ...(marking.mailUrl !== undefined ? { mail_url: marking.mailUrl } : {}),
       role: MASTER_AND_SLAVE_ROLE,
     };
   };
