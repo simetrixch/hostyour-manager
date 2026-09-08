@@ -8,6 +8,7 @@ import { buildCreateTenantBody, type TenantCreateForm } from "./api.ts";
 
 const base: TenantCreateForm = {
   clusterId: "cls_abc",
+  stage: "prod",
   subdomain: "acme.dev",
   owner: "team-acme",
   apps: [],
@@ -59,6 +60,6 @@ describe("buildCreateTenantBody", () => {
     expect(buildCreateTenantBody({ ...base, seedUsers: true }).seedUsers).toBe(true);
     const body = buildCreateTenantBody(base);
     expect(body.seedUsers).toBe(false);
-    expect(Object.keys(body).sort()).toEqual(["apps", "clusterId", "owner", "seedUsers", "subdomain"]);
+    expect(Object.keys(body).sort()).toEqual(["apps", "clusterId", "owner", "seedUsers", "stage", "subdomain"]);
   });
 });

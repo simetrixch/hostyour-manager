@@ -64,7 +64,7 @@ describe("migrate (consumer)", () => {
     const ports = consumerPorts(f);
     await seedConsumerRegistration(ports.registrations);
     // The unit's record already stands (the onboard created it) — the move must UPDATE it, not mint a pair.
-    f.dns.seed(`${CONSUMER}.${TARGET.domain}`, "A", SOURCE.ip);
+    f.dns.seed(`${CONSUMER}-prod.${TARGET.domain}`, "A", SOURCE.ip);
     f.source.reader.setJobResult(`reloc-list-source-${CONSUMER}`, { succeeded: true, logs: "DB acme_db" });
 
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
@@ -78,8 +78,8 @@ describe("migrate (consumer)", () => {
     expect(reg?.entry.cluster).toBe(TARGET.cluster);
     expect(reg?.entry.quiesced).toBe(false);
     // ONE record, updated in place with the target cluster's own address.
-    const upsert = f.dns.upserts.find((u) => u.name === `${CONSUMER}.${TARGET.domain}`);
-    expect(upsert).toEqual({ name: `${CONSUMER}.${TARGET.domain}`, type: "A", content: TARGET.ip, created: false });
+    const upsert = f.dns.upserts.find((u) => u.name === `${CONSUMER}-prod.${TARGET.domain}`);
+    expect(upsert).toEqual({ name: `${CONSUMER}-prod.${TARGET.domain}`, type: "A", content: TARGET.ip, created: false });
     // Dump ran on the source, restore + completeness on the target, the clear on the source — and
     // the clear came AFTER the target held everything (the job orders on each side say so).
     expect(jobNames(f.source)).toContain(`reloc-dump-mongo-${CONSUMER}`);
@@ -90,10 +90,10 @@ describe("migrate (consumer)", () => {
     // ServiceClaim teardown that the prune sets off kept the databases — which is why the listing in
     // verify-source-released could still find them. The TARGET namespace carries no such mark: the
     // mark means "leaving", and provision-target clears any left over from an earlier move away.
-    expect(f.source.reader.namespaceAnnotations.get(CONSUMER)?.[CLAIM_RELOCATING_ANNOTATION]).toBe("true");
-    expect(f.target.reader.namespaceAnnotations.get(CONSUMER)?.[CLAIM_RELOCATING_ANNOTATION]).toBeUndefined();
+    expect(f.source.reader.namespaceAnnotations.get(`${CONSUMER}-prod`)?.[CLAIM_RELOCATING_ANNOTATION]).toBe("true");
+    expect(f.target.reader.namespaceAnnotations.get(`${CONSUMER}-prod`)?.[CLAIM_RELOCATING_ANNOTATION]).toBeUndefined();
     // The source namespace fell with the clear (the per-consumer PostgreSQL and the PVCs go with it).
-    expect(f.source.reader.deletedNamespaces).toContain(CONSUMER);
+    expect(f.source.reader.deletedNamespaces).toContain(`${CONSUMER}-prod`);
     // The row settled LAST, onto the target.
     const row = db.db.select().from(apps).where(eq(apps.id, "app_1")).get();
     expect(row?.clusterId).toBe(TARGET.clusterId);
@@ -109,7 +109,7 @@ describe("repoint (the claim mark)", () => {
     const ports = consumerPorts(f);
     await seedConsumerRegistration(ports.registrations);
     // The source namespace is gone (this is the fake's absence model), so the mark cannot be written.
-    await f.source.reader.deleteNamespace(CONSUMER);
+    await f.source.reader.deleteNamespace(`${CONSUMER}-prod`);
 
     await expect(repointStep(consumerWorld(ports, "app_1"), TARGET.clusterId).run(stepCtx(db, "repoint", {}, []))).rejects.toThrow(/nothing to annotate/);
 
@@ -133,7 +133,7 @@ describe("tenant-migrate", () => {
     const plan = await def.plan({ tenantId: "tnt_1", targetClusterId: TARGET.clusterId }, { db: db.db });
     expect(plan.steps.map((s) => s.name)).toEqual(STEP_ORDER);
 
-    f.target.reader.setSecretValue(`${GUID}-auth`, "hostyour-app-secrets", "AUTH_JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----");
+    f.target.reader.setSecretValue(`${GUID}-auth-prod`, "hostyour-app-secrets", "AUTH_JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----");
     const params = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId };
     await driveSteps(db, def.steps(params), params, [], {
       // After the repoint the source appset stops matching this registration and ArgoCD prunes every
@@ -149,11 +149,11 @@ describe("tenant-migrate", () => {
     // And every source MEMBER namespace was marked too: each member chart renders its own ServiceClaim,
     // so the CR release alone would not have saved the member databases from the prune's claim cascade.
     for (const member of ["auth", "jobs", "report", "web"]) {
-      expect(f.source.reader.namespaceAnnotations.get(`${GUID}-${member}`)?.[CLAIM_RELOCATING_ANNOTATION]).toBe("true");
+      expect(f.source.reader.namespaceAnnotations.get(`${GUID}-${member}-prod`)?.[CLAIM_RELOCATING_ANNOTATION]).toBe("true");
     }
     // The target got the whole isolation: every member AppProject + the CR.
     for (const member of ["auth", "jobs", "report", "web"]) {
-      expect(f.target.projects.get(TARGET.cluster, `${GUID}-${member}`)).toBeDefined();
+      expect(f.target.projects.get(TARGET.cluster, `${GUID}-${member}-prod`)).toBeDefined();
     }
     // The GARAGE bucket rode every phase: dumped on the source, restored + counted on the target.
     expect(jobNames(f.source)).toContain(`reloc-dump-bucket-${GUID}`);
@@ -164,7 +164,7 @@ describe("tenant-migrate", () => {
     // The source fell LAST: databases dropped + folder purged (the clear job), namespaces reaped.
     expect(jobNames(f.source)).toContain(`reloc-clear-source-${GUID}`);
     for (const member of ["auth", "jobs", "report", "web"]) {
-      expect(f.source.reader.deletedNamespaces).toContain(`${GUID}-${member}`);
+      expect(f.source.reader.deletedNamespaces).toContain(`${GUID}-${member}-prod`);
     }
     // The row settled LAST, onto the target.
     const row = db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get();

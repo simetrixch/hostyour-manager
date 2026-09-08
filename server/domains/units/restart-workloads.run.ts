@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { RunDefinition, Step } from "../../executor/types.ts";
+import { consumerNamespace } from "../../../shared/consumer.ts";
 import {
   attestTargetStep, loadAppCluster, type LifecyclePorts,
   attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts,
@@ -55,14 +56,15 @@ function restartSteps(ports: LifecyclePorts, p: RestartWorkloadsParams): Step[] 
       name: "restart-workloads",
       title: "Roll the consumer's workloads so their pods read their secrets again",
       run: async (ctx) => {
-        // The namespace IS the consumer name (G1), and the patch runs on the RESOLVED target cluster —
-        // a consumer on a slave is rolled through that slave's own client, never the master's.
+        // The namespace is <name>-<stage> (consumerNamespace), and the patch runs on the RESOLVED
+        // target cluster — a consumer on a slave is rolled through that slave's own client, never
+        // the master's.
         const ac = loadAppCluster(ctx.db, p.appId);
         const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
         // The stamp is what makes the pod template DIFFERENT, which is what makes the workload roll.
         // Its value is never read back; it is there for the operator who looks at the workload later.
         const stampedAt = new Date().toISOString();
-        const rolled = await clusterReader.restartWorkloads(ac.name, stampedAt);
+        const rolled = await clusterReader.restartWorkloads(consumerNamespace(ac.name, ac.stage), stampedAt);
         ctx.checkpoint({ rolled, stampedAt });
         ctx.log(
           "meta",
@@ -122,7 +124,7 @@ function tenantRestartSteps(ports: TenantLifecyclePorts, p: TenantRestartWorkloa
         // ONE stamp for the whole tenant, so an operator reading two member namespaces afterwards can
         // tell they were rolled by the same act rather than by two unrelated ones.
         const stampedAt = new Date().toISOString();
-        const namespaces = tenantWatchNamespaces(ctx.db, tc.tenantId, tc.guid);
+        const namespaces = tenantWatchNamespaces(ctx.db, tc.tenantId, tc.guid, tc.stage);
         let total = 0;
         for (const ns of namespaces) {
           const rolled = await clusterReader.restartWorkloads(ns, stampedAt);
@@ -148,7 +150,7 @@ export function makeTenantRestartWorkloadsDef(ports: TenantLifecyclePorts): RunD
     mutating: true,
     plan: async (params, { db }) => {
       const tc = loadTenantCluster(db, params.tenantId);
-      const namespaces = tenantWatchNamespaces(db, params.tenantId, tc.guid);
+      const namespaces = tenantWatchNamespaces(db, params.tenantId, tc.guid, tc.stage);
       const stepDefs = tenantRestartSteps(ports, params);
       return {
         kind: "tenant-restart-workloads",

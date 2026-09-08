@@ -109,7 +109,7 @@ function apexRegistrations(unitApex: string): Registrations {
   repo.seed(repo.booksBranch, "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
   repo.seed(repo.booksBranch, "clusters/platform/values-prod.yaml", "global:\n  env: prod\n");
   repo.seed(repo.booksBranch, clusterMapPath("s1.example"), `global:\n  unitApex: ${unitApex}\n`);
-  return new Registrations(repo, async () => ({ name: "s1", stage: "prod" }));
+  return new Registrations(repo);
 }
 
 async function makeConsumerLive(resolver?: FakeClusterKubeResolver, registrations?: Registrations): Promise<{ app: Hono<AppEnv>; cookie: string }> {
@@ -145,13 +145,13 @@ describe("the consumer's public address on the live payload", () => {
     // The cluster is reached at s1.example; the unit serves at the cluster's apex. The two differ
     // on every cluster whose FQDN carries a first label, which is the case this whole field exists for.
     expect(body.row.domain).toBe("s1.example");
-    expect(body.unitHost).toBe("acme.example.com");
+    expect(body.unitHost).toBe("acme-prod.example.com");
   });
 
   it("follows the apex the chain states, so a cluster that IS its own apex composes that instead", async () => {
     seedConsumer();
     const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })), apexRegistrations("s1.example"));
-    expect((await live(app, cookie)).unitHost).toBe("acme.s1.example");
+    expect((await live(app, cookie)).unitHost).toBe("acme-prod.s1.example");
   });
 
   it("is null — no link at all — when no chain can be read, rather than a guessed host", async () => {

@@ -86,7 +86,7 @@ export async function scanOrphanTenants(deps: { db: Db; registrations: TenantReg
     skipped.push(...scan.skipped); // reported, never dropped — see OrphanScan
     for (const pointer of scan.pointers) {
       if (known.has(pointer.guid)) continue;
-      const resolved = resolveClusterIdByName(db, pointer.cluster, stage);
+      const resolved = resolveClusterIdByName(db, pointer.cluster);
       found.push({
         guid: pointer.guid,
         subdomain: pointer.subdomain,

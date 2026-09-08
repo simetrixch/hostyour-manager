@@ -1,7 +1,8 @@
 // tenant-fanout.ts — the PURE fan-out algebra (no IO) and the SINGLE source of truth for every name a
 // tenant package carries. A tenant is a BRACKET over several SELF-CONTAINED members. Each member gets
-// its OWN namespace, its OWN AppProject — both literally <guid>-<member> — and its OWN Application
-// <guid>-<member>-<stage>.
+// its OWN namespace, its OWN AppProject and its OWN Application — all three literally
+// <guid>-<member>-<stage>, because a tenant carries its own stage and may stand at more than one
+// under one guid.
 //
 // A member is one of two things, and the platform does not need to tell them apart:
 //   - a STANDING member, declared in the tenant product's manifest (TenantSpecSchema.members), which
@@ -17,10 +18,11 @@
 // AppProject — moves together because every piece of it is named from the same guid. There is no
 // namespace named by the bare guid and no member that carries shared pieces for the others.
 //
-// The Application NAMES here MUST match the tenant ApplicationSet in hostyour-cloud
-// (argocd/<stage>/apps/tenants-appset.yaml), which fans out over the `members` of each registration
+// The NAMES here MUST match the tenant ApplicationSet in hostyour-cloud
+// (clusters/argocd/files/tenants-appset.yaml), which fans out over the `members` of each registration
 // registrations/<guid>/<stage>.yaml in catalog: one Application <guid>-<member>-<stage> into
-// namespace <guid>-<member>, carrying that member's sources. EVERY name carries the -<stage> suffix.
+// namespace <guid>-<member>-<stage>, carrying that member's sources. EVERY name carries the -<stage>
+// suffix, the stage being the one the registration path states.
 //
 // Three consumers pivot on this module and MUST agree:
 //   1. the tenant validator (validate-tenant.ts) renders each resolveFanout member into its own
@@ -75,34 +77,35 @@ export function identityProviderMember(spec: TenantSpec): string {
   return m.name;
 }
 
-/** ONE member's namespace: <guid>-<member>. THE name source — never hand-rolled anywhere else. */
-export function memberNamespace(guid: string, member: string): string {
-  return `${guid}-${member}`;
+/** ONE member's namespace at one stage: <guid>-<member>-<stage>. THE name source — never hand-rolled
+ *  anywhere else. */
+export function memberNamespace(guid: string, member: string, stage: Stage): string {
+  return `${guid}-${member}-${stage}`;
 }
 
 /** ONE member's AppProject. The identity law holds per member: the AppProject name IS the namespace,
  *  so the isolation project and the namespace it permits can never drift apart. */
-export function memberAppProject(guid: string, member: string): string {
-  return memberNamespace(guid, member);
+export function memberAppProject(guid: string, member: string, stage: Stage): string {
+  return memberNamespace(guid, member, stage);
 }
 
-/** ONE member's ArgoCD Application: <guid>-<member>-<stage>. */
 /** The label every namespace and every Application of one tenant carries — the selector the fan-out
  *  watches filter by and the teardown reaps namespaces by. Declared here, with the rest of the tenant's
  *  naming. */
 export const TENANT_LABEL_KEY = "platform/tenant";
 
+/** ONE member's ArgoCD Application: <guid>-<member>-<stage> — the same string as its namespace. */
 export function memberApplication(guid: string, member: string, stage: Stage): string {
-  return `${guid}-${member}-${stage}`;
+  return memberNamespace(guid, member, stage);
 }
 
-/** Every namespace of a tenant — what a teardown reaps and a move carries.
+/** Every namespace of a tenant at one stage — what a teardown reaps and a move carries.
  *
  *  Takes the tenant's member NAMES, which every caller holds already: the tenant's row, its
  *  registration, or the run's frozen params. Never a constant, which would be names of one product
  *  living in the platform. */
-export function tenantNamespaces(members: readonly string[], guid: string): string[] {
-  return members.map((m) => memberNamespace(guid, m));
+export function tenantNamespaces(members: readonly string[], guid: string, stage: Stage): string[] {
+  return members.map((m) => memberNamespace(guid, m, stage));
 }
 
 /** Substitute the ONE token the manifest defines, `{app}`, throughout a source. It reaches every
@@ -167,8 +170,8 @@ export function tenantApplicationSet(members: readonly string[], guid: string, s
 
 /** The resolved members FLATTENED to one entry per chart render — what the validator templates, one
  *  helm invocation each. A member with two sources produces two renders that share the ONE namespace
- *  `<guid>-<member>` and the ONE Application, so the render set and the watch set differ; `member`
- *  is what they agree on.
+ *  `<guid>-<member>-<stage>` and the ONE Application, so the render set and the watch set differ;
+ *  `member` is what they agree on.
  *
  *  The value-file layering matches the appset exactly: the chart's own values.yaml, then
  *  values-<stage>.yaml, then whatever the source declares. */

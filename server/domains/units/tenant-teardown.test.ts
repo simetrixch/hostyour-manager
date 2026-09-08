@@ -4,7 +4,6 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, REPLACE_TEARDOWN, type TenantTeardownTarget, type TenantTeardownOpts } from "./tenant-teardown.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import { memberAppProject, tenantApplicationSet } from "./tenant-fanout.ts";
@@ -15,7 +14,6 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { Stage } from "../../../shared/enums.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, TEST_QUOTA } from "./tenant-members.fixture.ts";
 
@@ -41,16 +39,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-/** A cluster-marking resolver that answers from a literal name -> stage map — mirrors registrations.test.ts's
- *  helper. Every registration this file commits targets "s1" at "prod". */
-function marked(byName: Record<string, Stage>): ClusterStageResolver {
-  return async (cluster: string) => {
-    const stage = byName[cluster];
-    if (!stage) throw new Error(`no cluster map for "${cluster}"`);
-    return { name: cluster, stage };
-  };
-}
-const CLUSTERS = marked({ s1: "prod" });
 
 function entry(over: Partial<TenantRegistration> = {}): TenantRegistration {
   return {
@@ -143,7 +131,7 @@ async function runUntilThrow(steps: Step[], logs: string[]): Promise<void> {
 
 describe("tenantTeardownSteps — the step-name prefix", () => {
   it("names every step <stepPrefix>-<guid>-<suffix>, so two teardowns in ONE run cannot collide", () => {
-    const prt = ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS));
+    const prt = ports(new TenantRegistrations(new FakePlatformRepo()));
     const other = "e2e8ymj86dk8";
     const names = [
       ...tenantTeardownSteps(prt, target(), REPLACE_TEARDOWN, []),
@@ -162,7 +150,7 @@ describe("tenantTeardownSteps — the step-name prefix", () => {
     // REAP is fail-soft, so it carries the one extra step the loud flavours do not: the settle guard that
     // re-reads the fan-out after the cascade, because only a fail-soft run can reach the record step with
     // its prune unproven.
-    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)), target(), REAP, []);
+    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target(), REAP, []);
     expect(steps.map((s) => s.name)).toEqual([
       `reap-${GUID}-remove`, `reap-${GUID}-watch-prune`, `reap-${GUID}-delete-projects`, `reap-${GUID}-verify-prune`, `reap-${GUID}-record`,
     ]);
@@ -178,25 +166,25 @@ describe("tenantTeardownSteps — the relocation mark", () => {
   const MARK = "platform.hostyour.cloud/relocating";
   function markedCluster(): FakeClusterReader {
     const c = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
-    for (const m of MEMBERS) c.namespaceAnnotations.set(`${GUID}-${m}`, { [MARK]: "true" });
+    for (const m of MEMBERS) c.namespaceAnnotations.set(`${GUID}-${m}-prod`, { [MARK]: "true" });
     return c;
   }
   it("the remove step clears the mark on every member namespace BEFORE it removes the pointer", async () => {
     const cluster = markedCluster();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const logs: string[] = [];
     await step(tenantTeardownSteps(ports(reg, { cluster }), target(), REAP, []), REAP, "remove").run(ctx("remove", logs));
-    expect(MEMBERS.every((m) => cluster.namespaceAnnotations.get(`${GUID}-${m}`)?.[MARK] === undefined)).toBe(true);
+    expect(MEMBERS.every((m) => cluster.namespaceAnnotations.get(`${GUID}-${m}-prod`)?.[MARK] === undefined)).toBe(true);
     expect(logs.findIndex((l) => l.includes(`${MARK} cleared`))).toBeLessThan(logs.findIndex((l) => l.includes("pointer removed")));
   });
 
   it("clears the mark even when the pointer is already gone — a purge reaps that tenant's namespaces too", async () => {
     const cluster = markedCluster();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS); // no tenant.yaml committed
+    const reg = new TenantRegistrations(new FakePlatformRepo()); // no tenant.yaml committed
     const logs: string[] = [];
     await step(tenantTeardownSteps(ports(reg, { cluster }), target(), REAP, []), REAP, "remove").run(ctx("remove", logs));
-    expect(MEMBERS.every((m) => cluster.namespaceAnnotations.get(`${GUID}-${m}`)?.[MARK] === undefined)).toBe(true);
+    expect(MEMBERS.every((m) => cluster.namespaceAnnotations.get(`${GUID}-${m}-prod`)?.[MARK] === undefined)).toBe(true);
     expect(logs.some((l) => l.includes("pointer already removed"))).toBe(true);
   });
 });
@@ -217,7 +205,7 @@ describe("tenantTeardownSteps — the cascade and the record step's place", () =
   }
 
   it("places the cascade BETWEEN delete-projects and record, so the row flip is the LAST step", () => {
-    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)), target(), REAP, cascade([]));
+    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target(), REAP, cascade([]));
     expect(steps.map((s) => s.name)).toEqual([
       `reap-${GUID}-remove`, `reap-${GUID}-watch-prune`, `reap-${GUID}-delete-projects`,
       "delete-namespaces", "delete-tenant-crypto",
@@ -234,7 +222,7 @@ describe("tenantTeardownSteps — the cascade and the record step's place", () =
     // orphan scan either, because the FIRST teardown step already git-rm'd its pointer. The tenant would
     // still be running, with nothing in the product able to name it again.
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const ran: string[] = [];
     const steps = tenantTeardownSteps(ports(reg), target(), REAP, cascade(ran, "delete-namespaces"));
@@ -250,24 +238,24 @@ describe("tenantTeardownSteps — the cascade and the record step's place", () =
 
 describe("tenantTeardownSteps — the prune policy", () => {
   it("fail-loud THROWS when the fan-out still stands (the replace must not deploy onto a served FQDN)", async () => {
-    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS), { argo: lingeringArgo() }), target(), REPLACE_TEARDOWN, []);
+    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo()), { argo: lingeringArgo() }), target(), REPLACE_TEARDOWN, []);
     await expect(step(steps, REPLACE_TEARDOWN, "watch-prune").run(ctx("watch-prune", []))).rejects.toThrow(/fan-out was not pruned/);
   });
 
   it("fail-soft OBSERVES the same lingering fan-out and continues (an orphan never prunes cleanly)", async () => {
     const logs: string[] = [];
-    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS), { argo: lingeringArgo() }), target(), REAP, []);
+    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo()), { argo: lingeringArgo() }), target(), REAP, []);
     await step(steps, REAP, "watch-prune").run(ctx("watch-prune", logs)); // must NOT throw
     expect(logs.some((l) => l.includes("fan-out was not pruned") && l.includes("continuing"))).toBe(true);
   });
 
   it("fail-loud propagates a watch READ failure; fail-soft records it and continues", async () => {
     const argo = new FakeMasterArgoReader({ throwOnSet: new Error("argocd unreachable") });
-    const loud = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS), { argo }), target(), REPLACE_TEARDOWN, []);
+    const loud = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo()), { argo }), target(), REPLACE_TEARDOWN, []);
     await expect(step(loud, REPLACE_TEARDOWN, "watch-prune").run(ctx("watch-prune", []))).rejects.toThrow(/argocd unreachable/);
 
     const logs: string[] = [];
-    const soft = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS), { argo }), target(), REAP, []);
+    const soft = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo()), { argo }), target(), REAP, []);
     await step(soft, REAP, "watch-prune").run(ctx("watch-prune", logs));
     expect(logs.some((l) => l.includes("could not confirm the fan-out prune") && l.includes("argocd unreachable"))).toBe(true);
   });
@@ -278,7 +266,7 @@ describe("tenantTeardownSteps — the prune policy", () => {
     // still reference it — and, for the replace, deploy a fresh guid onto the public FQDN the old
     // fan-out is still serving. Every fail-loud target legitimately carries at least base + auth, so an
     // empty set means the resolution proved nothing.
-    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)), target({ watchNames: [] }), REPLACE_TEARDOWN, []);
+    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target({ watchNames: [] }), REPLACE_TEARDOWN, []);
     await expect(step(steps, REPLACE_TEARDOWN, "watch-prune").run(ctx("watch-prune", []))).rejects.toThrow(/EMPTY fan-out watch set/);
   });
 
@@ -286,7 +274,7 @@ describe("tenantTeardownSteps — the prune policy", () => {
     // The purge flavour reaps the Tenant CR + namespace by guid afterwards, so it must NOT stall on a
     // tenant whose fan-out cannot be named at all (a create-tenant that died before write-registration).
     const logs: string[] = [];
-    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)), target({ watchNames: [] }), REAP, []);
+    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target({ watchNames: [] }), REAP, []);
     await step(steps, REAP, "watch-prune").run(ctx("watch-prune", logs));
     expect(logs.some((l) => l.includes("fan-out pruned (0 Application(s))"))).toBe(true);
   });
@@ -294,7 +282,7 @@ describe("tenantTeardownSteps — the prune policy", () => {
   it("both policies pass a fan-out that IS pruned (every expected name reads Missing)", async () => {
     for (const opts of [REPLACE_TEARDOWN, REAP]) {
       const logs: string[] = [];
-      const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)), target(), opts, []);
+      const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target(), opts, []);
       await step(steps, opts, "watch-prune").run(ctx("watch-prune", logs));
       expect(logs.some((l) => l.includes(`fan-out pruned (${WATCH.length} Application(s))`))).toBe(true);
     }
@@ -315,7 +303,7 @@ describe("tenantTeardownSteps — the settle guard", () => {
     // refuse to RECORD: the guard throws before the flip, so the row is untouched and the failed run is
     // retryable from this very step.
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const steps = tenantTeardownSteps(ports(reg, { argo: lingeringArgo() }), target(), REAP, []);
 
@@ -335,7 +323,7 @@ describe("tenantTeardownSteps — the settle guard", () => {
     // as loudly as one that settles over a lingering fan-out.
     seedTenantRow();
     const steps = tenantTeardownSteps(
-      ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS), { argo: new FakeMasterArgoReader({ throwOnSet: new Error("argocd unreachable") }) }),
+      ports(new TenantRegistrations(new FakePlatformRepo()), { argo: new FakeMasterArgoReader({ throwOnSet: new Error("argocd unreachable") }) }),
       target(), REAP, [],
     );
     await expect(runUntilThrow(steps, [])).rejects.toThrow(/could not confirm the fan-out of reaped tenant .* is gone \(argocd unreachable\)/);
@@ -348,7 +336,7 @@ describe("tenantTeardownSteps — the settle guard", () => {
     // gone one — so a purge that had to force the reap still settles its row and still ends SUCCEEDED.
     seedTenantRow();
     const logs: string[] = [];
-    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)), target(), REAP, []);
+    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target(), REAP, []);
     await runUntilThrow(steps, logs);
     expect(logs.some((l) => l.includes(`fan-out confirmed gone (${WATCH.length} Application(s))`))).toBe(true);
     expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()?.status).toBe("offboarded");
@@ -360,7 +348,7 @@ describe("tenantTeardownSteps — the settle guard", () => {
     // invent a read — nor block the settle over a set that was empty by design.
     seedTenantRow();
     const logs: string[] = [];
-    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS), { argo: lingeringArgo() }), target({ watchNames: [] }), REAP, []);
+    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo()), { argo: lingeringArgo() }), target({ watchNames: [] }), REAP, []);
     await runUntilThrow(steps, logs);
     expect(logs.some((l) => l.includes("named no fan-out Application — nothing to verify"))).toBe(true);
     expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()?.status).toBe("offboarded");
@@ -377,7 +365,7 @@ describe("tenantTeardownSteps — the settle guard", () => {
   it("the LOUD flavours have no guard at all — their watch already proved it, and a second read is pure cost", () => {
     // create-tenant's replace + abort teardowns pay nothing for this: reaching their record step is itself
     // the proof, since their watch THREW on a fan-out that did not prune.
-    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)), target(), REPLACE_TEARDOWN, []);
+    const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target(), REPLACE_TEARDOWN, []);
     expect(steps.map((s) => s.name)).not.toContain(`replace-${GUID}-verify-prune`);
   });
 });
@@ -385,7 +373,7 @@ describe("tenantTeardownSteps — the settle guard", () => {
 describe("tenantTeardownSteps — the wording", () => {
   it("renders the flavour into every step title and into the run log", async () => {
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const steps = tenantTeardownSteps(ports(reg), target(), REAP, []);
     expect(steps.map((s) => s.title)).toEqual([
@@ -407,20 +395,20 @@ describe("tenantTeardownSteps — the wording", () => {
 describe("tenantTeardownSteps — a full non-replace teardown", () => {
   it("removes the registration, deletes EVERY member AppProject and flips the rows offboarded (kept)", async () => {
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const projects = new FakeMasterProjectWriter();
     for (const member of MEMBERS) {
-      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
+      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
     }
-    for (const member of MEMBERS) expect(projects.get(ARGO_NS, memberAppProject(GUID, member))).toBeDefined();
+    for (const member of MEMBERS) expect(projects.get(ARGO_NS, memberAppProject(GUID, member, "prod"))).toBeDefined();
 
     const logs: string[] = [];
     for (const s of tenantTeardownSteps(ports(reg, { projects }), target(), REAP, [])) await s.run(ctx(s.name, logs));
 
     expect(await reg.readTenant("prod", GUID)).toBeNull(); // registration git-rm'd
     // ALL of them — a project the teardown could not name would outlive the tenant it fenced.
-    for (const member of MEMBERS) expect(projects.get(ARGO_NS, memberAppProject(GUID, member))).toBeUndefined();
+    for (const member of MEMBERS) expect(projects.get(ARGO_NS, memberAppProject(GUID, member, "prod"))).toBeUndefined();
     const row = db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get();
     expect(row?.status).toBe("offboarded"); // soft state — the row is KEPT
     expect(row?.lastRunId).toBe("run_td");
@@ -429,7 +417,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
 
   it("deletes the tenant's argo-sync grant beside its AppProjects — no Role naming this guid's Applications outlives it", async () => {
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const buildRbac = new FakeBuildRbacWriter();
     await buildRbac.applyBuildRbac([renderTenantArgoSync({ guid: GUID, applications: WATCH, argoNamespace: ARGO_NS, units: ["example-platform"] })]);
@@ -449,7 +437,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
     // deprovisioned tenant stayed on the Tenants page's "Offboarded tenants" panel and went on offering
     // the purge that had just completed — the most destructive run kind in the product looking like a no-op.
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const steps = tenantTeardownSteps(ports(reg), target(), REAP_PURGED, []);
 
@@ -473,7 +461,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
     // record with another's, and restamping it with a run id that deleted nothing.
     seedTenantRow();
     db.db.insert(tenantApps).values({ id: "tna_gone", tenantId: "tnt_1", name: "web", status: "purged", lastRunId: "run_tpurge" }).run();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     for (const s of tenantTeardownSteps(ports(reg), target(), REAP, [])) await s.run(ctx(s.name, []));
 
@@ -506,7 +494,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
     const logs: string[] = [];
     // The abort's own target shape: no row id, so the record step MUST take the (clusterId, guid)
     // fallback — the path that carried no status filter at all.
-    for (const s of tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)), target({ tenantId: null }), REAP, [])) {
+    for (const s of tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target({ tenantId: null }), REAP, [])) {
       await s.run(ctx(s.name, logs));
     }
 
@@ -535,7 +523,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
     db.db.update(tenantApps).set({ status: "offboarded", lastRunId: "run_off" }).where(eq(tenantApps.id, "tna_erp")).run();
 
     const logs: string[] = [];
-    for (const s of tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)), target(), REAP_PURGED, [])) {
+    for (const s of tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target(), REAP_PURGED, [])) {
       await s.run(ctx(s.name, logs));
     }
 
@@ -547,7 +535,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
   });
 
   it("tolerates the ORPHAN: no inventory row to flip, the GitOps + cluster footprint still goes", async () => {
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS); // no seedTenantRow ⇒ nothing in inventory
+    const reg = new TenantRegistrations(new FakePlatformRepo()); // no seedTenantRow ⇒ nothing in inventory
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const logs: string[] = [];
     for (const s of tenantTeardownSteps(ports(reg), target({ tenantId: null }), REAP, [])) await s.run(ctx(s.name, logs));
@@ -557,7 +545,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
   });
 
   it("is re-runnable: a second pass skips the already-removed pointer instead of throwing", async () => {
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS); // pointer never committed ⇒ already absent
+    const reg = new TenantRegistrations(new FakePlatformRepo()); // pointer never committed ⇒ already absent
     const logs: string[] = [];
     for (const s of tenantTeardownSteps(ports(reg), target({ tenantId: null }), REAP, [])) await s.run(ctx(s.name, logs));
     expect(logs.some((l) => l.includes("pointer already removed") && l.includes("resume"))).toBe(true);
@@ -569,7 +557,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
     // step AND inside removeTenant), leaving the broken tenant deployed forever; the tolerant scan
     // reports "unreadable", which is NOT "absent" and so still git-rm's.
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     repo.seed(repo.booksBranch, `registrations/${GUID}/prod.yaml`, 'cluster: "s1"\nsubdomain: 7\n'); // subdomain must be a string
     const logs: string[] = [];

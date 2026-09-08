@@ -5,7 +5,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
 import { renderSmtpOpsGrant } from "./build-rbac.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
@@ -18,23 +18,22 @@ import type { VaultSeeder, VaultSeedOutcome, BuildRepoPatDeleteInput, AppSecrets
 
 // The SCOPE half of offboard — split from offboard.run.test.ts, whose fixtures are all single-stage.
 // An offboard removes ONE STAGE of a unit, and a unit deployed at two stages is two of some things and
-// one of others. Per stage, because a cluster carries exactly one stage and the unit's stages therefore
-// stand on different clusters: the registration, the Application, the repository credential, the
-// namespace, the DNS record, the <stage>/consumer/<name>/* Vault entries and the apps row. Per UNIT,
-// one copy shared by every stage: the mail-ops grant in the relay's namespace,
+// one of others. Per stage, every object whose name carries the stage: the registration, the
+// Application, the repository Secret repo-<name>-<stage>, the namespace <name>-<stage>, the host
+// <name>-<stage>.<unitApex>, the mail-ops grant <name>-<stage>-smtp-ops in the relay's namespace, the
+// <stage>/consumer/<name>/* Vault entries and the apps row. Per UNIT, one copy shared by every stage:
 // secret/build/<name>/repo-pat, the ONE build webhook on the consumer repo, and the release kit
 // committed into it. (The AppProject, the admission policy and the three build grants are on neither
-// list any more: they render from the registration and go with it, hostyour-cloud#174.) These tests hold both halves: offboarding prod
-// while dev stands leaves dev everything it releases and deploys through, and offboarding dev afterwards
-// — the unit's last stage — takes the shared set with it.
+// list any more: they render from the registration and go with it, hostyour-cloud#174.) The two stages
+// stand on two clusters here, but nothing requires that — the stage is the unit's, the cluster any
+// active one. These tests hold both halves: offboarding prod while dev stands leaves dev everything it
+// releases and deploys through, and offboarding dev afterwards — the unit's last stage — takes the
+// shared set with it.
 
 let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-// The unit's two stages stand on two clusters, so the stage boundary is asked about both: s1 is the
-// prod cluster (the offboard target) and s2 the dev one (the stage that must survive).
-const twoStageClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: cluster === "s2" ? "dev" : "prod" });
 
 const REPO = "https://github.com/x/acme.git";
 const KIT_PATHS = ["release/release.sh", ".github/workflows/release.yml"];
@@ -76,19 +75,18 @@ function seedProdApp(): void {
   db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_prod" }).run();
 }
 
-/** dev: its OWN server, cluster and row (app_2) — a cluster carries exactly one stage, so the unit's
- *  second stage cannot share s1. The row the "last stage" offboard is driven from. */
+/** dev: its OWN server, cluster and row (app_2) on s2. The row the "last stage" offboard is driven from. */
 function seedDevApp(): void {
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "dev", domain: "s2.example", status: "active" }).run();
   db.db.insert(apps).values({ id: "app_2", clusterId: "cls_2", name: "acme", stage: "dev", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_dev" }).run();
 }
 
-/** The one grant the Manager still writes, as the two onboards left it: ONE mail-ops pair for the
- *  unit, in the relay's namespace, shared by both stages. */
+/** The one grant the Manager still writes, as the two onboards left it: one mail-ops pair PER STAGE,
+ *  both in the relay's namespace. */
 async function seedBuildGrants(): Promise<FakeBuildRbacWriter> {
   const buildRbac = new FakeBuildRbacWriter();
-  await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+  await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" }), renderSmtpOpsGrant({ name: "acme", stage: "dev" })]);
   return buildRbac;
 }
 
@@ -125,7 +123,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
   it("leaves the other stage everything it needs to build, release and deploy", async () => {
     seedProdApp();
     const platform = new FakePlatformRepo();
-    const reg = new Registrations(platform, twoStageClusterStage);
+    const reg = new Registrations(platform);
     await seedTwoStages(reg);
 
     const buildRbac = await seedBuildGrants();
@@ -136,8 +134,8 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
     const seeder = new FakeSeeder();
     const dns = new FakeDnsProvider();
-    dns.seed("acme.s1.example", "A", "203.0.113.10"); // prod's own host
-    dns.seed("acme.s2.example", "A", "203.0.113.20"); // dev's — under the OTHER cluster's apex
+    dns.seed("acme-prod.s1.example", "A", "203.0.113.10"); // prod's own host
+    dns.seed("acme-dev.s2.example", "A", "203.0.113.20"); // dev's — under the OTHER cluster's apex
     const revoked: string[] = [];
     const creds = {
       open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")),
@@ -153,7 +151,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
 
     // PER STAGE — prod's own objects are gone.
     expect(await reg.readRegistration("prod", "acme")).toBeNull();
-    expect(dns.record("acme.s1.example", "A")).toBeUndefined();
+    expect(dns.record("acme-prod.s1.example", "A")).toBeUndefined();
     expect(seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]);
     expect(db.db.select().from(apps).where(eq(apps.id, "app_1")).get()?.status).toBe("offboarded");
     // The sealed clone credential is the ROW's own — every stage's onboard seals its own — so revoking
@@ -163,24 +161,25 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     // PER UNIT — everything dev still releases and deploys through is untouched.
     expect(await reg.readRegistration("dev", "acme")).not.toBeNull();
     expect(platform.read(platform.booksBranch, "registrations/acme/build.yaml")).not.toBeNull();
+    // The mail-ops grant is per stage: prod's pair went with prod, dev's pair stands.
     expect(buildRbac.keys()).toEqual([
-      "Role postfix/acme-smtp-ops",
-      "RoleBinding postfix/acme-smtp-ops",
+      "Role postfix/acme-dev-smtp-ops",
+      "RoleBinding postfix/acme-dev-smtp-ops",
     ]);
     expect(github.hooksFor("x", "acme")).toHaveLength(1);
     expect(github.deletedCalls).toEqual([]);
     expect(consumerRepo.commits).toEqual([]);
     expect(seeder.deleted).toEqual([]);
-    expect(dns.record("acme.s2.example", "A")).toBeDefined();
-    // One skip line per per-unit cleanup: the mail-ops grant, the webhook, the release kit, the PAT.
-    expect(logs.filter((l) => l.includes("stays registered at dev"))).toHaveLength(4);
+    expect(dns.record("acme-dev.s2.example", "A")).toBeDefined();
+    // One skip line per per-unit cleanup: the webhook, the release kit, the PAT.
+    expect(logs.filter((l) => l.includes("stays registered at dev"))).toHaveLength(3);
   });
 
   it("removes what the stages shared once the LAST stage is offboarded", async () => {
     seedProdApp();
     seedDevApp();
     const platform = new FakePlatformRepo();
-    const reg = new Registrations(platform, twoStageClusterStage);
+    const reg = new Registrations(platform);
     await seedTwoStages(reg);
 
     const buildRbac = await seedBuildGrants();

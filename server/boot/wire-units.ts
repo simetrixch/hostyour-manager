@@ -5,7 +5,7 @@ import type { CredentialStore } from "../security/store.ts";
 import type { Db } from "../db/client.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
 import { GitRepoReader, GitPlatformRepo, GitConsumerRepo } from "../adapters/git/git.ts";
-import type { PlatformRepo } from "../adapters/git/port.ts";
+import type { PlatformRepo, RepoReader } from "../adapters/git/port.ts";
 import { KubeBuildRbacWriter } from "../adapters/kube/kube-rbac.ts";
 import { KubeRepoCredentialWriter } from "../adapters/kube/kube-repo-credential.ts";
 import { CloudflareDns } from "../adapters/dns/cloudflare-dns.ts";
@@ -15,6 +15,7 @@ import { readClusterValueChain } from "../domains/inventory/cluster-value-chain.
 import { unitApexFromChain } from "../domains/units/admission-policy.ts";
 import type { Stage } from "../../shared/enums.ts";
 import { buildPlaneFqdnFromMarkings } from "../domains/inventory/cluster-marking.ts";
+import { readChannelStages } from "../domains/inventory/channel-stages.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
 import type { ClusterKubeResolver } from "../adapters/kube/port.ts";
 import { masterKubeInput, type MasterKubeClients } from "./master-kube.ts";
@@ -27,9 +28,8 @@ import { HttpActivator } from "../adapters/activation/activation-http.ts";
 import type { Activator } from "../adapters/activation/port.ts";
 import { HttpGitHubConsumer } from "../adapters/github-consumer/github-consumer-http.ts";
 import { HelmCliRenderer } from "../adapters/helm/helm.ts";
-import { Registrations, clusterStageFromMarkings } from "../domains/units/registrations.ts";
+import { Registrations } from "../domains/units/registrations.ts";
 import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
-import type { ClusterStageResolver } from "../domains/units/registrations.ts";
 import { makeOnboardDef, type OnboardPorts } from "../domains/units/onboard.run.ts";
 import { makeOffboardDef } from "../domains/units/offboard.run.ts";
 import { makePurgeDef } from "../domains/units/purge.run.ts";
@@ -140,6 +140,11 @@ export interface UnitsWiring {
    *  SAME Registrations the consumer runs commit through. Undefined when consumer onboarding is not
    *  configured; the scan route then degrades to an empty result with a reason. */
   registrations?: Registrations;
+  /** The CONSUMER family's repository reader, threaded to registerConsumerRoutes so the wizard's
+   *  prefill (POST /api/consumers/prefill) reads a consumer repository's version before any run
+   *  exists — the SAME GitRepoReader the onboard run clones with. Undefined when consumer
+   *  onboarding is not configured; the prefill route then answers 501. */
+  repoReader?: RepoReader;
   /** A cluster's public unit apex (global.unitApex off its values chain), threaded to
    *  registerTenantRoutes so POST /api/tenants/:id/invite-admin addresses the tenant's example-auth at
    *  `auth.<subdomain>.<unitApex>` — the host the member's chart renders. The SAME resolver the tenant
@@ -172,6 +177,9 @@ interface Family {
   /** Present only for the consumer family — the registration registrations its detected-scan read route
    *  diffs against the inventory. Undefined when the family is not configured. */
   registrations?: Registrations;
+  /** Present only for the consumer family — the repository reader its prefill route clones with.
+   *  Undefined when the family is not configured. */
+  repoReader?: RepoReader;
   /** Present only for the tenant family — bring the catalog's books branch into being and to the
    *  catalog's trunk, so the tenant ApplicationSet's git generator has a revision to resolve before
    *  the first tenant exists and the member charts on that revision are the current ones. It crosses
@@ -224,10 +232,6 @@ export function buildUnits(
       openCredential: () => Promise.resolve(Buffer.from(config.github!.token, "utf8")),
     })
     : undefined;
-  // The stage boundary is enforced at BOTH registration writers, and both read the SAME cluster
-  // markings (clusters/active/<fqdn>.yaml on the platform repo). The tenant registrations's own repo is
-  // catalog, so it takes this resolver rather than a second PlatformRepo it could then write to.
-  const clusterStage = platformRepo ? clusterStageFromMarkings(platformRepo) : undefined;
   // The unit DNS provider — ONE Cloudflare client for both families' provision-dns and
   // remove-dns steps. Absent (no token) ⇒ those steps fail loud (DNS is a mandatory part of the
   // run kinds), never a silent skip.
@@ -270,8 +274,8 @@ export function buildUnits(
       ? { self: { addr: config.vault.addr, k8sAuthMount: config.vault.k8sAuthMount, k8sRole: config.vault.k8sRole, saTokenPath: config.vault.saTokenPath } }
       : {},
   );
-  const tenant = buildTenantOnboarding(config, activator, logger, platformRepo, clusterStage, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, kube);
-  const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, clusterStage, dns, relocation, tenant.tenantRegistrations, seeder, kube);
+  const tenant = buildTenantOnboarding(config, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, kube);
+  const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube);
   // The sanctioned type-erasure (registrations.ts): each typed RunDefinition<P> is stored executor-facing
   // as AnyRunDefinition; the executor parses params via paramsSchema before plan()/steps(). Both
   // families share one flat defs[] — the run kinds are disjoint, so buildRunDefinitions keys them apart.
@@ -283,6 +287,7 @@ export function buildUnits(
     tenantEnabled: tenant.enabled,
     ...(consumer.resolver ? { resolver: consumer.resolver } : {}),
     ...(consumer.registrations ? { registrations: consumer.registrations } : {}),
+    ...(consumer.repoReader ? { repoReader: consumer.repoReader } : {}),
     ...(tenant.resolver ? { tenantResolver: tenant.resolver } : {}),
     ...(tenant.catalogRepoUrl ? { catalogRepoUrl: tenant.catalogRepoUrl } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
@@ -302,7 +307,6 @@ function buildConsumerOnboarding(
   activator: Activator,
   logger: Logger,
   platformRepo: PlatformRepo | undefined,
-  clusterStage: ClusterStageResolver | undefined,
   dns: DnsProvider | undefined,
   relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage">,
   tenantRegistrations: TenantRegistrations | undefined,
@@ -312,13 +316,13 @@ function buildConsumerOnboarding(
   /** The master-local clients and the one resolver over them, built in the composition root. */
   kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
 ): Family {
-  if (!config.onboarding || !config.github || !platformRepo || !clusterStage) return { defs: [], enabled: false };
+  if (!config.onboarding || !config.github || !platformRepo) return { defs: [], enabled: false };
 
   // Opens a SEALED credential (a private-repo read credential, a slave's cluster bearer) by id.
   const openCredential = (id: string): Promise<Buffer> => store.open(id, { purpose: "consumer-onboard" });
 
   const repo = new GitRepoReader({ openCredential });
-  const registrations = new Registrations(platformRepo, clusterStage);
+  const registrations = new Registrations(platformRepo);
   // WHERE the build webhook points. The image-builder EventListener stands on ONE cluster, and every
   // cluster's map names it in `build-plane`, so onboard (create) and offboard/purge (delete) read the
   // host off the same map instead of composing it from the cluster a unit happens to deploy on.
@@ -429,6 +433,9 @@ function buildConsumerOnboarding(
     // (domains/units/first-master.ts holds the other three conditions). Omitted when unset, so a
     // Manager that does not install first masters carries no such branch at all.
     ...(config.platformUnitName ? { platformUnitName: config.platformUnitName } : {}),
+    // The channel ceiling, read off the platform repo's trunk per plan — the same read the wizard's
+    // GET /api/consumers/channels serves, so the plan refuses exactly what the wizard did not offer.
+    channelStages: () => readChannelStages(platformRepo),
     // The manager-side bound of the validation poll — a margin above the sandbox job budget
     // (see the GATE_* pair above).
     validationBudgetMs: GATE_POLL_BUDGET_MS,
@@ -507,8 +514,9 @@ function buildConsumerOnboarding(
 
   // The resolver rides out so the consumer routes' live reconciliation read can resolve per-cluster
   // access at request time (the same resolver the runs already resolve through); the registrations rides
-  // out so the detected scan (GET /api/consumers/detected) diffs the very pointers the runs commit.
-  return { defs, enabled: true, resolver, registrations };
+  // out so the detected scan (GET /api/consumers/detected) diffs the very pointers the runs commit;
+  // the repository reader rides out so the wizard's prefill clones with the reader the run clones with.
+  return { defs, enabled: true, resolver, registrations, repoReader: repo };
 }
 
 // ---- Tenant (multi-app) onboarding: catalog + the manager-side HelmRenderer ----
@@ -517,7 +525,6 @@ function buildTenantOnboarding(
   activator: Activator,
   logger: Logger,
   platformRepo: PlatformRepo | undefined,
-  clusterStage: ClusterStageResolver | undefined,
   dns: DnsProvider | undefined,
   resolveUnitApex: ((domain: string, stage: Stage) => Promise<string>) | undefined,
   resolveClusterValueFiles: ((domain: string, stage: Stage) => Promise<ClusterValueFile[]>) | undefined,
@@ -529,12 +536,9 @@ function buildTenantOnboarding(
   /** The master-local clients and the one resolver over them, built in the composition root. */
   kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
 ): Family {
-  // A tenant registration names a cluster, and that name is checked against the cluster's marking at
-  // the writer — so without a resolver for those markings the family stays off rather than writing a
-  // registration nothing checked. The platform repo coordinates are required for the same kind of
-  // reason: every member AppProject must allow the `$values` source its Application pulls from, and a
-  // project written without it would fail every sync.
-  if (!config.catalog || !platformRepo || !clusterStage || !resolveUnitApex || !resolveClusterValueFiles || !config.github) return { defs: [], enabled: false };
+  // The platform repo coordinates are required: every member AppProject must allow the `$values`
+  // source its Application pulls from, and a project written without it would fail every sync.
+  if (!config.catalog || !platformRepo || !resolveUnitApex || !resolveClusterValueFiles || !config.github) return { defs: [], enabled: false };
 
   const repoURL = config.catalog.repoURL;
   const platformRepoURL = `https://github.com/${config.github.owner}/${config.github.repo}.git`;
@@ -602,7 +606,7 @@ function buildTenantOnboarding(
   // THE ONLY MOMENT AN INSTALLATION MOVES ONTO NEWER MEMBER CHARTS: a change on the catalog's trunk
   // reaches a tenant at the Manager's next boot and at no other time.
   const carryTrunkToBooksBranch = (): Promise<void> => deployRepo.carryTrunkToBooksBranch();
-  const tenantRegistrations = new TenantRegistrations(deployRepo, clusterStage);
+  const tenantRegistrations = new TenantRegistrations(deployRepo);
   // Tenants only ever land on slaves (POLICY), so per-slave resolution is the path that matters
   // here; the master trio still backs the master-local argoReader/projectWriter. Both come from the
   // composition root — one resolver serves this family, the consumer family and the cluster run kinds.
@@ -616,7 +620,7 @@ function buildTenantOnboarding(
   // the units that attest the builds the tenant pulls — read off the CONSUMER registration tree on the
   // platform repo (registrations/<unit>/build.yaml), which is where a claim on a build name stands.
   const buildRbac = new KubeBuildRbacWriter(masterKubeInput(config));
-  const registrations = new Registrations(platformRepo, clusterStage);
+  const registrations = new Registrations(platformRepo);
 
   // create-tenant + add-app drive the full port set (git reader + helm + the second platform repo);
   // the kube clients are resolved per target cluster at run time via the resolver.

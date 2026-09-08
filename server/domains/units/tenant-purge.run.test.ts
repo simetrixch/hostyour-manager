@@ -9,14 +9,13 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeTenantPurgeDef, type TenantPurgeParams, type TenantPurgeRequest } from "./tenant-purge.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { FakePlatformRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import type { PlanStreamCtx } from "../../executor/types.ts";
-import type { Stage, TenantStatus } from "../../../shared/enums.ts";
+import type { TenantStatus } from "../../../shared/enums.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
 
@@ -60,16 +59,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-/** A cluster-marking resolver that answers from a literal name -> stage map — mirrors registrations.test.ts's
- *  helper. Both slaves this file commits registrations for are marked "prod". */
-function marked(byName: Record<string, Stage>): ClusterStageResolver {
-  return async (cluster: string) => {
-    const stage = byName[cluster];
-    if (!stage) throw new Error(`no cluster map for "${cluster}"`);
-    return { name: cluster, stage };
-  };
-}
-const CLUSTERS = marked({ s1: "prod", s2: "prod" });
 
 /** The tenant as it stands in GitOps (one app) — committed by the tests that need a pointer. */
 function entry(cluster = "s1"): TenantRegistration {
@@ -157,7 +146,7 @@ async function planned(prt: TenantLifecyclePorts, req: TenantPurgeRequest = REQU
 describe("tenant-purge plan", () => {
   it("plans with cluster targetKind, the ordered steps, the tenant locks and a summary that states the deprovision — with NO tenants row", async () => {
     seedCluster(); // orphan: cluster only, no tenants row
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" }); // a live pointer, never inventoried
     const { params, plan } = await planned(ports(reg));
 
@@ -194,7 +183,7 @@ describe("tenant-purge plan", () => {
 
   it("freezes the INVENTORIED target (tenantId + row-derived cluster) for a tenant the inventory knows", async () => {
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const { params, plan } = await planned(ports(reg));
     expect(params.target.tenantId).toBe("tnt_1");
@@ -211,7 +200,7 @@ describe("tenant-purge plan", () => {
 
   it("plans a guid NEITHER source knows: nothing to git-rm, no fan-out to watch, cluster footprint still reaped", async () => {
     seedCluster(); // no row, and no pointer was ever committed
-    const { params, plan } = await planned(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)));
+    const { params, plan } = await planned(ports(new TenantRegistrations(new FakePlatformRepo())));
     // A guid NEITHER source knows resolves to NO members: nothing here can name them, and a hardcoded
     // trio was only ever true of one product's tenants. The namespace reap asks the cluster by label
     // for whatever is standing, which is what actually finds them.
@@ -222,20 +211,23 @@ describe("tenant-purge plan", () => {
   it("mutating def starts with attest-target under empty params (the armed check does def.steps({}))", () => {
     // guards.assertGuardsArmed evaluates def.steps({})[0].name — building the steps must not deref a
     // frozen target, so this must not throw and the first step must be attest-target.
-    expect(makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS))).steps({} as TenantPurgeParams)[0]?.name).toBe("attest-target");
+    expect(makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo()))).steps({} as TenantPurgeParams)[0]?.name).toBe("attest-target");
   });
 
   it("plan() is a guard — the target must be resolved + frozen by the streaming planner", () => {
     // Refuses the synchronous planning path outright (like create-tenant / add-app): steps() cannot
     // build the shared teardown without a target resolved from the LIVE pointer first.
-    const def = makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)));
+    const def = makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo())));
     expect(() => def.plan({} as TenantPurgeParams, { db: db.db })).toThrow(/planned via planStream/);
   });
 
-  it("fails closed on a stage that disagrees with the target cluster's own stage", async () => {
-    seedCluster(); // cls_1 is prod
-    const def = makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)));
-    await expect(def.planStream!({ guid: GUID, stage: "dev", clusterId: "cls_1" }, planCtx())).rejects.toThrow(/stage mismatch/);
+  it("plans at a stage other than the target cluster's own — the stage is the tenant's, the cluster any active one", async () => {
+    seedCluster(); // cls_1 is marked prod; the tenant stands there at dev
+    const def = makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo())));
+    const result = await def.planStream!({ guid: GUID, stage: "dev", clusterId: "cls_1" }, planCtx());
+    expect(result.outcome).toBe("planned");
+    if (result.outcome !== "planned") return;
+    expect(result.params).toMatchObject({ stage: "dev", target: { stage: "dev", cluster: "s1" } });
   });
 
   it.each(["master", "master+slave"] as const)("PLANS on a cluster carrying the %s role and still reaches the cluster-side deletes", async (role) => {
@@ -244,7 +236,7 @@ describe("tenant-purge plan", () => {
     // and the manager reaches operator.hostyour.cloud on such a cluster through its own ServiceAccount
     // (ClusterRole manager-tenant-reaper) rather than a harvested bearer.
     seedMasterCluster(role);
-    const def = makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS)));
+    const def = makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo())));
     const result = await def.planStream!({ guid: GUID, stage: "prod", clusterId: "cls_m" }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
@@ -255,7 +247,7 @@ describe("tenant-purge plan", () => {
   it("REFUSES to purge a tenant that lives on a DIFFERENT cluster than the one requested", async () => {
     seedCluster();
     seedSecondCluster();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry("s2"), runId: "run_onb" }); // the tenant is on s2
     const def = makeTenantPurgeDef(ports(reg));
     await expect(def.planStream!(REQUEST, planCtx())).rejects.toThrow(/lives on cluster cls_2 \("s2"\).*refusing to purge on the wrong cluster/);

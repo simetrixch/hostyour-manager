@@ -15,14 +15,14 @@ describe("the two cluster-name resolvers", () => {
 
   it("resolves both directions from clusters.domain, NOT from the machine name", () => {
     expect(resolveClusterNameById(db.db, "cls_1")).toBe("s1");
-    expect(resolveClusterIdByName(db.db, "s1", "prod")).toEqual({ clusterId: "cls_1", domain: "s1.example.com" });
+    expect(resolveClusterIdByName(db.db, "s1")).toEqual({ clusterId: "cls_1", domain: "s1.example.com" });
     // The server row is called something else entirely; the short name never comes from it.
-    expect(resolveClusterIdByName(db.db, "box-a", "prod")).toBeNull();
+    expect(resolveClusterIdByName(db.db, "box-a")).toBeNull();
   });
 
-  it("answers null for an unknown cluster and for the right name at the wrong stage", () => {
+  it("answers null for an unknown cluster", () => {
     expect(resolveClusterNameById(db.db, "cls_missing")).toBeNull();
-    expect(resolveClusterIdByName(db.db, "s1", "dev")).toBeNull();
+    expect(resolveClusterIdByName(db.db, "nobody")).toBeNull();
   });
 });
 

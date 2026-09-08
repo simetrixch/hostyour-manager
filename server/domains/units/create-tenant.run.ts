@@ -40,10 +40,12 @@ import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
 
 // The "tenant-create" Run — the tenant analogue of
 // onboard.run.ts. Instead of pinning one consumer chart it fans a single registration out to one
-// SELF-CONTAINED member per trio service and per app: each with its own namespace <guid>-<member>, its
-// own AppProject and its own Application. Everything not per-member — the tenant's Vault path, its
-// databases, its crypto — is either claimed by the member chart that needs it (ServiceClaims) or
-// written by this run itself (the tenant's crypto entry in Vault).
+// SELF-CONTAINED member per trio service and per app: each with its own namespace
+// <guid>-<member>-<stage>, its own AppProject and its own Application. The STAGE is the tenant's
+// own, an input of the request held against nothing but STAGE itself, and the cluster is any active
+// one. Everything not per-member — the tenant's Vault path, its databases, its crypto — is either
+// claimed by the member chart that needs it (ServiceClaims) or written by this run itself (the
+// tenant's crypto entry in Vault).
 // It shares onboard's streaming-plan skeleton: the plan phase runs the long fan-out validation
 // (validate-tenant.ts) gate-by-gate against the approve card, freezes the composed report + resolved
 // pin into params, and settles planned/failed — so plan() is a guard (see planStream).
@@ -99,8 +101,8 @@ export interface TenantOnboardPorts {
    *  part of the run kind), never a silent skip. */
   dns?: DnsProvider;
   /** The public apex (global.unitApex) of the target cluster, read off its values chain on the
-   *  platform repo — the tenant family's own repo is catalog, so the apex arrives as a
-   *  resolver (the cluster-stage boundary's shape). */
+   *  platform repo for the TENANT's stage — the tenant family's own repo is catalog, so the apex
+   *  arrives as a resolver. */
   resolveUnitApex: (domain: string, stage: Stage) => Promise<string>;
   /** The target cluster's values chain off its install branch, read ONCE per plan and folded two
    *  ways: the registry host the fan-out's images are probed in (registryHostFromChain — the
@@ -193,9 +195,13 @@ export const CreateTenantParams = z.object({
 export type CreateTenantParams = z.infer<typeof CreateTenantParams>;
 
 /** The raw operator request from the create-tenant wizard (before the plan mints the guid + resolves
- *  the pin/report). stage + domain are derived from the target cluster row, never trusted from input. */
+ *  the pin/report). The STAGE is the tenant's own and the operator's input; the domain is derived from
+ *  the target cluster row, never trusted from input. */
 export const CreateTenantRequest = z.object({
   clusterId: z.string().startsWith("cls_"),
+  // The tenant's own stage — the registration path registrations/<guid>/<stage>.yaml, every member's
+  // namespace suffix and the Vault path <stage>/tenants/<guid>. Any active cluster takes any stage.
+  stage: z.enum(STAGE),
   subdomain: subdomainSchema,
   owner: z.string().min(1),
   // Per-app seed tiers — each selected app's Reference + Demo checkboxes. Absent ⇒ both false.
@@ -218,7 +224,7 @@ type TenantRecordPhase = "provisional" | "settled";
 
 /** The ONE writer of the tenants + tenant_apps rows, shared by both record steps so "what the run
  *  intends" and "what the run achieved" can never drift into two different row shapes. Overwrite-
- *  idempotent on (clusterId, guid) and (tenantId, name), in ONE tx so a crash leaves it resumable: every
+ *  idempotent on (guid, stage) and (tenantId, name), in ONE tx so a crash leaves it resumable: every
  *  DESCRIPTIVE column (the subdomain, the seed flag, the owner) is rewritten in both phases, because a
  *  resume must converge the row onto the params it is actually running.
  *
@@ -236,7 +242,7 @@ function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase: Tenan
   const status: TenantStatus = settle ? "active" : "provisioning";
   const lifecycle = { status, suspended: false }; // the unit above — a fresh tenant is never suspended
   return localTx(ctx, (tx) => {
-    const existing = tx.select().from(tenants).where(and(eq(tenants.clusterId, p.clusterId), eq(tenants.guid, p.guid))).get();
+    const existing = tx.select().from(tenants).where(and(eq(tenants.guid, p.guid), eq(tenants.stage, p.stage))).get();
     const values = {
       clusterId: p.clusterId, guid: p.guid, subdomain: p.subdomain, stage: p.stage,
       // Every later path that reaches the IdP holds a row, not the manifest.
@@ -269,7 +275,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
   // AppProject per entry — the tenant owns several of each, never one shared pair. Read defensively
   // because the armed check evaluates def.steps({}) with NO params at all.
   const members = (p.members ?? []).map((m) => m.name);
-  const namespaces = members.map((m) => memberNamespace(p.guid, m));
+  const namespaces = members.map((m) => memberNamespace(p.guid, m, p.stage));
   // Idempotent-by-subdomain: PREPEND the shared teardown steps for each existing same-subdomain
   // tenant AFTER attest-target (which must stay step 0) and record-provisional (which must
   // precede every mutation, and a teardown git-rm's a pointer), and BEFORE the onboard proper — so the
@@ -290,8 +296,8 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // Fail closed on an absent/drifted deploy-state (shared assertDeployState, lifecycle.ts).
         // Read it on the TARGET cluster's own reader (a slave over its bearer).
         const { clusterReader } = await ports.resolver.resolve(p.clusterId);
-        const state = assertDeployState(await clusterReader.readDeployState(), p.domain, p.stage, "tenant");
-        ctx.log("meta", `target ${p.domain} (${p.stage}) attested for ${p.guid} — deploy-state generation ${state.generation}`);
+        const state = assertDeployState(await clusterReader.readDeployState(), p.domain, "tenant");
+        ctx.log("meta", `target ${p.domain} attested for ${p.guid} at ${p.stage} — deploy-state generation ${state.generation}`);
       },
     },
     // The execute-time subdomain belt (tenant-replace.ts): a concurrent create-tenant that took the
@@ -371,7 +377,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
       title: "Apply the per-member isolation AppProjects and admission policies",
       run: async (ctx) => {
         // ONE AppProject PER MEMBER, all of them BEFORE the registration: every generated member
-        // Application references .spec.project == <guid>-<member>, and ArgoCD rejects an Application
+        // Application references .spec.project == <guid>-<member>-<stage>, and ArgoCD rejects an Application
         // whose project is absent. Each project permits exactly its own member namespace, so a member's
         // Application cannot deploy into a sibling. Beside each project, the member's
         // ValidatingAdmissionPolicy on the TARGET cluster (the policy is cluster-scoped, so it rides
@@ -387,6 +393,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
           const project = renderTenantAppProject({
             guid: p.guid,
             member,
+            stage: p.stage,
             argoNamespace,
             catalogRepoUrl: p.catalogRepoUrl,
             platformRepoURL: ports.platformRepoURL,
@@ -396,7 +403,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
           const { policy, binding } = renderTenantMemberAdmissionPolicy({ guid: p.guid, member, stage: p.stage });
           await clusterReader.applyAdmissionPolicy(policy, binding);
         }
-        ctx.checkpoint({ appProjects: namespaces, admissionPolicies: members.map((m) => tenantMemberAdmissionPolicyName(p.guid, m)) });
+        ctx.checkpoint({ appProjects: namespaces, admissionPolicies: members.map((m) => tenantMemberAdmissionPolicyName(p.guid, m, p.stage)) });
         ctx.log(
           "meta",
           `${members.length} AppProject(s) + admission policies applied (${namespaces.join(", ")}) — each member is isolated to its own namespace, destination pinned to ${p.cluster}, and its Namespace objects may carry no platform label beyond the stamped set`,
@@ -430,10 +437,10 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
       title: "Provision the tenant's public DNS record",
       run: async (ctx) => {
         // ONE wildcard record per unit: every member sits exactly one level below
-        // <subdomain>.<unitApex> (auth., erp., web., …; nothing lives on the bare <subdomain>), so
-        // `*.<subdomain>.<unitApex>` covers them all — members added later included — and a move
-        // changes one record. The idempotent-by-subdomain replace needs no removal of its own: the
-        // replacing tenant carries the SAME subdomain, so this upsert re-points the standing record.
+        // <subdomain>.<unitApex> (`<member>-<stage>.`; nothing lives on the bare <subdomain>), so
+        // `*.<subdomain>.<unitApex>` covers them all — members and stages added later included — and
+        // a move changes one record. The idempotent-by-subdomain replace needs no removal of its own:
+        // the replacing tenant carries the SAME subdomain, so this upsert re-points the standing record.
         const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
         await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantWildcardHost(p.subdomain, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
       },
@@ -445,8 +452,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // The inverse is already armed (record-provisional registered the shared teardown, whose first
         // step git-rm's exactly this file). ONE file per tenant per stage; the gate report is NOT
         // written to git (it lives in this run's record). Overwrite-idempotent on resume;
-        // TenantRegistrationSchema.parse re-validates as a belt, and commitTenant enforces the stage
-        // boundary against the target cluster's own marking.
+        // TenantRegistrationSchema.parse re-validates as a belt.
         const registration: TenantRegistration = TenantRegistrationSchema.parse({
           cluster: p.cluster,
           subdomain: p.subdomain,
@@ -537,26 +543,26 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
 interface ResolvedCluster {
   clusterId: string;
   domain: string;
-  stage: Stage;
   /** The cluster's SHORT NAME (clusterShortName of its domain, e.g. "s1") — populates the
    *  pointer's `cluster` field and the AppProject destination pin. */
   cluster: string;
 }
 
-/** Resolve the target cluster's context from its row — stage/domain are the cluster's, never trusted
- *  from wizard input (the registration path registrations/<guid>/<stage>.yaml depends on it). Also surfaces the
- *  cluster's SHORT NAME — the ArgoCD destination identity the pointer and the AppProject pin
- *  against. A tenant is placed on ANY active cluster whatever role it carries; the cluster must be
- *  ACTIVE, because a tenant that is not yet (or no longer) reachable cannot be created on it. */
+/** Resolve the target cluster's context from its row — the domain is the cluster's, never trusted
+ *  from wizard input, and the cluster's `stage` column is the platform's and is not read: the
+ *  tenant's stage is the request's. Also surfaces the cluster's SHORT NAME — the ArgoCD destination
+ *  identity the pointer and the AppProject pin against. A tenant is placed on ANY active cluster
+ *  whatever role or stage it carries; the cluster must be ACTIVE, because a tenant that is not yet (or
+ *  no longer) reachable cannot be created on it. */
 function resolveCluster(db: Db, clusterId: string): ResolvedCluster {
   const row = db
-    .select({ id: clusters.id, domain: clusters.domain, stage: clusters.stage, status: clusters.status })
+    .select({ id: clusters.id, domain: clusters.domain, status: clusters.status })
     .from(clusters)
     .where(eq(clusters.id, clusterId))
     .get();
   if (!row) throw errNotFound(`cluster ${clusterId}`);
   if (row.status !== "active") throw errValidation(`cluster ${clusterId} is not active (status "${row.status}")`);
-  return { clusterId: row.id, domain: row.domain, stage: row.stage, cluster: clusterShortName(row.domain) };
+  return { clusterId: row.id, domain: row.domain, cluster: clusterShortName(row.domain) };
 }
 
 /** Mint a guid the registrations tree does not already hold at this stage. The 32^12 CSPRNG space makes
@@ -591,16 +597,18 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
     planStream: async (rawParams, ctx) => {
       const req = CreateTenantRequest.parse(rawParams);
       const rc = resolveCluster(ctx.db, req.clusterId);
-      const clusterValueFiles = await ports.resolveClusterValueFiles(rc.domain, rc.stage);
+      // The chain is (the cluster's domain, the TENANT's stage): values-<stage>.yaml in it is the
+      // tenant's, and every member chart renders with exactly the files its Application layers.
+      const clusterValueFiles = await ports.resolveClusterValueFiles(rc.domain, req.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
-      const guid = await mintFreeGuid(ports, rc.stage);
+      const guid = await mintFreeGuid(ports, req.stage);
       const outcome = await validateTenant(
         {
           repoURL: ports.catalogRepoUrl,
           // The revision every member Application will read its chart at, and therefore the only one
           // worth rendering the gates over (tenant-registrations.ts, the `branch` getter).
           ref: ports.registrations.branch,
-          stage: rc.stage,
+          stage: req.stage,
           apps: req.apps,
           probeGuid: guid,
           clusterValueFiles,
@@ -618,8 +626,8 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       }
       // Idempotent-by-subdomain: resolve the existing same-subdomain tenants to REPLACE — the union
       // of the DB inventory + a GitOps pointer scan (the scan also reaps ORPHANS), deduped by guid.
-      const replaces = await resolveReplaceTargets({ db: ctx.db, registrations: ports.registrations }, rc.stage, req.subdomain);
-      const expectedApps = tenantApplicationSet(outcome.memberRecords.map((m) => m.name), guid, rc.stage);
+      const replaces = await resolveReplaceTargets({ db: ctx.db, registrations: ports.registrations }, req.stage, req.subdomain);
+      const expectedApps = tenantApplicationSet(outcome.memberRecords.map((m) => m.name), guid, req.stage);
       // Freeze the ensure-images set alongside expectedApps: the validated render's container
       // images, filtered to the target cluster's registry host. The validated revision is frozen
       // into chartsRef as well, so the set cannot move between plan + execute.
@@ -632,7 +640,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         // Frozen from the approved validation: the run executes what was approved.
         members: outcome.memberRecords, identityProvider: outcome.identityProvider,
         subdomain: req.subdomain,
-        stage: rc.stage,
+        stage: req.stage,
         clusterId: rc.clusterId,
         domain: rc.domain,
         cluster: rc.cluster,
@@ -660,7 +668,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         // The replace sentence carries the SAME data warning tenant-offboard's summary gives, because
         // approving this plan approves the same prune: the replaced tenant's member databases go with
         // its ServiceClaim deletions, and only its identity survives for a purge to reap.
-        summary: `Create tenant ${guid} (${req.subdomain}) on ${rc.domain} (${rc.stage}) pinned at ${outcome.resolvedSha.slice(0, 7)} with ${req.apps.length} app(s): ${stepDefs.length} steps.${replaces.length ? ` Replaces existing ${replaces.map((r) => r.guid).join(", ")} (subdomain "${req.subdomain}") before deploying ${guid}. The replaced tenant's member DATABASES are NOT kept: pruning its fan-out deletes every member's ServiceClaim, and the service-provisioner drops a claim's databases together with its user — run a backup first if the data has to come back. Its identity (the Vault crypto entry, the namespaces) survives until a purge reaps it.` : ""}`,
+        summary: `Create tenant ${guid} (${req.subdomain}) at ${req.stage} on ${rc.domain} pinned at ${outcome.resolvedSha.slice(0, 7)} with ${req.apps.length} app(s): ${stepDefs.length} steps.${replaces.length ? ` Replaces existing ${replaces.map((r) => r.guid).join(", ")} (subdomain "${req.subdomain}" at ${req.stage}) before deploying ${guid}. The replaced tenant's member DATABASES are NOT kept: pruning its fan-out deletes every member's ServiceClaim, and the service-provisioner drops a claim's databases together with its user — run a backup first if the data has to come back. Its identity (the Vault crypto entry, the namespaces) survives until a purge reaps it.` : ""}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [], // no host owned — the Manager acts master-locally
         locks: tenantLocks(ports.registrations),

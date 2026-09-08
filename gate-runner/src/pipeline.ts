@@ -78,7 +78,7 @@ export async function runGates(
   };
 
   // G1 structure — produces the manifest.
-  const structure = checkStructure({ files, chartPath: meta.chartPath, targetName: meta.targetName, stage: meta.stage });
+  const structure = checkStructure({ files, chartPath: meta.chartPath, targetName: meta.targetName, stage: meta.stage, repoURL: meta.repoURL });
   emit(structure.result);
   manifest = structure.manifest;
 

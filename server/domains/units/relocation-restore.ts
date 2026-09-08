@@ -10,9 +10,9 @@ import { readRegistrationJob, readRegistrationFromLogs, MONGO_NAMESPACE } from "
 import { loadActiveTargetCluster, type TargetCluster } from "./relocation-target.ts";
 import { requireDbtoolsImage, requireStorageBox, runRelocationJob, type RelocationPorts, type WorldOf } from "./relocation.ts";
 
-/** The target of this run, resolved fresh at every step (same-stage + active, like the plan said). */
-export function targetOf(ctx: StepCtx, worldStage: string, targetClusterId: string): TargetCluster {
-  return loadActiveTargetCluster(ctx.db, targetClusterId, worldStage as TargetCluster["stage"]);
+/** The target of this run, resolved fresh at every step (active, like the plan said). */
+export function targetOf(ctx: StepCtx, targetClusterId: string): TargetCluster {
+  return loadActiveTargetCluster(ctx.db, targetClusterId);
 }
 
 /** attest-target for a RESTORE (step 0): the TARGET cluster is the one this run mutates, so its
@@ -23,10 +23,10 @@ export function attestRestoreTargetStep(ports: RelocationPorts, worldOf: WorldOf
     title: "Attest the target cluster (deploy-state fresh)",
     run: async (ctx) => {
       const w = await worldOf(ctx);
-      const target = targetOf(ctx, w.stage, targetClusterId);
+      const target = targetOf(ctx, targetClusterId);
       const { clusterReader } = await ports.resolver.resolve(target.clusterId);
-      const state = assertDeployState(await clusterReader.readDeployState(), target.domain, target.stage, w.kindWord);
-      ctx.log("meta", `target ${target.domain} (${target.stage}) attested for the restore of ${w.unit} — deploy-state generation ${state.generation}`);
+      const state = assertDeployState(await clusterReader.readDeployState(), target.domain, w.kindWord);
+      ctx.log("meta", `target ${target.domain} attested for the restore of ${w.unit} at ${w.stage} — deploy-state generation ${state.generation}`);
     },
   };
 }
@@ -42,7 +42,7 @@ export function provisionTargetStep(worldOf: WorldOf, targetClusterId: string): 
     title: "Provision the unit's isolation on the target cluster",
     run: async (ctx) => {
       const w = await worldOf(ctx);
-      await w.provisionTarget(ctx, targetOf(ctx, w.stage, targetClusterId));
+      await w.provisionTarget(ctx, targetOf(ctx, targetClusterId));
     },
   };
 }
@@ -58,7 +58,7 @@ export function provisionTargetFromDumpStep(ports: RelocationPorts, worldOf: Wor
     title: "Read the dumped registration and provision the target cluster",
     run: async (ctx) => {
       const w = await worldOf(ctx);
-      const target = targetOf(ctx, w.stage, targetClusterId);
+      const target = targetOf(ctx, targetClusterId);
       requireStorageBox(ports, "restore");
       const image = requireDbtoolsImage(ports, "restore");
       const logs = await runRelocationJob(ports, ctx, target.clusterId, readRegistrationJob({ unit: w.unit, namespace: MONGO_NAMESPACE, image }));
@@ -80,7 +80,7 @@ export function watchTargetStep(worldOf: WorldOf, targetClusterId: string): Step
     title: "Wait for the unit to converge on the target (still closed)",
     run: async (ctx) => {
       const w = await worldOf(ctx);
-      await w.watchConverged(ctx, targetOf(ctx, w.stage, targetClusterId).clusterId, "quiesced");
+      await w.watchConverged(ctx, targetOf(ctx, targetClusterId).clusterId, "quiesced");
     },
   };
 }
@@ -94,7 +94,7 @@ export function restoreStep(ports: RelocationPorts, worldOf: WorldOf, targetClus
       const w = await worldOf(ctx);
       requireStorageBox(ports, "restore");
       requireDbtoolsImage(ports, "restore");
-      const target = targetOf(ctx, w.stage, targetClusterId);
+      const target = targetOf(ctx, targetClusterId);
       const jobs = await w.restoreJobs(ctx);
       for (const job of jobs) await runRelocationJob(ports, ctx, target.clusterId, job);
       ctx.checkpoint({ jobs: jobs.map((j) => j.spec.name) });
@@ -112,7 +112,7 @@ export function verifyCompletenessStep(ports: RelocationPorts, worldOf: WorldOf,
     title: "Verify the target holds everything the dump holds (before DNS)",
     run: async (ctx) => {
       const w = await worldOf(ctx);
-      const target = targetOf(ctx, w.stage, targetClusterId);
+      const target = targetOf(ctx, targetClusterId);
       const jobs = await w.verifyCompletenessJobs(ctx);
       for (const job of jobs) await runRelocationJob(ports, ctx, target.clusterId, job);
       await w.verifyCompletenessExtra?.(ctx, target);
@@ -130,7 +130,7 @@ export function switchDnsStep(ports: RelocationPorts, worldOf: WorldOf, targetCl
     title: "Switch the unit's one DNS record to the target cluster",
     run: async (ctx) => {
       const w = await worldOf(ctx);
-      const target = targetOf(ctx, w.stage, targetClusterId);
+      const target = targetOf(ctx, targetClusterId);
       const recordName = await w.dnsRecordName(ctx, target);
       // The one caller that overwrites a foreign address: the record answers with the SOURCE cluster
       // until this step, and moving it onto the target is the whole of the switch.
@@ -147,7 +147,7 @@ export function targetSmokeStep(ports: RelocationPorts, worldOf: WorldOf, target
     title: "Smoke-check every unit namespace on the target",
     run: async (ctx) => {
       const w = await worldOf(ctx);
-      const target = targetOf(ctx, w.stage, targetClusterId);
+      const target = targetOf(ctx, targetClusterId);
       const { clusterReader } = await ports.resolver.resolve(target.clusterId);
       for (const ns of w.namespaces) {
         const smoke = await clusterReader.smoke(ns);
@@ -170,7 +170,7 @@ export function recordStep(worldOf: WorldOf, targetClusterId: string, what: stri
     title: `Record the ${what} in inventory`,
     run: async (ctx) => {
       const w = await worldOf(ctx);
-      await w.record(ctx, targetOf(ctx, w.stage, targetClusterId));
+      await w.record(ctx, targetOf(ctx, targetClusterId));
     },
   };
 }

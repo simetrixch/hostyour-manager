@@ -58,9 +58,11 @@ export interface OnboardRequest {
   repoCredentialId?: string; // a Manager-side credential id for a private repo
 }
 
-/** The platform-computed context the plan phase derives from the target cluster's plane config. */
+/** The platform-computed context the plan phase derives from the target cluster's row and the
+ *  operator's request. */
 export interface OnboardTarget {
   domain: string; // the GitOps branch the registration's cluster lives on, e.g. "s1.example"
+  /** The UNIT's stage — the operator's input, never the cluster's. */
   stage: Stage;
   /** The chart subpath inside the repo. ABSENT for a build-only unit — one that carries a build
    *  registration and no stage file, so nothing of it is ever deployed and there is no chart to
@@ -227,7 +229,7 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
     // AppProject, build namespace, host), so a reserved name is refused before uniqueness is asked.
     const managerGates: GateResult[] = [
       gateRepoAccess({ ok: true, detail: `cloned ${req.repoURL} at ${cloned.resolvedSha}` }),
-      gateUnitName({ unitName: req.consumerName, tenantSubdomains }),
+      gateUnitName({ unitName: req.consumerName, stage: target.stage, tenantSubdomains }),
     ];
 
     // THE MANIFEST DECIDES WHETHER THE REST OF THE MANAGER-SIDE GATES RUN AT ALL. Below this branch
@@ -279,7 +281,7 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
     managerGates.push(
       gateBuildNameUniqueness({ unitName: req.consumerName, buildNames: declaredBuilds, foreignBuilds }),
       gateBuildDeclaration({ declaredBuilds, chart }),
-      gateFqdnGrant({ unitName: req.consumerName, fqdn: declaredFqdn, unitApex, clusterDomain, foreignFqdns }),
+      gateFqdnGrant({ unitName: req.consumerName, stage: target.stage, fqdn: declaredFqdn, unitApex, clusterDomain, foreignFqdns }),
       gateUnitSize({ unitName: req.consumerName, size: req.size, brings, quota: brings ? deps.resolveQuota(req.size, brings) : null }),
     );
     for (const g of managerGates) deps.log(`${g.id} ${g.status} — ${g.detail}`);

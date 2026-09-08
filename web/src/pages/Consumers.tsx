@@ -14,7 +14,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { ConsumerLifecycleDialog, type LifecycleAction } from "../components/ConsumerLifecycleDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
-import { DetectedConsumerPanel } from "../components/DetectedConsumerPanel.tsx";
+import { DetectedConsumerPanel, type PurgeTarget } from "../components/DetectedConsumerPanel.tsx";
 import { LiveReconFacts } from "../components/LiveReconFacts.tsx";
 import { OffboardedConsumers, ConsumerBackupDialog, ConsumerRelocationDialog } from "../components/ConsumerRelocation.tsx";
 
@@ -88,9 +88,9 @@ export function Consumers() {
   const [relocFor, setRelocFor] = useState<{ c: ConsumerView; kind: "move" | "restore" } | null>(null);
   // The one shared runs list, for the per-card relocation state band (relocationBand.ts).
   const [runs, setRuns] = useState<RunView[]>([]);
-  // The purge dialog's prefill: {} = opened blank from the header button, {name, clusterId} = opened
-  // from a Detected row whose identity the scan already named (the retype arming is unchanged).
-  const [purgeDialog, setPurgeDialog] = useState<{ name?: string; clusterId?: string } | null>(null);
+  // The purge dialog's prefill: {} = opened blank from the header button, {name, stage, clusterId} =
+  // opened from a Detected row whose identity the scan already named (the retype arming is unchanged).
+  const [purgeDialog, setPurgeDialog] = useState<Partial<PurgeTarget> | null>(null);
   // The DETECTED scan. null = never run: the scan fetches every active
   // cluster's install branch server-side, so it is bound to an explicit operator action and must
   // NEVER fire on page load (the same rule as the tenant orphan scan). `detScanning` drives the
@@ -220,7 +220,7 @@ export function Consumers() {
             scanError={detScanError}
             scan={detScan}
             onAdopt={setAdoptFor}
-            onPurge={(d) => setPurgeDialog({ name: d.name, clusterId: d.clusterId })}
+            onPurge={setPurgeDialog}
           />
           <div className="page__actions">
             <button
@@ -385,8 +385,7 @@ export function Consumers() {
 
       {purgeDialog && (
         <PurgeOrphanDialog
-          {...(purgeDialog.name ? { initialName: purgeDialog.name } : {})}
-          {...(purgeDialog.clusterId ? { initialClusterId: purgeDialog.clusterId } : {})}
+          initial={purgeDialog}
           onCancel={() => setPurgeDialog(null)}
           onConfirm={(input) => {
             setPurgeDialog(null);
@@ -407,8 +406,8 @@ export function Consumers() {
           }}
         >
           <p>
-            This <strong>plans</strong> an adopt run for <strong>{adoptFor.name}</strong> on <strong>{adoptFor.domain}</strong> (
-            {adoptFor.stage}) and opens it — you <strong>approve on the next screen</strong>. The run attests the target cluster, records
+            This <strong>plans</strong> an adopt run for <strong>{adoptFor.name}</strong> at <strong>{adoptFor.stage}</strong> on{" "}
+            <strong>{adoptFor.domain}</strong> and opens it — you <strong>approve on the next screen</strong>. The run attests the target cluster, records
             the live cluster + ArgoCD state into the run log, then <strong>reconstructs the missing inventory row from the GitOps
             registration</strong> (chart {adoptFor.pointer.chartPath}, provenance <strong>adopted</strong>).{" "}
             <strong>Nothing is deployed, validated or changed on the cluster</strong> — afterwards the consumer appears under Consumers

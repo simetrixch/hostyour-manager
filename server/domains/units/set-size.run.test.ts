@@ -4,7 +4,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps, tenants, unitSizes } from "../../db/schema/inventory.ts";
 import { makeSetSizeDef, makeTenantSetSizeDef } from "./set-size.run.ts";
 import { seedUnitSizes } from "./unit-size.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
@@ -26,7 +26,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 function ctx(runId: string, stepName: string, params: Record<string, unknown>, logs: string[]): StepCtx {
   return {
@@ -106,7 +105,7 @@ async function seedTenant(reg: TenantRegistrations): Promise<void> {
 
 describe("set-size run (consumer)", () => {
   it("writes the named size's figures into the registration", async () => {
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedConsumer(reg);
     const params = { appId: "app_1", size: "large" as const };
     await runAll(makeSetSizeDef(consumerPorts(reg)).steps(params), params);
@@ -115,7 +114,7 @@ describe("set-size run (consumer)", () => {
   });
 
   it("RE-APPLIES the table: asking for the size it already has writes the table's CURRENT figures", async () => {
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedConsumer(reg);
     // The operator raised `small` in the size table. The registration still carries the old figures —
     // that is the whole point of resolving at write time — and nothing has reached the cluster.
@@ -133,7 +132,7 @@ describe("set-size run (consumer)", () => {
   });
 
   it("plans attest-target first, claims the books branch, and says the ceiling evicts nothing", async () => {
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedConsumer(reg);
     const plan = await makeSetSizeDef(consumerPorts(reg)).plan({ appId: "app_1", size: "medium" }, { db: db.db });
 
@@ -154,7 +153,7 @@ describe("set-size run (consumer)", () => {
 
 describe("tenant-set-size run", () => {
   it("writes the figures once, and the summary says they bound EACH member namespace", async () => {
-    const reg = new TenantRegistrations(new FakePlatformRepo(), async (c) => ({ name: c, stage: "prod" }));
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await seedTenant(reg);
     const params = { tenantId: "tnt_1", size: "medium" as const };
     await runAll(makeTenantSetSizeDef(tenantPorts(reg)).steps(params), params);

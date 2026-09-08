@@ -4,7 +4,6 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { scanOrphanTenants, resolveRunTenantState, CreateTenantPurgeTarget } from "./tenant-orphans.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import type { Stage } from "../../../shared/enums.ts";
@@ -21,17 +20,6 @@ const ORPHAN = "e2e8ymj86dk8"; // a live pointer with no row
 const STRANDED = "hp5t8m2wq3xn"; // a live pointer whose slave is not a registered cluster
 const BROKEN = "kx4v7n2q9r3s"; // a pointer dir whose registration the scan cannot read
 
-/** A cluster-marking resolver that answers from a literal name -> stage map — mirrors registrations.test.ts's
- *  helper. A cluster is marked exactly ONE stage, so a stage-specific fixture gets its own short name
- *  (s1dev, next to s1) rather than reusing s1 at two stages. */
-function marked(byName: Record<string, Stage>): ClusterStageResolver {
-  return async (cluster: string) => {
-    const stage = byName[cluster];
-    if (!stage) throw new Error(`no cluster map for "${cluster}"`);
-    return { name: cluster, stage };
-  };
-}
-const CLUSTERS = marked({ s1: "prod", s9: "prod", s1dev: "dev" });
 
 /** guid + stage + the registration body — the write-time triple TenantRegistrations.commitTenant now takes
  *  (the guid is the DIRECTORY and the stage the FILE NAME, so neither lives in the body). */
@@ -73,7 +61,7 @@ afterEach(() => db.sqlite.close());
 
 /** A registrations whose fake catalog carries the given tenants as live pointers. */
 async function deployed(...entries: TenantFixture[]): Promise<TenantRegistrations> {
-  const registrations = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+  const registrations = new TenantRegistrations(new FakePlatformRepo());
   let n = 0;
   for (const e of entries) await registrations.commitTenant({ stage: e.stage, guid: e.guid, registration: e.registration, runId: `run_${++n}` });
   return registrations;
@@ -84,7 +72,7 @@ async function deployed(...entries: TenantFixture[]): Promise<TenantRegistration
  *  is exactly the case this discovery has to stay honest about. */
 async function deployedWithRaw(raw: Record<string, string>, ...entries: TenantFixture[]): Promise<TenantRegistrations> {
   const repo = new FakePlatformRepo();
-  const registrations = new TenantRegistrations(repo, CLUSTERS);
+  const registrations = new TenantRegistrations(repo);
   let n = 0;
   for (const e of entries) await registrations.commitTenant({ stage: e.stage, guid: e.guid, registration: e.registration, runId: `run_${++n}` });
   for (const [path, content] of Object.entries(raw)) repo.seed(repo.booksBranch, path, content);

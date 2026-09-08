@@ -4,7 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeAdoptConsumerDef, type AdoptConsumerPorts, type AdoptConsumerParams } from "./adopt-consumer.run.ts";
-import { Registrations, serializePointer, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations, serializePointer } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
@@ -27,9 +27,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-// Every fixture runs on the prod stage, so a fixed resolver answers every cluster with "prod" — the
-// stage boundary Registrations.commitRegistration checks before it ever writes a stage file.
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader };
 
@@ -67,7 +64,7 @@ function seedCluster(): void {
 
 /** A registrations whose fake platform repo carries acme's live STAGE registration on s1.example/prod. */
 async function deployedRegistrations(over: { repoCredentialId?: string; suspended?: boolean } = {}): Promise<Registrations> {
-  const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+  const reg = new Registrations(new FakePlatformRepo());
   await reg.commitRegistration({
     unit: {
       name: "acme", repoURL: "https://github.com/x/acme.git",
@@ -90,7 +87,7 @@ const STEP_ORDER = ["attest-target", "read-pointer", "attest-live", "record-inve
 describe("adopt-consumer run definition", () => {
   it("plans with cluster targetKind, the ordered steps, and the git-branch lock — with NO app row", async () => {
     seedCluster();
-    const adoptRegistrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const adoptRegistrations = new Registrations(new FakePlatformRepo());
     const def = makeAdoptConsumerDef(ports(adoptRegistrations));
     const plan = await def.plan(PARAMS, { db: db.db });
     expect(def.mutating).toBe(true);
@@ -110,20 +107,21 @@ describe("adopt-consumer run definition", () => {
   });
 
   it("mutating def starts with attest-target under empty params (the armed check does def.steps({}))", () => {
-    expect(makeAdoptConsumerDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage))).steps({} as AdoptConsumerParams)[0]?.name).toBe("attest-target");
+    expect(makeAdoptConsumerDef(ports(new Registrations(new FakePlatformRepo()))).steps({} as AdoptConsumerParams)[0]?.name).toBe("attest-target");
   });
 
   it("attest-target fails closed on a deploy-state domain mismatch (never record against the wrong cluster)", async () => {
     seedCluster();
-    const prt = ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { cluster: new FakeClusterReader({ deployState: { domain: "other.example", stage: "prod", writtenAt: "x", generation: 1 } }) });
+    const prt = ports(new Registrations(new FakePlatformRepo()), { cluster: new FakeClusterReader({ deployState: { domain: "other.example", stage: "prod", writtenAt: "x", generation: 1 } }) });
     const attest = makeAdoptConsumerDef(prt).steps(PARAMS)[0]!;
     await expect(attest.run(ctx("attest-target", []))).rejects.toThrow(/deploy-state mismatch/);
   });
 
-  it("plan fails closed on a stage that disagrees with the target cluster's own stage", async () => {
-    seedCluster(); // cls_1 is prod
-    const def = makeAdoptConsumerDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage)));
-    await expect(def.plan({ consumerName: "acme", stage: "dev", clusterId: "cls_1" }, { db: db.db })).rejects.toThrow(/stage mismatch/);
+  it("plans a unit at a stage other than the target cluster's own — the stage is the unit's, the cluster any active one", async () => {
+    seedCluster(); // cls_1 is marked prod; the unit stands there at dev
+    const def = makeAdoptConsumerDef(ports(new Registrations(new FakePlatformRepo())));
+    const plan = await def.plan({ consumerName: "acme", stage: "dev", clusterId: "cls_1" }, { db: db.db });
+    expect(plan.steps[0]?.name).toBe("attest-target");
   });
 
   it("plan refuses when an UNSETTLED row already tracks the consumer — nothing invisible to adopt", async () => {
@@ -144,7 +142,7 @@ describe("adopt-consumer run definition", () => {
 
   it("read-pointer fails NOT_FOUND when no registration exists — there is nothing to adopt", async () => {
     seedCluster();
-    const step = makeAdoptConsumerDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage))).steps(PARAMS).find((s) => s.name === "read-pointer")!;
+    const step = makeAdoptConsumerDef(ports(new Registrations(new FakePlatformRepo()))).steps(PARAMS).find((s) => s.name === "read-pointer")!;
     await expect(step.run(ctx("read-pointer", []))).rejects.toThrow(/does not exist, so there is nothing to adopt/);
   });
 
@@ -156,7 +154,7 @@ describe("adopt-consumer run definition", () => {
       name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false,
       chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
     }));
-    const step = makeAdoptConsumerDef(ports(new Registrations(repo, prodClusterStage))).steps(PARAMS).find((s) => s.name === "read-pointer")!;
+    const step = makeAdoptConsumerDef(ports(new Registrations(repo))).steps(PARAMS).find((s) => s.name === "read-pointer")!;
     await expect(step.run(ctx("read-pointer", []))).rejects.toThrow(/disagrees with its directory name/);
   });
 

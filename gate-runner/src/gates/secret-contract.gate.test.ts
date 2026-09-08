@@ -6,6 +6,9 @@
 //   4. a null manifest,
 //   5. a ClusterExternalSecret (spec.externalSecretSpec) with an undeclared remoteRef.property,
 //   6. a ClusterExternalSecret with a wrong remoteRef.key,
+//   7. a SecretStore naming no serviceAccountRef,
+//   8. a ServiceAccount missing one of the two alias-metadata annotations,
+//   9. a ServiceAccount claiming another unit,
 //   plus a PASS for a well-formed ClusterExternalSecret referencing a declared key.
 // Each FAIL asserts BOTH status === "fail" and that `reason` names the specific problem.
 import { describe, expect, it } from "vitest";
@@ -44,25 +47,54 @@ function baseManifest(): ConsumerManifest {
   };
 }
 
-function secretStore(over?: { server?: string; role?: string }): RenderedDoc {
+function secretStore(over?: { server?: string; role?: string; serviceAccount?: string | null }): RenderedDoc {
+  const serviceAccountRef = over?.serviceAccount === null ? {} : { serviceAccountRef: { name: over?.serviceAccount ?? "acme" } };
   return {
     env: "test",
     docIndex: 0,
     apiVersion: "external-secrets.io/v1beta1",
     kind: "SecretStore",
     name: "acme",
-    namespace: "acme",
+    namespace: "acme-test",
     raw: {
       apiVersion: "external-secrets.io/v1beta1",
       kind: "SecretStore",
-      metadata: { name: "acme", namespace: "acme" },
+      metadata: { name: "acme", namespace: "acme-test" },
       spec: {
         provider: {
           vault: {
             server: over?.server ?? VAULT_SERVER,
             path: "secret",
-            auth: { kubernetes: { mountPath: "kubernetes", role: over?.role ?? "consumer-eso" } },
+            auth: { kubernetes: { mountPath: "kubernetes", role: over?.role ?? "consumer-eso", ...serviceAccountRef } },
           },
+        },
+      },
+    },
+  };
+}
+
+/** The ServiceAccount the store logs in as. Vault's `consumer-eso` role lifts these two annotations
+ *  into the alias metadata its policy path <stage>/consumer/<unit>/* is templated on, so the chart
+ *  must render them on exactly this object — `null` leaves one out. */
+function serviceAccount(over?: { unit?: string | null; stage?: string | null }): RenderedDoc {
+  const unit = over?.unit === undefined ? "acme" : over.unit;
+  const stage = over?.stage === undefined ? "test" : over.stage;
+  return {
+    env: "test",
+    docIndex: 3,
+    apiVersion: "v1",
+    kind: "ServiceAccount",
+    name: "acme",
+    namespace: "acme-test",
+    raw: {
+      apiVersion: "v1",
+      kind: "ServiceAccount",
+      metadata: {
+        name: "acme",
+        namespace: "acme-test",
+        annotations: {
+          ...(unit !== null ? { "vault.hashicorp.com/alias-metadata-unit": unit } : {}),
+          ...(stage !== null ? { "vault.hashicorp.com/alias-metadata-stage": stage } : {}),
         },
       },
     },
@@ -131,7 +163,7 @@ function makeCtx(over: Partial<GateContext> = {}): GateContext {
     clusterValueFiles: CHAIN,
     files: new Map<string, string>(),
     manifest: baseManifest(),
-    rendered: [secretStore(), externalSecret()],
+    rendered: [secretStore(), externalSecret(), serviceAccount()],
     dependencies: [],
     ...over,
   };
@@ -170,7 +202,7 @@ describe("G7 secret contract", () => {
       },
     };
     const devStore: RenderedDoc = { ...secretStore(), env: "dev", docIndex: 2 };
-    const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), externalSecret(), devStore, devEs] }));
+    const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), externalSecret(), serviceAccount(), devStore, devEs] }));
     expect(r.status).toBe("pass"); // the dev/... keys are out of scope, not violations
     expect(r.reason).toBeNull();
     expect(r.found).toContain("onboarding stage");
@@ -242,8 +274,30 @@ describe("G7 secret contract", () => {
     expect(r.reason).toContain(EXPECTED_KEY);
   });
 
+  it("FAIL 7: a SecretStore that names no serviceAccountRef — nothing carries the unit and stage the login is bound by", () => {
+    const r = secretContractGate.check(makeCtx({ rendered: [secretStore({ serviceAccount: null }), externalSecret(), serviceAccount()] }));
+    expect(r.status).toBe("fail");
+    expect(r.reason).toContain("serviceAccountRef");
+  });
+
+  it("FAIL 8: the ServiceAccount misses one of the two alias-metadata annotations", () => {
+    for (const missing of [{ stage: null }, { unit: null }] as const) {
+      const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), externalSecret(), serviceAccount(missing)] }));
+      expect(r.status, JSON.stringify(missing)).toBe("fail");
+      expect(r.reason).toContain("stage" in missing ? "vault.hashicorp.com/alias-metadata-stage" : "vault.hashicorp.com/alias-metadata-unit");
+    }
+  });
+
+  it("FAIL 9: the ServiceAccount claims another unit or another stage — that is another entry of the mount", () => {
+    for (const foreign of [{ unit: "other" }, { stage: "prod" }] as const) {
+      const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), externalSecret(), serviceAccount(foreign)] }));
+      expect(r.status, JSON.stringify(foreign)).toBe("fail");
+      expect(r.reason).toContain("unit" in foreign ? "other" : "prod");
+    }
+  });
+
   it("passes a well-formed ClusterExternalSecret referencing a declared key at spec.externalSecretSpec", () => {
-    const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), clusterExternalSecret()] }));
+    const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), clusterExternalSecret(), serviceAccount()] }));
     expect(r.status).toBe("pass");
     expect(r.reason).toBeNull();
     expect(r.severity).toBe("hard");

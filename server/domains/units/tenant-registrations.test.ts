@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { seedQuota } from "../../../shared/unit-size.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
-import type { Stage } from "../../../shared/enums.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
 
 const GUID = "zsjs023ctne0"; // a live guid (matches the registrations/** path guard)
@@ -25,17 +23,6 @@ function registration(over: Partial<TenantRegistration> = {}): TenantRegistratio
   };
 }
 
-/** A cluster-marking resolver that answers from a literal name -> stage map. Stands in for the maps
- *  under clusters/active/ so a boundary test states BOTH sides in one place. */
-function marked(byName: Record<string, Stage>): ClusterStageResolver {
-  return async (cluster: string) => {
-    const stage = byName[cluster];
-    if (!stage) throw new Error(`no cluster map for "${cluster}"`);
-    return { name: cluster, stage };
-  };
-}
-
-const CLUSTERS = marked({ s1: "dev", s2: "dev" });
 
 describe("tenantRegistrationWrite (the ONE-file write the tenant appsets read)", () => {
   it("writes registrations/<guid>/<stage>.yaml carrying every field the schema defaults", () => {
@@ -65,7 +52,7 @@ describe("tenantRegistrationWrite (the ONE-file write the tenant appsets read)",
 describe("TenantRegistrations", () => {
   it("commits the ONE registration file in one commit with a run-id trailer", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" });
     expect(repo.commits).toHaveLength(1);
     const c = repo.commits[0]!;
@@ -75,16 +62,16 @@ describe("TenantRegistrations", () => {
     expect(c.remove ?? []).toEqual([]);
   });
 
-  it("commitTenant refuses a registration whose cluster is marked for a DIFFERENT stage, and the error names both sides", async () => {
-    const reg = new TenantRegistrations(new FakePlatformRepo(), marked({ s1: "dev" }));
-    const attempt = () => reg.commitTenant({ stage: "prod", guid: GUID, registration: registration({ cluster: "s1" }), runId: "run_1" });
-    await expect(attempt()).rejects.toMatchObject({ code: "VALIDATION" });
-    await expect(attempt()).rejects.toThrow(/names stage "prod".*marked "dev"/s);
+  it("commitTenant writes a registration onto a cluster of ANOTHER stage — the file name states the tenant's stage, the cluster field any active cluster", async () => {
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: registration({ cluster: "s1" }), runId: "run_1" });
+    const t = await reg.readTenant("prod", GUID);
+    expect(t?.entry.cluster).toBe("s1");
   });
 
   it("readTenant reads back exactly what commitTenant wrote", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" });
     const t = await reg.readTenant("dev", GUID);
     expect(t?.entry.cluster).toBe("s1");
@@ -98,7 +85,7 @@ describe("TenantRegistrations", () => {
 
   it("ROUND-TRIP (drop-trap): every registration field survives write -> re-read intact", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     const full = registration({
       cluster: "s1", subdomain: "simetrix.dev",
       members: testMembers([{ name: "erp", seedReference: true, seedDemo: false }]), identityProvider: "auth",
@@ -112,7 +99,7 @@ describe("TenantRegistrations", () => {
 
   it("DROP-TRAP: updateTenantApps rewrites the registration WITHOUT dropping cluster/seedUsers/resetNonce/quiesced", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration({ seedUsers: true, quota: seedQuota("small"), resetNonce: "3", quiesced: true }), runId: "run_1" });
     await reg.updateTenantApps("dev", GUID, { op: "append", app: "web", member: testMembers(["web"])[3]!, runId: "run_2" });
     // The REWRITTEN bytes still carry every field (a field the writer omits is silently erased — and a
@@ -133,7 +120,7 @@ describe("TenantRegistrations", () => {
 
   it("DROP-TRAP: setTenantSuspended preserves cluster/seedUsers/resetNonce/quiesced across the flip AND the flip back", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration({ seedUsers: true, quota: seedQuota("small"), resetNonce: "3", quiesced: true }), runId: "run_1" });
     await reg.setTenantSuspended("dev", GUID, true, "run_2");
     await reg.setTenantSuspended("dev", GUID, false, "run_3");
@@ -146,13 +133,13 @@ describe("TenantRegistrations", () => {
   });
 
   it("returns null for a tenant that was never committed", async () => {
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     expect(await reg.readTenant("dev", GUID)).toBeNull();
   });
 
   it("updateTenantApps rewrites the ONE registration file, refuses duplicate + reserved names", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" });
     await reg.updateTenantApps("dev", GUID, { op: "append", app: "web", member: testMembers(["web"])[3]!, runId: "run_2" });
     const t = await reg.readTenant("dev", GUID);
@@ -165,7 +152,7 @@ describe("TenantRegistrations", () => {
 
   it("append carries both per-app seed tiers into apps[] (and folds them back), default false when omitted", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration({ apps: [], members: testMembers([]) }), runId: "run_1" });
     await reg.updateTenantApps("dev", GUID, { op: "append", app: "web", member: testMembers(["web"])[3]!, seedReference: true, seedDemo: true, runId: "run_2" }); // seedable later-added app
     await reg.updateTenantApps("dev", GUID, { op: "append", app: "crm", member: testMembers(["crm"])[3]!, runId: "run_3" }); // no tiers ⇒ both false
@@ -175,7 +162,7 @@ describe("TenantRegistrations", () => {
 
   it("legacy pointers fold unchanged: a raw {name} and a legacy {name, seed:true} both fold to canonical seed tiers", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     // Seed a LEGACY registration carrying the two on-disk shapes the old formats wrote: a raw {name}
     // (from before the seed tiers) and a {name, seed:true} (the legacy demo alias). The read side folds BOTH — seed → seedDemo.
     const legacy = tenantRegistrationWrite("dev", GUID, registration({ members: testMembers(["erp", "web"]), apps: [
@@ -194,7 +181,7 @@ describe("TenantRegistrations", () => {
 
   it("updateTenantApps drops an app and refuses dropping an absent one", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration({ apps: [{ name: "erp", seedReference: false, seedDemo: false }, { name: "web", seedReference: false, seedDemo: false }], members: testMembers(["erp", "web"]) }), runId: "run_1" });
     await reg.updateTenantApps("dev", GUID, { op: "drop", app: "erp", runId: "run_2" });
     expect((await reg.readTenant("dev", GUID))?.entry.apps).toEqual([{ name: "web", seedReference: false, seedDemo: false }]);
@@ -203,13 +190,13 @@ describe("TenantRegistrations", () => {
   });
 
   it("updateTenantApps refuses when the tenant is not onboarded", async () => {
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await expect(reg.updateTenantApps("dev", GUID, { op: "append", app: "web", member: testMembers(["web"])[3]!, runId: "r" })).rejects.toMatchObject({ code: "VALIDATION" });
   });
 
   it("setTenantSuspended flips the field in the registration in place (NOT a git-mv)", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" });
     await reg.setTenantSuspended("dev", GUID, true, "run_2");
     const s = repo.commits[1]!;
@@ -225,7 +212,7 @@ describe("TenantRegistrations", () => {
 
   it("subdomainGuids scans the GitOps pointers and returns every guid whose registration carries the subdomain", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     const OTHER = "e2e8ymj86dk8";
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" }); // simetrix.dev
     await reg.commitTenant({ stage: "dev", guid: OTHER, registration: registration({ subdomain: "simetrix.dev" }), runId: "run_2" });
@@ -238,7 +225,7 @@ describe("TenantRegistrations", () => {
 
   it("listTenantGuids is the SAME scan without the subdomain filter — every deployed guid at the stage", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     const OTHER = "e2e8ymj86dk8";
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" }); // simetrix.dev
     await reg.commitTenant({ stage: "dev", guid: OTHER, registration: registration({ subdomain: "other.dev" }), runId: "run_2" });
@@ -254,7 +241,7 @@ describe("TenantRegistrations", () => {
   });
 
   it("listTenantPointers is the same scan projecting subdomain + cluster — what NAMES an orphan and aims its purge", async () => {
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     const OTHER = "e2e8ymj86dk8";
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" }); // GUID / simetrix.dev on s1
     await reg.commitTenant({ stage: "dev", guid: OTHER, registration: registration({ subdomain: "other.dev", cluster: "s2" }), runId: "run_2" });
@@ -273,7 +260,7 @@ describe("TenantRegistrations", () => {
 
   it("removeTenant removes the ONE registration file (offboard); a second offboard is refused", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" });
     await reg.removeTenant("dev", GUID, "run_2");
     const off = repo.commits[1]!;
@@ -288,7 +275,7 @@ describe("TenantRegistrations", () => {
     // ask is "does a registration file stand here". Parsing it would refuse to remove precisely the
     // broken tenant an offboard/purge is aimed at — the guard would protect the leftover, not the tenant.
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     repo.seed(repo.booksBranch, `${DIR}/dev.yaml`, 'cluster: "s1"\nsubdomain: 7\n'); // subdomain must be a string
     await expect(reg.readTenant("dev", GUID)).rejects.toThrow(/dev\.yaml failed its schema/); // the strict fold still refuses
     await reg.removeTenant("dev", GUID, "run_2");
@@ -307,7 +294,7 @@ describe("the pointer scan reports what it could NOT read", () => {
   /** A registrations whose fake catalog carries GUID as a clean registration plus one seeded raw file. */
   async function withSeeded(path: string, content: string): Promise<TenantRegistrations> {
     const repo = new FakePlatformRepo();
-    const reg = new TenantRegistrations(repo, CLUSTERS);
+    const reg = new TenantRegistrations(repo);
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" });
     repo.seed(repo.booksBranch, path, content);
     return reg;

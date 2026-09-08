@@ -8,7 +8,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
-import { consumerArgoAppName, ConsumerRegistrationSchema, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
+import { consumerArgoAppName, consumerNamespace, ConsumerRegistrationSchema, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { serializePointer, parseRegistration, type Registrations } from "./registrations.ts";
@@ -57,15 +57,18 @@ async function readStageRegistration(ports: ConsumerRelocationPorts, stage: Stag
 export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): WorldOf {
   return async (ctx: StepCtx): Promise<RelocationWorld> => {
     const ac = loadAppCluster(ctx.db, appId);
+    // The unit's stage is the row's own and travels with it: the chain is read for the CLUSTER's
+    // domain and the UNIT's stage, on the source and on the target alike.
     const unitApex = async (): Promise<string> => unitApexFromChain(await ports.registrations.readClusterValueFiles(ac.domain, ac.stage));
+    const namespace = consumerNamespace(ac.name, ac.stage);
     const image = ports.dbtoolsImage ?? "";
     // The registration + PVC list are read lazily, per closure: a restore resolves this world while
     // the unit's registration is deliberately ABSENT (offboarded), and must not fail on it.
-    const jobInputs = async (): Promise<{ name: string; stage: typeof ac.stage; databases: string[]; services: ConsumerStageRegistration["services"]; pvcs: string[]; image: string }> => {
+    const jobInputs = async (): Promise<{ name: string; namespace: string; stage: typeof ac.stage; databases: string[]; services: ConsumerStageRegistration["services"]; pvcs: string[]; image: string }> => {
       const reg = await readStageRegistration(ports, ac.stage, ac.name);
       const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
-      const pvcs = await clusterReader.listPersistentVolumeClaims(ac.name);
-      return { name: ac.name, stage: ac.stage, databases: reg.databases, services: reg.services, pvcs, image };
+      const pvcs = await clusterReader.listPersistentVolumeClaims(namespace);
+      return { name: ac.name, namespace, stage: ac.stage, databases: reg.databases, services: reg.services, pvcs, image };
     };
     const converged = (s: ArgoAppStatus): boolean => s.sync === "Synced" && s.health === "Healthy";
     const appName = consumerArgoAppName(ac.name, ac.stage);
@@ -76,9 +79,9 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       sourceClusterId: ac.clusterId,
       sourceDomain: ac.domain,
       sourceCluster: clusterShortName(ac.domain),
-      publicHost: consumerUnitHost(ac.name, await unitApex()),
-      namespaces: [ac.name],
-      homeNamespace: ac.name,
+      publicHost: consumerUnitHost(ac.name, ac.stage, await unitApex()),
+      namespaces: [namespace],
+      homeNamespace: namespace,
       setQuiesced: (q, runId) => ports.registrations.setQuiesced(ac.stage, ac.name, q, runId),
       readRegistrationYaml: async () => serializePointer(ConsumerRegistrationSchema, await readStageRegistration(ports, ac.stage, ac.name)),
       watchConverged: async (c, clusterId, intent) => {
@@ -132,7 +135,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
           if (repoURL === undefined || repoURL === null) throw errValidation(`consumer "${ac.name}" has no repo URL on record — the credential would be sealed against a repository nobody can name`);
           const pat = await c.creds.open(row.repoCredentialId, { purpose: "relocation:provision-target", runId: c.runId });
           try {
-            await ports.repoCredential.applyRepoCredential(renderConsumerRepoCredential({ consumerName: ac.name, argoNamespace, repoURL, pat: pat.toString("utf8") }));
+            await ports.repoCredential.applyRepoCredential(renderConsumerRepoCredential({ consumerName: ac.name, stage: ac.stage, argoNamespace, repoURL, pat: pat.toString("utf8") }));
           } finally {
             pat.fill(0);
           }
@@ -143,8 +146,8 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         // next ordinary offboard keep the unit's databases behind. Clearing it is part of arming the
         // target. A cluster the unit has never been on has no namespace yet (ArgoCD creates it on the
         // first sync) and nothing to clear.
-        if ((await clusterReader.smoke(ac.name)).namespaceExists) {
-          await clusterReader.annotateNamespace(ac.name, { [CLAIM_RELOCATING_ANNOTATION]: null });
+        if ((await clusterReader.smoke(namespace)).namespaceExists) {
+          await clusterReader.annotateNamespace(namespace, { [CLAIM_RELOCATING_ANNOTATION]: null });
         }
         c.log("meta", `target ${target.cluster} provisioned for ${ac.name} — ${row?.repoCredentialId ? `repository credential in ${argoNamespace}; ` : ""}the isolation AppProject, the admission policy and the argo-sync grant are rendered from the registration and follow the repoint`);
       },
@@ -159,8 +162,8 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         // has no CR and its namespace outlives the prune (Delete=false, set by the appset's
         // managedNamespaceMetadata).
         const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
-        await clusterReader.annotateNamespace(ac.name, { [CLAIM_RELOCATING_ANNOTATION]: "true" });
-        c.log("meta", `source namespace ${ac.name} annotated ${CLAIM_RELOCATING_ANNOTATION} — the ServiceClaim teardown that the repoint sets off now keeps the data instead of dropping it`);
+        await clusterReader.annotateNamespace(namespace, { [CLAIM_RELOCATING_ANNOTATION]: "true" });
+        c.log("meta", `source namespace ${namespace} annotated ${CLAIM_RELOCATING_ANNOTATION} — the ServiceClaim teardown that the repoint sets off now keeps the data instead of dropping it`);
         const { commit } = await ports.registrations.setCluster(ac.stage, ac.name, target.cluster, c.runId);
         c.checkpoint({ commit });
         c.log("meta", `registration for ${ac.name} repointed ${ac.domain} -> ${target.domain} (${commit}) — the source appset stops generating the Application and the target starts`);
@@ -172,7 +175,9 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         await ports.registrations.commitRegistration({
           unit: { name: entry.name, repoURL: entry.repoURL, ...(entry.repoCredentialId ? { repoCredentialId: entry.repoCredentialId } : {}), ...(entry.owner ? { owner: entry.owner } : {}), ...(entry.onboardedAt ? { onboardedAt: entry.onboardedAt } : {}), suspended: entry.suspended, quiesced: true },
           builds: [],
-          deploy: { stage: target.stage, chartPath: entry.chartPath!, cluster: target.cluster, databases: entry.databases ?? [], services: entry.services ?? [],
+          // The unit's OWN stage: the dump is re-committed at the path it was dumped from, on the
+          // target cluster, whatever stage that cluster's map carries.
+          deploy: { stage: ac.stage, chartPath: entry.chartPath!, cluster: target.cluster, databases: entry.databases ?? [], services: entry.services ?? [],
                     // The size travels with the unit: a move must land it on the instance it ran on,
                     // not on whatever the default happens to be at the destination.
                     size: entry.size ?? "small", mongodb: entry.mongodb ?? "shared",
@@ -195,11 +200,12 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         }
         c.log("meta", `source Application ${appName} is gone — the source released the unit`);
       },
-      dnsRecordName: async (_c, target) => consumerUnitHost(ac.name, unitApexFromChain(await ports.registrations.readClusterValueFiles(target.domain, target.stage))),
+      // The chain is (the TARGET cluster's domain, the UNIT's stage).
+      dnsRecordName: async (_c, target) => consumerUnitHost(ac.name, ac.stage, unitApexFromChain(await ports.registrations.readClusterValueFiles(target.domain, ac.stage))),
       clearSourceCluster: async (c) => {
         const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
-        await clusterReader.deleteAdmissionPolicy(consumerAdmissionPolicyName(ac.name));
-        await projectWriter.deleteAppProject(argoNamespace, ac.name);
+        await clusterReader.deleteAdmissionPolicy(consumerAdmissionPolicyName(ac.name, ac.stage));
+        await projectWriter.deleteAppProject(argoNamespace, namespace);
         // The argo-sync grant ONLY. The unit's two other build grants live in the stage-free
         // `<name>-build` namespace, which does not move with the unit and is the one place its release
         // PipelineRun is created — deleting them here would leave the unit unable to build on its new
@@ -213,10 +219,10 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         // before this step — which verify-source-released measured for the delivery Application off
         // the same selector. Until one real move says so on a real cluster, a leftover cluster-scoped
         // policy on a shared source is worth three idempotent calls (hostyour-manager#113).
-        if (ports.buildRbac) await ports.buildRbac.deleteBuildRbac([renderConsumerArgoSync({ name: ac.name, argoNamespace })]);
-        if (ports.repoCredential) await ports.repoCredential.deleteRepoCredential(argoNamespace, consumerRepoCredentialName(ac.name));
-        const { deleted } = await clusterReader.deleteNamespace(ac.name);
-        c.log("meta", `source cluster cleared for ${ac.name} — admission policy, AppProject, argo-sync grant, repository credential removed; namespace ${ac.name} ${deleted ? "deleted" : "already absent"} (the per-consumer PostgreSQL and the PVCs fall with it)`);
+        if (ports.buildRbac) await ports.buildRbac.deleteBuildRbac([renderConsumerArgoSync({ name: ac.name, stage: ac.stage, argoNamespace })]);
+        if (ports.repoCredential) await ports.repoCredential.deleteRepoCredential(argoNamespace, consumerRepoCredentialName(ac.name, ac.stage));
+        const { deleted } = await clusterReader.deleteNamespace(namespace);
+        c.log("meta", `source cluster cleared for ${ac.name} at ${ac.stage} — admission policy, AppProject, argo-sync grant, repository credential removed; namespace ${namespace} ${deleted ? "deleted" : "already absent"} (the per-consumer PostgreSQL and the PVCs fall with it)`);
         // The one thing a move does NOT take off the source. The objectstore claim's teardown skipped
         // its DeleteBucket at repoint (Garage refuses it on a non-empty bucket, and the retrying
         // finalizer would have kept the source Application standing past verify-source-released), and

@@ -73,14 +73,20 @@ describe("inventory tenants + tenant_apps", () => {
     expect(apps[0]?.status).toBe("active");
   });
 
-  it("enforces UNIQUE(clusterId, guid) on tenants and UNIQUE(tenantId, name) on tenant_apps", () => {
+  it("enforces UNIQUE(guid, stage) on tenants — across clusters — and UNIQUE(tenantId, name) on tenant_apps", () => {
     const db = fresh();
     seedCluster(db);
+    db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
     const base = { clusterId: "cls_1", guid: "e2e8ymj86dk8", subdomain: "acme.example", stage: "prod" as const, members: ["auth", "jobs", "report"], identityProvider: "auth" };
     const first = tenantId();
     db.db.insert(tenants).values({ id: first, ...base }).run();
-    // Same (clusterId, guid) -> unique-index violation.
+    // Same (guid, stage) -> unique-index violation, on this cluster and on any other: one tenant
+    // stands at one stage in exactly one place.
     expect(() => db.db.insert(tenants).values({ id: tenantId(), ...base }).run()).toThrow(/UNIQUE/i);
+    expect(() => db.db.insert(tenants).values({ id: tenantId(), ...base, clusterId: "cls_2" }).run()).toThrow(/UNIQUE/i);
+    // The same guid at ANOTHER stage is another tenant row, on the same cluster or not.
+    db.db.insert(tenants).values({ id: tenantId(), ...base, stage: "test" }).run();
 
     const a1 = tenantAppId();
     db.db.insert(tenantApps).values({ id: a1, tenantId: first, name: "web" }).run();
@@ -133,11 +139,17 @@ describe("apps.stage", () => {
     expect(() => db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name) VALUES ('app_2','cls_1','acme')").run()).toThrow(/NOT NULL/i);
   });
 
-  it("holds UNIQUE(clusterId, name, stage) — the upsert key finds one row or none", () => {
+  it("holds UNIQUE(name, stage) across clusters — the upsert key finds one row or none, and one name at two stages on one cluster is two rows", () => {
     const db = fresh();
     seedCluster(db);
+    db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
     insert(db, "app_1", "prod");
     expect(() => insert(db, "app_2", "prod")).toThrow(/UNIQUE/i);
+    // The same (name, stage) on ANOTHER cluster is the same unit twice — refused.
+    expect(() => db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, stage) VALUES ('app_3', 'cls_2', 'acme', 'prod')").run()).toThrow(/UNIQUE/i);
+    // The same name at another stage on the SAME cluster is the unit's second stage — allowed.
+    insert(db, "app_4", "test");
   });
 
   // The provenance DEFAULT as the DATABASE holds it, on both tables that carry it. Inserted through

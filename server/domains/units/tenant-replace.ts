@@ -75,7 +75,7 @@ export async function resolveTeardownTarget(
   if (row) {
     identity = { subdomain: row.subdomain, clusterId: row.clusterId, tenantId: row.tenantId };
   } else if (pointer) {
-    const resolved = resolveClusterIdByName(db, pointer.cluster, stage);
+    const resolved = resolveClusterIdByName(db, pointer.cluster);
     if (resolved) identity = { subdomain: pointer.subdomain, clusterId: resolved.clusterId, tenantId: null };
   }
   if (!identity) return null;

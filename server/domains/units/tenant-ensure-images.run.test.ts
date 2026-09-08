@@ -5,7 +5,6 @@ import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { makeAddAppDef, AddAppParams } from "./add-app.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { memberApplication, tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -39,7 +38,6 @@ const ENGINE = { repo: "example-engine", tag: "0.4.0" };
 /** A cluster-marking resolver that answers every cluster short name at "prod" — every fixture in this
  *  file lands its tenant on s1/prod, so a single-stage stand-in is all TenantRegistrations needs to
  *  satisfy commitTenant's stage boundary check. */
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
@@ -107,7 +105,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
     seeder: fakeTenantSeeder(),
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
-    registrations: new TenantRegistrations(new FakePlatformRepo(), CLUSTER_STAGE),
+    registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({}),
       argoReader: new FakeMasterArgoReader({}),
@@ -229,7 +227,7 @@ describe("create-tenant planStream resolves the registry host", () => {
         return [{ path: clusterMapPath("m1.example"), content: "global:\n  endpoints:\n    registry:\n      host: zot.build1.example\n" }];
       },
     });
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.registryHost).toBe("zot.build1.example");
@@ -240,7 +238,7 @@ describe("create-tenant planStream resolves the registry host", () => {
     seedClusters();
     // A chain that states no registry host — registryHostFromChain itself must reject the plan loud.
     const prt = ports({ resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: "global: {}\n" }] });
-    await expect(makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", subdomain: "a.example", owner: "o", apps: [] }, planCtx())).rejects.toThrow(/registry\.host/);
+    await expect(makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "a.example", owner: "o", apps: [] }, planCtx())).rejects.toThrow(/registry\.host/);
   });
 });
 
@@ -261,7 +259,7 @@ describe("create-tenant planStream freezes requiredImages", () => {
     ];
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: docsWithImages } });
     const def = makeCreateTenantDef(ports({ helm }));
-    const result = await def.planStream!({ clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.requiredImages).toEqual([

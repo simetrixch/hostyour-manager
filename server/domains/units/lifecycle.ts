@@ -36,22 +36,26 @@ export interface AppCluster {
   clusterId: string;
 }
 
+/** The consumer's own facts off its row: its name and STAGE are the row's, the domain is its
+ *  cluster's. The cluster's `stage` column is the platform's and is not read here. */
 export function loadAppCluster(db: Db, appId: string): AppCluster {
   const app = db.select().from(apps).where(eq(apps.id, appId)).get();
   if (!app) throw errNotFound(`app ${appId}`);
   const cluster = db.select().from(clusters).where(eq(clusters.id, app.clusterId)).get();
   if (!cluster) throw errNotFound(`cluster ${app.clusterId} for app ${appId}`);
-  return { name: app.name, domain: cluster.domain, stage: cluster.stage, clusterId: cluster.id };
+  return { name: app.name, domain: cluster.domain, stage: app.stage, clusterId: cluster.id };
 }
 
 /** Fail-closed deploy-state gate, shared by every consumer AND tenant attest-target step: the target
  *  cluster must still be a provisioned hostyour cluster (its deploy-state ConfigMap present) whose
- *  domain/stage agree with the unit's cluster row. `subject` names the unit in the mismatch message
- *  ("app" / "tenant"). Returns the (now-non-null) DeployState so the caller can log its generation. */
-export function assertDeployState(state: DeployState | null, domain: string, stage: Stage, subject: string): DeployState {
+ *  DOMAIN agrees with the unit's cluster row. The deploy-state's stage is the platform's and is not
+ *  compared: a unit at any stage stands on a cluster of any stage. `subject` names the unit in the
+ *  mismatch message ("app" / "tenant"). Returns the (now-non-null) DeployState so the caller can log
+ *  its generation. */
+export function assertDeployState(state: DeployState | null, domain: string, subject: string): DeployState {
   if (!state) throw errNotFound(`deploy-state for cluster ${domain} — refusing to act on an unprovisioned cluster`);
-  if (state.domain !== domain || state.stage !== stage) {
-    throw errNotFound(`deploy-state mismatch: cluster reports ${state.domain}/${state.stage}, ${subject} targets ${domain}/${stage}`);
+  if (state.domain !== domain) {
+    throw errNotFound(`deploy-state mismatch: cluster reports ${state.domain}, ${subject} targets ${domain}`);
   }
   return state;
 }
@@ -68,8 +72,8 @@ export function attestTargetStep(ports: LifecyclePorts, appId: string): Step {
       // Read the deploy-state on the TARGET cluster (a slave over its own bearer, or the master), not the
       // master-local reader — a consumer on one slave must be attested against that slave.
       const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
-      const state = assertDeployState(await clusterReader.readDeployState(), ac.domain, ac.stage, "app");
-      ctx.log("meta", `target ${ac.domain} (${ac.stage}) attested for ${ac.name} — deploy-state generation ${state.generation}`);
+      const state = assertDeployState(await clusterReader.readDeployState(), ac.domain, "app");
+      ctx.log("meta", `target ${ac.domain} attested for ${ac.name} at ${ac.stage} — deploy-state generation ${state.generation}`);
     },
   };
 }
@@ -78,18 +82,17 @@ export function attestTargetStep(ports: LifecyclePorts, appId: string): Step {
  *  rather than to the unit-in-a-stage has to ask before it removes anything, and both consumer removal
  *  run kinds (offboard, purge) ask through this one helper.
  *
- *  What is per stage, because a cluster carries exactly one stage and a unit's stages therefore sit on
- *  different clusters: the stage registration, the generated Application, the isolation AppProject, the
- *  ArgoCD repository credential, the admission policy, the namespace, the argo-sync grant, and the
- *  `<stage>/consumer/<name>/*` Vault entries. The public DNS record is per stage too, but NOT for that
- *  reason — its name `<name>.<unitApex>` states no cluster and two clusters may share an apex. It is per
- *  stage because provisionUnitDns (unit-dns.ts) refuses to onboard a stage onto a host another cluster's
- *  address already answers, so a unit reaches a second stage only where the two apexes differ and the two
- *  stages then own two different names. What is per UNIT, one copy shared by every stage: the
- *  `<name>-build` namespace with its EventListener and manager-read grants, the repo PAT at
- *  `secret/build/<name>/repo-pat`, the ONE build webhook on the consumer repo, and the release kit
- *  committed into that repo. Removing any of the second group while another stage stands leaves that
- *  stage unable to build, release or deploy.
+ *  What is per stage, because every name of it carries the stage: the stage registration, the
+ *  generated Application `<name>-<stage>`, the isolation AppProject, the admission policy
+ *  `consumer-<name>-<stage>`, the namespace `<name>-<stage>`, the ArgoCD repository credential
+ *  `repo-<name>-<stage>`, the argo-sync grant `<name>-<stage>-argo-sync`, the mail-ops grant
+ *  `<name>-<stage>-smtp-ops`, the public DNS record `<name>-<stage>.<unitApex>` and the
+ *  `<stage>/consumer/<name>/*` Vault entries. Two stages of one unit may share one cluster and always
+ *  share the relay's namespace, which is why none of these may be named per unit. What is per UNIT,
+ *  one copy shared by every stage: the `<name>-build` namespace with its EventListener and
+ *  manager-read grants, the repo PAT at `secret/build/<name>/repo-pat`, the ONE build webhook on the
+ *  consumer repo, and the release kit committed into that repo. Removing any of the second group
+ *  while another stage stands leaves that stage unable to build, release or deploy.
  *
  *  The registration tree answers it: `registrations/<unit>/` still holding another `<stage>.yaml` means
  *  the unit stays registered — the same rule removeRegistration applies to build.yaml, asked of the same
@@ -179,7 +182,7 @@ export interface TenantLifecyclePorts {
   buildRbac?: BuildRbacWriter;
   /** The public apex (global.unitApex) of a cluster, read off its values chain on the platform repo
    *  — the tenant registrations's own repo is catalog, so the apex arrives as a resolver, the same
-   *  shape the cluster-stage boundary uses. */
+   *  shape the build-plane FQDN arrives in. */
   resolveUnitApex: (domain: string, stage: Stage) => Promise<string>;
   /** Destroys the tenant's crypto entry `<stage>/tenants/<guid>` — the purge inverse of the seed
    *  create-tenant does. Optional and skipped when absent, the same shape buildRbac has: the seeder is
@@ -189,8 +192,8 @@ export interface TenantLifecyclePorts {
 }
 
 /** A tenant + its cluster context, resolved from the tenants row (tnt_) and its clusters row. The
- *  guid is the sole tenant identity (namespace == AppProject == <guid>). The tenant analogue of
- *  AppCluster. */
+ *  guid and the STAGE are the row's own (every member is named `<guid>-<member>-<stage>`); the domain
+ *  is the cluster's. The tenant analogue of AppCluster. */
 export interface TenantCluster {
   tenantId: string;
   guid: string;
@@ -233,8 +236,8 @@ export function attestTenantTargetStep(ports: TenantLifecyclePorts, tenantId: st
       const tc = loadTenantCluster(ctx.db, tenantId);
       // Attest the TARGET cluster (tenants only ever land on slaves, POLICY) over its own reader.
       const { clusterReader } = await ports.resolver.resolve(tc.clusterId);
-      const state = assertDeployState(await clusterReader.readDeployState(), tc.domain, tc.stage, "tenant");
-      ctx.log("meta", `target ${tc.domain} (${tc.stage}) attested for ${tc.guid} — deploy-state generation ${state.generation}`);
+      const state = assertDeployState(await clusterReader.readDeployState(), tc.domain, "tenant");
+      ctx.log("meta", `target ${tc.domain} attested for ${tc.guid} at ${tc.stage} — deploy-state generation ${state.generation}`);
     },
   };
 }

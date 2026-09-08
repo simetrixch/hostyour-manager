@@ -194,9 +194,8 @@ function hasInventoryRow(db: Db, p: { guid: string; stage: Stage }): boolean {
 
 /** The target cluster's own coordinates, derived from the clusters row + the guid ALONE — no tenants row
  *  required (that is the entire point). The cluster row is the authority for the domain and for the
- *  cluster's short name (clusterShortName); the REQUESTED stage is cross-checked against the
- *  cluster's own stage (a cluster is exactly one stage) so a mistyped stage fails closed instead of
- *  pointing the teardown at the wrong pointer path. */
+ *  cluster's short name (clusterShortName); the stage is the tenant's own, as requested — the
+ *  cluster's `stage` column is the platform's and decides nothing about a tenant. */
 interface TenantPurgeCluster {
   guid: string;
   domain: string;
@@ -207,17 +206,14 @@ interface TenantPurgeCluster {
 
 function loadPurgeCluster(db: Db, p: TenantPurgeRequest): TenantPurgeCluster {
   const row = db
-    .select({ id: clusters.id, domain: clusters.domain, stage: clusters.stage })
+    .select({ id: clusters.id, domain: clusters.domain })
     .from(clusters)
     .where(eq(clusters.id, p.clusterId))
     .get();
   if (!row) throw errNotFound(`cluster ${p.clusterId}`);
-  if (row.stage !== p.stage) {
-    throw errValidation(`stage mismatch: cluster ${p.clusterId} is ${row.stage}, tenant-purge targets ${p.stage}`);
-  }
   // Cluster STATUS is deliberately not checked: leftovers on a cluster that is no longer active are
   // exactly what this run kind is for.
-  return { guid: p.guid, domain: row.domain, stage: row.stage, clusterId: row.id, cluster: clusterShortName(row.domain) };
+  return { guid: p.guid, domain: row.domain, stage: p.stage, clusterId: row.id, cluster: clusterShortName(row.domain) };
 }
 
 /** The teardown target for a guid NEITHER source knows — no tenants row AND no live registration (a
@@ -277,8 +273,10 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
         // for its deletion costs one idempotent 404.
         const c = loadPurgeCluster(ctx.db, p);
         const { clusterReader } = await ports.resolver.resolve(c.clusterId);
-        const labelled = await clusterReader.listNamespaces(tenantSelector(c.guid));
-        const namespaces = [...new Set([...labelled, ...p.target.members.map((m) => memberNamespace(c.guid, m))])];
+        // The label names the guid alone, so the labelled set is narrowed to THIS stage's suffix: a
+        // sibling stage of the same tenant is its own tenant and keeps its namespaces.
+        const labelled = (await clusterReader.listNamespaces(tenantSelector(c.guid))).filter((ns) => ns.endsWith(`-${c.stage}`));
+        const namespaces = [...new Set([...labelled, ...p.target.members.map((m) => memberNamespace(c.guid, m, c.stage))])];
         const issued: string[] = [];
         for (const ns of namespaces) {
           if ((await clusterReader.deleteNamespace(ns)).deleted) issued.push(ns);
@@ -416,7 +414,9 @@ function tenantPurgeSteps(ports: TenantLifecyclePorts, params: TenantPurgeParams
         // ready replica refuses the run. Without this, the only thing between the operator and an
         // unrecoverable deprovision of a serving tenant was the prose on the approve card.
         if (!hasInventoryRow(ctx.db, p)) {
-          const namespaces = await clusterReader.listNamespaces(`platform/tenant=${c.guid}`);
+          // The label names the guid alone; this purge is aimed at ONE stage, so only that stage's
+          // member namespaces are read — a sibling stage serving under the same guid is its own tenant.
+          const namespaces = (await clusterReader.listNamespaces(`platform/tenant=${c.guid}`)).filter((ns) => ns.endsWith(`-${c.stage}`));
           for (const ns of namespaces) {
             const running = (await clusterReader.smoke(ns)).workloads.filter((w) => w.ready > 0);
             if (running.length > 0) {
@@ -442,8 +442,8 @@ function tenantPurgeSteps(ports: TenantLifecyclePorts, params: TenantPurgeParams
             );
           }
         }
-        const state = assertDeployState(await clusterReader.readDeployState(), c.domain, c.stage, "tenant");
-        ctx.log("meta", `target ${c.domain} (${c.stage}) attested for the purge of ${c.guid} — deploy-state generation ${state.generation}`);
+        const state = assertDeployState(await clusterReader.readDeployState(), c.domain, "tenant");
+        ctx.log("meta", `target ${c.domain} attested for the purge of ${c.guid} at ${c.stage} — deploy-state generation ${state.generation}`);
       },
     },
     // The pointer-side teardown, shared with the replace: remove the tenant.yaml, best-effort wait for

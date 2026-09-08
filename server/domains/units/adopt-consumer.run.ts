@@ -4,10 +4,10 @@ import type { RunDefinition, Step } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { apps, clusters } from "../../db/schema/inventory.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
-import { STAGE, APP_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
-import { consumerArgoAppName, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
+import { STAGE, APP_SETTLED_STATUS } from "../../../shared/enums.ts";
+import { consumerArgoAppName, consumerNamespace, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
 import { localTx } from "../../executor/stepkit.ts";
-import { assertDeployState, type LifecyclePorts } from "./lifecycle.ts";
+import { assertDeployState, type AppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import { upsertAppRow } from "./onboard-steps.ts";
 
 // adopt-consumer — the RECOVERY companion to purge.run.ts, and its structural
@@ -38,8 +38,10 @@ import { upsertAppRow } from "./onboard-steps.ts";
 // as purge refuses to act on the wrong cluster.
 
 export const AdoptConsumerParams = z.object({
-  // The consumer name == namespace == AppProject == registration directory (G1). Same shape onboard/purge use.
+  // The consumer name — the unit, and the registration directory; its namespace is <name>-<stage>.
+  // Same shape onboard/purge use.
   consumerName: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/),
+  // The unit's own stage — the registration file registrations/<name>/<stage>.yaml.
   stage: z.enum(STAGE),
   clusterId: z.string().startsWith("cls_"),
 });
@@ -51,12 +53,9 @@ export type AdoptConsumerParams = z.infer<typeof AdoptConsumerParams>;
  *  reads as intent. */
 export type AdoptConsumerPorts = LifecyclePorts;
 
-interface AdoptTarget {
-  name: string;
-  domain: string;
-  stage: Stage;
-  clusterId: string;
-}
+/** The adopt target — the four facts every consumer lifecycle run resolves off its row, here
+ *  derived from the request. */
+type AdoptTarget = AppCluster;
 
 /** Read the target's STAGE registration, refusing everything that would make an adopt write a mixed
  *  identity. Both steps that need it call this rather than one caching the read for the other: steps
@@ -87,29 +86,27 @@ async function readStageRegistration(ports: AdoptConsumerPorts, t: AdoptTarget):
 }
 
 /** Derive the target identity from name+stage+cluster ALONE — no inventory row exists (that is the
- *  whole point). The cluster row is the AUTHORITY for the domain; the passed stage is cross-checked
- *  against the cluster's own stage (a cluster is exactly one stage) so a mistyped stage fails closed
- *  rather than reading the wrong pointer path. Byte-identical to purge's loadPurgeTarget — kept local
- *  so the two run files stay independently editable (the same reason purge does not import offboard). */
+ *  whole point). The cluster row is the AUTHORITY for the domain; the stage is the unit's own, as
+ *  given, and the cluster's `stage` column — the platform's — decides nothing about it. Byte-identical
+ *  to purge's loadPurgeTarget — kept local so the two run files stay independently editable (the same
+ *  reason purge does not import offboard). */
 function loadAdoptTarget(db: Db, p: AdoptConsumerParams): AdoptTarget {
   const cluster = db.select().from(clusters).where(eq(clusters.id, p.clusterId)).get();
   if (!cluster) throw errNotFound(`cluster ${p.clusterId}`);
-  if (cluster.stage !== p.stage) {
-    throw errValidation(`stage mismatch: cluster ${p.clusterId} is ${cluster.stage}, adopt targets ${p.stage}`);
-  }
-  return { name: p.consumerName, domain: cluster.domain, stage: cluster.stage, clusterId: cluster.id };
+  return { name: p.consumerName, domain: cluster.domain, stage: p.stage, clusterId: cluster.id };
 }
 
-/** The UNSETTLED apps row for this name on this cluster, or undefined. Present ⇒ the consumer is
- *  already on the Consumers list (the list joins apps -> clusters with no stage filter), so there is
- *  nothing invisible to adopt and the run refuses. A SETTLED row (APP_SETTLED_STATUS — a recorded
- *  removal) does NOT block: a pointer standing beside it means the consumer is out there again,
- *  and adopting flips that same row back to a live status (the upsert key finds it). */
+/** The UNSETTLED apps row of this (name, stage), on any cluster, or undefined. Present ⇒ the
+ *  consumer is already on the Consumers list, so there is nothing invisible to adopt and the run
+ *  refuses — a unit stands at one stage in exactly one place, and an adopt onto a second cluster
+ *  would move a row another cluster serves. A SETTLED row (APP_SETTLED_STATUS — a recorded removal)
+ *  does NOT block: a pointer standing beside it means the consumer is out there again, and adopting
+ *  flips that same row back to a live status (the upsert key finds it). */
 function findUnsettledRow(db: Db, t: AdoptTarget): typeof apps.$inferSelect | undefined {
   return db
     .select()
     .from(apps)
-    .where(and(eq(apps.clusterId, t.clusterId), eq(apps.name, t.name), notInArray(apps.status, [...APP_SETTLED_STATUS])))
+    .where(and(eq(apps.name, t.name), eq(apps.stage, t.stage), notInArray(apps.status, [...APP_SETTLED_STATUS])))
     .get();
 }
 
@@ -129,8 +126,8 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
         // attestTargetStep cannot be reused.
         const t = loadAdoptTarget(ctx.db, p);
         const { clusterReader } = await ports.resolver.resolve(t.clusterId);
-        const state = assertDeployState(await clusterReader.readDeployState(), t.domain, t.stage, "consumer");
-        ctx.log("meta", `target ${t.domain} (${t.stage}) attested for adopt of ${t.name} — deploy-state generation ${state.generation}`);
+        const state = assertDeployState(await clusterReader.readDeployState(), t.domain, "consumer");
+        ctx.log("meta", `target ${t.domain} attested for adopt of ${t.name} at ${t.stage} — deploy-state generation ${state.generation}`);
       },
     },
     {
@@ -146,7 +143,7 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
         const tracked = findUnsettledRow(ctx.db, t);
         if (tracked) {
           throw errValidation(
-            `consumer "${t.name}" is already tracked on cluster ${t.clusterId} (row ${tracked.id}, status ${tracked.status}) — it is on the Consumers list, so there is nothing to adopt`,
+            `consumer "${t.name}" at ${t.stage} is already tracked on cluster ${tracked.clusterId} (row ${tracked.id}, status ${tracked.status}) — it is on the Consumers list, so there is nothing to adopt`,
           );
         }
         const current = await readStageRegistration(ports, t);
@@ -177,9 +174,10 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
         // the other, exactly like the live route.
         const t = loadAdoptTarget(ctx.db, p);
         const appName = consumerArgoAppName(t.name, t.stage);
+        const namespace = consumerNamespace(t.name, t.stage);
         const { clusterReader, argoReader, argoNamespace } = await ports.resolver.resolve(t.clusterId);
         const [smokeRes, argoRes] = await Promise.allSettled([
-          clusterReader.smoke(t.name),
+          clusterReader.smoke(namespace),
           argoReader.getApplication(argoNamespace, appName),
         ]);
         if (smokeRes.status === "fulfilled") {
@@ -187,7 +185,7 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
           const up = s.workloads.filter((w) => w.available).length;
           ctx.log(
             "meta",
-            `live cluster: namespace ${t.name} ${s.namespaceExists ? "exists" : "does NOT exist"}, ${up}/${s.workloads.length} workload(s) available, external secrets ${s.externalSecretsReady ? "ready" : "NOT ready"}`,
+            `live cluster: namespace ${namespace} ${s.namespaceExists ? "exists" : "does NOT exist"}, ${up}/${s.workloads.length} workload(s) available, external secrets ${s.externalSecretsReady ? "ready" : "NOT ready"}`,
           );
         } else {
           ctx.log("meta", `live cluster state could not be read (${errText(smokeRes.reason)}) — recorded as unknown, not as healthy; the Consumers card will show the live truth per row`);
@@ -270,7 +268,7 @@ export function makeAdoptConsumerDef(ports: AdoptConsumerPorts): RunDefinition<A
       const tracked = findUnsettledRow(db, t);
       if (tracked) {
         throw errValidation(
-          `consumer "${t.name}" is already tracked on cluster ${t.clusterId} (row ${tracked.id}, status ${tracked.status}) — it is on the Consumers list, so there is nothing to adopt`,
+          `consumer "${t.name}" at ${t.stage} is already tracked on cluster ${tracked.clusterId} (row ${tracked.id}, status ${tracked.status}) — it is on the Consumers list, so there is nothing to adopt`,
         );
       }
       const stepDefs = adoptSteps(ports, params);

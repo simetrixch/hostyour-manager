@@ -151,11 +151,11 @@ describe("gateT2Render", () => {
 // ── gateT3Isolation (the kind-scope fence) ───────────────────────────────────────────────────────
 
 describe("gateT3Isolation", () => {
-  const AUTH_NS = `${PROBE}-auth`; // the auth member's OWN namespace
-  const ERP_NS = `${PROBE}-erp`; // the erp app member's OWN namespace (engine + front renders share it)
+  const AUTH_NS = `${PROBE}-auth-prod`; // the auth member's OWN namespace, at the tenant's stage
+  const ERP_NS = `${PROBE}-erp-prod`; // the erp app member's OWN namespace (engine + front renders share it)
   const clean: MemberDocs[] = [
-    { member: "auth", namespace: AUTH_NS, docs: [NS_DOC] },
-    { member: "erp", namespace: ERP_NS, docs: [doc("Deployment"), doc("Service")] },
+    { member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [NS_DOC] },
+    { member: "erp", namespace: ERP_NS, guid: PROBE, docs: [doc("Deployment"), doc("Service")] },
   ];
 
   it("passes when only Namespace appears at cluster scope and every member stays inside its own namespace", () => {
@@ -166,39 +166,39 @@ describe("gateT3Isolation", () => {
   });
 
   it("rejects a forbidden cluster-scoped kind (ClusterRole)", () => {
-    const g = gateT3Isolation([{ member: "auth", namespace: AUTH_NS, docs: [doc("ClusterRole")] }]);
+    const g = gateT3Isolation([{ member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [doc("ClusterRole")] }]);
     expect(g.status).toBe("fail");
     expect(g.reason).toMatch(/cluster-scoped/);
     expect(g.evidence?.[0]?.kind).toBe("ClusterRole");
   });
 
   it("rejects the Tenant CR — the Manager is its sole writer, a chart-rendered twin would fight it", () => {
-    const g = gateT3Isolation([{ member: "auth", namespace: AUTH_NS, docs: [TENANT_DOC] }]);
+    const g = gateT3Isolation([{ member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [TENANT_DOC] }]);
     expect(g.status).toBe("fail");
     expect(g.reason).toMatch(/cluster-scoped/);
     expect(g.evidence?.[0]?.kind).toBe("Tenant");
   });
 
   it("rejects a self-minted ArgoCD Application", () => {
-    const g = gateT3Isolation([{ member: "erp", namespace: ERP_NS, docs: [doc("Application")] }]);
+    const g = gateT3Isolation([{ member: "erp", namespace: ERP_NS, guid: PROBE, docs: [doc("Application")] }]);
     expect(g.status).toBe("fail");
     expect(g.reason).toMatch(/argoproj\.io/);
   });
 
   it("rejects a Role/RoleBinding escalation", () => {
-    expect(gateT3Isolation([{ member: "auth", namespace: AUTH_NS, docs: [doc("Role")] }]).status).toBe("fail");
-    expect(gateT3Isolation([{ member: "auth", namespace: AUTH_NS, docs: [doc("RoleBinding")] }]).status).toBe("fail");
+    expect(gateT3Isolation([{ member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [doc("Role")] }]).status).toBe("fail");
+    expect(gateT3Isolation([{ member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [doc("RoleBinding")] }]).status).toBe("fail");
   });
 
   it("rejects an inline Secret", () => {
-    const g = gateT3Isolation([{ member: "auth", namespace: AUTH_NS, docs: [doc("Secret")] }]);
+    const g = gateT3Isolation([{ member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [doc("Secret")] }]);
     expect(g.status).toBe("fail");
     expect(g.reason).toMatch(/Vault/);
   });
 
   it("rejects a namespaced object pinned to a namespace outside the fence entirely", () => {
     const escapee = doc("Deployment", { raw: { kind: "Deployment", metadata: { name: "d", namespace: "kube-system" } } });
-    const g = gateT3Isolation([{ member: "erp", namespace: ERP_NS, docs: [escapee] }]);
+    const g = gateT3Isolation([{ member: "erp", namespace: ERP_NS, guid: PROBE, docs: [escapee] }]);
     expect(g.status).toBe("fail");
     expect(g.reason).toMatch(/namespace confinement|outside the member namespace/);
     expect(g.evidence?.[0]?.fieldPath).toBe("metadata.namespace");
@@ -208,17 +208,40 @@ describe("gateT3Isolation", () => {
     // erp's render pins a Deployment at the auth member's namespace instead of its own: just as much
     // an escape as a wholly foreign namespace, because T3 holds every member to ITS OWN namespace only.
     const crossMember = doc("Deployment", { raw: { kind: "Deployment", metadata: { name: "d", namespace: AUTH_NS } } });
-    const g = gateT3Isolation([{ member: "erp", namespace: ERP_NS, docs: [crossMember] }]);
+    const g = gateT3Isolation([{ member: "erp", namespace: ERP_NS, guid: PROBE, docs: [crossMember] }]);
     expect(g.status).toBe("fail");
     expect(g.reason).toMatch(/outside the member namespace/);
     expect(g.found).toContain(AUTH_NS);
+  });
+
+  it("rejects a document pinned to the member's OWN name at another stage — <guid>-auth is not <guid>-auth-prod", () => {
+    // A chart that hard-codes the pre-stage namespace shape would land beside the member, not in it;
+    // the stage is part of the namespace and the fence holds the whole string.
+    const unstaged = doc("Deployment", { raw: { kind: "Deployment", metadata: { name: "d", namespace: `${PROBE}-auth` } } });
+    const g = gateT3Isolation([{ member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [unstaged] }]);
+    expect(g.status).toBe("fail");
+    expect(g.reason).toMatch(/outside the member namespace/);
+    expect(g.found).toContain(`${PROBE}-auth"`);
+  });
+
+  it("rejects a ServiceAccount claiming another tenant's guid in vault.hashicorp.com/alias-metadata-tenant, and admits its own or none", () => {
+    // tenant-eso-<stage> binds the tenant's Vault entry by this alias metadata: a foreign guid is a
+    // foreign tenant's secrets synced into this namespace. Own guid and no claim both pass.
+    const claiming = (guid?: string): RenderedDoc =>
+      doc("ServiceAccount", { raw: { kind: "ServiceAccount", metadata: { name: "example-auth", ...(guid !== undefined ? { annotations: { "vault.hashicorp.com/alias-metadata-tenant": guid } } : {}) } } });
+    const foreign = gateT3Isolation([{ member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [claiming("zzzzzzzzzzzz")] }]);
+    expect(foreign.status).toBe("fail");
+    expect(foreign.reason).toMatch(/only as zsjs023ctne0/);
+    expect(foreign.evidence?.[0]?.fieldPath).toBe("metadata.annotations['vault.hashicorp.com/alias-metadata-tenant']");
+    expect(gateT3Isolation([{ member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [claiming(PROBE)] }]).status).toBe("pass");
+    expect(gateT3Isolation([{ member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [claiming()] }]).status).toBe("pass");
   });
 
   it("catches a forbidden member smuggled inside a kind-agnostic List aggregate", () => {
     const smuggler = doc("Widget", {
       raw: { kind: "Widget", items: [{ kind: "ClusterRole", metadata: { name: "sneaky" } }] },
     });
-    const g = gateT3Isolation([{ member: "auth", namespace: AUTH_NS, docs: [smuggler] }]);
+    const g = gateT3Isolation([{ member: "auth", namespace: AUTH_NS, guid: PROBE, docs: [smuggler] }]);
     expect(g.status).toBe("fail");
     expect(g.evidence?.[0]?.kind).toBe("ClusterRole");
     expect(g.evidence?.[0]?.name).toBe("sneaky");
@@ -321,7 +344,7 @@ describe("validateTenant", () => {
       `${PROBE}-auth`, `${PROBE}-jobs`, `${PROBE}-report`, `${PROBE}-erp-1`, `${PROBE}-erp-2`,
     ]);
     expect(helm.requests.map((r) => r.namespace)).toEqual([
-      `${PROBE}-auth`, `${PROBE}-jobs`, `${PROBE}-report`, `${PROBE}-erp`, `${PROBE}-erp`,
+      `${PROBE}-auth-prod`, `${PROBE}-jobs-prod`, `${PROBE}-report-prod`, `${PROBE}-erp-prod`, `${PROBE}-erp-prod`,
     ]);
     expect(helm.requests.map((r) => r.chartPath)).toContain("charts/example-engine");
     // Every member is rendered WITH the target cluster's folded chain — the charts require values

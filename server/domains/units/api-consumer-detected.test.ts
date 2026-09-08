@@ -78,7 +78,7 @@ const scan = async (app: Hono<AppEnv>, cookie: string): Promise<DetectedScanView
 
 describe("GET /api/consumers/detected — the two halves composed", () => {
   it("answers both halves in one response", async () => {
-    const registrations = new Registrations(new FakePlatformRepo(), async () => ({ name: "s1", stage: "prod" }));
+    const registrations = new Registrations(new FakePlatformRepo());
     const { app, cookie } = await makeApp({ resolver: resolverHolding(["ghost"]), registrations });
     const body = await scan(app, cookie);
     expect(body.error).toBeUndefined();
@@ -93,7 +93,7 @@ describe("GET /api/consumers/detected — the two halves composed", () => {
     // not vanish either.
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.6", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
-    const registrations = new Registrations(new FakePlatformRepo(), async () => ({ name: "s1", stage: "prod" }));
+    const registrations = new Registrations(new FakePlatformRepo());
     const resolver = resolverHolding(["ghost"]);
     resolver.set("cls_2", {
       clusterReader: new FakeClusterReader({ throwOnListNamespaces: new Error("dial tcp 100.64.0.11:16443: connect: no route to host") }),
@@ -125,7 +125,7 @@ describe("GET /api/consumers/detected — the two halves composed", () => {
   });
 
   it("degrades the CLUSTER half alone when no resolver is wired, and still answers the registration half", async () => {
-    const registrations = new Registrations(new FakePlatformRepo(), async () => ({ name: "s1", stage: "prod" }));
+    const registrations = new Registrations(new FakePlatformRepo());
     const { app, cookie } = await makeApp({ registrations });
     const body = await scan(app, cookie);
     expect(body.error).toBeUndefined();

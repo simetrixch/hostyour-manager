@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, DeployableOnboardParams, type OnboardParams, type OnboardPorts } from "./onboard.run.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { CHANNEL_STAGES } from "./onboard.fixture.ts";
+import { Registrations } from "./registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
@@ -38,9 +39,6 @@ const AUTH_ACTIVATION: ConsumerActivation = {
 };
 const BOOTSTRAP_SPEC = { key: "AUTH_BOOTSTRAP_TOKEN", required: true as const, generate: "hex32" as const };
 
-// Every fixture onboards to the prod stage, so a fixed resolver answers every cluster with "prod" —
-// the stage boundary Registrations.commitRegistration checks before it ever writes a stage file.
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` — onboard's planStream
  *  resolves OnboardParams.unitApex from exactly this chain (admission-policy.ts unitApexFromChain),
@@ -92,7 +90,8 @@ function ports(over: Partial<OnboardPorts> = {}): OnboardPorts {
   return {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
     runner: new FakeGateRunner({ report: passReport() }),
-    registrations: new Registrations(platform, prodClusterStage),
+    registrations: new Registrations(platform),
+    channelStages: async () => CHANNEL_STAGES,
     resolveBuildPlaneFqdn: seedClusterMaps(platform, { "s1.example": "prod" }),
     seeder: new FakeSeeder(),
     resolver: new FakeClusterKubeResolver({
@@ -166,7 +165,7 @@ describe("onboard post-onboard activation step", () => {
     expect(activator.calls).toHaveLength(1);
     const call = activator.calls[0]!;
     // The unit's ONE host, <name>.<unitApex> — the same composition the admission policy pins.
-    expect(call.url).toBe("https://acme.example.com/api/v1/bootstrap/invite-admin");
+    expect(call.url).toBe("https://acme-prod.example.com/api/v1/bootstrap/invite-admin");
     expect(call.method).toBe("POST");
     expect(call.tokenHeader).toBe("X-Bootstrap-Token");
     expect(call.body).toEqual({ email: "admin@acme.test" });
@@ -267,7 +266,7 @@ describe("onboard post-onboard activation step", () => {
     };
     const prt = ports({ runner: new FakeGateRunner({ report: { ...passReport(), manifest } }) });
     const res = await makeOnboardDef(prt).planStream!(
-      { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart", repoCredentialId: "cred_pat" },
+      { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart", repoCredentialId: "cred_pat" },
       { db: db.db, log: () => undefined, signal: new AbortController().signal },
     );
     expect(res.outcome).toBe("planned");

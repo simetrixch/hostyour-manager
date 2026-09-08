@@ -2,22 +2,21 @@
 // provisioned at onboard/create-tenant, removed at offboard AND at both purge run kinds, over the
 // DnsProvider port (adapters/dns). One record per unit STANDING AT A STAGE, by kind of unit:
 //
-//   consumer — A `<name>.<unitApex>`. The chart renders exactly ONE host, and by DNS rule a
-//              wildcard does NOT cover the bare name, so the record is the name itself.
+//   consumer — A `<name>-<stage>.<unitApex>`. The chart renders exactly ONE host, and by DNS rule a
+//              wildcard does NOT cover a bare label, so the record is the host itself.
 //   tenant   — wildcard A `*.<subdomain>.<unitApex>`. Every member sits exactly one level below
-//              (auth./erp./web. …, nothing lives on the bare <subdomain>), so ONE wildcard covers
-//              them all — members added later included — and a move changes ONE record.
+//              (`<member>-<stage>.<subdomain>.`, nothing lives on the bare <subdomain>), so ONE
+//              wildcard covers them all — members and stages added later included — and a move
+//              changes ONE record.
 //
-// NEITHER NAME CARRIES A STAGE, and the apex is the target cluster's own (global.unitApex off its
-// values chain). Two clusters may well share one apex — install.sh defaults `unit-apex` to the FQDN
-// minus its first label precisely so a unit KEEPS its address when it moves between two clusters in
-// one zone — and under a shared apex both stages of a unit compose the identical host. That host can
-// answer for exactly one cluster, and the consumer chart's ingress and the admission policy pin the
-// same stage-free host on both, so the second stage would not become reachable, it would take the
-// first stage's address away. provisionUnitDns therefore REFUSES a host that already answers with
-// another cluster's address: a unit gets a second stage only where the two clusters' apexes differ,
-// and then the two records are two different names. That refusal is what makes the record a PER-STAGE
-// object for every teardown (offboard.run.ts SCOPE) even though its name states no stage.
+// THE CONSUMER'S RECORD NAME CARRIES THE STAGE, and the apex is the target cluster's own
+// (global.unitApex off its values chain). Two clusters may well share one apex — install.sh defaults
+// `unit-apex` to the FQDN minus its first label precisely so a unit KEEPS its address when it moves
+// between two clusters in one zone — and under a shared apex two stages of one unit are two records
+// with two names, so both may stand in one zone and on one cluster. What the name does NOT separate
+// is two CLUSTERS claiming the same stage of one unit: the host can answer for exactly one cluster,
+// so provisionUnitDns REFUSES a host that already answers with another cluster's address. A standing
+// record at another address is a takeover, whatever put it there.
 //
 // The record's CONTENT is the target cluster's address, READ off the cluster's own A record (its
 // FQDN resolves to the machine that serves it) — never computed. A move is then a content update of
@@ -31,40 +30,46 @@
 // are the idempotent no-op (delete-by-(name,type) resolves 0).
 import type { StepCtx } from "../../executor/types.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
+import type { Stage } from "../../../shared/enums.ts";
+import { consumerNamespace } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
 // A CONSUMER NAME AND A TENANT SUBDOMAIN ARE ONE NAME SPACE. Both stand as a single DNS label
-// directly under the apex: the consumer IS `<name>.<unitApex>`, and the tenant's members sit one
-// level below `<subdomain>.<unitApex>`. That parent is not merely the tenant's wildcard root — it is
-// the Domain its IdP scopes every session cookie to (`example-auth.cookieDomain` in
+// directly under the apex: the consumer serves `<name>-<stage>.<unitApex>`, and the tenant's members
+// sit one level below `<subdomain>.<unitApex>`. That parent is not merely the tenant's wildcard root —
+// it is the Domain its IdP scopes every session cookie to (`example-auth.cookieDomain` in
 // catalog/charts/example-auth/templates/_helpers.tpl, delivered as AUTH_COOKIE_DOMAIN and set
 // on the access and refresh cookies in example-auth/backend/src/auth/cookies.ts). A browser sends a
-// cookie to every host at or below its Domain, so a consumer standing on a tenant's label is handed
-// that tenant's users' sessions by their own browsers, with nothing in the tenant compromised. Both
-// onboarding run kinds therefore hold their candidate against the other side's set: gate G23 refuses a
-// consumer name a tenant already stands on (gates/compose.ts), and the create-tenant step
-// ensure-subdomain-free refuses a subdomain a consumer already holds (tenant-replace.ts).
+// cookie to every host at or below its Domain, so a consumer named `<subdomain>-<stage>` would stand
+// on a label a tenant's cookies reach for. Both onboarding run kinds therefore hold their candidate
+// against the other side's set: gate G23 refuses a consumer name a tenant already stands on
+// (gates/compose.ts), and the create-tenant step ensure-subdomain-free refuses a subdomain a consumer
+// already holds (tenant-replace.ts).
 
-/** The consumer's one public host — the same composition the admission policy pins. */
-export function consumerUnitHost(consumerName: string, unitApex: string): string {
-  return `${consumerName}.${unitApex}`;
+/** The consumer's one public host at one stage, `<name>-<stage>.<unitApex>` — the same composition
+ *  the admission policy pins and G19 grants. The label is the namespace, so the host and the
+ *  namespace cannot drift apart. */
+export function consumerUnitHost(consumerName: string, stage: Stage, unitApex: string): string {
+  return `${consumerNamespace(consumerName, stage)}.${unitApex}`;
 }
 
-/** The tenant's one wildcard — covering every member host `<member>.<subdomain>.<unitApex>`. */
+/** The tenant's one wildcard — covering every member host `<member>-<stage>.<subdomain>.<unitApex>`,
+ *  at every stage the tenant stands at. */
 export function tenantWildcardHost(subdomain: string, unitApex: string): string {
   return `*.${subdomain}.${unitApex}`;
 }
 
-/** ONE member's own public host — a single name the wildcard above covers, for the callers that must
- *  ADDRESS a member rather than resolve it (the first-admin invite over the tenant's example-auth, the
- *  relocation probe). The three parts are exactly what the member charts render: every tenant-mode
- *  ingress host in catalog is `<member>.<tenant.subdomain>.<global.unitApex>`
- *  (charts/example-auth/templates/_helpers.tpl and its jobs/report/ui/web siblings, each of which
- *  `required`s the apex). Composing from the cluster's own domain instead names a host no ingress
- *  serves and no record resolves, because install.sh defaults `unit-apex` to the cluster FQDN minus
- *  its first label — so the two differ on every cluster that is not itself the apex. */
-export function tenantMemberHost(member: string, subdomain: string, unitApex: string): string {
-  return `${member}.${subdomain}.${unitApex}`;
+/** ONE member's own public host at one stage — a single name the wildcard above covers, for the
+ *  callers that must ADDRESS a member rather than resolve it (the first-admin invite over the
+ *  tenant's example-auth, the relocation probe). The parts are exactly what the member charts
+ *  render: every tenant-mode ingress host in catalog is
+ *  `<member>-<stage>.<tenant.subdomain>.<global.unitApex>` (charts/example-auth/templates/_helpers.tpl
+ *  and its jobs/report/ui/web siblings, each of which `required`s the apex). Composing from the
+ *  cluster's own domain instead names a host no ingress serves and no record resolves, because
+ *  install.sh defaults `unit-apex` to the cluster FQDN minus its first label — so the two differ on
+ *  every cluster that is not itself the apex. */
+export function tenantMemberHost(member: string, stage: Stage, subdomain: string, unitApex: string): string {
+  return `${member}-${stage}.${subdomain}.${unitApex}`;
 }
 
 function requireDns(dns: DnsProvider | undefined, unit: string, runKind: string): DnsProvider {
@@ -118,9 +123,9 @@ export async function provisionUnitDns(
     if (standing !== null && standing !== address) {
       throw errValidation(
         `the host ${opts.recordName} already answers with ${standing}, and ${opts.clusterFqdn} is at ${address} — refusing to point "${opts.unit}" at a cluster the address does not serve. ` +
-          `The host carries no stage: it is <unit>.<unitApex>, and a cluster's unitApex is global.unitApex in its own installation/profile.yaml, stamped from the unit_apex answer when its install branch is generated — so two clusters in one zone give a unit ONE host, not two. ` +
-          `Overwriting it would move whatever serves ${opts.recordName} today onto this cluster without deploying it there. ` +
-          `Give the two clusters different unit_apex answers if this unit is to stand at both, or remove the standing record if nothing serves it any more.`,
+          `The record name carries the unit's stage, and a cluster's unitApex is global.unitApex in its own installation/profile.yaml, stamped from the unit_apex answer when its install branch is generated — so two clusters in one zone give one stage of a unit ONE host, not two. ` +
+          `Overwriting it would move whatever serves ${opts.recordName} today onto this cluster without deploying it there: a standing record at another address is a takeover. ` +
+          `Remove the standing record if nothing serves it any more, or give the two clusters different unit_apex answers.`,
       );
     }
   }

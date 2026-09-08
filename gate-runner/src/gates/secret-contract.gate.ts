@@ -1,12 +1,18 @@
 // gate-runner/src/gates/secret-contract.gate.ts
 // G7 "secret contract" (hard). Validates the rendered SecretStore + ExternalSecret documents
-// against the single-Vault injection contract. Two rules, both fail-closed:
+// against the single-Vault injection contract. Three rules, all fail-closed:
 //   every rendered SecretStore must authenticate to Vault with the role "consumer-eso" and
 //        point at the cluster's own Vault URL. That URL is read back out of the SAME values chain
 //        G3 rendered with (`global.endpoints.vault.url`, last file that sets it wins), so the gate holds the
 //        render against the cluster's value rather than against anything the Manager computed.
 //        The rendered-output equality on `server` is the SOLE control against a chart hardcoding a
 //        non-templated `server:` literal, so it stays hard.
+//   the ServiceAccount every rendered SecretStore logs in as (its `serviceAccountRef.name`, in the
+//        same env) must carry the two annotations the ONE role reads its alias metadata off —
+//        `vault.hashicorp.com/alias-metadata-unit: <unit>` and
+//        `vault.hashicorp.com/alias-metadata-stage: <stage>` — because the role's policy admits
+//        `<stage>/consumer/<unit>/*` through exactly those two, so a missing or foreign one is a
+//        login that reads nothing, or another unit's entry.
 //   every rendered ExternalSecret must read from the expected secret path
 //        `<stage>/consumer/<name>/app`, and every property it extracts must be a key the consumer
 //        actually DECLARED in its manifest (manifest.secrets[].key). An ExternalSecret that
@@ -28,9 +34,15 @@ const ID = "G7";
 const TITLE = "secret contract";
 const SEVERITY: GateSeverity = "hard";
 const CONSUMER_ROLE = "consumer-eso";
+/** The two ServiceAccount annotations the `consumer-eso` login lifts into its alias metadata — the
+ *  unit and its stage — which the role's policy path `<stage>/consumer/<unit>/*` is templated on. */
+const ALIAS_UNIT_ANNOTATION = "vault.hashicorp.com/alias-metadata-unit";
+const ALIAS_STAGE_ANNOTATION = "vault.hashicorp.com/alias-metadata-stage";
 
 const EXPECTED =
-  "SecretStore role==consumer-eso + server==the cluster chain's global.endpoints.vault.url; every " +
+  "SecretStore role==consumer-eso + server==the cluster chain's global.endpoints.vault.url, and the " +
+  `ServiceAccount its serviceAccountRef names carries ${ALIAS_UNIT_ANNOTATION}==<name> and ` +
+  `${ALIAS_STAGE_ANNOTATION}==<stage>; every ` +
   "ExternalSecret / ClusterExternalSecret remoteRef.key==<stage>/consumer/<name>/app " +
   "referencing only manifest-declared secrets";
 
@@ -108,9 +120,37 @@ function collectRoles(node: unknown, depth: number, out: string[]): void {
   }
 }
 
+/** Collect the `serviceAccountRef.name` values inside an untrusted Vault-auth subtree, as liberally
+ *  as collectRoles finds the role: the login's ServiceAccount is what the annotations are read off. */
+function collectServiceAccountRefs(node: unknown, depth: number, out: string[]): void {
+  if (depth > 6) return;
+  const rec = asRecord(node);
+  if (!rec) return;
+  for (const [k, v] of Object.entries(rec)) {
+    if (k === "serviceAccountRef") {
+      const name = asRecord(v) ? asString((v as Record<string, unknown>).name) : null;
+      if (name !== null) out.push(name);
+    }
+    if (asRecord(v)) collectServiceAccountRefs(v, depth + 1, out);
+  }
+}
+
+/** One annotation off an untrusted rendered ServiceAccount, or null when absent. */
+function annotationOf(doc: RenderedDoc, key: string): string | null {
+  const metadata = asRecord(doc.raw.metadata);
+  const annotations = metadata ? asRecord(metadata.annotations) : null;
+  return annotations ? asString(annotations[key]) : null;
+}
+
 // --- per-document checks ------------------------------------------------------------------------
 
-function checkStore(doc: RenderedDoc, vaultServer: string, problems: string[], evidence: GateEvidence[]): void {
+function checkStore(
+  doc: RenderedDoc,
+  vaultServer: string,
+  identity: { targetName: string; stage: string; serviceAccounts: readonly RenderedDoc[] },
+  problems: string[],
+  evidence: GateEvidence[],
+): void {
   const spec = asRecord(doc.raw.spec);
   const provider = spec ? asRecord(spec.provider) : null;
   const vault = provider ? asRecord(provider.vault) : null;
@@ -134,6 +174,34 @@ function checkStore(doc: RenderedDoc, vaultServer: string, problems: string[], e
         `${q(CONSUMER_ROLE)} but the rendered auth role is ${seen}`,
     );
     evidence.push(pin(doc, "spec.provider.vault.auth", roles.length === 0 ? null : roles.join(",")));
+  }
+
+  // The login's identity: the ONE role binds every consumer namespace, and its policy admits
+  // `<stage>/consumer/<unit>/*` through the alias metadata it lifts off the ServiceAccount's
+  // annotations. A store whose ServiceAccount is not rendered, or is rendered without the two
+  // annotations, or with another unit's or stage's, is a login that reads nothing or reads another
+  // unit's entry — a foretold boot failure, or worse, so every one is a violation.
+  const refs: string[] = [];
+  if (vault) collectServiceAccountRefs(vault, 0, refs);
+  if (refs.length === 0) {
+    problems.push(`SecretStore ${q(doc.name)} (doc ${doc.docIndex}) names no serviceAccountRef, so no ServiceAccount carries the unit and stage its Vault login is bound by`);
+    evidence.push(pin(doc, "spec.provider.vault.auth.kubernetes.serviceAccountRef", null));
+    return;
+  }
+  for (const ref of refs) {
+    const sa = identity.serviceAccounts.find((s) => s.name === ref && (s.namespace === "" || doc.namespace === "" || s.namespace === doc.namespace));
+    if (sa === undefined) {
+      problems.push(`SecretStore ${q(doc.name)} (doc ${doc.docIndex}) logs in as ServiceAccount ${q(ref)}, which the chart does not render for env ${q(doc.env)}`);
+      evidence.push(pin(doc, "spec.provider.vault.auth.kubernetes.serviceAccountRef.name", ref));
+      continue;
+    }
+    for (const [key, want] of [[ALIAS_UNIT_ANNOTATION, identity.targetName], [ALIAS_STAGE_ANNOTATION, identity.stage]] as const) {
+      const have = annotationOf(sa, key);
+      if (have !== want) {
+        problems.push(`ServiceAccount ${q(sa.name)} (doc ${sa.docIndex}), the login of SecretStore ${q(doc.name)}, must carry ${key}: ${q(want)} but carries ${q(have)}`);
+        evidence.push(pin(sa, `metadata.annotations['${key}']`, have));
+      }
+    }
   }
 }
 
@@ -239,6 +307,8 @@ function check(ctx: GateContext): GateResult {
   const referenced = new Set<string>();
   let storeCount = 0;
   let esCount = 0;
+  // The ServiceAccounts of the onboarding stage's render — what a SecretStore's login is looked up in.
+  const serviceAccounts = ctx.rendered.filter((doc) => doc.env === ctx.stage && doc.kind === "ServiceAccount");
 
   for (const doc of ctx.rendered) {
     // G7 validates the render that will ACTUALLY be deployed — the onboarding stage. The chart is
@@ -250,7 +320,7 @@ function check(ctx: GateContext): GateResult {
     if (doc.env !== ctx.stage) continue;
     if (doc.kind === "SecretStore") {
       storeCount += 1;
-      checkStore(doc, vaultServer, problems, evidence);
+      checkStore(doc, vaultServer, { targetName: ctx.targetName, stage: ctx.stage, serviceAccounts }, problems, evidence);
     } else if (doc.kind === "ExternalSecret") {
       esCount += 1;
       checkExternalSecret(doc, asRecord(doc.raw.spec), "spec", expectedKey, declaredKeys, referenced, problems, evidence);
@@ -283,7 +353,8 @@ function check(ctx: GateContext): GateResult {
   const scanned =
     `Inspected ${storeCount} rendered SecretStore and ${esCount} rendered ` +
     `ExternalSecret/ClusterExternalSecret document(s) for the onboarding stage ${q(ctx.stage)}; ` +
-    `required SecretStore role ${q(CONSUMER_ROLE)} + server ${q(vaultServer)} and remoteRef key ${q(expectedKey)}.`;
+    `required SecretStore role ${q(CONSUMER_ROLE)} + server ${q(vaultServer)}, its ServiceAccount annotated ` +
+    `${ALIAS_UNIT_ANNOTATION}=${q(ctx.targetName)} and ${ALIAS_STAGE_ANNOTATION}=${q(ctx.stage)}, and remoteRef key ${q(expectedKey)}.`;
 
   if (problems.length > 0) {
     const listed = joinCapped(problems, 3);
@@ -295,7 +366,8 @@ function check(ctx: GateContext): GateResult {
       found: `${scanned} Found ${problems.length} violation(s): ${listed}.${unrefNote}`,
       reason:
         `${listed}. A hardcoded or incorrect Vault server or auth role escapes the cluster's ` +
-        `single-Vault fence, and an ExternalSecret key or property that does not match the ` +
+        `single-Vault fence, a ServiceAccount without the unit and stage annotations logs in as ` +
+        `nothing the role's policy admits, and an ExternalSecret key or property that does not match the ` +
         `cluster's secret path or a manifest-declared secret is a foretold boot failure; the ` +
         `plan is rejected.`,
       evidence: evidence.slice(0, 20),
@@ -308,8 +380,9 @@ function check(ctx: GateContext): GateResult {
     severity: SEVERITY,
     expected: EXPECTED,
     found:
-      `${scanned} Every SecretStore uses role ${q(CONSUMER_ROLE)} and the cluster's Vault server, and ` +
-      `every ExternalSecret reads the expected key with only manifest-declared properties.${unrefNote}`,
+      `${scanned} Every SecretStore uses role ${q(CONSUMER_ROLE)} and the cluster's Vault server through a ` +
+      `ServiceAccount annotated with this unit and stage, and every ExternalSecret reads the expected key ` +
+      `with only manifest-declared properties.${unrefNote}`,
   });
 }
 

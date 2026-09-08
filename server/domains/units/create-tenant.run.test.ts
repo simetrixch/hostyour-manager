@@ -6,8 +6,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
-import { memberAppProject, tenantApplicationSet } from "./tenant-fanout.ts";
+import { memberAppProject, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
@@ -40,7 +39,6 @@ const EXPECTED = tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.nam
 /** A cluster-marking resolver that answers every cluster short name at "prod" — every fixture in this
  *  file lands its tenant on s1/prod, so a single-stage stand-in is all TenantRegistrations needs to
  *  satisfy commitTenant's stage boundary check. */
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 // A schema-valid catalog fan-out manifest (build-only) — same shape validate-tenant.test.ts uses.
 const MANIFEST_YAML = `
@@ -127,7 +125,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     seeder: fakeTenantSeeder(),
     repo: repoWithManifest(),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
-    registrations: new TenantRegistrations(new FakePlatformRepo(), CLUSTER_STAGE),
+    registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({
       clusterReader: cluster ?? new FakeClusterReader({
         deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },
@@ -272,14 +270,14 @@ describe("create-tenant run definition", () => {
     const members = [...TEST_MEMBERS, ...APPS.map((a) => a.name)];
     expect(members).toEqual(["auth", "jobs", "report", "erp"]);
     for (const member of members) {
-      const project = projects.get("argocd", memberAppProject(GUID, member));
-      expect(project?.metadata.name).toBe(`${GUID}-${member}`);
+      const project = projects.get("argocd", memberAppProject(GUID, member, "prod"));
+      expect(project?.metadata.name).toBe(`${GUID}-${member}-prod`);
       expect(project?.spec.sourceRepos).toEqual([DEPLOY_URL, PLATFORM_URL]);
       // The Tenant CR entry is gone — the Manager writes that object itself, never a chart.
       expect(project?.spec.clusterResourceWhitelist).toEqual([{ group: "", kind: "Namespace" }]);
       // The destination pins the tenant's OWN slave by ArgoCD cluster name — never server "*" — and
       // confines this member to its own namespace, never a sibling's.
-      expect(project?.spec.destinations).toEqual([{ name: "s1", namespace: `${GUID}-${member}` }]);
+      expect(project?.spec.destinations).toEqual([{ name: "s1", namespace: `${GUID}-${member}-prod` }]);
     }
   });
 
@@ -323,7 +321,7 @@ describe("create-tenant streaming planner", () => {
   it("mints a free guid, validates the fan-out, and freezes a plan (targetKind cluster, catalog lock)", async () => {
     seedClusters();
     const def = makeCreateTenantDef(ports());
-    const result = await def.planStream!({ clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.guid).toMatch(/^[0-9a-hjkmnp-tv-z]{12}$/);
@@ -340,6 +338,17 @@ describe("create-tenant streaming planner", () => {
     expect(result.plan.steps.map((s) => s.name)).toEqual(def.steps(result.params).map((s) => s.name));
   });
 
+  it("plans a tenant at test onto a cluster marked prod — the stage is the tenant's, and every member namespace carries it", async () => {
+    seedClusters(); // cls_1 is marked prod
+    const result = await makeCreateTenantDef(ports()).planStream!({ clusterId: "cls_1", stage: "test", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+    expect(result.outcome).toBe("planned");
+    if (result.outcome !== "planned") return;
+    expect(result.params).toMatchObject({ stage: "test", clusterId: "cls_1", cluster: "s1", domain: "s1.example" });
+    expect(result.params.expectedApps).toEqual(tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], result.params.guid, "test"));
+    expect(memberNamespace(result.params.guid, "auth", "test")).toBe(`${result.params.guid}-auth-test`);
+    expect(result.plan.summary).toContain("at test on s1.example");
+  });
+
   it("validates the member CHARTS at the same books branch the registration is locked on, and never at the trunk", async () => {
     // ONE REVISION OF THE CATALOG, because a member Application names that repository twice — its
     // pins source and its chart source — and ArgoCD's repo-server generates no manifest for an
@@ -348,7 +357,7 @@ describe("create-tenant streaming planner", () => {
     seedClusters();
     const reader = repoWithManifest();
     const result = await makeCreateTenantDef(ports({ repo: reader }))
-      .planStream!({ clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+      .planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(reader.clones.map((c) => c.ref)).toEqual([FAKE_BOOKS_BRANCH]);
@@ -359,7 +368,7 @@ describe("create-tenant streaming planner", () => {
   it("resolves the slave's NAME off clusters.domain and freezes the registryHost the target cluster resolves to", async () => {
     seedClusters(); // s1.example slave + m1.example master
     const def = makeCreateTenantDef(ports());
-    const result = await def.planStream!({ clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.cluster).toBe("s1"); // clusterShortName of clusters.domain
@@ -373,7 +382,7 @@ describe("create-tenant streaming planner", () => {
     seedClusters();
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } });
     const def = makeCreateTenantDef(ports({ helm }));
-    const result = await def.planStream!({ clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     // jobs and report render for EVERY tenant — nothing gates them, not a flag, not the presence of a file.
@@ -384,7 +393,7 @@ describe("create-tenant streaming planner", () => {
   // land. What still gates a target is the cluster's STATUS, which resolveCluster keeps checking.
   it.each(["master", "master+slave"] as const)("plans a tenant onto the cluster carrying the %s role", async (role) => {
     seedClusters(role);
-    const result = await makeCreateTenantDef(ports()).planStream!({ clusterId: "cls_m", subdomain: "a.example", owner: "o", apps: [] }, planCtx());
+    const result = await makeCreateTenantDef(ports()).planStream!({ clusterId: "cls_m", stage: "prod", subdomain: "a.example", owner: "o", apps: [] }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect([result.params.clusterId, result.params.cluster, result.params.domain]).toEqual(["cls_m", "m1", "m1.example"]);
@@ -392,7 +401,7 @@ describe("create-tenant streaming planner", () => {
 
   it("plans with NO master cluster registered — the registrations comes off the target cluster's chain, not a master row", async () => {
     seedSlave(); // slave only — no master row anywhere in inventory
-    const result = await makeCreateTenantDef(ports()).planStream!({ clusterId: "cls_1", subdomain: "a.example", owner: "o", apps: [] }, planCtx());
+    const result = await makeCreateTenantDef(ports()).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "a.example", owner: "o", apps: [] }, planCtx());
     expect(result.outcome === "planned" && result.params.registryHost).toBe(REGISTRY_HOST);
   });
 
@@ -400,7 +409,7 @@ describe("create-tenant streaming planner", () => {
     seedClusters();
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [doc("ClusterRole")] } });
     const def = makeCreateTenantDef(ports({ helm }));
-    const result = await def.planStream!({ clusterId: "cls_1", subdomain: "acme.example", owner: "o", apps: [] }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "o", apps: [] }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
     expect(result.summary).toMatch(/T3/);

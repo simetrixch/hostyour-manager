@@ -45,7 +45,7 @@
 import { and, eq, notInArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { apps, clusters } from "../../db/schema/inventory.ts";
-import { APP_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
+import { APP_SETTLED_STATUS, STAGE, type Stage } from "../../../shared/enums.ts";
 // The wire shapes this module ANSWERS IN, declared once in shared/api-types.ts and consumed unchanged
 // by the browser (web/src/api.ts + the Detected panel) — the same one-declaration rule the tenant
 // orphan scan follows, for the reason documented at length in that file's header.
@@ -56,17 +56,49 @@ import type { Registrations } from "./registrations.ts";
 import type { ClusterKubeResolver, WorkloadStatus } from "../../adapters/kube/port.ts";
 import { consumerNamespaceSelector } from "./admission-policy.ts";
 
-/** Diff the LIVE GitOps consumer registrations against the inventory, per ACTIVE cluster, and return
- *  every consumer only the registrations know about — plus every one the scan had to skip. Iterates the
- *  registered active clusters rows and selects the registrations whose own `cluster` field names that
- *  cluster (the same selection the appset makes), so — unlike the tenant scan, whose registration names
- *  a slave that may not be registered — every detected consumer arrives with its clusterId resolved.
+/** The inventory's key for one consumer standing at one stage — `<name>\0<stage>`, a separator no
+ *  DNS label carries. Both scans subtract the inventory by this key: a unit stands at one stage in
+ *  exactly one place, so the name alone would let a row at test hide a leftover at prod. */
+const key = (name: string, stage: Stage): string => `${name}\0${stage}`;
+
+/** The UNSETTLED rows on one cluster, as (name, stage) keys — the inventory side of both diffs. A
+ *  SETTLED row is deliberately not "known" — see the header. */
+function knownOnCluster(db: Db, clusterId: string): Set<string> {
+  return new Set(
+    db
+      .select({ name: apps.name, stage: apps.stage })
+      .from(apps)
+      .where(and(eq(apps.clusterId, clusterId), notInArray(apps.status, [...APP_SETTLED_STATUS])))
+      .all()
+      .map((r) => key(r.name, r.stage)),
+  );
+}
+
+/** Split a labelled namespace into the (name, stage) the platform composed it from — `<name>-<stage>`
+ *  for a stage of STAGE, read off shared/enums.ts and never a literal. Null for a namespace ending in
+ *  no stage suffix: nothing this platform composes, so it is reported under its full name and no
+ *  purge is aimed at it. */
+function splitConsumerNamespace(namespace: string): { name: string; stage: Stage } | null {
+  for (const stage of STAGE) {
+    const suffix = `-${stage}`;
+    if (namespace.length > suffix.length && namespace.endsWith(suffix)) {
+      return { name: namespace.slice(0, -suffix.length), stage };
+    }
+  }
+  return null;
+}
+
+/** Diff the LIVE GitOps consumer registrations against the inventory, per ACTIVE cluster and per
+ *  stage, and return every consumer only the registrations know about — plus every one the scan had
+ *  to skip. Iterates the registered active clusters rows and, for each stage of STAGE, selects the
+ *  registrations whose own `cluster` field names that cluster (the same selection the appset makes),
+ *  so — unlike the tenant scan, whose registration names a slave that may not be registered — every
+ *  detected consumer arrives with its clusterId resolved. Every stage is read for every cluster: a
+ *  unit carries its own stage, and one cluster may hold a unit at test beside the same unit at prod.
  *
- *  The inventory side of the diff is keyed on (clusterId, name) and NOT additionally on stage,
- *  mirroring purge's findAppRow: any UNSETTLED row for that name on that cluster already renders the
- *  consumer on the Consumers list (the list joins apps -> clusters without a stage filter), so it is
- *  not "invisible" and must not be offered for adoption. A SETTLED row is deliberately not "known" —
- *  see the header.
+ *  The inventory side of the diff is keyed on (clusterId, name, stage): any UNSETTLED row for that
+ *  unit at that stage on that cluster already renders it on the Consumers list, so it is not
+ *  "invisible" and must not be offered for adoption.
  *
  *  Each registration's fields are carried VERBATIM as its CLAIM (DetectedConsumerPointerView) — no
  *  live probe happens here. THROWS when the registration branch cannot be read at all — the route turns
@@ -81,38 +113,33 @@ export async function scanDetectedConsumers(deps: { db: Db; registrations: Regis
   const skipped: SkippedConsumerPointerView[] = [];
   const active = db.select().from(clusters).where(eq(clusters.status, "active")).all();
   for (const cluster of active) {
-    const known = new Set(
-      db
-        .select({ name: apps.name })
-        .from(apps)
-        .where(and(eq(apps.clusterId, cluster.id), notInArray(apps.status, [...APP_SETTLED_STATUS])))
-        .all()
-        .map((r) => r.name),
-    );
-    const scan = await registrations.listConsumerRegistrations(cluster.domain, cluster.stage);
-    skipped.push(...scan.skipped); // reported, never dropped — see DetectedScan
-    for (const found of scan.registrations) {
-      if (known.has(found.name)) continue;
-      const e = found.entry;
-      detected.push({
-        name: found.name,
-        stage: cluster.stage,
-        clusterId: cluster.id,
-        domain: cluster.domain,
-        // ONLY the registration side — what it SAYS, copied verbatim. Optional fields are OMITTED when
-        // absent (never an explicit undefined — exactOptionalPropertyTypes). chartPath/cluster are
-        // mandatory in a STAGE registration, which is the only kind this scan reads.
-        pointer: {
-          repoURL: e.repoURL,
-          chartPath: e.chartPath ?? "",
-          cluster: e.cluster ?? "",
-          suspended: e.suspended,
-          quiesced: e.quiesced,
-          ...(e.repoCredentialId !== undefined ? { repoCredentialId: e.repoCredentialId } : {}),
-          ...(e.onboardedAt !== undefined ? { onboardedAt: e.onboardedAt } : {}),
-          ...(e.owner !== undefined ? { owner: e.owner } : {}),
-        },
-      });
+    const known = knownOnCluster(db, cluster.id);
+    for (const stage of STAGE) {
+      const scan = await registrations.listConsumerRegistrations(cluster.domain, stage);
+      skipped.push(...scan.skipped); // reported, never dropped — see DetectedScan
+      for (const found of scan.registrations) {
+        if (known.has(key(found.name, stage))) continue;
+        const e = found.entry;
+        detected.push({
+          name: found.name,
+          stage,
+          clusterId: cluster.id,
+          domain: cluster.domain,
+          // ONLY the registration side — what it SAYS, copied verbatim. Optional fields are OMITTED when
+          // absent (never an explicit undefined — exactOptionalPropertyTypes). chartPath/cluster are
+          // mandatory in a STAGE registration, which is the only kind this scan reads.
+          pointer: {
+            repoURL: e.repoURL,
+            chartPath: e.chartPath ?? "",
+            cluster: e.cluster ?? "",
+            suspended: e.suspended,
+            quiesced: e.quiesced,
+            ...(e.repoCredentialId !== undefined ? { repoCredentialId: e.repoCredentialId } : {}),
+            ...(e.onboardedAt !== undefined ? { onboardedAt: e.onboardedAt } : {}),
+            ...(e.owner !== undefined ? { owner: e.owner } : {}),
+          },
+        });
+      }
     }
   }
   return { detected, skipped };
@@ -126,7 +153,9 @@ export async function scanDetectedConsumers(deps: { db: Db; registrations: Regis
  *  inexpressible state. This one starts from the other end: it asks the cluster which namespaces carry
  *  the platform's own consumer label (consumerNamespaceSelector — the same pair the consumers
  *  ApplicationSet stamps through managedNamespaceMetadata and the unit's admission policy admits), and
- *  subtracts both books. What is left is a consumer the product can neither show nor reach.
+ *  subtracts both books. What is left is a consumer the product can neither show nor reach. The
+ *  namespace name `<name>-<stage>` is split into the unit and its stage (splitConsumerNamespace), so
+ *  the row carries the identity a purge is aimed by.
  *
  *  WHY THE NAMESPACE AND NOT THE APPLICATION. The consumers ApplicationSet GENERATES the Application
  *  from the registration, so a removed registration takes the Application with it — there is nothing
@@ -166,35 +195,35 @@ export async function scanClusterOrphanConsumers(deps: {
   const active = db.select().from(clusters).where(eq(clusters.status, "active")).all();
 
   for (const cluster of active) {
-    const stage = cluster.stage as Stage;
     try {
-      const known = new Set(
-        db
-          .select({ name: apps.name })
-          .from(apps)
-          .where(and(eq(apps.clusterId, cluster.id), notInArray(apps.status, [...APP_SETTLED_STATUS])))
-          .all()
-          .map((r) => r.name),
-      );
-      // The registrations this cluster's appset generates from. An UNREADABLE registration tree makes
-      // this half refuse for this cluster rather than report everything on it as an orphan: without the
-      // registration names there is nothing to subtract, and every healthy consumer would be listed as
-      // untracked — the loudest possible false positive.
-      const registered = await registrations.listConsumerRegistrations(cluster.domain, stage);
-      for (const r of registered.registrations) known.add(r.name);
-      // A registration the reader could not PARSE is a name it could not learn, so a namespace of that
-      // name would be reported here as an orphan although the file exists. Its directory name is the
-      // identity (that much was readable), so subtract it and let `skipped` carry the file itself.
-      for (const s of registered.skipped) known.add(s.name);
+      const known = knownOnCluster(db, cluster.id);
+      // The registrations this cluster's appsets generate from, at every stage. An UNREADABLE
+      // registration tree makes this half refuse for this cluster rather than report everything on
+      // it as an orphan: without the registration names there is nothing to subtract, and every
+      // healthy consumer would be listed as untracked — the loudest possible false positive.
+      for (const stage of STAGE) {
+        const registered = await registrations.listConsumerRegistrations(cluster.domain, stage);
+        for (const r of registered.registrations) known.add(key(r.name, stage));
+        // A registration the reader could not PARSE is a name it could not learn, so a namespace of
+        // that name would be reported here as an orphan although the file exists. Its directory name
+        // and the file's stage are the identity (that much was readable), so subtract it and let
+        // `skipped` carry the file itself.
+        for (const s of registered.skipped) known.add(key(s.name, s.stage));
+      }
 
       const { clusterReader } = await resolver.resolve(cluster.id);
       const namespaces = await clusterReader.listNamespaces(consumerNamespaceSelector());
       for (const ns of namespaces) {
-        if (known.has(ns)) continue;
+        // The namespace IS the identity: <name>-<stage>. A labelled namespace ending in no stage is
+        // nothing this platform composed, so it is listed under its full name with no stage — and no
+        // purge, because no (name, stage) aims one.
+        const split = splitConsumerNamespace(ns);
+        if (split !== null && known.has(key(split.name, split.stage))) continue;
         const smoke = await clusterReader.smoke(ns);
         clusterOrphans.push({
-          name: ns,
-          stage,
+          name: split?.name ?? ns,
+          namespace: ns,
+          stage: split?.stage ?? null,
           clusterId: cluster.id,
           domain: cluster.domain,
           running: smoke.workloads.filter((w: WorkloadStatus) => w.ready > 0).length,
@@ -206,7 +235,7 @@ export async function scanClusterOrphanConsumers(deps: {
       unscanned.push({
         clusterId: cluster.id,
         domain: cluster.domain,
-        stage,
+        stage: cluster.stage,
         reason: e instanceof Error ? e.message : String(e),
       });
     }

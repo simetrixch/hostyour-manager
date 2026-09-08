@@ -9,7 +9,7 @@ import { servers, clusters, apps, unitSizes } from "../../db/schema/inventory.ts
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerUnitSizeRoutes } from "./api-unit-sizes.ts";
 import { seedUnitSizes } from "./unit-size.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { seedQuota, UNIT_SIZE_SEED } from "../../../shared/unit-size.ts";
 import type { AppEnv } from "../../http/app-env.ts";
@@ -20,7 +20,6 @@ import type { AppEnv } from "../../http/app-env.ts";
 
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
@@ -108,7 +107,7 @@ describe("the size table", () => {
 
 describe("what the three sizes cost ONE unit", () => {
   it("composes a consumer's figures from what its registration says it brings", async () => {
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     await seedConsumer(registrations, { postgresql: true, mongodb: "replicaset" });
     const { app, cookie } = await make(registrations);
 

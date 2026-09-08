@@ -1,4 +1,5 @@
 import { TENANT_PROJECT_LABEL, type AppProjectManifest } from "../../adapters/kube/port.ts";
+import type { Stage } from "../../../shared/enums.ts";
 import { memberAppProject, memberNamespace } from "./tenant-fanout.ts";
 
 // The per-TENANT-MEMBER isolation AppProject renderer. Pure: no IO — the writer
@@ -18,10 +19,10 @@ import { memberAppProject, memberNamespace } from "./tenant-fanout.ts";
 // self-escalation blacklist.
 
 /** Render ONE tenant MEMBER's isolation AppProject.
- *  name == namespace == <guid>-<member>: a tenant holds several namespaces and
- *  several AppProjects, one pair per member, and each pair fences exactly one member — so a member's
- *  Application can deploy into its own namespace and nowhere else, not even into a sibling member of
- *  the same tenant.
+ *  name == namespace == <guid>-<member>-<stage>: a tenant holds several namespaces and
+ *  several AppProjects, one pair per member and stage, and each pair fences exactly one member — so a
+ *  member's Application can deploy into its own namespace and nowhere else, not even into a sibling
+ *  member of the same tenant or the same member at another stage.
  *
  *  sourceRepos = catalog (where every tenant chart lives) PLUS the platform GitOps repo
  *  (hostyour-cloud): the generated member Application is multi-source — it pulls its chart from
@@ -41,16 +42,16 @@ import { memberAppProject, memberNamespace } from "./tenant-fanout.ts";
  *  stamp — so cross-tenant namespace safety does not rest on the sole-renderer property alone
  *  (the platform renders the fan-out; the tenant never authors these). Same fence-4 blacklist so a
  *  tenant chart can never mint an Application/AppProject/Role/RoleBinding. */
-export function renderTenantAppProject(input: { guid: string; member: string; argoNamespace: string; catalogRepoUrl: string; platformRepoURL: string; cluster: string }): AppProjectManifest {
+export function renderTenantAppProject(input: { guid: string; member: string; stage: Stage; argoNamespace: string; catalogRepoUrl: string; platformRepoURL: string; cluster: string }): AppProjectManifest {
   // Never hand-rolled — tenant-fanout is the source of truth for every tenant name.
-  const name = memberAppProject(input.guid, input.member);
-  const namespace = memberNamespace(input.guid, input.member);
+  const name = memberAppProject(input.guid, input.member, input.stage);
+  const namespace = memberNamespace(input.guid, input.member, input.stage);
   return {
     apiVersion: "argoproj.io/v1alpha1",
     kind: "AppProject",
     metadata: { name, namespace: input.argoNamespace, labels: { [TENANT_PROJECT_LABEL.key]: TENANT_PROJECT_LABEL.value } },
     spec: {
-      description: `Per-member isolation project for tenant ${input.guid} member "${input.member}" (hostyour-cloud onboarding).`,
+      description: `Per-member isolation project for tenant ${input.guid} member "${input.member}" at ${input.stage} (hostyour-cloud onboarding).`,
       sourceRepos: [input.catalogRepoUrl, input.platformRepoURL],
       destinations: [{ name: input.cluster, namespace }],
       clusterResourceWhitelist: [{ group: "", kind: "Namespace" }],

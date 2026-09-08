@@ -5,7 +5,6 @@ import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { makeAddAppDef, AddAppParams } from "./add-app.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { memberApplication, tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -47,7 +46,6 @@ const ATTESTED = [
 /** A cluster-marking resolver that answers every cluster short name at "prod" — every fixture in this
  *  file lands its tenant on s1/prod, so a single-stage stand-in is all TenantRegistrations needs to
  *  satisfy commitTenant's stage boundary check. */
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
@@ -88,7 +86,7 @@ function passReport(): TenantValidationReport {
 /** A registrations whose repo already carries the tenant's registration with its one app — what add-app
  *  reads the tenant's standing members off. */
 async function seededRegistrations(): Promise<TenantRegistrations> {
-  const registrations = new TenantRegistrations(new FakePlatformRepo(), CLUSTER_STAGE);
+  const registrations = new TenantRegistrations(new FakePlatformRepo());
   const registration: TenantRegistration = {
     cluster: "s1", subdomain: "acme.example",
     members: testMembers(APPS), identityProvider: "auth", apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false })),
@@ -102,7 +100,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
   return {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
-    registrations: new TenantRegistrations(new FakePlatformRepo(), CLUSTER_STAGE),
+    registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({}),
       argoReader: new FakeMasterArgoReader({}),
@@ -224,7 +222,7 @@ describe("planStream derives the subjects from the tenant's own images", () => {
     ];
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: docsWithImages } });
     const def = makeCreateTenantDef(ports({ helm }));
-    const result = await def.planStream!({ clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     // example-platform builds example-engine, which this tenant pulls; swissbookai builds nothing it

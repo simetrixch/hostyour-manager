@@ -5,10 +5,10 @@ import { eq } from "drizzle-orm";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
-import { STAGE } from "../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE } from "../../../shared/release.ts";
 import { GateReportSchema, UngatedOnboardSchema } from "../../../shared/gates.ts";
-import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, consumerArgoAppName } from "../../../shared/consumer.ts";
+import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, consumerArgoAppName, consumerNamespace } from "../../../shared/consumer.ts";
 import type { Activator } from "../../adapters/activation/port.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { BuildPlane } from "../../adapters/build-plane/port.ts";
@@ -38,7 +38,9 @@ import { AppError, errNotFound } from "../../kernel/errors.ts";
 import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome } from "./validate.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import { clusterShortName, type BuildPlaneFqdnResolver } from "../inventory/cluster-marking.ts";
+import { assertChannelReaches, type ChannelStages } from "../inventory/channel-stages.ts";
 import { resolveMasterCluster } from "./tenant-values.ts";
+import { consumerUnitHost } from "./unit-dns.ts";
 import type { Registrations } from "./registrations.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
 import type { RepoReader, ConsumerRepo } from "../../adapters/git/port.ts";
@@ -46,15 +48,17 @@ import type { GateRunner } from "../../adapters/gate-runner/port.ts";
 import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 
 // The "consumer-onboard" Run: check → registration → provision → inject → trigger → watch. The run kind
-// knows TWO forms of ONE step chain:
+// knows TWO forms of ONE step chain, and BOTH take the unit's STAGE as an input, held against the
+// channel ceiling once at plan time:
 //
 //  - DEPLOYABLE (the manifest declares a chart): the full chain, ending in the deployment the
-//    triggered release cycle produced. The operator names a target cluster.
+//    triggered release cycle produced. The operator names a target cluster — ANY active one; the
+//    cluster's own stage is the platform's and says nothing about the unit's.
 //  - BUILD-ONLY (the manifest declares no chart): the subset — nothing of the unit deploys, so
 //    attest-target, the target-cluster provisioning, provision-dns, watch-deployment and smoke are
-//    absent. The operator names the stage the ONE triggered release run puts the release on. The
-//    seven platform units go through this form, which is what makes the manager the writer of
-//    their registrations instead of a hand commit.
+//    absent. The stage is where the ONE triggered release run puts the release. The seven platform
+//    units go through this form, which is what makes the manager the writer of their registrations
+//    instead of a hand commit.
 //
 // The onboarding TRIGGERS the release cycle instead of pinning a revision: OnboardRequest carries
 // {version, channel}, the run injects the kit + the webhook and then starts the cycle ONCE through
@@ -92,8 +96,9 @@ const OnboardParamsBase = z.object({
   // existing tag of that version+channel) and pushes the deploy ref for `stage`.
   version: z.string().regex(RELEASE_VERSION_RE),
   channel: z.enum(RELEASE_CHANNEL),
-  // Deployable: the target cluster's stage (derived from its row). Build-only: the stage the one
-  // triggered release run puts the release on (the operator's own pick).
+  // The UNIT's own stage, the operator's input for both forms: the registration path
+  // registrations/<name>/<stage>.yaml, the namespace <name>-<stage>, the host, the Vault path
+  // <stage>/consumer/<name>/… and the deploy ref the triggered release pushes all follow it.
   stage: z.enum(STAGE),
   // The default-branch head the gates checked at plan time. Display/audit only — there is no pin:
   // the check step re-runs the gates at the CURRENT head, and the release cycle builds whatever
@@ -123,10 +128,10 @@ export const DeployableOnboardParams = OnboardParamsBase.extend({
   // The target cluster's SHORT NAME (clusterShortName of its domain, e.g. "m1") — the stage
   // registration's own `cluster` field, which the consumers ApplicationSet selects on.
   cluster: z.string().min(1),
-  namespace: z.string().min(1), // == consumerName by the identity law (G1)
+  namespace: z.string().min(1), // == consumerNamespace(consumerName, stage): <name>-<stage>
   // The cluster's public apex, read out of its own values chain at plan time (global.unitApex). The
-  // unit's ONE host is <consumerName>.<unitApex> — the admission policy pins it and provision-dns
-  // creates exactly that record.
+  // unit's ONE host is <consumerName>-<stage>.<unitApex> — the admission policy pins it and
+  // provision-dns creates exactly that record.
   unitApex: z.string().min(1),
   chartPath: z.string().regex(/^[^/].*$/),
   argoAppName: z.string().min(1),
@@ -282,6 +287,12 @@ export interface OnboardPorts {
    *  first-master.ts states the other three conditions. Absent ⇒ no onboarding on this Manager may
    *  skip the gate, which is where every Manager that does not install first masters stands. */
   platformUnitName?: string;
+  /** The channel ceiling — `global.channelStages` read off the platform repo's trunk
+   *  (domains/inventory/channel-stages.ts readChannelStages). The plan holds the requested stage
+   *  against it for BOTH forms before anything else is read: a stage the channel does not reach is
+   *  a release the pipeline refuses to pin, so the refusal belongs at the wizard, not three watches
+   *  later. Read per plan, never cached — the table changes without a Manager release. */
+  channelStages: () => Promise<ChannelStages>;
 }
 
 function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[] {
@@ -391,14 +402,15 @@ function onboardSteps(ports: OnboardPorts, p: OnboardParams): Step[] {
 }
 
 /** The raw operator request from the onboard wizard. Carries {version, channel} — never a ref or a
- *  tag: the release script mints (or reuses) the tag repo-side, and the run only triggers it.
- *  EXACTLY ONE of `clusterId` (deployable — the stage is the cluster's) and `stage` (build-only —
- *  where the one triggered release run puts the release) is given; the manifest's own shape (chart
- *  present or not) is checked against that choice at plan time. Carries the ONE per-consumer GitHub
- *  PAT as a raw value — REQUIRED (owner rule: every consumer is private and onboards with exactly
- *  one PAT). The API handler seals it into the credential store BEFORE any run exists and threads
- *  only the sealed reference onward (OnboardPlanRequest): planStreamed persists its raw params
- *  verbatim (params_json), so the raw PAT must never enter the executor. */
+ *  tag: the release script mints (or reuses) the tag repo-side, and the run only triggers it. The
+ *  STAGE is always given — it is the unit's own — and `clusterId` alone decides the form: given, the
+ *  unit deploys onto that cluster (deployable); absent, only its build is registered (build-only).
+ *  The manifest's own shape (chart present or not) is checked against that choice at plan time.
+ *  Carries the ONE per-consumer GitHub PAT as a raw value — REQUIRED (owner rule: every consumer is
+ *  private and onboards with exactly one PAT). The API handler seals it into the credential store
+ *  BEFORE any run exists and threads only the sealed reference onward (OnboardPlanRequest):
+ *  planStreamed persists its raw params verbatim (params_json), so the raw PAT must never enter the
+ *  executor. */
 const OnboardRequestFields = z.object({
   consumerName: consumerNameSchema,
   repoURL: repoURLSchema,
@@ -414,31 +426,21 @@ const OnboardRequestFields = z.object({
   // lands there and is raised deliberately afterwards rather than sold generously by omission.
   size: UnitSizeSchema.default(DEFAULT_UNIT_SIZE),
   repoPat: z.string().min(1), // the raw GitHub PAT — sealed by the API handler, never persisted/logged
+  // The unit's own stage, for both forms. Held against the channel ceiling at plan time.
+  stage: z.enum(STAGE),
+  // The target cluster of a DEPLOYABLE unit, any active one. Absent ⇒ the build-only form.
   clusterId: z.string().startsWith("cls_").optional(),
-  stage: z.enum(STAGE).optional(),
 });
 
-function refineFormChoice(r: { clusterId?: string | undefined; stage?: string | undefined }, ctx: z.RefinementCtx): void {
-  if ((r.clusterId === undefined) === (r.stage === undefined)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["clusterId"],
-      message: "exactly one of clusterId (deployable — the stage is the cluster's) or stage (build-only — where the triggered release run puts the release) must be given",
-    });
-  }
-}
-
-export const OnboardRequest = OnboardRequestFields.superRefine(refineFormChoice);
+export const OnboardRequest = OnboardRequestFields;
 export type OnboardRequest = z.infer<typeof OnboardRequest>;
 
 /** What actually enters the executor (planStream's raw params): the operator request with the raw
  *  PAT REPLACED by the sealed credential reference. Split from OnboardRequest so the raw value is
  *  structurally unable to reach params_json. */
-export const OnboardPlanRequest = OnboardRequestFields.omit({ repoPat: true })
-  .extend({
-    repoCredentialId: z.string().min(1), // the sealed repo PAT (the run's read credential)
-  })
-  .superRefine(refineFormChoice);
+export const OnboardPlanRequest = OnboardRequestFields.omit({ repoPat: true }).extend({
+  repoCredentialId: z.string().min(1), // the sealed repo PAT (the run's read credential)
+});
 export type OnboardPlanRequest = z.infer<typeof OnboardPlanRequest>;
 
 export interface ResolvedTarget {
@@ -452,35 +454,36 @@ export interface ResolvedTarget {
   argoAppName: string;
 }
 
-/** Resolve the target cluster's context from its inventory row. Exported + structurally typed
- *  (clusterId/consumerName/chartPath) so a caller resolving the TARGET stage can reuse it without
- *  copying this logic. The cluster's own VALUES are not resolved here at all: they live once per
- *  cluster in the values chain on its install branch and reach every chart from there. */
-export function resolveTarget(db: Db, req: { clusterId: string; consumerName: string; chartPath: string }): ResolvedTarget {
+/** Resolve the target cluster's context from its inventory row. The row supplies the cluster's
+ *  domain and id and nothing else: the STAGE is the unit's own, from the request, and the cluster's
+ *  `stage` column is the platform's, which decides nothing about a unit. The cluster's own VALUES
+ *  are not resolved here at all: they live once per cluster in the values chain on its install
+ *  branch and reach every chart from there. */
+export function resolveTarget(db: Db, req: { clusterId: string; consumerName: string; chartPath: string; stage: Stage }): ResolvedTarget {
   const cluster = db.select().from(clusters).where(eq(clusters.id, req.clusterId)).get();
   if (!cluster) throw errNotFound(`cluster ${req.clusterId}`);
   return {
-    target: { domain: cluster.domain, stage: cluster.stage, chartPath: req.chartPath },
+    target: { domain: cluster.domain, stage: req.stage, chartPath: req.chartPath },
     clusterId: cluster.id,
     cluster: clusterShortName(cluster.domain),
-    namespace: req.consumerName, // identity law: name == namespace
-    // The GENERATED Application's name: the consumers appset stamps `{{ .name }}-<stage>`
-    // (e.g. example-auth-prod) — never the bare consumer name (that stays the AppProject/ns name).
-    argoAppName: consumerArgoAppName(req.consumerName, cluster.stage),
+    // The identity law: manifest name == chart name == repo name == unit, and the namespace is the
+    // unit at its stage. The generated Application carries the same name (consumerArgoAppName).
+    namespace: consumerNamespace(req.consumerName, req.stage),
+    argoAppName: consumerArgoAppName(req.consumerName, req.stage),
   };
 }
 
 /** Reject the plan when the manifest's shape (chart present = deployable, absent = build-only)
- *  disagrees with the form the operator picked — the request's cluster-or-stage choice. Returning
- *  the rejection instead of throwing keeps the full report frozen for the operator. */
+ *  disagrees with the form the operator picked — whether the request names a target cluster.
+ *  Returning the rejection instead of throwing keeps the full report frozen for the operator. */
 function formMismatch(outcome: ValidationOutcome, wantsChart: boolean, consumerName: string): { outcome: "rejected"; summary: string; planJson: unknown } | null {
   const hasChart = outcome.report.manifest?.chart !== undefined;
   if (hasChart === wantsChart) return null;
   return {
     outcome: "rejected",
     summary: hasChart
-      ? `Onboarding "${consumerName}" was rejected — the manifest declares a chart (a self-contained, deployable unit), so a target cluster must be picked instead of a bare stage`
-      : `Onboarding "${consumerName}" was rejected — the manifest declares NO chart (a build-only unit), so onboard it build-only: a stage for the triggered release run instead of a target cluster`,
+      ? `Onboarding "${consumerName}" was rejected — the manifest declares a chart (a self-contained, deployable unit), so a target cluster must be picked`
+      : `Onboarding "${consumerName}" was rejected — the manifest declares NO chart (a build-only unit), so onboard it build-only: no target cluster, only the stage the triggered release run puts the release on`,
     planJson: outcome.report,
   };
 }
@@ -506,14 +509,18 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
       // (the raw PAT is already sealed to repoCredentialId before this point — never logged).
       ctx.log(
         `onboard parameters — consumer="${req.consumerName}" repo="${req.repoURL}" ` +
-          `version=${req.version} channel=${req.channel} ` +
-          (req.clusterId !== undefined ? `cluster=${req.clusterId} chartPath="${req.chartPath}" ` : `build-only stage=${req.stage} `) +
+          `version=${req.version} channel=${req.channel} stage=${req.stage} ` +
+          (req.clusterId !== undefined ? `cluster=${req.clusterId} chartPath="${req.chartPath}" ` : `build-only `) +
           `owner="${req.owner}" repoCredential=${req.repoCredentialId} (raw PAT sealed, never logged)`,
       );
+      // The channel ceiling, held ONCE for both forms and before anything is cloned: the release
+      // pipeline refuses to pin a release whose channel does not reach the stage, so an onboarding
+      // that would fail there is refused here, where the operator reads the rule off the message.
+      assertChannelReaches(await ports.channelStages(), req.channel, req.stage, `the onboarding of "${req.consumerName}" (version ${req.version})`);
 
       if (req.clusterId === undefined) {
         // ---- BUILD-ONLY: no target cluster; the gates run without a chart or a values chain ----
-        const stage = req.stage!;
+        const stage = req.stage;
         const master = resolveMasterCluster(ctx.db);
         // THE ONE ONBOARDING THAT SKIPS THE GATE, and only when every condition in first-master.ts
         // holds. The verdict is computed here, in the open, and the refusal reason is logged even
@@ -585,12 +592,13 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
       }
 
       // ---- DEPLOYABLE: resolve the target cluster and run all the gates ----
-      const r = resolveTarget(ctx.db, { clusterId: req.clusterId, consumerName: req.consumerName, chartPath: req.chartPath });
+      const r = resolveTarget(ctx.db, { clusterId: req.clusterId, consumerName: req.consumerName, chartPath: req.chartPath, stage: req.stage });
       // The cluster's own values come from its install branch, not from here — the gate renders the
-      // chart with exactly the files the Application layers at sync.
+      // chart with exactly the files the Application layers at sync. The chain is read for the
+      // UNIT's stage: values-<stage>.yaml in it is the unit's, and global.env with it.
       const clusterValueFiles = await ports.registrations.readClusterValueFiles(r.target.domain, r.target.stage);
-      // ...and the facts the target cluster resolved to, so a wrong stage or branch is visible here
-      // rather than three gates later.
+      // ...and the facts the target cluster resolved to, so a wrong branch or namespace is visible
+      // here rather than three gates later.
       ctx.log(
         `resolved target — domain=${r.target.domain} stage=${r.target.stage} namespace=${r.namespace} ` +
           `argoApp=${r.argoAppName} ` +
@@ -665,7 +673,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
           // The grant is the operator's act, so the plan being approved names it — and names what the
           // grant IS: the admission policy admits the name; serving it stays the unit's own chart's
           // work (a second Ingress rule plus a tls entry of its own).
-          (outcome.report.manifest?.fqdn ? ` The manifest declares the extra FQDN ${outcome.report.manifest.fqdn} — approving attests it, so the unit MAY serve it beside ${req.consumerName}.${unitApex}; its chart must carry the extra Ingress rule and its own tls entry, or the name stays unserved.` : ""),
+          (outcome.report.manifest?.fqdn ? ` The manifest declares the extra FQDN ${outcome.report.manifest.fqdn} — approving attests it, so the unit MAY serve it beside ${consumerUnitHost(req.consumerName, req.stage, unitApex)}; its chart must carry the extra Ingress rule and its own tls entry, or the name stays unserved.` : ""),
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [], // no host owned — the Manager acts master-locally
         locks: [

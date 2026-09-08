@@ -3,12 +3,12 @@ import { eq, and } from "drizzle-orm";
 import type { RunDefinition, Step } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { apps, clusters } from "../../db/schema/inventory.ts";
-import { AppError, errNotFound, errValidation } from "../../kernel/errors.ts";
-import { STAGE, type Stage } from "../../../shared/enums.ts";
-import { consumerArgoAppName } from "../../../shared/consumer.ts";
+import { AppError, errNotFound } from "../../kernel/errors.ts";
+import { STAGE } from "../../../shared/enums.ts";
+import { consumerArgoAppName, consumerNamespace } from "../../../shared/consumer.ts";
 import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "./build-rbac.ts";
 import { localTx } from "../../executor/stepkit.ts";
-import { assertDeployState, clearRelocationHold, unitStaysRegistered, type LifecyclePorts } from "./lifecycle.ts";
+import { assertDeployState, clearRelocationHold, unitStaysRegistered, type AppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
@@ -79,8 +79,9 @@ import { assertNoOrphans } from "./offboard-orphans.ts";
 // never written still reads the tree, and an orphan of a unit that stands nowhere else takes everything.
 
 export const PurgeParams = z.object({
-  // The consumer name == namespace == AppProject == pointer name (G1). Same shape onboard/offboard use.
+  // The consumer name — the unit; its namespace is <name>-<stage>. Same shape onboard/offboard use.
   consumerName: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/),
+  // The unit's own stage — what names the namespace, the registration and the Vault tier.
   stage: z.enum(STAGE),
   clusterId: z.string().startsWith("cls_"),
 });
@@ -114,32 +115,28 @@ export type PurgePorts = LifecyclePorts & {
   dns?: DnsProvider;
 };
 
-interface PurgeTarget {
-  name: string;
-  domain: string;
-  stage: Stage;
-  clusterId: string;
-}
+/** The purge target — the same four facts every consumer lifecycle run resolves off its row, here
+ *  derived from the request: the cluster row is the authority for the domain, and the stage is the
+ *  unit's own, as given. Nothing cross-checks it against the cluster's `stage` column, which is the
+ *  platform's and decides nothing about a unit. */
+type PurgeTarget = AppCluster;
 
 /** Derive the target identity from name+stage+cluster ALONE — no inventory row required (that is the
- *  whole point). The cluster row is the authority for the domain; the passed stage is cross-checked
- *  against the cluster's own stage (a cluster is exactly one stage) so a mistyped stage fails closed
- *  rather than pointing the teardown at the wrong pointer path / Vault tier. */
+ *  whole point). */
 function loadPurgeTarget(db: Db, p: PurgeParams): PurgeTarget {
   const cluster = db.select().from(clusters).where(eq(clusters.id, p.clusterId)).get();
   if (!cluster) throw errNotFound(`cluster ${p.clusterId}`);
-  if (cluster.stage !== p.stage) {
-    throw errValidation(`stage mismatch: cluster ${p.clusterId} is ${cluster.stage}, purge targets ${p.stage}`);
-  }
-  return { name: p.consumerName, domain: cluster.domain, stage: cluster.stage, clusterId: cluster.id };
+  return { name: p.consumerName, domain: cluster.domain, stage: p.stage, clusterId: cluster.id };
 }
 
-/** The apps row for this name on this cluster, or undefined — purge NEVER requires it. Present ⇒
- *  record-purge marks it offboarded and remove-repo-pat revokes its sealed clone credential;
- *  absent ⇒ a true orphan (onboard died before record-inventory), and purge reaps the cluster/Vault
- *  footprint by name anyway with nothing to mark. */
+/** The apps row of this name AT THIS STAGE on this cluster, or undefined — purge NEVER requires it.
+ *  Present ⇒ record-purge marks it offboarded and remove-repo-pat revokes its sealed clone
+ *  credential; absent ⇒ a true orphan (onboard died before record-inventory), and purge reaps the
+ *  cluster/Vault footprint by name anyway with nothing to mark. The cluster stays in the lookup: a
+ *  row of this (name, stage) on ANOTHER cluster is a unit that stands elsewhere, and what this purge
+ *  reaps here is a leftover that row must not be settled over. */
 function findAppRow(db: Db, t: PurgeTarget): typeof apps.$inferSelect | undefined {
-  return db.select().from(apps).where(and(eq(apps.clusterId, t.clusterId), eq(apps.name, t.name))).get();
+  return db.select().from(apps).where(and(eq(apps.clusterId, t.clusterId), eq(apps.name, t.name), eq(apps.stage, t.stage))).get();
 }
 
 function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
@@ -157,8 +154,8 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         // appId via loadAppCluster; purge is keyed on the name.
         const t = loadPurgeTarget(ctx.db, p);
         const { clusterReader } = await ports.resolver.resolve(t.clusterId);
-        const state = assertDeployState(await clusterReader.readDeployState(), t.domain, t.stage, "consumer");
-        ctx.log("meta", `target ${t.domain} (${t.stage}) attested for purge of ${t.name} — deploy-state generation ${state.generation}`);
+        const state = assertDeployState(await clusterReader.readDeployState(), t.domain, "consumer");
+        ctx.log("meta", `target ${t.domain} attested for purge of ${t.name} at ${t.stage} — deploy-state generation ${state.generation}`);
       },
     },
     {
@@ -175,7 +172,7 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         // namespace whose registration is already gone too, and deleting that namespace hands its
         // ServiceClaims to the very teardown the mark disarms.
         const { clusterReader } = await ports.resolver.resolve(t.clusterId);
-        await clearRelocationHold(ctx, clusterReader, [t.name], t.name);
+        await clearRelocationHold(ctx, clusterReader, [consumerNamespace(t.name, t.stage)], t.name);
         const current = await ports.registrations.readRegistration(t.stage, t.name);
         if (!current) {
           ctx.checkpoint({ registration: null, removed: false });
@@ -234,45 +231,39 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         }
         try {
           const { argoNamespace } = await ports.resolver.resolve(t.clusterId);
-          const { deleted } = await ports.repoCredential.deleteRepoCredential(argoNamespace, consumerRepoCredentialName(t.name));
-          ctx.checkpoint({ repoCredential: consumerRepoCredentialName(t.name), deleted });
-          ctx.log("meta", deleted ? `ArgoCD repository credential for ${t.name} deleted` : `no ArgoCD repository credential for ${t.name} — already absent`);
+          const secret = consumerRepoCredentialName(t.name, t.stage);
+          const { deleted } = await ports.repoCredential.deleteRepoCredential(argoNamespace, secret);
+          ctx.checkpoint({ repoCredential: secret, deleted });
+          ctx.log("meta", deleted ? `ArgoCD repository credential ${secret} deleted` : `no ArgoCD repository credential ${secret} — already absent`);
         } catch (err) {
-          ctx.log("meta", `could not delete the ArgoCD repository credential for ${t.name} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
+          ctx.log("meta", `could not delete the ArgoCD repository credential for ${t.name} at ${t.stage} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
         }
       },
     },
     {
       name: "delete-smtp-ops-grant",
-      title: "Delete the unit's mail-ops grant (it goes with the unit's last stage)",
+      title: "Delete this stage's mail-ops grant",
       run: async (ctx) => {
-        // The same inverse offboard runs, derived from the NAME alone — an orphan may have died before
-        // the grant existed, so an absent one is the normal case. Per UNIT and not per stage: the
-        // dashboard it arms runs in the unit's namespace whatever stage it was onboarded at, so a purge
-        // of one stage would blind a surviving stage's dashboard. Fail-soft like the rest of the
-        // teardown, and the tree read sits INSIDE that body deliberately: a read that fails keeps the
-        // grant, which is the direction that cannot strip a surviving stage.
+        // The same inverse offboard runs, derived from the NAME and the STAGE alone — an orphan may
+        // have died before the grant existed, so an absent one is the normal case. Per stage: the
+        // grant binds the ServiceAccount of the namespace `<name>-<stage>` under a name that carries
+        // the stage (build-rbac.ts), so a surviving stage's dashboard holds a grant of its own.
+        // Fail-soft like the rest of the teardown.
         //
-        // It is the one per-unit fence a reconciler cannot render — the relay's namespace stands on the
-        // MASTER and a slave-hosted unit's reconciler is registered for one namespace — so it is the
-        // one this run still deletes by hand (hostyour-cloud#174).
+        // It is the one per-stage fence a reconciler cannot render — the relay's namespace stands on
+        // the MASTER and a slave-hosted unit's reconciler is registered for one namespace — so it is
+        // the one this run still deletes by hand (hostyour-cloud#174).
         const t = loadPurgeTarget(ctx.db, p);
         if (!ports.buildRbac) {
-          ctx.log("meta", `no build RBAC writer wired — the mail-ops grant for ${t.name} is left as it is`);
+          ctx.log("meta", `no build RBAC writer wired — the mail-ops grant for ${t.name} at ${t.stage} is left as it is`);
           return;
         }
         try {
-          const stageOnly = await unitStaysRegistered(ctx, ports.registrations, t, "the mail-ops grant");
-          if (stageOnly) {
-            ctx.checkpoint({ smtpOpsGrantDeleted: 0, scope: "stage" });
-            ctx.log("meta", `mail-ops grant for ${t.name} kept — the unit still stands at another stage and the grant is the unit's`);
-            return;
-          }
-          const { deleted } = await ports.buildRbac.deleteBuildRbac([renderSmtpOpsGrant({ name: t.name })]);
-          ctx.checkpoint({ smtpOpsGrantDeleted: deleted, scope: "unit" });
-          ctx.log("meta", deleted ? `${deleted} mail-ops grant object(s) for ${t.name} deleted from ${RELAY_NAMESPACE}` : `no mail-ops grant for ${t.name} — already absent`);
+          const { deleted } = await ports.buildRbac.deleteBuildRbac([renderSmtpOpsGrant({ name: t.name, stage: t.stage })]);
+          ctx.checkpoint({ smtpOpsGrantDeleted: deleted });
+          ctx.log("meta", deleted ? `${deleted} mail-ops grant object(s) for ${t.name} at ${t.stage} deleted from ${RELAY_NAMESPACE}` : `no mail-ops grant for ${t.name} at ${t.stage} — already absent`);
         } catch (err) {
-          ctx.log("meta", `could not delete the mail-ops grant for ${t.name} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
+          ctx.log("meta", `could not delete the mail-ops grant for ${t.name} at ${t.stage} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
         }
       },
     },
@@ -283,20 +274,21 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         // The backstop that makes purge complete even when the prune never happened: deleting the
         // namespace garbage-collects EVERY namespaced resource — the workloads, the ServiceClaim (whose
         // finalizer holds the namespace Terminating until the provisioner deprovisions the mongo
-        // user+db), the consumer's credentials Secret and the leftover cert-manager TLS Secret. By G1
-        // the namespace == the consumer name; the delete runs on the RESOLVED target client (the
-        // the slave's own reader for a slave, the master's for a master — never master-only). Idempotent +
-        // non-blocking: an already-absent namespace resolves deleted:false; a present one is issued the
-        // delete without waiting on finalizers.
+        // user+db), the consumer's credentials Secret and the leftover cert-manager TLS Secret. The
+        // namespace is <name>-<stage> (consumerNamespace); the delete runs on the RESOLVED target
+        // client (the slave's own reader for a slave, the master's for a master — never
+        // master-only). Idempotent + non-blocking: an already-absent namespace resolves deleted:false;
+        // a present one is issued the delete without waiting on finalizers.
         const t = loadPurgeTarget(ctx.db, p);
+        const namespace = consumerNamespace(t.name, t.stage);
         const { clusterReader } = await ports.resolver.resolve(t.clusterId);
-        const { deleted } = await clusterReader.deleteNamespace(t.name);
-        ctx.checkpoint({ namespace: t.name, deleted });
+        const { deleted } = await clusterReader.deleteNamespace(namespace);
+        ctx.checkpoint({ namespace, deleted });
         ctx.log(
           "meta",
           deleted
-            ? `namespace ${t.name} deleted on the target cluster — its ServiceClaim (→ mongo deprovision) and credentials Secret go with it`
-            : `namespace ${t.name} was already absent on the target cluster — nothing to delete`,
+            ? `namespace ${namespace} deleted on the target cluster — its ServiceClaim (→ mongo deprovision) and credentials Secret go with it`
+            : `namespace ${namespace} was already absent on the target cluster — nothing to delete`,
         );
       },
     },
@@ -333,7 +325,7 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         // idempotent no-op, so a true orphan that never reached provision-dns removes nothing.
         const t = loadPurgeTarget(ctx.db, p);
         const unitApex = unitApexFromChain(await ports.registrations.readClusterValueFiles(t.domain, t.stage));
-        await removeUnitDns(ctx, { dns: ports.dns, unit: t.name, recordName: consumerUnitHost(t.name, unitApex) });
+        await removeUnitDns(ctx, { dns: ports.dns, unit: t.name, recordName: consumerUnitHost(t.name, t.stage, unitApex) });
       },
     },
     {
@@ -486,8 +478,8 @@ export function makePurgeDef(ports: PurgePorts): RunDefinition<PurgeParams> {
         summary:
           `Force-remove consumer "${t.name}" from ${t.domain} (${t.stage}) by NAME` +
           (row ? "" : " (no inventory row — an orphaned partial onboard)") +
-          `: remove the registration, best-effort wait for the prune, delete the isolation AppProject + repository credential, delete the target-cluster namespace ` +
-          `(its ServiceClaim → the MongoDB user+db is deprovisioned, its credentials Secret goes with it), remove the unit's DNS record, then permanently delete this stage's Vault ` +
+          `: remove the registration, best-effort wait for the prune, delete this stage's repository credential and mail-ops grant, delete the target-cluster namespace ${consumerNamespace(t.name, t.stage)} ` +
+          `(its ServiceClaim → the MongoDB user+db is deprovisioned, its credentials Secret goes with it), remove this stage's DNS record, then permanently delete this stage's Vault ` +
           `secrets (ceremony + PostgreSQL — all versions, NOT recoverable)` +
           (row ? " and mark the inventory row offboarded (kept)." : ". No inventory row to mark.") +
           " What the unit's stages SHARE — the build-namespace grants, the repo PAT, the build webhook and the release kit — is removed ONLY when this is the unit's last registered stage, and kept while another stage stands." +

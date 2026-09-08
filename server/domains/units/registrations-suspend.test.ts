@@ -12,7 +12,7 @@ import { seedQuota, type UnitQuota } from "../../../shared/unit-size.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import type { ConsumerRegistration } from "../../../shared/consumer.ts";
 import type { Stage } from "../../../shared/enums.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 
 const REPO = "https://github.com/x/acme.git";
 
@@ -24,16 +24,11 @@ function deploy(over: Partial<{ stage: Stage; chartPath: string; cluster: string
   return { stage: "prod" as Stage, chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"), fqdn: "acme.example.com", ...over };
 }
 
-const CLUSTERS: ClusterStageResolver = async (cluster: string) => {
-  const stage = ({ s1: "prod", s1dev: "dev" } as Record<string, Stage>)[cluster];
-  if (!stage) throw new Error(`no cluster map for "${cluster}"`);
-  return { name: cluster, stage };
-};
 
 describe("Registrations suspend / quiesce", () => {
   it("flips suspended in place — the stage file keeps its ONE path", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy(), runId: "run_1" });
     await reg.setSuspended("prod", "acme", true, "run_2");
     expect(repo.commits.at(-1)!.message).toBe("consumer-suspend(acme) [run_2]");
@@ -51,7 +46,7 @@ describe("Registrations suspend / quiesce", () => {
   // These three hold the rule that makes both files true at once.
   it("stops the build only once EVERY stage of the unit is suspended", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: ["acme"], deploy: deploy(), runId: "run_1" });
     await reg.commitRegistration({ unit: unit(), builds: ["acme"], deploy: { ...deploy(), stage: "dev", cluster: "s1dev" }, runId: "run_2" });
 
@@ -71,7 +66,7 @@ describe("Registrations suspend / quiesce", () => {
 
   it("moves both files in ONE commit — never a window where the stage is paused and the build is not", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: ["acme"], deploy: deploy(), runId: "run_1" });
     const before = repo.commits.length;
     await reg.setSuspended("prod", "acme", true, "run_2");
@@ -81,7 +76,7 @@ describe("Registrations suspend / quiesce", () => {
 
   it("a quiesce leaves the build alone — only a suspend can change the unit-wide answer", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: ["acme"], deploy: deploy(), runId: "run_1" });
     await reg.setQuiesced("prod", "acme", true, "run_2");
     expect(repo.commits.at(-1)!.write?.map((w) => w.path)).toEqual(["registrations/acme/prod.yaml"]);
@@ -90,7 +85,7 @@ describe("Registrations suspend / quiesce", () => {
 
   it("flips quiesced without disturbing suspended (the two pauses are separate intents)", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy(), runId: "run_1" });
     await reg.setSuspended("prod", "acme", true, "run_2");
     await reg.setQuiesced("prod", "acme", true, "run_3");
@@ -101,7 +96,7 @@ describe("Registrations suspend / quiesce", () => {
 
   it("re-emits the WHOLE registration on a flip, so no field is dropped", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({
       unit: unit({ repoCredentialId: "cred_1", owner: "team-acme", onboardedAt: "2026-01-01T00:00:00Z" }),
       builds: [],

@@ -59,6 +59,6 @@ export function assertChannelReaches(table: ChannelStages, channel: ReleaseChann
   if (allowed.includes(stage)) return;
   throw errValidation(
     `${what} is on the ${channel} channel, which reaches ${allowed.length > 0 ? allowed.join(", ") : "no stage"} — ` +
-    `the target is marked ${stage}, so this release may not go there (${CHANNEL_STAGES_PATH} global.channelStages)`,
+    `the unit stands at ${stage}, so this release may not go there (${CHANNEL_STAGES_PATH} global.channelStages)`,
   );
 }

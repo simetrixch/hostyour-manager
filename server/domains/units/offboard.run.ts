@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import type { RunDefinition, Step } from "../../executor/types.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { AppError, errNotFound } from "../../kernel/errors.ts";
-import { consumerArgoAppName } from "../../../shared/consumer.ts";
+import { consumerArgoAppName, consumerNamespace } from "../../../shared/consumer.ts";
 import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "./build-rbac.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { attestTargetStep, clearRelocationHold, loadAppCluster, unitStaysRegistered, type LifecyclePorts } from "./lifecycle.ts";
@@ -39,18 +39,15 @@ import { assertNoOrphans } from "./offboard-orphans.ts";
 // than replaced — see remove-app-secrets.
 //
 // SCOPE — offboard removes ONE STAGE of a unit, so each step has to know whether its object belongs to
-// the stage or to the whole unit. Per stage: the registration, the Application, the AppProject, the
-// repository credential, the admission policy, the namespace, the argo-sync grant and the
-// <stage>/consumer/<name>/* Vault entries — a cluster carries exactly one stage, so a unit's stages sit
-// on different clusters and each of those exists once per stage. The DNS record is per stage too, on a
-// different ground: its name <name>.<unitApex> states no cluster and two clusters can share an apex, so
-// what separates the stages' records is that provision-dns REFUSES a host another cluster's address
-// already answers (unit-dns.ts) — a unit reaches a second stage only under a second apex. Per unit: the
-// <name>-build namespace's two grants, secret/build/<name>/repo-pat, the ONE build webhook on the
-// consumer repo and the release kit in it. The per-unit steps ask unitStaysRegistered (lifecycle.ts) and
-// keep their object while another <stage>.yaml stands, so offboarding prod leaves a unit that still
-// stands at dev able to build, release and deploy there. The mail-ops grant is per UNIT for the same
-// reason: a dashboard runs in the unit's namespace whatever stage it was onboarded at.
+// the stage or to the whole unit. Per stage, because every name of it carries the stage: the
+// registration, the Application, the AppProject, the repository credential, the admission policy, the
+// namespace `<name>-<stage>`, the argo-sync grant, the mail-ops grant, the DNS record
+// `<name>-<stage>.<unitApex>` and the <stage>/consumer/<name>/* Vault entries — two stages of one unit
+// may share one cluster, so nothing per stage may be named per unit (lifecycle.ts unitStaysRegistered
+// lists the split). Per unit: the <name>-build namespace's two grants, secret/build/<name>/repo-pat,
+// the ONE build webhook on the consumer repo and the release kit in it. The per-unit steps ask
+// unitStaysRegistered and keep their object while another <stage>.yaml stands, so offboarding prod
+// leaves a unit that still stands at dev able to build, release and deploy there.
 
 export const OffboardParams = z.object({ appId: z.string().startsWith("app_") });
 export type OffboardParams = z.infer<typeof OffboardParams>;
@@ -70,9 +67,9 @@ export type OffboardPorts = LifecyclePorts & {
    *  consumer repo with the unit's LAST stage (self-contained, fail-soft). Optional: absent ⇒ the
    *  remove-release-kit step logs + skips (never blocks offboard). */
   consumerRepo?: ConsumerRepo;
-  /** The build-grant writer — offboard deletes the unit's mail-ops grant with its LAST stage
-   *  (fail-soft), then READS it back in assert-no-orphans. Optional: absent ⇒ the delete-smtp-ops-grant
-   *  step logs + skips (never blocks offboard) and the scan reports that it could not look. */
+  /** The build-grant writer — offboard deletes this stage's mail-ops grant (fail-soft), then READS it
+   *  back in assert-no-orphans. Optional: absent ⇒ the delete-smtp-ops-grant step logs + skips (never
+   *  blocks offboard) and the scan reports that it could not look. */
   buildRbac?: BuildRbacWriter;
   /** The repository-credential writer — offboard deletes the unit's ArgoCD repository Secret (the
    *  inverse of provision-repo-credential) and reads it back in assert-no-orphans. Fail-soft like the
@@ -97,7 +94,7 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
         // The relocation mark goes FIRST, because the removal below is what sets off the prune, and
         // the prune is what deletes the ServiceClaims this offboard means to deprovision.
         const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
-        await clearRelocationHold(ctx, clusterReader, [ac.name], ac.name);
+        await clearRelocationHold(ctx, clusterReader, [consumerNamespace(ac.name, ac.stage)], ac.name);
         // Read first, remove only when present — removeRegistration REFUSES an absent file, and on a
         // resume the absence is the normal case: a crash between this step's git commit and its `ok`
         // write re-runs the whole step, which must converge instead of failing on its own earlier
@@ -147,25 +144,26 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
         }
         try {
           const { argoNamespace } = await ports.resolver.resolve(ac.clusterId);
-          const { deleted } = await ports.repoCredential.deleteRepoCredential(argoNamespace, consumerRepoCredentialName(ac.name));
-          ctx.checkpoint({ repoCredential: consumerRepoCredentialName(ac.name), deleted });
-          ctx.log("meta", deleted ? `ArgoCD repository credential for ${ac.name} deleted` : `no ArgoCD repository credential for ${ac.name} — already absent`);
+          const secret = consumerRepoCredentialName(ac.name, ac.stage);
+          const { deleted } = await ports.repoCredential.deleteRepoCredential(argoNamespace, secret);
+          ctx.checkpoint({ repoCredential: secret, deleted });
+          ctx.log("meta", deleted ? `ArgoCD repository credential ${secret} deleted` : `no ArgoCD repository credential ${secret} — already absent`);
         } catch (err) {
-          ctx.log("meta", `could not delete the ArgoCD repository credential for ${ac.name} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
+          ctx.log("meta", `could not delete the ArgoCD repository credential for ${ac.name} at ${ac.stage} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
         }
       },
     },
     {
       name: "delete-smtp-ops-grant",
-      title: "Delete the unit's mail-ops grant (it goes with the unit's last stage)",
+      title: "Delete this stage's mail-ops grant",
       run: async (ctx) => {
         // The inverse of provision-smtp-ops-grant, and the one grant a reconciler cannot render: it
         // stands in the relay's namespace ON THE MASTER, and the reconciler of a slave-hosted unit is
         // registered for exactly one namespace. Nothing prunes it when the registration goes.
         //
-        // PER UNIT AND NOT PER STAGE. A queue dashboard runs in the unit's namespace whatever stage it
-        // was onboarded at, so the grant goes only with the unit's last stage — taking it earlier
-        // would blind a surviving stage's dashboard to the relay it was granted.
+        // PER STAGE. The grant binds the ServiceAccount of the namespace `<name>-<stage>` under a name
+        // that carries the stage (build-rbac.ts), so a surviving stage's dashboard holds a grant of
+        // its own and this delete cannot reach it.
         //
         // Removed UNCONDITIONALLY rather than on a claim, because this run is keyed on the appId and
         // never reads services[] — and the delete is idempotent, so a unit that never claimed
@@ -173,28 +171,20 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
         // pods/exec in the relay's namespace bound to a ServiceAccount whose namespace is being
         // deleted.
         //
-        // Fail-soft — a teardown must not stall on a grant that was never provisioned, on a cluster
-        // surface that is already down, or on a registration tree it cannot read; what is left behind
-        // is an unbound Role, not access, and assert-no-orphans reads it back. The tree read sits
-        // INSIDE the fail-soft body deliberately: a read that fails keeps the grant, which is the
-        // direction that cannot strip a surviving stage.
+        // Fail-soft — a teardown must not stall on a grant that was never provisioned or on a cluster
+        // surface that is already down; what is left behind is an unbound Role, not access, and
+        // assert-no-orphans reads it back.
         const ac = loadAppCluster(ctx.db, appId);
         if (!ports.buildRbac) {
-          ctx.log("meta", `no build RBAC writer wired — the mail-ops grant for ${ac.name} is left as it is`);
+          ctx.log("meta", `no build RBAC writer wired — the mail-ops grant for ${ac.name} at ${ac.stage} is left as it is`);
           return;
         }
         try {
-          const stageOnly = await unitStaysRegistered(ctx, ports.registrations, ac, "the mail-ops grant");
-          if (stageOnly) {
-            ctx.checkpoint({ smtpOpsGrantDeleted: 0, scope: "stage" });
-            ctx.log("meta", `mail-ops grant for ${ac.name} kept — the unit still stands at another stage and the grant is the unit's`);
-            return;
-          }
-          const { deleted } = await ports.buildRbac.deleteBuildRbac([renderSmtpOpsGrant({ name: ac.name })]);
-          ctx.checkpoint({ smtpOpsGrantDeleted: deleted, scope: "unit" });
-          ctx.log("meta", deleted ? `${deleted} mail-ops grant object(s) for ${ac.name} deleted from ${RELAY_NAMESPACE}` : `no mail-ops grant for ${ac.name} — already absent`);
+          const { deleted } = await ports.buildRbac.deleteBuildRbac([renderSmtpOpsGrant({ name: ac.name, stage: ac.stage })]);
+          ctx.checkpoint({ smtpOpsGrantDeleted: deleted });
+          ctx.log("meta", deleted ? `${deleted} mail-ops grant object(s) for ${ac.name} at ${ac.stage} deleted from ${RELAY_NAMESPACE}` : `no mail-ops grant for ${ac.name} at ${ac.stage} — already absent`);
         } catch (err) {
-          ctx.log("meta", `could not delete the mail-ops grant for ${ac.name} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
+          ctx.log("meta", `could not delete the mail-ops grant for ${ac.name} at ${ac.stage} (${err instanceof Error ? err.message : String(err)}) — continuing the teardown`);
         }
       },
     },
@@ -205,8 +195,8 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
         // ArgoCD's CreateNamespace=true CREATES the consumer namespace but does NOT delete it on prune —
         // after watch-removal the Application is gone yet the namespace lingers Active (only the default
         // ServiceAccount + a leftover cert-manager TLS Secret remain), violating "on delete, everything
-        // but the inventory row is gone" (traces-not-facts-on-delete). Delete it explicitly. By the G1
-        // identity law namespace == consumer name (ac.name). It runs on the RIGHT cluster — the resolved
+        // but the inventory row is gone" (traces-not-facts-on-delete). Delete it explicitly. The
+        // namespace is <name>-<stage> (consumerNamespace). It runs on the RIGHT cluster — the resolved
         // clusterReader is the TARGET cluster's client (master-local for a master consumer, the per-slave
         // client for a slave), so the namespace is deleted WHERE the consumer ran, never master-only.
         // Ordered AFTER watch-removal so nothing live is stripped: the workloads are already pruned, so
@@ -214,14 +204,15 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
         // re-run, or ArgoCD/an operator already removed it) resolves deleted:false. Non-blocking — the
         // adapter issues the delete and returns without waiting on finalizers (the `--wait=false` equivalent).
         const ac = loadAppCluster(ctx.db, appId);
+        const namespace = consumerNamespace(ac.name, ac.stage);
         const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
-        const { deleted } = await clusterReader.deleteNamespace(ac.name);
-        ctx.checkpoint({ namespace: ac.name, deleted });
+        const { deleted } = await clusterReader.deleteNamespace(namespace);
+        ctx.checkpoint({ namespace, deleted });
         ctx.log(
           "meta",
           deleted
-            ? `namespace ${ac.name} deleted on the target cluster — the consumer leaves no lingering namespace`
-            : `namespace ${ac.name} was already absent on the target cluster — nothing to delete`,
+            ? `namespace ${namespace} deleted on the target cluster — the consumer leaves no lingering namespace`
+            : `namespace ${namespace} was already absent on the target cluster — nothing to delete`,
         );
       },
     },
@@ -231,11 +222,11 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
       run: async (ctx) => {
         // The inverse of provision-dns (no address is left pointing nowhere — without
         // exception, which is why this one teardown step is fail-CLOSED where its neighbours are
-        // fail-soft). The unit's host is <name>.<unitApex>; the apex comes off the cluster's values
-        // chain, the same read provision-dns's plan made.
+        // fail-soft). The unit's host is <name>-<stage>.<unitApex>; the apex comes off the cluster's
+        // values chain, the same read provision-dns's plan made.
         const ac = loadAppCluster(ctx.db, appId);
         const unitApex = unitApexFromChain(await ports.registrations.readClusterValueFiles(ac.domain, ac.stage));
-        await removeUnitDns(ctx, { dns: ports.dns, unit: ac.name, recordName: consumerUnitHost(ac.name, unitApex) });
+        await removeUnitDns(ctx, { dns: ports.dns, unit: ac.name, recordName: consumerUnitHost(ac.name, ac.stage, unitApex) });
       },
     },
     {
@@ -418,7 +409,7 @@ export function makeOffboardDef(ports: OffboardPorts): RunDefinition<OffboardPar
         // values back to restore them. The operator must see that at approve time, not discover it. The
         // per-unit rule is stated as a rule and not resolved here, so planning stays a read of the
         // inventory row and the answer is taken from the registration tree at the moment each step acts.
-        summary: `Offboard consumer "${ac.name}" from ${ac.domain} (${ac.stage}): remove the registration, wait for ArgoCD to prune, delete the isolation AppProject + repository credential, delete the target-cluster namespace, remove the unit's DNS record, then permanently delete this stage's Vault secrets (ceremony + PostgreSQL — all versions, NOT recoverable) and mark offboarded. What the unit's stages SHARE — the build-namespace grants, the repo PAT, the build webhook and the release kit — is removed ONLY when this is the unit's last registered stage, and kept while another stage stands. The inventory row is kept.`,
+        summary: `Offboard consumer "${ac.name}" from ${ac.domain} (${ac.stage}): remove the registration, wait for ArgoCD to prune, delete this stage's repository credential and mail-ops grant, delete the target-cluster namespace ${consumerNamespace(ac.name, ac.stage)}, remove this stage's DNS record, then permanently delete this stage's Vault secrets (ceremony + PostgreSQL — all versions, NOT recoverable) and mark offboarded. What the unit's stages SHARE — the build-namespace grants, the repo PAT, the build webhook and the release kit — is removed ONLY when this is the unit's last registered stage, and kept while another stage stands. The inventory row is kept.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [], // no host owned — the Manager acts master-locally
         locks: [

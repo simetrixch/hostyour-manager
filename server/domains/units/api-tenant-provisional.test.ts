@@ -14,7 +14,6 @@ import { registerTenantRoutes } from "./api.ts";
 import { makeOffboardTenantDef } from "./tenant-offboard.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "./tenant-lifecycle.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { FakeActivator } from "../../adapters/activation/testing/fake.ts";
@@ -61,7 +60,6 @@ function seedTenant(status: TenantStatus): void {
 
 /** A cluster-marking resolver that answers every cluster short name at "prod" — the guard's routes
  *  never move a tenant across stages, so a single-stage stand-in is all TenantRegistrations needs. */
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 function lifecyclePorts(registrations: TenantRegistrations, resolver: FakeClusterKubeResolver): TenantLifecyclePorts {
   return { registrations, resolver, catalogRepoUrl: DEPLOY_URL, argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com" };
@@ -73,11 +71,11 @@ function lifecyclePorts(registrations: TenantRegistrations, resolver: FakeCluste
 async function makeTenant(): Promise<{ app: Hono<AppEnv>; cookie: string; activator: FakeActivator }> {
   const store = new CredentialStore({ db: db.db, logger });
   const bus = new RunEventBus();
-  const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTER_STAGE);
+  const reg = new TenantRegistrations(new FakePlatformRepo());
   const resolver = new FakeClusterKubeResolver({
     clusterReader: new FakeClusterReader({
       deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 },
-      secretValues: { [`${memberNamespace(GUID, "auth")}/${TENANT_SECRET}/${BOOTSTRAP_TOKEN_KEY}`]: "boot_tok_abc" },
+      secretValues: { [`${memberNamespace(GUID, "auth", "prod")}/${TENANT_SECRET}/${BOOTSTRAP_TOKEN_KEY}`]: "boot_tok_abc" },
     }),
     argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
   });

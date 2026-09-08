@@ -45,7 +45,7 @@ function params(over: Partial<OnboardParams> = {}): OnboardParams {
 
 /** A registration tree with NOTHING in it — the unit stands at no other stage, so the abort cleanup
  *  takes the unit's ONE hook. A test that needs the opposite commits a second stage into its own. */
-const emptyRegistrations = new Registrations(new FakePlatformRepo(), () => Promise.resolve({ name: "s1", stage: "prod" }));
+const emptyRegistrations = new Registrations(new FakePlatformRepo());
 
 /** Build the step in isolation with only the webhook-relevant ports (the rest are never read). Each
  *  test passes exactly the keys it wants present (exactOptionalPropertyTypes forbids explicit
@@ -173,7 +173,7 @@ describe("onboard setup-webhook step", () => {
   it("the abort cleanup KEEPS the hook while the unit stands at another stage — the repo carries only one", async () => {
     // acme is live at dev; this run onboards prod and is aborted. The hook is the UNIT's, and dev
     // releases through it, so the abort must leave it exactly where it is.
-    const registrations = new Registrations(new FakePlatformRepo(), () => Promise.resolve({ name: "s2", stage: "dev" }));
+    const registrations = new Registrations(new FakePlatformRepo());
     await registrations.commitRegistration({
       unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
       builds: ["acme"],

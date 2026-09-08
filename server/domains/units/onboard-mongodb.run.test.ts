@@ -3,8 +3,9 @@ import { seedUnitSizes } from "./unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
+import { CHANNEL_STAGES } from "./onboard.fixture.ts";
 import { seedMongodbInstanceStep } from "./onboard-seed-mongodb.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
@@ -42,7 +43,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 function passReport(mongodb: MongodbMode): GateReport {
   return {
@@ -75,7 +75,8 @@ function ports(mongodb: MongodbMode, seeder?: RecordingSeeder): OnboardPorts {
   return {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
     runner: new FakeGateRunner({ report: passReport(mongodb) }),
-    registrations: new Registrations(platformRepo(), prodClusterStage),
+    registrations: new Registrations(platformRepo()),
+    channelStages: async () => CHANNEL_STAGES,
     seeder: (seeder ?? {}) as unknown as VaultSeeder,
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader(),
@@ -99,7 +100,7 @@ function seedCluster(): void {
 
 const REQ = {
   consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0",
-  channel: "stable" as const, clusterId: "cls_1", owner: "team-acme",
+  channel: "stable" as const, stage: "prod" as const, clusterId: "cls_1", owner: "team-acme",
   chartPath: "deploy/chart", repoCredentialId: "cred_pat",
 };
 const streamCtx = (): { db: DbHandle["db"]; log: () => void; signal: AbortSignal } =>

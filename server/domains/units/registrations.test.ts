@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { seedQuota, type UnitQuota } from "../../../shared/unit-size.ts";
 import { z } from "zod";
-import { Registrations, serializePointer, parseRegistration, makeRegistrationGuard, trailer, clusterStageFromMarkings, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations, serializePointer, parseRegistration, makeRegistrationGuard, trailer } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { ConsumerRegistrationSchema, type ConsumerRegistration } from "../../../shared/consumer.ts";
 import type { Stage } from "../../../shared/enums.ts";
@@ -19,17 +19,6 @@ function deploy(over: Partial<{ stage: Stage; chartPath: string; cluster: string
   return { stage: "prod" as Stage, chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"), ...over };
 }
 
-/** A cluster-marking resolver that answers from a literal name -> stage map. Stands in for the maps
- *  under clusters/active/ so a guard test states BOTH sides of the boundary in one place. */
-function marked(byName: Record<string, Stage>): ClusterStageResolver {
-  return async (cluster: string) => {
-    const stage = byName[cluster];
-    if (!stage) throw new Error(`no cluster map for "${cluster}"`);
-    return { name: cluster, stage };
-  };
-}
-
-const CLUSTERS = marked({ s1: "prod", s1dev: "dev" });
 
 describe("ConsumerRegistrationSchema", () => {
   it("refuses a name that is not basename(repoURL)", () => {
@@ -213,7 +202,7 @@ describe("trailer", () => {
 describe("Registrations.commitRegistration", () => {
   it("writes build.yaml AND the stage file in ONE commit on the books branch, with a run-id trailer", async () => {
     const repo = new FakePlatformRepo();
-    await new Registrations(repo, CLUSTERS).commitRegistration({ unit: unit(), builds: ["acme-backend"], deploy: deploy(), runId: "run_1" });
+    await new Registrations(repo).commitRegistration({ unit: unit(), builds: ["acme-backend"], deploy: deploy(), runId: "run_1" });
     expect(repo.commits).toHaveLength(1);
     const c = repo.commits[0]!;
     expect(c.branch).toBe(repo.booksBranch); // this installation's books, never the trunk
@@ -223,14 +212,14 @@ describe("Registrations.commitRegistration", () => {
 
   it("writes build.yaml alone for a build-only unit", async () => {
     const repo = new FakePlatformRepo();
-    await new Registrations(repo, CLUSTERS).commitRegistration({ unit: unit(), builds: [], runId: "run_1" });
+    await new Registrations(repo).commitRegistration({ unit: unit(), builds: [], runId: "run_1" });
     expect(repo.commits[0]!.write?.map((w) => w.path)).toEqual(["registrations/acme/build.yaml"]);
     expect(repo.commits[0]!.message).toBe("register(acme): build none [run_1]");
   });
 
   it("NEVER puts a deploy-group field in build.yaml", async () => {
     const repo = new FakePlatformRepo();
-    await new Registrations(repo, CLUSTERS).commitRegistration({
+    await new Registrations(repo).commitRegistration({
       unit: unit(),
       builds: ["acme-backend"],
       deploy: deploy({ databases: ["example_auth"], services: ["postgresql"] }),
@@ -248,26 +237,27 @@ describe("Registrations.commitRegistration", () => {
     expect(stage).not.toContain("builds:");
   });
 
-  it("refuses a stage registration whose cluster is marked for a DIFFERENT stage, naming both sides", async () => {
+  it("commits a stage registration onto a cluster of ANOTHER stage — the path states the unit's stage, the cluster field any active cluster", async () => {
+    // registrations/acme/test.yaml with cluster: s1 on a prod-marked cluster: the unit stands at test
+    // there, and nothing in the write compares the two stages.
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
-    await expect(
-      reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ stage: "prod", cluster: "s1dev" }), runId: "run_1" }),
-    ).rejects.toMatchObject({ code: "VALIDATION", message: expect.stringContaining('cluster "s1dev" is marked "dev"') });
-    // Nothing was written — the boundary is checked BEFORE anything is staged, build.yaml included.
-    expect(repo.commits).toHaveLength(0);
+    const reg = new Registrations(repo);
+    await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ stage: "test", cluster: "s1" }), runId: "run_1" });
+    expect(repo.commits).toHaveLength(1);
+    expect(repo.read(repo.booksBranch, "registrations/acme/test.yaml")).toContain('cluster: "s1"');
+    expect((await reg.readRegistration("test", "acme"))?.entry.cluster).toBe("s1");
   });
 
   it("refuses a registration whose name disagrees with its repo, at the schema", async () => {
     const repo = new FakePlatformRepo();
     await expect(
-      new Registrations(repo, CLUSTERS).commitRegistration({ unit: unit({ name: "other" }), builds: [], runId: "run_1" }),
+      new Registrations(repo).commitRegistration({ unit: unit({ name: "other" }), builds: [], runId: "run_1" }),
     ).rejects.toThrow(/basename\(repoURL\)/);
   });
 
   it("reads back the stage registration it wrote", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit({ repoCredentialId: "cred_1", owner: "team-acme" }), builds: [], deploy: deploy(), runId: "run_1" });
     const read = await reg.readRegistration("prod", "acme");
     expect(read?.entry.name).toBe("acme");
@@ -280,7 +270,7 @@ describe("Registrations.commitRegistration", () => {
 describe("Registrations.removeRegistration", () => {
   it("removes the stage file AND build.yaml when it was the unit's last stage", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: ["acme-backend"], deploy: deploy(), runId: "run_1" });
     const { unitRemoved } = await reg.removeRegistration("prod", "acme", "run_2");
     expect(unitRemoved).toBe(true);
@@ -290,7 +280,7 @@ describe("Registrations.removeRegistration", () => {
 
   it("keeps build.yaml while ANOTHER stage still registers the unit", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, marked({ s1: "prod", s1dev: "dev" }));
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy(), runId: "run_1" });
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ stage: "dev", cluster: "s1dev" }), runId: "run_2" });
     const { unitRemoved } = await reg.removeRegistration("prod", "acme", "run_3");
@@ -301,7 +291,7 @@ describe("Registrations.removeRegistration", () => {
 
   it("refuses a second removal", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy(), runId: "run_1" });
     await reg.removeRegistration("prod", "acme", "run_2");
     await expect(reg.removeRegistration("prod", "acme", "run_3")).rejects.toMatchObject({ code: "VALIDATION" });
@@ -311,7 +301,7 @@ describe("Registrations.removeRegistration", () => {
 describe("Registrations.readUnitStages", () => {
   it("names every stage a unit stands at, and nothing for a unit that stands at none", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, marked({ s1: "prod", s1dev: "dev" }));
+    const reg = new Registrations(repo);
     expect(await reg.readUnitStages("acme")).toEqual([]);
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy(), runId: "run_1" });
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ stage: "dev", cluster: "s1dev" }), runId: "run_2" });
@@ -325,7 +315,7 @@ describe("Registrations.readUnitStages", () => {
 
   it("drops a stage as its registration is removed — the source every per-unit teardown reads", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, marked({ s1: "prod", s1dev: "dev" }));
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy(), runId: "run_1" });
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ stage: "dev", cluster: "s1dev" }), runId: "run_2" });
     await reg.removeRegistration("prod", "acme", "run_3");
@@ -338,7 +328,7 @@ describe("Registrations.readUnitStages", () => {
 describe("Registrations.listAttestedBuildNames", () => {
   it("returns every OTHER unit's build names, tagged with the unit that attested them", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: ["acme-backend"], deploy: deploy(), runId: "run_1" });
     await reg.commitRegistration({ unit: unit({ name: "other", repoURL: "https://github.com/x/other.git" }), builds: ["other-api", "other-web"], runId: "run_2" });
     expect(await reg.listAttestedBuildNames("acme")).toEqual([
@@ -352,7 +342,7 @@ describe("Registrations.listAttestedBuildNames", () => {
   it("THROWS on a build.yaml that does not validate — a shrunken set would pass a taken name", async () => {
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "registrations/broken/build.yaml", "name: broken\nrepoURL: not-a-url\n");
-    await expect(new Registrations(repo, CLUSTERS).listAttestedBuildNames("acme")).rejects.toThrow(/registrations\/broken\/build\.yaml/);
+    await expect(new Registrations(repo).listAttestedBuildNames("acme")).rejects.toThrow(/registrations\/broken\/build\.yaml/);
   });
 
   // END TO END OVER THE HAND-SEEDED FILE — the layer G16 stands on. The pure reader folding the bytes
@@ -361,7 +351,7 @@ describe("Registrations.listAttestedBuildNames", () => {
   it("reads the hand-seeded bootstrap build.yaml through the tree, comments and block list included", async () => {
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "registrations/hostyour-manager/build.yaml", bootstrapBuildYaml("false"));
-    expect(await new Registrations(repo, CLUSTERS).listAttestedBuildNames("acme")).toEqual(["manager", "gate-runner", "dbtools"].map((build) => ({ unit: "hostyour-manager", build })));
+    expect(await new Registrations(repo).listAttestedBuildNames("acme")).toEqual(["manager", "gate-runner", "dbtools"].map((build) => ({ unit: "hostyour-manager", build })));
   });
 
   // AND WHAT A FRESH INSTALLATION STILL HITS. platform-build-registration.tpl:31 writes `suspended: "false"`, so this method
@@ -371,15 +361,15 @@ describe("Registrations.listAttestedBuildNames", () => {
   it("THROWS on the quoted suspended the template writes today — the fresh-installation refusal", async () => {
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "registrations/hostyour-manager/build.yaml", bootstrapBuildYaml('"false"'));
-    await expect(new Registrations(repo, CLUSTERS).listAttestedBuildNames("acme")).rejects.toThrow(/build\.yaml is not a readable build registration/);
-    await expect(new Registrations(repo, CLUSTERS).listAttestedBuildNames("acme")).rejects.toThrow(/expected boolean, received string/);
+    await expect(new Registrations(repo).listAttestedBuildNames("acme")).rejects.toThrow(/build\.yaml is not a readable build registration/);
+    await expect(new Registrations(repo).listAttestedBuildNames("acme")).rejects.toThrow(/expected boolean, received string/);
   });
 });
 
 describe("Registrations.listAttestedFqdns", () => {
   it("returns every attested fqdn except the candidate's own stage, skipping stage files that attest none", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, marked({ s1: "prod", s1dev: "dev" }));
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ fqdn: "shop.example.org" }), runId: "run_1" });
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ stage: "dev", cluster: "s1dev" }), runId: "run_2" });
     await reg.commitRegistration({ unit: unit({ name: "other", repoURL: "https://github.com/x/other.git" }), builds: [], deploy: deploy({ fqdn: "other.example.org" }), runId: "run_3" });
@@ -390,7 +380,7 @@ describe("Registrations.listAttestedFqdns", () => {
 
   it("keeps the SAME unit's OTHER stages in the set — a stage-less manifest fqdn must not be attested at two stages", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, marked({ s1: "prod", s1dev: "dev" }));
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ fqdn: "shop.example.org" }), runId: "run_1" });
     // Onboarding acme at DEV sees acme's own PROD attestation as taken.
     expect(await reg.listAttestedFqdns({ unit: "acme", stage: "dev" })).toEqual([{ unit: "acme", stage: "prod", fqdn: "shop.example.org" }]);
@@ -399,14 +389,14 @@ describe("Registrations.listAttestedFqdns", () => {
   it("THROWS on a stage file that does not validate — a shrunken set would grant a taken name", async () => {
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "registrations/broken/prod.yaml", "name: broken\nrepoURL: not-a-url\n");
-    await expect(new Registrations(repo, CLUSTERS).listAttestedFqdns({ unit: "acme", stage: "dev" })).rejects.toThrow(/registrations\/broken\/prod\.yaml/);
+    await expect(new Registrations(repo).listAttestedFqdns({ unit: "acme", stage: "dev" })).rejects.toThrow(/registrations\/broken\/prod\.yaml/);
   });
 });
 
 describe("Registrations.listConsumerRegistrations", () => {
   it("returns only the units this cluster carries at this stage", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, marked({ s1: "prod", s2: "prod" }));
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy(), runId: "run_1" });
     await reg.commitRegistration({
       unit: { name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false },
@@ -421,7 +411,7 @@ describe("Registrations.listConsumerRegistrations", () => {
 
   it("never sees a build-only unit", async () => {
     const repo = new FakePlatformRepo();
-    const reg = new Registrations(repo, CLUSTERS);
+    const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: ["acme-backend"], runId: "run_1" });
     const scan = await reg.listConsumerRegistrations("s1.example.com", "prod");
     expect(scan.registrations).toEqual([]);
@@ -434,7 +424,7 @@ describe("Registrations.listConsumerRegistrations", () => {
       name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false,
       chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
     })));
-    const scan = await new Registrations(repo, CLUSTERS).listConsumerRegistrations("s1.example.com", "prod");
+    const scan = await new Registrations(repo).listConsumerRegistrations("s1.example.com", "prod");
     expect(scan.registrations).toEqual([]);
     expect(scan.skipped[0]?.reason).toContain("disagrees with its directory name");
   });
@@ -442,7 +432,7 @@ describe("Registrations.listConsumerRegistrations", () => {
   it("reports a stage file that carries no deploy group", async () => {
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "registrations/acme/prod.yaml", serializePointer(ConsumerRegistrationSchema, ConsumerRegistrationSchema.parse({ ...unit(), builds: [] })));
-    const scan = await new Registrations(repo, CLUSTERS).listConsumerRegistrations("s1.example.com", "prod");
+    const scan = await new Registrations(repo).listConsumerRegistrations("s1.example.com", "prod");
     expect(scan.registrations).toEqual([]);
     expect(scan.skipped[0]?.reason).toContain("carries no deploy group");
   });
@@ -450,19 +440,9 @@ describe("Registrations.listConsumerRegistrations", () => {
   it("reports an unparseable file rather than dropping it", async () => {
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "registrations/acme/prod.yaml", "garbage-without-colon\n");
-    const scan = await new Registrations(repo, CLUSTERS).listConsumerRegistrations("s1.example.com", "prod");
+    const scan = await new Registrations(repo).listConsumerRegistrations("s1.example.com", "prod");
     expect(scan.skipped[0]?.name).toBe("acme");
     expect(scan.skipped[0]?.reason).toContain("not readable registration YAML");
-  });
-});
-
-describe("clusterStageFromMarkings", () => {
-  it("resolves a cluster's stage off its own map on the books branch", async () => {
-    const repo = new FakePlatformRepo();
-    repo.seed(repo.booksBranch, "clusters/active/s1.example.com.yaml", 'stage: "prod"\nrole: "slave"\n\nglobal:\n  domain: "s1.example.com"\n  buildPlane: "m1.example.com"\n');
-    const resolve = clusterStageFromMarkings(repo);
-    await expect(resolve("s1")).resolves.toEqual({ name: "s1", stage: "prod" });
-    await expect(resolve("s1.example.com")).resolves.toEqual({ name: "s1", stage: "prod" });
   });
 });
 
@@ -473,7 +453,7 @@ describe("Registrations.readClusterValueFiles", () => {
     repo.seed(repo.booksBranch, "clusters/platform/values-prod.yaml", "global:\n  env: prod\n");
     repo.seed(repo.booksBranch, clusterMapPath("s1.example"), "global:\n  endpoints:\n    vault:\n      url: https://vault.s1.example:8200\n");
 
-    const files = await new Registrations(repo, CLUSTERS).readClusterValueFiles("s1.example", "prod");
+    const files = await new Registrations(repo).readClusterValueFiles("s1.example", "prod");
     expect(files.map((f) => f.path)).toEqual([
       "clusters/platform/values-common.yaml",
       "clusters/platform/values-prod.yaml",
@@ -487,6 +467,6 @@ describe("Registrations.readClusterValueFiles", () => {
     // test's own, so the fake invents nothing else on it.
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "clusters/platform/values-common.yaml", "global: {}\n");
-    await expect(new Registrations(repo, CLUSTERS).readClusterValueFiles("bare.example", "prod")).rejects.toMatchObject({ code: "UPSTREAM" });
+    await expect(new Registrations(repo).readClusterValueFiles("bare.example", "prod")).rejects.toMatchObject({ code: "UPSTREAM" });
   });
 });

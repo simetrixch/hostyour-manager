@@ -50,46 +50,46 @@ const names = (apps: readonly AppRef[], stage: "dev" | "test" | "prod" = "dev"):
 const appOf = (m: FanoutMember, stage: "dev" | "test" | "prod"): string => memberApplication(GUID, m.member, stage);
 
 describe("the per-member naming — one namespace and one AppProject per member", () => {
-  it("names a member namespace <guid>-<member>, never the bare guid", () => {
-    expect(memberNamespace(GUID, "auth")).toBe("zsjs023ctne0-auth");
-    expect(memberNamespace(GUID, "erp")).toBe("zsjs023ctne0-erp");
-    expect(tenantNamespaces(membersOf("erp"), GUID)).not.toContain(GUID);
+  it("names a member namespace <guid>-<member>-<stage>, never the bare guid", () => {
+    expect(memberNamespace(GUID, "auth", "dev")).toBe("zsjs023ctne0-auth-dev");
+    expect(memberNamespace(GUID, "erp", "dev")).toBe("zsjs023ctne0-erp-dev");
+    expect(tenantNamespaces(membersOf("erp"), GUID, "dev")).not.toContain(GUID);
   });
 
   it("holds the identity law per member: AppProject name == namespace", () => {
     for (const member of membersOf("erp", "web")) {
-      expect(memberAppProject(GUID, member)).toBe(memberNamespace(GUID, member));
+      expect(memberAppProject(GUID, member, "dev")).toBe(memberNamespace(GUID, member, "dev"));
     }
   });
 
   it("gives a tenant with several members one namespace and one AppProject EACH, pairwise different", () => {
     const members = membersOf("erp", "crm", "web");
-    const namespaces = tenantNamespaces(members, GUID);
+    const namespaces = tenantNamespaces(members, GUID, "dev");
     expect(namespaces).toEqual([
-      "zsjs023ctne0-auth",
-      "zsjs023ctne0-jobs",
-      "zsjs023ctne0-report",
-      "zsjs023ctne0-erp",
-      "zsjs023ctne0-crm",
-      "zsjs023ctne0-web",
+      "zsjs023ctne0-auth-dev",
+      "zsjs023ctne0-jobs-dev",
+      "zsjs023ctne0-report-dev",
+      "zsjs023ctne0-erp-dev",
+      "zsjs023ctne0-crm-dev",
+      "zsjs023ctne0-web-dev",
     ]);
     expect(new Set(namespaces).size).toBe(namespaces.length); // pairwise different
     for (const ns of namespaces) expect(ns.startsWith(`${GUID}-`)).toBe(true);
     // The AppProjects are the same six strings — one per member, never one shared project.
-    expect(members.map((m) => memberAppProject(GUID, m))).toEqual(namespaces);
+    expect(members.map((m) => memberAppProject(GUID, m, "dev"))).toEqual(namespaces);
   });
 
   it("leaves every OTHER member standing when one member is torn down", () => {
-    const before = tenantNamespaces(membersOf("erp", "crm"), GUID);
-    const after = tenantNamespaces(membersOf("crm"), GUID); // erp removed
-    expect(after).not.toContain(memberNamespace(GUID, "erp"));
+    const before = tenantNamespaces(membersOf("erp", "crm"), GUID, "dev");
+    const after = tenantNamespaces(membersOf("crm"), GUID, "dev"); // erp removed
+    expect(after).not.toContain(memberNamespace(GUID, "erp", "dev"));
     for (const ns of after) expect(before).toContain(ns);
-    expect(after).toEqual(["zsjs023ctne0-auth", "zsjs023ctne0-jobs", "zsjs023ctne0-report", "zsjs023ctne0-crm"]);
+    expect(after).toEqual(["zsjs023ctne0-auth-dev", "zsjs023ctne0-jobs-dev", "zsjs023ctne0-report-dev", "zsjs023ctne0-crm-dev"]);
   });
 
   it("addresses no member the product did not declare — the bracket is its members and its apps", () => {
     expect(membersOf("erp")).not.toContain("base");
-    expect(tenantNamespaces(membersOf("erp"), GUID)).not.toContain(`${GUID}-base`);
+    expect(tenantNamespaces(membersOf("erp"), GUID, "dev")).not.toContain(`${GUID}-base-dev`);
     expect(tenantApplicationSet(membersOf("erp"), GUID, "dev")).not.toContain(`${GUID}-base-dev`);
     expect(names([app("erp")])).not.toContain("base");
   });
@@ -125,7 +125,7 @@ describe("resolveMembers — the ONE resolution the registration records and the
   it("builds an app member from perApp — engine first, then front — into its ONE namespace", () => {
     const erp = resolveMembers(SPEC, [app("erp")]).find((x) => x.name === "erp")!;
     expect(erp.sources.map((s) => s.chart)).toEqual(["charts/example-engine", "charts/example-ui"]);
-    expect(memberNamespace(GUID, erp.name)).toBe("zsjs023ctne0-erp");
+    expect(memberNamespace(GUID, erp.name, "dev")).toBe("zsjs023ctne0-erp-dev");
   });
 
   it("substitutes {app} in the value files and in every string of the values", () => {
@@ -175,10 +175,10 @@ describe("resolveFanout — the flattening the validator renders", () => {
   });
 
   it("puts each standing render in its OWN member namespace", () => {
-    expect(resolveFanout(SPEC, [], "dev").map((m) => memberNamespace(GUID, m.member))).toEqual([
-      "zsjs023ctne0-auth",
-      "zsjs023ctne0-jobs",
-      "zsjs023ctne0-report",
+    expect(resolveFanout(SPEC, [], "dev").map((m) => memberNamespace(GUID, m.member, "dev"))).toEqual([
+      "zsjs023ctne0-auth-dev",
+      "zsjs023ctne0-jobs-dev",
+      "zsjs023ctne0-report-dev",
     ]);
   });
 
@@ -193,7 +193,7 @@ describe("resolveFanout — the flattening the validator renders", () => {
   it("gives an app's two renders the SAME member, so both land in the one namespace", () => {
     const perApp = resolveFanout(SPEC, [app("erp")], "dev").filter((x) => x.member === "erp");
     expect(perApp).toHaveLength(2);
-    expect(new Set(perApp.map((x) => memberNamespace(GUID, x.member)))).toEqual(new Set(["zsjs023ctne0-erp"]));
+    expect(new Set(perApp.map((x) => memberNamespace(GUID, x.member, "dev")))).toEqual(new Set(["zsjs023ctne0-erp-dev"]));
     expect(new Set(perApp.map((x) => appOf(x, "dev")))).toEqual(new Set(["zsjs023ctne0-erp-dev"]));
   });
 
@@ -237,7 +237,7 @@ describe("tenantApplicationSet — expected Application names (match the tenant 
 
   it("names one Application per member namespace, in the same order", () => {
     const members = membersOf("erp", "crm");
-    expect(tenantApplicationSet(members, GUID, "test")).toEqual(tenantNamespaces(members, GUID).map((ns) => `${ns}-test`));
+    expect(tenantApplicationSet(members, GUID, "test")).toEqual(tenantNamespaces(members, GUID, "test"));
   });
 });
 

@@ -33,6 +33,7 @@ import { registerReleaseRoutes } from "../domains/releases/api.ts";
 import { searchPlatformApps } from "../domains/registry-cleanup/search.ts";
 import { registerConsumerRoutes, registerTenantRoutes } from "../domains/units/api.ts";
 import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
+import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
 import type { AppEnv } from "../http/app-env.ts";
@@ -226,6 +227,7 @@ export async function wire(): Promise<Wired> {
       // this installation sells is a fact whether or not onboarding is currently configured.
       registerUnitSizeRoutes(a, { db: db.db, executor, ...(units.registrations ? { registrations: units.registrations } : {}), onboardingEnabled: units.enabled, tenantEnabled: units.tenantEnabled });
       registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}) });
+      registerOnboardPrefillRoute(a, { store, onboardingEnabled: units.enabled, ...(units.repoReader ? { repo: units.repoReader } : {}) });
       // Tenant (multi-app) onboarding routes — the SAME thin shape, gated on the tenant family's own
       // flag (the catalog PAT). Registered right after the consumer routes; the read
       // path (tenant list/detail) stays live, the mutating triggers answer 501 until tenantEnabled.

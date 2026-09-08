@@ -15,7 +15,7 @@ import { parse as parseYaml } from "yaml";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
+import { MASTER_ROLES } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
 
@@ -32,15 +32,12 @@ export function resolveClusterNameById(db: Db, clusterId: string): string | null
 }
 
 /** The inverse, for the create-tenant replace lookup: find the cluster row whose short name matches
- *  `cluster` at `stage`, returning its id + domain. Resolves an ORPHAN tenant's target cluster from
- *  its pointer's `cluster` field alone (no tenants row to read a clusterId from). null when no such
- *  cluster is registered. */
-export function resolveClusterIdByName(db: Db, cluster: string, stage: Stage): { clusterId: string; domain: string } | null {
-  const rows = db
-    .select({ id: clusters.id, domain: clusters.domain })
-    .from(clusters)
-    .where(eq(clusters.stage, stage))
-    .all();
+ *  `cluster`, returning its id + domain. Resolves an ORPHAN tenant's target cluster from its
+ *  pointer's `cluster` field alone (no tenants row to read a clusterId from). null when no such
+ *  cluster is registered. The cluster's stage is not asked: a registration at any stage names any
+ *  active cluster, and the short name is unique across an installation (cluster-marking.ts). */
+export function resolveClusterIdByName(db: Db, cluster: string): { clusterId: string; domain: string } | null {
+  const rows = db.select({ id: clusters.id, domain: clusters.domain }).from(clusters).all();
   for (const r of rows) {
     if (clusterShortName(r.domain) === cluster) return { clusterId: r.id, domain: r.domain };
   }

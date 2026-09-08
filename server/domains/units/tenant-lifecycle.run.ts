@@ -4,7 +4,7 @@ import type { RunDefinition, Step, LockClaim } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { appName } from "../../../shared/tenant.ts";
-import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
+import { TENANT_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
 import { errValidation, errNotFound } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import type { ArgoAppStatusMap, WorkloadStatus } from "../../adapters/kube/port.ts";
@@ -95,8 +95,8 @@ export function tenantWatchMembers(db: Db, tenantId: string): string[] {
 }
 
 /** The member NAMESPACES of a tenant — tenantWatchMembers under the one naming function. */
-export function tenantWatchNamespaces(db: Db, tenantId: string, guid: string): string[] {
-  return tenantWatchMembers(db, tenantId).map((m) => memberNamespace(guid, m));
+export function tenantWatchNamespaces(db: Db, tenantId: string, guid: string, stage: Stage): string[] {
+  return tenantWatchMembers(db, tenantId).map((m) => memberNamespace(guid, m, stage));
 }
 
 /** Prune predicate: EVERY expected name reads health Missing (its CR is gone / never generated). An
@@ -172,7 +172,7 @@ function suspendSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParams
         // ArgoCD applied the manifests, not that the manifests carry the off state — a chart that
         // ignored `suspended` would pass the watch above and go on serving.
         const tc = loadTenantCluster(ctx.db, tenantId);
-        const namespaces = tenantWatchNamespaces(ctx.db, tc.tenantId, tc.guid);
+        const namespaces = tenantWatchNamespaces(ctx.db, tc.tenantId, tc.guid, tc.stage);
         const { clusterReader } = await ports.resolver.resolve(tc.clusterId);
         for (const ns of namespaces) {
           const smoke = await clusterReader.smoke(ns);

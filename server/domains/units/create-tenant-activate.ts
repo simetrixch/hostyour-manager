@@ -41,9 +41,9 @@ export function tenantActivateStep(ports: TenantOnboardPorts, p: CreateTenantPar
       if (!ports.activator) {
         throw errValidation(`an admin email was supplied for ${p.guid} but no activator is wired on this manager — refusing to skip the first-admin invite silently`);
       }
-      const ns = memberNamespace(p.guid, p.identityProvider);
+      const ns = memberNamespace(p.guid, p.identityProvider, p.stage);
       // The bootstrap token is a crypto secret the auth member's chart materializes via ESO into
-      // hostyour-app-secrets in ITS OWN namespace <guid>-auth — the tenant's IdP is the member that
+      // hostyour-app-secrets in ITS OWN namespace <guid>-<idp>-<stage> — the tenant's IdP is the member that
       // consumes it. Read it on the TARGET slave's own reader (the seam attest-target/smoke already use).
       // It MUST exist by now — smoke confirmed this namespace's ExternalSecrets are all Ready — so an
       // absent token is a real failure, not a race; fail loud rather than send an empty/wrong token.
@@ -52,11 +52,11 @@ export function tenantActivateStep(ports: TenantOnboardPorts, p: CreateTenantPar
       if (!token) {
         throw errValidation(`the tenant bootstrap token (Secret ${TENANT_SECRET} key ${BOOTSTRAP_TOKEN_KEY}) is absent in ${ns} — the tenant's crypto secret must exist after a green smoke; refusing to invite the first admin without it`);
       }
-      // The tenant auth ingress: auth.<subdomain>.<unitApex> — the same three parts the auth member's
+      // The tenant auth ingress: <idp>-<stage>.<subdomain>.<unitApex> — the same parts the auth member's
       // chart renders. The apex is read off the TARGET cluster's own values chain (the resolver
       // provision-dns already composes the tenant's wildcard `*.<subdomain>.<unitApex>` from), so the
       // host this posts to is one the wildcard covers and the ingress answers for.
-      const authFqdn = tenantMemberHost(p.identityProvider, p.subdomain, await ports.resolveUnitApex(p.domain, p.stage));
+      const authFqdn = tenantMemberHost(p.identityProvider, p.stage, p.subdomain, await ports.resolveUnitApex(p.domain, p.stage));
       const url = `https://${authFqdn}/api/v1/bootstrap/invite-admin`;
       // The token rides ONLY the declared header — never the URL, the body, or a log line.
       ctx.log("meta", `inviting the first tenant admin: POST ${url} with header X-Bootstrap-Token (token withheld)`);

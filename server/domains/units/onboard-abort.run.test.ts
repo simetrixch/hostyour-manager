@@ -9,7 +9,8 @@ import { Executor } from "../../executor/executor.ts";
 import { buildRunDefinitions } from "../runs/run-definitions.ts";
 import { getRun } from "../../executor/read.ts";
 import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { CHANNEL_STAGES } from "./onboard.fixture.ts";
+import { Registrations } from "./registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
@@ -72,13 +73,12 @@ const ACTIVATION_MANIFEST: ConsumerManifest = {
 
 const REQUEST = {
   consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable",
-  owner: "team-acme", chartPath: "deploy/chart", clusterId: "cls_1", repoCredentialId: "cred_pat",
+  owner: "team-acme", chartPath: "deploy/chart", stage: "prod", clusterId: "cls_1", repoCredentialId: "cred_pat",
 };
 
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 const fakeCreds = { open: async () => Buffer.from("github_pat_test", "utf8") } as unknown as CredentialStore;
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
@@ -140,7 +140,7 @@ interface Harness {
 
 function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator; projects?: FakeMasterProjectWriter; repoCredential?: FakeRepoCredentialWriter; created?: boolean } = {}): Harness {
   const platform = platformRepo("s1.example", "m1.example");
-  const registrations = new Registrations(platform, prodClusterStage);
+  const registrations = new Registrations(platform);
   const argo = new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } });
   const projects = over.projects ?? new FakeMasterProjectWriter();
   const cluster = new FakeClusterReader({
@@ -157,6 +157,7 @@ function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator;
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
     runner: new FakeGateRunner({ report: passReport(over.manifest ?? MANIFEST) }),
     registrations,
+    channelStages: async () => CHANNEL_STAGES,
     resolveBuildPlaneFqdn: seedClusterMaps(platform, { "s1.example": "prod", "m1.example": "prod" }),
     seeder,
     resolver: new FakeClusterKubeResolver({ clusterReader: cluster, argoReader: argo, projectWriter: projects, argoNamespace: "argocd" }),

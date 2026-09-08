@@ -6,7 +6,7 @@ import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
 import { renderSmtpOpsGrant } from "./build-rbac.ts";
 import { renderConsumerRepoCredential } from "./repo-credential.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter, FakeRepoCredentialWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
@@ -33,9 +33,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-// s1 carries prod (the offboard target), s2 carries dev (the stage that may survive) — a
-// cluster carries exactly one stage, so a unit's two stages never share one.
-const twoStageClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: cluster === "s2" ? "dev" : "prod" });
 
 class FakeSeeder implements VaultSeeder {
   async seed(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds"); }
@@ -103,19 +100,19 @@ function scanStep(prt: OffboardPorts): { run: (c: StepCtx) => Promise<void> } {
 describe("offboard assert-no-orphans", () => {
   it("fails the run and names every object a fail-soft delete left behind", async () => {
     seedApp();
-    const reg = new Registrations(new FakePlatformRepo(), twoStageClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistrationsAndRemoveProd(reg, false); // acme has left the platform: prod was its only stage
 
     // The world a teardown leaves when the cluster refuses its writes: the repository Secret and the
     // mail-ops grant are still standing, and so is the unit's address. Each was WRITTEN by this
     // manager outside any chart, so nothing else will ever take them away.
     const repoCredential = new FakeRepoCredentialWriter();
-    await repoCredential.applyRepoCredential(renderConsumerRepoCredential({ consumerName: "acme", argoNamespace: "argocd", repoURL: REPO, pat: "github_pat_test" }));
+    await repoCredential.applyRepoCredential(renderConsumerRepoCredential({ consumerName: "acme", stage: "prod", argoNamespace: "argocd", repoURL: REPO, pat: "github_pat_test" }));
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 3 } });
     const dns = new FakeDnsProvider();
-    dns.seed("acme.s1.example", "A", "203.0.113.10");
+    dns.seed("acme-prod.s1.example", "A", "203.0.113.10");
 
     const step = scanStep(ports(reg, { cluster, projects: new FakeMasterProjectWriter(), buildRbac, repoCredential, dns }));
     const failure = await step.run(ctx([])).then(() => null, (e: Error) => e);
@@ -125,10 +122,10 @@ describe("offboard assert-no-orphans", () => {
 
     // Every leftover is NAMED with where it stands — a report of what is gone would be useless here.
     for (const object of [
-      "ArgoCD repository Secret argocd/repo-acme",
-      "DNS A acme.s1.example",
-      "Role postfix/acme-smtp-ops",
-      "RoleBinding postfix/acme-smtp-ops",
+      "ArgoCD repository Secret argocd/repo-acme-prod",
+      "DNS A acme-prod.s1.example",
+      "Role postfix/acme-prod-smtp-ops",
+      "RoleBinding postfix/acme-prod-smtp-ops",
     ]) {
       expect(message).toContain(object);
     }
@@ -142,7 +139,7 @@ describe("offboard assert-no-orphans", () => {
   // offboard on a slow cluster.
   it("does not look at the objects a reconciler renders, so a prune still in flight is not a leftover", async () => {
     seedApp();
-    const reg = new Registrations(new FakePlatformRepo(), twoStageClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistrationsAndRemoveProd(reg, false);
 
     const projects = new FakeMasterProjectWriter();
@@ -160,15 +157,15 @@ describe("offboard assert-no-orphans", () => {
     expect(projects.get("argocd", "acme"), "and the scan takes nothing away either").toBeDefined();
   });
 
-  it("passes when only the remainders another stage needs are standing, and says they are kept on purpose", async () => {
+  it("passes when only the other stage's own objects are standing, and says the shared ones are kept on purpose", async () => {
     seedApp();
-    const reg = new Registrations(new FakePlatformRepo(), twoStageClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistrationsAndRemoveProd(reg, true); // acme still stands at dev
 
-    // The exact object the previous test flagged as an orphan, standing for the exact same reason it
-    // was never deleted: there is ONE mail-ops grant per unit, and dev mails through it.
+    // dev's mail-ops grant, standing beside the space prod's used to fill: it is dev's own object,
+    // named for dev, and the scan of prod's remains never looks at it.
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "dev" })]);
 
     const logs: string[] = [];
     const step = scanStep(ports(reg, {
@@ -181,20 +178,20 @@ describe("offboard assert-no-orphans", () => {
     await expect(step.run(ctx(logs))).resolves.toBeUndefined();
 
     expect(buildRbac.keys()).toEqual([
-      "Role postfix/acme-smtp-ops",
-      "RoleBinding postfix/acme-smtp-ops",
+      "Role postfix/acme-dev-smtp-ops",
+      "RoleBinding postfix/acme-dev-smtp-ops",
     ]);
     const line = logs.find((l) => l.startsWith("nothing of acme (prod) is left standing"))!;
-    expect(line).toContain("kept on purpose because the unit still stands at dev: the postfix grant");
+    expect(line).toContain("kept on purpose because the unit still stands at dev: the repo PAT, the build webhook and the release kit");
     expect(line).toContain("the apps row is kept as soft state");
   });
 
   it("is what stops record-offboard: a leftover leaves the row unsettled and the step retryable", async () => {
     seedApp();
-    const reg = new Registrations(new FakePlatformRepo(), twoStageClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistrationsAndRemoveProd(reg, false);
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
 
     const world = {
       cluster: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 3 } }),
@@ -211,7 +208,7 @@ describe("offboard assert-no-orphans", () => {
     expect(db.db.select().from(apps).where(eq(apps.id, "app_1")).get()?.status).toBe("active");
 
     // Deleting the grant is the repair, and re-running the step is how the run continues.
-    await buildRbac.deleteBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    await buildRbac.deleteBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
     await expect(steps[scan]!.run(ctx([]))).resolves.toBeUndefined();
   });
 });

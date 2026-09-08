@@ -11,7 +11,7 @@ import { RelocationTargetDialog } from "./RelocationTargetDialog.tsx";
  *  page opens for Back up and Move…/Restore…. All plan-then-approve: confirming only PLANS a run. */
 
 /** Offboarded consumers (their row is kept): nothing to reconcile, ONE run kind left — Restore rebuilds the
- *  consumer from its Storage Box folder onto a chosen cluster of its stage. */
+ *  consumer from its Storage Box folder onto a chosen active cluster, at its own stage. */
 export function OffboardedConsumers(props: { rows: ConsumerView[]; runs: RunView[]; onRestore: (c: ConsumerView) => void }): ReactNode {
   if (props.rows.length === 0) return null;
   return (
@@ -62,7 +62,6 @@ export function ConsumerRelocationDialog(props: { c: ConsumerView; kind: "move" 
       title={kind === "move" ? `Move "${c.name}" to another cluster?` : `Restore "${c.name}" from its backup?`}
       kind={kind}
       confirmLabel={kind === "move" ? "Plan move" : "Plan restore"}
-      stage={c.stage}
       currentClusterId={c.clusterId}
       loadTargets={listOnboardTargets}
       onCancel={props.onCancel}

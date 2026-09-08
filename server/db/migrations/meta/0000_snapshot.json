@@ -289,10 +289,9 @@
         }
       },
       "indexes": {
-        "apps_cluster_name_stage_uq": {
-          "name": "apps_cluster_name_stage_uq",
+        "apps_name_stage_uq": {
+          "name": "apps_name_stage_uq",
           "columns": [
-            "cluster_id",
             "name",
             "stage"
           ],
@@ -825,11 +824,11 @@
         }
       },
       "indexes": {
-        "tenants_cluster_guid_uq": {
-          "name": "tenants_cluster_guid_uq",
+        "tenants_guid_stage_uq": {
+          "name": "tenants_guid_stage_uq",
           "columns": [
-            "cluster_id",
-            "guid"
+            "guid",
+            "stage"
           ],
           "isUnique": true
         }

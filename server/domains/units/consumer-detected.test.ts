@@ -3,7 +3,7 @@ import { seedQuota } from "../../../shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { Registrations, serializePointer, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations, serializePointer } from "./registrations.ts";
 import { scanClusterOrphanConsumers, scanDetectedConsumers } from "./consumer-detected.ts";
 import { FakeClusterKubeResolver, FakeClusterReader, FakeMasterArgoReader, FakeMasterProjectWriter } from "../../adapters/kube/testing/fake.ts";
 import type { SmokeResult } from "../../adapters/kube/port.ts";
@@ -28,9 +28,6 @@ beforeEach(() => {
 });
 afterEach(() => db.sqlite.close());
 
-// Every fixture registers at the prod stage, so a fixed resolver answers every cluster with "prod" —
-// the stage boundary Registrations.commitRegistration checks before it ever writes a stage file.
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** Commit `name`'s live STAGE registration, targeting cluster short name `cluster` at `stage`. */
 async function seedRegistration(
@@ -63,7 +60,7 @@ function seedApp(name: string, over: { status?: "active" | "suspended" | "offboa
 describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
   it("returns only the registrations inventory does not know, carrying ONLY the registration side", async () => {
     seedApp("acme"); // tracked — must not be detected
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     await seedRegistration(registrations, "acme", { cluster: "s1" });
     await seedRegistration(registrations, "ghost", { cluster: "s1" });
     expect(await scanDetectedConsumers({ db: db.db, registrations })).toEqual({
@@ -77,7 +74,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
   });
 
   it("carries the registration's optional fields verbatim when present (repoCredentialId/owner/onboardedAt)", async () => {
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     await seedRegistration(registrations, "ghost", { cluster: "s1", repoCredentialId: "cred_ptr", owner: "team-x", onboardedAt: "2026-01-01T00:00:00Z" });
     const scan = await scanDetectedConsumers({ db: db.db, registrations });
     expect(scan.detected[0]?.pointer).toEqual({
@@ -88,15 +85,15 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
 
   it("finds nothing when every deployed registration has a row, and nothing when nothing is deployed", async () => {
     seedApp("acme");
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     await seedRegistration(registrations, "acme", { cluster: "s1" });
     expect(await scanDetectedConsumers({ db: db.db, registrations })).toEqual({ detected: [], skipped: [] });
-    expect(await scanDetectedConsumers({ db: db.db, registrations: new Registrations(new FakePlatformRepo(), prodClusterStage) })).toEqual({ detected: [], skipped: [] });
+    expect(await scanDetectedConsumers({ db: db.db, registrations: new Registrations(new FakePlatformRepo()) })).toEqual({ detected: [], skipped: [] });
   });
 
   it("a SUSPENDED row still counts as known — a paused consumer is on the Consumers list, not invisible", async () => {
     seedApp("acme", { status: "suspended" });
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     await seedRegistration(registrations, "acme", { cluster: "s1" });
     expect((await scanDetectedConsumers({ db: db.db, registrations })).detected).toEqual([]);
   });
@@ -105,14 +102,14 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
     // APP_SETTLED_STATUS, the consumer twin of the tenant scan's TENANT_SETTLED_STATUS rule: the row
     // records a removal that already ran, so it cannot vouch for a registration standing NOW.
     seedApp("acme", { status: "offboarded" });
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     await seedRegistration(registrations, "acme", { cluster: "s1" });
     const found = await scanDetectedConsumers({ db: db.db, registrations });
     expect(found.detected.map((d) => d.name)).toEqual(["acme"]);
   });
 
   it("reports a registration with suspended:true carrying that field verbatim — the record of intent, never read as 'should be running'", async () => {
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     await seedRegistration(registrations, "ghost", { cluster: "s1", suspended: true });
     const found = await scanDetectedConsumers({ db: db.db, registrations });
     expect(found.detected).toHaveLength(1);
@@ -124,7 +121,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s9.example", status: "planned" }).run();
     // The registration targets the PLANNED cluster's short name only — an active-clusters scan must
     // never select it (cls_1 is the only active cluster, and it selects on ITS OWN short name "s1").
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     await seedRegistration(registrations, "ghost", { cluster: "s9" });
     expect(await scanDetectedConsumers({ db: db.db, registrations })).toEqual({ detected: [], skipped: [] });
   });
@@ -134,7 +131,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
     // ghost is TRACKED on cls_2 but its registration targets cls_1 ("s1") — that deployment is unknown.
     db.db.insert(apps).values({ id: "app_ghost2", clusterId: "cls_2", name: "ghost", stage: "prod", provenance: "manager", status: "active" }).run();
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     await seedRegistration(registrations, "ghost", { cluster: "s1" });
     const found = await scanDetectedConsumers({ db: db.db, registrations });
     expect(found.detected.map((d) => `${d.clusterId}/${d.name}`)).toEqual(["cls_1/ghost"]);
@@ -142,7 +139,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
 
   it("reports a registration it could NOT read instead of dropping it — an empty list must mean 'checked'", async () => {
     const repo = new FakePlatformRepo();
-    const registrations = new Registrations(repo, prodClusterStage);
+    const registrations = new Registrations(repo);
     await seedRegistration(registrations, "ghost", { cluster: "s1" });
     // A hand-written/drifted file no writer of ours would produce: flat YAML, but failing the schema.
     // Registrations live on `master` (REGISTRATION_BRANCH), never on a cluster's own install branch.
@@ -158,7 +155,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
     // An adopt (or purge) aimed at the body's name would act on THAT namespace/AppProject and leave
     // the actual file — at this path — untouched. The path is the identity; the body is refused.
     const repo = new FakePlatformRepo();
-    const registrations = new Registrations(repo, prodClusterStage);
+    const registrations = new Registrations(repo);
     repo.seed(repo.booksBranch, "registrations/ghost/prod.yaml", serializePointer(ConsumerRegistrationSchema, {
       name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false,
       chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
@@ -172,7 +169,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
 
   it("reports unparseable registration bytes with the reason, never a throw that wedges the scan", async () => {
     const repo = new FakePlatformRepo();
-    const registrations = new Registrations(repo, prodClusterStage);
+    const registrations = new Registrations(repo);
     await seedRegistration(registrations, "ghost", { cluster: "s1" });
     repo.seed(repo.booksBranch, "registrations/junk/prod.yaml", "no colon on this line\n");
     const found = await scanDetectedConsumers({ db: db.db, registrations });
@@ -212,11 +209,11 @@ describe("scanClusterOrphanConsumers (the cluster-vs-both-books diff)", () => {
     // THE founding case: the registration was removed, the workloads were never pruned. The
     // registration diff starts from the registrations, so it reports nothing and is not wrong; this
     // one starts from the cluster and finds the namespace that is still serving.
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
-    const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding(["ghost"], { ghost: running(2) }) });
+    const registrations = new Registrations(new FakePlatformRepo());
+    const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding(["ghost-prod"], { "ghost-prod": running(2) }) });
     expect(found.unscanned).toEqual([]);
     expect(found.clusterOrphans).toEqual([
-      { name: "ghost", stage: "prod", clusterId: "cls_1", domain: "s1.example", running: 2, workloads: 2, externalSecretsReady: true },
+      { name: "ghost", namespace: "ghost-prod", stage: "prod", clusterId: "cls_1", domain: "s1.example", running: 2, workloads: 2, externalSecretsReady: true },
     ]);
     // And the registration diff, over the same world, is silent — which is the whole point.
     expect((await scanDetectedConsumers({ db: db.db, registrations })).detected).toEqual([]);
@@ -227,10 +224,10 @@ describe("scanClusterOrphanConsumers (the cluster-vs-both-books diff)", () => {
     // reported by scanDetectedConsumers with a pointer and an adopt button. Reporting either here
     // would put the same consumer on screen twice under two different remedies.
     seedApp("tracked");
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     await seedRegistration(registrations, "registered", { cluster: "s1" });
     const found = await scanClusterOrphanConsumers({
-      db: db.db, registrations, resolver: resolverHolding(["tracked", "registered", "ghost"]),
+      db: db.db, registrations, resolver: resolverHolding(["tracked-prod", "registered-prod", "ghost-prod"]),
     });
     expect(found.clusterOrphans.map((o) => o.name)).toEqual(["ghost"]);
   });
@@ -240,8 +237,8 @@ describe("scanClusterOrphanConsumers (the cluster-vs-both-books diff)", () => {
     // load-bearing one: an offboard that recorded the row but never reaped the namespace is exactly
     // the leftover this scan exists to surface.
     seedApp("acme", { status: "offboarded" });
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
-    const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding(["acme"], { acme: running(0) }) });
+    const registrations = new Registrations(new FakePlatformRepo());
+    const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding(["acme-prod"], { "acme-prod": running(0) }) });
     expect(found.clusterOrphans).toHaveLength(1);
     expect(found.clusterOrphans[0]).toMatchObject({ name: "acme", running: 0, workloads: 0 });
   });
@@ -250,30 +247,30 @@ describe("scanClusterOrphanConsumers (the cluster-vs-both-books diff)", () => {
     // A count of workloads cannot tell the two apart: a suspended unit renders 0 of 0 and reads
     // "available" too. The ready count is what decides whether somebody's customer is still being
     // served by something the platform does not know it runs.
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     const found = await scanClusterOrphanConsumers({
       db: db.db,
       registrations,
-      resolver: resolverHolding(["serving", "empty"], {
-        serving: running(3),
-        empty: { namespaceExists: true, workloads: [], externalSecretsReady: false },
+      resolver: resolverHolding(["serving-prod", "empty-prod"], {
+        "serving-prod": running(3),
+        "empty-prod": { namespaceExists: true, workloads: [], externalSecretsReady: false },
       }),
     });
     expect(found.clusterOrphans).toEqual([
-      { name: "serving", stage: "prod", clusterId: "cls_1", domain: "s1.example", running: 3, workloads: 3, externalSecretsReady: true },
-      { name: "empty", stage: "prod", clusterId: "cls_1", domain: "s1.example", running: 0, workloads: 0, externalSecretsReady: false },
+      { name: "serving", namespace: "serving-prod", stage: "prod", clusterId: "cls_1", domain: "s1.example", running: 3, workloads: 3, externalSecretsReady: true },
+      { name: "empty", namespace: "empty-prod", stage: "prod", clusterId: "cls_1", domain: "s1.example", running: 0, workloads: 0, externalSecretsReady: false },
     ]);
   });
 
   it("a workload with replicas but NONE ready is not counted as running", async () => {
     // ImagePullBackOff / CrashLoopBackOff: the namespace holds a workload, nothing serves. Counting
     // it as running would tell an operator a leak is live when it is not.
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     const found = await scanClusterOrphanConsumers({
       db: db.db,
       registrations,
-      resolver: resolverHolding(["stuck"], {
-        stuck: { namespaceExists: true, workloads: [{ kind: "Deployment", name: "api", available: false, desired: 2, ready: 0, message: "ImagePullBackOff" }], externalSecretsReady: true },
+      resolver: resolverHolding(["stuck-prod"], {
+        "stuck-prod": { namespaceExists: true, workloads: [{ kind: "Deployment", name: "api", available: false, desired: 2, ready: 0, message: "ImagePullBackOff" }], externalSecretsReady: true },
       }),
     });
     expect(found.clusterOrphans[0]).toMatchObject({ name: "stuck", running: 0, workloads: 1 });
@@ -284,8 +281,8 @@ describe("scanClusterOrphanConsumers (the cluster-vs-both-books diff)", () => {
     // slave gets named — while every other cluster still answers.
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.6", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
-    const resolver = resolverHolding(["ghost"], { ghost: running(1) });
+    const registrations = new Registrations(new FakePlatformRepo());
+    const resolver = resolverHolding(["ghost-prod"], { "ghost-prod": running(1) });
     resolver.set("cls_2", {
       clusterReader: new FakeClusterReader({ throwOnListNamespaces: new Error("dial tcp 100.64.0.11:16443: connect: no route to host") }),
       argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "s2",
@@ -301,7 +298,7 @@ describe("scanClusterOrphanConsumers (the cluster-vs-both-books diff)", () => {
     // Without the registration names there is nothing to subtract, so every healthy consumer would be
     // listed as untracked — the loudest possible false positive. The cluster goes to unscanned.
     const registrations = { listConsumerRegistrations: () => Promise.reject(new Error("install branch unreachable")) } as unknown as Registrations;
-    const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding(["acme", "ghost"]) });
+    const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding(["acme-prod", "ghost-prod"]) });
     expect(found.clusterOrphans).toEqual([]);
     expect(found.unscanned[0]).toMatchObject({ clusterId: "cls_1" });
     expect(found.unscanned[0]!.reason).toContain("install branch unreachable");
@@ -311,16 +308,35 @@ describe("scanClusterOrphanConsumers (the cluster-vs-both-books diff)", () => {
     // The body was unreadable, the directory name was not — and that name IS the identity. Without
     // this, a namespace whose registration is merely broken reads as having none at all.
     const repo = new FakePlatformRepo();
-    const registrations = new Registrations(repo, prodClusterStage);
+    const registrations = new Registrations(repo);
     repo.seed(repo.booksBranch, "registrations/junk/prod.yaml", "no colon on this line\n");
-    const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding(["junk", "ghost"]) });
+    const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding(["junk-prod", "ghost-prod"]) });
     expect(found.clusterOrphans.map((o) => o.name)).toEqual(["ghost"]);
+  });
+
+  it("lists a labelled namespace whose name carries NO stage under its full name, with no stage to aim a purge at", async () => {
+    // Nothing this platform composes: every consumer namespace is <name>-<stage>. The namespace is
+    // still shown — it carries the consumer label and may be serving — but a purge is keyed on
+    // (name, stage), so the row names the namespace and offers no stage.
+    const registrations = new Registrations(new FakePlatformRepo());
+    const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding(["legacy"], { legacy: running(1) }) });
+    expect(found.clusterOrphans).toEqual([
+      { name: "legacy", namespace: "legacy", stage: null, clusterId: "cls_1", domain: "s1.example", running: 1, workloads: 1, externalSecretsReady: true },
+    ]);
+  });
+
+  it("keeps one name at two stages on one cluster apart — an inventory row at prod does not vouch for the dev namespace", async () => {
+    seedApp("acme");
+    const registrations = new Registrations(new FakePlatformRepo());
+    const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding(["acme-prod", "acme-dev"]) });
+    expect(found.clusterOrphans.map((o) => o.namespace)).toEqual(["acme-dev"]);
+    expect(found.clusterOrphans[0]).toMatchObject({ name: "acme", stage: "dev" });
   });
 
   it("scans ONLY active clusters, and answers empty for a cluster holding no consumer namespace", async () => {
     db.db.insert(servers).values({ id: "srv_3", name: "s3", host: "1.2.3.7", sshUser: "root", role: "slave", status: "bare" }).run();
     db.db.insert(clusters).values({ id: "cls_3", serverId: "srv_3", stage: "prod", domain: "s3.example", status: "planned" }).run();
-    const registrations = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const registrations = new Registrations(new FakePlatformRepo());
     const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding([]) });
     expect(found).toEqual({ clusterOrphans: [], unscanned: [] });
   });

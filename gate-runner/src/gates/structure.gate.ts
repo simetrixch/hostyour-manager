@@ -6,7 +6,9 @@
 //
 // It fails CLOSED on the first structural violation, in this order:
 //   1. deploy/platform.yaml exists, parses as YAML, and schema-validates as a ConsumerManifest.
-//   2. identity law: manifest.name == the onboarding target.
+//   2. identity law: manifest.name == the onboarding target == basename(repoURL). The namespace is
+//      `<unit>-<stage>`, held by the Manager's resolveTarget and the platform's admission policy —
+//      never here, because this gate runs before the render and no namespace is on the table yet.
 //   3. the run's form and the manifest agree about the chart: a manifest that declares one must have
 //      been dispatched with a chart path. This is what keeps a null chartPath from being trusted —
 //      the build-only form is the ABSENCE of a chart path, so without this rule a path lost in the
@@ -39,6 +41,9 @@ export interface StructureInput {
   chartPath: string | null;
   targetName: string;
   stage: string;
+  /** The repository the run cloned — its basename (minus `.git`) is the unit's name by the identity
+   *  law, because the build webhook routes a push to a pipeline by exactly that equality. */
+  repoURL: string;
 }
 
 export interface StructureOutcome {
@@ -119,8 +124,16 @@ function issueSummary(
 }
 
 const PASS_EXPECTED =
-  `${MANIFEST_PATH} is a schema-valid ConsumerManifest whose identity, chart, per-env values files, ` +
-  `and onboarding stage all satisfy the structure contract.`;
+  `${MANIFEST_PATH} is a schema-valid ConsumerManifest whose identity (manifest name == chart name == repo name == unit; ` +
+  `the namespace is <unit>-<stage>), chart, per-env values files, and onboarding stage all satisfy the structure contract.`;
+
+/** The repository's basename, minus a trailing `.git` — what the registration schema and the build
+ *  webhook derive the unit from. Coerced defensively: a non-string repoURL is hostile input, and a
+ *  gate that crashes on it reports nothing. */
+function repoBasename(repoURL: unknown): string {
+  const trimmed = (typeof repoURL === "string" ? repoURL : String(repoURL)).replace(/\/+$/, "");
+  return trimmed.slice(trimmed.lastIndexOf("/") + 1).replace(/\.git$/, "");
+}
 
 function reject(expected: string, found: string, reason: string): StructureOutcome {
   return {
@@ -167,13 +180,23 @@ export function checkStructure(input: StructureInput): StructureOutcome {
   }
   const manifest = validated.data;
 
-  // ── 2. identity law: manifest.name == target ──────────────────────────────────────────────────
+  // ── 2. identity law: manifest.name == target == basename(repoURL) ─────────────────────────────
   if (manifest.name !== targetName) {
     return reject(
       `The manifest name must equal the onboarding target name (identity law).`,
       `${MANIFEST_PATH} declares name "${cap(manifest.name)}" but the onboarding target is "${cap(targetName)}".`,
-      `the identity law requires name == target == namespace == Chart.name; a mismatch would deploy ` +
-        `the consumer under a name the platform did not authorize.`,
+      `the identity law requires manifest name == chart name == repo name == unit, with the namespace ` +
+        `<unit>-<stage>; a mismatch would deploy the consumer under a name the platform did not authorize.`,
+    );
+  }
+  const repoName = repoBasename(input.repoURL);
+  if (repoName !== manifest.name) {
+    return reject(
+      `The repository's basename must equal the manifest name (identity law).`,
+      `${MANIFEST_PATH} declares name "${cap(manifest.name)}" but the repository is "${cap(repoName)}" (${cap(input.repoURL)}).`,
+      `the identity law requires manifest name == chart name == repo name == unit: the build webhook resolves the ` +
+        `unit from the pushed repository URL through exactly this equality, so a divergence would route this ` +
+        `repository's pushes at another unit's pipeline. A unit is named by its repo; rename the repo or the manifest.`,
     );
   }
 
@@ -268,7 +291,8 @@ export function checkStructure(input: StructureInput): StructureOutcome {
       expected: PASS_EXPECTED,
       found:
         `${MANIFEST_PATH} is a valid ConsumerManifest (name "${manifest.name}", envs ` +
-        `[${manifest.envs.join(", ")}]); the identity law holds,${chartClause} and the onboarding ` +
+        `[${manifest.envs.join(", ")}]); the identity law holds — manifest name == chart name == repo name == "${manifest.name}", ` +
+        `and the namespace ${manifest.name}-${cap(stage)} is the Manager's and the admission policy's to hold —${chartClause} and the onboarding ` +
         `stage "${stage}" is a declared env.`,
     }),
     manifest,

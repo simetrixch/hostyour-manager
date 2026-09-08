@@ -23,9 +23,11 @@
 // is the Manager's own DB (the frozen runs.plan_json). Keeping this function pure — no crypto,
 // no IO — is what lets it live in the domain and satisfy the boundary law.
 import { hardGatesPass, type GateReport, type GateResult } from "../../../../shared/gates.ts";
-import type { Stage } from "../../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../../shared/enums.ts";
+import { consumerNamespace } from "../../../../shared/consumer.ts";
 import type { ChartPinMapping } from "../builds.ts";
 import { BUILD_NAMESPACE_SUFFIX } from "../build-rbac.ts";
+import { consumerUnitHost } from "../unit-dns.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
 import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, type UnitComposition, type UnitQuota, type UnitSize } from "../../../../shared/unit-size.ts";
 
@@ -48,11 +50,13 @@ export interface ForeignFqdn {
 const TEXT_CAP = 600;
 const cap = (text: string): string => (text.length > TEXT_CAP ? `${text.slice(0, TEXT_CAP)}…` : text);
 
-/** The namespaces the PLATFORM itself stands in on a cluster, so no unit may be named after one —
- *  the unit's name IS its namespace (the identity law), and the consumers ApplicationSet pins the
- *  generated Application's destination to that namespace with CreateNamespace=true, so a unit named
- *  `mongodb` would have its chart synced INTO the platform's mongodb namespace, its pods beside the
- *  database's root-credential Secrets (a same-namespace mount needs no RBAC).
+/** The namespaces the PLATFORM itself stands in on a cluster, so no unit's namespace may be one —
+ *  a unit's namespace is `<name>-<stage>` (the identity law), and the consumers ApplicationSet pins
+ *  the generated Application's destination to that namespace with CreateNamespace=true, so a unit
+ *  whose `<name>-<stage>` were `mongodb` would have its chart synced INTO the platform's mongodb
+ *  namespace, its pods beside the database's root-credential Secrets (a same-namespace mount needs
+ *  no RBAC). The name itself is refused too: the unit's build namespace is `<name>-build`, and
+ *  a name that is a platform namespace reads as that namespace on every screen.
  *
  *  Enumerated from the code that creates them, in hostyour-cloud:
  *    - argocd/<stage>/apps/applicationset.yaml — the stage appset's destination namespaces
@@ -78,33 +82,39 @@ export const PLATFORM_NAMESPACES: readonly string[] = [
 
 /** G23 unit name (HARD). What a unit may be NAMED, refused here — at admission, before anything is
  *  written — because the platform composes further identities from the name: the namespace and the
- *  AppProject are the name itself, the build namespace is `<name>-build`, the public host is
- *  `<name>.<unitApex>`. A name inside a space the platform already owns therefore hands the unit an
- *  identity with another owner, and every writer downstream would obey the pin. Five reserved
+ *  AppProject are `<name>-<stage>`, the build namespace is `<name>-build`, the public host is
+ *  `<name>-<stage>.<unitApex>`. A name inside a space the platform already owns therefore hands the
+ *  unit an identity with another owner, and every writer downstream would obey the pin. Six reserved
  *  spaces, each with its owner:
- *    - PLATFORM_NAMESPACES (above) — the unit's chart would sync into a platform namespace;
+ *    - PLATFORM_NAMESPACES (above) — the unit's chart would sync into a platform namespace, held
+ *      against the name and against `<name>-<stage>`;
  *    - the `kube-` prefix, which Kubernetes reserves for its own namespaces;
  *    - the derived build-namespace space: a name ending in the build suffix IS `<unit>-build` for
  *      some unit — pinning this unit's AppProject into that build namespace, where the shared
  *      registrations push credential and that unit's repo PAT are materialized as Secrets. Refused for
  *      units that do not exist yet as well: onboarding `acme` later would derive `acme-build`, the
  *      namespace such a consumer already occupies.
+ *    - the derived stage-namespace space: a name ending in `-<s>` for any stage `s` of STAGE IS
+ *      `<unit>-<s>` for some unit — the namespace, the Application and the host of that unit at
+ *      that stage. `acme-prod` at test would stand as `acme-prod-test` beside `acme` at prod as
+ *      `acme-prod`, and its Application name would be another unit's namespace.
  *    - RESERVED_PROJECT_NAMES — the per-unit AppProject is named by the unit, and these names are
  *      the platform's shared ArgoCD projects; the writer refuses them mid-run (fail-closed), this
  *      clause moves the answer to admission;
  *    - the subdomains the TENANTS stand on. A tenant's IdP scopes every session cookie to
- *      `<subdomain>.<unitApex>` — the same string a consumer of that name would serve — so a
- *      consumer here is handed the tenant's users' sessions by their own browsers. The composition
- *      and the cookie chain are spelled out in unit-dns.ts; create-tenant holds the mirror of this
- *      clause (ensure-subdomain-free in tenant-replace.ts).
+ *      `<subdomain>.<unitApex>`, and a consumer of that name serves a label under that very
+ *      parent, so a consumer here is handed the tenant's users' sessions by their own browsers. The
+ *      composition and the cookie chain are spelled out in unit-dns.ts; create-tenant holds the
+ *      mirror of this clause (ensure-subdomain-free in tenant-replace.ts).
  *
- *  `tenantSubdomains` is every subdomain a tenant stands at, over every stage: the host carries no
- *  stage, and two clusters may share one apex, so a stage-scoped set would miss the collision the
- *  browser does not miss. */
-export function gateUnitName(input: { unitName: string; tenantSubdomains: readonly string[] }): GateResult {
+ *  `tenantSubdomains` is every subdomain a tenant stands at, over every stage: the cookie Domain
+ *  carries no stage, and two clusters may share one apex, so a stage-scoped set would miss the
+ *  collision the browser does not miss. */
+export function gateUnitName(input: { unitName: string; stage: Stage; tenantSubdomains: readonly string[] }): GateResult {
   const name = input.unitName;
+  const namespace = consumerNamespace(name, input.stage);
   const collisions: string[] = [];
-  if (PLATFORM_NAMESPACES.includes(name)) {
+  if (PLATFORM_NAMESPACES.includes(name) || PLATFORM_NAMESPACES.includes(namespace)) {
     collisions.push(`"${name}" is a platform namespace — the generated Application would sync the unit's chart into it, beside the platform's own Secrets`);
   }
   if (name.startsWith("kube-")) {
@@ -116,12 +126,19 @@ export function gateUnitName(input: { unitName: string; tenantSubdomains: readon
       `"${name}" is the derived build namespace of a unit named "${owner}" — every unit's release pipeline, the shared registrations push credential and its repo PAT live in <unit>${BUILD_NAMESPACE_SUFFIX}, whether that unit is onboarded yet or not`,
     );
   }
+  const stageSuffix = STAGE.find((s) => name.endsWith(`-${s}`));
+  if (stageSuffix !== undefined) {
+    const owner = name.slice(0, -(stageSuffix.length + 1));
+    collisions.push(
+      `"${name}" is the derived namespace of a unit named "${owner}" at ${stageSuffix} — every unit's namespace, Application and host are <unit>-<stage>, whether that unit is onboarded yet or not`,
+    );
+  }
   if (RESERVED_PROJECT_NAMES.includes(name)) {
     collisions.push(`"${name}" is a shared ArgoCD project name — the per-unit AppProject is named by the unit and may not shadow a platform project`);
   }
   if (input.tenantSubdomains.includes(name)) {
     collisions.push(
-      `"${name}" is the subdomain a tenant stands on — its example-auth scopes every session cookie to <subdomain>.<unitApex>, the exact host this unit would serve, so every browser holding that tenant's session would send it here`,
+      `"${name}" is the subdomain a tenant stands on — its example-auth scopes every session cookie to <subdomain>.<unitApex>, the parent of the host ${namespace}.<unitApex> this unit would serve, so every browser holding that tenant's session would send it here`,
     );
   }
   const ok = collisions.length === 0;
@@ -130,15 +147,15 @@ export function gateUnitName(input: { unitName: string; tenantSubdomains: readon
     title: "unit name",
     severity: "hard",
     status: ok ? "pass" : "fail",
-    expected: `the name "${name}" lies in no space the platform composes identities from: not a platform namespace, not under Kubernetes' kube- prefix, not in the derived build-namespace space <unit>${BUILD_NAMESPACE_SUFFIX}, not a shared ArgoCD project name, not a subdomain a tenant stands on`,
+    expected: `the name "${name}" lies in no space the platform composes identities from: not a platform namespace (as "${name}" or as "${namespace}"), not under Kubernetes' kube- prefix, not in the derived build-namespace space <unit>${BUILD_NAMESPACE_SUFFIX}, not in the derived stage-namespace space <unit>-<stage>, not a shared ArgoCD project name, not a subdomain a tenant stands on`,
     found: ok
-      ? `"${name}" collides with no reserved name space — the namespace, the AppProject, the build namespace it derives and the public host are free to be this unit's (checked against ${input.tenantSubdomains.length} tenant subdomain(s))`
+      ? `"${name}" collides with no reserved name space — the namespace and Application ${namespace}, the AppProject, the build namespace ${name}${BUILD_NAMESPACE_SUFFIX} and the public host are free to be this unit's (checked against ${input.tenantSubdomains.length} tenant subdomain(s))`
       : cap(collisions.join("; ")),
     reason: ok
       ? null
-      : "a unit is deployed into the namespace named by its name, fenced by the AppProject named by its name and served at the host composed from its name, so a reserved name hands it an identity another owner holds; a unit is named by its repo, so rename the repo and onboard again",
+      : "a unit is deployed into the namespace <unit>-<stage>, fenced by the AppProject of that name and served at the host composed from it, so a reserved name hands it an identity another owner holds; a unit is named by its repo, so rename the repo and onboard again",
     detail: ok ? "unit name is free" : "unit name is reserved",
-    evidence: collisions.slice(0, 5).map((c) => ({ source: "manager" as const, name, value: c.slice(0, 256) })),
+    evidence: collisions.slice(0, 6).map((c) => ({ source: "manager" as const, name, value: c.slice(0, 256) })),
   };
 }
 
@@ -254,8 +271,8 @@ export function gateBuildDeclaration(input: {
  *      clusters the one DNS record can point at only one of them, so a second attestation would
  *      raffle the first grant's traffic;
  *    - anything under (or equal to) the target cluster's own unitApex — those names are the
- *      platform's composition `<unit>.<unitApex>`, so a declared one could sit on another unit's
- *      address, or on the apex itself, without that unit ever attesting anything;
+ *      platform's composition `<unit>-<stage>.<unitApex>`, so a declared one could sit on another
+ *      unit's address, or on the apex itself, without that unit ever attesting anything;
  *    - anything under (or equal to) the target cluster's own FQDN — the platform's infrastructure
  *      hostnames (vault.<fqdn>, argo.<fqdn>, build.<fqdn>, zot.<fqdn>) are composed there and have
  *      no registration, so the foreign-fqdn set cannot see them; where the unitApex is not a parent
@@ -269,12 +286,14 @@ export function gateBuildDeclaration(input: {
  *  object only when the name does. */
 export function gateFqdnGrant(input: {
   unitName: string;
+  stage: Stage;
   fqdn: string | null;
   unitApex: string | null;
   clusterDomain: string | null;
   foreignFqdns: readonly ForeignFqdn[];
 }): GateResult {
-  const expected = `the fqdn "${input.unitName}" declares (if it declares one) is served by nothing on this platform yet — no stage registration attests it (another unit's or this unit's other stage), and it lies under neither the target cluster's unitApex nor the cluster's own FQDN`;
+  const platformHost = input.unitApex !== null ? consumerUnitHost(input.unitName, input.stage, input.unitApex) : `${consumerNamespace(input.unitName, input.stage)}.<unitApex>`;
+  const expected = `the fqdn "${input.unitName}" declares (if it declares one) is served by nothing on this platform yet — no stage registration attests it (another unit's or this unit's other stage), and it lies under neither the target cluster's unitApex nor the cluster's own FQDN; the unit's platform host ${platformHost} is granted either way`;
   if (input.fqdn === null) {
     return {
       id: "G19",
@@ -282,14 +301,14 @@ export function gateFqdnGrant(input: {
       severity: "hard",
       status: "pass",
       expected,
-      found: "no fqdn declared — the unit serves only its platform address <name>.<unitApex>",
+      found: `no fqdn declared — the unit serves only its platform address ${platformHost}`,
       reason: null,
       detail: "no fqdn declared",
     };
   }
   const collisions: string[] = [];
   if (input.unitApex !== null && (input.fqdn === input.unitApex || input.fqdn.endsWith(`.${input.unitApex}`))) {
-    collisions.push(`"${input.fqdn}" lies under the cluster's unitApex "${input.unitApex}" — every name there is the platform's own composition <unit>.${input.unitApex}`);
+    collisions.push(`"${input.fqdn}" lies under the cluster's unitApex "${input.unitApex}" — every name there is the platform's own composition <unit>-<stage>.${input.unitApex}`);
   }
   if (input.clusterDomain !== null && (input.fqdn === input.clusterDomain || input.fqdn.endsWith(`.${input.clusterDomain}`))) {
     collisions.push(`"${input.fqdn}" lies under the cluster's own FQDN "${input.clusterDomain}" — the platform's infrastructure hostnames (vault., argo., build., zot.) are composed there`);
@@ -311,7 +330,7 @@ export function gateFqdnGrant(input: {
     status: ok ? "pass" : "fail",
     expected,
     found: ok
-      ? `fqdn "${input.fqdn}" declared — checked against ${input.foreignFqdns.length} attested fqdn(s), the cluster's unitApex and the cluster's own FQDN, no collision`
+      ? `fqdn "${input.fqdn}" declared beside the platform host ${platformHost} — checked against ${input.foreignFqdns.length} attested fqdn(s), the cluster's unitApex and the cluster's own FQDN, no collision`
       : cap(collisions.join("; ")),
     reason: ok ? null : "an FQDN the platform already serves cannot be attested twice — the ingress controller would resolve the conflict by arbitrary order; re-run the onboard after the name is free or the manifest names another",
     detail: ok ? `fqdn "${input.fqdn}" is free to attest` : "fqdn already served by this platform",

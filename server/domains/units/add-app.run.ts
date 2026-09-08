@@ -153,7 +153,7 @@ async function assertAddAppAbortable(ports: TenantOnboardPorts, p: AddAppParams,
 }
 
 function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
-  const ns = memberNamespace(p.guid, p.app); // the NEW member's own namespace — no sibling is touched
+  const ns = memberNamespace(p.guid, p.app, p.stage); // the NEW member's own namespace — no sibling is touched
   return [
     {
       name: "attest-target",
@@ -162,8 +162,8 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
         // Fail closed on a drifted/absent deploy-state, exactly like create-tenant (shared helper).
         // Read it on the TARGET cluster's own reader (a slave over its bearer).
         const { clusterReader } = await ports.resolver.resolve(p.clusterId);
-        const state = assertDeployState(await clusterReader.readDeployState(), p.domain, p.stage, "tenant");
-        ctx.log("meta", `target ${p.domain} (${p.stage}) attested for ${p.guid} — deploy-state generation ${state.generation}`);
+        const state = assertDeployState(await clusterReader.readDeployState(), p.domain, "tenant");
+        ctx.log("meta", `target ${p.domain} attested for ${p.guid} at ${p.stage} — deploy-state generation ${state.generation}`);
       },
     },
     // The image gate, the SAME step create-tenant runs: the new app's pinned images must EXIST in
@@ -185,6 +185,7 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
         const project = renderTenantAppProject({
           guid: p.guid,
           member: p.app,
+          stage: p.stage,
           argoNamespace,
           catalogRepoUrl: p.catalogRepoUrl,
           platformRepoURL: ports.platformRepoURL,

@@ -133,7 +133,7 @@ export function TenantDetail() {
       <header className="page__head">
         <div>
           {/* The tenant's ONE identity, printed BARE: the guid is the BRACKET every member is named from
-              (namespace and AppProject <guid>-<member>, server tenant-fanout.ts `memberNamespace`) and the
+              (namespace and AppProject <guid>-<member>-<stage>, server tenant-fanout.ts `memberNamespace`) and the
               last segment of the Vault path <stage>/tenants/<guid> — there is no `t-` prefix anywhere. This
               is the most prominent identifier on the page, so a decorated one is the string an operator
               copies into `kubectl get ns` or a Vault path and finds nothing under;
@@ -446,7 +446,6 @@ export function TenantDetail() {
           title={relocT.kind === "move" ? `Move tenant "${relocT.t.subdomain}" to another cluster?` : `Restore tenant "${relocT.t.subdomain}" from its backup?`}
           kind={relocT.kind}
           confirmLabel={relocT.kind === "move" ? "Plan move" : "Plan restore"}
-          stage={relocT.t.stage}
           currentClusterId={relocT.t.clusterId}
           loadTargets={listTenantTargets}
           onCancel={() => setRelocT(null)}

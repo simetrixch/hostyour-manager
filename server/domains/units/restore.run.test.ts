@@ -37,7 +37,7 @@ describe("tenant-restore", () => {
     const ports = tenantPorts(f);
     const dumped = serializePointer(TenantRegistrationSchema, tenantEntry());
     scriptDumpedRegistration(f.target.reader, GUID, dumped);
-    f.target.reader.setSecretValue(`${GUID}-auth`, "hostyour-app-secrets", "AUTH_JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----");
+    f.target.reader.setSecretValue(`${GUID}-auth-prod`, "hostyour-app-secrets", "AUTH_JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----");
 
     const def = makeTenantRestoreDef(ports);
     const plan = await def.plan({ tenantId: "tnt_1", targetClusterId: TARGET.clusterId }, { db: db.db });
@@ -56,7 +56,7 @@ describe("tenant-restore", () => {
     expect(restored?.entry.apps.map((a) => a.name)).toEqual(["web"]);
     // Every member's isolation was provisioned on the TARGET (trio + web = 4 AppProjects) + the CR.
     for (const member of ["auth", "jobs", "report", "web"]) {
-      expect(f.target.projects.get(TARGET.cluster, `${GUID}-${member}`)).toBeDefined();
+      expect(f.target.projects.get(TARGET.cluster, `${GUID}-${member}-prod`)).toBeDefined();
     }
     // The stores were replayed on the target, and completeness ran before DNS.
     const names = jobNames(f.target);
@@ -129,7 +129,7 @@ describe("restore (consumer)", () => {
     // what "medium" means there today.
     expect(restored?.entry.quota).toEqual(seedQuota("medium"));
     expect(jobNames(f.target)).toContain(`reloc-restore-mongo-${CONSUMER}`);
-    expect(f.dns.record(`${CONSUMER}.${TARGET.domain}`, "A")).toBe(TARGET.ip);
+    expect(f.dns.record(`${CONSUMER}-prod.${TARGET.domain}`, "A")).toBe(TARGET.ip);
     const row = db.db.select().from(apps).where(eq(apps.id, "app_1")).get();
     expect(row?.status).toBe("active");
     expect(row?.clusterId).toBe(TARGET.clusterId);

@@ -35,7 +35,7 @@ const BASE = {
 function params(over: Partial<DeployableOnboardParams> = {}): OnboardParams {
   return OnboardParams.parse({
     ...BASE, form: "deployable", stage: "prod", domain: "s1.example",
-    clusterId: "cls_1", cluster: "s1", namespace: "acme", unitApex: "example.com",
+    clusterId: "cls_1", cluster: "s1", namespace: "acme-prod", unitApex: "example.com",
     chartPath: "deploy/chart", argoAppName: "acme-prod", report: passReport(),
     ...over,
   });
@@ -166,10 +166,10 @@ describe("onboard run definition", () => {
 
     // provision-dns created the unit's ONE record, pointing at the target cluster's own address
     const dns = prt.dns as FakeDnsProvider;
-    expect(dns.record("acme.example.com", "A")).toBe("203.0.113.10");
+    expect(dns.record("acme-prod.example.com", "A")).toBe("203.0.113.10");
 
     // provision-repo-credential put the ArgoCD repository Secret beside the Applications
-    const cred = (prt.repoCredential as FakeRepoCredentialWriter).get("argocd", "repo-acme");
+    const cred = (prt.repoCredential as FakeRepoCredentialWriter).get("argocd", "repo-acme-prod");
     expect(cred?.stringData.url).toBe("https://github.com/x/acme.git");
     expect(cred?.stringData.username).toBe("hostyour-cloud");
 
@@ -237,7 +237,7 @@ describe("onboard run definition", () => {
     const projects = new FakeMasterProjectWriter();
     const buildRbac = new FakeBuildRbacWriter();
     await runAll(params(), ports({ projects, buildRbac }), []);
-    expect(projects.get("argocd", "acme"), "the AppProject is clusters/units/reconciler's to render").toBeUndefined();
+    expect(projects.get("argocd", "acme-prod"), "the AppProject is clusters/units/reconciler's to render").toBeUndefined();
     expect(buildRbac.keys()).toEqual([]);
   });
 
@@ -248,10 +248,10 @@ describe("onboard run definition", () => {
     const buildRbac = new FakeBuildRbacWriter();
     await runAll(smtpOpsParams(), { ...ports({ buildRbac }), runner: smtpOpsRunner() }, []);
     expect(buildRbac.keys()).toEqual([
-      "Role postfix/acme-smtp-ops",
-      "RoleBinding postfix/acme-smtp-ops",
+      "Role postfix/acme-prod-smtp-ops",
+      "RoleBinding postfix/acme-prod-smtp-ops",
     ]);
-    const grant = buildRbac.get("Role", "postfix", "acme-smtp-ops") as RoleManifest;
+    const grant = buildRbac.get("Role", "postfix", "acme-prod-smtp-ops") as RoleManifest;
     expect(grant.rules.map((r) => r.resources[0])).toEqual(["pods", "pods/log", "pods/exec"]);
   });
 
@@ -307,7 +307,7 @@ describe("onboard run definition", () => {
     // reads the per-slave ArgoCD namespace, the smoke the slave's own cluster. Nothing writes a
     // project there any more: the AppProject is rendered into that same namespace by the reconciler
     // instance that manages it.
-    expect(slaveProjects.get("s2", "acme")).toBeUndefined();
+    expect(slaveProjects.get("s2", "acme-prod")).toBeUndefined();
     expect(resolver.resolved.every((c) => c === "cls_s2")).toBe(true);
   });
 
@@ -372,7 +372,7 @@ describe("onboard run definition", () => {
     ] };
     const prt = ports({ runner: new FakeGateRunner({ report: passReport(manifest) }) });
     const res = await makeOnboardDef(prt).planStream!(
-      { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart", repoCredentialId: "cred_pat" },
+      { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart", repoCredentialId: "cred_pat" },
       { db: db.db, log: () => undefined, signal: new AbortController().signal },
     );
     expect(res.outcome).toBe("planned");
@@ -390,7 +390,7 @@ describe("onboard run definition", () => {
     const streamCtx = { db: db.db, log: () => undefined, signal: new AbortController().signal };
     const buildOnlyPrt = ports({ runner: new FakeGateRunner({ report: passReport(BUILD_ONLY_MANIFEST) }) });
     const r1 = await makeOnboardDef(buildOnlyPrt).planStream!(
-      { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart", repoCredentialId: "cred_pat" },
+      { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart", repoCredentialId: "cred_pat" },
       streamCtx,
     );
     expect(r1).toMatchObject({ outcome: "rejected", summary: expect.stringContaining("declares NO chart") });
@@ -477,7 +477,7 @@ describe("the first master's ungated onboarding, tried from the ordinary route",
   // it would skip has nothing anywhere to read, and the answer is a deployment variable.
   const attempts: [string, boolean, Record<string, unknown>, RegExp][] = [
     ["a customer's build-only consumer on a from-zero installation", true, { consumerName: "acme" }, /is not this platform's own unit/],
-    ["the platform's own unit onboarded to a target cluster", true, { clusterId: "cls_1", stage: undefined }, /./],
+    ["the platform's own unit onboarded to a target cluster", true, { clusterId: "cls_1" }, /./],
     ["the platform's own unit on a Manager that names no platform unit", false, {}, /names no platform unit \(PLATFORM_UNIT_NAME is unset\)/],
   ];
   for (const [what, namesPlatformUnit, reqOver, says] of attempts) {

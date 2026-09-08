@@ -4,7 +4,8 @@ import { seedQuota } from "../../../shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, OnboardParams, DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { CHANNEL_STAGES } from "./onboard.fixture.ts";
+import { Registrations } from "./registrations.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
@@ -60,7 +61,6 @@ function passReport(manifest: ConsumerManifest = MANIFEST): GateReport {
   };
 }
 
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** The platform repo with the target's values chain — its profile states the unitApex G19 holds a
  *  declared fqdn's suffix against, and planStream composes the platform address from. */
@@ -80,7 +80,8 @@ function ports(over: Partial<OnboardPorts> & { cluster?: FakeClusterReader } = {
   return {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
     runner: new FakeGateRunner({ report: passReport() }),
-    registrations: new Registrations(platformRepo(), prodClusterStage),
+    registrations: new Registrations(platformRepo()),
+    channelStages: async () => CHANNEL_STAGES,
     seeder: {} as unknown as VaultSeeder, // none of the steps under test seeds
     resolver: new FakeClusterKubeResolver({
       clusterReader: cluster ?? new FakeClusterReader(),
@@ -128,7 +129,7 @@ function seedCluster(): void {
 
 const planReq = {
   consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable",
-  clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart", repoCredentialId: "cred_pat",
+  stage: "prod", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart", repoCredentialId: "cred_pat",
 } as const;
 const streamCtx = () => ({ db: db.db, log: () => undefined, signal: new AbortController().signal });
 
@@ -142,7 +143,7 @@ describe("onboard with a manifest-declared fqdn", () => {
     expect(res.params.fqdn).toBe(FQDN);
     // approving IS the grant, so the plan says what is being attested and beside which address
     expect(res.plan.summary).toContain(FQDN);
-    expect(res.plan.summary).toContain("acme.example.com");
+    expect(res.plan.summary).toContain("acme-prod.example.com");
   });
 
   it("planStream REJECTS a fqdn another unit has attested — G19 through the real registration tree", async () => {

@@ -3,7 +3,7 @@
 // the tests rather than inside one of them because three test files drive the same run kind, and a
 // second copy of a fixture is a second idea of what a consumer looks like.
 import { type OnboardPorts } from "./onboard.run.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
@@ -15,6 +15,7 @@ import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput } from "./vault-seeder.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import type { ChannelStages } from "../inventory/channel-stages.ts";
 
 export const SHA = "a".repeat(40);
 /** The tag the release cycle minted for the fixture release {version 1.0.0, channel stable} — what
@@ -66,9 +67,6 @@ export class FakeSeeder implements VaultSeeder {
   async deleteTenantCrypto(): Promise<void> {}
 }
 
-// Every fixture onboards to the prod stage, so a fixed resolver answers every cluster with "prod" —
-// the stage boundary Registrations.commitRegistration checks before it ever writes a stage file.
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` for each domain — onboard's
  *  planStream resolves unitApex from exactly this chain (admission-policy.ts unitApexFromChain). */
@@ -83,6 +81,10 @@ export function platformRepo(...domains: string[]): FakePlatformRepo {
   }
   return repo;
 }
+
+/** The channel table the fixtures plan against — the shape of platform/values-common.yaml
+ *  global.channelStages: alpha reaches dev alone, beta test as well, stable every stage. */
+export const CHANNEL_STAGES: ChannelStages = { alpha: ["dev"], beta: ["dev", "test"], stable: ["dev", "test", "prod"] };
 
 export type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter };
 
@@ -102,7 +104,8 @@ export function ports(over: Partial<OnboardPorts> & FakeKube = {}): OnboardPorts
   return {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
     runner: new FakeGateRunner({ report: passReport() }),
-    registrations: new Registrations(platform, prodClusterStage),
+    registrations: new Registrations(platform),
+    channelStages: async () => CHANNEL_STAGES,
     resolveBuildPlaneFqdn: seedClusterMaps(platform, { "s1.example": "prod", "m1.example": "prod" }),
     seeder: new FakeSeeder(),
     resolver: new FakeClusterKubeResolver({

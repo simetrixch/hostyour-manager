@@ -9,11 +9,15 @@
 // Pure: no IO. The writer (adapters/kube/kube-repo-credential.ts) applies what this renders; the
 // step opens the sealed PAT, hands it in, and zeroes its buffer after.
 import { CONSUMER_PROJECT_LABEL, type RepoCredentialManifest } from "../../adapters/kube/port.ts";
+import type { Stage } from "../../../shared/enums.ts";
+import { consumerNamespace } from "../../../shared/consumer.ts";
 
-/** The Secret name of one unit's repository credential — `repo-<name>`, the naming the per-slave
- *  ArgoCD repo Secrets already use (repo-platform, repo-catalog), prefixed per unit. */
-export function consumerRepoCredentialName(consumerName: string): string {
-  return `repo-${consumerName}`;
+/** The Secret name of one unit's repository credential AT ONE STAGE — `repo-<name>-<stage>`, the
+ *  naming the per-slave ArgoCD repo Secrets already use (repo-platform, repo-catalog), prefixed per
+ *  unit and stage. Per stage because two stages of one unit may share one cluster's ArgoCD namespace,
+ *  and an offboard of one stage must not take the other's credential away. */
+export function consumerRepoCredentialName(consumerName: string, stage: Stage): string {
+  return `repo-${consumerNamespace(consumerName, stage)}`;
 }
 
 /** The username every platform git-over-https credential authenticates as — GitHub ignores the
@@ -26,6 +30,7 @@ const ARGOCD_REPOSITORY_LABEL = { key: "argocd.argoproj.io/secret-type", value: 
 
 export function renderConsumerRepoCredential(input: {
   consumerName: string;
+  stage: Stage;
   /** The ArgoCD namespace the unit's Applications live in — where the instance discovers repo Secrets. */
   argoNamespace: string;
   repoURL: string;
@@ -36,7 +41,7 @@ export function renderConsumerRepoCredential(input: {
     apiVersion: "v1",
     kind: "Secret",
     metadata: {
-      name: consumerRepoCredentialName(input.consumerName),
+      name: consumerRepoCredentialName(input.consumerName, input.stage),
       namespace: input.argoNamespace,
       labels: {
         [ARGOCD_REPOSITORY_LABEL.key]: ARGOCD_REPOSITORY_LABEL.value,

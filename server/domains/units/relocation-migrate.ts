@@ -16,7 +16,7 @@ export function repointStep(worldOf: WorldOf, targetClusterId: string): Step {
     title: "Repoint the registration onto the target cluster",
     run: async (ctx) => {
       const w = await worldOf(ctx);
-      await w.repoint(ctx, targetOf(ctx, w.stage, targetClusterId));
+      await w.repoint(ctx, targetOf(ctx, targetClusterId));
     },
   };
 }

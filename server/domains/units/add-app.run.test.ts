@@ -7,7 +7,6 @@ import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventor
 import { makeAddAppDef, AddAppParams } from "./add-app.run.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { memberApplication, memberAppProject } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
@@ -36,7 +35,6 @@ const REGISTRY_HOST = "zot.m1.example";
 /** A cluster-marking resolver that answers every cluster short name at "prod" — every fixture in this
  *  file lands its tenant on s1/prod, so a single-stage stand-in is all TenantRegistrations needs to
  *  satisfy commitTenant's stage boundary check. */
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
@@ -111,7 +109,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
   return {
     repo: repoWithManifest(),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
-    registrations: new TenantRegistrations(seededPlatformRepo(), CLUSTER_STAGE),
+    registrations: new TenantRegistrations(seededPlatformRepo()),
     resolver: new FakeClusterKubeResolver({
       clusterReader: cluster ?? new FakeClusterReader({
         deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },
@@ -228,11 +226,11 @@ describe("add-app run definition", () => {
     const step = makeAddAppDef(ports({ projects })).steps(p).find((s) => s.name === "apply-appproject")!;
     const c = ctx(p, "apply-appproject", []);
     await step.run({ ...c, registerCleanup: (cl) => cleanups.push(cl.name) });
-    const projectName = memberAppProject(GUID, NEW_APP);
+    const projectName = memberAppProject(GUID, NEW_APP, "prod");
     expect(projects.get("argocd", projectName)?.metadata.name).toBe(projectName);
     // the existing "erp" member's project is untouched — a member is self-contained, so adding an app
     // adds exactly one namespace and one AppProject, never a sibling's.
-    expect(projects.get("argocd", memberAppProject(GUID, "erp"))).toBeUndefined();
+    expect(projects.get("argocd", memberAppProject(GUID, "erp", "prod"))).toBeUndefined();
     expect(cleanups).toEqual([]); // never registers a project delete — the member's namespace/AppProject are cluster state that stays
   });
 
@@ -263,7 +261,7 @@ describe("add-app run definition", () => {
   });
 
   it("smoke checks the NEW member's own namespace (<guid>-<app>), never a sibling's", async () => {
-    const memberNs = memberAppProject(GUID, NEW_APP); // identity law: AppProject name == namespace
+    const memberNs = memberAppProject(GUID, NEW_APP, "prod"); // identity law: AppProject name == namespace
     const cluster = new FakeClusterReader({ smoke: { namespaceExists: false, workloads: [], externalSecretsReady: true } });
     const step = makeAddAppDef(ports({ cluster })).steps(params()).find((s) => s.name === "smoke")!;
     await expect(step.run(ctx(params(), "smoke", []))).rejects.toThrow(new RegExp(`namespace ${memberNs} does not exist`));

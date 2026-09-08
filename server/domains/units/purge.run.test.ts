@@ -5,7 +5,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makePurgeDef, type PurgePorts, type PurgeParams } from "./purge.run.ts";
 import { renderSmtpOpsGrant } from "./build-rbac.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { FakePlatformRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
@@ -31,9 +31,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-// Every fixture purges from the prod stage, so a fixed resolver answers every cluster with "prod" —
-// the stage boundary Registrations.commitRegistration checks before it ever writes a stage file.
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** Commit acme's live STAGE registration on s1.example/prod — the purge target every test that
  *  needs a real registration to reap starts from. */
@@ -115,7 +112,7 @@ const STEP_ORDER = ["attest-target", "remove-registration", "watch-removal", "de
 describe("purge run definition", () => {
   it("plans with cluster targetKind, the ordered steps, and git-branch + master-kube locks — with NO app row", async () => {
     seedCluster(); // orphan: cluster only, no apps row
-    const def = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage)));
+    const def = makePurgeDef(ports(new Registrations(new FakePlatformRepo())));
     const plan = await def.plan(PARAMS, { db: db.db });
     expect(def.mutating).toBe(true);
     // The app row may not exist (orphan), so purge targets the CLUSTER (like onboard's plan), not "app".
@@ -130,12 +127,12 @@ describe("purge run definition", () => {
   it("mutating def starts with attest-target under empty params (the armed check does def.steps({}))", () => {
     // guards.assertGuardsArmed evaluates def.steps({})[0].name — building the steps must not deref
     // params, so this must not throw and the first step must be attest-target.
-    expect(makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage))).steps({} as PurgeParams)[0]?.name).toBe("attest-target");
+    expect(makePurgeDef(ports(new Registrations(new FakePlatformRepo()))).steps({} as PurgeParams)[0]?.name).toBe("attest-target");
   });
 
   it("HEALTHY consumer: removes the registration, waits for the prune, and marks the row offboarded (kept)", async () => {
     seedApp();
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg); // a live consumer
 
     const logs: string[] = [];
@@ -150,12 +147,12 @@ describe("purge run definition", () => {
 
   it("ORPHAN (no inventory row): purges the whole cluster + Vault footprint by NAME and never throws", async () => {
     seedCluster(); // NO app row
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     // A partial onboard that reached write-registration but died before record-inventory: registration
     // present, NO row. Also pre-seed the mail-ops grant so delete-smtp-ops-grant has something to reap.
     await seedRegistration(reg);
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
     const seeder = new FakeSeeder();
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
 
@@ -165,7 +162,7 @@ describe("purge run definition", () => {
     // Every artifact reaped, by name, with no row anywhere:
     expect(await reg.readRegistration("prod", "acme")).toBeNull(); // registration gone
     expect(buildRbac.keys()).toEqual([]); // the mail-ops grant gone (the AppProject goes with the registration)
-    expect(cluster.deletedNamespaces).toEqual(["acme"]); // namespace reaped (→ ServiceClaim → mongo deprovision)
+    expect(cluster.deletedNamespaces).toEqual(["acme-prod"]); // namespace reaped (→ ServiceClaim → mongo deprovision)
     expect(seeder.deleted).toEqual([{ consumerName: "acme" }]); // repo PAT (the local build tier)
     expect(seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]); // ceremony secrets
     // record-purge is a clean no-op: there is no row to mark, and no row was invented.
@@ -178,12 +175,12 @@ describe("purge run definition", () => {
     // without looking, the weaker run kind would settle the state the stricter one declined to: the
     // consumer would stop appearing as active while its mail-ops grant stood in the relay's namespace.
     seedApp();
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg);
     // The grant delete answers, but leaves the Role behind — the shape a fail-soft delete has after a
     // cluster-side refusal it only logged about.
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
     buildRbac.deleteBuildRbac = async () => ({ deleted: 0 });
 
     const logs: string[] = [];
@@ -194,16 +191,16 @@ describe("purge run definition", () => {
 
   it("does NOT require an inventory row — the whole run is a no-op-safe teardown even when nothing exists", async () => {
     seedCluster(); // orphan died BEFORE write-registration: no registration, no grant, no namespace, no row
-    const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, absentNamespaces: ["acme"] });
+    const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, absentNamespaces: ["acme-prod"] });
     const logs: string[] = [];
     // Nothing seeded beyond the cluster — every step must fail-soft and the run must complete.
-    await expect(runAll(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { cluster }), logs)).resolves.toBeUndefined();
+    await expect(runAll(ports(new Registrations(new FakePlatformRepo()), { cluster }), logs)).resolves.toBeUndefined();
     expect(logs.some((l) => l.includes("already absent"))).toBe(true); // remove-registration no-op
   });
 
   it("remove-registration is idempotent when the registration is already absent (orphan died before write-registration)", async () => {
     seedCluster();
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage); // no registration committed
+    const reg = new Registrations(new FakePlatformRepo()); // no registration committed
     const step = makePurgeDef(ports(reg)).steps(PARAMS).find((s) => s.name === "remove-registration")!;
     const logs: string[] = [];
     await step.run(ctx("remove-registration", logs)); // must not throw
@@ -215,7 +212,7 @@ describe("purge run definition", () => {
     // Script the app Synced/Healthy (never Missing) — offboard would THROW "was not pruned"; purge
     // logs and continues, because delete-namespace force-reaps the workloads regardless.
     const argo = new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } });
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { argo })).steps(PARAMS).find((s) => s.name === "watch-removal")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { argo })).steps(PARAMS).find((s) => s.name === "watch-removal")!;
     const logs: string[] = [];
     await expect(step.run(ctx("watch-removal", logs))).resolves.toBeUndefined();
     expect(logs.some((l) => l.includes("not pruned") && l.includes("delete-namespace will force-reap"))).toBe(true);
@@ -226,8 +223,8 @@ describe("purge run definition", () => {
   it("delete-smtp-ops-grant reaps the pre-seeded mail-ops grant and is idempotent when absent", async () => {
     seedCluster();
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
-    const del = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { buildRbac })).steps(PARAMS).find((s) => s.name === "delete-smtp-ops-grant")!;
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
+    const del = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { buildRbac })).steps(PARAMS).find((s) => s.name === "delete-smtp-ops-grant")!;
     await del.run(ctx("delete-smtp-ops-grant", []));
     expect(buildRbac.keys()).toEqual([]);
     await del.run(ctx("delete-smtp-ops-grant", [])); // second delete on the absent grant: no throw
@@ -236,11 +233,11 @@ describe("purge run definition", () => {
   it("delete-namespace deletes the target-cluster namespace named for the consumer, and is idempotent", async () => {
     seedCluster();
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { cluster })).steps(PARAMS).find((s) => s.name === "delete-namespace")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { cluster })).steps(PARAMS).find((s) => s.name === "delete-namespace")!;
     const logs: string[] = [];
     await step.run(ctx("delete-namespace", logs));
-    expect(cluster.deletedNamespaces).toEqual(["acme"]);
-    expect(logs.some((l) => l.includes("namespace acme deleted") && l.includes("mongo deprovision"))).toBe(true);
+    expect(cluster.deletedNamespaces).toEqual(["acme-prod"]);
+    expect(logs.some((l) => l.includes("namespace acme-prod deleted") && l.includes("mongo deprovision"))).toBe(true);
     await step.run(ctx("delete-namespace", logs)); // re-run stays a no-op (already-absent → deleted:false)
   });
 
@@ -249,7 +246,7 @@ describe("purge run definition", () => {
     const seeder = new FakeSeeder();
     const revoked: Array<{ id: string; reason: string }> = [];
     const creds = { revoke: (id: string, reason: string) => { revoked.push({ id, reason }); return Promise.resolve(); } } as unknown as CredentialStore;
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder })).steps(PARAMS).find((s) => s.name === "remove-repo-pat")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps(PARAMS).find((s) => s.name === "remove-repo-pat")!;
     await step.run(ctx("remove-repo-pat", [], creds));
     // The stage-free BUILD tier on the LOCAL Vault — the one place seed-repo-pat wrote.
     expect(seeder.deleted).toEqual([{ consumerName: "acme" }]);
@@ -259,7 +256,7 @@ describe("purge run definition", () => {
   it("remove-repo-pat still deletes the build-tier entry when there is NO row (nothing to revoke)", async () => {
     seedCluster(); // no app row → no sealed credential id recorded
     const seeder = new FakeSeeder();
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder })).steps(PARAMS).find((s) => s.name === "remove-repo-pat")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps(PARAMS).find((s) => s.name === "remove-repo-pat")!;
     const logs: string[] = [];
     await step.run(ctx("remove-repo-pat", logs)); // must not need creds.revoke
     expect(seeder.deleted).toEqual([{ consumerName: "acme" }]);
@@ -269,14 +266,14 @@ describe("purge run definition", () => {
   it("remove-dns removes the unit's record and STILL fails the run on a DNS API failure (purge's one fail-closed teardown step)", async () => {
     seedCluster();
     const dns = new FakeDnsProvider();
-    dns.seed("acme.s1.example", "A", "203.0.113.10"); // unitApex == the branch in the fake chain
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { dns })).steps(PARAMS).find((s) => s.name === "remove-dns")!;
+    dns.seed("acme-prod.s1.example", "A", "203.0.113.10"); // unitApex == the branch in the fake chain
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { dns })).steps(PARAMS).find((s) => s.name === "remove-dns")!;
     await step.run(ctx("remove-dns", []));
-    expect(dns.record("acme.s1.example", "A")).toBeUndefined();
+    expect(dns.record("acme-prod.s1.example", "A")).toBeUndefined();
 
     const failingDns = new FakeDnsProvider();
     failingDns.failWith = new Error("Cloudflare DNS refused DELETE: [10000] Authentication error");
-    const step2 = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { dns: failingDns })).steps(PARAMS).find((s) => s.name === "remove-dns")!;
+    const step2 = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { dns: failingDns })).steps(PARAMS).find((s) => s.name === "remove-dns")!;
     await expect(step2.run(ctx("remove-dns", []))).rejects.toThrow(/Authentication error/);
   });
 
@@ -286,7 +283,7 @@ describe("purge run definition", () => {
     github.seedHook("x", "acme", BUILD_HOOK_URL);
     const opened: string[] = [];
     const creds = { open: (id: string) => { opened.push(id); return Promise.resolve(Buffer.from("github_pat_test", "utf8")); } } as unknown as CredentialStore;
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { github })).steps(PARAMS).find((s) => s.name === "remove-webhook")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { github })).steps(PARAMS).find((s) => s.name === "remove-webhook")!;
     const logs: string[] = [];
     await step.run(ctx("remove-webhook", logs, creds));
     expect(opened).toEqual(["cred_pat"]);
@@ -298,7 +295,7 @@ describe("purge run definition", () => {
   it("remove-webhook fail-soft SKIPS for a true orphan (no inventory row → no repo URL / PAT)", async () => {
     seedCluster(); // NO app row — a true orphan
     const github = new FakeGitHubConsumer();
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { github })).steps(PARAMS).find((s) => s.name === "remove-webhook")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { github })).steps(PARAMS).find((s) => s.name === "remove-webhook")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-webhook", logs))).resolves.toBeUndefined();
     expect(github.deletedCalls).toEqual([]); // no PAT opened, nothing deleted
@@ -310,7 +307,7 @@ describe("purge run definition", () => {
     const consumerRepo = new FakeConsumerRepo();
     // The release-kit is present (committed at onboard) so the git-rm actually reaps it.
     for (const path of ["release/release.ps1", "release/release.sh", ".github/workflows/release.yml"]) consumerRepo.seed("https://github.com/x/acme.git", path, "kit");
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
     await step.run(ctx("remove-release-kit", logs));
     expect(consumerRepo.opened).toEqual([{ repoURL: "https://github.com/x/acme.git", credentialId: "cred_pat" }]);
@@ -323,7 +320,7 @@ describe("purge run definition", () => {
   it("remove-release-kit fail-soft SKIPS for a true orphan (no inventory row → no repo URL / PAT)", async () => {
     seedCluster(); // NO app row — a true orphan
     const consumerRepo = new FakeConsumerRepo();
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-release-kit", logs))).resolves.toBeUndefined();
     expect(consumerRepo.opened).toEqual([]); // never opened — nothing to remove
@@ -335,7 +332,7 @@ describe("purge run definition", () => {
     seedApp({ repoCredentialId: "cred_pat" });
     const consumerRepo = new FakeConsumerRepo();
     consumerRepo.failCommit(new AppError("UPSTREAM", "git push failed: 403"));
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-release-kit", logs))).resolves.toBeUndefined();
     expect(logs.some((l) => l.includes("release-kit NOT removed") && l.includes("by hand"))).toBe(true);
@@ -344,7 +341,7 @@ describe("purge run definition", () => {
   it("remove-app-secrets deletes the consumer-tier entry so a re-onboard cannot inherit the old keys", async () => {
     seedCluster();
     const seeder = new FakeSeeder();
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder })).steps(PARAMS).find((s) => s.name === "remove-app-secrets")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps(PARAMS).find((s) => s.name === "remove-app-secrets")!;
     const logs: string[] = [];
     await step.run(ctx("remove-app-secrets", logs));
     // The CONSUMER tier (<stage>/consumer/<name>/app), the different Vault path from the repo-pat's.
@@ -355,7 +352,7 @@ describe("purge run definition", () => {
   it("remove-database-secrets metadata-deletes the consumer-tier postgres leaf by NAME (unconditional, 404-tolerant no-op for a non-postgres consumer)", async () => {
     seedCluster(); // works even for a true orphan (no app row) — keyed on name+stage+cluster
     const seeder = new FakeSeeder();
-    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder })).steps(PARAMS).find((s) => s.name === "remove-database-secrets")!;
+    const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps(PARAMS).find((s) => s.name === "remove-database-secrets")!;
     const logs: string[] = [];
     await step.run(ctx("remove-database-secrets", logs));
     // DIFFERENT leaves from remove-app-secrets (.../{postgres,mongodb} vs .../app). Both calls are
@@ -368,7 +365,7 @@ describe("purge run definition", () => {
 
   it("is idempotent + fail-soft on a RE-RUN: a full purge twice over reaps once and never throws", async () => {
     seedApp();
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg);
     const seeder = new FakeSeeder();
     const logs: string[] = [];
@@ -381,20 +378,21 @@ describe("purge run definition", () => {
 
   // purge is keyed on ONE stage (name + stage + cluster), so it obeys the same per-stage/per-unit split
   // offboard does: force-removing prod must leave a unit that still stands at dev able to build and
-  // release. Proven through the same shared objects — the `acme-build` grants, the ONE build webhook,
-  // the release kit, secret/build/acme/repo-pat.
+  // release. Proven through the shared objects — the ONE build webhook, the release kit,
+  // secret/build/acme/repo-pat — and through the one object that is NOT shared: the mail-ops grant
+  // is per stage, so dev's stays and prod's goes.
   it("purging ONE stage of a two-stage unit keeps everything the other stage needs", async () => {
     seedApp({ repoCredentialId: "cred_prod" });
     const platform = new FakePlatformRepo();
-    // A cluster carries exactly one stage, so the unit's second stage stands on s2/dev.
-    const reg = new Registrations(platform, async (cluster) => ({ name: cluster, stage: cluster === "s2" ? "dev" : "prod" }));
+    // The unit's second stage stands on s2 at dev — any active cluster would do, the stage is the unit's.
+    const reg = new Registrations(platform);
     const unit = { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false };
     for (const deploy of [{ stage: "prod" as const, cluster: "s1" }, { stage: "dev" as const, cluster: "s2" }]) {
       await reg.commitRegistration({ unit, builds: ["acme"], deploy: { ...deploy, chartPath: "deploy/chart", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: `run_onb_${deploy.stage}` });
     }
 
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" }), renderSmtpOpsGrant({ name: "acme", stage: "dev" })]);
     const github = new FakeGitHubConsumer();
     github.seedHook("x", "acme", BUILD_HOOK_URL);
     const consumerRepo = new FakeConsumerRepo();
@@ -412,28 +410,30 @@ describe("purge run definition", () => {
     expect(await reg.readRegistration("prod", "acme")).toBeNull();
     expect(await reg.readRegistration("dev", "acme")).not.toBeNull();
     expect(platform.read(platform.booksBranch, "registrations/acme/build.yaml")).not.toBeNull();
-    // The mail-ops grant is the UNIT's, and the unit still stands at dev, so it stays exactly where it
-    // is: taking it here would blind the surviving stage's queue dashboard to the relay it was granted.
+    // The mail-ops grant is the STAGE's: prod's pair is gone, dev's pair stands untouched — its queue
+    // dashboard keeps the relay it was granted.
     expect(buildRbac.keys()).toEqual([
-      "Role postfix/acme-smtp-ops",
-      "RoleBinding postfix/acme-smtp-ops",
+      "Role postfix/acme-dev-smtp-ops",
+      "RoleBinding postfix/acme-dev-smtp-ops",
     ]);
     expect(github.hooksFor("x", "acme")).toHaveLength(1);
     expect(consumerRepo.commits).toEqual([]);
     expect(seeder.deleted).toEqual([]);
-    expect(logs.filter((l) => l.includes("stays registered at dev"))).toHaveLength(4);
+    // One skip line per per-unit cleanup: the webhook, the release kit, the PAT.
+    expect(logs.filter((l) => l.includes("stays registered at dev"))).toHaveLength(3);
   });
 
   it("attest-target fails closed on a deploy-state domain mismatch (never purge the wrong cluster)", async () => {
     seedCluster();
-    const prt = ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { cluster: new FakeClusterReader({ deployState: { domain: "other.example", stage: "prod", writtenAt: "x", generation: 1 } }) });
+    const prt = ports(new Registrations(new FakePlatformRepo()), { cluster: new FakeClusterReader({ deployState: { domain: "other.example", stage: "prod", writtenAt: "x", generation: 1 } }) });
     const attest = makePurgeDef(prt).steps(PARAMS)[0]!;
     await expect(attest.run(ctx("attest-target", []))).rejects.toThrow(/deploy-state mismatch/);
   });
 
-  it("plan fails closed on a stage that disagrees with the target cluster's own stage", async () => {
-    seedCluster(); // cls_1 is prod
-    const def = makePurgeDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage)));
-    await expect(def.plan({ consumerName: "acme", stage: "dev", clusterId: "cls_1" }, { db: db.db })).rejects.toThrow(/stage mismatch/);
+  it("plans a purge at a stage other than the target cluster's own — the stage is the unit's, the cluster any active one", async () => {
+    seedCluster(); // cls_1 is marked prod; the orphan stands there at dev
+    const def = makePurgeDef(ports(new Registrations(new FakePlatformRepo())));
+    const plan = await def.plan({ consumerName: "acme", stage: "dev", clusterId: "cls_1" }, { db: db.db });
+    expect(plan.steps[0]?.name).toBe("attest-target");
   });
 });

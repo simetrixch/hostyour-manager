@@ -14,6 +14,7 @@ import { EPHEMERAL_STREAM } from "../../../shared/enums.ts";
 // The activate_url / mail readers + the mail line live in activation-result.ts, shared with the
 // tenant's create-tenant-activate.ts so both invite steps parse + surface the response identically.
 import { extractActivateUrl, extractMail, mailLine } from "./activation-result.ts";
+import { consumerUnitHost } from "./unit-dns.ts";
 
 /** Build the `activate` step. Closes over `runtime` (the seed-minted token) so it reads a value that
  *  was never persisted; onboardSteps appends it only when `p.activation` is set. */
@@ -48,10 +49,10 @@ export function activateStep(ports: OnboardPorts, p: DeployableOnboardParams, ru
         body[pr.field] = v;
       }
       if (!ports.activator) throw errValidation(`consumer "${p.consumerName}" declares an activation but no activator is wired on this manager — refusing to skip a declared activation silently`);
-      // The call goes to the consumer's OWN public ingress — the unit's one host <name>.<unitApex>,
-      // the same composition the admission policy pins and provision-dns resolved. The token rides
-      // ONLY the declared header — never the URL/body/log.
-      const url = `https://${p.consumerName}.${p.unitApex}${act.path}`;
+      // The call goes to the consumer's OWN public ingress — the unit's one host
+      // <name>-<stage>.<unitApex>, the same composition the admission policy pins and provision-dns
+      // resolved. The token rides ONLY the declared header — never the URL/body/log.
+      const url = `https://${consumerUnitHost(p.consumerName, p.stage, p.unitApex)}${act.path}`;
       ctx.log("meta", `activating: ${act.method} ${url} with header ${act.tokenHeader} (token withheld)${act.prompt.length ? ` + fields ${act.prompt.map((x) => x.field).join(", ")}` : ""}`);
       const res = await ports.activator.invoke({ url, method: act.method, tokenHeader: act.tokenHeader, token, body, signal: ctx.signal });
       // Drop the in-run token as soon as the call has consumed it (hygiene; it is GC'd with the closure

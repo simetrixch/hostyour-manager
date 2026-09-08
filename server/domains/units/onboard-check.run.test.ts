@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { makeOnboardDef, OnboardParams, DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { CHANNEL_STAGES } from "./onboard.fixture.ts";
+import { Registrations } from "./registrations.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
@@ -50,7 +51,6 @@ function passReport(manifest: ConsumerManifest = MANIFEST): GateReport {
   };
 }
 
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** The platform repo with the target's values chain — check re-reads it so the chart is held against
  *  what the Application will actually layer at sync. */
@@ -68,7 +68,8 @@ function ports(over: Partial<OnboardPorts> = {}): OnboardPorts {
   return {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
     runner: new FakeGateRunner({ report: passReport() }),
-    registrations: new Registrations(platformRepo(), prodClusterStage),
+    registrations: new Registrations(platformRepo()),
+    channelStages: async () => CHANNEL_STAGES,
     seeder: {} as unknown as VaultSeeder,
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader(),

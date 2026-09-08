@@ -56,7 +56,7 @@ async function makeTenant(apex?: string): Promise<{ app: Hono<AppEnv>; cookie: s
   const bus = new RunEventBus();
   const resolver = new FakeClusterKubeResolver({
     clusterReader: new FakeClusterReader({
-      secretValues: { [`${memberNamespace(GUID, "auth")}/${TENANT_SECRET}/${BOOTSTRAP_TOKEN_KEY}`]: "boot_tok_abc" },
+      secretValues: { [`${memberNamespace(GUID, "auth", "prod")}/${TENANT_SECRET}/${BOOTSTRAP_TOKEN_KEY}`]: "boot_tok_abc" },
     }),
     argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
   });
@@ -84,7 +84,7 @@ describe("POST /api/tenants/:id/invite-admin addresses the tenant's own example-
     const { app, cookie, activator } = await makeTenant(APEX);
     expect((await invite(app, cookie)).status).toBe(200);
     const call = activator.calls[0]!;
-    expect(call.url).toBe(`https://auth.acme.${APEX}/api/v1/bootstrap/invite-admin`);
+    expect(call.url).toBe(`https://auth-prod.acme.${APEX}/api/v1/bootstrap/invite-admin`);
     expect(call.url).not.toContain(DOMAIN);
     // The token still rides the header alone — the host is the only thing this fix moves.
     expect(call.tokenHeader).toBe("X-Bootstrap-Token");
@@ -95,7 +95,7 @@ describe("POST /api/tenants/:id/invite-admin addresses the tenant's own example-
     seedTenant();
     const { app, cookie, activator } = await makeTenant(DOMAIN);
     expect((await invite(app, cookie)).status).toBe(200);
-    expect(activator.calls[0]?.url).toBe(`https://auth.acme.${DOMAIN}/api/v1/bootstrap/invite-admin`);
+    expect(activator.calls[0]?.url).toBe(`https://auth-prod.acme.${DOMAIN}/api/v1/bootstrap/invite-admin`);
   });
 
   it("answers 501 with no apex resolver wired — a credential is never posted at a guessed host", async () => {

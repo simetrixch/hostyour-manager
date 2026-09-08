@@ -107,10 +107,12 @@ export async function assertOnboardAbortable(ports: OnboardPorts, p: OnboardPara
     `(the prune deletes the consumer's ServiceClaim, and its deprovision drops the consumer's databases and user, and takes the unit's ` +
     `AppProject, admission policy and grants with the registration they render from), then delete the mail-ops grant, the repository ` +
     `credential and the DNS record`;
+  // The row is keyed (name, stage): one unit stands at one stage in exactly one place, so the
+  // cluster is the row's to say, never a second key.
   const row = db
     .select({ status: apps.status })
     .from(apps)
-    .where(and(eq(apps.clusterId, p.clusterId), eq(apps.name, p.consumerName), eq(apps.stage, p.stage)))
+    .where(and(eq(apps.name, p.consumerName), eq(apps.stage, p.stage)))
     .get();
   if (row && CONSUMER_LIVE_STATUS.includes(row.status)) {
     throw errValidation(

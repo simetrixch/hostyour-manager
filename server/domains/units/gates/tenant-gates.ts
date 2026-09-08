@@ -17,9 +17,12 @@
 //                   Namespace; any other cluster-scoped kind, any Application/ApplicationSet/AppProject,
 //                   any Role/RoleBinding, or any inline Secret — including one smuggled inside a
 //                   List/aggregate — FAILS, as does a document pinned to a namespace other than the
-//                   member's own, a SIBLING member of the same tenant included. The List/items expansion
-//                   mirrors gate-runner/src/render-docs.ts (the applier flattens ANY object with a
-//                   top-level items[], kind-agnostic), reimplemented here.
+//                   member's own, a SIBLING member of the same tenant included, and a ServiceAccount
+//                   whose `vault.hashicorp.com/alias-metadata-tenant` names another guid — the claim
+//                   the member's admission policy fences on the cluster (admission-policy.ts), held
+//                   here against the rendered docs. The List/items expansion mirrors
+//                   gate-runner/src/render-docs.ts (the applier flattens ANY object with a top-level
+//                   items[], kind-agnostic), reimplemented here.
 //   T4 apps       — every apps[] entry resolved to its rendered engine+front render set, with no
 //                   reserved-name collision and no duplicate app name (a belt behind the schema refine).
 //
@@ -32,6 +35,7 @@ import { ConsumerManifestSchema, type ConsumerManifest, type TenantSpec } from "
 import { TenantValidationReportSchema, type TenantValidationReport } from "../../../../shared/tenant.ts";
 import type { RenderedDoc, HelmRenderResult } from "../../../adapters/helm/port.ts";
 import type { FanoutMember, AppRef } from "../tenant-fanout.ts";
+import { VAULT_ALIAS_TENANT_ANNOTATION } from "../admission-policy.ts";
 
 export const TENANT_MANIFEST_PATH = "deploy/platform.yaml";
 const TEXT_CAP = 200; // cap any echoed untrusted string (a parse error, a helm stderr, a chart name)
@@ -200,17 +204,28 @@ function nameOf(raw: Record<string, unknown> | null): string {
 }
 
 /** metadata.namespace off an untrusted object, or "" when absent/non-string. A cluster-scoped object
- *  has none; a namespaced object confined to its member carries <guid>-<member>. */
+ *  has none; a namespaced object confined to its member carries <guid>-<member>-<stage>. */
 function namespaceOf(raw: Record<string, unknown> | null): string {
   const md = raw ? asRecord(raw.metadata) : null;
   const ns = md ? md.namespace : undefined;
   return typeof ns === "string" ? ns : "";
 }
 
+/** The `vault.hashicorp.com/alias-metadata-tenant` annotation off an untrusted object, or null when
+ *  the object carries none (a ServiceAccount that logs into nothing). Non-string values read as the
+ *  claim they are — a claim that is not the guid. */
+function tenantClaimOf(raw: Record<string, unknown> | null): string | null {
+  const md = raw ? asRecord(raw.metadata) : null;
+  const annotations = md ? asRecord(md.annotations) : null;
+  if (!annotations || !(VAULT_ALIAS_TENANT_ANNOTATION in annotations)) return null;
+  const claim = annotations[VAULT_ALIAS_TENANT_ANNOTATION];
+  return typeof claim === "string" ? claim : String(claim);
+}
+
 /** Evaluate one object's kind against the fence. A List/*List aggregate (ANY object with a top-level
  *  items[] array — kind-agnostic, the applier's unstructured.IsList rule) is expanded and each item is
  *  checked the same way, so a forbidden member cannot hide inside a wrapper the top-level walk skips. */
-function evaluate(kind: string, name: string, raw: Record<string, unknown> | null, where: string, memberNs: string): Violation | null {
+function evaluate(kind: string, name: string, raw: Record<string, unknown> | null, where: string, member: { namespace: string; guid: string }): Violation | null {
   const listItems = raw ? raw.items : undefined;
   if (Array.isArray(listItems)) {
     for (let i = 0; i < listItems.length; i++) {
@@ -219,24 +234,39 @@ function evaluate(kind: string, name: string, raw: Record<string, unknown> | nul
       const itemKind = typeof item.kind === "string" ? item.kind : "";
       if (itemKind === "") continue;
       const itemName = nameOf(item);
-      const v = evaluate(itemKind, itemName, item, `item #${i} of ${kind || "aggregate"} "${name}" (${where})`, memberNs);
+      const v = evaluate(itemKind, itemName, item, `item #${i} of ${kind || "aggregate"} "${name}" (${where})`, member);
       if (v) return { ...v, fieldPath: `items[${i}].${v.fieldPath}`, kind: v.kind ?? itemKind, name: v.name ?? itemName };
     }
     return null;
   }
   // Namespace confinement: a doc that declares an explicit metadata.namespace outside the MEMBER's own
-  // <guid>-<member> escapes the fence (helm --namespace only defaults the namespace for objects that
-  // omit it, so an object hard-coding another namespace slips past a kind-only check). A sibling member
-  // of the same tenant is just as much outside — each member is self-contained, and the member's
-  // AppProject permits its own namespace and no other. Cluster-scoped kinds carry no namespace and fall
-  // through to the kind checks below (Namespace alone is permitted).
+  // <guid>-<member>-<stage> escapes the fence (helm --namespace only defaults the namespace for objects
+  // that omit it, so an object hard-coding another namespace slips past a kind-only check). A sibling
+  // member of the same tenant is just as much outside — each member is self-contained, and the member's
+  // AppProject permits its own namespace and no other — and so is the same member at another stage.
+  // Cluster-scoped kinds carry no namespace and fall through to the kind checks below (Namespace alone
+  // is permitted).
   const ns = namespaceOf(raw);
-  if (ns !== "" && ns !== memberNs) {
+  if (ns !== "" && ns !== member.namespace) {
     return {
       found: `${where} has kind "${kind}", named "${name}", pinned to namespace "${ns}".`,
-      reason: `a rendered object declares metadata.namespace "${ns}", outside the member namespace "${memberNs}" — it escapes the member's namespace confinement.`,
+      reason: `a rendered object declares metadata.namespace "${ns}", outside the member namespace "${member.namespace}" — it escapes the member's namespace confinement.`,
       fieldPath: "metadata.namespace", value: ns,
     };
+  }
+  // The alias-metadata claim: a ServiceAccount may claim the tenant's own guid or nothing. The
+  // `tenant-eso-<stage>` Vault login lifts this annotation into its alias metadata and the role's
+  // policy admits `<stage>/tenants/{{metadata.tenant}}`, so another guid is another tenant's entry —
+  // the same clause the member's admission policy refuses on the cluster, held here at the render.
+  if (kind === "ServiceAccount") {
+    const claim = tenantClaimOf(raw);
+    if (claim !== null && claim !== member.guid) {
+      return {
+        found: `${where} has kind "ServiceAccount", named "${name}", annotated ${VAULT_ALIAS_TENANT_ANNOTATION}: "${cap(claim)}".`,
+        reason: `a ServiceAccount in ${member.namespace} may claim ${VAULT_ALIAS_TENANT_ANNOTATION} only as ${member.guid} — the alias metadata is what tenant-eso-<stage> binds the tenant's Vault entry by, so another guid is another tenant's secrets.`,
+        fieldPath: `metadata.annotations['${VAULT_ALIAS_TENANT_ANNOTATION}']`, value: claim,
+      };
+    }
   }
   if (CLUSTER_SCOPED_FORBIDDEN.has(kind)) {
     return {
@@ -270,11 +300,13 @@ function evaluate(kind: string, name: string, raw: Record<string, unknown> | nul
 }
 
 /** All rendered docs of one fan-out render, tagged with its name for the expected/found/reason sentences and with the
- *  MEMBER namespace those docs were rendered into — the fence T3 holds them to. The engine and front
+ *  MEMBER namespace those docs were rendered into — the fence T3 holds them to — and the tenant's
+ *  guid, the one value a ServiceAccount's alias-metadata claim may carry. The engine and front
  *  renders of one app carry the same `namespace`, because they deploy into the one member namespace. */
 export interface MemberDocs {
   member: string;
   namespace: string;
+  guid: string;
   docs: readonly RenderedDoc[];
 }
 
@@ -288,14 +320,14 @@ export function gateT3Isolation(docsByMember: readonly MemberDocs[]): GateResult
     `the namespace its own member deploys into (${namespaces.join(", ") || "none"}), a sibling member of ` +
     `the same tenant included; the only cluster-scoped kind permitted is Namespace; no ` +
     `Application/ApplicationSet/AppProject, no Role/RoleBinding, no inline Secret, with List aggregates ` +
-    `expanded.`;
+    `expanded; a ServiceAccount claims ${VAULT_ALIAS_TENANT_ANNOTATION} only as the tenant's own guid.`;
   let total = 0;
   for (const m of docsByMember) {
     for (let i = 0; i < m.docs.length; i++) {
       const doc = m.docs[i];
       if (!doc) continue;
       total++;
-      const v = evaluate(doc.kind, doc.name, asRecord(doc.raw), `member "${m.member}" document #${i}`, m.namespace);
+      const v = evaluate(doc.kind, doc.name, asRecord(doc.raw), `member "${m.member}" document #${i}`, { namespace: m.namespace, guid: m.guid });
       if (v) {
         const evidence: GateEvidence[] = [
           { source: "rendered", kind: v.kind ?? doc.kind, name: v.name ?? doc.name, fieldPath: v.fieldPath, value: clip(v.value) },
@@ -310,7 +342,7 @@ export function gateT3Isolation(docsByMember: readonly MemberDocs[]): GateResult
   return {
     id: "T3", title: "isolation", severity: "hard", status: "pass",
     expected,
-    found: `all ${total} rendered document(s) stay inside their own member's namespace fence across ${namespaces.length} member namespace(s): no forbidden cluster-scoped, control-plane, RBAC, or inline-Secret kind (List aggregates expanded).`,
+    found: `all ${total} rendered document(s) stay inside their own member's namespace fence across ${namespaces.length} member namespace(s): no forbidden cluster-scoped, control-plane, RBAC, or inline-Secret kind, no ServiceAccount claiming another tenant's guid (List aggregates expanded).`,
     reason: null, detail: "namespace fence held",
   };
 }
@@ -348,13 +380,13 @@ export function gateT4Apps(input: AppsCheckInput): GateResult {
     if (input.standingMembers.includes(app.name)) {
       return t4Reject(
         `app "${cap(app.name)}" is also a standing member of this tenant.`,
-        `the standing member and the app are both named <guid>-${cap(app.name)}, so the app would claim the member's own namespace and its Application <guid>-${cap(app.name)}-<stage> and silently overwrite it; the plan is rejected.`,
+        `the standing member and the app are both named <guid>-${cap(app.name)}-<stage>, so the app would claim the member's own namespace and its Application and silently overwrite it; the plan is rejected.`,
       );
     }
     if (seen.has(app.name)) {
       return t4Reject(
         `app "${cap(app.name)}" appears more than once in apps[].`,
-        `each member is keyed by app name; a duplicate would collide on the namespace <guid>-${cap(app.name)}, so the plan is rejected.`,
+        `each member is keyed by app name; a duplicate would collide on the namespace <guid>-${cap(app.name)}-<stage>, so the plan is rejected.`,
       );
     }
     seen.add(app.name);

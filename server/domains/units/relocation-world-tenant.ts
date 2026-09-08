@@ -84,7 +84,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
     const applyIsolation = async (c: StepCtx, target: TargetCluster, memberNames: string[], applications: string[]): Promise<void> => {
       const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(target.clusterId);
       for (const member of memberNames) {
-        await projectWriter.applyAppProject(argoNamespace, renderTenantAppProject({ guid: tc.guid, member, argoNamespace, catalogRepoUrl: ports.catalogRepoUrl, platformRepoURL: ports.platformRepoURL, cluster: target.cluster }));
+        await projectWriter.applyAppProject(argoNamespace, renderTenantAppProject({ guid: tc.guid, member, stage: tc.stage, argoNamespace, catalogRepoUrl: ports.catalogRepoUrl, platformRepoURL: ports.platformRepoURL, cluster: target.cluster }));
         // The member's admission boundary moves WITH the member, exactly as the consumer world
         // carries its policy: the target's ApplicationSet stamps the same labels off the same
         // registration, so the target policy admits the same managed namespace the source's did.
@@ -107,9 +107,9 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       sourceCluster: (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.cluster ?? "",
       // Every tenant has its auth member, and every member sits one level below the subdomain — so
       // the auth host is the probe target that exists for EVERY tenant.
-      publicHost: tenantMemberHost(tc.identityProvider, tc.subdomain, await ports.resolveUnitApex(tc.domain, tc.stage)),
-      namespaces: tenantNamespaces(allMembers, tc.guid),
-      homeNamespace: memberNamespace(tc.guid, tc.identityProvider),
+      publicHost: tenantMemberHost(tc.identityProvider, tc.stage, tc.subdomain, await ports.resolveUnitApex(tc.domain, tc.stage)),
+      namespaces: tenantNamespaces(allMembers, tc.guid, tc.stage),
+      homeNamespace: memberNamespace(tc.guid, tc.identityProvider, tc.stage),
       setQuiesced: (q, runId) => ports.registrations.setTenantQuiesced(tc.stage, tc.guid, q, runId),
       readRegistrationYaml: async () => serializePointer(TenantRegistrationSchema, await readRegistration(ports, tc.stage, tc.guid)),
       watchConverged: async (c, clusterId, intent) => watchSet(tenantApplicationSet(allMembers, tc.guid, tc.stage))(c, clusterId, intent),
@@ -130,7 +130,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         // this cluster can carry one from an earlier move away from it — and a mark left behind would
         // make the next ordinary offboard keep that member's databases. Clear it wherever a namespace
         // stands; on a first arrival ArgoCD has not created them yet and there is nothing to clear.
-        for (const ns of tenantNamespaces(members, tc.guid)) {
+        for (const ns of tenantNamespaces(members, tc.guid, tc.stage)) {
           if ((await clusterReader.smoke(ns)).namespaceExists) {
             await clusterReader.annotateNamespace(ns, { [CLAIM_RELOCATING_ANNOTATION]: null });
           }
@@ -151,7 +151,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         // namespace cannot finish terminating while a claim inside it still holds the provisioner's
         // finalizer.
         const { clusterReader } = await ports.resolver.resolve(tc.clusterId);
-        const sourceNamespaces = tenantNamespaces(allMembers, tc.guid);
+        const sourceNamespaces = tenantNamespaces(allMembers, tc.guid, tc.stage);
         for (const ns of sourceNamespaces) {
           await clusterReader.annotateNamespace(ns, { [CLAIM_RELOCATING_ANNOTATION]: "true" });
         }
@@ -164,8 +164,10 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         const entry = TenantRegistrationSchema.parse(parseYaml(registrationYaml));
         // Re-committed AT THE TARGET, closed: the fan-out deploys quiesced, the claims provision
         // empty stores, and open-access lifts it only after the data is back and verified.
+        // The tenant's OWN stage: the dump is re-committed at the path it was dumped from, on the
+        // target cluster, whatever stage that cluster's map carries.
         const { commit } = await ports.registrations.commitTenant({
-          stage: target.stage,
+          stage: tc.stage,
           guid: tc.guid,
           registration: { ...entry, cluster: target.cluster, quiesced: true },
           runId: c.runId,
@@ -199,14 +201,16 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         }
         c.log("meta", `source fan-out for ${tc.guid} is pruned (${names.length} Application(s)) — the source released the tenant`);
       },
-      dnsRecordName: async (_c, target) => tenantWildcardHost(tc.subdomain, await ports.resolveUnitApex(target.domain, target.stage)),
+      // The chain is (the TARGET cluster's domain, the TENANT's stage).
+      dnsRecordName: async (_c, target) => tenantWildcardHost(tc.subdomain, await ports.resolveUnitApex(target.domain, tc.stage)),
       verifyCompletenessExtra: async (c, target) => {
         // The crypto material never travels (Vault is one shared mount) — what must be PROVEN is
         // that the target's ESO materialized it, or every member boots into SecretSyncedError.
         const { clusterReader } = await ports.resolver.resolve(target.clusterId);
-        const key = await clusterReader.readSecretValue(memberNamespace(tc.guid, tc.identityProvider), TENANT_SECRET, "AUTH_JWT_PUBLIC_KEY");
+        const idpNamespace = memberNamespace(tc.guid, tc.identityProvider, tc.stage);
+        const key = await clusterReader.readSecretValue(idpNamespace, TENANT_SECRET, "AUTH_JWT_PUBLIC_KEY");
         if (key === null) {
-          throw errValidation(`the tenant's crypto material did not materialize on ${target.cluster} (${TENANT_SECRET} in ${memberNamespace(tc.guid, tc.identityProvider)} has no AUTH_JWT_PUBLIC_KEY) — the identity would not survive, aborting before DNS`);
+          throw errValidation(`the tenant's crypto material did not materialize on ${target.cluster} (${TENANT_SECRET} in ${idpNamespace} has no AUTH_JWT_PUBLIC_KEY) — the identity would not survive, aborting before DNS`);
         }
         c.log("meta", `crypto material verified on ${target.cluster} — the tenant keeps its identity (same Vault entry, same keys)`);
       },
@@ -215,16 +219,18 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         const members = allMembers;
         let deleted = 0;
         for (const member of members) {
-          if ((await projectWriter.deleteAppProject(argoNamespace, memberAppProject(tc.guid, member))).deleted) deleted++;
+          if ((await projectWriter.deleteAppProject(argoNamespace, memberAppProject(tc.guid, member, tc.stage))).deleted) deleted++;
           // The member's admission policy goes with its AppProject — cluster-scoped, so nothing else
           // ever reaps it, and the target cluster carries its own copy since provision-target.
-          await clusterReader.deleteAdmissionPolicy(tenantMemberAdmissionPolicyName(tc.guid, member));
+          await clusterReader.deleteAdmissionPolicy(tenantMemberAdmissionPolicyName(tc.guid, member, tc.stage));
         }
         const grantRemoved = await deleteTenantArgoSync(ports, tc.guid, argoNamespace);
         // The namespaces by LABEL, unioned with the derivable names — the same complete reap the
-        // purge makes, because a member nobody records still carries the label.
-        const labelled = await clusterReader.listNamespaces(tenantSelector(tc.guid));
-        const namespaces = [...new Set([...labelled, ...members.map((m) => memberNamespace(tc.guid, m))])];
+        // purge makes, because a member nobody records still carries the label. The label names the
+        // guid alone, so the labelled set is narrowed to THIS stage's suffix: a sibling stage of the
+        // same tenant on the source cluster is not moving and keeps its namespaces.
+        const labelled = (await clusterReader.listNamespaces(tenantSelector(tc.guid))).filter((ns) => ns.endsWith(`-${tc.stage}`));
+        const namespaces = [...new Set([...labelled, ...members.map((m) => memberNamespace(tc.guid, m, tc.stage))])];
         const gone: string[] = [];
         for (const ns of namespaces) {
           if ((await clusterReader.deleteNamespace(ns)).deleted) gone.push(ns);
@@ -232,7 +238,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         c.log("meta", `source cluster cleared for ${tc.guid} — ${deleted} AppProject(s) + the admission policies deleted, argo-sync grant ${grantRemoved ? "deleted" : "already absent"}, ${gone.length} of ${namespaces.length} namespace(s) deleted`);
       },
       record: async (c, target) => {
-        const entry = await ports.registrations.readTenant(target.stage, tc.guid);
+        const entry = await ports.registrations.readTenant(tc.stage, tc.guid);
         const appNames = entry?.entry.apps.map((a) => a.name) ?? apps;
         localTx(c, (tx) => {
           tx.update(tenants).set({ clusterId: target.clusterId, status: "active", suspended: false, lastRunId: c.runId, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();

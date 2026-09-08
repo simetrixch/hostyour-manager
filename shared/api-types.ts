@@ -785,15 +785,18 @@ export interface SkippedConsumerPointerView {
  *
  *  Unlike DetectedConsumerView there is no `pointer`: there is nothing to claim anything, so every
  *  field here is a LIVE READ of the cluster. The three that aim a purge — clusterId, name, stage — are
- *  the G1 identity (the namespace IS the consumer name), which is why a purge can reach this without a
+ *  the identity the namespace `<name>-<stage>` spells, which is why a purge can reach this without a
  *  row and without a registration. ADOPT cannot: it reconstructs the inventory row FROM the
  *  registration, and there is none. */
 export interface ClusterOrphanConsumerView {
-  /** The namespace name, which IS the consumer name (G1). */
+  /** The consumer name — the namespace minus its `-<stage>` suffix. For a labelled namespace whose
+   *  name ends in no stage of STAGE (nothing this platform composes) it is the whole namespace, and
+   *  `stage` is null: the row is listed so the operator sees it, and no purge is offered, because
+   *  no (name, stage) aims one. */
   name: string;
-  stage: Stage;
-  clusterId: string;
-  domain: string;
+  /** The namespace as the cluster reports it. */
+  namespace: string; stage: Stage | null;
+  clusterId: string; domain: string;
   /** How many of the namespace's workloads have at least one ready replica, out of how many it holds.
    *  `running > 0` is what separates a consumer that is SERVING from an empty namespace an offboard
    *  left behind — the difference between a leak and a leftover, and the operator decides differently
@@ -934,3 +937,10 @@ export type RunTenantStateView =
 export interface ChannelStagesView {
   channelStages: Partial<Record<ReleaseChannel, Stage[]>>;
 }
+
+/** POST /api/consumers/prefill — what the onboard wizard fills its Version and Channel fields with
+ *  before the operator confirms them, read off the consumer's repository: `package.json` `version`
+ *  when it is in the release grammar, else the chart's `Chart.yaml` `appVersion`, else `0.1.0`;
+ *  the channel is `stable`. Each value names its SOURCE in a sentence the wizard prints as the
+ *  field's hint, so the operator sees whether the number was read or defaulted. Both stay editable. */
+export interface OnboardPrefillView { version: string; versionSource: string; channel: ReleaseChannel; channelSource: string }

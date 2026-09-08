@@ -139,19 +139,18 @@ export const apps = sqliteTable("apps", {
   // and what a unit runs is read off its Application's spec (server/domains/units/live-recon.ts
   // driftOf). A column here would have no writer with anything true to write, and calling one the pin is
   // what made the Consumers card cry "Drift" at two converged consumers.
-  // Which stage this consumer runs at on `clusterId` — copied from the cluster's own row so a reader
-  // of the inventory needs no join, and part of the upsert key. A cluster carries exactly ONE stage
-  // and a registration for stage X may only name a cluster marked X (domains/units/registrations.ts
-  // assertClusterStage), so a unit deployed at two stages stands on two clusters and (clusterId, name)
-  // already separates its rows; carrying the stage in the key states that identity outright instead of
-  // leaving it implied by the cluster row.
+  // The UNIT's stage — the operator's input at the onboarding, stated by the registration path
+  // registrations/<name>/<stage>.yaml, and the second half of the row's identity: a unit stands at
+  // one stage in exactly one place, so (name, stage) is the unique key and `clusterId` is a fact the
+  // row records, never a key. The cluster's own `stage` column is the platform's and says nothing
+  // about a unit: one unit may stand at test and at prod on one cluster, two rows with one clusterId.
   //
   // NOT NULL, because the one INSERT of this table cannot produce a null and a null would break it:
   // every row is written by upsertAppRow (domains/units/onboard-steps.ts), whose AppRowValues
   // carries the stage, and the remaining writers only flip status or clusterId. SQLite treats NULLs as
-  // DISTINCT in a unique index, so a null-stage row would sit outside apps_cluster_name_stage_uq
-  // entirely, while upsertAppRow looks the existing row up with `stage = ?` — which never matches a
-  // NULL. That one writer would then insert a second row beside the first on every run.
+  // DISTINCT in a unique index, so a null-stage row would sit outside apps_name_stage_uq entirely,
+  // while upsertAppRow looks the existing row up with `stage = ?` — which never matches a NULL. That
+  // one writer would then insert a second row beside the first on every run.
   stage: text("stage", { enum: STAGE }).notNull(),
   repoUrl: text("repo_url"),                                       // the consumer repo URL
   chartPath: text("chart_path"),                                   // path to the Helm chart inside the repo
@@ -164,12 +163,15 @@ export const apps = sqliteTable("apps", {
   lastRunId: text("last_run_id"),
   status: text("status", { enum: APP_STATUS }).notNull().default("active"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
-}, (t) => [uniqueIndex("apps_cluster_name_stage_uq").on(t.clusterId, t.name, t.stage)]);
+}, (t) => [uniqueIndex("apps_name_stage_uq").on(t.name, t.stage)]);
 
 // A tenant (multi-app package) deployed on a cluster. Unlike a consumer `apps` row, a tenant fans
 // out to one ArgoCD Application per MEMBER (auth/jobs/report plus one per app), each in its own
-// namespace <guid>-<member>, so it carries the guid identity instead of a single repoUrl/chartPath. The row
-// is mutable (suspend/resume field-flips, add-app), unlike the append-once `apps` row — hence updatedAt.
+// namespace <guid>-<member>-<stage>, so it carries the guid identity instead of a single
+// repoUrl/chartPath. Unique on (guid, stage), the tenant twin of the consumer key: a tenant may stand
+// at several stages under one guid, each row its own, and the cluster is a fact the row records. The
+// row is mutable (suspend/resume field-flips, add-app), unlike the append-once `apps` row — hence
+// updatedAt.
 // Written by the create-tenant Run's `record-provisional` step (the FIRST writer — it records INTENT
 // before any git/kube mutation, status "provisioning", so a run that dies mid-way still leaves a row
 // every removal run kind can name) and settled to "active" by its `record-inventory` step; read by
@@ -217,7 +219,7 @@ export const tenants = sqliteTable("tenants", {
   adminCheckedAt: integer("admin_checked_at", { mode: "timestamp_ms" }),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(now),
-}, (t) => [uniqueIndex("tenants_cluster_guid_uq").on(t.clusterId, t.guid)]);
+}, (t) => [uniqueIndex("tenants_guid_stage_uq").on(t.guid, t.stage)]);
 
 // A single app inside a tenant's guid × apps[] matrix (Application <guid>-<name>-<stage>). One row
 // per entry in the tenant pointer's apps[]. Written by the create-tenant Run's `record-provisional`

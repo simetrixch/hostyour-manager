@@ -17,7 +17,6 @@ import { registerTenantRoutes } from "./api.ts";
 import { makeTenantPurgeDef } from "./tenant-purge.run.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
@@ -84,7 +83,6 @@ function seedTenantRow(status: TenantStatus): void {
 /** A cluster-marking resolver that answers every cluster short name at "prod" — the whole suite targets
  *  s1/prod, so a single-stage stand-in is all TenantRegistrations needs to satisfy commitTenant's stage
  *  boundary check. */
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** The tenant as it stands in GitOps — committed through the real registrations, so the guard reads exactly
  *  the bytes a create-tenant would have written. Its presence is the second half of the question the
@@ -122,7 +120,7 @@ function lifecyclePorts(registrations: TenantRegistrations, clusterReader: FakeC
  *  purge issued neither. */
 async function makeTenant(): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string; registrations: TenantRegistrations; cluster: FakeClusterReader }> {
   const store = new CredentialStore({ db: db.db, logger });
-  const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTER_STAGE);
+  const reg = new TenantRegistrations(new FakePlatformRepo());
   const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
   const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [makeTenantPurgeDef(lifecyclePorts(reg, cluster))]), sshFactory: noSsh, actor: () => "op_system" });
   const session = new SessionCodec(db.db, config);
@@ -320,7 +318,7 @@ describe("the same refusal is BELTED in attest-target, so approving a stale plan
     // The backstop reap deletes ONE namespace per member (the trio + the tenant's apps) — never a bare
     // <guid> namespace, which does not exist under the per-member model.
     const members = [...TEST_MEMBERS, ...reg.apps.map((a) => a.name)];
-    expect(cluster.deletedNamespaces).toEqual(members.map((m) => memberNamespace(GUID, m)));
+    expect(cluster.deletedNamespaces).toEqual(members.map((m) => memberNamespace(GUID, m, "prod")));
     // The rows moved, and only at the END: the record step is the last one, after every reap and after
     // the crypto delete, so "purged" states a deprovision that actually ran.
     expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()?.status).toBe("purged");

@@ -52,7 +52,7 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         // ServiceClaim, and the prune this removal sets off is what hands those claims to the teardown
         // the mark disarms. It runs before the resume skip too — a resumed run still has to clear it.
         const { clusterReader } = await ports.resolver.resolve(tc.clusterId);
-        await clearRelocationHold(ctx, clusterReader, tenantWatchNamespaces(ctx.db, tc.tenantId, tc.guid), tc.guid);
+        await clearRelocationHold(ctx, clusterReader, tenantWatchNamespaces(ctx.db, tc.tenantId, tc.guid, tc.stage), tc.guid);
         if ((await ports.registrations.scanTenant(tc.stage, tc.guid)).status === "absent") {
           ctx.log("meta", `tenant ${tc.guid} registration already removed — skipping (resume)`);
           return;
@@ -90,13 +90,13 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         // Idempotent: an already-absent project or policy resolves deleted:false.
         const tc = loadTenantCluster(ctx.db, tenantId);
         const members = tenantWatchMembers(ctx.db, tc.tenantId);
-        const names = members.map((m) => memberAppProject(tc.guid, m));
+        const names = members.map((m) => memberAppProject(tc.guid, m, tc.stage));
         const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
         let deleted = 0;
         let policiesDeleted = 0;
         for (const member of members) {
-          if ((await projectWriter.deleteAppProject(argoNamespace, memberAppProject(tc.guid, member))).deleted) deleted++;
-          if ((await clusterReader.deleteAdmissionPolicy(tenantMemberAdmissionPolicyName(tc.guid, member))).deleted) policiesDeleted++;
+          if ((await projectWriter.deleteAppProject(argoNamespace, memberAppProject(tc.guid, member, tc.stage))).deleted) deleted++;
+          if ((await clusterReader.deleteAdmissionPolicy(tenantMemberAdmissionPolicyName(tc.guid, member, tc.stage))).deleted) policiesDeleted++;
         }
         // The inverse of create-tenant's provision-argo-sync, in the same namespace and the same step
         // as the projects: a Role naming this guid's Applications must not outlive the guid.

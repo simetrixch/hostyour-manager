@@ -12,17 +12,16 @@ export interface RelocationTargetView {
 }
 
 /** The target picker of the two relocation run kinds that need one: MOVE takes the unit to a
- *  DIFFERENT active cluster of its own stage, RESTORE rebuilds it on any active cluster of that
- *  stage — its own included (the disaster-recovery case). The choices are filtered to what the run
- *  would accept (same stage, active, and for a move never the current cluster), so the dialog can
- *  only aim where assertMovableTo / the target check would let the plan through. Plan-then-approve:
- *  confirming only PLANS the run and opens the Run screen. Reuses the shared .dialog shell. */
+ *  DIFFERENT active cluster, RESTORE rebuilds it on any active cluster — its own included (the
+ *  disaster-recovery case). The unit keeps its own stage through either, whatever stage the cluster
+ *  carries. The choices are filtered to what the run would accept (active, and for a move never the
+ *  current cluster), so the dialog can only aim where assertMovableTo / the target check would let
+ *  the plan through. Plan-then-approve: confirming only PLANS the run and opens the Run screen.
+ *  Reuses the shared .dialog shell. */
 export function RelocationTargetDialog(props: {
   title: string;
   kind: "move" | "restore";
   confirmLabel: string;
-  /** The unit's stage — the boundary a relocation never crosses. */
-  stage: string;
   /** The unit's current cluster — excluded for a move (source ≠ target). */
   currentClusterId: string;
   loadTargets: () => Promise<RelocationTargetView[]>;
@@ -55,9 +54,7 @@ export function RelocationTargetDialog(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const admitted = (targets ?? []).filter(
-    (t) => t.status === "active" && t.stage === props.stage && (props.kind === "restore" || t.id !== props.currentClusterId),
-  );
+  const admitted = (targets ?? []).filter((t) => t.status === "active" && (props.kind === "restore" || t.id !== props.currentClusterId));
 
   return (
     <div className="dialog-backdrop" onClick={props.onCancel}>
@@ -73,19 +70,20 @@ export function RelocationTargetDialog(props: {
             </p>
           )}
           <label className="field" htmlFor={selectId}>
-            <span className="field__label">Target cluster ({props.stage} only)</span>
+            <span className="field__label">Target cluster</span>
             <select id={selectId} className="field__input" value={clusterId} onChange={(e) => setClusterId(e.target.value)}>
               <option value="">— choose a cluster —</option>
               {admitted.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.domain} · {t.stage}
+                  {t.domain} (platform {t.stage})
                 </option>
               ))}
             </select>
+            <span className="field__hint">Any active cluster — the unit keeps its own stage; the cluster&apos;s stage is the platform&apos;s.</span>
           </label>
           {targets !== null && admitted.length === 0 && (
             <p className="note">
-              No admissible target: a {props.kind} needs an ACTIVE {props.stage} cluster{props.kind === "move" ? " other than the unit's own" : ""}.
+              No admissible target: a {props.kind} needs an ACTIVE cluster{props.kind === "move" ? " other than the unit's own" : ""}.
             </p>
           )}
         </div>

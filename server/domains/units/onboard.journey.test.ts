@@ -10,7 +10,8 @@ import { CredentialStore } from "../../security/store.ts";
 import { buildRunDefinitions } from "../../domains/runs/run-definitions.ts";
 import { getRun, readEvents } from "../../executor/read.ts";
 import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { CHANNEL_STAGES } from "./onboard.fixture.ts";
+import { Registrations } from "./registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
@@ -32,9 +33,6 @@ const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh in the onboard journey"));
 const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {} };
 
-// Every fixture onboards to the prod stage, so a fixed resolver answers every cluster with "prod" —
-// the stage boundary Registrations.commitRegistration checks before it ever writes a stage file.
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` — onboard's planStream
  *  resolves OnboardParams.unitApex from exactly this chain (admission-policy.ts unitApexFromChain),
@@ -86,7 +84,8 @@ function fakePorts(over: Partial<OnboardPorts> = {}): OnboardPorts {
   return {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
     runner: new FakeGateRunner({ report: report(g1Pass, "pass") }),
-    registrations: new Registrations(platform, prodClusterStage),
+    registrations: new Registrations(platform),
+    channelStages: async () => CHANNEL_STAGES,
     resolveBuildPlaneFqdn: seedClusterMaps(platform, { "s1.example": "prod" }),
     seeder: noSeeder,
     // The steps resolve their kube clients per target cluster; the master path resolves to
@@ -152,7 +151,7 @@ function seedCluster(): void {
 // What the API handler hands the executor AFTER sealing the operator's raw PAT: the request minus
 // repoPat plus the sealed reference (OnboardPlanRequest). sealPat mirrors that handler here.
 // {version, channel} — the run TRIGGERS the release; it never carries a ref or a tag.
-const REQUEST = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart" };
+const REQUEST = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart" };
 
 async function sealPat(store: CredentialStore): Promise<string> {
   const ref = await store.seal({ kind: "pat", label: "consumer repo PAT (acme)", plaintext: Buffer.from("github_pat_journey", "utf8"), fingerprint: "sha256:test" });
@@ -193,7 +192,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const github = ports.github as FakeGitHubConsumer;
     expect(github.dispatches).toHaveLength(1);
     expect(github.dispatches[0]!.inputs).toEqual({ version: "1.0.0", channel: "stable", stage: "prod" });
-    expect((ports.dns as FakeDnsProvider).record("acme.example.com", "A")).toBe("203.0.113.10");
+    expect((ports.dns as FakeDnsProvider).record("acme-prod.example.com", "A")).toBe("203.0.113.10");
   });
 
   it("a rejected validation settles the run failed with no steps and no inventory", async () => {
@@ -268,7 +267,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const call = activator.calls[0]!;
     const mintedToken = seeder.seeded[0]!.data["AUTH_BOOTSTRAP_TOKEN"]!;
     // The unit's ONE host, <name>.<unitApex> — the same composition the admission policy pins.
-    expect(call.url).toBe("https://acme.example.com/api/v1/bootstrap/invite-admin");
+    expect(call.url).toBe("https://acme-prod.example.com/api/v1/bootstrap/invite-admin");
     expect(call.token).toBe(mintedToken);
     expect(call.body).toEqual({ email: "admin@acme.test" });
 

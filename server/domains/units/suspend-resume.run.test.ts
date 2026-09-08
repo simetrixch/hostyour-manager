@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeSuspendDef, makeResumeDef } from "./suspend-resume.run.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import type { LifecyclePorts } from "./lifecycle.ts";
@@ -19,9 +19,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-// Every fixture runs on the prod stage, so a fixed resolver answers every cluster with "prod" — the
-// stage boundary Registrations.commitRegistration checks before it ever writes a stage file.
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** Commit acme's STAGE registration on s1.example/prod, `suspended` at the given state — what
  *  suspend/resume flips a field on, not a file it moves between directories. */
@@ -68,7 +65,7 @@ function seedApp(status: "active" | "suspended"): void {
 describe("suspend run", () => {
   it("flips the registration to suspended, waits for the off render to converge, and marks the row suspended", async () => {
     seedApp("active");
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg);
 
     // suspend does NOT prune — it is a field flip, and the render still converges Synced/Healthy
@@ -83,7 +80,7 @@ describe("suspend run", () => {
 
   it("plans with app targetKind and the git-branch/master-kube locks", async () => {
     seedApp("active");
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     const plan = await makeSuspendDef(ports(reg, { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" })).plan({ appId: "app_1" }, { db: db.db });
     expect(plan.targetKind).toBe("app");
     // The row moves BEFORE the commit: from the flip onward the inventory and the registration
@@ -103,7 +100,7 @@ describe("suspend run", () => {
 describe("resume run", () => {
   it("flips the registration back to running, waits for Synced/Healthy at the pin, and marks the row active", async () => {
     seedApp("suspended");
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg, { suspended: true }); // start suspended
 
     const logs: string[] = [];
@@ -117,7 +114,7 @@ describe("resume run", () => {
 
   it("resume fails when ArgoCD never re-converges on the running render", async () => {
     seedApp("suspended");
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg, { suspended: true });
     const steps = makeResumeDef(ports(reg, { syncRevision: SHA, targetRevision: null, sync: "OutOfSync", health: "Progressing" })).steps({ appId: "app_1" });
     await steps[0]!.run(ctx("run_res", "attest-target", []));

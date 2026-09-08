@@ -55,7 +55,7 @@ export function makeRestoreDef(ports: ConsumerRelocationPorts): RunDefinition<Re
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: async (params, { db }) => {
       const ac = loadAppCluster(db, params.appId);
-      const target = loadActiveTargetCluster(db, params.targetClusterId, ac.stage);
+      const target = loadActiveTargetCluster(db, params.targetClusterId);
       const stepDefs = restoreSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, "restored consumer");
       return {
         kind: "consumer-restore",
@@ -80,7 +80,7 @@ export function makeTenantRestoreDef(ports: TenantRelocationPorts): RunDefinitio
     mutating: true,
     plan: async (params, { db }) => {
       const tc = loadTenantCluster(db, params.tenantId);
-      const target = loadActiveTargetCluster(db, params.targetClusterId, tc.stage);
+      const target = loadActiveTargetCluster(db, params.targetClusterId);
       const stepDefs = restoreSteps(ports, tenantWorld(ports, params.tenantId), params.targetClusterId, "restored tenant");
       return {
         kind: "tenant-restore",

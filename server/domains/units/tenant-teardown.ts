@@ -251,7 +251,7 @@ export function tenantTeardownSteps(ports: TenantLifecyclePorts, t: TenantTeardo
         // removal sets off hands those claims to the teardown the mark disarms, and a purge reaps a
         // tenant whose pointer is already gone the same way.
         const { clusterReader } = await ports.resolver.resolve(t.clusterId);
-        await clearRelocationHold(ctx, clusterReader, t.members.map((m) => memberNamespace(t.guid, m)), t.guid);
+        await clearRelocationHold(ctx, clusterReader, t.members.map((m) => memberNamespace(t.guid, m, t.stage)), t.guid);
         if ((await ports.registrations.scanTenant(t.stage, t.guid)).status === "absent") {
           ctx.log("meta", `${settled} ${t.guid} pointer already removed — skipping (resume)`);
           return;
@@ -318,12 +318,12 @@ export function tenantTeardownSteps(ports: TenantLifecyclePorts, t: TenantTeardo
         // re-onboard's managed namespace under a fresh Application name.
         // Idempotent: an already-absent project or policy resolves deleted:false (a re-run / the orphan case).
         const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(t.clusterId);
-        const names = t.members.map((m) => memberAppProject(t.guid, m));
+        const names = t.members.map((m) => memberAppProject(t.guid, m, t.stage));
         let deleted = 0;
         let policiesDeleted = 0;
         for (const member of t.members) {
-          if ((await projectWriter.deleteAppProject(argoNamespace, memberAppProject(t.guid, member))).deleted) deleted++;
-          if ((await clusterReader.deleteAdmissionPolicy(tenantMemberAdmissionPolicyName(t.guid, member))).deleted) policiesDeleted++;
+          if ((await projectWriter.deleteAppProject(argoNamespace, memberAppProject(t.guid, member, t.stage))).deleted) deleted++;
+          if ((await clusterReader.deleteAdmissionPolicy(tenantMemberAdmissionPolicyName(t.guid, member, t.stage))).deleted) policiesDeleted++;
         }
         // The tenant's argo-sync grant lives in the same namespace and goes the same way: it names
         // Application names, and a Role naming this guid's Applications must not outlive the guid.
@@ -365,7 +365,7 @@ export function tenantTeardownSteps(ports: TenantLifecyclePorts, t: TenantTeardo
         // row already records decides both whether it may be written and what this step logs.
         const row =
           (t.tenantId === null ? null : ctx.db.select({ id: tenants.id, status: tenants.status }).from(tenants).where(eq(tenants.id, t.tenantId)).get() ?? null) ??
-          ctx.db.select({ id: tenants.id, status: tenants.status }).from(tenants).where(and(eq(tenants.clusterId, t.clusterId), eq(tenants.guid, t.guid))).get() ??
+          ctx.db.select({ id: tenants.id, status: tenants.status }).from(tenants).where(and(eq(tenants.guid, t.guid), eq(tenants.stage, t.stage))).get() ??
           null;
         if (row === null) {
           ctx.log("meta", `${settled} ${t.guid} had no inventory row — nothing to record (orphan)`);

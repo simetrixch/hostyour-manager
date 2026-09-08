@@ -11,7 +11,8 @@ export const TENANT_COLUMNS = {
   subdomain: tenants.subdomain,
   clusterId: tenants.clusterId,
   domain: clusters.domain,
-  stage: clusters.stage,
+  // The tenant's OWN stage — the row's, never the cluster's, whose stage is the platform's.
+  stage: tenants.stage,
   // The member set and which of them is the IdP: every view that names a namespace, an AppProject or
   // the tenant's auth host derives it from these two, so they belong in the one projection.
   members: tenants.members,

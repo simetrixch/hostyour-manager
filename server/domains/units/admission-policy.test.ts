@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderTenantMemberAdmissionPolicy, unitApexFromChain, tenantMemberAdmissionPolicyName, TENANT_MANAGED_LABEL } from "./admission-policy.ts";
+import { renderTenantMemberAdmissionPolicy, unitApexFromChain, tenantMemberAdmissionPolicyName, TENANT_MANAGED_LABEL, VAULT_ALIAS_TENANT_ANNOTATION } from "./admission-policy.ts";
 import { TENANT_PROJECT_LABEL } from "../../adapters/kube/port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -35,7 +35,7 @@ describe("unitApexFromChain", () => {
  *  request addresses ("" for a cluster-scoped object), and the object with every server-side stamp
  *  already applied. */
 interface Review {
-  resource: "ingresses" | "services" | "namespaces";
+  resource: "ingresses" | "services" | "namespaces" | "serviceaccounts";
   operation: "CREATE" | "UPDATE";
   namespace: string;
   object: { metadata: { name: string; labels?: Record<string, string>; annotations?: Record<string, string> } };
@@ -113,19 +113,19 @@ function namespaceReview(name: string, trackingId?: string, labels?: Record<stri
 }
 
 // The TENANT MEMBER boundary — the same Namespace clauses with the tenant's own granted set. The
-// member fixtures mirror the tenant fan-out naming: namespace <guid>-<member>, generated Application
-// <guid>-<member>-<stage> (the tracking-id prefix).
+// member fixtures mirror the tenant fan-out naming: namespace <guid>-<member>-<stage>, generated
+// Application of the same name (the tracking-id prefix).
 const GUID = "abc123def456";
 // The IdP member carries the redis-consumer label because the product DECLARES it for that member
 // (TenantMemberSchema.namespaceLabels), not because the platform knows a member called "auth".
 const auth = renderTenantMemberAdmissionPolicy({ guid: GUID, member: "auth", stage: "prod", namespaceLabels: { "platform/redis-consumer": "true" } });
 const jobs = renderTenantMemberAdmissionPolicy({ guid: GUID, member: "jobs", stage: "prod" });
-const authNs = `${GUID}-auth`;
+const authNs = `${GUID}-auth-prod`;
 const authTracking = `${GUID}-auth-prod:/Namespace:/${authNs}`;
 
 describe("renderTenantMemberAdmissionPolicy", () => {
-  it("names the policy tenant-<guid>-<member>, apart from every consumer-<name>, and labels both halves tenant-managed", () => {
-    expect(auth.policy.metadata.name).toBe(tenantMemberAdmissionPolicyName(GUID, "auth"));
+  it("names the policy tenant-<guid>-<member>-<stage>, apart from every consumer-<name>-<stage>, and labels both halves tenant-managed", () => {
+    expect(auth.policy.metadata.name).toBe(tenantMemberAdmissionPolicyName(GUID, "auth", "prod"));
     expect(auth.policy.metadata.name).toBe(`tenant-${authNs}`);
     expect(auth.binding.metadata.name).toBe(auth.policy.metadata.name);
     expect(auth.binding.spec.policyName).toBe(auth.policy.metadata.name);
@@ -139,9 +139,10 @@ describe("renderTenantMemberAdmissionPolicy", () => {
     expect(auth.binding.spec.validationActions).toEqual(["Deny"]);
   });
 
-  it("watches ONLY the Namespace kind — a member's chart is the platform's own, so no Ingress or Service clause", () => {
+  it("watches the Namespace and ServiceAccount kinds alone — a member's chart is the platform's own, so no Ingress or Service clause", () => {
     expect(auth.policy.spec.matchConstraints.resourceRules).toEqual([
       { apiGroups: [""], apiVersions: ["v1"], operations: ["CREATE", "UPDATE"], resources: ["namespaces"] },
+      { apiGroups: [""], apiVersions: ["v1"], operations: ["CREATE", "UPDATE"], resources: ["serviceaccounts"] },
     ]);
     for (const v of auth.policy.spec.validations) {
       expect(v.expression).not.toContain("'ingresses'");
@@ -184,7 +185,7 @@ describe("the fence against the admission request a tenant member sends", () => 
   });
 
   it("admits the redis reach label on the auth member ALONE — no other member may write itself into that NetworkPolicy's selector", () => {
-    const jobsNs = `${GUID}-jobs`;
+    const jobsNs = `${GUID}-jobs-prod`;
     const jobsTracking = `${GUID}-jobs-prod:/Namespace:/${jobsNs}`;
     const stamped = { "platform/tenant": GUID, [TENANT_MANAGED_LABEL]: "true", "platform/db-consumer": "true" };
     expect(admit(jobs, namespaceReview(jobsNs, jobsTracking, stamped))).toEqual({ evaluated: true, denied: [] });
@@ -204,7 +205,12 @@ describe("the fence against the admission request a tenant member sends", () => 
   });
 
   it("DENIES a member creating a sibling's namespace with the own-namespace clause", () => {
-    const review = namespaceReview(`${GUID}-jobs`, `${GUID}-auth-prod:/Namespace:/${GUID}-jobs`);
+    const review = namespaceReview(`${GUID}-jobs-prod`, `${GUID}-auth-prod:/Namespace:/${GUID}-jobs-prod`);
+    expect(admit(auth, review).denied).toContain(`a tenant member may only create its own namespace ${authNs}`);
+  });
+
+  it("DENIES the member's OWN name at another stage — the stage is part of the namespace, so <guid>-auth-test is a foreign namespace to <guid>-auth-prod", () => {
+    const review = namespaceReview(`${GUID}-auth-test`, `${GUID}-auth-prod:/Namespace:/${GUID}-auth-test`);
     expect(admit(auth, review).denied).toContain(`a tenant member may only create its own namespace ${authNs}`);
   });
 
@@ -214,7 +220,54 @@ describe("the fence against the admission request a tenant member sends", () => 
     // the ownership term inside the clauses.
     expect(evaluatesFor(auth, namespaceReview("vault"))).toBe(true);
     expect(admit(auth, namespaceReview("vault"))).toEqual({ evaluated: true, denied: [] });
-    expect(admit(auth, namespaceReview("acme", "acme-prod:/Namespace:/acme"))).toEqual({ evaluated: true, denied: [] });
-    expect(admit(auth, namespaceReview(`${GUID}-jobs`, `${GUID}-jobs-prod:/Namespace:/${GUID}-jobs`))).toEqual({ evaluated: true, denied: [] });
+    expect(admit(auth, namespaceReview("acme-prod", "acme-prod:/Namespace:/acme-prod"))).toEqual({ evaluated: true, denied: [] });
+    expect(admit(auth, namespaceReview(`${GUID}-jobs-prod`, `${GUID}-jobs-prod:/Namespace:/${GUID}-jobs-prod`))).toEqual({ evaluated: true, denied: [] });
+  });
+});
+
+/** A ServiceAccount admission in a member namespace, with whatever alias-metadata claim the chart
+ *  rendered — `undefined` renders no annotation at all. */
+function serviceAccountReview(namespace: string, tenantClaim: string | undefined, operation: "CREATE" | "UPDATE" = "CREATE"): Review {
+  return {
+    resource: "serviceaccounts",
+    operation,
+    namespace,
+    object: {
+      metadata: {
+        name: "example-auth",
+        ...(tenantClaim !== undefined ? { annotations: { [VAULT_ALIAS_TENANT_ANNOTATION]: tenantClaim } } : {}),
+      },
+    },
+  };
+}
+
+describe("the fence against the Vault alias a tenant member's ServiceAccount claims", () => {
+  // tenant-eso-<stage> binds a tenant's Vault entry by the alias metadata its ServiceAccount carries.
+  // A chart that annotated its ServiceAccount with another guid would have ESO sync THAT tenant's
+  // secrets into this namespace — nothing else on the cluster refuses it, so the policy must.
+  const OTHER = "zzzzzzzzzzzz";
+  const message = `a ServiceAccount in ${authNs} may claim ${VAULT_ALIAS_TENANT_ANNOTATION} only as ${GUID}`;
+
+  it("admits a ServiceAccount that claims the member's own guid", () => {
+    expect(admit(auth, serviceAccountReview(authNs, GUID))).toEqual({ evaluated: true, denied: [] });
+  });
+
+  it("DENIES a ServiceAccount claiming another guid, on CREATE and on UPDATE, naming the guid it may claim", () => {
+    for (const operation of ["CREATE", "UPDATE"] as const) {
+      const { evaluated, denied } = admit(auth, serviceAccountReview(authNs, OTHER, operation));
+      expect(evaluated, operation).toBe(true);
+      expect(denied, operation).toHaveLength(1);
+      expect(denied[0]).toContain(message);
+      expect(denied[0]).toContain("another tenant's secrets");
+    }
+  });
+
+  it("admits a ServiceAccount that claims nothing — a member with no Vault reach binds no role", () => {
+    expect(admit(auth, serviceAccountReview(authNs, undefined))).toEqual({ evaluated: true, denied: [] });
+  });
+
+  it("judges no ServiceAccount outside the member's own namespace — a sibling's claim is the sibling policy's business", () => {
+    expect(admit(auth, serviceAccountReview(`${GUID}-jobs-prod`, OTHER))).toEqual({ evaluated: true, denied: [] });
+    expect(admit(auth, serviceAccountReview("acme-prod", OTHER))).toEqual({ evaluated: true, denied: [] });
   });
 });

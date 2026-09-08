@@ -17,18 +17,17 @@ const targets: TenantPlacementTarget[] = [
 ];
 
 describe("tenantPlacement", () => {
-  // The whole point: the stage is NOT an operator choice, it is a property of the cluster
-  // installation (clusters.stage, written by deploy-slave and re-attested against the cluster's
-  // hostyour-cloud-deploy-state ConfigMap by attest-target). Picking the other cluster must therefore move
-  // the stage AND everything derived from it — that is what makes this a read-out rather than a field.
-  it("reads the stage and domain off the chosen cluster — a different cluster is a different stage", () => {
-    expect(tenantPlacement("cl_s1", targets)).toEqual({
-      stage: "prod",
+  // The stage is the TENANT's own, chosen by the operator; the cluster contributes its domain and
+  // nothing else. A test tenant on a prod-marked cluster is the ordinary case, so the read-out must
+  // follow the chosen stage and not the cluster's marking.
+  it("takes the stage from the operator's choice and the domain from the chosen cluster", () => {
+    expect(tenantPlacement("test", "cl_s1", targets)).toEqual({
+      stage: "test",
       domain: "s1.example.com",
-      registrationPath: "registrations/<guid>/prod.yaml",
-      namespaces: ["<guid>-auth", "<guid>-jobs", "<guid>-report"],
+      registrationPath: "registrations/<guid>/test.yaml",
+      namespaces: ["<guid>-auth-test", "<guid>-jobs-test", "<guid>-report-test"],
     });
-    expect(tenantPlacement("cl_dev1", targets)).toMatchObject({ stage: "dev", registrationPath: "registrations/<guid>/dev.yaml" });
+    expect(tenantPlacement("prod", "cl_dev1", targets)).toMatchObject({ stage: "prod", domain: "dev1.example.com", registrationPath: "registrations/<guid>/prod.yaml" });
   });
 
   // The registration path must be the shape the tenant registry actually writes and guards
@@ -36,22 +35,22 @@ describe("tenantPlacement", () => {
   // registrations/<guid>/<stage>.yaml). A read-out the operator cannot check against catalog is
   // worse than none, because it reads as a fact.
   it("names the registration file in the shape the tenant registry writes", () => {
-    const p = tenantPlacement("cl_s1", targets);
+    const p = tenantPlacement("prod", "cl_s1", targets);
     expect(p?.registrationPath).toBe(`registrations/${TENANT_GUID_PLACEHOLDER}/prod.yaml`);
   });
 
   // The namespace rule: a tenant is not one namespace, it is one PER MEMBER (tenant-fanout.ts
-  // `memberNamespace` — <guid>-<member>; there is no bare-guid namespace anywhere any more). With no
+  // `memberNamespace` — <guid>-<member>-<stage>; there is no bare-guid namespace anywhere). With no
   // app picked, the read-out is exactly the mandatory trio, in the server's own order
   // (tenant-fanout.ts TENANT_TRIO), so the wizard's set and the run's own step log name the members
   // identically — and none of them is the bare guid, which would send an operator's kubectl at a
   // namespace that does not exist.
-  it("shows one namespace per trio member — never the bare guid", () => {
-    const p = tenantPlacement("cl_s1", targets);
+  it("shows one namespace per trio member, each carrying the stage — never the bare guid", () => {
+    const p = tenantPlacement("prod", "cl_s1", targets);
     expect(p?.namespaces).toEqual([
-      `${TENANT_GUID_PLACEHOLDER}-auth`,
-      `${TENANT_GUID_PLACEHOLDER}-jobs`,
-      `${TENANT_GUID_PLACEHOLDER}-report`,
+      `${TENANT_GUID_PLACEHOLDER}-auth-prod`,
+      `${TENANT_GUID_PLACEHOLDER}-jobs-prod`,
+      `${TENANT_GUID_PLACEHOLDER}-report-prod`,
     ]);
     expect(p?.namespaces).not.toContain(TENANT_GUID_PLACEHOLDER);
     for (const ns of p?.namespaces ?? []) expect(ns.startsWith(`${TENANT_GUID_PLACEHOLDER}-`)).toBe(true);
@@ -61,13 +60,13 @@ describe("tenantPlacement", () => {
   // same order tenantMembers (tenant-fanout.ts) lists them in, so the read-out and the run's own step
   // log never disagree on which member is which.
   it("appends one namespace per picked app, in order, after the trio", () => {
-    const p = tenantPlacement("cl_s1", targets, ["web", "buildproject"]);
+    const p = tenantPlacement("prod", "cl_s1", targets, ["web", "buildproject"]);
     expect(p?.namespaces).toEqual([
-      `${TENANT_GUID_PLACEHOLDER}-auth`,
-      `${TENANT_GUID_PLACEHOLDER}-jobs`,
-      `${TENANT_GUID_PLACEHOLDER}-report`,
-      `${TENANT_GUID_PLACEHOLDER}-web`,
-      `${TENANT_GUID_PLACEHOLDER}-buildproject`,
+      `${TENANT_GUID_PLACEHOLDER}-auth-prod`,
+      `${TENANT_GUID_PLACEHOLDER}-jobs-prod`,
+      `${TENANT_GUID_PLACEHOLDER}-report-prod`,
+      `${TENANT_GUID_PLACEHOLDER}-web-prod`,
+      `${TENANT_GUID_PLACEHOLDER}-buildproject-prod`,
     ]);
     for (const ns of p?.namespaces ?? []) expect(ns.startsWith(`${TENANT_GUID_PLACEHOLDER}-`)).toBe(true);
   });
@@ -78,7 +77,7 @@ describe("tenantPlacement", () => {
   // would reject as a guid. An example/fabricated identifier here is a string an operator can copy into
   // a Vault path (<stage>/tenants/<guid>) or a kubectl command and act on the wrong tenant with.
   it("fabricates no identifier: what stands in for the guid cannot BE a guid", () => {
-    const p = tenantPlacement("cl_s1", targets);
+    const p = tenantPlacement("prod", "cl_s1", targets);
     expect(guid.safeParse(TENANT_GUID_PLACEHOLDER).success).toBe(false);
     // The placeholder is visible in every place the guid will appear, and no path or namespace carries
     // another guid-shaped run of characters that could be read as one.
@@ -89,13 +88,14 @@ describe("tenantPlacement", () => {
     }
   });
 
-  // Nothing to show is shown as nothing: no cluster picked yet, the targets request still in flight, or
-  // an id no row carries. A partial placement would print `registrations/<guid>/.yaml` — a path that exists
-  // nowhere — under a heading that claims to state where the tenant lands.
-  it("claims no placement before a cluster is chosen, while targets load, or for an unknown cluster", () => {
-    expect(tenantPlacement("", targets)).toBeNull();
-    expect(tenantPlacement("cl_s1", null)).toBeNull();
-    expect(tenantPlacement("cl_s1", [])).toBeNull();
-    expect(tenantPlacement("cl_gone", targets)).toBeNull();
+  // Nothing to show is shown as nothing: no stage or no cluster picked yet, the targets request still
+  // in flight, or an id no row carries. A partial placement would print `registrations/<guid>/.yaml` —
+  // a path that exists nowhere — under a heading that claims to state where the tenant lands.
+  it("claims no placement before a stage and a cluster are chosen, while targets load, or for an unknown cluster", () => {
+    expect(tenantPlacement("", "cl_s1", targets)).toBeNull();
+    expect(tenantPlacement("prod", "", targets)).toBeNull();
+    expect(tenantPlacement("prod", "cl_s1", null)).toBeNull();
+    expect(tenantPlacement("prod", "cl_s1", [])).toBeNull();
+    expect(tenantPlacement("prod", "cl_gone", targets)).toBeNull();
   });
 });

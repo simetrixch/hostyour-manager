@@ -1,13 +1,16 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { ClusterOrphanConsumerView, ConsumerLiveProbeView, DetectedConsumerView, DetectedScanView } from "../../../shared/api-types.ts";
+import type { Stage } from "../../../shared/enums.ts";
 import { probeConsumerLive } from "../api.ts";
 import { LiveReconFacts } from "./LiveReconFacts.tsx";
 
-/** What a purge needs to aim: the G1 identity, which a detected consumer and a cluster orphan both
- *  carry. Typed as the intersection rather than as either view, because the two reach the SAME dialog
- *  and neither of the other fields would be read there. */
+/** What a purge needs to aim: the identity (name + stage, the namespace `<name>-<stage>`) and the
+ *  cluster, which a detected consumer and a cluster orphan with a stage both carry. Typed as the
+ *  intersection rather than as either view, because the two reach the SAME dialog and neither of
+ *  the other fields would be read there. */
 export interface PurgeTarget {
   name: string;
+  stage: Stage;
   clusterId: string;
 }
 
@@ -107,7 +110,8 @@ function DetectedRows({ detected, onAdopt, onPurge }: {
  *  Only PURGE is offered, and the row says why. Adopt reconstructs the inventory row FROM the
  *  registration, and a cluster orphan has none, so an adopt button here would be a button that cannot
  *  work — the operator's route back is to write the registration, which is not something this panel
- *  can do for them. */
+ *  can do for them. A labelled namespace whose name carries no `-<stage>` suffix is listed under its
+ *  full name with NO purge: the purge is keyed on (name, stage), and there is no stage to aim it at. */
 function ClusterOrphanRows({ orphans, onPurge }: {
   orphans: ClusterOrphanConsumerView[];
   onPurge: (t: PurgeTarget) => void;
@@ -115,13 +119,13 @@ function ClusterOrphanRows({ orphans, onPurge }: {
   return (
     <ul className="cards">
       {orphans.map((o) => (
-        <li key={`${o.clusterId}/${o.name}`} className="card servercard">
+        <li key={`${o.clusterId}/${o.namespace}`} className="card servercard">
           <div className="card__head">
             <strong className="servercard__name">{o.name}</strong>
             <span className={o.running > 0 ? "badge badge--failed" : "badge badge--degraded"}>{o.running > 0 ? "serving, untracked" : "leftover namespace"}</span>
           </div>
           <div className="servercard__target">
-            {o.domain} · {o.stage} · namespace {o.name}
+            {o.domain} · {o.stage ?? "no stage in the name"} · namespace {o.namespace}
           </div>
           {/* The live counts, and nothing that could read as a claim: no file said any of this. */}
           <div className="servercard__chips">
@@ -136,13 +140,18 @@ function ClusterOrphanRows({ orphans, onPurge }: {
             {o.running > 0
               ? "This namespace is SERVING and the platform does not know it runs. Nothing on the Consumers list reaches it, and no release, suspend or offboard can address it."
               : "This namespace holds nothing that is ready — the remains of a removal that never finished reaping it."}{" "}
-            Adopt is not offered: it rebuilds the inventory row from the registration, and there is none. To keep this consumer, write its registration and scan again; to remove it, purge.
+            Adopt is not offered: it rebuilds the inventory row from the registration, and there is none.{" "}
+            {o.stage === null
+              ? "Purge is not offered either: the namespace carries no -<stage> suffix, and a purge is aimed at one name at one stage. Remove it by hand."
+              : "To keep this consumer, write its registration and scan again; to remove it, purge."}
           </div>
-          <div className="actions">
-            <button type="button" className="btn btn--danger" onClick={() => onPurge({ name: o.name, clusterId: o.clusterId })}>
-              Purge…
-            </button>
-          </div>
+          {o.stage !== null && (
+            <div className="actions">
+              <button type="button" className="btn btn--danger" onClick={() => onPurge({ name: o.name, stage: o.stage as Stage, clusterId: o.clusterId })}>
+                Purge…
+              </button>
+            </div>
+          )}
         </li>
       ))}
     </ul>

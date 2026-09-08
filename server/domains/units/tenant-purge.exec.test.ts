@@ -10,7 +10,6 @@ import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventor
 import { makeTenantPurgeDef, PURGE_TEARDOWN, type TenantPurgeParams, type TenantPurgeRequest } from "./tenant-purge.run.ts";
 import { makeOffboardTenantDef } from "./tenant-offboard.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import { memberAppProject, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
@@ -22,7 +21,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { PlanStreamCtx, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { Stage, TenantStatus } from "../../../shared/enums.ts";
+import type { TenantStatus } from "../../../shared/enums.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
 import type { VaultSeeder, VaultSeedOutcome, TenantCryptoDeleteInput } from "../../adapters/vault/seeder-port.ts";
@@ -45,7 +44,7 @@ const WATCH = tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)]
 // The tenant's members — the trio plus its one app. Every one has a namespace and an AppProject of
 // its own, so the purge reaps this many of each.
 const MEMBERS = [...TEST_MEMBERS, ...APPS.map((a) => a.name)];
-const NAMESPACES = MEMBERS.map((m) => memberNamespace(GUID, m));
+const NAMESPACES = MEMBERS.map((m) => memberNamespace(GUID, m, "prod"));
 /** The label every member namespace of this tenant carries — how the purge finds the ones no source names. */
 const TENANT_LABEL = `platform/tenant=${GUID}`;
 const REQUEST: TenantPurgeRequest = { guid: GUID, stage: "prod", clusterId: "cls_1" };
@@ -60,16 +59,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-/** A cluster-marking resolver that answers from a literal name -> stage map — mirrors registrations.test.ts's
- *  helper. Both slaves this file commits registrations for are marked "prod". */
-function marked(byName: Record<string, Stage>): ClusterStageResolver {
-  return async (cluster: string) => {
-    const stage = byName[cluster];
-    if (!stage) throw new Error(`no cluster map for "${cluster}"`);
-    return { name: cluster, stage };
-  };
-}
-const CLUSTERS = marked({ s1: "prod", s2: "prod" });
 
 /** The tenant as it stands in GitOps (one app) — committed by the tests that need a pointer. */
 function entry(cluster = "s1"): TenantRegistration {
@@ -192,11 +181,11 @@ function lingeringArgo(): FakeMasterArgoReader {
 describe("tenant-purge execution", () => {
   it("ORPHAN (no tenants row): reaps pointer, AppProject, Tenant CR and namespace by GUID and never throws", async () => {
     seedCluster(); // NO tenants row
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" }); // died after write-registration, before record-inventory
     const projects = new FakeMasterProjectWriter();
     for (const member of MEMBERS) {
-      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
+      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
     }
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
     const prt = ports(reg, { projects, cluster });
@@ -206,7 +195,7 @@ describe("tenant-purge execution", () => {
     await runAll(prt, params, logs);
 
     expect(await reg.readTenant("prod", GUID)).toBeNull(); // pointer git-rm'd
-    for (const member of MEMBERS) expect(projects.get(ARGO_NS, memberAppProject(GUID, member))).toBeUndefined(); // every member AppProject deleted
+    for (const member of MEMBERS) expect(projects.get(ARGO_NS, memberAppProject(GUID, member, "prod"))).toBeUndefined(); // every member AppProject deleted
     expect(cluster.deletedNamespaces).toEqual(NAMESPACES); // the backstop reap fired on EVERY member namespace
     // The record step is a clean SOFT-SKIP: there is no row to mark, and none was invented. That must
     // survive every change to WHAT the record step writes (the purge gaining its own terminal
@@ -226,7 +215,7 @@ describe("tenant-purge execution", () => {
   // object-storage credential and its Mongo databases. Only the cluster can tell the two apart.
   it("ORPHAN BELT: an uninventoried tenant whose workloads are RUNNING is refused, not purged", async () => {
     seedCluster(); // NO tenants row — indistinguishable from an orphan in git
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const cluster = new FakeClusterReader({
       deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 },
@@ -247,7 +236,7 @@ describe("tenant-purge execution", () => {
     seedCluster(); // no row, no pointer — create-tenant died at/around apply-appproject
     const projects = new FakeMasterProjectWriter();
     for (const member of MEMBERS) {
-      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
+      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
     }
     // NEITHER source knows this guid, so the frozen target names the trio alone. The erp namespace is
     // reachable only through the label the appsets stamp on every member namespace — which is why the
@@ -256,7 +245,7 @@ describe("tenant-purge execution", () => {
       deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 },
       namespacesByLabel: { [TENANT_LABEL]: NAMESPACES },
     });
-    const prt = ports(new TenantRegistrations(new FakePlatformRepo(), CLUSTERS), { projects, cluster });
+    const prt = ports(new TenantRegistrations(new FakePlatformRepo()), { projects, cluster });
 
     const logs: string[] = [];
     const { params } = await planned(prt);
@@ -265,7 +254,7 @@ describe("tenant-purge execution", () => {
     // EMPTY: no source here knows them, and the hardcoded trio that stood here was only ever true of
     // one product. The namespace reap finds them by label — asserted below.
     expect(cluster.deletedNamespaces).toEqual(NAMESPACES);
-    expect(cluster.deletedNamespaces).toContain(memberNamespace(GUID, "erp")); // found by label alone
+    expect(cluster.deletedNamespaces).toContain(memberNamespace(GUID, "erp", "prod")); // found by label alone
     expect(logs.some((l) => l.includes("pointer already removed"))).toBe(true); // remove-pointer no-op
   });
 
@@ -278,7 +267,7 @@ describe("tenant-purge execution", () => {
     // row goes on offering the purge it has just finished. The two states mean opposite things, so the
     // purge records its own.
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
     const prt = ports(reg, { cluster });
@@ -312,7 +301,7 @@ describe("tenant-purge execution", () => {
     // that the namespace, the Vault path and the Mongo databases are gone. They are: this purge deleted
     // the Tenant CR and the namespace those apps WERE.
     seedTenantRow("active");
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const cluster = new FakeClusterReader({
       deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 },
@@ -353,7 +342,7 @@ describe("tenant-purge execution", () => {
     // The entry has an owner: the same seeder that wrote it at create-tenant destroys it here, all
     // versions, so "purged" is a fact rather than a request.
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
     const seeder = new FakePurgeSeeder();
@@ -374,7 +363,7 @@ describe("tenant-purge execution", () => {
     // purge. The order is asserted on the step list, because a reordering is exactly the kind of edit
     // that looks harmless.
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const prt = ports(reg);
     const { params } = await planned(prt);
@@ -388,7 +377,7 @@ describe("tenant-purge execution", () => {
     // refusal existed to prevent — so the step names it instead, and the run still completes: the rest
     // of the footprint is reaped and the operator is told what to remove by hand.
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const prt = ports(reg, { seeder: null });
 
@@ -404,7 +393,7 @@ describe("tenant-purge execution", () => {
     // The record step is the LAST one, after every reap and after the crypto delete, and the rows then
     // read purged — a distinct state from the "offboarded" an offboard leaves.
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
     const prt = ports(reg, { cluster });
@@ -424,7 +413,7 @@ describe("tenant-purge execution", () => {
 
   it("watch-prune is FAIL-SOFT: a fan-out that never prunes does NOT stop the teardown", async () => {
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const prt = ports(reg, { argo: lingeringArgo() });
     const { params } = await planned(prt);
@@ -445,7 +434,7 @@ describe("tenant-purge execution", () => {
     // must still fire), never about RECORDING: the settle guard fails the run at the last step before the
     // flip, which leaves the tenant listed and the run retryable from that step.
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
     const prt = ports(reg, { argo: lingeringArgo(), cluster });
@@ -466,7 +455,7 @@ describe("tenant-purge execution", () => {
 
   it("is idempotent on a RE-RUN: a full purge twice over reaps once and never throws", async () => {
     seedTenantRow();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
     const prt = ports(reg, { cluster });
@@ -489,7 +478,7 @@ describe("tenant-purge execution", () => {
 
   it("attest-target fails closed on a deploy-state domain mismatch (never purge the wrong cluster)", async () => {
     seedCluster();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const prt = ports(reg, { cluster: new FakeClusterReader({ deployState: { domain: "other.example", stage: "prod", writtenAt: "x", generation: 1 } }) });
     const { params } = await planned(prt);
@@ -500,7 +489,7 @@ describe("tenant-purge execution", () => {
   it("attest-target re-checks the frozen target's cluster, so hand-crafted params cannot purge elsewhere", async () => {
     seedCluster();
     seedSecondCluster();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const prt = ports(reg);
     const { params } = await planned(prt);
@@ -516,9 +505,9 @@ describe("tenant-purge execution", () => {
     // under it drops exactly the data the move is carrying. Reading the Tenant CR's own
     // relocating annotation instead would rest on an object nothing reconciles.
     seedCluster();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
-    const marked = memberNamespace(GUID, "auth");
+    const marked = memberNamespace(GUID, "auth", "prod");
     const cluster = new FakeClusterReader({
       deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 },
       namespacesByLabel: { [`platform/tenant=${GUID}`]: [marked] },

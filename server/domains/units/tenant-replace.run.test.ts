@@ -6,7 +6,6 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { resolveReplaceTargets, resolveTeardownTarget, type ReplaceTarget } from "./tenant-replace.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -20,7 +19,6 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
-import type { Stage } from "../../../shared/enums.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
@@ -53,16 +51,6 @@ const TRIO_MEMBERS = ["auth", "jobs", "report"];
 // trio every tenant always has (tenant-fanout.ts).
 const TRIO_PLUS_LEGACY = [...TEST_MEMBERS, "legacy"];
 
-/** A cluster-marking resolver that answers from a literal name -> stage map — mirrors registrations.test.ts's
- *  helper. Every registration this file commits targets "s1" at "prod". */
-function marked(byName: Record<string, Stage>): ClusterStageResolver {
-  return async (cluster: string) => {
-    const stage = byName[cluster];
-    if (!stage) throw new Error(`no cluster map for "${cluster}"`);
-    return { name: cluster, stage };
-  };
-}
-const CLUSTERS = marked({ s1: "prod" });
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
@@ -122,7 +110,7 @@ function oldRegistration(over: Partial<TenantRegistration> = {}): TenantRegistra
 /** A shared registrations over a seedable FakePlatformRepo, so a test can pre-commit the old pointer AND
  *  have planStream / the steps read it back through the SAME instance. */
 function makeRegistrations(): TenantRegistrations {
-  return new TenantRegistrations(new FakePlatformRepo(), CLUSTERS);
+  return new TenantRegistrations(new FakePlatformRepo());
 }
 
 /** A VaultSeeder for the tenant runs: create-tenant seeds the crypto entry through it, and nothing
@@ -247,7 +235,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
   it("no existing subdomain: a plain onboard, NO offboard steps prepended", async () => {
     seedClusters();
     const def = makeCreateTenantDef(ports(makeRegistrations()));
-    const result = await def.planStream!({ clusterId: "cls_1", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.replaces).toEqual([]);
@@ -261,7 +249,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration(), runId: "run_old" });
     const def = makeCreateTenantDef(ports(registrations));
-    const result = await def.planStream!({ clusterId: "cls_1", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.replaces).toEqual([
@@ -270,7 +258,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     // attest-target stays step 0 and record-provisional follows it (the row must exist before the
     // first mutation); the four replace steps then sit before the onboard proper.
     expect(result.plan.steps.map((s) => s.name)).toEqual([...ONBOARD_HEAD, ...replaceStepNames(OLD), ...ONBOARD_TAIL]);
-    expect(result.plan.summary).toMatch(new RegExp(`Replaces existing ${OLD} \\(subdomain "${SUB}"\\) before deploying ${result.params.guid}`));
+    expect(result.plan.summary).toMatch(new RegExp(`Replaces existing ${OLD} \\(subdomain "${SUB}" at prod\\) before deploying ${result.params.guid}`));
     // Approving the replace approves a PRUNE of the old tenant, and the prune's ServiceClaim deletions
     // drop the member databases — the summary must warn like tenant-offboard's does, before approval.
     expect(result.plan.summary).toContain("The replaced tenant's member DATABASES are NOT kept");
@@ -282,7 +270,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration(), runId: "run_old" });
     const def = makeCreateTenantDef(ports(registrations));
-    const result = await def.planStream!({ clusterId: "cls_1", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     // The GitOps pointer scan caught the orphan (clusterId derived from the pointer's slave name).
@@ -482,7 +470,7 @@ describe("resolveTeardownTarget resolves ONE guid, with or without an inventory 
     seedOldRow();
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, `registrations/${OLD}/prod.yaml`, 'cluster: "s1"\nsubdomain: 7\n'); // subdomain must be a string
-    const registrations = new TenantRegistrations(repo, CLUSTERS);
+    const registrations = new TenantRegistrations(repo);
     await expect(registrations.readTenant("prod", OLD)).rejects.toThrow(/prod\.yaml failed its schema/); // the strict fold still refuses
     expect(await resolveTeardownTarget({ db: db.db, registrations }, "prod", OLD)).toEqual({
       guid: OLD, subdomain: SUB, stage: "prod", clusterId: "cls_1", cluster: "s1", tenantId: "tnt_old",

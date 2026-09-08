@@ -1,18 +1,20 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { listTenantTargets, listTenantAppCatalog, createTenant, type TenantTargetView } from "../api.ts";
 import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
 
 /** Create-tenant wizard — the tenant analogue of
  *  ConsumerOnboard. Unlike a consumer it does NOT point at an external repo: a tenant's charts
  *  always live in the fixed catalog repo, so the operator only declares WHAT to fan out —
- *  a subdomain, an owner, the target cluster and the optional per-app rows. The trio auth/jobs/report
- *  is NOT offered: every tenant has those three members, always. There is NO secret field (v1 seeds no
- *  secrets; charts pull from Vault via ExternalSecret). Submit hands off to the Run screen, where the
- *  T1..T4 fan-out gates stream gate-by-gate and the operator approves the deploy. */
+ *  a subdomain, an owner, the tenant's own stage, the target cluster (any active one) and the
+ *  optional per-app rows. The trio auth/jobs/report is NOT offered: every tenant has those three
+ *  members, always. There is NO secret field (v1 seeds no secrets; charts pull from Vault via
+ *  ExternalSecret). Submit hands off to the Run screen, where the T1..T4 fan-out gates stream
+ *  gate-by-gate and the operator approves the deploy. */
 export function TenantCreate() {
   const nav = useNavigate();
-  const [form, setForm] = useState({ subdomain: "", owner: "", clusterId: "", adminEmail: "" });
+  const [form, setForm] = useState({ subdomain: "", owner: "", stage: "", clusterId: "", adminEmail: "" });
   // The app-type catalog (null = still loading) + the operator's multi-selection. The catalog is the
   // SOLE source of app names — a checkbox can only select a values-<app>.yaml overlay that exists in
   // catalog, which is exactly what the T4 "apps resolved" gate requires (no free text).
@@ -79,6 +81,7 @@ export function TenantCreate() {
     try {
       const { runId } = await createTenant({
         clusterId: form.clusterId,
+        stage: form.stage as Stage,
         subdomain: form.subdomain.trim(),
         owner: form.owner.trim(),
         // the checked catalog app-types + their two per-app seed tiers (buildCreateTenantBody trims + de-dupes)
@@ -93,11 +96,11 @@ export function TenantCreate() {
     }
   }
 
-  const noTargets = targets !== null && targets.length === 0;
-  // Where the tenant lands, derived from the chosen cluster alone (tenantPlacement.ts, which carries the
-  // WHY: one cluster IS one stage, so this is a read-out and not a field). Null
-  // until a cluster is chosen, and it changes NOTHING about what is submitted.
-  const placement = tenantPlacement(form.clusterId, targets, [...selectedApps]);
+  const activeTargets = (targets ?? []).filter((t) => t.status === "active");
+  const noTargets = targets !== null && activeTargets.length === 0;
+  // Where the tenant lands, derived from the chosen stage and cluster (tenantPlacement.ts). Null until
+  // both are chosen, and it changes NOTHING about what is submitted.
+  const placement = tenantPlacement(form.stage, form.clusterId, targets, [...selectedApps]);
 
   return (
     <section className="page">
@@ -110,7 +113,7 @@ export function TenantCreate() {
 
       <p className="callout">
         A tenant fans one registration out to one self-contained member per service — auth, jobs and report always, plus
-        one per app you declare — each with its own namespace <code>&lt;guid&gt;-&lt;member&gt;</code> and its own
+        one per app you declare — each with its own namespace <code>&lt;guid&gt;-&lt;member&gt;-&lt;stage&gt;</code> and its own
         AppProject, all rendered from the fixed catalog repo. The Manager renders and validates the entire
         fan-out (T1..T4) before anything is deployed; you approve on the next screen.
       </p>
@@ -140,34 +143,47 @@ export function TenantCreate() {
             <span className="field__hint">A public DNS-subdomain label (zero PII) — the tenant's public address.</span>
           </label>
           <label className="field">
+            <span className="field__label">Stage</span>
+            <select value={form.stage} onChange={set("stage")} required>
+              <option value="" disabled>
+                Choose a stage
+              </option>
+              {STAGE.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <span className="field__hint">
+              The tenant&apos;s OWN stage — every member namespace, the registration file and the Vault path{" "}
+              <code>&lt;stage&gt;/tenants/&lt;guid&gt;</code> carry it, whatever cluster it lands on.
+            </span>
+          </label>
+          <label className="field">
             <span className="field__label">Target cluster</span>
             <select value={form.clusterId} onChange={set("clusterId")} required>
               <option value="" disabled>
                 {targets === null ? "Loading…" : "Choose a cluster"}
               </option>
-              {(targets ?? []).map((t) => (
+              {activeTargets.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.domain} · {t.stage}
+                  {t.domain} (platform {t.stage})
                 </option>
               ))}
             </select>
-            <span className="field__hint">The stage and domain are taken from the cluster — never sent from here.</span>
+            <span className="field__hint">Any active cluster. The stage in brackets is the platform&apos;s own, not the tenant&apos;s; the domain is taken from the cluster.</span>
           </label>
 
-          {/* The placement read-out that makes the line above checkable instead of merely stated: the
-              stage a cluster carries, and the two identities it decides — the GitOps pointer directory in
-              catalog and the member namespaces on the cluster. It is a READ-OUT, never an input: there is no
-              stage field to build, because one cluster IS exactly one stage (the reasoning, and the three
-              places that enforce it, live in tenantPlacement.ts). The guid is the one thing not yet known
-              — the plan mints it — so it shows as the <guid> placeholder with a line saying so, rather
-              than an example an operator could copy somewhere and act on. */}
+          {/* The placement read-out that makes the two fields above checkable instead of merely stated:
+              the two identities they decide — the GitOps registration file in catalog and the member
+              namespaces on the cluster. The guid is the one thing not yet known — the plan mints it — so
+              it shows as the <guid> placeholder with a line saying so, rather than an example an operator
+              could copy somewhere and act on. */}
           {placement && (
             <div className="field">
               <span className="field__label">Where this tenant will land</span>
               <span className="field__hint">
-                Stage <code>{placement.stage}</code> on <code>{placement.domain}</code> — derived from the cluster, not
-                selectable: a cluster is installed as exactly one stage and every tenant run re-attests that against the
-                cluster itself.
+                Stage <code>{placement.stage}</code> on <code>{placement.domain}</code>.
               </span>
               <span className="field__hint">
                 GitOps registration <code>{placement.registrationPath}</code> in catalog ·{" "}
@@ -203,7 +219,7 @@ export function TenantCreate() {
             Apps <em className="field__opt">optional</em>
           </span>
           <span className="field__hint">
-            Each app becomes a member of its own: namespace <code>&lt;guid&gt;-&lt;name&gt;</code> and Application{" "}
+            Each app becomes a member of its own: namespace and Application{" "}
             <code>&lt;guid&gt;-&lt;name&gt;-&lt;stage&gt;</code>, rendered from its{" "}
             <code>charts/example-engine/values-&lt;name&gt;.yaml</code> overlay in catalog. Pick from the catalog
             below — auth/jobs/report are reserved for the mandatory trio.
@@ -247,7 +263,7 @@ export function TenantCreate() {
         </div>
 
         <div className="form-foot">
-          <button type="submit" className="btn btn--primary" disabled={busy || noTargets || !form.subdomain || !form.clusterId || !form.owner}>
+          <button type="submit" className="btn btn--primary" disabled={busy || noTargets || !form.subdomain || !form.stage || !form.clusterId || !form.owner}>
             {busy ? "Validating…" : "Validate & plan"}
           </button>
         </div>

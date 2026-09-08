@@ -17,7 +17,6 @@ import { makeCreateTenantDef, type TenantOnboardPorts } from "./create-tenant.ru
 import { makeTenantPurgeDef } from "./tenant-purge.run.ts";
 import { makeSuspendTenantDef } from "./tenant-lifecycle.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
@@ -78,7 +77,6 @@ function seedSlaveCluster(): void {
 /** A cluster-marking resolver that answers every cluster short name at "prod" — every fixture in this
  *  file lands its tenant on s2/prod, so a single-stage stand-in is all TenantRegistrations needs to
  *  satisfy commitTenant's stage boundary check. */
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
@@ -166,7 +164,7 @@ async function makeTenant(enabled: boolean): Promise<{ app: Hono<AppEnv>; execut
   const store = new CredentialStore({ db: db.db, logger });
   const bus = new RunEventBus();
   const repo = new FakePlatformRepo(); // exposed so a test can plant a pointer the registrations would never write
-  const reg = new TenantRegistrations(repo, CLUSTER_STAGE);
+  const reg = new TenantRegistrations(repo);
   const defs = enabled
     ? [makeCreateTenantDef(onboardPorts(reg)), makeTenantPurgeDef(lifecyclePorts(reg)), makeSuspendTenantDef(lifecyclePorts(reg))]
     : [];
@@ -202,7 +200,7 @@ async function seedPointer(registrations: TenantRegistrations, guid: string, sub
 }
 
 // The tenant lands on cls_2 here; placement is free, so this is a fixture choice, not a rule.
-const CREATE_REQ = { clusterId: "cls_2", subdomain: "acme.example", owner: "team-acme", apps: [{ name: "erp" }] };
+const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: [{ name: "erp" }] };
 
 describe("GET /api/tenants/orphans (the pointer scan)", () => {
   it("lists a live pointer with no inventory row, resolved to its cluster row", async () => {
@@ -441,14 +439,13 @@ describe("POST /api/tenants/purge (the force-offboard trigger)", () => {
     ]);
   });
 
-  it("a stage that disagrees with the target cluster fails the plan closed", async () => {
-    // A mistyped stage would point the teardown at the wrong pointer path, so loadPurgeCluster refuses.
+  it("plans at a stage other than the target cluster's own — the stage is the tenant's, the cluster any active one", async () => {
     seedCluster();
-    seedSlaveCluster(); // cls_2 is prod
+    seedSlaveCluster(); // cls_2 is marked prod; the tenant is addressed at dev there
     const { app, executor, cookie } = await makeTenant(true);
     const { runId } = (await (await app.request("/api/tenants/purge", { method: "POST", ...authed(cookie), body: JSON.stringify({ guid: ORPHAN_GUID, stage: "dev", clusterId: "cls_2" }) })).json()) as { runId: string };
     await executor.settle(runId);
-    expect(getRun(db.db, runId)?.status).toBe("failed");
+    expect(getRun(db.db, runId)?.status).toBe("planned");
   });
 
   it("400 on a body that is not a {guid, stage, clusterId} identity", async () => {

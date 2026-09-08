@@ -35,7 +35,7 @@ const ALL_SERVICES: ConsumerService[] = ["mongodb", "postgresql"];
  *  worth asserting over. */
 function everyJob(): RelocationJob[] {
   const tenant = { guid: GUID, stage: "prod" as const, apps: ["web"], image: IMAGE , identityProvider: "auth" };
-  const consumer = { name: CONSUMER, stage: "prod" as const, databases: ["acme_main"], services: ALL_SERVICES, pvcs: ["data"], image: IMAGE };
+  const consumer = { name: CONSUMER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, pvcs: ["data"], image: IMAGE };
   return [
     ...tenantDumpJobs({ ...tenant, registrationYaml: "guid: zsjs023ctne0\n" }),
     ...tenantRestoreJobs(tenant),

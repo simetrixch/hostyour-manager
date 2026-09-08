@@ -58,7 +58,7 @@ export function makeMigrateDef(ports: ConsumerRelocationPorts): RunDefinition<Mi
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: async (params, { db }) => {
       const ac = loadAppCluster(db, params.appId);
-      const target = assertMovableTo(db, ac.clusterId, params.targetClusterId, ac.stage);
+      const target = assertMovableTo(db, ac.clusterId, params.targetClusterId);
       const stepDefs = migrateSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, attestTargetStep(ports, params.appId), "moved consumer");
       return {
         kind: "consumer-migrate",
@@ -83,7 +83,7 @@ export function makeTenantMigrateDef(ports: TenantRelocationPorts): RunDefinitio
     mutating: true,
     plan: async (params, { db }) => {
       const tc = loadTenantCluster(db, params.tenantId);
-      const target = assertMovableTo(db, tc.clusterId, params.targetClusterId, tc.stage);
+      const target = assertMovableTo(db, tc.clusterId, params.targetClusterId);
       const stepDefs = migrateSteps(ports, tenantWorld(ports, params.tenantId), params.targetClusterId, attestTenantTargetStep(ports, params.tenantId), "moved tenant");
       return {
         kind: "tenant-migrate",

@@ -42,8 +42,9 @@
 //   unit-apex    the public apex units (consumers and tenants) serve under, <name>.<unit-apex>.
 //   platform-domain  the installation's business domain — the mail sender identity and the relay's
 //                sender allowlist. The branch programs write it (defaulting to the unit apex).
-//   endpoints.mail.url  where units reach the installation's shared mail service; absent on an
-//                installation that runs none.
+//   endpoints.mail.unit  the UNIT that is the installation's shared mail service — a consumer's
+//                name, reached at `<unit>-<stage>.<unit-apex>` by a unit at the same stage; absent on
+//                an installation that runs none.
 //   catalog-repo the <owner>/<name> of the repository holding this installation's tenant charts
 //                and their per-stage pins. The branch programs demand it (nothing composes a
 //                repository this cloud does not own).
@@ -181,8 +182,9 @@ export interface ClusterMarking {
    *  several, and the render of the whole observability application stopped at
    *  `range can't iterate over ...`. */
   alertRecipients?: string[];
-  /** Carried, never read here. */
-  mailUrl?: string;
+  /** The unit that is the installation's mail service, off `endpoints.mail.unit`. Handed on to a
+   *  slave's regeneration as `mail_unit`, and never read here for anything else. */
+  mailUnit?: string;
   /** Carried, never read here. */
   catalogRepo?: string;
   /** Which authority issues this installation's certificates, the authority it registers with, and
@@ -235,9 +237,9 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
   // second time beside it. The map states one thing about the catalogue — where a build clones it
   // from — and every other spelling of it follows from that one.
   const catalogRepo = g.catalogUrl?.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
-  // Derived, like catalogRepo: the address stands in the endpoints block, which travels whole in
+  // Derived, like catalogRepo: the unit stands in the endpoints block, which travels whole in
   // globalRest, so reading it by name here does not make this module a second writer of it.
-  const mailUrl = (g.endpoints as { mail?: { url?: string } } | undefined)?.mail?.url;
+  const mailUnit = (g.endpoints as { mail?: { unit?: string } } | undefined)?.mail?.unit;
   const rest = Object.fromEntries(Object.entries(g).filter(([k]) => !NAMED_GLOBALS.has(k)));
   return {
     ...(header !== undefined ? { header } : {}),
@@ -262,7 +264,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
       ? { alertRecipients: (Array.isArray(g.alertRecipients) ? g.alertRecipients : g.alertRecipients.split(","))
           .map((m) => m.trim()).filter((m) => m.length > 0) }
       : {}),
-    ...(mailUrl !== undefined ? { mailUrl } : {}),
+    ...(mailUnit !== undefined ? { mailUnit } : {}),
     ...(catalogRepo ? { catalogRepo } : {}),
     ...(g.clusterIssuer !== undefined ? { clusterIssuer: g.clusterIssuer } : {}),
     ...(g.letsencryptEmail !== undefined ? { letsencryptEmail: g.letsencryptEmail } : {}),
@@ -323,9 +325,9 @@ export async function resolveClusterMarking(repo: PlatformRepo, cluster: string)
 export type BuildPlaneFqdnResolver = (cluster: string) => Promise<string>;
 
 /** Bind a BuildPlaneFqdnResolver to the platform repo, which carries the maps. Handed to the onboarding
- *  steps as a bound function rather than a PlatformRepo — the same shape the stage boundary
- *  (ClusterStageResolver) and the tenant unit apex arrive in, so a step keeps its distance from the git
- *  port and every caller reads the field through one function. */
+ *  steps as a bound function rather than a PlatformRepo — the same shape the tenant unit apex
+ *  arrives in, so a step keeps its distance from the git port and every caller reads the field
+ *  through one function. */
 export function buildPlaneFqdnFromMarkings(repo: PlatformRepo): BuildPlaneFqdnResolver {
   return async (cluster: string) => (await resolveClusterMarking(repo, cluster)).buildPlaneFqdn;
 }
@@ -511,7 +513,7 @@ async function commitMarking(repo: PlatformRepo, c: MarkingCommit): Promise<{ co
 /** Write ONE cluster's whole map onto the books branch — deploy-slave's mark-slave step, the
  *  writer that puts a slave into the slaves ApplicationSet's world. What the caller does not
  *  state is KEPT from the standing file: the header (the file's own explanation), the release pin
- *  (a key this manager never writes) and the mail service's address (install-time), so marking a
+ *  (a key this manager never writes) and the mail service's unit (install-time), so marking a
  *  slave again never deletes what another writer recorded. Commits only when the marking actually
  *  changed, so a redeploy re-running the step converges instead of committing over itself. */
 export async function writeClusterMarking(
@@ -525,7 +527,7 @@ export async function writeClusterMarking(
     ...marking,
     ...(current?.header !== undefined ? { header: current.header } : {}),
     ...(current?.release !== undefined ? { release: current.release } : {}),
-    ...(current?.mailUrl !== undefined && marking.mailUrl === undefined ? { mailUrl: current.mailUrl } : {}),
+    ...(current?.mailUnit !== undefined && marking.mailUnit === undefined ? { mailUnit: current.mailUnit } : {}),
   };
   if (current && markingDifferences(current, next).length === 0) return { changed: false };
   await commitMarking(repo, {

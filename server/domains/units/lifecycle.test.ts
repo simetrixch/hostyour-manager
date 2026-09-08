@@ -50,16 +50,17 @@ function ctx(logs: string[]): StepCtx {
 const state = (over: Partial<DeployState> = {}): DeployState => ({ domain: "s1.example", stage: "prod", writtenAt: "x", generation: 7, ...over });
 
 describe("assertDeployState", () => {
-  it("returns the state when domain + stage agree", () => {
-    expect(assertDeployState(state(), "s1.example", "prod", "tenant").generation).toBe(7);
+  it("returns the state when the domain agrees", () => {
+    expect(assertDeployState(state(), "s1.example", "tenant").generation).toBe(7);
   });
 
   it("throws on an absent deploy-state (unprovisioned cluster)", () => {
-    expect(() => assertDeployState(null, "s1.example", "prod", "tenant")).toThrow(/refusing to act on an unprovisioned cluster/);
+    expect(() => assertDeployState(null, "s1.example", "tenant")).toThrow(/refusing to act on an unprovisioned cluster/);
   });
 
-  it("throws on a domain/stage mismatch, naming the subject", () => {
-    expect(() => assertDeployState(state({ stage: "test" }), "s1.example", "prod", "tenant")).toThrow(/tenant targets s1.example\/prod/);
+  it("throws on a domain mismatch, naming the subject — the cluster's own stage is not a boundary", () => {
+    expect(() => assertDeployState(state({ domain: "other.example" }), "s1.example", "tenant")).toThrow(/tenant targets s1.example/);
+    expect(assertDeployState(state({ stage: "test" }), "s1.example", "tenant").stage).toBe("test");
   });
 });
 
@@ -91,10 +92,10 @@ describe("attestTenantTargetStep", () => {
     expect(logs.some((l) => l.includes(`${GUID}`) && l.includes("generation 7"))).toBe(true);
   });
 
-  it("fails closed when the cluster reports a different domain/stage", async () => {
+  it("fails closed when the cluster reports a different domain — its stage is not compared, a tenant stands at its own", async () => {
     seedTenant();
-    const step = attestTenantTargetStep(tenantPorts(state({ stage: "test" })), "tnt_1");
-    await expect(step.run(ctx([]))).rejects.toThrow(/deploy-state mismatch/);
+    await expect(attestTenantTargetStep(tenantPorts(state({ domain: "other.example" })), "tnt_1").run(ctx([]))).rejects.toThrow(/deploy-state mismatch/);
+    await expect(attestTenantTargetStep(tenantPorts(state({ stage: "test" })), "tnt_1").run(ctx([]))).resolves.toBeUndefined();
   });
 
   it("fails closed when the cluster has no deploy-state", async () => {

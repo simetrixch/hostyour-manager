@@ -14,12 +14,12 @@ const TEST_MEMBERS = ["auth", "jobs", "report"];
 // deletes the grant of the cluster a relocated unit is leaving.
 
 const argoSync = (argoNamespace = "argocd"): { role: RoleManifest; binding: RoleBindingManifest } =>
-  renderConsumerArgoSync({ name: "example-auth", argoNamespace });
+  renderConsumerArgoSync({ name: "example-auth", stage: "prod", argoNamespace });
 
 describe("renderConsumerArgoSync", () => {
   it("is a Role plus the Binding that arms it, both under the ownership label the writer guards on", () => {
     const { role, binding } = argoSync();
-    expect(role.metadata.name).toBe("example-auth-argo-sync");
+    expect(role.metadata.name).toBe("example-auth-prod-argo-sync");
     expect(binding.roleRef).toEqual({ apiGroup: "rbac.authorization.k8s.io", kind: "Role", name: role.metadata.name });
     expect(binding.metadata.name).toBe(role.metadata.name);
     expect(binding.metadata.namespace).toBe(role.metadata.namespace);
@@ -30,7 +30,7 @@ describe("renderConsumerArgoSync", () => {
   it("scopes to the unit's THREE Applications by name, in the ArgoCD namespace they live in", () => {
     const { role, binding } = argoSync();
     expect(role.metadata.namespace).toBe("argocd");
-    expect(role.rules[0]!.resourceNames).toEqual(["example-auth-dev", "example-auth-test", "example-auth-prod"]);
+    expect(role.rules[0]!.resourceNames).toEqual(["example-auth-prod"]);
     expect(role.rules[0]!.apiGroups).toEqual(["argoproj.io"]);
     expect(role.rules[0]!.resources).toEqual(["applications"]);
     // The pipeline runs in the unit's build namespace, so that is where the subject lives.
@@ -67,14 +67,14 @@ const tenantGrant = (units: readonly string[] = ["example-platform", "example-au
 describe("renderSmtpOpsGrant", () => {
   // The permission a mail-queue dashboard needs, and it is not small: exec into the RELAY's pods.
   // Two properties carry the whole design, and each is one this repo got wrong somewhere before.
-  const g = renderSmtpOpsGrant({ name: "example-post" });
+  const g = renderSmtpOpsGrant({ name: "example-post", stage: "prod" });
 
   it("lands in the RELAY's namespace, not the unit's — that is the point of writing it here", () => {
     // A chart of the unit cannot grant itself anything in someone else's namespace, and the relay's
     // chart cannot name the unit. Only a writer that knows both can put this object where it belongs.
     expect(g.role.metadata.namespace).toBe(RELAY_NAMESPACE);
     expect(g.binding.metadata.namespace).toBe(RELAY_NAMESPACE);
-    expect(g.binding.subjects).toEqual([{ kind: "ServiceAccount", name: "example-post", namespace: "example-post" }]);
+    expect(g.binding.subjects).toEqual([{ kind: "ServiceAccount", name: "example-post", namespace: "example-post-prod" }]);
   });
 
   it("carries the consumer ownership label on BOTH objects, so the offboard's delete reaches them", () => {
@@ -98,9 +98,10 @@ describe("renderSmtpOpsGrant", () => {
     }
   });
 
-  it("is named per unit, so two claimants never collide on one object", () => {
-    expect(g.role.metadata.name).toBe("example-post-smtp-ops");
-    expect(renderSmtpOpsGrant({ name: "other-unit" }).role.metadata.name).toBe("other-unit-smtp-ops");
+  it("is named per unit AND stage, so two claimants — or one unit at two stages — never collide on one object", () => {
+    expect(g.role.metadata.name).toBe("example-post-prod-smtp-ops");
+    expect(renderSmtpOpsGrant({ name: "other-unit", stage: "prod" }).role.metadata.name).toBe("other-unit-prod-smtp-ops");
+    expect(renderSmtpOpsGrant({ name: "example-post", stage: "test" }).role.metadata.name).toBe("example-post-test-smtp-ops");
   });
 });
 

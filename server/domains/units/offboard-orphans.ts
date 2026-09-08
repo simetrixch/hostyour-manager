@@ -19,17 +19,17 @@
 // success over a Secret or a Role that is still there. That is what this scan is for, and it is why
 // it was reduced rather than removed when the other five stopped being written here.
 //
-// Together with the two GitOps-side things the run removes itself — this stage's registration and the
-// public DNS record of this stage — that set is what is read back here, from the cluster, the
-// registration branch and the DNS provider, rather than from the run's own account of what it did.
+// Both are named per STAGE — `repo-<name>-<stage>` and `<name>-<stage>-smtp-ops` — so both are this
+// run's own to take and both are looked for whatever the unit's other stages do. Together with the
+// two GitOps-side things the run removes itself — this stage's registration and the public DNS
+// record of this stage — that set is what is read back here, from the cluster, the registration
+// branch and the DNS provider, rather than from the run's own account of what it did.
 //
 // WHAT IS DELIBERATELY KEPT, and is therefore never a finding:
 //   - the apps row. A settled consumer row is kept for the history and for a re-onboard.
-//   - everything a SURVIVING stage of the same unit builds, releases, deploys and mails through: the
-//     mail-ops grant, the repo PAT, the build webhook and the release kit. There is one of each per
-//     UNIT, not one per stage (lifecycle.ts unitStaysRegistered), so a one-stage offboard leaves them
-//     standing on purpose — and this scan asks the same registration tree before it looks, so it flags
-//     exactly the objects the same run was supposed to take.
+//   - everything a SURVIVING stage of the same unit builds and releases through: the repo PAT, the
+//     build webhook and the release kit. There is one of each per UNIT, not one per stage
+//     (lifecycle.ts unitStaysRegistered), so a one-stage offboard leaves them standing on purpose.
 //   - every object a reconciler renders. The AppProject, the admission policy and the three grants are
 //     read here no more: they go when the registration goes, and their clock is ArgoCD's.
 //   - the consumer's namespace. deleteNamespace is non-blocking by contract, so the namespace is
@@ -104,19 +104,16 @@ export async function assertNoOrphans(ctx: StepCtx, ports: OrphanScanPorts, unit
   // so a manager wired without it never wrote the object either and there is nothing of its making
   // to find. Said in the report rather than counted as gone.
   if (ports.repoCredential) {
-    const secret = consumerRepoCredentialName(unit.name);
+    const secret = consumerRepoCredentialName(unit.name, unit.stage);
     look(`ArgoCD repository Secret ${argoNamespace}/${secret}`, await ports.repoCredential.repoCredentialExists(argoNamespace, secret));
   } else {
     unread.push("the ArgoCD repository Secret (no repository-credential writer is wired, so this manager never wrote one)");
   }
 
-  // The mail-ops grant is the UNIT's, so it is looked for only once this is the unit's LAST stage —
-  // while another stands, delete-smtp-ops-grant kept it on purpose and a read could only ever flag
-  // what the same run deliberately left.
-  if (elsewhere.length > 0) {
-    unread.push(`the mail-ops grant (the unit still stands at ${elsewhere.join(", ")}, and the grant is the unit's)`);
-  } else if (ports.buildRbac) {
-    const grants = [renderSmtpOpsGrant({ name: unit.name })];
+  // The mail-ops grant is THIS STAGE's, named `<name>-<stage>-smtp-ops`, so it is looked for whatever
+  // the unit's other stages do: a surviving stage holds a grant of its own under another name.
+  if (ports.buildRbac) {
+    const grants = [renderSmtpOpsGrant({ name: unit.name, stage: unit.stage })];
     const present = new Set((await ports.buildRbac.listBuildRbac(grants)).map(grantRef));
     for (const { role, binding } of grants) {
       for (const o of [role, binding]) {
@@ -136,13 +133,13 @@ export async function assertNoOrphans(ctx: StepCtx, ports: OrphanScanPorts, unit
       `cannot look for a leftover DNS record of ${unit.name}: no DNS provider is wired on this manager (CLOUDFLARE_DNS_API_TOKEN unset) — the unit's address is a mandatory part of the run kind, never a silent skip`,
     );
   }
-  const host = consumerUnitHost(unit.name, unitApexFromChain(await ports.registrations.readClusterValueFiles(unit.domain, unit.stage)));
+  const host = consumerUnitHost(unit.name, unit.stage, unitApexFromChain(await ports.registrations.readClusterValueFiles(unit.domain, unit.stage)));
   look(`DNS A ${host}`, (await ports.dns.readRecordContent({ name: host, type: "A", signal: ctx.signal })) !== null);
 
   if (left.length > 0) {
     throw errValidation(
       `the ${runKind} of ${unit.name} (${unit.stage}) left ${left.length} object(s) standing on ${unit.domain}: ${left.join("; ")}. ` +
-        `Nothing else takes any of these away — the registration and the address are this run's own to remove, and the two cluster objects are the only ones no reconciler renders, so no ArgoCD prune reaches them. ` +
+        `Nothing else takes any of these away — the registration and the address are this run's own to remove, and the two cluster objects (the repository Secret and the ${RELAY_NAMESPACE} grant) are the only ones no reconciler renders, so no ArgoCD prune reaches them. ` +
         `Repair them and retry this step. ` +
         `The inventory row is deliberately NOT recorded offboarded: a row saying ${unit.name} left ${unit.stage} while these stand is what makes a leftover unfindable.`,
     );
@@ -155,7 +152,7 @@ export async function assertNoOrphans(ctx: StepCtx, ports: OrphanScanPorts, unit
     "meta",
     `nothing of ${unit.name} (${unit.stage}) is left standing on ${unit.domain} — read back and gone: ${gone.join(", ")}` +
       (elsewhere.length > 0
-        ? `; kept on purpose because the unit still stands at ${elsewhere.join(", ")}: the ${RELAY_NAMESPACE} grant, the repo PAT, the build webhook and the release kit`
+        ? `; kept on purpose because the unit still stands at ${elsewhere.join(", ")}: the repo PAT, the build webhook and the release kit`
         : "") +
       `; the apps row is kept as soft state` +
       (unread.length > 0 ? `; not looked at: ${unread.join("; ")}` : ""),

@@ -5,7 +5,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
 import { renderSmtpOpsGrant } from "./build-rbac.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { FakePlatformRepo, FakeConsumerRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
@@ -23,9 +23,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-// Every fixture offboards from the prod stage, so a fixed resolver answers every cluster with "prod" —
-// the stage boundary Registrations.commitRegistration checks before it ever writes a stage file.
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 
 /** Commit acme's live STAGE registration on s1.example/prod — the offboard target every test
@@ -115,7 +112,7 @@ function seedApp(over: { repoCredentialId?: string } = {}): void {
 describe("offboard run definition", () => {
   it("plans with app targetKind, the ordered steps, and git-branch + master-kube locks", async () => {
     seedApp();
-    const def = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage)));
+    const def = makeOffboardDef(ports(new Registrations(new FakePlatformRepo())));
     const plan = await def.plan({ appId: "app_1" }, { db: db.db });
     expect(def.mutating).toBe(true);
     expect(plan.targetKind).toBe("app");
@@ -145,7 +142,7 @@ describe("offboard run definition", () => {
   it("removes the pointer, waits for the prune, and marks the row offboarded (kept)", async () => {
     seedApp();
     const platform = new FakePlatformRepo();
-    const reg = new Registrations(platform, prodClusterStage);
+    const reg = new Registrations(platform);
     await seedRegistration(reg); // a live consumer
 
     const logs: string[] = [];
@@ -166,15 +163,15 @@ describe("offboard run definition", () => {
   it("remove-registration clears the relocation mark first — a stale mark must not make this offboard keep the data", async () => {
     seedApp();
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } });
-    cluster.namespaceAnnotations.set("acme", { "platform.hostyour.cloud/relocating": "true" });
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    cluster.namespaceAnnotations.set("acme-prod", { "platform.hostyour.cloud/relocating": "true" });
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg);
 
     const logs: string[] = [];
     const remove = makeOffboardDef(ports(reg, { cluster })).steps({ appId: "app_1" }).find((s) => s.name === "remove-registration")!;
     await remove.run(ctx("remove-registration", logs));
 
-    expect(cluster.namespaceAnnotations.get("acme")?.["platform.hostyour.cloud/relocating"]).toBeUndefined();
+    expect(cluster.namespaceAnnotations.get("acme-prod")?.["platform.hostyour.cloud/relocating"]).toBeUndefined();
     // Order is the whole property: the mark is off BEFORE the commit that starts the prune.
     const cleared = logs.findIndex((l) => l.includes("platform.hostyour.cloud/relocating cleared"));
     const removed = logs.findIndex((l) => l.includes("registration for acme (prod) removed"));
@@ -189,7 +186,7 @@ describe("offboard run definition", () => {
     seedApp();
     const projects = new FakeMasterProjectWriter();
     await projects.applyAppProject("argocd", { apiVersion: "argoproj.io/v1alpha1", kind: "AppProject", metadata: { name: "acme", namespace: "argocd", labels: { "hostyour.cloud/consumer": "true" } }, spec: { description: "d", sourceRepos: [], destinations: [], clusterResourceWhitelist: [], namespaceResourceBlacklist: [], roles: [] } });
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     const prt = ports(reg, { projects });
     for (const step of makeOffboardDef(prt).steps({ appId: "app_1" })) {
       if (step.name === "assert-no-orphans" || step.name === "attest-target") continue;
@@ -201,10 +198,10 @@ describe("offboard run definition", () => {
   it("delete-smtp-ops-grant removes the mail-ops grant, and is idempotent when it is absent", async () => {
     seedApp();
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme" })]);
-    expect(buildRbac.keys()).toEqual(["Role postfix/acme-smtp-ops", "RoleBinding postfix/acme-smtp-ops"]);
+    await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
+    expect(buildRbac.keys()).toEqual(["Role postfix/acme-prod-smtp-ops", "RoleBinding postfix/acme-prod-smtp-ops"]);
 
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     const del = makeOffboardDef(ports(reg, { buildRbac })).steps({ appId: "app_1" }).find((s) => s.name === "delete-smtp-ops-grant")!;
     await del.run(ctx("delete-smtp-ops-grant", []));
     expect(buildRbac.keys()).toEqual([]);
@@ -216,7 +213,7 @@ describe("offboard run definition", () => {
   it("delete-smtp-ops-grant is FAIL-SOFT — a writer that throws is logged and the teardown continues", async () => {
     seedApp();
     const throwing = { applyBuildRbac: () => Promise.reject(new Error("x")), deleteBuildRbac: () => Promise.reject(new Error("rbac api down")), listBuildRbac: () => Promise.resolve([]) };
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     const del = makeOffboardDef(ports(reg, { buildRbac: throwing })).steps({ appId: "app_1" }).find((s) => s.name === "delete-smtp-ops-grant")!;
     const logs: string[] = [];
     await del.run(ctx("delete-smtp-ops-grant", logs));
@@ -228,23 +225,23 @@ describe("offboard run definition", () => {
     // Hold the reference so we can assert WHICH namespace was deleted on the RESOLVED target client
     // (the slave's own reader for a slave, the master's for a master — never a master-only delete).
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { cluster })).steps({ appId: "app_1" }).find((s) => s.name === "delete-namespace")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { cluster })).steps({ appId: "app_1" }).find((s) => s.name === "delete-namespace")!;
     const logs: string[] = [];
     await step.run(ctx("delete-namespace", logs));
 
     // G1 identity law: namespace == consumer name. ArgoCD's CreateNamespace=true never prunes it, so
     // the Run must — otherwise the empty namespace lingers Active (the bug this step fixes).
-    expect(cluster.deletedNamespaces).toEqual(["acme"]);
-    expect(logs.some((l) => l.includes("namespace acme deleted on the target cluster"))).toBe(true);
+    expect(cluster.deletedNamespaces).toEqual(["acme-prod"]);
+    expect(logs.some((l) => l.includes("namespace acme-prod deleted on the target cluster"))).toBe(true);
   });
 
   it("delete-namespace is idempotent + fail-soft when the namespace is already absent (a re-run / ArgoCD already removed it)", async () => {
     seedApp();
-    const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, absentNamespaces: ["acme"] });
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { cluster })).steps({ appId: "app_1" }).find((s) => s.name === "delete-namespace")!;
+    const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, absentNamespaces: ["acme-prod"] });
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { cluster })).steps({ appId: "app_1" }).find((s) => s.name === "delete-namespace")!;
     const logs: string[] = [];
     await step.run(ctx("delete-namespace", logs)); // an absent namespace resolves deleted:false — no throw
-    expect(cluster.deletedNamespaces).toEqual(["acme"]);
+    expect(cluster.deletedNamespaces).toEqual(["acme-prod"]);
     expect(logs.some((l) => l.includes("already absent"))).toBe(true);
     // a second run stays a no-op (the crash-resume path)
     await step.run(ctx("delete-namespace", logs));
@@ -255,7 +252,7 @@ describe("offboard run definition", () => {
     // lingering never reaches delete-namespace. Pin the ordering: it sits after watch-removal, so the
     // delete only ever reaps the already-empty shell.
     seedApp();
-    const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage))).steps({ appId: "app_1" });
+    const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()))).steps({ appId: "app_1" });
     const del = steps.findIndex((s) => s.name === "delete-namespace");
     expect(del).toBeGreaterThan(steps.findIndex((s) => s.name === "watch-removal"));
   });
@@ -265,7 +262,7 @@ describe("offboard run definition", () => {
     const seeder = new FakeSeeder();
     const revoked: Array<{ id: string; reason: string }> = [];
     const creds = { revoke: (id: string, reason: string) => { revoked.push({ id, reason }); return Promise.resolve(); } } as unknown as CredentialStore;
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-repo-pat")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-repo-pat")!;
     const logs: string[] = [];
     await step.run(ctx("remove-repo-pat", logs, creds));
 
@@ -279,7 +276,7 @@ describe("offboard run definition", () => {
   it("remove-repo-pat fails closed when the Vault delete fails (a lingering PAT is never silent)", async () => {
     seedApp();
     const failing: VaultSeeder = seederWith({ deleteBuildRepoPat: async () => { throw new Error("vault build repo-pat delete failed for secret/build/acme/repo-pat (403)"); } });
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder: failing })).steps({ appId: "app_1" }).find((s) => s.name === "remove-repo-pat")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder: failing })).steps({ appId: "app_1" }).find((s) => s.name === "remove-repo-pat")!;
     await expect(step.run(ctx("remove-repo-pat", []))).rejects.toThrow(/repo-pat delete failed/);
   });
 
@@ -287,11 +284,11 @@ describe("offboard run definition", () => {
     seedApp();
     const dns = new FakeDnsProvider();
     // The default FakePlatformRepo values chain states unitApex == the branch (s1.example).
-    dns.seed("acme.s1.example", "A", "203.0.113.10");
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { dns })).steps({ appId: "app_1" }).find((s) => s.name === "remove-dns")!;
+    dns.seed("acme-prod.s1.example", "A", "203.0.113.10");
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { dns })).steps({ appId: "app_1" }).find((s) => s.name === "remove-dns")!;
     const logs: string[] = [];
     await step.run(ctx("remove-dns", logs));
-    expect(dns.record("acme.s1.example", "A")).toBeUndefined();
+    expect(dns.record("acme-prod.s1.example", "A")).toBeUndefined();
     expect(logs.some((l) => l.includes("no address is left pointing nowhere"))).toBe(true);
     await step.run(ctx("remove-dns", logs)); // absent now — the idempotent no-op, no throw
   });
@@ -300,7 +297,7 @@ describe("offboard run definition", () => {
     seedApp();
     const dns = new FakeDnsProvider();
     dns.failWith = new Error("Cloudflare DNS refused DELETE: [10000] Authentication error");
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { dns })).steps({ appId: "app_1" }).find((s) => s.name === "remove-dns")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { dns })).steps({ appId: "app_1" }).find((s) => s.name === "remove-dns")!;
     await expect(step.run(ctx("remove-dns", []))).rejects.toThrow(/Authentication error/);
   });
 
@@ -311,12 +308,12 @@ describe("offboard run definition", () => {
       applyRepoCredential: async () => ({ created: true }), repoCredentialExists: async () => false,
       deleteRepoCredential: async (ns: string, name: string) => { deletedCreds.push(`${ns}/${name}`); return { deleted: true }; },
     };
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { repoCredential })).steps({ appId: "app_1" }).find((s) => s.name === "delete-repo-credential")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { repoCredential })).steps({ appId: "app_1" }).find((s) => s.name === "delete-repo-credential")!;
     await step.run(ctx("delete-repo-credential", []));
-    expect(deletedCreds).toEqual(["argocd/repo-acme"]);
+    expect(deletedCreds).toEqual(["argocd/repo-acme-prod"]);
 
     const failing = { applyRepoCredential: async () => ({ created: true }), deleteRepoCredential: async () => { throw new Error("secrets api down"); }, repoCredentialExists: async () => false };
-    const step2 = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { repoCredential: failing })).steps({ appId: "app_1" }).find((s) => s.name === "delete-repo-credential")!;
+    const step2 = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { repoCredential: failing })).steps({ appId: "app_1" }).find((s) => s.name === "delete-repo-credential")!;
     const logs2: string[] = [];
     await step2.run(ctx("delete-repo-credential", logs2)); // fail-soft — logged, never a crash
     expect(logs2.some((l) => l.includes("secrets api down"))).toBe(true);
@@ -325,7 +322,7 @@ describe("offboard run definition", () => {
   it("remove-app-secrets deletes the consumer-tier entry so a re-onboard cannot inherit the old keys", async () => {
     seedApp();
     const seeder = new FakeSeeder();
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-app-secrets")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-app-secrets")!;
     const logs: string[] = [];
     await step.run(ctx("remove-app-secrets", logs));
 
@@ -343,7 +340,7 @@ describe("offboard run definition", () => {
     // benign no-op. Swallowing this error would reintroduce the bug the step exists to prevent.
     seedApp();
     const failing: VaultSeeder = seederWith({ deleteApp: async () => { throw new Error("vault app-secrets delete failed for secret/prod/consumer/acme/app (403)"); } });
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder: failing })).steps({ appId: "app_1" }).find((s) => s.name === "remove-app-secrets")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder: failing })).steps({ appId: "app_1" }).find((s) => s.name === "remove-app-secrets")!;
     await expect(step.run(ctx("remove-app-secrets", []))).rejects.toThrow(/app-secrets delete failed/);
   });
 
@@ -355,7 +352,7 @@ describe("offboard run definition", () => {
     seedApp();
     let statusAtDelete: string | undefined;
     const seeder: VaultSeeder = seederWith({ deleteApp: async () => { statusAtDelete = db.db.select().from(apps).where(eq(apps.id, "app_1")).get()?.status; } });
-    const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder })).steps({ appId: "app_1" });
+    const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps({ appId: "app_1" });
     const i = steps.findIndex((s) => s.name === "remove-app-secrets");
     const j = steps.findIndex((s) => s.name === "record-offboard");
     expect(i).toBeGreaterThan(steps.findIndex((s) => s.name === "watch-removal"));
@@ -369,7 +366,7 @@ describe("offboard run definition", () => {
   it("remove-database-secrets metadata-deletes the consumer-tier postgres leaf so a re-onboard cannot inherit the old superuser password", async () => {
     seedApp();
     const seeder = new FakeSeeder();
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-database-secrets")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-database-secrets")!;
     const logs: string[] = [];
     await step.run(ctx("remove-database-secrets", logs));
     // BOTH consumer-tier database leaves (<stage>/consumer/<name>/{postgres,mongodb}), DIFFERENT
@@ -383,13 +380,13 @@ describe("offboard run definition", () => {
   it("remove-database-secrets fails closed when the Vault delete fails (a surviving leaf would be inherited under cas=0)", async () => {
     seedApp();
     const failing: VaultSeeder = seederWith({ deletePostgres: async () => { throw new Error("vault postgres-secret delete failed for secret/prod/consumer/acme/postgres (403)"); } });
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { seeder: failing })).steps({ appId: "app_1" }).find((s) => s.name === "remove-database-secrets")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder: failing })).steps({ appId: "app_1" }).find((s) => s.name === "remove-database-secrets")!;
     await expect(step.run(ctx("remove-database-secrets", []))).rejects.toThrow(/postgres-secret delete failed/);
   });
 
   it("removes the postgres secret AFTER watch-removal (the postgres pod + exporter read it via ESO until the app is pruned)", async () => {
     seedApp();
-    const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage))).steps({ appId: "app_1" });
+    const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()))).steps({ appId: "app_1" });
     const pg = steps.findIndex((s) => s.name === "remove-database-secrets");
     expect(pg).toBeGreaterThan(steps.findIndex((s) => s.name === "watch-removal"));
     // grouped with the other consumer-tier Vault delete, right after it
@@ -402,7 +399,7 @@ describe("offboard run definition", () => {
     github.seedHook("x", "acme", BUILD_HOOK_URL); // where the onboard put it: s1's build plane
     const opened: string[] = [];
     const creds = { open: (id: string) => { opened.push(id); return Promise.resolve(Buffer.from("github_pat_test", "utf8")); } } as unknown as CredentialStore;
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { github })).steps({ appId: "app_1" }).find((s) => s.name === "remove-webhook")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { github })).steps({ appId: "app_1" }).find((s) => s.name === "remove-webhook")!;
     const logs: string[] = [];
     await step.run(ctx("remove-webhook", logs, creds));
     // The GitHub org/repo comes from the apps row's repo_url path (x/acme), NOT the human owner.
@@ -418,7 +415,7 @@ describe("offboard run definition", () => {
     const github = new FakeGitHubConsumer();
     github.scopeError = true; // the PAT lost admin:repo_hook — must NOT crash the teardown
     const creds = { open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")) } as unknown as CredentialStore;
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { github })).steps({ appId: "app_1" }).find((s) => s.name === "remove-webhook")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { github })).steps({ appId: "app_1" }).find((s) => s.name === "remove-webhook")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-webhook", logs, creds))).resolves.toBeUndefined();
     expect(logs.some((l) => l.includes("webhook NOT removed") && l.includes("by hand"))).toBe(true);
@@ -426,7 +423,7 @@ describe("offboard run definition", () => {
 
   it("remove-webhook fail-soft skips when no webhook adapter is wired (never blocks offboard)", async () => {
     seedApp({ repoCredentialId: "cred_pat" });
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage))).steps({ appId: "app_1" }).find((s) => s.name === "remove-webhook")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()))).steps({ appId: "app_1" }).find((s) => s.name === "remove-webhook")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-webhook", logs))).resolves.toBeUndefined();
     expect(logs.some((l) => l.includes("no GitHub consumer client is wired"))).toBe(true);
@@ -434,7 +431,7 @@ describe("offboard run definition", () => {
 
   it("remove-webhook runs BEFORE remove-repo-pat so the sealed clone PAT is still openable", async () => {
     seedApp({ repoCredentialId: "cred_pat" });
-    const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage))).steps({ appId: "app_1" });
+    const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()))).steps({ appId: "app_1" });
     const w = steps.findIndex((s) => s.name === "remove-webhook");
     const r = steps.findIndex((s) => s.name === "remove-repo-pat");
     expect(w).toBeGreaterThan(-1);
@@ -446,7 +443,7 @@ describe("offboard run definition", () => {
     const consumerRepo = new FakeConsumerRepo();
     // The release-kit is present (committed at onboard) so the git-rm actually reaps it.
     for (const path of ["release/release.ps1", "release/release.sh", ".github/workflows/release.yml"]) consumerRepo.seed("https://github.com/x/acme.git", path, "kit");
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { consumerRepo })).steps({ appId: "app_1" }).find((s) => s.name === "remove-release-kit")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps({ appId: "app_1" }).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
     await step.run(ctx("remove-release-kit", logs));
     // Opened the consumer repo (repo URL from the apps row, sealed PAT from repoCredentialId) and
@@ -463,7 +460,7 @@ describe("offboard run definition", () => {
     seedApp({ repoCredentialId: "cred_pat" });
     const consumerRepo = new FakeConsumerRepo();
     consumerRepo.failCommit(new AppError("UPSTREAM", "git push failed: remote: Permission denied (403)"));
-    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage), { consumerRepo })).steps({ appId: "app_1" }).find((s) => s.name === "remove-release-kit")!;
+    const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps({ appId: "app_1" }).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-release-kit", logs))).resolves.toBeUndefined();
     expect(logs.some((l) => l.includes("release-kit NOT removed") && l.includes("by hand"))).toBe(true);
@@ -471,7 +468,7 @@ describe("offboard run definition", () => {
 
   it("a release-kit removal failure never blocks the rest of offboard (later steps still run, row offboarded)", async () => {
     seedApp({ repoCredentialId: "cred_pat" });
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg);
     const consumerRepo = new FakeConsumerRepo();
     consumerRepo.failOpen(new AppError("UPSTREAM", "clone failed: 403")); // the release-kit removal cannot even open the repo
@@ -485,7 +482,7 @@ describe("offboard run definition", () => {
 
   it("remove-release-kit runs BEFORE remove-repo-pat so the sealed clone PAT is still openable", async () => {
     seedApp({ repoCredentialId: "cred_pat" });
-    const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo(), prodClusterStage))).steps({ appId: "app_1" });
+    const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()))).steps({ appId: "app_1" });
     const rk = steps.findIndex((s) => s.name === "remove-release-kit");
     const rp = steps.findIndex((s) => s.name === "remove-repo-pat");
     expect(rk).toBeGreaterThan(-1);
@@ -494,7 +491,7 @@ describe("offboard run definition", () => {
 
   it("attest-target fails closed on a deploy-state domain mismatch", async () => {
     seedApp();
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     const prt = ports(reg, { cluster: new FakeClusterReader({ deployState: { domain: "other.example", stage: "prod", writtenAt: "x", generation: 1 } }) });
     const attest = makeOffboardDef(prt).steps({ appId: "app_1" })[0]!;
     await expect(attest.run(ctx("attest-target", []))).rejects.toThrow(/deploy-state mismatch/);
@@ -503,7 +500,7 @@ describe("offboard run definition", () => {
   it("watch-removal fails when the app never prunes", async () => {
     seedApp();
     const platform = new FakePlatformRepo();
-    const reg = new Registrations(platform, prodClusterStage);
+    const reg = new Registrations(platform);
     await seedRegistration(reg);
     const prt = ports(reg, { argo: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }) });
     const steps = makeOffboardDef(prt).steps({ appId: "app_1" });

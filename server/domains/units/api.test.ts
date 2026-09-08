@@ -14,13 +14,14 @@ import { getRun } from "../../executor/read.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerConsumerRoutes, registerTenantRoutes } from "./api.ts";
 import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
+import { CHANNEL_STAGES } from "./onboard.fixture.ts";
 import { makeOffboardDef } from "./offboard.run.ts";
 import { makeSuspendDef, makeResumeDef } from "./suspend-resume.run.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { makeAddAppDef } from "./add-app.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "./tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "./tenant-offboard.run.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -91,9 +92,6 @@ function passReport(): GateReport {
 
 const fakeSeeder = () => ({ seed: async () => ({ created: true }), seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {} });
 
-// Every fixture registers at the prod stage, so a fixed resolver answers every cluster with "prod" —
-// the stage boundary Registrations.commitRegistration checks before it ever writes a stage file.
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` for the two consumer
  *  fixtures' domains — onboard's planStream resolves OnboardParams.unitApex from exactly this chain
@@ -119,6 +117,7 @@ function onboardPorts(): OnboardPorts {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
     runner: new FakeGateRunner({ report: passReport() }),
     registrations: lifecycle.registrations,
+    channelStages: async () => CHANNEL_STAGES,
     resolveBuildPlaneFqdn,
     seeder: fakeSeeder(),
     // Reuse the lifecycle resolver so onboard drives the same master-local fakes.
@@ -134,7 +133,7 @@ function onboardPorts(): OnboardPorts {
 
 function lifecyclePorts(): LifecyclePorts {
   return {
-    registrations: new Registrations(seededPlatformRepo(), prodClusterStage),
+    registrations: new Registrations(seededPlatformRepo()),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } }),
       argoReader: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
@@ -183,7 +182,7 @@ function seedSlaveCluster(): void {
 
 const RAW_PAT = "github_pat_raw_secret_value";
 // {version, channel} — the onboard TRIGGERS the release; the request carries no ref and no tag.
-const REQ = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", clusterId: "cls_1", owner: "team", repoPat: RAW_PAT };
+const REQ = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team", repoPat: RAW_PAT };
 
 describe("consumer API", () => {
   it("501 NOT_CONFIGURED on onboard when onboarding is not wired", async () => {
@@ -350,7 +349,7 @@ function tenantLifecyclePorts(reg: TenantRegistrations): TenantLifecyclePorts {
 async function makeTenant(enabled: boolean, appCatalog?: AppCatalogProvider): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string }> {
   const store = new CredentialStore({ db: db.db, logger });
   const bus = new RunEventBus();
-  const reg = new TenantRegistrations(new FakePlatformRepo(), prodClusterStage);
+  const reg = new TenantRegistrations(new FakePlatformRepo());
   const defs = enabled
     ? [
         makeCreateTenantDef(tenantOnboardPorts(reg)),
@@ -382,7 +381,7 @@ function seedTenant(): void {
 
 // The request targets the seeded slave cls_2. resolveCluster is role-agnostic — it requires only
 // an ACTIVE cluster — so the slave here is test topology, not an enforced law.
-const CREATE_REQ = { clusterId: "cls_2", subdomain: "acme.example", owner: "team-acme", apps: [{ name: "erp" }] };
+const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: [{ name: "erp" }] };
 
 describe("tenant API", () => {
   it("501 NOT_CONFIGURED on create-tenant when tenant onboarding is not wired", async () => {

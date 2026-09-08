@@ -180,9 +180,9 @@ export interface TenantJobInputs {
  *  carry the bucket-scoped key Secret (the engine is the one member with a StoragePort). A tenant
  *  with no apps has no member that can reach the bucket — and nothing that writes it — so the bucket
  *  phase is simply absent. */
-function tenantBucketNamespace(guid: string, apps: readonly string[]): string | null {
+function tenantBucketNamespace(guid: string, apps: readonly string[], stage: Stage): string | null {
   const first = apps[0];
-  return first === undefined ? null : memberNamespace(guid, first);
+  return first === undefined ? null : memberNamespace(guid, first, stage);
 }
 
 /** The complete tenant dump — EVERYTHING the unit owns: the registration, every `<guid>_*` Mongo
@@ -209,7 +209,7 @@ done
       },
     },
     {
-      namespace: memberNamespace(i.guid, i.identityProvider),
+      namespace: memberNamespace(i.guid, i.identityProvider, i.stage),
       spec: {
         ...boxSpec("dump-crypto", i.guid, TENANT_CRYPTO_KEYS.map((k) => ({ name: k.env, secretKeyRef: { name: TENANT_SECRET, key: k.env } }))),
         image: i.image,
@@ -219,7 +219,7 @@ done
       },
     },
   ];
-  const bucketNs = tenantBucketNamespace(i.guid, i.apps);
+  const bucketNs = tenantBucketNamespace(i.guid, i.apps, i.stage);
   if (bucketNs !== null) {
     jobs.push({
       namespace: bucketNs,
@@ -282,7 +282,7 @@ done
       },
     },
   ];
-  const bucketNs = tenantBucketNamespace(i.guid, i.apps);
+  const bucketNs = tenantBucketNamespace(i.guid, i.apps, i.stage);
   if (bucketNs !== null) {
     jobs.push({
       namespace: bucketNs,
@@ -318,7 +318,7 @@ echo "COMPLETE mongo"
       },
     },
   ];
-  const bucketNs = tenantBucketNamespace(i.guid, i.apps);
+  const bucketNs = tenantBucketNamespace(i.guid, i.apps, i.stage);
   if (bucketNs !== null) {
     jobs.push({
       namespace: bucketNs,

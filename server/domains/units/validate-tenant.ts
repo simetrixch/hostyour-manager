@@ -167,7 +167,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       const docsByMember: MemberDocs[] = [];
       for (const member of members) {
         if (deps.signal.aborted) throw abortError();
-        const namespace = memberNamespace(req.probeGuid, member.member);
+        const namespace = memberNamespace(req.probeGuid, member.member, req.stage);
         const result = await deps.helm.template({
           workdir: cloned.workdir,
           chartPath: member.chart,
@@ -178,7 +178,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           signal: deps.signal, // a DELETE/budget abort kills the in-flight helm child immediately
         });
         renders.push({ member: member.name, result });
-        if (result.ok) docsByMember.push({ member: member.name, namespace, docs: result.docs });
+        if (result.ok) docsByMember.push({ member: member.name, namespace, guid: req.probeGuid, docs: result.docs });
         deps.log(`rendered ${member.name} (${member.chart}) into ${namespace} -> ${result.ok ? `${result.docs.length} doc(s)` : "FAILED"}`);
       }
 

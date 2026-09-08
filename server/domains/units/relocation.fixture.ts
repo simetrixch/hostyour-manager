@@ -10,13 +10,13 @@ import type { StepCtx, Step } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
-import type { Stage, AppStatus, TenantStatus } from "../../../shared/enums.ts";
+import type { AppStatus, TenantStatus } from "../../../shared/enums.ts";
 import type { ConsumerService } from "../../../shared/consumer.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakePublicProbe } from "../../adapters/http-probe/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter, FakeRepoCredentialWriter } from "../../adapters/kube/testing/fake.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
@@ -40,10 +40,6 @@ const TENANT_MEMBERS = ["auth", "jobs", "report"];
 const TENANT_IDP = "auth";
 const TENANT_WATCH = tenantApplicationSet([...TENANT_MEMBERS, ...TENANT_APPS.map((a) => a.name)], GUID, "prod");
 
-const marked: ClusterStageResolver = async (cluster: string) => {
-  if (cluster !== "s1" && cluster !== "s2") throw new Error(`no cluster map for "${cluster}"`);
-  return { name: cluster, stage: "prod" as Stage };
-};
 
 export function openFixtureDb(): DbHandle {
   return openDb(":memory:");
@@ -136,7 +132,7 @@ export function makeFakes(): RelocationFakes {
 }
 
 export function consumerPorts(f: RelocationFakes): ConsumerRelocationPorts & { registrations: Registrations } {
-  const registrations = new Registrations(f.platformRepo, marked);
+  const registrations = new Registrations(f.platformRepo);
   return {
     registrations,
     resolver: f.resolver,
@@ -152,7 +148,7 @@ export function consumerPorts(f: RelocationFakes): ConsumerRelocationPorts & { r
 }
 
 export function tenantPorts(f: RelocationFakes): TenantRelocationPorts & { registrations: TenantRegistrations } {
-  const registrations = new TenantRegistrations(f.platformRepo, marked);
+  const registrations = new TenantRegistrations(f.platformRepo);
   return {
     registrations,
     resolver: f.resolver,

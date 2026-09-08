@@ -13,7 +13,8 @@ import { STAGE, type Stage } from "./enums.ts";
 export const CONSUMER_MANIFEST_PATH = "deploy/platform.yaml";
 
 /** DNS-1123 label, <= 40 chars. The identity law (G1) requires
- *  name == namespace == Chart.name == pointer name. */
+ *  manifest name == chart name == repo name == unit, and the namespace is `<unit>-<stage>`
+ *  (consumerNamespace below). */
 const consumerName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/);
 
 /** The backing services a consumer may request in its manifest (contract v1.3). THIS list is the
@@ -77,8 +78,8 @@ export type TenantSource = z.infer<typeof TenantSourceSchema>;
  *  member the platform genuinely has to know, and the only reason a member name was ever a constant
  *  here. Exactly one member carries it. */
 export const TenantMemberSchema = TenantSourceSchema.extend({
-  /** The member's name — its Application suffix, its namespace suffix and its AppProject suffix, all
-   *  `<guid>-<name>`. Free text within the DNS-label grammar: the platform composes with it and
+  /** The member's name — the middle of its namespace, its AppProject and its Application, all
+   *  `<guid>-<name>-<stage>`. Free text within the DNS-label grammar: the platform composes with it and
    *  never compares against a literal. */
   name: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/),
   /** The tenant's own IdP. Exactly one member declares it; create-tenant's activation and every
@@ -229,8 +230,8 @@ export const ConsumerManifestSchema = z.object({
   // sets. That is why no size field stands beside it: a unit has ONE size, and a second size field is
   // a second answer to a question already answered.
   mongodb: MongodbModeSchema.default("shared"),
-  // The OPTIONAL extra public FQDN the consumer serves under IN ADDITION to `<name>.<unitApex>` —
-  // never instead: one Ingress, two spec.rules entries, told apart by the Host header. Declaring is
+  // The OPTIONAL extra public FQDN the consumer serves under IN ADDITION to `<name>-<stage>.<unitApex>`
+  // — never instead: one Ingress, two spec.rules entries, told apart by the Host header. Declaring is
   // not granting: the onboard run kind ATTESTS the value into the stage registration (the builds[]
   // declare-and-attest shape), and the admission policy admits only the ATTESTED value, so a
   // manifest naming a foreign FQDN gets nothing. The platform never verifies domain control and
@@ -301,13 +302,23 @@ export const ConsumerManifestSchema = z.object({
   });
 export type ConsumerManifest = z.infer<typeof ConsumerManifestSchema>;
 
-/** The NAME of the Application the consumers ApplicationSet generates from a pointer: the appset
- *  template stamps `{{ .name }}-<stage>` (hostyour-cloud argocd/<stage>/apps/consumers-appset.yaml),
- *  e.g. "example-auth-prod" — NOT the bare consumer name. Every Manager watch on the generated
- *  Application (onboard watch-sync, offboard watch-removal, suspend/resume) MUST derive the name
- *  here, or it polls a CR that never exists. The AppProject/namespace stay the bare name (G1). */
-export function consumerArgoAppName(consumerName: string, stage: Stage): string {
+/** The NAMESPACE of one consumer AT ONE STAGE: `<name>-<stage>`, prod included. A unit carries its
+ *  own stage, so two stages of one unit may stand in one installation — on one cluster even — and
+ *  the bare name would put them into one namespace with one host and one certificate. Every writer
+ *  of the namespace composes it here: the AppProject destination, the admission policy's namespace
+ *  clause, the smoke check, the namespace delete, the mail-ops grant's subject. The consumers
+ *  ApplicationSet (hostyour-cloud clusters/argocd/files/consumers-appset.yaml) stamps the same
+ *  string, so a second spelling anywhere would deploy into a namespace nothing fences. */
+export function consumerNamespace(consumerName: string, stage: Stage): string {
   return `${consumerName}-${stage}`;
+}
+
+/** The NAME of the Application the consumers ApplicationSet generates from a registration — the
+ *  same string as the namespace, `<name>-<stage>` (e.g. "example-auth-prod"), never the bare consumer
+ *  name. Every Manager watch on the generated Application (onboard watch-sync, offboard
+ *  watch-removal, suspend/resume) MUST derive the name here, or it polls a CR that never exists. */
+export function consumerArgoAppName(consumerName: string, stage: Stage): string {
+  return consumerNamespace(consumerName, stage);
 }
 
 /** The ArgoCD UI deep-link for a consumer's generated Application. The master's own ArgoCD is served
@@ -355,8 +366,8 @@ export const ConsumerRegistrationSchema = z
     // ---- the deploy group: present TOGETHER in a stage file, absent TOGETHER from build.yaml ----
     chartPath: z.string().regex(/^[^/].*$/).optional(),
     // The cluster this stage's Application lands on, by its SHORT NAME (clusterShortName of the
-    // cluster's FQDN, e.g. "m1") — the appset's post-selector matches on it. A registration for
-    // stage X may only name a cluster MARKED X; that boundary is enforced at the writer.
+    // cluster's FQDN, e.g. "m1") — the appset's post-selector matches on it. Any active cluster: the
+    // stage is the unit's own, stated by this file's path, and the cluster's map says nothing about it.
     cluster: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/).optional(),
     // The LITERAL Mongo database name(s) copied VERBATIM from ConsumerManifest.databases — the
     // registration is the outward projection the consumers ApplicationSet reads to set
@@ -394,7 +405,7 @@ export const ConsumerRegistrationSchema = z
     // The ATTESTED extra public FQDN — the onboard run kind copies the manifest's `fqdn` here AFTER
     // refusing a name the platform already serves. The admission policy and the consumer chart read
     // THIS value, never the manifest, which is what makes declaring different from being granted.
-    // OPTIONAL even in the stage form (most units serve only `<name>.<unitApex>`), so it stands
+    // OPTIONAL even in the stage form (most units serve only `<name>-<stage>.<unitApex>`), so it stands
     // OUTSIDE the deploy group's stands-or-falls rule; never in build.yaml (checked below).
     fqdn: publicFqdn.optional(),
     // ---- build.yaml only ----

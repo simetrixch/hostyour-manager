@@ -1,5 +1,5 @@
-// A unit's per-stage argo-sync grant, its mail-ops grant, and a tenant's argo-sync grant — what is
-// left in this repository of what used to be "the per-unit build RBAC".
+// A unit's per-stage argo-sync grant, its per-stage mail-ops grant, and a tenant's argo-sync grant —
+// what is left in this repository of what used to be "the per-unit build RBAC".
 //
 // WHO APPLIES WHAT, AND IT IS NOT ONE ANSWER. All three build grants are RENDERED FROM THE
 // REGISTRATION since hostyour-cloud#174 — the two `<name>-build` ones by
@@ -18,13 +18,15 @@
 // Manager is therefore still its only writer, with the onboard's provision-smtp-ops-grant and the
 // removal run kinds' delete-smtp-ops-grant as its inverse.
 //
-// THE THREE BUILD GRANTS DO NOT SHARE A SCOPE, which is what makes the argo-sync one a renderer of
-// its own. The two `<name>-build` grants belong to the UNIT and a build is stage-free — one namespace
-// per unit, one image per release — so a unit deployed at two stages has ONE of each. The argo-sync
-// grant belongs to the unit AT ONE STAGE: it lives in the target cluster's ArgoCD namespace, and a
-// cluster carries exactly one stage, so that one exists per stage. A teardown that removed the first
-// two while another stage stood would leave that stage unable to release, which is what calling the
-// set "the per-unit build RBAC" once made it do.
+// THE GRANTS DO NOT SHARE A SCOPE. The two `<name>-build` grants belong to the UNIT and a build is
+// stage-free — one namespace per unit, one image per release — so a unit deployed at two stages has
+// ONE of each. The argo-sync grant and the mail-ops grant belong to the unit AT ONE STAGE, named
+// `<name>-<stage>-…`: the argo-sync grant names the one Application `<name>-<stage>`, and the
+// mail-ops grant binds the ServiceAccount in the one namespace `<name>-<stage>`. Two stages of one
+// unit may share one cluster's ArgoCD namespace and always share the relay's namespace, so a grant
+// named per unit would be one object two stages write and the first offboard would take it from the
+// other. A teardown that removed the two build grants while another stage stood would leave that
+// stage unable to release, which is what calling the set "the per-unit build RBAC" once made it do.
 //
 // A TENANT gets one more grant of the same kind (renderTenantArgoSync): its member Applications need
 // the same sync, but a tenant runs no release of its own, so the grant arms the build pipelines of
@@ -32,8 +34,8 @@
 //
 // Pure: no IO. The writer (adapters/kube) applies what this renders.
 import { CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL, type BuildRbacGrant, type RoleBindingManifest, type RoleManifest } from "../../adapters/kube/port.ts";
-import { STAGE } from "../../../shared/enums.ts";
-import { consumerArgoAppName } from "../../../shared/consumer.ts";
+import type { Stage } from "../../../shared/enums.ts";
+import { consumerArgoAppName, consumerNamespace } from "../../../shared/consumer.ts";
 
 /** The ServiceAccount every PipelineRun in a unit's build namespace runs under. One per build
  *  namespace, so a unit's pipeline holds exactly this unit's grants and no other's. */
@@ -82,22 +84,26 @@ function grant(input: {
 }
 
 /**
- * ONE unit's mail-OPS grant, in the RELAY's namespace: read its pods, read their logs, and exec into
- * them — what a queue dashboard needs to run postqueue/postsuper and show what the relay did with a
- * message. Rendered ONLY for a unit whose stage registration attests `smtp-ops`.
+ * ONE unit's mail-OPS grant AT ONE STAGE, in the RELAY's namespace: read its pods, read their logs,
+ * and exec into them — what a queue dashboard needs to run postqueue/postsuper and show what the
+ * relay did with a message. Rendered ONLY for a unit whose stage registration attests `smtp-ops`.
  *
  * Written by the Manager rather than by the relay's chart, for a reason the relay cannot solve: a
  * RoleBinding names a concrete ServiceAccount, so a chart carrying it would have to know which unit
  * of which installation runs the dashboard — the very name this ticket removes. A namespace LABEL
  * cannot stand in either: labels select namespaces for a NetworkPolicy, and RBAC binds identities.
  *
+ * The subject is the ServiceAccount named `<name>` in the namespace `<name>-<stage>` — the customer
+ * chart's own ServiceAccount, named after the unit — so a unit's two stages hold two grants that bind
+ * two ServiceAccounts, and the offboard of one stage deletes exactly its own.
+ *
  * Role AND binding, both under the consumer ownership label, so the offboard's delete takes the
- * permission away with the unit. Left to the chart, the Role would outlive every consumer that ever
+ * permission away with the stage. Left to the chart, the Role would outlive every consumer that ever
  * claimed it, in the namespace of the relay itself.
  */
-export function renderSmtpOpsGrant(input: { name: string }): BuildRbacGrant {
+export function renderSmtpOpsGrant(input: { name: string; stage: Stage }): BuildRbacGrant {
   return grant({
-    name: `${input.name}-smtp-ops`,
+    name: `${consumerNamespace(input.name, input.stage)}-smtp-ops`,
     namespace: RELAY_NAMESPACE,
     label: CONSUMER_PROJECT_LABEL,
     rules: [
@@ -105,30 +111,30 @@ export function renderSmtpOpsGrant(input: { name: string }): BuildRbacGrant {
       { apiGroups: [""], resources: ["pods/log"], verbs: ["get"] },
       { apiGroups: [""], resources: ["pods/exec"], verbs: ["create", "get"] },
     ],
-    subjects: [{ namespace: input.name, name: input.name }],
+    subjects: [{ namespace: consumerNamespace(input.name, input.stage), name: input.name }],
   });
 }
 
 /**
- * ONE unit's argo-sync grant, on its own — because its SCOPE differs from the two build-namespace
- * grants it is rendered beside. The ArgoCD namespace belongs to the unit's TARGET cluster (the master's
- * "argocd", or a slave's per-slave one), and a cluster carries exactly one stage, so a unit deployed at
- * two stages has two of these, one per cluster, while it has only one `<name>-build`. A teardown of ONE
- * stage therefore renders this alone: the grant of the stage that is going, without touching what the
- * unit's surviving stages build with.
+ * ONE unit's argo-sync grant AT ONE STAGE, on its own — because its SCOPE differs from the two
+ * build-namespace grants it is rendered beside. The ArgoCD namespace belongs to the unit's TARGET
+ * cluster (the master's "argocd", or a slave's per-slave one), and two stages of one unit may land on
+ * one cluster, so the grant is named `<name>-<stage>-argo-sync` and names that one stage's
+ * Application. A teardown of ONE stage therefore renders this alone: the grant of the stage that is
+ * going, without touching what the unit's surviving stages build with or sync.
  */
-export function renderConsumerArgoSync(input: { name: string; argoNamespace: string }): BuildRbacGrant {
+export function renderConsumerArgoSync(input: { name: string; stage: Stage; argoNamespace: string }): BuildRbacGrant {
   return grant({
-    name: `${input.name}-argo-sync`,
+    name: `${consumerNamespace(input.name, input.stage)}-argo-sync`,
     namespace: input.argoNamespace,
     label: CONSUMER_PROJECT_LABEL,
     rules: [
       {
         apiGroups: ["argoproj.io"],
         resources: ["applications"],
-        // Every Application this unit can ever have, named outright. The ArgoCD namespace holds
+        // The ONE Application of this unit at this stage, named outright. The ArgoCD namespace holds
         // every unit's Applications, so without resourceNames this grant would reach all of them.
-        resourceNames: STAGE.map((stage) => consumerArgoAppName(input.name, stage)),
+        resourceNames: [consumerArgoAppName(input.name, input.stage)],
         // list and watch are deliberately absent: kube ignores resourceNames for those two verbs,
         // so granting either would silently widen this Role back to every Application in the
         // namespace. A sync is a read plus a patch of the named object, which needs neither.

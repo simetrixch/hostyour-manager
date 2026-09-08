@@ -10,7 +10,7 @@ import { clusters, servers } from "../../db/schema/inventory.ts";
 import { MASTER_ROLES, type Stage, type DriftVerdict } from "../../../shared/enums.ts";
 import type { LiveArgoView, LiveDriftView, ConsumerLiveProbeView } from "../../../shared/api-types.ts";
 import { syncedRevisionFor, targetedRevisionFor, type ClusterKubeResolver, type ClusterReader, type SmokeResult } from "../../adapters/kube/port.ts";
-import { consumerArgoAppName, consumerArgocdUrl } from "../../../shared/consumer.ts";
+import { consumerArgoAppName, consumerArgocdUrl, consumerNamespace } from "../../../shared/consumer.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import { consumerUnitHost } from "./unit-dns.ts";
@@ -99,7 +99,7 @@ export async function probeConsumerLive(
   input: { clusterId: string; name: string; stage: Stage; repoUrl: string | null },
 ): Promise<ConsumerLiveProbeView> {
   const { clusterReader, argoReader, argoNamespace } = await resolver.resolve(input.clusterId);
-  // namespace == the consumer name by the G1 identity law; the GENERATED Application is <name>-<stage>.
+  // The namespace and the GENERATED Application are both <name>-<stage>.
   const appName = consumerArgoAppName(input.name, input.stage);
   // The ArgoCD UI deep-link, derived from the master's OWN cluster domain (the public masterFqdn,
   // always present — never the optional MASTER_FQDN config). Computed HERE, not the always-live list
@@ -115,7 +115,7 @@ export async function probeConsumerLive(
   // Fan the two live reads so one failure never sinks the other — a down slave spins its cluster
   // smoke, not the argo read that always hits the master's one kube endpoint.
   const [smokeRes, argoRes] = await Promise.allSettled([
-    clusterReader.smoke(input.name),
+    clusterReader.smoke(consumerNamespace(input.name, input.stage)),
     argoReader.getApplication(argoNamespace, appName),
   ]);
 
@@ -155,8 +155,8 @@ export async function probeConsumerLive(
   return { cluster, argo, drift, argocdUrl };
 }
 
-/** WHERE the consumer serves: `<name>.<unitApex>`, the one host its ingress renders, its admission
- *  policy admits and its DNS record names. Composed here rather than in the browser because the apex
+/** WHERE the consumer serves: `<name>-<stage>.<unitApex>`, the one host its ingress renders, its
+ *  admission policy admits and its DNS record names. Composed here rather than in the browser because the apex
  *  is not on the SQL row and cannot be derived from it: `clusters.domain` is where the CLUSTER is
  *  reached, while `global.unitApex` — read off that cluster's own values chain — is where its UNITS
  *  serve, and install.sh defaults the apex to the cluster FQDN minus its first label, so the two
@@ -173,7 +173,7 @@ export async function readUnitHost(
 ): Promise<string | null> {
   if (!registrations) return null;
   try {
-    return consumerUnitHost(name, unitApexFromChain(await registrations.readClusterValueFiles(domain, stage)));
+    return consumerUnitHost(name, stage, unitApexFromChain(await registrations.readClusterValueFiles(domain, stage)));
   } catch {
     return null;
   }

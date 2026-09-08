@@ -135,7 +135,7 @@ function checkStep(ports: CheckTenantsPorts): Step {
         try {
           // The bootstrap Secret lives in the AUTH member's own namespace — the member that consumes
           // it — and the read uses the per-cluster credential this manager already holds.
-          const ns = memberNamespace(t.guid, t.identityProvider);
+          const ns = memberNamespace(t.guid, t.identityProvider, t.stage);
           const { clusterReader } = await ports.resolver.resolve(t.clusterId);
           const token = await clusterReader.readSecretValue(ns, TENANT_SECRET, BOOTSTRAP_TOKEN_KEY);
           if (!token) {
@@ -146,7 +146,7 @@ function checkStep(ports: CheckTenantsPorts): Step {
             // chain and never off the cluster's own domain — composing from the domain asks a host
             // nothing serves.
             const apex = await ports.resolveUnitApex(t.domain, t.stage);
-            const authFqdn = tenantMemberHost(t.identityProvider, t.subdomain, apex);
+            const authFqdn = tenantMemberHost(t.identityProvider, t.stage, t.subdomain, apex);
             const answer = await ports.health.read({
               url: `https://${authFqdn}/api/v1/bootstrap/status`,
               tokenHeader: BOOTSTRAP_TOKEN_HEADER,

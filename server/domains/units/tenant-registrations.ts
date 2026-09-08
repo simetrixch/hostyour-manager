@@ -7,12 +7,11 @@
 //   - SERIALIZE -> VALIDATE -> RE-PARSE: the file is schema-validated, serialized as flat
 //     "key: <json>" YAML, and the bytes are re-parsed + re-validated (anti-injection, deep-equal).
 //   - RUN-ID TRAILER: every commit ends with [<runId>], traceable to an approved+succeeded Run.
-//   - STAGE BOUNDARY: a registration for stage X may only name a cluster MARKED X. Enforced here, at
-//     the one writer, against clusters/active/<fqdn>.yaml on the platform repo — the same guard
-//     commitRegistration applies to a consumer.
 //
 // ONE FILE per tenant per stage: registrations/<guid>/<stage>.yaml. The guid is the DIRECTORY and the
-// stage is the FILE NAME, so the path IS the identity and the body repeats neither. Every field of
+// stage is the FILE NAME, so the path IS the identity and the body repeats neither. The stage is the
+// tenant's own, and the `cluster` field names any active cluster — a tenant may stand at several
+// stages under one guid, on one cluster or on several. Every field of
 // TenantRegistrationSchema is written on EVERY commit, which is what makes the read-modify-write ops
 // below safe: a field a writer does not re-emit is silently dropped from the file, and a dropped
 // cluster would mis-target a LIVE tenant's fan-out (prune+selfHeal cascade). The round-trip tests pin
@@ -22,10 +21,9 @@
 // Suspend is a FIELD flip (the chart renders the off state), NOT a git-mv. removeTenant git-rm's the
 // tenant's file for that stage (offboard).
 //
-// Boundary: domain layer — imports shared/ (type + schema), the inventory domain's cluster marking
+// Boundary: domain layer — imports shared/ (type + schema) and the git PlatformRepo port; the
+// concrete second repo bound to catalog (its workRoot + repo-qualified lock) is wired by the adapter.
 import type { UnitQuota } from "../../../shared/unit-size.ts";
-// (the base domain every other one may read) and the git PlatformRepo port; the concrete second repo
-// bound to catalog (its workRoot + repo-qualified lock) is wired by the adapter.
 import { z } from "zod";
 import { parse as parseYaml } from "yaml";
 import { guid as guidSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration } from "../../../shared/tenant.ts";
@@ -36,7 +34,7 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 import type { SkippedTenantPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { AppError } from "../../kernel/errors.ts";
-import { serializePointer, makeRegistrationGuard, trailer, type ClusterStageResolver, assertClusterStage } from "./registrations.ts";
+import { serializePointer, makeRegistrationGuard, trailer } from "./registrations.ts";
 
 /** registrations/<guid>/<stage>.yaml — the ONE per-tenant-per-stage file. The guid segment mirrors
  *  shared/tenant.ts:guid (12 chars of Crockford base32 minus i/l/o/u). */
@@ -91,13 +89,8 @@ export function tenantRegistrationWrite(stage: Stage, guid: string, registration
 }
 
 export class TenantRegistrations {
-  /** `repo` is catalog (where the registrations live); `clusterStage` resolves a cluster's
-   *  MARKED stage off the platform repo — a different repo, which is why it rides as a function rather
-   *  than a second PlatformRepo this class would then also be tempted to write through. */
-  constructor(
-    private readonly repo: PlatformRepo,
-    private readonly clusterStage: ClusterStageResolver,
-  ) {}
+  /** `repo` is catalog, where the registrations live. */
+  constructor(private readonly repo: PlatformRepo) {}
 
   /** The branch every read and every commit below stands on — this installation's books in
    *  catalog, resolved once when the repo port was built, and the same name hostyour-cloud's
@@ -215,10 +208,10 @@ export class TenantRegistrations {
   }
 
   /** Every subdomain a tenant stands at, ACROSS ALL STAGES — the set the consumer onboarding's G23
-   *  holds a candidate unit name against, because a consumer named after one would serve exactly the
-   *  host that tenant's IdP scopes its session cookies to (unit-dns.ts). Stage-free deliberately:
-   *  neither the cookie Domain nor the consumer's host carries a stage, and two clusters may share
-   *  one `global.unitApex`, so a stage-scoped answer would miss a collision the browser does not. */
+   *  holds a candidate unit name against, because a consumer named after one would serve a label
+   *  under the parent that tenant's IdP scopes its session cookies to (unit-dns.ts). Stage-free
+   *  deliberately: the cookie Domain carries no stage, and two clusters may share one
+   *  `global.unitApex`, so a stage-scoped answer would miss a collision the browser does not. */
   async listTenantSubdomains(): Promise<string[]> {
     const subdomains = new Set<string>();
     for (const stage of STAGE) {
@@ -227,12 +220,9 @@ export class TenantRegistrations {
     return [...subdomains];
   }
 
-  /** Commit ONE tenant's registration for ONE stage (create-tenant). The stage boundary is enforced
-   *  HERE, at the writer: the named cluster's own marking must say this stage, or nothing is written.
-   *  Overwrite-idempotent on resume. */
+  /** Commit ONE tenant's registration for ONE stage (create-tenant). Overwrite-idempotent on resume. */
   async commitTenant(input: { stage: Stage; guid: string; registration: TenantRegistration; runId: string }): Promise<{ commit: string }> {
     const { stage, guid, registration, runId } = input;
-    await assertClusterStage(this.clusterStage, registration.cluster, stage, `tenant ${guid}`);
     return this.repo.withBranch(this.branch, (books) =>
       books.commit({
         message: `create-tenant(${guid}): ${stage} on ${registration.cluster} + ${registration.apps.length} app(s) ${trailer(runId)}`,
@@ -250,10 +240,10 @@ export class TenantRegistrations {
     const { op, app, member, seedReference = false, seedDemo = false, runId } = input;
     const has = current.entry.apps.some((a) => a.name === app);
     if (op === "append" && has) throw new AppError("VALIDATION", `app "${app}" already exists in tenant "${guid}"`);
-    // Held against THIS tenant's own members, not against a constant: both are named <guid>-<name>,
-    // so the app would claim the member's namespace, AppProject and Application.
+    // Held against THIS tenant's own members, not against a constant: both are named
+    // <guid>-<name>-<stage>, so the app would claim the member's namespace, AppProject and Application.
     if (op === "append" && current.entry.members.some((m) => m.name === app)) {
-      throw new AppError("VALIDATION", `app name "${app}" is also a member of tenant "${guid}" — both are named <guid>-${app}, so the app would claim the member's namespace and Application`);
+      throw new AppError("VALIDATION", `app name "${app}" is also a member of tenant "${guid}" — both are named <guid>-${app}-${stage}, so the app would claim the member's namespace and Application`);
     }
     if (op === "drop" && !has) throw new AppError("VALIDATION", `app "${app}" is not in tenant "${guid}"`);
     if (op === "append" && !member) throw new AppError("VALIDATION", `add-app for "${app}" carries no member record — the ApplicationSet fans out over members[], so the app would be recorded as owned and never deployed`);
@@ -304,11 +294,10 @@ export class TenantRegistrations {
 
   /** Repoint the tenant's `cluster` field — the whole bracket moves at once: every member appset
    *  selects on this one field, so the source slave stops generating the fan-out and the target
-   *  starts. The stage boundary holds here exactly as at commitTenant. */
+   *  starts. The file keeps its path, so a tenant moves within its stage, never across one. */
   async setTenantCluster(stage: Stage, guid: string, cluster: string, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
-    await assertClusterStage(this.clusterStage, cluster, stage, `tenant ${guid}`);
     return this.write(stage, guid, { ...current.entry, cluster }, `tenant-migrate(${guid}): ${current.entry.cluster} -> ${cluster} ${trailer(runId)}`);
   }
 

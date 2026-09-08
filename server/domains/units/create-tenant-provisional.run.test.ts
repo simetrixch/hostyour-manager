@@ -6,7 +6,6 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { memberAppProject, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -96,7 +95,6 @@ const REGISTRY_HOST = "zot.m1.example";
 /** A cluster-marking resolver that answers every cluster short name at "prod" — every fixture in this
  *  file lands its tenant on s1/prod, so a single-stage stand-in is all TenantRegistrations needs to
  *  satisfy commitTenant's stage boundary check. */
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 function passReport(): TenantValidationReport {
   return composeTenantReport({
@@ -137,7 +135,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     seeder: fakeTenantSeeder(),
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
-    registrations: new TenantRegistrations(new FakePlatformRepo(), CLUSTER_STAGE),
+    registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({
       clusterReader: cluster ?? new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 3 } }),
       argoReader: argo ?? new FakeMasterArgoReader(), // no scripted statuses ⇒ every member reads Missing ⇒ pruned
@@ -241,7 +239,7 @@ describe("record-provisional — the row exists BEFORE anything is deployed", ()
     // The whole point: the row is the ONLY thing that exists at this moment.
     expect(await prt.registrations.readTenant("prod", GUID)).toBeNull();
     for (const member of [...TEST_MEMBERS, ...APPS.map((a) => a.name)]) {
-      expect(projects.get("argocd", memberAppProject(GUID, member))).toBeUndefined();
+      expect(projects.get("argocd", memberAppProject(GUID, member, "prod"))).toBeUndefined();
     }
   });
 
@@ -298,7 +296,7 @@ describe("record-provisional — the row exists BEFORE anything is deployed", ()
 // is a known live condition. The failed run's screen therefore has to resolve the tenants ROW, not
 // conclude "failed create-tenant ⇒ orphan" and hold out the one run kind that deprovisions the tenant.
 describe("a create-tenant that fails only at `activate` leaves a LIVE tenant", () => {
-  const TOKEN_PATH = `${memberNamespace(GUID, "auth")}/hostyour-app-secrets/AUTH_BOOTSTRAP_TOKEN`;
+  const TOKEN_PATH = `${memberNamespace(GUID, "auth", "prod")}/hostyour-app-secrets/AUTH_BOOTSTRAP_TOKEN`;
 
   it("record-inventory has already settled the row to active — so the run's tenant reads LIVE, never purgeable", async () => {
     seedClusters();
@@ -381,13 +379,13 @@ describe("create-tenant's abort-with-cleanup IS the shared teardown", () => {
       await stepNamed(prt, p, s).run(ctx(p, s));
     }
     expect(await prt.registrations.readTenant("prod", GUID)).not.toBeNull();
-    for (const member of members) expect(projects.get("argocd", memberAppProject(GUID, member))).toBeDefined();
+    for (const member of members) expect(projects.get("argocd", memberAppProject(GUID, member, "prod"))).toBeDefined();
 
     const logs: string[] = [];
     for (const c of makeCreateTenantDef(prt).cleanups?.(p) ?? []) await c.run(ctx(p, `cleanup:${c.name}`, { logs }));
 
     expect(await prt.registrations.readTenant("prod", GUID)).toBeNull();
-    for (const member of members) expect(projects.get("argocd", memberAppProject(GUID, member))).toBeUndefined();
+    for (const member of members) expect(projects.get("argocd", memberAppProject(GUID, member, "prod"))).toBeUndefined();
     // The record step found the row by (clusterId, guid) even though the frozen target carries
     // tenantId null — record-provisional mints that id at EXECUTE time, so no params could hold it.
     const row = tenantRow();
@@ -416,13 +414,13 @@ describe("create-tenant's abort-with-cleanup IS the shared teardown", () => {
     // the teardown must reap it even though it was never row-backed.
     await projects.applyAppProject(
       "argocd",
-      renderTenantAppProject({ guid: GUID, member: "auth", argoNamespace: "argocd", catalogRepoUrl: DEPLOY_URL, platformRepoURL: PLATFORM_URL, cluster: "s1" }),
+      renderTenantAppProject({ guid: GUID, member: "auth", stage: "prod", argoNamespace: "argocd", catalogRepoUrl: DEPLOY_URL, platformRepoURL: PLATFORM_URL, cluster: "s1" }),
     );
     const prt = ports({ projects });
     const p = params();
     const logs: string[] = [];
     for (const c of makeCreateTenantDef(prt).cleanups?.(p) ?? []) await c.run(ctx(p, `cleanup:${c.name}`, { logs }));
-    expect(projects.get("argocd", memberAppProject(GUID, "auth"))).toBeUndefined();
+    expect(projects.get("argocd", memberAppProject(GUID, "auth", "prod"))).toBeUndefined();
     expect(logs.some((l) => l.includes(`rolled-back tenant ${GUID} had no inventory row`))).toBe(true);
   });
 });
@@ -437,10 +435,10 @@ describe("the guid mint probes with the TOLERANT scan", () => {
     // strict fold's throw is injected on the registrations itself: the scan-grade probe never calls it, while
     // "absent" — the one answer that means the guid is FREE — still comes from the real scan.
     seedClusters();
-    const registrations = new TenantRegistrations(new FakePlatformRepo(), CLUSTER_STAGE);
+    const registrations = new TenantRegistrations(new FakePlatformRepo());
     registrations.readTenant = () => Promise.reject(new AppError("INTERNAL", `tenant file tenants/prod/${GUID}/reset.yaml failed its schema: nonce Invalid input`));
     const result = await makeCreateTenantDef(ports({ registrations })).planStream!(
-      { clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS, trio: { jobs: false } },
+      { clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS, trio: { jobs: false } },
       { db: db.db, log: () => undefined, signal: new AbortController().signal },
     );
     expect(result.outcome).toBe("planned");

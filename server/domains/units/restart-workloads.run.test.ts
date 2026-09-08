@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeRestartWorkloadsDef, makeTenantRestartWorkloadsDef } from "./restart-workloads.run.ts";
-import { Registrations, type ClusterStageResolver } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
@@ -24,7 +24,6 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-const prodClusterStage: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 function ctx(runId: string, stepName: string, params: Record<string, unknown>, logs: string[]): StepCtx {
   return {
@@ -95,19 +94,19 @@ describe("restart-workloads run (consumer)", () => {
     seedApp();
     // The namespace IS the consumer name (G1) — the assertion that the run derived it from the row
     // rather than from anything the caller passed.
-    const cluster = new FakeClusterReader({ ...ATTESTING, workloadsPerNamespace: { acme: 3 } });
+    const cluster = new FakeClusterReader({ ...ATTESTING, workloadsPerNamespace: { "acme-prod": 3 } });
     const logs: string[] = [];
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await runAll(makeRestartWorkloadsDef(consumerPorts(reg, cluster)).steps({ appId: "app_1" }), "run_r", { appId: "app_1" }, logs);
 
-    expect(cluster.restarted.map((r) => r.namespace)).toEqual(["acme"]);
+    expect(cluster.restarted.map((r) => r.namespace)).toEqual(["acme-prod"]);
     expect(logs.join("\n")).toContain("3 workload(s) of acme rolled");
   });
 
   it("stamps the pod template with an instant — what makes the template DIFFERENT, which is what rolls it", async () => {
     seedApp();
-    const cluster = new FakeClusterReader({ ...ATTESTING, workloadsPerNamespace: { acme: 1 } });
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const cluster = new FakeClusterReader({ ...ATTESTING, workloadsPerNamespace: { "acme-prod": 1 } });
+    const reg = new Registrations(new FakePlatformRepo());
     await runAll(makeRestartWorkloadsDef(consumerPorts(reg, cluster)).steps({ appId: "app_1" }), "run_r", { appId: "app_1" }, []);
 
     expect(cluster.restarted[0]?.stampedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -116,9 +115,9 @@ describe("restart-workloads run (consumer)", () => {
   it("reports a unit with no workload as such instead of as a delivery that landed", async () => {
     seedApp();
     // A suspended consumer renders replicas 0 — nothing to roll, and no pod holding a stale value.
-    const cluster = new FakeClusterReader({ ...ATTESTING, workloadsPerNamespace: { acme: 0 } });
+    const cluster = new FakeClusterReader({ ...ATTESTING, workloadsPerNamespace: { "acme-prod": 0 } });
     const logs: string[] = [];
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     await runAll(makeRestartWorkloadsDef(consumerPorts(reg, cluster)).steps({ appId: "app_1" }), "run_r", { appId: "app_1" }, logs);
 
     expect(logs.join("\n")).toContain("no workload on s1.example to roll");
@@ -127,14 +126,14 @@ describe("restart-workloads run (consumer)", () => {
   it("FAILS the run when the cluster refuses the patch — never reports a half-done delivery", async () => {
     seedApp();
     const cluster = new FakeClusterReader({ ...ATTESTING, throwOnRestart: new Error("deployments.apps is forbidden: patch") });
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     const steps = makeRestartWorkloadsDef(consumerPorts(reg, cluster)).steps({ appId: "app_1" });
     await expect(runAll(steps, "run_r", { appId: "app_1" }, [])).rejects.toThrow(/forbidden: patch/);
   });
 
   it("plans attest-target first, claims no BOOKS branch, and says in the summary that it moves no secret", async () => {
     seedApp();
-    const reg = new Registrations(new FakePlatformRepo(), prodClusterStage);
+    const reg = new Registrations(new FakePlatformRepo());
     const plan = await makeRestartWorkloadsDef(consumerPorts(reg, new FakeClusterReader(ATTESTING))).plan({ appId: "app_1" }, { db: db.db });
 
     expect(plan.targetKind).toBe("app");
@@ -152,10 +151,10 @@ describe("restart-workloads run (consumer)", () => {
 describe("tenant-restart-workloads run", () => {
   it("walks EVERY member namespace of the tenant under ONE stamp", async () => {
     seedTenant();
-    const expected = ["auth", "jobs", "report", "erp"].map((m) => memberNamespace(GUID, m));
+    const expected = ["auth", "jobs", "report", "erp"].map((m) => memberNamespace(GUID, m, "prod"));
     const cluster = new FakeClusterReader({ ...ATTESTING, workloadsPerNamespace: Object.fromEntries(expected.map((ns) => [ns, 2])) });
     const logs: string[] = [];
-    const reg = new TenantRegistrations(new FakePlatformRepo(), async (c) => ({ name: c, stage: "prod" }));
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     await runAll(makeTenantRestartWorkloadsDef(tenantPorts(reg, cluster)).steps({ tenantId: "tnt_1" }), "run_tr", { tenantId: "tnt_1" }, logs);
 
     // A tenant owns one namespace PER MEMBER — rolling only one of them would leave the other members
@@ -168,14 +167,14 @@ describe("tenant-restart-workloads run", () => {
 
   it("plans attest-target first, names the member namespaces, and claims no catalog books lock", async () => {
     seedTenant();
-    const reg = new TenantRegistrations(new FakePlatformRepo(), async (c) => ({ name: c, stage: "prod" }));
+    const reg = new TenantRegistrations(new FakePlatformRepo());
     const plan = await makeTenantRestartWorkloadsDef(tenantPorts(reg, new FakeClusterReader(ATTESTING))).plan({ tenantId: "tnt_1" }, { db: db.db });
 
     expect(plan.targetKind).toBe("tenant");
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "restart-workloads"]);
     // The operator approves a namespace LIST, not a count: the members are what can be checked against
     // the Vault entry whose value was just replaced.
-    expect(plan.summary).toContain(memberNamespace(GUID, "erp"));
+    expect(plan.summary).toContain(memberNamespace(GUID, "erp", "prod"));
     // Every OTHER tenant run kind claims `catalog@<books>` plus the cluster branch because it writes
     // the registration; this one writes nothing, so it queues behind none of them.
     expect(plan.locks).toEqual([{ resource: "master-kube", key: "m" }]);

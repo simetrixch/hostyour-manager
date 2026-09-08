@@ -48,7 +48,7 @@ describe("assertChannelReaches", () => {
     // The operator must be able to read the rule off the refusal — otherwise the answer to "why not?"
     // is a file they have to go and find.
     expect(() => assertChannelReaches(table, "alpha", "prod", "platform release 1.0.0-alpha"))
-      .toThrow(/1\.0\.0-alpha.*alpha channel, which reaches dev.*marked prod/s);
+      .toThrow(/1\.0\.0-alpha.*alpha channel, which reaches dev.*stands at prod/s);
   });
 
   it("refuses a channel the table does not mention at all — an unlisted channel reaches nothing", () => {

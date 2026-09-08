@@ -257,7 +257,7 @@ export function openAccessStep(worldOf: WorldOf, on: "source" | "target", target
     run: async (ctx) => {
       const w = await worldOf(ctx);
       const { commit } = await w.setQuiesced(false, ctx.runId);
-      const clusterId = on === "source" ? w.sourceClusterId : loadActiveTargetCluster(ctx.db, targetClusterId!, w.stage).clusterId;
+      const clusterId = on === "source" ? w.sourceClusterId : loadActiveTargetCluster(ctx.db, targetClusterId!).clusterId;
       await w.watchConverged(ctx, clusterId, "running");
       ctx.checkpoint({ commit });
       ctx.log("meta", `access to ${w.unit} reopened (${commit}) — the unit serves again`);

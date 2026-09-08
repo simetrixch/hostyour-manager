@@ -18,6 +18,8 @@ import type {
   // The channel table the onboard wizard reads — served literally from the platform repo's
   // clusters/platform/values-common.yaml (global.channelStages); the manager keeps no copy.
   ChannelStagesView,
+  // What the onboard wizard's prefill answers: the version and channel the repository states.
+  OnboardPrefillView,
   // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
   OperatorKeyView,
 } from "../../shared/api-types.ts";
@@ -250,25 +252,37 @@ export interface OnboardInput {
    *  mints (or reuses) the full tag from them — the manager never composes a tag. */
   version: string;
   channel: "alpha" | "beta" | "stable";
-  /** Deployable form: the target cluster (its stage is the cluster's own). Exactly one of clusterId
-   *  and stage is sent. */
+  /** The unit's own stage, for both forms — the namespace, the host, the registration path and the
+   *  Vault path all follow it, and the plan holds it against the channel's ceiling. */
+  stage: Stage;
+  /** Deployable form: the target cluster, any active one. Absent ⇒ the build-only form. */
   clusterId?: string;
-  /** Build-only form: the stage the ONE triggered release run puts the release on. */
-  stage?: string;
   owner: string;
   chartPath?: string;
   /** The ONE per-consumer GitHub PAT (required — every consumer repo is private). Sent once over
    *  TLS; the Manager seals it server-side and it never appears in any run/params/log. */
   repoPat: string;
 }
+/** What the wizard's "Read from repository" sends (POST /api/consumers/prefill): the repository, the
+ *  PAT that reads it — sealed for the one clone and purged again server-side — and the chart path
+ *  whose Chart.yaml answers where package.json does not. */
+export interface OnboardPrefillInput {
+  repoURL: string;
+  repoPat: string;
+  chartPath?: string;
+}
 export const listConsumers = (): Promise<ConsumerView[]> => req<ConsumerView[]>("/api/consumers");
 export const getConsumerLive = (appId: string): Promise<ConsumerLiveView> => req<ConsumerLiveView>(`/api/consumers/${appId}/live`);
 export const listOnboardTargets = (): Promise<OnboardTargetView[]> => req<OnboardTargetView[]>("/api/consumers/targets");
 /** The channel table (GET /api/consumers/channels): which stages each release channel may reach —
  *  read literally from platform/values-common.yaml global.channelStages, never a wizard copy. The
- *  pipeline enforces the ceiling at the point that writes; the wizard only uses this to offer valid
- *  choices up front. */
+ *  pipeline enforces the ceiling at the point that writes; the wizard offers the stages a channel
+ *  admits, and the plan refuses the rest. */
 export const getChannelStages = (): Promise<ChannelStagesView> => req<ChannelStagesView>("/api/consumers/channels");
+/** The wizard's prefill: the version and the channel the repository itself states, each with the
+ *  source it was read from, so the operator confirms a number instead of typing one. */
+export const prefillOnboard = (input: OnboardPrefillInput): Promise<OnboardPrefillView> =>
+  post<OnboardPrefillView>("/api/consumers/prefill", input as unknown as Record<string, unknown>);
 export const onboardConsumer = (input: OnboardInput): Promise<{ runId: string }> =>
   post<{ runId: string }>("/api/consumers", input as unknown as Record<string, unknown>);
 export const offboardConsumer = (appId: string): Promise<{ runId: string }> => post(`/api/consumers/${appId}/offboard`);
@@ -442,6 +456,8 @@ export type TenantDetailView = TenantView & { apps: TenantAppView[] };
  *  mandatory members of every tenant. */
 export interface TenantCreateForm {
   clusterId: string;
+  /** The tenant's own stage — every member's namespace suffix and the registration path. */
+  stage: Stage;
   subdomain: string;
   owner: string;
   /** The selected app-types with their two per-app seed tiers: seedReference ⇒ reference
@@ -452,10 +468,11 @@ export interface TenantCreateForm {
   /** OPTIONAL first-admin email. Empty ⇒ omitted from the body (no first-admin invite). */
   adminEmail?: string;
 }
-/** The POST /api/tenants body == the server's CreateTenantRequest (stage/domain are derived from
- *  the target cluster row server-side, never sent). */
+/** The POST /api/tenants body == the server's CreateTenantRequest (the domain is derived from the
+ *  target cluster row server-side, never sent; the stage is the tenant's own and IS sent). */
 export interface CreateTenantBody {
   clusterId: string;
+  stage: Stage;
   subdomain: string;
   owner: string;
   apps: { name: string; seedReference: boolean; seedDemo: boolean }[]; // per-app seed tiers; default off
@@ -477,6 +494,7 @@ export function buildCreateTenantBody(f: TenantCreateForm): CreateTenantBody {
   const adminEmail = f.adminEmail?.trim();
   return {
     clusterId: f.clusterId,
+    stage: f.stage,
     subdomain: f.subdomain.trim(),
     owner: f.owner.trim(),
     apps,

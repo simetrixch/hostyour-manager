@@ -98,9 +98,9 @@ function errText(e: unknown): string {
 export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardApiDeps): void {
   const { executor, db, store, onboardingEnabled, resolver, registrations, platformRepo } = deps;
 
-  // The consumer inventory: every onboarded app + which cluster it runs on (apps.clusterId ->
-  // clusters.domain/stage). provenance "manager" marks a consumer this Manager onboarded and
-  // gate-validated, "adopted" one whose row was reconstructed from the registration — the same two
+  // The consumer inventory: every onboarded app, its own stage, and which cluster it runs on
+  // (apps.clusterId -> clusters.domain). provenance "manager" marks a consumer this Manager onboarded
+  // and gate-validated, "adopted" one whose row was reconstructed from the registration — the same two
   // words the tenant projection below carries, so a reader compares the two lists on one vocabulary.
   app.get("/api/consumers", (c) =>
     c.json(
@@ -110,7 +110,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
           name: apps.name,
           clusterId: apps.clusterId,
           domain: clusters.domain,
-          stage: clusters.stage,
+          stage: apps.stage,
           repoUrl: apps.repoUrl,
           chartPath: apps.chartPath,
           provenance: apps.provenance,
@@ -202,7 +202,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     const found = db
       .select({
         id: apps.id, name: apps.name, clusterId: apps.clusterId, domain: clusters.domain,
-        stage: clusters.stage, repoUrl: apps.repoUrl, status: apps.status,
+        stage: apps.stage, repoUrl: apps.repoUrl, status: apps.status,
       })
       .from(apps)
       .innerJoin(clusters, eq(apps.clusterId, clusters.id))
@@ -225,7 +225,8 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
   // including the master's self-cluster — the owner may onboard their OWN trusted apps to
   // it). The master self-cluster is seeded as a regular clusters row, so it appears here
   // dynamically from inventory — no cluster-name list anywhere; who qualifies is purely a row
-  // question (status = active).
+  // question (status = active). The `stage` here is the CLUSTER's, the platform's own; it decides
+  // nothing about the unit, whose stage the wizard asks separately.
   app.get("/api/consumers/targets", (c) =>
     c.json(
       db
@@ -294,8 +295,9 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
   // Purge / force-offboard: remove a consumer's WHOLE footprint BY NAME even when NO inventory row
   // exists (an orphaned partial onboard — onboard writes the row last, so a failure at watch-sync/
   // smoke leaves the pointer/AppProject/namespace/Vault/mongo behind with no appId to offboard).
-  // Keyed on name+stage+cluster (G1), NOT an appId, so it needs a body rather than a path :appId —
-  // there may be no app row to name. Plans synchronously (no gate-runner); approve via the Runs API.
+  // Keyed on name+stage+cluster (the namespace is <name>-<stage>), NOT an appId, so it needs a body
+  // rather than a path :appId — there may be no app row to name. Plans synchronously (no
+  // gate-runner); approve via the Runs API.
   app.post("/api/consumers/purge", async (c) => {
     if (!onboardingEnabled) throw errNotConfigured("onboarding is not configured on this manager");
     const parsed = PurgeParams.safeParse(await c.req.json().catch(() => ({})));
@@ -469,7 +471,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     const appRows = db.select({ name: tenantApps.name }).from(tenantApps).where(and(eq(tenantApps.tenantId, found.id), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS]))).all();
     const members = [...found.members, ...appRows.map((a) => a.name)];
     const expectedApps = tenantApplicationSet(members, found.guid, found.stage);
-    const namespaces = tenantNamespaces(members, found.guid);
+    const namespaces = tenantNamespaces(members, found.guid, found.stage);
     // The deployed-revision ANCHOR is the AUTH member: every tenant has it, always, so there is
     // one member whose Application is guaranteed to exist to read a revision off. Its Application is the
     // only single-repo one of the set, which is what makes a revision readable at all.
@@ -541,9 +543,10 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   });
 
   // The tenant target picker: the clusters a tenant can be created on — every ACTIVE cluster,
-  // whatever role it carries. Placement is not a function of the role; a tenant runs on a slave and
-  // equally on a master+slave. The same list the consumer picker offers, and the create-tenant plan
-  // re-checks `active` itself (resolveCluster), so this route is the UI convenience it always was.
+  // whatever role or stage it carries. Placement is not a function of the role; a tenant runs on a
+  // slave and equally on a master+slave, and the tenant's own stage is the wizard's separate input.
+  // The same list the consumer picker offers, and the create-tenant plan re-checks `active` itself
+  // (resolveCluster), so this route is the UI convenience it always was.
   app.get("/api/tenants/targets", (c) =>
     c.json(
       db
@@ -701,19 +704,19 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     // error — refuse early with a clear reason (resume first) instead of a raw DNS/connect failure.
     if (found.suspended) throw errValidation(`tenant ${found.subdomain} is suspended — its auth ingress is down; resume it before inviting the admin`);
     // The bootstrap Secret lives in the AUTH member's own namespace — the member that consumes it.
-    const ns = memberNamespace(found.guid, found.identityProvider);
+    const ns = memberNamespace(found.guid, found.identityProvider, found.stage);
     const { clusterReader } = await resolver.resolve(found.clusterId);
     const token = await clusterReader.readSecretValue(ns, TENANT_SECRET, BOOTSTRAP_TOKEN_KEY);
     if (!token) throw errValidation(`the tenant bootstrap token (Secret ${TENANT_SECRET} key ${BOOTSTRAP_TOKEN_KEY}) is absent in ${ns} — cannot invite the first admin`);
-    // WHERE the tenant's own example-auth serves: auth.<subdomain>.<unitApex>, the host its ingress
-    // renders and the tenant's wildcard record covers. The apex comes off the target cluster's values
-    // chain, never off `found.domain` — that column is where the CLUSTER is reached, and install.sh
-    // defaults the apex to the cluster FQDN minus its first label, so composing from the domain posts
-    // the bootstrap token at a host nothing serves.
+    // WHERE the tenant's own example-auth serves: <idp>-<stage>.<subdomain>.<unitApex>, the host its
+    // ingress renders and the tenant's wildcard record covers. The apex comes off the target
+    // cluster's values chain, never off `found.domain` — that column is where the CLUSTER is reached,
+    // and install.sh defaults the apex to the cluster FQDN minus its first label, so composing from
+    // the domain posts the bootstrap token at a host nothing serves.
     const result = await inviteOrResendTenantAdmin({
       activator,
       token,
-      authFqdn: tenantMemberHost(found.identityProvider, found.subdomain, await resolveUnitApex(found.domain, found.stage)),
+      authFqdn: tenantMemberHost(found.identityProvider, found.stage, found.subdomain, await resolveUnitApex(found.domain, found.stage)),
       email: parsed.data.email,
       signal: c.req.raw.signal,
     });

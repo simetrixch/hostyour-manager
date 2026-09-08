@@ -35,7 +35,7 @@ function baseFiles(): Record<string, string> {
 
 function run(
   files: Record<string, string>,
-  over: Partial<{ chartPath: string | null; targetName: string; stage: string }> = {},
+  over: Partial<{ chartPath: string | null; targetName: string; stage: string; repoURL: string }> = {},
 ) {
   return checkStructure({
     files: new Map(Object.entries(files)),
@@ -43,6 +43,7 @@ function run(
     // the default, which `??` would swallow.
     chartPath: over.chartPath === undefined ? "deploy/chart" : over.chartPath,
     targetName: over.targetName ?? "acme",
+    repoURL: over.repoURL ?? "https://github.com/x/acme.git",
     stage: over.stage ?? "dev",
   });
 }
@@ -87,6 +88,20 @@ describe("G1 structure", () => {
     expect(manifest).toBeNull();
     expect(result.reason).toContain("identity law");
     expect(result.found).toContain("other");
+  });
+
+  it("(4b) fails the identity law when manifest.name != basename(repoURL) — the repository name IS the unit", () => {
+    for (const repoURL of ["https://github.com/x/other.git", "https://github.com/x/other", "https://github.com/x/other.git/"]) {
+      const { result, manifest } = run(baseFiles(), { repoURL });
+      expect(result.status, repoURL).toBe("fail");
+      expect(manifest).toBeNull();
+      expect(result.reason).toContain("identity law");
+      expect(result.found).toContain('"other"');
+      expect(result.found).toContain(repoURL);
+    }
+    // The .git suffix and a trailing slash are spelling, not identity.
+    expect(run(baseFiles(), { repoURL: "https://github.com/x/acme" }).result.status).toBe("pass");
+    expect(run(baseFiles(), { repoURL: "https://github.com/x/acme.git/" }).result.status).toBe("pass");
   });
 
   it("(5) fails when the stage is not one of the declared envs", () => {
@@ -198,10 +213,10 @@ describe("G1 structure", () => {
   // module contract is "never crash on any input".
   it("fails cleanly (no crash) on a null stage or an undefined targetName", () => {
     const files = new Map(Object.entries(baseFiles()));
-    const nullStage = checkStructure({ files, chartPath: "deploy/chart", targetName: "acme", stage: null as unknown as string });
+    const nullStage = checkStructure({ files, chartPath: "deploy/chart", targetName: "acme", stage: null as unknown as string, repoURL: "https://github.com/x/acme.git" });
     expect(nullStage.result.status).toBe("fail");
     expect(nullStage.manifest).toBeNull();
-    const noName = checkStructure({ files, chartPath: "deploy/chart", targetName: undefined as unknown as string, stage: "dev" });
+    const noName = checkStructure({ files, chartPath: "deploy/chart", targetName: undefined as unknown as string, stage: "dev", repoURL: "https://github.com/x/acme.git" });
     expect(noName.result.status).toBe("fail");
     expect(noName.manifest).toBeNull();
   });

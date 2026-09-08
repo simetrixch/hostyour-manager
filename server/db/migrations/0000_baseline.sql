@@ -81,7 +81,7 @@ CREATE TABLE `apps` (
 	FOREIGN KEY (`cluster_id`) REFERENCES `clusters`(`id`) ON UPDATE no action ON DELETE restrict
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `apps_cluster_name_stage_uq` ON `apps` (`cluster_id`,`name`,`stage`);--> statement-breakpoint
+CREATE UNIQUE INDEX `apps_name_stage_uq` ON `apps` (`name`,`stage`);--> statement-breakpoint
 CREATE TABLE `clusters` (
 	`id` text PRIMARY KEY NOT NULL,
 	`server_id` text NOT NULL,
@@ -157,7 +157,7 @@ CREATE TABLE `tenants` (
 	FOREIGN KEY (`cluster_id`) REFERENCES `clusters`(`id`) ON UPDATE no action ON DELETE restrict
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `tenants_cluster_guid_uq` ON `tenants` (`cluster_id`,`guid`);--> statement-breakpoint
+CREATE UNIQUE INDEX `tenants_guid_stage_uq` ON `tenants` (`guid`,`stage`);--> statement-breakpoint
 CREATE TABLE `unit_sizes` (
 	`component` text NOT NULL,
 	`name` text NOT NULL,

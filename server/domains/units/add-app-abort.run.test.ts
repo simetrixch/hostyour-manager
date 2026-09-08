@@ -12,7 +12,6 @@ import { getRun } from "../../executor/read.ts";
 import { makeAddAppDef } from "./add-app.run.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -46,7 +45,6 @@ const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 const fakeCreds = { open: async () => Buffer.from("x", "utf8") } as unknown as CredentialStore;
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
@@ -93,7 +91,7 @@ interface Harness {
 }
 
 function harness(): Harness {
-  const registrations = new TenantRegistrations(seededPlatformRepo(), CLUSTER_STAGE);
+  const registrations = new TenantRegistrations(seededPlatformRepo());
   const argo = new FakeMasterArgoReader({});
   const ports: TenantOnboardPorts = {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),

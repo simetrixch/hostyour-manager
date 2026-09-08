@@ -4,7 +4,6 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -42,7 +41,6 @@ const REGISTRY_HOST = "zot.m1.example";
 const APPS = [{ name: "erp" }];
 const EXPECTED = tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod");
 
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
@@ -91,7 +89,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
   return {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
-    registrations: new TenantRegistrations(new FakePlatformRepo(), CLUSTER_STAGE),
+    registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({
       clusterReader: cluster ?? new FakeClusterReader({}),
       argoReader: new FakeMasterArgoReader({ statuses, status: GREEN }),
@@ -146,8 +144,8 @@ function seedSlave(): void {
 }
 
 describe("create-tenant first-admin invite (activate step)", () => {
-  const TOKEN_PATH = `${memberNamespace(GUID, "auth")}/hostyour-app-secrets/AUTH_BOOTSTRAP_TOKEN`;
-  const AUTH_URL = "https://auth.acme.example.example.com/api/v1/bootstrap/invite-admin";
+  const TOKEN_PATH = `${memberNamespace(GUID, "auth", "prod")}/hostyour-app-secrets/AUTH_BOOTSTRAP_TOKEN`;
+  const AUTH_URL = "https://auth-prod.acme.example.example.com/api/v1/bootstrap/invite-admin";
 
   const activateStep = (prt: TenantOnboardPorts, p: CreateTenantParams) =>
     makeCreateTenantDef(prt).steps(p).find((s) => s.name === "activate")!;
@@ -170,7 +168,7 @@ describe("create-tenant first-admin invite (activate step)", () => {
     const activator = new FakeActivator();
     const p = params({ adminEmail: "admin@acme.test" });
     await activateStep(ports({ activator, cluster: withToken(), resolveUnitApex: async () => "zone.example" }), p).run(ctx(p));
-    expect(activator.calls[0]?.url).toBe("https://auth.acme.example.zone.example/api/v1/bootstrap/invite-admin");
+    expect(activator.calls[0]?.url).toBe("https://auth-prod.acme.example.zone.example/api/v1/bootstrap/invite-admin");
     expect(activator.calls[0]?.url).not.toContain("s1.example"); // the cluster is reached there; the tenant does not serve there
   });
 
@@ -245,7 +243,7 @@ describe("create-tenant first-admin invite (activate step)", () => {
     seedSlave();
     const planCtx: PlanStreamCtx = { db: db.db, log: () => undefined, signal: new AbortController().signal };
     const result = await makeCreateTenantDef(ports()).planStream!(
-      { clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme", apps: APPS, adminEmail: "admin@acme.test" },
+      { clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS, adminEmail: "admin@acme.test" },
       planCtx,
     );
     expect(result.outcome).toBe("planned");

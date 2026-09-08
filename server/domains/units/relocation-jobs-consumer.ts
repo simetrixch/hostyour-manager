@@ -16,7 +16,11 @@ const consumerPostgresEnv = (): JobEnvVar[] => [{ name: "POSTGRES_PASSWORD", sec
 
 
 export interface ConsumerJobInputs {
+  /** The unit — the box folder `/<name>/` and the job names. */
   name: string;
+  /** The unit's namespace on the cluster, `<name>-<stage>` — where its Secrets and PVCs stand, so
+   *  where every job that reads them runs. */
+  namespace: string;
   stage: Stage;
   /** The registration's literal databases[] — Mongo names under a mongodb claim, PostgreSQL names
    *  under a postgresql one (the registration's own engine-neutral contract). */
@@ -34,7 +38,7 @@ export function consumerDumpJobs(i: ConsumerJobInputs & { registrationYaml: stri
   const jobs: RelocationJob[] = [
     {
       // The registration copy has no cluster-side Secret at all, so it rides the unit's own namespace.
-      namespace: i.name,
+      namespace: i.namespace,
       spec: {
         ...boxSpec("dump-reg", i.name),
         image: i.image,
@@ -61,7 +65,7 @@ done
   }
   if (i.services.includes("postgresql")) {
     jobs.push({
-      namespace: i.name,
+      namespace: i.namespace,
       spec: {
         ...boxSpec("dump-pg", i.name, consumerPostgresEnv()),
         image: i.image,
@@ -77,7 +81,7 @@ rclone copyto /tmp/postgres-all.sql "box:${i.name}/postgres/all.sql"
   }
   if (i.pvcs.length > 0) {
     jobs.push({
-      namespace: i.name,
+      namespace: i.namespace,
       spec: {
         ...boxSpec("dump-pvc", i.name),
         image: i.image,
@@ -124,7 +128,7 @@ done
   }
   if (i.services.includes("postgresql")) {
     jobs.push({
-      namespace: i.name,
+      namespace: i.namespace,
       spec: {
         ...boxSpec("restore-pg", i.name, consumerPostgresEnv()),
         image: i.image,
@@ -138,7 +142,7 @@ PGPASSWORD="$POSTGRES_PASSWORD" psql -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_
   }
   if (i.pvcs.length > 0) {
     jobs.push({
-      namespace: i.name,
+      namespace: i.namespace,
       spec: {
         ...boxSpec("restore-pvc", i.name),
         image: i.image,

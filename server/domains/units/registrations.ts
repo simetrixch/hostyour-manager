@@ -1,7 +1,7 @@
 // Registrations — the Manager's ONLY writer of the platform repo's
 // registrations/**, and the ONE writer of EVERY file of a unit. Policy lives here; transport lives in
 // the PlatformRepo git adapter. The laws, factored into reusable primitives (serializePointer /
-// parseRegistration / trailer / makeRegistrationGuard / assertClusterStage) so the tenant-shaped registrations
+// parseRegistration / trailer / makeRegistrationGuard) so the tenant-shaped registrations
 // (tenant-registrations.ts) obeys the same ones:
 //   - PATH GUARD: every write path matches its registrations's namespace regex — a traversal or a stray
 //     path is a programming error (INTERNAL), never a commit. makeRegistrationGuard(pattern) mints one
@@ -14,10 +14,11 @@
 //     a reference `!==` would falsely throw INTERNAL on every nested commit.
 //   - RUN-ID TRAILER: every commit message ends with [<runId>] so a commit is always traceable to
 //     an approved+succeeded Run.
-//   - STAGE BOUNDARY: a registration for stage X may only name a cluster MARKED X. The marking lives in
-//     ONE place (clusters/active/<fqdn>.yaml on the books branch, inventory/cluster-marking.ts) and the
-//     check runs at the WRITER, so a mistake is refused before it is committed rather than discovered
-//     when a prod workload appears on a dev cluster.
+//
+// THE STAGE IS THE PATH'S. `registrations/<unit>/<stage>.yaml` states the unit's stage, and the
+// `cluster` field inside it names any active cluster: the cluster's own map carries the platform's
+// stage, which decides nothing about a unit, so nothing here compares the two. What a stage is still
+// held against is the channel ceiling, at the onboarding's plan.
 //
 // The tree: registrations/<unit>/build.yaml (stage-free, EVERY unit) plus registrations/<unit>/
 // <stage>.yaml for a DEPLOYABLE unit. All of it on ONE branch — the appsets' files generator reads
@@ -39,7 +40,7 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 import type { SkippedConsumerPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { AppError, errValidation } from "../../kernel/errors.ts";
-import { clusterShortName, resolveClusterMarking } from "../inventory/cluster-marking.ts";
+import { clusterShortName } from "../inventory/cluster-marking.ts";
 
 const REGISTRATION_GUARD = /^registrations\/[a-z0-9-]+\/(dev|test|prod|build)\.yaml$/;
 
@@ -62,32 +63,6 @@ export function makeRegistrationGuard(pattern: RegExp, label: string): (path: st
 }
 
 const guard = makeRegistrationGuard(REGISTRATION_GUARD, "registrations/<unit>/(dev|test|prod|build).yaml");
-
-/** Resolve the stage a cluster is MARKED for, named either by its short name or its FQDN. The two
- *  registration writers take this rather than a PlatformRepo, because the tenant registrations's own repo is
- *  catalog while the markings live on the platform repo. */
-export type ClusterStageResolver = (cluster: string) => Promise<{ name: string; stage: Stage }>;
-
-/** Bind a ClusterStageResolver to the platform repo — the ONE source of a cluster's stage
- *  (clusters/active/<fqdn>.yaml, written by install.sh). */
-export function clusterStageFromMarkings(repo: PlatformRepo): ClusterStageResolver {
-  return async (cluster: string) => {
-    const marking = await resolveClusterMarking(repo, cluster);
-    return { name: marking.name, stage: marking.stage };
-  };
-}
-
-/** THE stage boundary: a registration for stage X may only name a cluster marked X. Refuses with
- *  both sides AND where each came from, so an operator reads the fix off the message instead of
- *  guessing which of the two is wrong. `subject` names the unit the registration is for. */
-export async function assertClusterStage(resolve: ClusterStageResolver, cluster: string, stage: Stage, subject: string): Promise<void> {
-  const marked = await resolve(cluster);
-  if (marked.stage !== stage) {
-    throw errValidation(
-      `stage boundary: the registration for ${subject} names stage "${stage}" (the file registrations/…/${stage}.yaml) but cluster "${cluster}" is marked "${marked.stage}" in its cluster map clusters/active/*.yaml — stages never share a cluster, so either the registration targets the wrong cluster or the cluster's map is wrong`,
-    );
-  }
-}
 
 /** Canonical-JSON deep equality — the serialize round-trip's comparison. A reference `!==` holds
  *  only for flat scalars; a nested value (builds[], apps[]) always re-parses to a NEW reference, so it
@@ -192,12 +167,8 @@ export interface RegistrationCommit {
 }
 
 export class Registrations {
-  /** `repo` is the platform GitOps repo (hostyour-cloud), which carries BOTH the registrations and the
-   *  cluster markings; `clusterStage` reads the latter. */
-  constructor(
-    private readonly repo: PlatformRepo,
-    private readonly clusterStage: ClusterStageResolver,
-  ) {}
+  /** `repo` is the platform GitOps repo (hostyour-cloud), which carries the registrations. */
+  constructor(private readonly repo: PlatformRepo) {}
 
   /** The branch every read and every commit below stands on — this installation's books, resolved
    *  once when the repo port was built. Exposed because a run that commits through this registrations
@@ -232,9 +203,9 @@ export class Registrations {
 
   /** Every unit that holds a registration — one directory under `registrations/`, whatever stages or
    *  build.yaml it carries. The create-tenant subdomain belt holds a requested subdomain against
-   *  this set: a consumer serves `<name>.<unitApex>`, which is the very host a tenant of that
-   *  subdomain scopes its session cookies to (unit-dns.ts). The DIRECTORY is the answer here, not the
-   *  files inside it — a unit half-way through an onboard or a teardown still owns the name. */
+   *  this set: a consumer serves `<name>-<stage>.<unitApex>`, a label under the very parent a tenant
+   *  of that subdomain scopes its session cookies to (unit-dns.ts). The DIRECTORY is the answer here,
+   *  not the files inside it — a unit half-way through an onboard or a teardown still owns the name. */
   async listUnitNames(): Promise<string[]> {
     return this.repo.withBranch(this.branch, (books) => books.listDir("registrations"));
   }
@@ -365,10 +336,7 @@ export class Registrations {
   /** THE writer. Commits build.yaml ALWAYS — for a build-only AND for a deployable unit — plus the one
    *  stage file when a deploy group is given, in ONE commit. Nothing else in this process writes a file
    *  under registrations/<unit>/, which together with the schema's `name == basename(repoURL)`
-   *  invariant is what makes the two files structurally unable to contradict each other.
-   *
-   *  The stage boundary is checked BEFORE anything is staged, so a registration aimed at a
-   *  differently-marked cluster is refused rather than committed and reverted. */
+   *  invariant is what makes the two files structurally unable to contradict each other. */
   async commitRegistration(input: RegistrationCommit & { runId: string }): Promise<{ commit: string }> {
     const { unit, builds, deploy, runId } = input;
     const write: { path: string; content: string }[] = [
@@ -376,7 +344,6 @@ export class Registrations {
     ];
     let message = `register(${unit.name}): build ${builds.length ? builds.join(", ") : "none"} ${trailer(runId)}`;
     if (deploy) {
-      await assertClusterStage(this.clusterStage, deploy.cluster, deploy.stage, `consumer ${unit.name}`);
       write.push({
         path: guard(stagePath(deploy.stage, unit.name)),
         content: serializePointer(ConsumerRegistrationSchema, {
@@ -427,12 +394,11 @@ export class Registrations {
 
   /** Repoint the stage registration's `cluster` field — the WHOLE move, as far as GitOps is
    *  concerned: the appsets select on this field, so the source cluster stops generating the
-   *  Application and the target starts. The stage boundary holds here exactly as at registration:
-   *  a unit moves within its stage, never across one. */
+   *  Application and the target starts. The file keeps its path, so a unit moves within its stage,
+   *  never across one. */
   async setCluster(stage: Stage, name: string, cluster: string, runId: string): Promise<{ commit: string }> {
     const current = await this.readRegistration(stage, name);
     if (!current) throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);
-    await assertClusterStage(this.clusterStage, cluster, stage, `consumer ${name}`);
     return this.repo.withBranch(this.branch, (books) =>
       books.commit({
         message: `migrate(${name}): ${current.entry.cluster} -> ${cluster} ${trailer(runId)}`,

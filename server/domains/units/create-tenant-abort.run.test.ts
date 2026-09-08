@@ -16,7 +16,6 @@ import { getRun, getRunParams } from "../../executor/read.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { ClusterStageResolver } from "./registrations.ts";
 import { memberAppProject } from "./tenant-fanout.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -66,7 +65,7 @@ const SHA = "a".repeat(40);
 const SUB = "acme.example";
 const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
-const REQUEST = { clusterId: "cls_1", subdomain: SUB, owner: "team-acme", apps: [{ name: "erp" }] };
+const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: [{ name: "erp" }] };
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
@@ -111,7 +110,6 @@ const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION
 /** A cluster-marking resolver that answers every cluster short name at "prod" — every fixture in this
  *  file lands its tenant on s1/prod, so a single-stage stand-in is all TenantRegistrations needs to
  *  satisfy commitTenant's stage boundary check. */
-const CLUSTER_STAGE: ClusterStageResolver = async (cluster) => ({ name: cluster, stage: "prod" });
 
 /** The slave a tenant lands on. */
 function seedClusters(): void {
@@ -134,7 +132,7 @@ interface Harness {
 async function harness(over: { activator?: FakeActivator } = {}): Promise<Harness> {
   const store = new CredentialStore({ db: db.db, logger });
   const bus = new RunEventBus();
-  const registrations = new TenantRegistrations(new FakePlatformRepo(), CLUSTER_STAGE);
+  const registrations = new TenantRegistrations(new FakePlatformRepo());
   const argo = new FakeMasterArgoReader();
   const projects = new FakeMasterProjectWriter();
   const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 3 } });
@@ -250,7 +248,7 @@ describe("aborting a create-tenant run whose tenant went LIVE", () => {
     // Nothing was scheduled and nothing ran: the tenant is exactly as it was, and so is the run.
     expect(await h.registrations.readTenant("prod", params.guid)).not.toBeNull();
     for (const member of [...TEST_MEMBERS, ...params.apps.map((a) => a.name)]) {
-      expect(h.projects.get("argocd", memberAppProject(params.guid, member))).toBeDefined();
+      expect(h.projects.get("argocd", memberAppProject(params.guid, member, "prod"))).toBeDefined();
     }
     expect(tenantRow(params.guid)?.status).toBe("active");
     const run = getRun(db.db, runId);
@@ -283,7 +281,7 @@ describe("aborting a create-tenant run whose tenant went LIVE", () => {
     expect(getRun(db.db, runId)?.status).toBe("cancelled");
     expect(await h.registrations.readTenant("prod", params.guid)).toBeNull(); // pointer git-rm'd
     for (const member of [...TEST_MEMBERS, ...params.apps.map((a) => a.name)]) {
-      expect(h.projects.get("argocd", memberAppProject(params.guid, member))).toBeUndefined(); // every member's AppProject deleted
+      expect(h.projects.get("argocd", memberAppProject(params.guid, member, "prod"))).toBeUndefined(); // every member's AppProject deleted
     }
     expect(tenantRow(params.guid)?.status).toBe("offboarded");
   });
