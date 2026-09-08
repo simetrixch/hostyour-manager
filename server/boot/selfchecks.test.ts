@@ -17,6 +17,8 @@ import type { AnyRunDefinition } from "../executor/types.ts";
 import { FakePlatformRepo } from "../adapters/git/testing/fake.ts";
 import { RELEASE_TAG_RE } from "../../shared/release.ts";
 import { CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH } from "../domains/inventory/channel-stages.ts";
+import { DEPLOY_STATE_VALUES_BRANCH, DEPLOY_STATE_VALUES_PATH } from "../domains/inventory/deploy-state-name.ts";
+import { DEPLOY_STATE_CONFIGMAP } from "../../shared/deploy-state.ts";
 import { PRODUCT_BRANCH } from "../../shared/branches.ts";
 import { INSTALL_ORDER_PATH } from "../domains/inventory/install-order.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf } from "./selfchecks.ts";
@@ -198,6 +200,47 @@ describe("boot self-checks", () => {
     repo.seed(CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH, `global:\n  releaseTagFilter: '${filter}'\n`);
     return repo;
   };
+
+  // The deploy-state name, the other literal this Manager keeps a copy of. The platform's chart writes the
+  // ConfigMap attest-target reads, so a rename there turns every onboarding's first step into a refusal of
+  // a cluster that is provisioned — which is how the first real onboarding was lost.
+  const deployStateValues = (written: string): FakePlatformRepo => {
+    const repo = new FakePlatformRepo();
+    repo.seed(DEPLOY_STATE_VALUES_BRANCH, DEPLOY_STATE_VALUES_PATH, `configmap:\n  configmap:\n    name: ${written}\n`);
+    return repo;
+  };
+
+  it("onboarding.deploy_state_name_mirror is GREEN when the platform writes the name this process reads", async () => {
+    const { db } = fresh();
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: deployStateValues(DEPLOY_STATE_CONFIGMAP.name) });
+    const check = results.find((r) => r.name === "onboarding.deploy_state_name_mirror");
+    expect(check?.kind).toBe("degrading");
+    expect(check?.ok).toBe(true);
+  });
+
+  // The counter-probe, and the exact drift that was there: the platform writes one name, this process asks
+  // for another, and both are named in the line an operator gets.
+  it("onboarding.deploy_state_name_mirror is RED on a drifted name, names both, and does NOT fail boot", async () => {
+    const { db } = fresh();
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: deployStateValues("hostyour-cloud-deploy-state") });
+    const check = results.find((r) => r.name === "onboarding.deploy_state_name_mirror");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("hostyour-cloud-deploy-state");
+    expect(check?.detail).toContain(DEPLOY_STATE_CONFIGMAP.name);
+    expect(() => assertBlockingChecksPass(results)).not.toThrow();
+    expect(readinessOf(results).checks).toContainEqual({ name: "onboarding.deploy_state_name_mirror", ok: false });
+  });
+
+  // "I could not read the other side" must not arrive as "the two agree".
+  it("onboarding.deploy_state_name_mirror is RED when the platform values carry no name at all", async () => {
+    const { db } = fresh();
+    const repo = new FakePlatformRepo();
+    repo.seed(DEPLOY_STATE_VALUES_BRANCH, DEPLOY_STATE_VALUES_PATH, "configmap:\n  configmap:\n    enabled: true\n");
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: repo });
+    const check = results.find((r) => r.name === "onboarding.deploy_state_name_mirror");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("no readable configmap.configmap.name");
+  });
 
   it("release.grammar_mirror is GREEN when the platform repo carries the grammar this process enforces", async () => {
     const { db } = fresh();

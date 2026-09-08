@@ -17,6 +17,7 @@ import { RESTART_ANNOTATION } from "./port.ts";
 import { runKubeJob } from "./kube-job.ts";
 import * as ns from "./kube-namespace.ts";
 import { AppError } from "../../kernel/errors.ts";
+import { DEPLOY_STATE_CONFIGMAP } from "../../../shared/deploy-state.ts";
 import {
   mapArgoStatus,
   mapApplicationSet,
@@ -42,7 +43,7 @@ const EXTERNAL_SECRETS = { group: "external-secrets.io", version: "v1", plural: 
  *  its binding enforces nothing) and deleted as a pair. */
 const ADMISSION_POLICY = { group: "admissionregistration.k8s.io", version: "v1", plural: "validatingadmissionpolicies" } as const;
 const ADMISSION_BINDING = { group: "admissionregistration.k8s.io", version: "v1", plural: "validatingadmissionpolicybindings" } as const;
-const DEPLOY_STATE = { namespace: "kube-system", name: "hostyour-cloud-deploy-state" } as const;
+const DEPLOY_STATE = DEPLOY_STATE_CONFIGMAP;
 const DEFAULT_POLL_MS = 2000;
 
 /** What a watch observes while the Application CR does not exist (yet, or anymore): watch-sync

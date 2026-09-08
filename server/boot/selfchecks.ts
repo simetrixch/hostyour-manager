@@ -11,6 +11,7 @@ import { reconcileLocks } from "../executor/locks.ts";
 import { renderForbidden } from "../domains/access/forbidden.ts";
 import { SessionCodec } from "../domains/access/session.ts";
 import { readReleaseTagFilter, assertMirrorsReleaseGrammar } from "../domains/inventory/release-grammar.ts";
+import { assertMirrorsDeployStateName, readDeployStateName } from "../domains/inventory/deploy-state-name.ts";
 import { readAnsiwisePin, ANSIWISE_PIN_PATH, ANSIWISE_PIN_BRANCH, ANSIWISE_PIN_KEY } from "../domains/inventory/ansiwise-pin.ts";
 import { readInstallOrder, holdsInstallOrder, INSTALL_ORDER_PATH } from "../domains/inventory/install-order.ts";
 import { PROGRAM_STEP_PREFIX } from "../domains/runs/defs/ansiwise-run.kit.ts";
@@ -252,6 +253,37 @@ export function runSelfChecks(deps: {
  * Without a platform repo there is no second side, so the check SKIPS and says so. Reporting `ok` there
  * would be a green light for a comparison that never ran — the one outcome a drift check must not have.
  */
+/**
+ * DOES THE PLATFORM WRITE THE DEPLOY-STATE UNDER THE NAME THIS PROCESS READS? attest-target refuses a
+ * target whose deploy-state it cannot read, and that refusal is the first step of every onboarding,
+ * tenant creation and adoption. The name is the platform's to choose — its chart's values write it and
+ * this Manager's own RBAC is resourceNames-scoped to it — and this process carries a copy of it.
+ *
+ * Two literals in two repositories, and the drift between them fails nothing where it is written: it
+ * produces a Manager that refuses a cluster which is perfectly provisioned. That is what happened to the
+ * first consumer onboarding ever run against a real cluster — thirteen gates green, then a refused
+ * target for a ConfigMap nobody had ever written under the name being asked for.
+ *
+ * DEGRADING, and SKIPPED without a platform repo, for the reasons the grammar mirror below states.
+ */
+async function checkDeployStateNameMirror(platformRepo: PlatformRepo | undefined): Promise<CheckResult> {
+  const name = "onboarding.deploy_state_name_mirror";
+  if (!platformRepo) {
+    return {
+      name,
+      kind: "skipped",
+      ok: false,
+      detail: "the platform repo is not configured on this manager — the name GitOps writes the deploy-state under cannot be read, so nothing was compared",
+    };
+  }
+  try {
+    assertMirrorsDeployStateName(await readDeployStateName(platformRepo));
+    return { name, kind: "degrading", ok: true, detail: undefined };
+  } catch (e) {
+    return { name, kind: "degrading", ok: false, detail: messageOf(e) };
+  }
+}
+
 async function checkReleaseGrammarMirror(platformRepo: PlatformRepo | undefined): Promise<CheckResult> {
   const name = "release.grammar_mirror";
   if (!platformRepo) {
@@ -426,6 +458,7 @@ export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; p
     results.push({ name: "session.roundtrip", kind: "blocking", ok: false, detail: messageOf(e) });
   }
   results.push(await checkReleaseGrammarMirror(deps.platformRepo));
+  results.push(await checkDeployStateNameMirror(deps.platformRepo));
   results.push(await checkAnsiwisePinReadable(deps.platformRepo));
   results.push(await checkInstallOrder(deps.platformRepo, deps.runDefinitions));
   return results;

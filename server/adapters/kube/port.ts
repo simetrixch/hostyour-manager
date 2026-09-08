@@ -211,7 +211,7 @@ export interface ExternalSecretRow {
   targetSecret: string;
 }
 
-/** kube-system/hostyour-cloud-deploy-state, written by the installer on every deploy — attest-target
+/** kube-system/hostyour-deploy-state, written by the platform's deploy-state chart on every sync — attest-target
  *  compares these and fails closed on absence/staleness. */
 export interface DeployState {
   domain: string;

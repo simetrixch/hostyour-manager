@@ -247,7 +247,7 @@ export function externalSecretsAllReady(rows: readonly ExternalSecretRow[]): boo
   return rows.every((row) => row.ready);
 }
 
-// ---- Deploy-state ConfigMap (kube-system/hostyour-cloud-deploy-state) --------------------------
+// ---- Deploy-state ConfigMap (kube-system/hostyour-deploy-state) --------------------------------
 
 /** Map the ConfigMap's `.data` to DeployState. A present-but-malformed ConfigMap throws
  *  VALIDATION (never a silent default) — attest-target treats that as fail-closed, same as
