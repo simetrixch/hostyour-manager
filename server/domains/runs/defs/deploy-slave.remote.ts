@@ -149,51 +149,6 @@ export function parsePipeRows(out: string): string[][] {
 /** The line separator, as a call rather than a literal. */
 function chr10(): string { return String.fromCharCode(10); }
 
-/** What is asked of a machine to find the disk its volumes belong on. `findmnt` reads the kernel's
- *  own mount table, so what comes back is what is mounted and not what somebody meant to mount.
- *
- *  THE MACHINE DOES THE DISCARDING, AND THAT IS NOT AN OPTIMISATION. What comes back of a command
- *  is its TAIL, and a cluster's own mount table runs to hundreds of lines — every pod subpath the
- *  container runtime binds appears in it. Asked unfiltered, the one line that matters sits at the
- *  top and scrolls out: the same machine answered "/mnt/data" before its cluster was installed and
- *  "no separate data disk" minutes later, with the disk still mounted (apps4, 2026-08-29). What is
- *  left here is short whatever the machine runs, and the reading below judges it again. */
-export const DATA_DISK_COMMAND =
-  "findmnt -rno TARGET,SOURCE | grep ' /dev/' | grep -v -e '^/ ' -e '^/boot' -e '^/snap' -e '^/var/snap' | head -20";
-
-/** WHERE THE VOLUMES OF A CLUSTER BELONG: the machine's separate disk, if it carries one.
- *
- *  THIS WAS ASKED OF A PERSON AND THEREFORE FORGOTTEN. The three rows that place the volumes —
- *  require_storage_mount, create_storage_directory, link_storage_path — each do nothing when the
- *  answer is empty, and empty is what a form gets when nobody types a path. Measured on a master on
- *  2026-08-29: 29 GB of cluster data on the 124 GB boot disk while a 1 TB disk sat mounted at
- *  /mnt/data with 2.1 MB on it. Nothing reported it, because nothing had been asked.
- *
- *  WHAT COUNTS AS THAT DISK: a mount of a real block device that is neither the root filesystem nor
- *  a place the system keeps for itself. The boot partition is not it, and neither are the mounts the
- *  container runtime makes under a snap's tree — those are the cluster's own volumes appearing as
- *  mounts, and taking one would point the storage at itself. The shallowest remaining one wins,
- *  because a machine built with one data disk has exactly one and a nested mount is a part of it.
- *
- *  A MACHINE WITH NO SUCH DISK IS ANSWERED WITH NOTHING, and the three rows then skip exactly as
- *  they did before this existed. */
-export function dataDiskFrom(mountTable: string): { storage_mount: string; storage_subdirectory: string } | undefined {
-  const candidates: string[] = [];
-  for (const line of mountTable.split(chr10())) {
-    const [target, source] = line.trim().split(/\s+/);
-    if (target === undefined || source === undefined) continue;
-    if (!source.startsWith("/dev/")) continue;
-    if (target === "/" || target.startsWith("/boot") || target.startsWith("/var/snap") || target.startsWith("/snap")) continue;
-    candidates.push(target);
-  }
-  if (candidates.length === 0) return undefined;
-  const shallowest = candidates.sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))[0]!;
-  // NAMED, NOT THE MOUNT ITSELF. The link the cluster follows points at a directory ON that disk, so
-  // the disk keeps a name of its own and what the cluster wrote is told apart from what else is
-  // there — a mount pointed at directly is one nobody can put anything else on.
-  return { storage_mount: shallowest, storage_subdirectory: `${shallowest}/microk8s-storage` };
-}
-
 /** WHERE THIS MACHINE CAN BE REACHED, each address on its own as a `/32`.
  *
  *  INHERITING THE MASTER'S ADDRESSES PUTS THE WRONG FENCE AROUND A SLAVE. `global.nodeCidrs` is

@@ -77,10 +77,6 @@ describe("cluster-redeploy, master arm — what a person supplies and what the m
     // unsent one leaves the machine sharing no range, which is what every machine deployed by this
     // manager has been told. It is named here so that adding a source for it has to move this line.
     expect(answers.lan_cidr).toBeUndefined();
-    // The machine's own mount table decides the storage pair, and the scripted host names no data
-    // disk — so neither answer is sent and the cluster's volumes stay where the snap puts them.
-    expect(answers.storage_mount).toBeUndefined();
-    expect(answers.storage_subdirectory).toBeUndefined();
   });
 
   it("PLANTED DEFECT: a map that records no mailbox and no authority sends neither, so the program refuses by name", async () => {

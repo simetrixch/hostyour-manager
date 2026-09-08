@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
-import type { Step, StepCtx, Cleanup, RunDefinition } from "../../../executor/types.ts";
+import type { Step, Cleanup, RunDefinition } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
 import { STAGE, isMasterRole } from "../../../../shared/enums.ts";
@@ -28,7 +28,7 @@ import { disablePasswordLoginStep, purgeBootstrapPasswordStep, restorePasswordLo
 import { leaveHostCleanup, removeManagerKeyCleanup } from "./leave-host.kit.ts";
 import { placeAnsiwiseStep } from "./place-ansiwise.step.ts";
 import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
-import { SLAVE_API_PORT, DATA_DISK_COMMAND, HOST_ADDRESS_COMMAND, dataDiskFrom, hostAddressesFrom } from "./deploy-slave.remote.ts";
+import { SLAVE_API_PORT, HOST_ADDRESS_COMMAND, hostAddressesFrom } from "./deploy-slave.remote.ts";
 import { rejoinStep, joinIfAbsentStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
 import { clusterShortName, resolveClusterMarking, writeClusterMarking, projectClusterMarking, type ClusterMarking } from "../../inventory/cluster-marking.ts";
@@ -152,7 +152,6 @@ export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts
       // by name, which is the sentence an operator can act on.
       ...(installation?.letsencryptEmail !== undefined ? { letsencrypt_email: installation.letsencryptEmail } : {}),
       ...(installation?.letsencryptServer !== undefined ? { letsencrypt_server: installation.letsencryptServer } : {}),
-      ...(await dataDisk(ctx)),
       ...(await pull(ctx)),
     };
   };
@@ -847,22 +846,3 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
 };
 }
 
-/** Asks the machine for its mount table and reads the data disk out of it. A machine that answers
- *  nothing readable is treated as one with no such disk: this decides WHERE volumes go and never
- *  WHETHER a run proceeds. */
-async function dataDisk(ctx: StepCtx): Promise<Record<string, string>> {
-  try {
-    const session = await ctx.ssh();
-    const seen = await session.exec(DATA_DISK_COMMAND, { signal: ctx.signal, timeoutMs: 30_000 });
-    if (seen.code !== 0) return {};
-    const disk = dataDiskFrom(seen.stdoutTail);
-    if (disk === undefined) {
-      ctx.log("meta", "this machine carries no separate data disk — the cluster's volumes stay where the snap puts them");
-      return {};
-    }
-    ctx.log("meta", `the cluster's volumes go on ${disk.storage_mount}, under ${disk.storage_subdirectory}`);
-    return disk;
-  } catch {
-    return {};
-  }
-}
