@@ -220,6 +220,18 @@ export const ConsumerManifestSchema = z.object({
   // (ConsumerRegistration.databases) so the consumers ApplicationSet injects it as mongodb.databases and
   // the service-provisioner creates EXACTLY these names. Empty [] ⇒ the consumer requests no database.
   databases: z.array(z.string()).default([]),
+  // The LITERAL redis key patterns this consumer's ACL user is granted, each written as redis writes
+  // one after `~` (`example:auth:*`). The SIBLING of `databases` above, and for the same reason: one
+  // redis serves every consumer of a cluster out of ONE keyspace, so a pattern is a claim on a
+  // shared name the way a database name is. Copied VERBATIM into the registration, injected by the
+  // consumers ApplicationSet as `redis.keyPatterns`, granted EXACTLY as stated by the
+  // service-provisioner, and held to this set by the unit's own admission fence — so a chart cannot
+  // ask for a pattern the platform never granted it (simetrixch/hostyour-cloud#199).
+  //
+  // REQUIRED FOR A REDIS CLAIM AND FAIL-CLOSED, which the ServiceClaim CRD states and this mirrors:
+  // an ACL user must be told which keys it may touch, and the answer for a claim naming none is an
+  // error rather than every key. Empty [] ⇒ this consumer claims no redis, which is most of them.
+  keyPatterns: z.array(z.string()).default([]),
   // HOW this consumer runs MongoDB. `shared` (the default) means the cluster's own replica set, the
   // one every tenant uses. The other two give it an instance of its OWN, in its own namespace, and
   // the difference between them is capability rather than price: a `standalone` is ONE member and
@@ -374,6 +386,12 @@ export const ConsumerRegistrationSchema = z
     // mongodb.databases, so the service-provisioner creates EXACTLY these names (no prefix, no
     // env-suffix, no composition). An empty list ⇒ the consumer requests no database.
     databases: z.array(z.string()).optional(),
+    // The redis key patterns copied VERBATIM from ConsumerManifest.keyPatterns — the outward
+    // projection the consumers ApplicationSet reads to set `redis.keyPatterns`, and the units
+    // ApplicationSet to set the fence's granted set. Optional because a registration written before
+    // the field existed is still a valid registration; ABSENT reads as granted NOTHING, never as
+    // granted everything, which is also what a unit claiming no redis carries.
+    keyPatterns: z.array(z.string()).optional(),
     // The backing services the consumer CLAIMS, copied VERBATIM from ConsumerManifest.services.
     // Distinct from `databases` on purpose: `databases` is engine-neutral (a consumer may reuse it for
     // Postgres db names), so it cannot be the switch that decides whether the platform renders a

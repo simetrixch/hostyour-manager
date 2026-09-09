@@ -72,7 +72,7 @@ async function deployedRegistrations(over: { repoCredentialId?: string; suspende
       ...(over.repoCredentialId ? { repoCredentialId: over.repoCredentialId } : {}),
     },
     builds: [],
-    deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
     runId: "run_onb",
   });
   return reg;
@@ -152,7 +152,7 @@ describe("adopt-consumer run definition", () => {
     // Registrations live on `master` (REGISTRATION_BRANCH), never on the domain's own install branch.
     repo.seed(repo.booksBranch, "registrations/acme/prod.yaml", serializePointer(ConsumerRegistrationSchema, {
       name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false,
-      chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
+      chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
     }));
     const step = makeAdoptConsumerDef(ports(new Registrations(repo))).steps(PARAMS).find((s) => s.name === "read-pointer")!;
     await expect(step.run(ctx("read-pointer", []))).rejects.toThrow(/disagrees with its directory name/);

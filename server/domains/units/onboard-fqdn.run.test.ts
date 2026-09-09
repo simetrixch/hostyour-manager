@@ -36,7 +36,7 @@ const FQDN = "shop.example.org";
 const MANIFEST: ConsumerManifest = {
   apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
   name: "acme", owner: "team-acme", envs: ["prod"],
-  chart: { path: "deploy/chart" }, services: [], databases: [], secrets: [],
+  chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], secrets: [],
   builds: [{ name: "acme-api", containerfile: "Containerfile" }],
   fqdn: FQDN,
 };
@@ -152,7 +152,7 @@ describe("onboard with a manifest-declared fqdn", () => {
     await prt.registrations.commitRegistration({
       unit: { name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false },
       builds: [],
-      deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"), fqdn: FQDN },
+      deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"), fqdn: FQDN },
       runId: "run_0",
     });
     const res = await makeOnboardDef(prt).planStream!(planReq, streamCtx());

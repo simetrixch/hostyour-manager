@@ -15,8 +15,8 @@ function unit(over: Partial<ConsumerRegistration> = {}) {
 }
 
 /** The deploy group of one stage, as an onboard freezes it — `fqdn` where the manifest declared one. */
-function deploy(over: Partial<{ stage: Stage; chartPath: string; cluster: string; databases: string[]; services: ConsumerRegistration["services"]; size: "small" | "medium" | "large"; mongodb: "shared" | "standalone" | "replicaset"; quota: UnitQuota; fqdn: string }> = {}) {
-  return { stage: "prod" as Stage, chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"), ...over };
+function deploy(over: Partial<{ stage: Stage; chartPath: string; cluster: string; databases: string[]; keyPatterns: string[]; services: ConsumerRegistration["services"]; size: "small" | "medium" | "large"; mongodb: "shared" | "standalone" | "replicaset"; quota: UnitQuota; fqdn: string }> = {}) {
+  return { stage: "prod" as Stage, chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"), ...over };
 }
 
 
@@ -47,7 +47,7 @@ describe("ConsumerRegistrationSchema", () => {
   });
 
   it("accepts the stage form and requires the WHOLE deploy group, services and size included", () => {
-    expect(ConsumerRegistrationSchema.safeParse({ ...unit(), chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }).success).toBe(true);
+    expect(ConsumerRegistrationSchema.safeParse({ ...unit(), chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }).success).toBe(true);
     const missing = ConsumerRegistrationSchema.safeParse({ ...unit(), chartPath: "deploy/chart", cluster: "s1", databases: [] });
     expect(missing.success).toBe(false);
     expect(missing.error?.issues.map((i) => i.path.join("."))).toContain("services");
@@ -60,7 +60,7 @@ describe("ConsumerRegistrationSchema", () => {
   });
 
   it("refuses builds[] in a stage registration", () => {
-    const r = ConsumerRegistrationSchema.safeParse({ ...unit(), chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"), builds: ["acme-backend"] });
+    const r = ConsumerRegistrationSchema.safeParse({ ...unit(), chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"), builds: ["acme-backend"] });
     expect(r.success).toBe(false);
     expect(r.error?.issues[0]?.message).toContain("stage-free build registration");
   });
@@ -83,7 +83,7 @@ describe("serializePointer (generic over the registration schemas)", () => {
   });
 
   it("carries the literal databases[] and the claimed services[] verbatim", () => {
-    const { stage: _stage, ...group } = deploy({ databases: ["example_auth"], services: ["postgresql"] });
+    const { stage: _stage, ...group } = deploy({ databases: ["example_auth"], keyPatterns: [], services: ["postgresql"] });
     const y = serializePointer(ConsumerRegistrationSchema, ConsumerRegistrationSchema.parse({ ...unit(), ...group }));
     expect(y).toContain('databases: ["example_auth"]');
     expect(y).toContain('services: ["postgresql"]');
@@ -222,7 +222,7 @@ describe("Registrations.commitRegistration", () => {
     await new Registrations(repo).commitRegistration({
       unit: unit(),
       builds: ["acme-backend"],
-      deploy: deploy({ databases: ["example_auth"], services: ["postgresql"] }),
+      deploy: deploy({ databases: ["example_auth"], keyPatterns: [], services: ["postgresql"] }),
       runId: "run_1",
     });
     const build = repo.commits[0]!.write!.find((w) => w.path === "registrations/acme/build.yaml")!.content;
@@ -422,7 +422,7 @@ describe("Registrations.listConsumerRegistrations", () => {
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "registrations/acme/prod.yaml", serializePointer(ConsumerRegistrationSchema, ConsumerRegistrationSchema.parse({
       name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false,
-      chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
+      chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
     })));
     const scan = await new Registrations(repo).listConsumerRegistrations("s1.example.com", "prod");
     expect(scan.registrations).toEqual([]);

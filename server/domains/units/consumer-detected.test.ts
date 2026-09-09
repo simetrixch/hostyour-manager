@@ -44,7 +44,7 @@ async function seedRegistration(
       ...(opts.onboardedAt ? { onboardedAt: opts.onboardedAt } : {}),
     },
     builds: [],
-    deploy: { stage: opts.stage ?? "prod", chartPath: "deploy/chart", cluster: opts.cluster, databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    deploy: { stage: opts.stage ?? "prod", chartPath: "deploy/chart", cluster: opts.cluster, databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
     runId: `run_${name}`,
   });
 }
@@ -158,7 +158,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
     const registrations = new Registrations(repo);
     repo.seed(repo.booksBranch, "registrations/ghost/prod.yaml", serializePointer(ConsumerRegistrationSchema, {
       name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false,
-      chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
+      chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
     }));
     const found = await scanDetectedConsumers({ db: db.db, registrations });
     expect(found.detected).toEqual([]); // NOT { name: "acme", … } at the path of ghost

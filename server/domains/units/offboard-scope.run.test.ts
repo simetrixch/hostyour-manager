@@ -62,7 +62,7 @@ async function seedTwoStages(reg: Registrations): Promise<void> {
     await reg.commitRegistration({
       unit,
       builds: ["acme"],
-      deploy: { ...deploy, chartPath: "deploy/chart", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+      deploy: { ...deploy, chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
       runId: `run_onb_${deploy.stage}`,
     });
   }
