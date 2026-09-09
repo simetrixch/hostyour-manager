@@ -192,9 +192,11 @@ const EnvSchema = z.object({
   // (the seeder is write-only, so like STORAGE_BOX_* they arrive as env, never as a Vault read-back).
   // ALL THREE OR NONE — a token without the account it signs for addresses nothing.
   //
-  // A MANAGING TOKEN, and that is what makes the per-tenant fence possible: create-tenant makes the
-  // bucket named by the tenant guid with it and mints a key scoped to THAT ONE BUCKET, which is the
-  // only object-storage credential a tenant ever holds. An installation-wide bucket key handed to
+  // A MANAGING TOKEN, carrying Workers R2 Storage Write AND Account API Tokens Write — the second
+  // because an R2 access key IS an account API token (its id is the key id, the SHA-256 of its value
+  // is the secret), so minting one is a token create. That is what makes the per-tenant fence
+  // possible: create-tenant makes the bucket named by the tenant guid and mints a key scoped to THAT
+  // ONE BUCKET, which is the only object-storage credential a tenant ever holds. An installation-wide bucket key handed to
   // every tenant would sit in every tenant's pod and reach every other tenant's objects.
   // Absent ⇒ create-tenant fails LOUD; a tenant whose engine cannot reach a bucket refuses to boot.
   CLOUDFLARE_R2_API_TOKEN: z.string().min(1).optional(),
