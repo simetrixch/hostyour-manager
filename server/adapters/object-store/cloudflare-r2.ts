@@ -172,7 +172,8 @@ export class CloudflareR2 implements ObjectStore {
     if (missing.length > 0) {
       throw new ObjectStoreError(
         `Cloudflare account ${this.opts.accountId} offers no bucket-scoped permission group named ${missing.map((m) => `"${m}"`).join(" or ")} ` +
-        `(scope ${BUCKET_SCOPE}) — may the managing token read this account's permission groups?`,
+        `(scope ${BUCKET_SCOPE}) — the managing token needs Workers R2 Storage Write and Account API ` +
+        "Tokens Write, and the second is what lets it read these groups and mint a key at all",
       );
     }
     this.permissions = found as { id: string; name: string }[];
