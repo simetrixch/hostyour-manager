@@ -247,6 +247,10 @@ const FULL_MAP = [
   "  vaultKubernetesAuthPath: kubernetes-m1",
   "  registryPullUser: acme-pull",
   "  registryPushUser: acme-push",
+  // The object storage the deployment programs write, on ONE line the way the template emits it.
+  // It is carried and never read here, so the round trip below is the whole of what proves a rewrite
+  // gives it back rather than deleting the only record of which account a tenant's bucket is in.
+  "  objectStorage: {r2: {accountId: '7d6b0eaa', jurisdiction: 'eu'}}",
   "  endpoints:",
   "    registry:",
   "      host: zot.m1.example.com",
