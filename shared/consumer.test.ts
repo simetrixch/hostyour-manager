@@ -130,6 +130,47 @@ describe("ConsumerRegistrationSchema fqdn (the ATTESTED extra FQDN)", () => {
   });
 });
 
+describe("keyPatterns (the redis grant, the sibling of databases)", () => {
+  const base = {
+    apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, name: "acme", owner: "team-acme",
+    envs: ["prod"], chart: { path: "deploy/chart" },
+  } as const;
+  const stage = {
+    name: "acme", repoURL: "https://github.com/x/acme.git",
+    chartPath: "deploy/chart", cluster: "s1", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
+  };
+
+  // One redis serves every consumer of a cluster out of ONE keyspace, so a pattern is a claim on a
+  // shared name the way a database name is. Before this the patterns came from the consumer's own
+  // chart, which is the one place the platform did not control what a unit was granted
+  // (simetrixch/hostyour-cloud#199).
+  it("a manifest that names none is granted none, never everything", () => {
+    const r = ConsumerManifestSchema.safeParse(base);
+    expect(r.success).toBe(true);
+    expect(r.data?.keyPatterns).toEqual([]);
+  });
+
+  it("carries the patterns VERBATIM — no prefix, no composition", () => {
+    const r = ConsumerManifestSchema.safeParse({ ...base, keyPatterns: ["example:auth:*"] });
+    expect(r.success).toBe(true);
+    expect(r.data?.keyPatterns).toEqual(["example:auth:*"]);
+  });
+
+  it("a registration written before the field existed reads as granted NOTHING", () => {
+    // The fail-closed direction, and the one that matters: an absent field must never read as a
+    // unit granted every key. The fence renders its granted set from this.
+    const r = ConsumerRegistrationSchema.safeParse(stage);
+    expect(r.success).toBe(true);
+    expect(r.data?.keyPatterns ?? []).toEqual([]);
+  });
+
+  it("carries them through the registration the way databases travels", () => {
+    const r = ConsumerRegistrationSchema.safeParse({ ...stage, keyPatterns: ["example:auth:*"] });
+    expect(r.success).toBe(true);
+    expect(r.data?.keyPatterns).toEqual(["example:auth:*"]);
+  });
+});
+
 describe("ConsumerRegistrationSchema databases (verbatim copy carried in the registration)", () => {
   const stage = {
     name: "acme", repoURL: "https://github.com/x/acme.git",

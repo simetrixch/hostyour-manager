@@ -57,9 +57,9 @@ function seedApp(): void {
  *  prod stage the way remove-registration does. What is left is the tree the scan reads. */
 async function seedRegistrationsAndRemoveProd(reg: Registrations, alsoDev: boolean): Promise<void> {
   const unit = { name: "acme", repoURL: REPO, suspended: false, quiesced: false };
-  await reg.commitRegistration({ unit, builds: ["acme"], deploy: { stage: "prod", cluster: "s1", chartPath: "deploy/chart", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: "run_onb_prod" });
+  await reg.commitRegistration({ unit, builds: ["acme"], deploy: { stage: "prod", cluster: "s1", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: "run_onb_prod" });
   if (alsoDev) {
-    await reg.commitRegistration({ unit, builds: ["acme"], deploy: { stage: "dev", cluster: "s2", chartPath: "deploy/chart", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: "run_onb_dev" });
+    await reg.commitRegistration({ unit, builds: ["acme"], deploy: { stage: "dev", cluster: "s2", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: "run_onb_dev" });
   }
   await reg.removeRegistration("prod", "acme", "run_off");
 }

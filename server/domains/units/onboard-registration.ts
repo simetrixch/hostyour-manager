@@ -39,6 +39,7 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
           chartPath: p.chartPath,
           cluster: p.cluster,
           databases: p.databases, // literal Mongo DB name(s), copied verbatim from the manifest
+          keyPatterns: p.keyPatterns, // literal redis key patterns — the grant the unit's fence holds its claim to
           services: p.services, // claimed services, copied verbatim — a chart source gates on this
           // The unit's one size, and what it brings — the appset names the database presets from
           // the first and gates its conditional sources on the second.

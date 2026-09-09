@@ -26,7 +26,7 @@ export const MINTED_TAG = "1.0.0-stable-20260719120000";
 export const MANIFEST: ConsumerManifest = {
   apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
   name: "acme", owner: "team-acme", envs: ["prod"],
-  chart: { path: "deploy/chart" }, services: [], databases: [], secrets: [],
+  chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], secrets: [],
   builds: [{ name: "acme-api", containerfile: "Containerfile" }],
 };
 /** The BUILD-ONLY twin: no chart — the deploy is central, only the build belongs to the unit. */

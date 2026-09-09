@@ -32,7 +32,7 @@ const SHA = "a".repeat(40);
 const MANIFEST: ConsumerManifest = {
   apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared",
   name: "acme", owner: "team-acme", envs: ["prod"],
-  chart: { path: "deploy/chart" }, services: [], databases: [], secrets: [],
+  chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], secrets: [],
   builds: [{ name: "acme-api", containerfile: "Containerfile" }],
 };
 const CHART_PINS = 'builds:\n  - name: acme-api\n    image: acme-api\n    tag: "0.0.0"\n';

@@ -140,6 +140,8 @@ export const DeployableOnboardParams = OnboardParamsBase.extend({
   // routing source the consumers ApplicationSet reads for mongodb.databases. Empty [] ⇒ the consumer
   // requests none.
   databases: z.array(z.string()).default([]),
+  // The redis key patterns frozen from the validated manifest, the sibling of `databases`.
+  keyPatterns: z.array(z.string()).default([]),
   // The claimed services frozen from the validated manifest — copied VERBATIM into the registration's
   // `services` field, the switch the consumers ApplicationSet gates its conditional per-consumer
   // PostgreSQL source on, AND the switch seed-postgres-superuser keys its Vault write on.
@@ -650,6 +652,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         chartPath: req.chartPath,
         argoAppName: r.argoAppName,
         databases: outcome.report.manifest?.databases ?? [], // literal DB name(s) from the manifest, copied verbatim
+        keyPatterns: outcome.report.manifest?.keyPatterns ?? [], // literal redis key patterns, copied verbatim
         services: outcome.report.manifest?.services ?? [], // claimed services from the manifest, copied verbatim
         // How this consumer runs MongoDB, copied verbatim. Written unconditionally, because the
         // registration is the outward projection and a consumer that changes its mind later must

@@ -58,7 +58,7 @@ const CHART_PINS = `builds:\n  - name: acme-api\n    image: acme-api\n    tag: "
 const MANIFEST: ConsumerManifest = {
   apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
   name: "acme", owner: "team-acme", envs: ["prod"],
-  chart: { path: "deploy/chart" }, services: [], databases: [],
+  chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [],
   // In the zod output shape (key, required, generate) — the check step holds the frozen params
   // against the report by JSON equality, so the fixture states the parsed order.
   secrets: [{ key: "AUTH_BOOTSTRAP_TOKEN", required: true, generate: "hex32" }],

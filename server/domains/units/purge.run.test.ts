@@ -38,7 +38,7 @@ async function seedRegistration(reg: Registrations): Promise<void> {
   await reg.commitRegistration({
     unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
     builds: [],
-    deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
     runId: "run_onb",
   });
 }
@@ -388,7 +388,7 @@ describe("purge run definition", () => {
     const reg = new Registrations(platform);
     const unit = { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false };
     for (const deploy of [{ stage: "prod" as const, cluster: "s1" }, { stage: "dev" as const, cluster: "s2" }]) {
-      await reg.commitRegistration({ unit, builds: ["acme"], deploy: { ...deploy, chartPath: "deploy/chart", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: `run_onb_${deploy.stage}` });
+      await reg.commitRegistration({ unit, builds: ["acme"], deploy: { ...deploy, chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: `run_onb_${deploy.stage}` });
     }
 
     const buildRbac = new FakeBuildRbacWriter();

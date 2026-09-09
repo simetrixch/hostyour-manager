@@ -177,7 +177,11 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
           builds: [],
           // The unit's OWN stage: the dump is re-committed at the path it was dumped from, on the
           // target cluster, whatever stage that cluster's map carries.
-          deploy: { stage: ac.stage, chartPath: entry.chartPath!, cluster: target.cluster, databases: entry.databases ?? [], services: entry.services ?? [],
+          deploy: { stage: ac.stage, chartPath: entry.chartPath!, cluster: target.cluster, databases: entry.databases ?? [],
+                    // The redis grant travels with the unit, for the reason the size below does: a
+                    // move must land it with what it ran with. Dropped here, the unit would arrive
+                    // granted NOTHING and its ACL user would be refused its own keys.
+                    keyPatterns: entry.keyPatterns ?? [], services: entry.services ?? [],
                     // The size travels with the unit: a move must land it on the instance it ran on,
                     // not on whatever the default happens to be at the destination.
                     size: entry.size ?? "small", mongodb: entry.mongodb ?? "shared",

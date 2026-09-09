@@ -261,7 +261,7 @@ describe("onboard post-onboard activation step", () => {
     seedClusters();
     const manifest = { mongodb: "shared" as const,
       apiVersion: "hostyour.cloud/v1" as const, kind: "ConsumerManifest" as const,
-      name: "acme", owner: "team-acme", envs: ["prod" as const], chart: { path: "deploy/chart" }, services: [], databases: [], builds: BUILDS,
+      name: "acme", owner: "team-acme", envs: ["prod" as const], chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], builds: BUILDS,
       secrets: [{ key: "AUTH_BOOTSTRAP_TOKEN", required: true, generate: "hex32" as const }], activation: AUTH_ACTIVATION,
     };
     const prt = ports({ runner: new FakeGateRunner({ report: { ...passReport(), manifest } }) });

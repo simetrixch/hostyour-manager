@@ -73,7 +73,7 @@ afterEach(() => { db.sqlite.close(); });
 const CONSUMER_MANIFEST: ConsumerManifest = {
   apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
   name: "acme", owner: "team-acme", envs: ["prod"],
-  chart: { path: "deploy/chart" }, services: [], databases: [], secrets: [],
+  chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], secrets: [],
   builds: [{ name: "acme-api", containerfile: "Containerfile" }],
 };
 /** The chart's per-stage pin G18's chart half reads — the builds[] entry whose `image` is the build

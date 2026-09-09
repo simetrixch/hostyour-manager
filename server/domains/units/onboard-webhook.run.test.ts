@@ -177,7 +177,7 @@ describe("onboard setup-webhook step", () => {
     await registrations.commitRegistration({
       unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
       builds: ["acme"],
-      deploy: { stage: "dev", cluster: "s2", chartPath: "deploy/chart", databases: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+      deploy: { stage: "dev", cluster: "s2", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
       runId: "run_onb_dev",
     });
     const github = new FakeGitHubConsumer();

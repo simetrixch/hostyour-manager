@@ -82,7 +82,7 @@ async function readStageRegistration(ports: AdoptConsumerPorts, t: AdoptTarget):
       `registrations/${t.name}/${t.stage}.yaml carries no deploy group (chartPath/cluster/databases/services/size/mongodb/quota) — it registers a build, not a deployment, so there is nothing to adopt`,
     );
   }
-  return { ...e, chartPath: e.chartPath, cluster: e.cluster, databases: e.databases, services: e.services, size: e.size, mongodb: e.mongodb, quota: e.quota };
+  return { ...e, chartPath: e.chartPath, cluster: e.cluster, databases: e.databases, keyPatterns: e.keyPatterns, services: e.services, size: e.size, mongodb: e.mongodb, quota: e.quota };
 }
 
 /** Derive the target identity from name+stage+cluster ALONE — no inventory row exists (that is the

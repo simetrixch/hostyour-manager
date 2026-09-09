@@ -163,7 +163,7 @@ export interface RegistrationCommit {
   /** The deploy group of ONE stage, plus the OPTIONAL attested fqdn — the manifest's declared extra
    *  FQDN, copied here by the onboard run kind after G19 refused every name the platform already serves.
    *  Absent ⇒ a build-only unit: build.yaml is written, no stage file. */
-  deploy?: { stage: Stage; chartPath: string; cluster: string; databases: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string };
+  deploy?: { stage: Stage; chartPath: string; cluster: string; databases: string[]; keyPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string };
 }
 
 export class Registrations {
@@ -351,6 +351,7 @@ export class Registrations {
           chartPath: deploy.chartPath,
           cluster: deploy.cluster,
           databases: deploy.databases,
+          keyPatterns: deploy.keyPatterns,
           services: deploy.services,
           size: deploy.size,
           mongodb: deploy.mongodb,
