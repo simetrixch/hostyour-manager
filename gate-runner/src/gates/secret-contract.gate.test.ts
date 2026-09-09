@@ -101,8 +101,11 @@ function serviceAccount(over?: { unit?: string | null; stage?: string | null }):
   };
 }
 
-function externalSecret(over?: { key?: string; property?: string }): RenderedDoc {
+function externalSecret(over?: { key?: string; property?: string; refreshPolicy?: string | null }): RenderedDoc {
   const key = over?.key ?? EXPECTED_KEY;
+  // A well-formed document carries the platform's delivery rule. `refreshPolicy: null` takes it
+  // away entirely, which is the DANGEROUS shape — absent means the controller's Periodic default.
+  const policy = over && "refreshPolicy" in over ? over.refreshPolicy : "OnChange";
   return {
     env: "test",
     docIndex: 1,
@@ -115,6 +118,8 @@ function externalSecret(over?: { key?: string; property?: string }): RenderedDoc
       kind: "ExternalSecret",
       metadata: { name: "acme", namespace: "acme" },
       spec: {
+        ...(policy === null ? {} : { refreshPolicy: policy }),
+        refreshInterval: "0",
         data: [
           { secretKey: "DB_PASSWORD", remoteRef: { key, property: over?.property ?? "DB_PASSWORD" } },
           { secretKey: "API_TOKEN", remoteRef: { key, property: "API_TOKEN" } },
@@ -128,8 +133,9 @@ function externalSecret(over?: { key?: string; property?: string }): RenderedDoc
 // Cluster-scoped sibling: the identical ExternalSecret read spec sits one level deeper under
 // spec.externalSecretSpec, plus a namespaceSelector that fans the resulting Secret into arbitrary
 // namespaces. It must clear the same key + declared-property checks as an ExternalSecret.
-function clusterExternalSecret(over?: { key?: string; property?: string }): RenderedDoc {
+function clusterExternalSecret(over?: { key?: string; property?: string; refreshPolicy?: string | null }): RenderedDoc {
   const key = over?.key ?? EXPECTED_KEY;
+  const policy = over && "refreshPolicy" in over ? over.refreshPolicy : "OnChange";
   return {
     env: "test",
     docIndex: 2,
@@ -144,6 +150,8 @@ function clusterExternalSecret(over?: { key?: string; property?: string }): Rend
       spec: {
         namespaceSelector: { matchLabels: { team: "acme" } },
         externalSecretSpec: {
+          ...(policy === null ? {} : { refreshPolicy: policy }),
+          refreshInterval: "0",
           data: [
             { secretKey: "DB_PASSWORD", remoteRef: { key, property: over?.property ?? "DB_PASSWORD" } },
             { secretKey: "API_TOKEN", remoteRef: { key, property: "API_TOKEN" } },
@@ -294,6 +302,44 @@ describe("G7 secret contract", () => {
       expect(r.status, JSON.stringify(foreign)).toBe("fail");
       expect(r.reason).toContain("unit" in foreign ? "other" : "prod");
     }
+  });
+
+  describe("the platform's secret delivery rule", () => {
+    // Until this check existed, the FIRST thing to judge a consumer's ExternalSecret was the
+    // cluster's own externalsecret-delivery admission policy — mid-onboarding, with the namespace
+    // already applied, the object refused and the app Secret missing. Three consumer charts carried
+    // the defect at once (digitaplatform/digita-auth#6 and its siblings).
+    it("refuses an ExternalSecret that names NO refreshPolicy, which is the shape that silently polls", () => {
+      const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), externalSecret({ refreshPolicy: null }), serviceAccount()] }));
+      expect(r.status).toBe("fail");
+      // The message has to say ABSENT rather than "wrong value": an absent field is not an empty
+      // one, it is the controller's Periodic default, and that is what nobody notices.
+      expect(r.reason).toMatch(/refreshPolicy is absent, so the controller's Periodic default applies/);
+      expect(r.reason).toMatch(/must be "OnChange"/);
+    });
+
+    it("refuses an ExternalSecret carrying a DIFFERENT policy, and names the value it found", () => {
+      const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), externalSecret({ refreshPolicy: "Periodic" }), serviceAccount()] }));
+      expect(r.status).toBe("fail");
+      expect(r.reason).toMatch(/refreshPolicy is "Periodic"/);
+    });
+
+    it("holds the cluster-scoped sibling to the same rule, one level deeper", () => {
+      const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), externalSecret(), clusterExternalSecret({ refreshPolicy: null })] }));
+      expect(r.status).toBe("fail");
+      expect(r.reason).toMatch(/spec\.externalSecretSpec\.refreshPolicy is absent/);
+    });
+
+    it("does NOT refuse over refreshInterval — the cluster does not hold it either", () => {
+      // The counter-probe of the three above, and the reason it exists: the admission policy holds
+      // refreshPolicy alone and says so in as many words, because under OnChange a document has no
+      // timer whatever the interval says. A gate refusing more than the cluster would refuse a
+      // document the cluster accepts, which the consumer could then never make pass.
+      const doc = externalSecret();
+      (doc.raw.spec as Record<string, unknown>).refreshInterval = "1h";
+      const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), doc, serviceAccount()] }));
+      expect(r.status).toBe("pass");
+    });
   });
 
   it("passes a well-formed ClusterExternalSecret referencing a declared key at spec.externalSecretSpec", () => {
