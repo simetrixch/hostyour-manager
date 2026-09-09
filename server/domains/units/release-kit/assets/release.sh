@@ -28,7 +28,9 @@
 #      the commit + the tag. A later run for the SAME version+channel REUSES
 #      that tag — that is how a release reaches a further stage without being
 #      rebuilt: the same commit, the same image, one more stage.
-#   6. Deletes and re-pushes the deploy ref refs/tags/deploy/<stage>/<tag>.
+#   6. Places the delivery branch deploy/<stage> on the release commit - the
+#      branch the unit's Application renders its chart off - and then
+#      deletes and re-pushes the deploy ref refs/tags/deploy/<stage>/<tag>.
 #      Pushing that ref is the ONLY build trigger. It is deleted first because
 #      pushing a ref that already stands changes nothing and fires no webhook,
 #      so a repeat of the same (release, stage) would do nothing at all. The
@@ -255,6 +257,22 @@ fi
 # The release COMMIT is the tag's, never HEAD — on a reuse, HEAD has usually moved on.
 SHA="$(git rev-list -n 1 "$TAG")"
 SHA7="${SHA:0:7}"
+
+# ── The delivery branch, placed at the release commit ─────────────────────────
+#
+# WHAT THE CLUSTER READS. The unit's Application follows `deploy/<stage>` of this repository, not a
+# tag: the chart is rendered off that branch and the release pipeline's bump writes the image tags
+# into its values there. So the branch has to exist before the deploy ref below starts a build, and
+# it has to stand on THIS release's tree - a pin written onto an older tree names images built from
+# a chart nobody released.
+#
+# MOVED AND NOT MERGED. The platform owns this branch. Every release places it on the release
+# commit; the bump's pin commits then sit on top of it and are replaced by the next release the same
+# way. Nothing a person pushes there survives a release, which is the point: what the cluster runs
+# is what was released.
+DELIVERY_BRANCH="refs/heads/deploy/${STAGE}"
+git push --force origin "${SHA}:${DELIVERY_BRANCH}"   || die "the delivery branch deploy/${STAGE} could not be placed at ${SHA7}, so the build would have nothing to render"
+say "deploy/${STAGE} stands at ${SHA7}"
 
 DEPLOY_REF="refs/tags/deploy/${STAGE}/${TAG}"
 # Delete first (absent on a first deploy — that is the normal case, not an error), then push: the

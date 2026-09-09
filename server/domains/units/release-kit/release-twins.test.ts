@@ -290,6 +290,7 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     expect(stdout).toBe([
       "release: package.json declares 1.2.3",
       "release: minted 1.2.3-stable-<ts14>",
+      "release: deploy/dev stands at <sha7>",
       "release: the manifest <root>/work/deploy/platform.yaml names no platformRepo, so nothing is pinned from here - the deploy ref above is what the platform reacts to",
       "release: probe-unit 1.2.3-stable-<ts14> (commit <sha7>) is on its way to dev",
       "release: the platform builds these image tags, or skips the build when they already exist:",
