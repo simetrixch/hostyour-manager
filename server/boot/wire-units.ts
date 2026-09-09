@@ -9,6 +9,7 @@ import type { PlatformRepo, RepoReader } from "../adapters/git/port.ts";
 import { KubeBuildRbacWriter } from "../adapters/kube/kube-rbac.ts";
 import { KubeRepoCredentialWriter } from "../adapters/kube/kube-repo-credential.ts";
 import { CloudflareDns } from "../adapters/dns/cloudflare-dns.ts";
+import { CloudflareR2 } from "../adapters/object-store/cloudflare-r2.ts";
 import type { DnsProvider } from "../adapters/dns/port.ts";
 import type { ClusterValueFile } from "../../shared/cluster-values.ts";
 import { readClusterValueChain } from "../domains/inventory/cluster-value-chain.ts";
@@ -24,6 +25,7 @@ import { HttpRegistryProbe, REGISTRY_PULL_DOCKERCONFIG_PATH } from "../adapters/
 import { TektonBuildPlane } from "../adapters/build-plane/build-plane-tekton.ts";
 import { VaultSelfSeeder } from "../adapters/vault/vault-self-seeder.ts";
 import type { VaultSeeder } from "../adapters/vault/seeder-port.ts";
+import type { ObjectStore } from "../adapters/object-store/port.ts";
 import { HttpActivator } from "../adapters/activation/activation-http.ts";
 import type { Activator } from "../adapters/activation/port.ts";
 import { HttpGitHubConsumer } from "../adapters/github-consumer/github-consumer-http.ts";
@@ -236,6 +238,16 @@ export function buildUnits(
   // remove-dns steps. Absent (no token) ⇒ those steps fail loud (DNS is a mandatory part of the
   // run kinds), never a silent skip.
   const dns = config.dns ? new CloudflareDns({ apiToken: config.dns.cloudflareApiToken }) : undefined;
+  // The tenant object store — ONE Cloudflare client for create-tenant's bucket and the key it mints
+  // for it. Absent (no managing token, or no account for it to manage) ⇒ that step fails loud, never
+  // a tenant whose engine refuses to boot for want of a bucket it can reach.
+  const objectStore = config.objectStorage
+    ? new CloudflareR2({
+        apiToken: config.objectStorage.apiToken,
+        accountId: config.objectStorage.accountId,
+        jurisdiction: config.objectStorage.jurisdiction,
+      })
+    : undefined;
   // A cluster's own values chain on its install branch. The tenant runs carry no consumer Registrations,
   // so this reader serves them off the SAME platform-repo worktree: folded to the public unit apex
   // (global.unitApex) here, and handed over whole for the tenant planners, which derive the registrations
@@ -274,7 +286,7 @@ export function buildUnits(
       ? { self: { addr: config.vault.addr, k8sAuthMount: config.vault.k8sAuthMount, k8sRole: config.vault.k8sRole, saTokenPath: config.vault.saTokenPath } }
       : {},
   );
-  const tenant = buildTenantOnboarding(config, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, kube);
+  const tenant = buildTenantOnboarding(config, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube);
   const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube);
   // The sanctioned type-erasure (registrations.ts): each typed RunDefinition<P> is stored executor-facing
   // as AnyRunDefinition; the executor parses params via paramsSchema before plan()/steps(). Both
@@ -533,6 +545,10 @@ function buildTenantOnboarding(
    *  seeds the tenant's crypto entry with it and tenant-purge destroys the same entry, so the writer and
    *  the destroyer are provably the same object. */
   seeder: VaultSeeder,
+  /** Makes each tenant's bucket and mints the one key that reaches it. Absent (no managing token) ⇒
+   *  create-tenant's seed step fails loud, for the same reason the seeder's absence does: a tenant
+   *  short of one secret is a tenant whose pods never start. */
+  objectStore: ObjectStore | undefined,
   /** The master-local clients and the one resolver over them, built in the composition root. */
   kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
 ): Family {
@@ -653,6 +669,9 @@ function buildTenantOnboarding(
     resolveClusterValueFiles,
     // Writes <stage>/tenants/<guid>, the ONE Vault entry every member namespace of the tenant reads.
     seeder,
+    // Makes the bucket that entry's three storage properties address, and mints the key that reaches
+    // it and no other bucket of this account.
+    ...(objectStore ? { objectStore } : {}),
   };
   // remove-app + tenant-suspend/-resume/-offboard only flip/drop the pointer + watch the fan-out — no
   // clone/render, so they take the narrower lifecycle port set (registrations + resolver).
