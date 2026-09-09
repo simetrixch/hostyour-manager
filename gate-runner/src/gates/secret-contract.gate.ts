@@ -20,6 +20,17 @@
 //        so it is rejected rather than warned. The cluster-scoped sibling ClusterExternalSecret
 //        carries the SAME read spec nested under `spec.externalSecretSpec` (and a namespaceSelector
 //        that fans the Secret into arbitrary namespaces), so it is held to the identical key + declared-property checks.
+//   every rendered ExternalSecret must carry `spec.refreshPolicy: OnChange`, the platform's secret
+//        DELIVERY rule: a secret is read when it is deployed and when its target Secret is deleted,
+//        never on a timer. The cluster holds the same sentence in the `externalsecret-delivery`
+//        ValidatingAdmissionPolicy, and until this check existed that policy was the FIRST thing to
+//        judge a consumer's ExternalSecret — mid-onboarding, with the namespace already applied, the
+//        object refused and the app Secret missing (hostyour-manager#130). ABSENT is the case that
+//        matters: the controller's own default is Periodic, so a document written without thinking
+//        about this does not fail, does not warn and reads Vault every hour for the life of the
+//        cluster. `refreshInterval` is deliberately NOT held, because the cluster does not hold it
+//        either: under OnChange a document has no timer whatever the interval says, and a gate that
+//        refused more than the cluster would refuse a document the cluster accepts.
 // Declared-but-unreferenced manifest keys are advisory only (surfaced in `found`, never blocking).
 // ctx.rendered[i].raw is UNTRUSTED parsed YAML — every nested read is guarded (typeof / Array
 // checks), and every untrusted string embedded in the report text is truncated, so a hostile chart
@@ -38,13 +49,17 @@ const CONSUMER_ROLE = "consumer-eso";
  *  unit and its stage — which the role's policy path `<stage>/consumer/<unit>/*` is templated on. */
 const ALIAS_UNIT_ANNOTATION = "vault.hashicorp.com/alias-metadata-unit";
 const ALIAS_STAGE_ANNOTATION = "vault.hashicorp.com/alias-metadata-stage";
+/** The one value the platform's secret delivery rule admits. Stated as a literal here and as a
+ *  literal in the cluster's admission policy, because the two say the same sentence and a value
+ *  either of them computed could drift from the other. */
+const DELIVERY_POLICY = "OnChange";
 
 const EXPECTED =
   "SecretStore role==consumer-eso + server==the cluster chain's global.endpoints.vault.url, and the " +
   `ServiceAccount its serviceAccountRef names carries ${ALIAS_UNIT_ANNOTATION}==<name> and ` +
   `${ALIAS_STAGE_ANNOTATION}==<stage>; every ` +
   "ExternalSecret / ClusterExternalSecret remoteRef.key==<stage>/consumer/<name>/app " +
-  "referencing only manifest-declared secrets";
+  `referencing only manifest-declared secrets, each carrying refreshPolicy==${DELIVERY_POLICY}`;
 
 // --- untrusted-value guards ---------------------------------------------------------------------
 
@@ -219,6 +234,21 @@ function checkExternalSecret(
   problems: string[],
   evidence: GateEvidence[],
 ): void {
+  // THE DELIVERY RULE, before anything about what is read: a document that polls Vault is wrong
+  // whatever it reads. ABSENT and WRONG are told apart on purpose — an absent field is not an empty
+  // one, it is the controller's Periodic default, and that is the document nobody notices.
+  const declaresPolicy = esSpec !== null && "refreshPolicy" in esSpec;
+  const policy = esSpec ? asString(esSpec.refreshPolicy) : null;
+  if (policy !== DELIVERY_POLICY) {
+    problems.push(
+      `${doc.kind} ${q(doc.name)} (doc ${doc.docIndex}) ${specPath}.refreshPolicy ` +
+        (declaresPolicy ? `is ${q(policy)}` : "is absent, so the controller's Periodic default applies") +
+        ` but must be ${q(DELIVERY_POLICY)} — a secret on this platform is read when it is deployed and ` +
+        "when its target Secret is deleted, never on a timer; the cluster refuses this document at sync",
+    );
+    evidence.push(pin(doc, `${specPath}.refreshPolicy`, policy));
+  }
+
   asArray(esSpec ? esSpec.data : []).forEach((entry, i) => {
     const rec = asRecord(entry);
     const remoteRef = rec ? asRecord(rec.remoteRef) : null;
