@@ -231,6 +231,11 @@ export function branchAnswers(target: SlaveTarget, serverId: string, ports: Depl
       ...(marking.letsencryptEmail !== undefined ? { letsencrypt_email: marking.letsencryptEmail } : {}),
       ...(marking.letsencryptServer !== undefined ? { letsencrypt_server: marking.letsencryptServer } : {}),
       ...(marking.timeSources !== undefined ? { time_sources: marking.timeSources } : {}),
+      // The registry's two accounts, the master's answer handed on: the catalogue declares a
+      // default for each, so a run that is not told them writes that default over the
+      // operator's answer and the registry stops accepting what the build presents.
+      ...(marking.registryPullUser !== undefined ? { registry_pull_user: marking.registryPullUser } : {}),
+      ...(marking.registryPushUser !== undefined ? { registry_push_user: marking.registryPushUser } : {}),
       // The unit that is the installation's mail service, the master's answer handed on: a
       // tenant's members require it, and the slave's map is what its fan-out reads.
       ...(marking.mailUnit !== undefined ? { mail_unit: marking.mailUnit } : {}),

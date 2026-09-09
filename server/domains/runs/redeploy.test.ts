@@ -4,6 +4,7 @@ import { servers, clusters } from "../../db/schema/inventory.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { activeClusterTarget } from "./defs/deploy-slave.kit.ts";
 import { slaveMachineAnswers, hostAnswers } from "./defs/deploy-slave.ts";
+import { branchAnswers, masterSelfTarget } from "./defs/deploy-slave.master.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import {
   MASTER_FQDN, MASTER_MARKING_YAML, MAP_LETSENCRYPT_EMAIL, MAP_LETSENCRYPT_SERVER, MAP_TIME_SOURCES,
@@ -115,6 +116,44 @@ describe("cluster-redeploy, master arm — what a person supplies and what the m
 
     await expect(hostAnswers(MASTER_ID, h.runPorts)(hostedStepCtx(h)))
       .rejects.toThrow(/states no global\.timeSources/);
+  });
+
+  it("answers deploy-branch with the registry accounts the map states, and states nothing where it does not", async () => {
+    // THE TWO ANSWERS THE CATALOGUE HAS A DEFAULT FOR, which is what makes carrying them necessary:
+    // a run that is not told them writes `platform-pull` and `platform-push` into the installation's
+    // own credentials file, over whatever its operator answered, and the registry then rejects the
+    // account the first release's build presents. Measured on apps1 on 2026-09-09: the map, the
+    // credentials file and the build's ESO secret all read `platform-pull` while the registry
+    // accepted `simetrixch-pull`, and the release died at `probe: … answered 401`.
+    const h = await masterWithLiveCluster();
+    // The regeneration is answered with the machine's own LAN address — the gate has to prove the
+    // manager cannot be reached from inside the fence — so the row carries one here.
+    h.db.db.update(servers).set({ lanHost: "10.1.1.10" }).where(eq(servers.id, MASTER_ID)).run();
+    // The composer reads the map's own `release:` first — a regeneration is brought to the state the
+    // installation records, never to whatever the trunk holds — so the map is seeded with one.
+    const withRelease = (map: string): string => `release: 0.8.149-stable-20260909083324
+${map}`;
+    const target = masterSelfTarget(MASTER_ID, { domain: MASTER_FQDN, stage: "prod" });
+    h.platformRepo.seed(
+      h.platformRepo.booksBranch,
+      clusterMapPath(MASTER_FQDN),
+      withRelease(MASTER_MARKING_YAML),
+    );
+    expect(await branchAnswers(target, MASTER_ID, h.runPorts)(hostedStepCtx(h)))
+      .toMatchObject({ registry_pull_user: "puller", registry_push_user: "pusher" });
+
+    // The counter-probe: a map that records neither leaves the catalogue's default standing, so the
+    // answers are ABSENT rather than invented here.
+    h.platformRepo.seed(
+      h.platformRepo.booksBranch,
+      clusterMapPath(MASTER_FQDN),
+      withRelease(mapWithout("  registryPullUser: puller", "  registryPushUser: pusher")),
+    );
+    const withoutAccounts = await branchAnswers(target, MASTER_ID, h.runPorts)(hostedStepCtx(h));
+    expect(withoutAccounts.registry_pull_user).toBeUndefined();
+    expect(withoutAccounts.registry_push_user).toBeUndefined();
+    // PLANTED INNOCENT: the keys that stand in that same map still come through.
+    expect(withoutAccounts.books_fqdn).toBe(MASTER_FQDN);
   });
 
   it("refuses a server whose cluster is not live, before any answer is composed", async () => {

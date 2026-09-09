@@ -135,6 +135,11 @@ const ClusterMarkingFileSchema = z.object({
     // the map template writes, and never empty — deploy-host refuses a machine that would ask the
     // time of nothing. Optional because the maps that predate the key are still valid markings.
     timeSources: z.array(z.string().min(1)).min(1).optional(),
+    // The registry's two accounts BY NAME, as the map template writes them. Optional because
+    // the maps that predate the key are still valid markings, and because the catalogue
+    // declares a default for each — a map that states neither leaves that default standing.
+    registryPullUser: z.string().min(1).optional(),
+    registryPushUser: z.string().min(1).optional(),
     endpoints: z.object({}).passthrough().optional(),
   // PASSTHROUGH, and only here. The global block carries every value the charts of this platform
   // read, and this process has no business refusing a key a chart added — it would fail every map
@@ -196,6 +201,13 @@ export interface ClusterMarking {
   /** The time servers the machines of this installation ask the time of. Handed to the
    *  machine-layer programs of a machine that joins later, the way the three above are. */
   timeSources?: string[];
+  /** The registry's two accounts, by name. Handed to the machine-layer programs of a machine
+   *  that joins later, because the catalogue declares a DEFAULT for each: a run that is not
+   *  told them writes the default into the installation's own credentials file and over the
+   *  operator's answer, and the registry the first release pulls from then rejects the
+   *  account the build presents (hostyour-manager#128). */
+  registryPullUser?: string;
+  registryPushUser?: string;
   /** Everything `global` carried that this module does not name, carried VERBATIM. The schema lets
    *  the block through on purpose, so a chart may add a value without failing every map read on the
    *  release that introduces it - but a writer that emits only what it understands turns that
@@ -221,6 +233,7 @@ const NAMED_GLOBALS = new Set([
   "domain", "booksCluster", "buildPlane", "master", "apiHost", "apiPort",
   "unitApex", "platformDomain", "alertRecipients", "catalogUrl",
   "clusterIssuer", "letsencryptEmail", "letsencryptServer", "timeSources",
+  "registryPullUser", "registryPushUser",
 ]);
 
 function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking {
@@ -270,6 +283,8 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
     ...(g.letsencryptEmail !== undefined ? { letsencryptEmail: g.letsencryptEmail } : {}),
     ...(g.letsencryptServer !== undefined ? { letsencryptServer: g.letsencryptServer } : {}),
     ...(g.timeSources !== undefined ? { timeSources: g.timeSources } : {}),
+    ...(g.registryPullUser !== undefined ? { registryPullUser: g.registryPullUser } : {}),
+    ...(g.registryPushUser !== undefined ? { registryPushUser: g.registryPushUser } : {}),
     ...(Object.keys(rest).length > 0 ? { globalRest: rest } : {}),
   };
 }
@@ -424,6 +439,8 @@ function serializeMarking(m: ClusterMarking): string {
     ...(m.clusterIssuer !== undefined ? ([["clusterIssuer", m.clusterIssuer]] as [string, string][]) : []),
     ...(m.letsencryptEmail !== undefined ? ([["letsencryptEmail", m.letsencryptEmail]] as [string, string][]) : []),
     ...(m.letsencryptServer !== undefined ? ([["letsencryptServer", m.letsencryptServer]] as [string, string][]) : []),
+    ...(m.registryPullUser !== undefined ? ([["registryPullUser", m.registryPullUser]] as [string, string][]) : []),
+    ...(m.registryPushUser !== undefined ? ([["registryPushUser", m.registryPushUser]] as [string, string][]) : []),
     // A LIST, in the flow shape the map template writes it in, for the reason alertRecipients is.
     ...(m.timeSources !== undefined && m.timeSources.length > 0
       ? ([["timeSources", asYaml(`[${m.timeSources.map((s) => `'${s.replaceAll("'", "''")}'`).join(", ")}]`)]] as [string, { yaml: string }][])
@@ -528,6 +545,12 @@ export async function writeClusterMarking(
     ...(current?.header !== undefined ? { header: current.header } : {}),
     ...(current?.release !== undefined ? { release: current.release } : {}),
     ...(current?.mailUnit !== undefined && marking.mailUnit === undefined ? { mailUnit: current.mailUnit } : {}),
+    ...(current?.registryPullUser !== undefined && marking.registryPullUser === undefined
+      ? { registryPullUser: current.registryPullUser }
+      : {}),
+    ...(current?.registryPushUser !== undefined && marking.registryPushUser === undefined
+      ? { registryPushUser: current.registryPushUser }
+      : {}),
   };
   if (current && markingDifferences(current, next).length === 0) return { changed: false };
   await commitMarking(repo, {
