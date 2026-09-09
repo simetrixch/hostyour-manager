@@ -21,8 +21,9 @@ import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { mintTenantCrypto, TENANT_CRYPTO_PROPERTIES } from "./tenant-crypto-mint.ts";
-import { STORAGE_SECRET_PREFIX, STORAGE_ENDPOINT_FIELD, readTenantStorage } from "./tenant-storage.ts";
+import { provisionTenantStorage } from "./tenant-storage.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import type { ObjectStore } from "../../adapters/object-store/port.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
@@ -118,6 +119,11 @@ export interface TenantOnboardPorts {
    *  Manager without Vault is a real state (a dev process, the checks); absent ⇒ the seed step fails
    *  loud, never silently produces a tenant whose members cannot resolve a single secret. */
   seeder?: VaultSeeder;
+  /** Makes the tenant's bucket and mints the ONE key that reaches it — the storage half of the same
+   *  Vault entry the seeder writes. Optional only because a Manager without an object-storage
+   *  credential is a real state (a dev process, the checks); absent ⇒ the seed step fails loud,
+   *  never silently produces a tenant whose engine refuses to boot for want of a bucket. */
+  objectStore?: ObjectStore;
 }
 
 const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely
@@ -352,17 +358,28 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // them — which is the property the write-only policy exists to have.
         if (!ports.seeder) throw errValidation("no Vault seeder is wired — a tenant's crypto entry cannot be written, and without it every member's ExternalSecrets fail to resolve");
         // The three storage values ride in the SAME write as the minted crypto: one entry, one
-        // cas=0 create, no second grant and no second path. Read here rather than at plan time
-        // because a plan carries no secret — approve is where the operator hands them over.
-        const storage = readTenantStorage(ctx);
+        // cas=0 create, no second grant and no second path. Made here rather than at plan time
+        // because a plan carries no secret, and because a plan that is never approved must not
+        // leave a bucket and a live key behind.
+        const storage = await provisionTenantStorage(ports.objectStore, { guid: p.guid, stage: p.stage, ...(ctx.signal ? { signal: ctx.signal } : {}) });
         const { created } = await ports.seeder.seedTenantCrypto({
-          stage: p.stage, guid: p.guid, data: { ...mintTenantCrypto(), ...storage },
+          stage: p.stage, guid: p.guid, data: { ...mintTenantCrypto(), ...storage.properties },
         });
-        ctx.checkpoint({ tenantCrypto: p.guid, created });
+        // WHAT THE CREATE-ONCE ENTRY REFUSED IS WITHDRAWN AT ONCE. The write is cas=0, so an entry a
+        // previous run already made stands exactly as it stands — and the key minted a line above is
+        // then a live credential on the tenant's bucket that nothing in the product names. It cannot
+        // replace the standing one either: that one's secret half was returned once and is
+        // unreadable, so the tenant's pods keep using it. Taking the new key back is the only move
+        // that leaves the account holding exactly the keys the tenants' entries name.
+        if (!created) {
+          const { deleted } = await ports.objectStore!.withdrawBucketKey({ accessKeyId: storage.bucket.accessKeyId, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+          ctx.log("meta", `the key minted for bucket ${storage.bucket.bucket} was withdrawn again (${deleted}) — the standing entry names another one, and its secret cannot be read back to replace it`);
+        }
+        ctx.checkpoint({ tenantCrypto: p.guid, created, bucket: storage.bucket.bucket, bucketCreated: storage.created });
         ctx.log(
           "meta",
           created
-            ? `entry ${p.stage}/tenants/${p.guid} created (${TENANT_CRYPTO_PROPERTIES.length} minted + 3 supplied properties) — the JWT keypair its IdP signs with, the TOTP key, the bootstrap token, the engine key, and the object storage the operator handed over`
+            ? `entry ${p.stage}/tenants/${p.guid} created (${TENANT_CRYPTO_PROPERTIES.length} minted + 3 storage properties) — the JWT keypair its IdP signs with, the TOTP key, the bootstrap token, the engine key, and a key reaching bucket ${storage.bucket.bucket} (${storage.created ? "made by this run" : "already there"}) and no other bucket`
             : `crypto entry ${p.stage}/tenants/${p.guid} already exists and was left UNTOUCHED — a re-run never rotates a live tenant's keys out from under its running pods`,
         );
       },
@@ -673,14 +690,13 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         targets: [], // no host owned — the Manager acts master-locally
         locks: tenantLocks(ports.registrations),
         warnings: [],
-        // The tenant's object storage, handed over at approve and written into the SAME Vault entry
-        // as the crypto. Every other value a tenant needs is minted or derived; these three are made
-        // at Cloudflare, and the account-scoped token that makes them is not this tier's to hold.
-        // Without them a tenant's engine REFUSES TO BOOT in production: the chart pins
-        // UPLOAD_STORAGE=r2 and the engine's storage-factory will not fall back to local disk there.
-        requiredSecrets: [`${STORAGE_SECRET_PREFIX}key`, `${STORAGE_SECRET_PREFIX}secret`],
-        // The endpoint is not a secret — it is a public URL — so it travels in the clear beside them.
-        requiredInputs: [{ field: STORAGE_ENDPOINT_FIELD, label: "R2 endpoint of the tenant's bucket (https://<account-id>[.<jurisdiction>].r2.cloudflarestorage.com)" }],
+        // NOTHING IS ASKED OF THE OPERATOR. It used to be three values here — the two halves of a
+        // bucket key and the endpoint — because a bucket and a key scoped to it are made with an
+        // ACCOUNT-scoped credential and this tier held none. It holds one now, so seed-tenant-crypto
+        // makes the bucket and mints the key itself (simetrixch/hostyour-cloud#197). Stated EMPTY
+        // rather than left out: the approve ceremony renders one input per entry, and the field is
+        // what says this run needs no ceremony at all.
+        requiredSecrets: [],
       };
       return { outcome: "planned", params, plan };
     },

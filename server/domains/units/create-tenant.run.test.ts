@@ -22,6 +22,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
 import type { VaultSeeder, TenantCryptoSeedInput } from "../../adapters/vault/seeder-port.ts";
+import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { TENANT_CRYPTO_PROPERTIES, TENANT_STORAGE_PROPERTIES } from "./tenant-crypto-mint.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -123,6 +124,9 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     // irrecoverable by design (the Manager holds no read grant), so a test can only assert THAT the
     // entry was created, which the step log carries.
     seeder: fakeTenantSeeder(),
+    // The object store the same step makes the tenant's bucket in and mints its key from. A fresh
+    // one per fixture, so a test asserts exactly the buckets and keys ITS run produced.
+    objectStore: new FakeObjectStore(),
     repo: repoWithManifest(),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: new TenantRegistrations(new FakePlatformRepo()),
@@ -179,16 +183,10 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
 function ctx(p: CreateTenantParams, stepName: string, logs: string[]): StepCtx {
   return {
     runId: "run_tnt", stepName, db: db.db, creds: {} as unknown as CredentialStore, params: p,
-    secrets: {
-      // What approve collected: the two sealed values and the endpoint in the clear. A tenant
-      // created without them has an engine that refuses to boot, so no scenario here can omit them.
-      get: (n: string) => ({
-        "tenant-storage:key": Buffer.from("r2-access-key", "utf8"),
-        "tenant-storage:secret": Buffer.from("r2-secret-key", "utf8"),
-        "activation-input:storageEndpoint": Buffer.from("https://acct.eu.r2.cloudflarestorage.com", "utf8"),
-      })[n],
-      wipe: () => undefined,
-    }, signal: new AbortController().signal,
+    // APPROVE COLLECTS NOTHING for a tenant create. The three object-storage values used to arrive
+    // here; the platform makes the bucket and mints the key itself now, so a step reading a secret
+    // would be reading something no ceremony fills (hostyour-cloud#197).
+    secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal,
     logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
@@ -330,11 +328,12 @@ describe("create-tenant streaming planner", () => {
     expect(result.plan.targetKind).toBe("cluster");
     expect(result.plan.targetId).toBe("cls_1");
     expect(result.plan.locks).toContainEqual({ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` }); // the books branch, not the trunk the charts stand on
-    // The tenant's object storage: the two sealed values approve demands, and the endpoint in the
-    // clear beside them. Everything else a tenant needs is minted or derived — these three are made
-    // at Cloudflare with a token this tier deliberately does not hold.
-    expect(result.plan.requiredSecrets).toEqual(["tenant-storage:key", "tenant-storage:secret"]);
-    expect(result.plan.requiredInputs?.map((i) => i.field)).toEqual(["storageEndpoint"]);
+    // NOTHING IS ASKED OF THE OPERATOR. The tenant's object storage used to be three values here —
+    // the two halves of a bucket key and the endpoint — because this tier held no credential that
+    // could make either. It holds one now, and seed-tenant-crypto makes the bucket and mints the key
+    // itself, so an approve ceremony would render inputs for a run that needs none.
+    expect(result.plan.requiredSecrets).toEqual([]);
+    expect(result.plan.requiredInputs ?? []).toEqual([]);
     expect(result.plan.steps.map((s) => s.name)).toEqual(def.steps(result.params).map((s) => s.name));
   });
 
@@ -418,10 +417,12 @@ describe("create-tenant streaming planner", () => {
 });
 
 describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
-  /** Runs just that step against a scripted seeder, and hands back what it was asked to write. */
-  async function seedStep(over: Partial<VaultSeeder> = {}): Promise<{ seen: TenantCryptoSeedInput[]; logs: string[] }> {
+  /** Runs just that step against a scripted seeder, and hands back what it was asked to write, what
+   *  the log said, and the object store it made the tenant's bucket and key in. */
+  async function seedStep(over: Partial<VaultSeeder> = {}, store = new FakeObjectStore()): Promise<{ seen: TenantCryptoSeedInput[]; logs: string[]; store: FakeObjectStore }> {
     const seen: TenantCryptoSeedInput[] = [];
     const prt = ports({
+      objectStore: store,
       seeder: {
         ...fakeTenantSeeder(),
         seedTenantCrypto: async (i: TenantCryptoSeedInput) => {
@@ -435,7 +436,7 @@ describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
     const p = params();
     const step = makeCreateTenantDef(prt).steps(p).find((s) => s.name === "seed-tenant-crypto")!;
     await step.run(ctx(p, step.name, logs));
-    return { seen, logs };
+    return { seen, logs, store };
   }
 
   it("writes the tenant's own leaf with every property its members read", async () => {
@@ -446,7 +447,51 @@ describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
     // ONE entry, one create-only write: the five minted values AND the three the operator handed
     // over. Splitting them would mean a second write against a path cas=0 makes write-once.
     expect(Object.keys(seen[0]!.data).sort()).toEqual([...TENANT_CRYPTO_PROPERTIES, ...TENANT_STORAGE_PROPERTIES].sort());
-    expect(seen[0]!.data["upload-s3-endpoint"]).toBe("https://acct.eu.r2.cloudflarestorage.com");
+  });
+
+  it("makes the tenant's bucket, named by its guid, and seeds the key minted for THAT bucket", async () => {
+    // The bucket name is the guid because that is what the engine chart addresses (UPLOAD_S3_BUCKET)
+    // and what the relocation jobs address as s3:<guid>. The three storage properties have to be the
+    // ones the mint just produced: a key seeded from anywhere else reaches a bucket nobody made.
+    const { seen, store } = await seedStep();
+    expect([...store.buckets]).toEqual([GUID]);
+    expect(store.mints).toHaveLength(1);
+    expect(store.mints[0]!.bucket).toBe(GUID);
+    // The name carries the stage: one guid can exist at two stages, each with a bucket of its own.
+    expect(store.mints[0]!.name).toBe(`tenant-${GUID}-prod`);
+    expect(seen[0]!.data["upload-s3-key"]).toBe(store.mints[0]!.accessKeyId);
+    expect(seen[0]!.data["upload-s3-secret"]).toBe(store.mints[0]!.secretAccessKey);
+    expect(seen[0]!.data["upload-s3-endpoint"]).toBe(store.mints[0]!.endpoint);
+    // Nothing is withdrawn on the normal path — the entry took the key the mint produced.
+    expect(store.withdrawals).toEqual([]);
+  });
+
+  it("leaves a bucket that already stands exactly as it is — a re-run must not touch a live tenant's objects", async () => {
+    const store = new FakeObjectStore();
+    store.buckets.add(GUID);
+    const { store: after } = await seedStep({}, store);
+    expect([...after.buckets]).toEqual([GUID]);
+  });
+
+  it("withdraws the key it minted when the create-once entry refused it, so no key outlives the entry naming it", async () => {
+    // The write is cas=0. An entry a previous run made stands, and the key minted a line above is
+    // then a live credential on the tenant's bucket that NOTHING in the product names — and it
+    // cannot replace the standing one, whose secret half is unreadable. Taking it back is the only
+    // move that leaves the account holding exactly the keys the tenants' entries name.
+    const { logs, store } = await seedStep({ seedTenantCrypto: async () => ({ created: false }) });
+    expect(store.mints).toHaveLength(1);
+    expect(store.withdrawals).toEqual([{ accessKeyId: store.mints[0]!.accessKeyId, deleted: 1 }]);
+    expect(store.keys.size).toBe(0);
+    expect(logs.some((l) => l.includes("was withdrawn again"))).toBe(true);
+  });
+
+  it("fails LOUD with no object storage wired, rather than producing a tenant whose engine cannot boot", async () => {
+    // The counter-probe of the seeder refusal below: the two absences are the same kind of failure,
+    // because a tenant short of ONE of its secrets is a tenant whose pods never start.
+    const { objectStore: _drop, ...rest } = ports();
+    const p = params();
+    const step = makeCreateTenantDef(rest as TenantOnboardPorts).steps(p).find((s) => s.name === "seed-tenant-crypto")!;
+    await expect(step.run(ctx(p, step.name, []))).rejects.toThrow(/no object storage is wired/);
   });
 
   it("runs BEFORE write-registration — the fan-out must never generate a member whose secrets do not exist yet", async () => {

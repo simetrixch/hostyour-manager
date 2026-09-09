@@ -187,6 +187,23 @@ const EnvSchema = z.object({
   STORAGE_BOX_HOST: z.string().min(1).optional(),
   STORAGE_BOX_USER: z.string().min(1).optional(),
   STORAGE_BOX_PASSWORD: z.string().min(1).optional(),
+  // WHERE A TENANT'S UPLOADS GO, and the one object-storage credential this installation holds. The
+  // three values come from secret/<stage>/app/cloudflare-r2 via the manager's own ExternalSecret
+  // (the seeder is write-only, so like STORAGE_BOX_* they arrive as env, never as a Vault read-back).
+  // ALL THREE OR NONE — a token without the account it signs for addresses nothing.
+  //
+  // A MANAGING TOKEN, and that is what makes the per-tenant fence possible: create-tenant makes the
+  // bucket named by the tenant guid with it and mints a key scoped to THAT ONE BUCKET, which is the
+  // only object-storage credential a tenant ever holds. An installation-wide bucket key handed to
+  // every tenant would sit in every tenant's pod and reach every other tenant's objects.
+  // Absent ⇒ create-tenant fails LOUD; a tenant whose engine cannot reach a bucket refuses to boot.
+  CLOUDFLARE_R2_API_TOKEN: z.string().min(1).optional(),
+  CLOUDFLARE_R2_ACCOUNT_ID: z.string().min(1).optional(),
+  // Part of a bucket's IDENTITY and not a setting on it: a bucket made under one jurisdiction is
+  // invisible under another, and the key scoped to it names the jurisdiction too. The three
+  // Cloudflare accepts; "default" is the unrestricted one and what an installation that never
+  // answered gets, so a map written before this key existed still resolves to the same buckets.
+  CLOUDFLARE_R2_JURISDICTION: z.enum(["default", "eu", "fedramp"]).default("default"),
   // WHERE THE DEPLOYMENT PROGRAMS COME FROM — the repository cloned to /srv/ansiwise-catalog on a
   // machine that carries none, and the tree the serving binary reads every program and its
   // ansiwise.yaml out of. It is `owner/name`, and the URL is composed the same way every other
@@ -279,6 +296,9 @@ const EnvSchema = z.object({
 }, {
   message: "STORAGE_BOX_HOST, STORAGE_BOX_USER and STORAGE_BOX_PASSWORD must be set together (the staging area needs all three, or none)",
   path: ["STORAGE_BOX_HOST"],
+}).refine((e) => Boolean(e.CLOUDFLARE_R2_API_TOKEN) === Boolean(e.CLOUDFLARE_R2_ACCOUNT_ID), {
+  message: "CLOUDFLARE_R2_API_TOKEN and CLOUDFLARE_R2_ACCOUNT_ID must be set together (a token addresses nothing without the account it manages, and an account nothing can be created in)",
+  path: ["CLOUDFLARE_R2_API_TOKEN"],
 });
 
 export interface Config {
@@ -387,6 +407,14 @@ export interface Config {
     host: string;
     user: string;
     password: string;
+  };
+  /** Present ⇒ the object storage is wired: the account tenant buckets are made in, the jurisdiction
+   *  they are made under, and the MANAGING token that makes them. Absent ⇒ create-tenant fails loud —
+   *  a tenant with no bucket has an engine that refuses to boot. */
+  objectStorage?: {
+    apiToken: string;
+    accountId: string;
+    jurisdiction: "default" | "eu" | "fedramp";
   };
   /** The pinned dbtools job image the relocation Jobs run. Absent ⇒ those steps fail loud. */
   dbtoolsImage?: string;
@@ -527,6 +555,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     // The refine above guarantees the three together; the triple guard narrows them.
     ...(e.STORAGE_BOX_HOST && e.STORAGE_BOX_USER && e.STORAGE_BOX_PASSWORD
       ? { storageBox: { host: e.STORAGE_BOX_HOST, user: e.STORAGE_BOX_USER, password: e.STORAGE_BOX_PASSWORD } }
+      : {}),
+    // The refine above guarantees the token and the account together; the pair guard narrows them.
+    // The jurisdiction always has its default, so it is never what makes the block absent.
+    ...(e.CLOUDFLARE_R2_API_TOKEN && e.CLOUDFLARE_R2_ACCOUNT_ID
+      ? { objectStorage: { apiToken: e.CLOUDFLARE_R2_API_TOKEN, accountId: e.CLOUDFLARE_R2_ACCOUNT_ID, jurisdiction: e.CLOUDFLARE_R2_JURISDICTION } }
       : {}),
     ...(e.DBTOOLS_IMAGE ? { dbtoolsImage: e.DBTOOLS_IMAGE } : {}),
     // Unconditional, because the setting has a default and the repository is public: there is no

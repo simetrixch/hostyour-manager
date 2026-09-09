@@ -24,6 +24,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
@@ -133,6 +134,9 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
   const { argo, cluster, projects, ...portOver } = over;
   return {
     seeder: fakeTenantSeeder(),
+    // The object store the seed step makes the tenant's bucket in and mints its key from — the
+    // platform's own, so no operator value stands behind it (hostyour-cloud#197).
+    objectStore: new FakeObjectStore(),
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: new TenantRegistrations(new FakePlatformRepo()),
@@ -172,16 +176,9 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
 function ctx(p: CreateTenantParams, stepName: string, opts: { runId?: string; logs?: string[]; cleanups?: Cleanup[] } = {}): StepCtx {
   return {
     runId: opts.runId ?? "run_tnt", stepName, db: db.db, creds: {} as unknown as CredentialStore, params: p,
-    secrets: {
-      // What approve collected: the two sealed values and the endpoint in the clear. A tenant
-      // created without them has an engine that refuses to boot, so no scenario here can omit them.
-      get: (n: string) => ({
-        "tenant-storage:key": Buffer.from("r2-access-key", "utf8"),
-        "tenant-storage:secret": Buffer.from("r2-secret-key", "utf8"),
-        "activation-input:storageEndpoint": Buffer.from("https://acct.eu.r2.cloudflarestorage.com", "utf8"),
-      })[n],
-      wipe: () => undefined,
-    }, signal: new AbortController().signal,
+    // APPROVE COLLECTS NOTHING for a tenant create — the platform makes the bucket and mints the
+    // key itself, so a step reading a secret would read something no ceremony fills.
+    secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal,
     logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),

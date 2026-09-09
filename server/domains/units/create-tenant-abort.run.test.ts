@@ -30,6 +30,7 @@ import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 /** The standing members the product under test declares — stated by the fixture, the way a real
@@ -161,6 +162,9 @@ function fakeTenantSeeder(): VaultSeeder {
       // irrecoverable by design (the Manager holds no read grant), so a test can only assert THAT the
       // entry was created, which the step log carries.
       seeder: fakeTenantSeeder(),
+      // The object store the seed step makes the tenant's bucket in and mints its key from — the
+      // platform's own, so no operator value stands behind it (hostyour-cloud#197).
+      objectStore: new FakeObjectStore(),
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations,
