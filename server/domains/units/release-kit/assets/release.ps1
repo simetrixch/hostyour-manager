@@ -129,6 +129,12 @@ function Test-RunsHere {
 
 # One branch of the platform tree, pinned and pushed. The checkout and the reset onto the remote
 # branch are what make the write land on THAT branch and not on whatever the clone had open.
+#
+# THE SUBJECT OPENS WITH `release:` because the platform's push gate excuses a release stamp from
+# naming an issue by that word and by nothing else. The clone below carries no hooks, so the gate
+# never judges this commit here — but it judges it wherever the same commit is pushed from a
+# checkout that does, and a commit the gate refuses from one place is a commit it should refuse
+# from every place (#132).
 function Publish-BranchPin {
   param([Parameter(Mandatory = $true)][string]$Branch)
   git -C $platformRepoDir checkout --quiet $Branch 2>$null
@@ -140,7 +146,7 @@ function Publish-BranchPin {
     return
   }
   git -C $platformRepoDir add -- @pinned
-  git -C $platformRepoDir commit --quiet -m "Pin $Stage to $tag" -m "Written by the release of $name, once its images were built."
+  git -C $platformRepoDir commit --quiet -m "release: pin $Stage to $tag" -m "Written by the release of $name, once its images were built."
   git -C $platformRepoDir push --quiet origin $Branch
   if ($LASTEXITCODE -ne 0) { Die "the pin of $Stage to $tag-$sha7 could not be pushed to $Branch of $platformRepo" }
   Say "pinned $Branch to $tag-$sha7 in $($pinned -join ' ')"

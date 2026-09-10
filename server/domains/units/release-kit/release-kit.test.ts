@@ -151,10 +151,13 @@ describe("release-kit embedded assets", () => {
     expect(sh).toContain("gh run watch");
     expect(ps1).toContain("gh run watch");
 
-    // The pin write, and the commit body that identifies who wrote it.
+    // The pin write, the subject the platform's push gate excuses as a release stamp (#132), and
+    // the commit body that identifies who wrote it.
     expect(sh).toContain('git -C "$PLATFORM_REPO_DIR" push --quiet origin "$branch"');
+    expect(sh).toContain('-m "release: pin ${STAGE} to ${TAG}"');
     expect(sh).toContain('-m "Written by the release of ${NAME}, once its images were built."');
     expect(ps1).toContain("git -C $platformRepoDir push --quiet origin $Branch");
+    expect(ps1).toContain('-m "release: pin $Stage to $tag"');
     expect(ps1).toContain('-m "Written by the release of $name, once its images were built."');
   });
 

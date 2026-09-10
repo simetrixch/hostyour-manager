@@ -113,6 +113,12 @@ runs_here() {
 
 # One branch of the platform tree, pinned and pushed. The checkout and the reset onto the remote
 # branch are what make the write land on THAT branch and not on whatever the clone had open.
+#
+# THE SUBJECT OPENS WITH `release:` because the platform's push gate excuses a release stamp from
+# naming an issue by that word and by nothing else. The clone below carries no hooks, so the gate
+# never judges this commit here — but it judges it wherever the same commit is pushed from a
+# checkout that does, and a commit the gate refuses from one place is a commit it should refuse
+# from every place (#132).
 pin_branch() {
   branch="$1"
   git -C "$PLATFORM_REPO_DIR" checkout --quiet "$branch" || die "the platform tree has no branch ${branch} - nothing further was pinned"
@@ -123,7 +129,7 @@ pin_branch() {
     return 0
   fi
   git -C "$PLATFORM_REPO_DIR" add -- $pinned
-  git -C "$PLATFORM_REPO_DIR" commit --quiet -m "Pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME}, once its images were built."
+  git -C "$PLATFORM_REPO_DIR" commit --quiet -m "release: pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME}, once its images were built."
   git -C "$PLATFORM_REPO_DIR" push --quiet origin "$branch" \
     || die "the pin of ${STAGE} to ${TAG}-${SHA7} could not be pushed to ${branch} of ${PLATFORM_REPO}"
   say "pinned ${branch} to ${TAG}-${SHA7} in ${pinned}"
