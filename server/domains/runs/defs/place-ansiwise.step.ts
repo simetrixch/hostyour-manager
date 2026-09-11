@@ -2,7 +2,7 @@ import type { Step, StepCtx } from "../../../executor/types.ts";
 import type { servers } from "../../../db/schema/inventory.ts";
 import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
 import { readAnsiwisePin } from "../../inventory/ansiwise-pin.ts";
-import { loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
+import { loadMaster, loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { requireElevationPassword, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 import {
   placeAnsiwise, assertWord, findUnknownProgram, handRunRoot, VERSION_PLACEHOLDER, NAME_PLACEHOLDER,
@@ -76,39 +76,73 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
   return {
     name: "place-ansiwise",
     title: "Place the engine at the pinned version, and bring the catalogue it is judged by with it",
+    run: (ctx) => placeOn(ctx, ports, loadServer(ctx.db, target.serverId)),
+  };
+}
+
+/** The same act on the MASTER, from a run whose own target is another machine: the slave deploy and
+ *  the rejoin mint a credential on the master through the master's own `ansiwise-rest`, and until
+ *  #133 that surface was whatever engine the master had carried since its installation — nothing
+ *  but a redeploy of the master ever moved it, while the catalogue every program is read out of is
+ *  always master. A row that names a step the master's engine does not carry was refused in the run
+ *  that needed it. The master is loaded at RUN time, as the mint loads it, and reached over the
+ *  session the plan declares for it (`ctx.ssh(master.id)`, the aux target); the act is the
+ *  placement above, idempotent by measurement, so a current master costs two readings. */
+export function placeAnsiwiseOnMasterStep(ports: DeploySlavePorts & AnsiwisePorts, opts: { host?: string } = {}): Step {
+  return {
+    name: "place-ansiwise-master",
+    title: "Place the engine on the master at the pinned version, and bring its catalogue with it",
     run: async (ctx) => {
-      const server = loadServer(ctx.db, target.serverId);
-      const verdict = await runBootstrap(ctx, ports, server);
-      // The other half of making a machine speakable, and it has to happen HERE: every program this
-      // manager drives runs through `ansiwise-rest` as the operator, and the first thing a run does
-      // is write its own record. A program's own row keeps these directories right afterwards; it
-      // cannot make them right the first time, because it is a program and the programs are what
-      // cannot start.
-      const handed = await handRunRoot(await placementMachine(ctx, server.name), {
-        account: server.sshUser,
-        elevationPassword: requireElevationPassword(ctx),
-      });
-      // AND THE CATALOGUE THE ENGINE IS JUDGED BY, in the same step and before any program. The
-      // machine's cluster program asserts the placed engine against the version stamped into the
-      // catalogue ON THE MACHINE, and the catalogue is refreshed by a row of a program that is
-      // itself read out of the catalogue — so without this a pin move reaches an installed machine
-      // one program after the row that asserts it. A machine carrying no catalogue is untouched,
-      // which is what keeps the birth of a machine out of this: the row cannot go into the first
-      // program a machine runs, because it needs an answer the client's first-master flow does not
-      // send, and nothing here asks a program for anything.
-      const catalogue = await refreshCatalogue(
-        await placementMachine(ctx, server.name),
-        ports.catalogueOrigin === undefined
-          ? undefined
-          : {
-              ...ports.catalogueOrigin,
-              account: server.sshUser,
-              elevationPassword: requireElevationPassword(ctx),
-            },
-      );
-      ctx.checkpoint({ ...verdict, ...handed, catalogue });
+      const master = loadMaster(ctx.db);
+      // A host that carries the master part IS the master: the placement on the host, one step
+      // up, has already brought it to the pin, and the plan declares no second target for it.
+      if (opts.host !== undefined && opts.host === master.id) {
+        ctx.log("meta", `${master.name} carries the master part, so the placement on the host above is this one — nothing to do`);
+        ctx.checkpoint({ skipped: "host-is-master" });
+        return;
+      }
+      await placeOn(ctx, ports, master, master.id);
     },
   };
+}
+
+/** The placement on [server], reached over the run's session for [sessionId] — the run's own target
+ *  where none is named. */
+async function placeOn(
+  ctx: StepCtx,
+  ports: DeploySlavePorts & AnsiwisePorts,
+  server: typeof servers.$inferSelect,
+  sessionId?: string,
+): Promise<void> {
+  const verdict = await runBootstrap(ctx, ports, server, sessionId);
+  // The other half of making a machine speakable, and it has to happen HERE: every program this
+  // manager drives runs through `ansiwise-rest` as the operator, and the first thing a run does
+  // is write its own record. A program's own row keeps these directories right afterwards; it
+  // cannot make them right the first time, because it is a program and the programs are what
+  // cannot start.
+  const handed = await handRunRoot(await placementMachine(ctx, server.name, sessionId), {
+    account: server.sshUser,
+    elevationPassword: requireElevationPassword(ctx),
+  });
+  // AND THE CATALOGUE THE ENGINE IS JUDGED BY, in the same step and before any program. The
+  // machine's cluster program asserts the placed engine against the version stamped into the
+  // catalogue ON THE MACHINE, and the catalogue is refreshed by a row of a program that is
+  // itself read out of the catalogue — so without this a pin move reaches an installed machine
+  // one program after the row that asserts it. A machine carrying no catalogue is untouched,
+  // which is what keeps the birth of a machine out of this: the row cannot go into the first
+  // program a machine runs, because it needs an answer the client's first-master flow does not
+  // send, and nothing here asks a program for anything.
+  const catalogue = await refreshCatalogue(
+    await placementMachine(ctx, server.name, sessionId),
+    ports.catalogueOrigin === undefined
+      ? undefined
+      : {
+          ...ports.catalogueOrigin,
+          account: server.sshUser,
+          elevationPassword: requireElevationPassword(ctx),
+        },
+  );
+  ctx.checkpoint({ ...verdict, ...handed, catalogue });
 }
 
 /** The bootstrap's manager half: the pin and the address resolved out of this installation, and the
@@ -117,6 +151,7 @@ async function runBootstrap(
   ctx: StepCtx,
   ports: DeploySlavePorts & AnsiwisePorts,
   server: typeof servers.$inferSelect,
+  sessionId?: string,
 ): Promise<BootstrapVerdict> {
   const downloads = requireDownloads(ports);
   const request = {
@@ -127,7 +162,7 @@ async function runBootstrap(
     elevationPassword: requireElevationPassword(ctx),
   };
   return placeAnsiwise(
-    await placementMachine(ctx, server.name),
+    await placementMachine(ctx, server.name, sessionId),
     { read: (url) => downloads.get(url, { signal: ctx.signal }) },
     request,
   );
@@ -147,8 +182,8 @@ async function runBootstrap(
  *  the engine no longer carries stands in an argument list while every check in this repository
  *  stays green, because a scripted machine answers an unknown command with exit 0 and no census
  *  reads an argument list at all. */
-async function placementMachine(ctx: StepCtx, name: string): Promise<PlacementMachine> {
-  const session = await ctx.ssh();
+async function placementMachine(ctx: StepCtx, name: string, sessionId?: string): Promise<PlacementMachine> {
+  const session = await ctx.ssh(sessionId);
   return {
     name,
     putFile: (remotePath, content, mode) => session.putFile(remotePath, content, mode, { signal: ctx.signal }),

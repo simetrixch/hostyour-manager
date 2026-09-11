@@ -308,7 +308,11 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // `--version` any more (deploy-slave.placement.fixture.ts deletes the file the send names, so
       // this is read off what the machine holds rather than off a command it was given).
       expect(h.hosts.catalogueBranch).toBeUndefined();
-      expect(h.hosts.files.filter((f) => f.path.includes("ansiwise"))).toEqual([]);
+      expect(h.hosts.files.filter((f) => f.host === "10.1.1.11" && f.path.includes("ansiwise"))).toEqual([]);
+      // THE MASTER KEEPS WHAT THE RUN BROUGHT IT. The engine placed on the master before the mint
+      // (#133) is the master's own machine layer at the pin, not a per-slave state, and an abort
+      // that took it off would leave a live master unable to run any program at all.
+      expect(h.hosts.files.filter((f) => f.host === "m1.example.com" && f.path.includes("ansiwise"))).not.toEqual([]);
       // THE ROW FOLLOWS THE MACHINE. A manager still holding a key for a box that no longer takes
       // one would offer run kinds that die at their first session, so the key is purged and the
       // server goes back to `bare` — what a machine nothing has reached is.

@@ -11,6 +11,7 @@ import { registerSecret } from "../../../security/redact.ts";
 import { recordTailnetReading } from "../tailnet-probe.ts";
 import { clusterShortName } from "../../inventory/cluster-marking.ts";
 import { dropCoordinatorNodes } from "./tailnet.coordinator.ts";
+import { placeAnsiwiseOnMasterStep, placeAnsiwiseStep } from "./place-ansiwise.step.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { activeClusterTarget, loadMaster, loadServer, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import {
@@ -444,11 +445,26 @@ export function tailnetSteps(kind: TailnetKind, serverId: string, ports: Tailnet
   // the only way to refresh a reading without performing a repair. Every other kind ENDS with this
   // same step, which is why the reading it writes is the same fact whichever kind took it.
   if (kind === "cluster-tailnet-read") return [attestTargetStep(serverId), readMembershipStep(serverId)];
+  // THE ENGINE IS BROUGHT TO THE PIN BEFORE ANY PROGRAM IS JUDGED BY IT — on the host, and on the
+  // master where the rejoin mints there — because the catalogue those programs are read out of is
+  // always master and the engine on an installed machine moves only when a run moves it (#133). Both
+  // placements are idempotent by measurement, so a current machine costs two readings each.
   if (kind === "cluster-tailnet-rejoin") {
-    return [attestTargetStep(serverId), rejoinStep(target, serverId, ports), readMembershipStep(serverId)];
+    return [
+      attestTargetStep(serverId),
+      placeAnsiwiseStep(target, ports),
+      placeAnsiwiseOnMasterStep(ports, { host: serverId }),
+      rejoinStep(target, serverId, ports),
+      readMembershipStep(serverId),
+    ];
   }
   // One catalogue program each, declaring no answers, so the generic program step fits whole.
-  return [attestTargetStep(serverId), ansiwiseProgramStep(target, PROGRAM[kind], ports), readMembershipStep(serverId)];
+  return [
+    attestTargetStep(serverId),
+    placeAnsiwiseStep(target, ports),
+    ansiwiseProgramStep(target, PROGRAM[kind], ports),
+    readMembershipStep(serverId),
+  ];
 }
 
 const SUMMARY: Record<TailnetMode, (o: { name: string; steps: number; host: string; master: string; masterIsTarget: boolean }) => string> = {

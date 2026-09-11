@@ -114,7 +114,13 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
       const db = setup();
       const middle = MIDDLE_STEP[kind];
       const plan = await def.plan({ serverId: SLAVE_ID }, { db: db.db });
-      expect(plan.steps.map((s) => s.name)).toEqual([ATTEST_TARGET_STEP, ...(middle === null ? [] : [middle]), "read-membership"]);
+      // Every kind that drives a program brings the host's engine to the pin first (#133); the
+      // reading alone runs no program and places nothing.
+      expect(plan.steps.map((s) => s.name)).toEqual([
+        ATTEST_TARGET_STEP,
+        ...(middle === null ? [] : ["place-ansiwise", ...(kind === "cluster-tailnet-rejoin" ? ["place-ansiwise-master"] : []), middle]),
+        "read-membership",
+      ]);
       // mutating ⇒ the executor refuses to let an operator skip that first step.
       expect((def as AnyRunDefinition).mutating).toBe(true);
     });
@@ -160,7 +166,7 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
       id: "cls_m", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com", status: "active",
     }).run();
     const plan = await DEFS["cluster-tailnet-rejoin"].plan({ serverId: MASTER_ID }, { db: db.db });
-    expect(plan.steps.map((s) => s.name)).toEqual([ATTEST_TARGET_STEP, "rejoin", "read-membership"]);
+    expect(plan.steps.map((s) => s.name)).toEqual([ATTEST_TARGET_STEP, "place-ansiwise", "place-ansiwise-master", "rejoin", "read-membership"]);
     // ONE entry for the one server. The aux master entry every slave rejoin declares would here be
     // a SECOND entry for the same server, and the executor keys ONE transport per server
     // (executor/context.ts `declared`) — the second entry would override the public transport this

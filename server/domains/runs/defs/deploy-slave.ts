@@ -26,7 +26,7 @@ import {
 } from "./manager-key.kit.ts";
 import { disablePasswordLoginStep, purgeBootstrapPasswordStep, restorePasswordLoginCleanup } from "./password-login.kit.ts";
 import { leaveHostCleanup, removeManagerKeyCleanup } from "./leave-host.kit.ts";
-import { placeAnsiwiseStep } from "./place-ansiwise.step.ts";
+import { placeAnsiwiseOnMasterStep, placeAnsiwiseStep } from "./place-ansiwise.step.ts";
 import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
 import { SLAVE_API_PORT, HOST_ADDRESS_COMMAND, hostAddressesFrom } from "./deploy-slave.remote.ts";
 import { rejoinStep, joinIfAbsentStep, readMembershipStep } from "./tailnet.kit.ts";
@@ -618,6 +618,12 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // state, so early registration is safe. A redeploy takes the measured form of the same act and
     // arms nothing: it joins a machine that holds no address and says what it read of one that
     // does (tailnet.kit.ts joinIfAbsentStep).
+    // THE MASTER'S ENGINE FIRST, because the join below mints on the master through the master's
+    // own `ansiwise-rest`, and the master's engine moves only when a run moves it (#133): every
+    // slave deployed after a release of the engine would otherwise ask the master's OLD binary to
+    // run a catalogue row the new one was released for. Idempotent by measurement; on a current
+    // master it is two readings.
+    placeAnsiwiseOnMasterStep(ports),
     ...(redeploying
       ? [joinIfAbsentStep(target, sid, ports)]
       : [armed(removeSlaveCleanup(ports), rejoinStep(target, sid, ports))]),

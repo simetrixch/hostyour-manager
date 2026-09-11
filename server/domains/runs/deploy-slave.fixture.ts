@@ -99,7 +99,7 @@ export const STEP_NAMES = [
   "slave-preflight", "disable-password-login", "purge-bootstrap-password",
   "mark-slave",
   "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services",
-  "rejoin", "read-membership", "declare-tailnet-address", "create-mgmt",
+  "place-ansiwise-master", "rejoin", "read-membership", "declare-tailnet-address", "create-mgmt",
   "gitops-handoff", "verify-slave", "register",
 ];
 /** The redeploy slave arm: the SAME list, with the outright join in the MEASURED form that reads the

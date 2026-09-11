@@ -459,7 +459,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       const h = await tailnetHost(serve, { cluster: false });
 
       const r = await h.executor.plan(kind, { serverId: SLAVE_ID });
-      expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", `run-${program}`, "read-membership"]);
+      expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", "place-ansiwise", `run-${program}`, "read-membership"]);
       expect(r.plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
       await h.executor.approve(r.runId, elevationOnly());
       await h.executor.settle(r.runId);
@@ -484,7 +484,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const h = await tailnetHost(serve);
 
     const r = await h.executor.plan("cluster-tailnet-rejoin", { serverId: SLAVE_ID });
-    expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", "rejoin", "read-membership"]);
+    expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", "place-ansiwise", "place-ansiwise-master", "rejoin", "read-membership"]);
     await h.executor.approve(r.runId, elevationOnly());
     await h.executor.settle(r.runId);
     expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
@@ -513,7 +513,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     const h = await liveMaster(serve);
 
     const r = await h.executor.plan("cluster-tailnet-rejoin", { serverId: MASTER_ID });
-    expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", "rejoin", "read-membership"]);
+    expect(r.plan.steps.map((s) => s.name)).toEqual(["attest-target", "place-ansiwise", "place-ansiwise-master", "rejoin", "read-membership"]);
     await h.executor.approve(r.runId, elevationOnly());
     await h.executor.settle(r.runId);
     expect(getRun(h.db.db, r.runId)?.status).toBe("succeeded");
