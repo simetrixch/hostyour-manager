@@ -127,12 +127,12 @@ describe("resolveClusterMarking", () => {
   const installerTail = `  unitApex: example.com\n  platformDomain: example.com\n`;
 
   it("resolves a map exactly as today's writers leave it, carrying platform-domain", async () => {
-    const installerSlave = `${slaveMap}${installerTail}  endpoints:\n    mail:\n      unit: post\n  apiHost: 100.64.0.11\n  apiPort: 16443\n`;
+    const installerSlave = `${slaveMap}${installerTail}  endpoints:\n    mail:\n      host: post\n  apiHost: 100.64.0.11\n  apiPort: 16443\n`;
     const repo = repoWith({ [MASTER]: `${masterMap}${installerTail}`, [SLAVE]: installerSlave });
     expect(await resolveClusterMarking(repo, "m1")).toMatchObject({ fqdn: MASTER, platformDomain: "example.com" });
     expect(await resolveClusterMarking(repo, "s1")).toMatchObject({
       fqdn: SLAVE, unitApex: "example.com", platformDomain: "example.com",
-      mailUnit: "post", apiHost: "100.64.0.11", apiPort: 16443,
+      mailHost: "post", apiHost: "100.64.0.11", apiPort: 16443,
     });
   });
 
@@ -254,7 +254,7 @@ const FULL_MAP = [
   "  endpoints:",
   "    registry:",
   "      host: zot.m1.example.com",
-  "    mail: {unit: 'post'}",
+  "    mail: {host: 'post'}",
   "    vault: {url: 'https://vault.m1.example.com'}",
   "    idp: {url: 'https://idp.m1.example.com'}",
   "    tailnet: {url: 'https://tale.m1.example.com'}",
@@ -281,7 +281,7 @@ describe("map rewrite — a writer keeps every value the map carried", () => {
     for (const kept of [
       "clusterName: m1", "vaultKubernetesAuthPath: kubernetes-m1",
       "registryPullUser: acme-pull", "registryPushUser: acme-push",
-      "host: zot.m1.example.com", "unit: post",
+      "host: zot.m1.example.com", "host: post",
       "clusterIssuer: letsencrypt-production",
       "letsencryptEmail: ops@example.com",
       "letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",

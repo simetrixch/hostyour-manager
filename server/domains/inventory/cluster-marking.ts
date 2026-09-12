@@ -42,9 +42,9 @@
 //   unit-apex    the public apex units (consumers and tenants) serve under, <name>.<unit-apex>.
 //   platform-domain  the installation's business domain — the mail sender identity and the relay's
 //                sender allowlist. The branch programs write it (defaulting to the unit apex).
-//   endpoints.mail.unit  the UNIT that is the installation's shared mail service — a consumer's
-//                name, reached at `<unit>-<stage>.<unit-apex>` by a unit at the same stage; absent on
-//                an installation that runs none.
+//   endpoints.mail.host  the host LABEL the installation's shared mail service stands on — reached
+//                at `<label>.<stage apex>` by a unit in the same stage zone; absent on an installation
+//                that runs none.
 //   catalog-repo the <owner>/<name> of the repository holding this installation's tenant charts
 //                and their per-stage pins. The branch programs demand it (nothing composes a
 //                repository this cloud does not own).
@@ -187,9 +187,9 @@ export interface ClusterMarking {
    *  several, and the render of the whole observability application stopped at
    *  `range can't iterate over ...`. */
   alertRecipients?: string[];
-  /** The unit that is the installation's mail service, off `endpoints.mail.unit`. Handed on to a
-   *  slave's regeneration as `mail_unit`, and never read here for anything else. */
-  mailUnit?: string;
+  /** The host label the installation's mail service stands on, off `endpoints.mail.host`. Handed on
+   *  to a slave's regeneration as `mail_host`, and never read here for anything else. */
+  mailHost?: string;
   /** Carried, never read here. */
   catalogRepo?: string;
   /** Which authority issues this installation's certificates, the authority it registers with, and
@@ -252,7 +252,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
   const catalogRepo = g.catalogUrl?.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
   // Derived, like catalogRepo: the unit stands in the endpoints block, which travels whole in
   // globalRest, so reading it by name here does not make this module a second writer of it.
-  const mailUnit = (g.endpoints as { mail?: { unit?: string } } | undefined)?.mail?.unit;
+  const mailHost = (g.endpoints as { mail?: { host?: string } } | undefined)?.mail?.host;
   const rest = Object.fromEntries(Object.entries(g).filter(([k]) => !NAMED_GLOBALS.has(k)));
   return {
     ...(header !== undefined ? { header } : {}),
@@ -277,7 +277,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
       ? { alertRecipients: (Array.isArray(g.alertRecipients) ? g.alertRecipients : g.alertRecipients.split(","))
           .map((m) => m.trim()).filter((m) => m.length > 0) }
       : {}),
-    ...(mailUnit !== undefined ? { mailUnit } : {}),
+    ...(mailHost !== undefined ? { mailHost } : {}),
     ...(catalogRepo ? { catalogRepo } : {}),
     ...(g.clusterIssuer !== undefined ? { clusterIssuer: g.clusterIssuer } : {}),
     ...(g.letsencryptEmail !== undefined ? { letsencryptEmail: g.letsencryptEmail } : {}),
@@ -544,7 +544,7 @@ export async function writeClusterMarking(
     ...marking,
     ...(current?.header !== undefined ? { header: current.header } : {}),
     ...(current?.release !== undefined ? { release: current.release } : {}),
-    ...(current?.mailUnit !== undefined && marking.mailUnit === undefined ? { mailUnit: current.mailUnit } : {}),
+    ...(current?.mailHost !== undefined && marking.mailHost === undefined ? { mailHost: current.mailHost } : {}),
     ...(current?.registryPullUser !== undefined && marking.registryPullUser === undefined
       ? { registryPullUser: current.registryPullUser }
       : {}),

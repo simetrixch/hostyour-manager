@@ -238,7 +238,7 @@ export function branchAnswers(target: SlaveTarget, serverId: string, ports: Depl
       ...(marking.registryPushUser !== undefined ? { registry_push_user: marking.registryPushUser } : {}),
       // The unit that is the installation's mail service, the master's answer handed on: a
       // tenant's members require it, and the slave's map is what its fan-out reads.
-      ...(marking.mailUnit !== undefined ? { mail_unit: marking.mailUnit } : {}),
+      ...(marking.mailHost !== undefined ? { mail_host: marking.mailHost } : {}),
       role: MASTER_AND_SLAVE_ROLE,
     };
   };
