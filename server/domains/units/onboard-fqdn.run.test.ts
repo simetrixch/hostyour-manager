@@ -104,7 +104,7 @@ function params(over: Partial<DeployableOnboardParams> = {}): OnboardParams {
     consumerName: "acme", repoURL: "https://github.com/x/acme.git", owner: "team-acme",
     repoCredentialId: "cred_pat", version: "1.0.0", channel: "stable", resolvedSha: SHA,
     builds: ["acme-api"], form: "deployable", stage: "prod", domain: "s1.example",
-    clusterId: "cls_1", cluster: "s1", namespace: "acme", unitApex: "example.com",
+    clusterId: "cls_1", cluster: "s1", namespace: "acme", unitApex: "example.com", host: "acme",
     chartPath: "deploy/chart", argoAppName: "acme-prod", report: passReport(), fqdn: FQDN,
     ...over,
   });
@@ -143,7 +143,7 @@ describe("onboard with a manifest-declared fqdn", () => {
     expect(res.params.fqdn).toBe(FQDN);
     // approving IS the grant, so the plan says what is being attested and beside which address
     expect(res.plan.summary).toContain(FQDN);
-    expect(res.plan.summary).toContain("acme-prod.example.com");
+    expect(res.plan.summary).toContain("acme.example.com");
   });
 
   it("planStream REJECTS a fqdn another unit has attested — G19 through the real registration tree", async () => {
@@ -152,7 +152,7 @@ describe("onboard with a manifest-declared fqdn", () => {
     await prt.registrations.commitRegistration({
       unit: { name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false },
       builds: [],
-      deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"), fqdn: FQDN },
+      deploy: { stage: "prod", host: "other", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"), fqdn: FQDN },
       runId: "run_0",
     });
     const res = await makeOnboardDef(prt).planStream!(planReq, streamCtx());

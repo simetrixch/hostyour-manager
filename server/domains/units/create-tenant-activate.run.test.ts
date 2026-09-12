@@ -105,7 +105,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     dns,
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [],
-    consumerNames: async () => [],
+    consumerHostLabels: async () => [],
     ...portOver,
   };
 }
@@ -145,7 +145,7 @@ function seedSlave(): void {
 
 describe("create-tenant first-admin invite (activate step)", () => {
   const TOKEN_PATH = `${memberNamespace(GUID, "auth", "prod")}/hostyour-app-secrets/AUTH_BOOTSTRAP_TOKEN`;
-  const AUTH_URL = "https://auth-prod.acme.example.example.com/api/v1/bootstrap/invite-admin";
+  const AUTH_URL = "https://auth.acme.example.example.com/api/v1/bootstrap/invite-admin";
 
   const activateStep = (prt: TenantOnboardPorts, p: CreateTenantParams) =>
     makeCreateTenantDef(prt).steps(p).find((s) => s.name === "activate")!;
@@ -168,7 +168,7 @@ describe("create-tenant first-admin invite (activate step)", () => {
     const activator = new FakeActivator();
     const p = params({ adminEmail: "admin@acme.test" });
     await activateStep(ports({ activator, cluster: withToken(), resolveUnitApex: async () => "zone.example" }), p).run(ctx(p));
-    expect(activator.calls[0]?.url).toBe("https://auth-prod.acme.example.zone.example/api/v1/bootstrap/invite-admin");
+    expect(activator.calls[0]?.url).toBe("https://auth.acme.example.zone.example/api/v1/bootstrap/invite-admin");
     expect(activator.calls[0]?.url).not.toContain("s1.example"); // the cluster is reached there; the tenant does not serve there
   });
 

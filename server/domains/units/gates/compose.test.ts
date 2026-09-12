@@ -46,7 +46,7 @@ describe("G17 repo access (hard)", () => {
 describe("G23 unit name (hard)", () => {
   it("passes a name outside every reserved space", () => {
     for (const name of ["acme", "example-auth", "swissbookai"]) {
-      const g = gateUnitName({ stage: "prod", unitName: name, tenantSubdomains: [] });
+      const g = gateUnitName({ stage: "prod", unitName: name, hostLabel: name, tenantSubdomains: [], foreignHostLabels: [] });
       expect(g.status).toBe("pass");
       expect(g.severity).toBe("hard");
       expect(g.reason).toBeNull();
@@ -55,7 +55,7 @@ describe("G23 unit name (hard)", () => {
 
   it("refuses every platform namespace — the unit's name IS its namespace, so the chart would sync into the platform's", () => {
     for (const name of PLATFORM_NAMESPACES) {
-      const g = gateUnitName({ stage: "prod", unitName: name, tenantSubdomains: [] });
+      const g = gateUnitName({ stage: "prod", unitName: name, hostLabel: name, tenantSubdomains: [], foreignHostLabels: [] });
       expect(g.status, `"${name}" must be refused`).toBe("fail");
       expect(g.found).toContain("platform namespace");
     }
@@ -65,20 +65,20 @@ describe("G23 unit name (hard)", () => {
     // The AppProject destination is the unit's name, so a consumer named example-auth-build is
     // pinned into example-auth's build namespace — where the shared registrations push credential and
     // example-auth's repo PAT are materialized.
-    const g = gateUnitName({ stage: "prod", unitName: "example-auth-build", tenantSubdomains: [] });
+    const g = gateUnitName({ stage: "prod", unitName: "example-auth-build", hostLabel: "example-auth-build", tenantSubdomains: [], foreignHostLabels: [] });
     expect(g.status).toBe("fail");
     expect(g.found).toContain('"example-auth"');
     expect(g.reason).not.toBeNull();
     // The space is reserved wholesale: it is refused even when no unit of that name is onboarded
     // yet, because onboarding that unit later would derive exactly this namespace.
-    expect(gateUnitName({ stage: "prod", unitName: "nobody-yet-build", tenantSubdomains: [] }).status).toBe("fail");
+    expect(gateUnitName({ stage: "prod", unitName: "nobody-yet-build", hostLabel: "nobody-yet-build", tenantSubdomains: [], foreignHostLabels: [] }).status).toBe("fail");
   });
 
   it("refuses a name in the derived <unit>-<stage> space — the namespace, Application and host of a unit named by the prefix", () => {
     // A consumer named acme-prod would be pinned into the namespace acme's prod stage renders into,
     // and its own prod namespace would read acme-prod-prod.
     for (const name of ["acme-prod", "acme-test", "nobody-yet-dev"]) {
-      const g = gateUnitName({ stage: "prod", unitName: name, tenantSubdomains: [] });
+      const g = gateUnitName({ stage: "prod", unitName: name, hostLabel: name, tenantSubdomains: [], foreignHostLabels: [] });
       expect(g.status, `"${name}" must be refused`).toBe("fail");
       expect(g.found).toContain("<unit>-<stage>");
     }
@@ -89,35 +89,52 @@ describe("G23 unit name (hard)", () => {
     // staged namespace equals one of them would sync into the platform's.
     const staged = PLATFORM_NAMESPACES.find((ns) => ns.endsWith("-prod"));
     if (staged === undefined) return;
-    const g = gateUnitName({ stage: "prod", unitName: staged.slice(0, -"-prod".length), tenantSubdomains: [] });
+    const g = gateUnitName({ stage: "prod", unitName: staged.slice(0, -"-prod".length), hostLabel: staged.slice(0, -"-prod".length), tenantSubdomains: [], foreignHostLabels: [] });
     expect(g.status).toBe("fail");
   });
 
   it("refuses Kubernetes' kube- prefix", () => {
     for (const name of ["kube-public", "kube-node-lease"]) {
-      expect(gateUnitName({ stage: "prod", unitName: name, tenantSubdomains: [] }).status).toBe("fail");
+      expect(gateUnitName({ stage: "prod", unitName: name, hostLabel: name, tenantSubdomains: [], foreignHostLabels: [] }).status).toBe("fail");
     }
   });
 
   it("refuses every shared ArgoCD project name — the per-unit AppProject is named by the unit", () => {
     for (const name of RESERVED_PROJECT_NAMES) {
-      expect(gateUnitName({ stage: "prod", unitName: name, tenantSubdomains: [] }).status, `"${name}" must be refused`).toBe("fail");
+      expect(gateUnitName({ stage: "prod", unitName: name, hostLabel: name, tenantSubdomains: [], foreignHostLabels: [] }).status, `"${name}" must be refused`).toBe("fail");
     }
   });
 
-  it("refuses a name a tenant already stands on — its IdP scopes every session cookie to that exact host", () => {
-    // A tenant with subdomain "simetrix" serves auth./web./jobs. under it and sets its session
-    // cookies with Domain=simetrix.<unitApex>. A consumer of that name serves simetrix.<unitApex>
-    // itself, so every browser holding a tenant session would send it there — a full takeover with
-    // nothing of the tenant touched. The mirror lives in the create-tenant subdomain belt.
-    const g = gateUnitName({ stage: "prod", unitName: "simetrix", tenantSubdomains: ["simetrix", "other"] });
+  it("refuses a LABEL a tenant already stands on — its IdP scopes every session cookie to that exact host", () => {
+    // A tenant with subdomain "simetrix" serves auth./web./jobs. under simetrix.<stage apex> and
+    // sets its session cookies with Domain=simetrix.<stage apex>. A consumer on that label serves
+    // simetrix.<stage apex> itself, so every browser holding a tenant session would send it there —
+    // a full takeover with nothing of the tenant touched. The mirror lives in the create-tenant
+    // subdomain belt. It is the LABEL that is held, so a unit named after the tenant but standing
+    // on another label passes, and a unit whose label is the tenant's subdomain fails whatever its name.
+    const g = gateUnitName({ stage: "prod", unitName: "simetrix", hostLabel: "simetrix", tenantSubdomains: ["simetrix", "other"], foreignHostLabels: [] });
     expect(g.status).toBe("fail");
     expect(g.found).toContain("session cookie");
-    expect(gateUnitName({ stage: "prod", unitName: "acme", tenantSubdomains: ["simetrix"] }).status).toBe("pass");
+    expect(gateUnitName({ stage: "prod", unitName: "acme", hostLabel: "acme", tenantSubdomains: ["simetrix"], foreignHostLabels: [] }).status).toBe("pass");
+    expect(gateUnitName({ stage: "prod", unitName: "digita-simetrix", hostLabel: "simetrix", tenantSubdomains: ["simetrix"], foreignHostLabels: [] }).status).toBe("fail");
+    expect(gateUnitName({ stage: "prod", unitName: "simetrix", hostLabel: "portal", tenantSubdomains: ["simetrix"], foreignHostLabels: [] }).status).toBe("pass");
+  });
+
+  it("refuses a label another unit stands on at this stage — one zone is one name space", () => {
+    // digita-auth stands on `auth` at prod. A second unit declaring host: auth at prod would be the
+    // same host; the DNS step would refuse it three steps after approval, so the gate refuses first.
+    const taken = [{ unit: "digita-auth", host: "auth" }];
+    const g = gateUnitName({ stage: "prod", unitName: "acme-auth", hostLabel: "auth", tenantSubdomains: [], foreignHostLabels: taken });
+    expect(g.status).toBe("fail");
+    expect(g.found).toContain('"auth" is the host of unit "digita-auth"');
+    // The name may collide with nothing while the label is free, and the label check is per stage —
+    // the caller hands in the labels of THIS stage, so a label taken at another stage is not here.
+    expect(gateUnitName({ stage: "prod", unitName: "acme-auth", hostLabel: "acme-auth", tenantSubdomains: [], foreignHostLabels: taken }).status).toBe("pass");
+    expect(gateUnitName({ stage: "dev", unitName: "acme-auth", hostLabel: "auth", tenantSubdomains: [], foreignHostLabels: [] }).status).toBe("pass");
   });
 
   it("fails the whole set of gates — it is a HARD gate", () => {
-    const g23 = gateUnitName({ stage: "prod", unitName: "mongodb", tenantSubdomains: [] });
+    const g23 = gateUnitName({ stage: "prod", unitName: "mongodb", hostLabel: "mongodb", tenantSubdomains: [], foreignHostLabels: [] });
     expect(composeReport(runnerReport(), [gateRepoAccess({ ok: true, detail: "ok" }), g23]).verdict).toBe("fail");
   });
 });
@@ -204,29 +221,29 @@ describe("G19 fqdn grant (hard)", () => {
   const foreign = [{ unit: "unit-a", stage: "prod" as const, fqdn: "shop.example.org" }];
 
   it("passes — and says so — when no fqdn is declared", () => {
-    const g = gateFqdnGrant({ stage: "prod", unitName: "acme", fqdn: null, unitApex: null, clusterDomain: null, foreignFqdns: [] });
+    const g = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: null, unitApex: null, clusterDomain: null, foreignFqdns: [] });
     expect(g.status).toBe("pass");
     expect(g.severity).toBe("hard");
     expect(g.found).toContain("no fqdn declared");
     expect(g.reason).toBeNull();
   });
 
-  it("names the unit's platform host WITH its stage — <name>-<stage>.<unitApex>, prod included", () => {
-    for (const stage of ["dev", "test", "prod"] as const) {
-      const g = gateFqdnGrant({ stage, unitName: "acme", fqdn: null, unitApex: "units.example.com", clusterDomain: null, foreignFqdns: [] });
-      expect(g.found).toContain(`acme-${stage}.units.example.com`);
-      expect(g.expected).toContain(`acme-${stage}.units.example.com`);
+  it("names the unit's platform host under its STAGE ZONE — <label>.<stage apex>, and prod is the apex itself", () => {
+    for (const [stage, host] of [["dev", "auth.dev.units.example.com"], ["test", "auth.test.units.example.com"], ["prod", "auth.units.example.com"]] as const) {
+      const g = gateFqdnGrant({ stage, unitName: "acme", hostLabel: "auth", fqdn: null, unitApex: "units.example.com", clusterDomain: null, foreignFqdns: [] });
+      expect(g.found).toContain(host);
+      expect(g.expected).toContain(host);
     }
   });
 
   it("passes a declared fqdn nobody serves: outside the apex, attested by no other unit", () => {
-    const g = gateFqdnGrant({ stage: "prod", unitName: "acme", fqdn: "app.acme.example.org", unitApex: "units.example.com", clusterDomain: "m1.example.com", foreignFqdns: foreign });
+    const g = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: "app.acme.example.org", unitApex: "units.example.com", clusterDomain: "m1.example.com", foreignFqdns: foreign });
     expect(g.status).toBe("pass");
     expect(g.found).toContain("app.acme.example.org");
   });
 
   it("fails naming the unit AND the stage file that already attest the fqdn", () => {
-    const g = gateFqdnGrant({ stage: "prod", unitName: "acme", fqdn: "shop.example.org", unitApex: "units.example.com", clusterDomain: null, foreignFqdns: foreign });
+    const g = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: "shop.example.org", unitApex: "units.example.com", clusterDomain: null, foreignFqdns: foreign });
     expect(g.status).toBe("fail");
     expect(g.found).toContain("unit-a");
     expect(g.found).toContain("registrations/unit-a/prod.yaml");
@@ -235,29 +252,30 @@ describe("G19 fqdn grant (hard)", () => {
 
   it("fails anything under (or equal to) the cluster's unitApex — those names are the platform's own composition", () => {
     for (const fqdn of ["other.units.example.com", "units.example.com"]) {
-      const g = gateFqdnGrant({ stage: "prod", unitName: "acme", fqdn, unitApex: "units.example.com", clusterDomain: null, foreignFqdns: [] });
+      const g = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn, unitApex: "units.example.com", clusterDomain: null, foreignFqdns: [] });
       expect(g.status).toBe("fail");
       expect(g.found).toContain("units.example.com");
     }
     // A SUFFIX that is not a label boundary is a different domain, not a sub-name of the apex.
-    expect(gateFqdnGrant({ stage: "prod", unitName: "acme", fqdn: "not-units.example.com", unitApex: "units.example.com", clusterDomain: null, foreignFqdns: [] }).status).toBe("pass");
+    expect(gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: "not-units.example.com", unitApex: "units.example.com", clusterDomain: null, foreignFqdns: [] }).status).toBe("pass");
   });
 
   it("fails anything under (or equal to) the cluster's own FQDN — the platform's infrastructure hostnames live there and have no registration", () => {
     // The case the unitApex clause cannot see: an apex that is NOT a parent of the cluster FQDN.
     for (const fqdn of ["vault.m1.internal.example", "m1.internal.example"]) {
-      const g = gateFqdnGrant({ stage: "prod", unitName: "acme", fqdn, unitApex: "customers.example", clusterDomain: "m1.internal.example", foreignFqdns: [] });
+      const g = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn, unitApex: "customers.example", clusterDomain: "m1.internal.example", foreignFqdns: [] });
       expect(g.status).toBe("fail");
       expect(g.found).toContain("m1.internal.example");
     }
     // The label boundary again: a name merely ENDING in the FQDN's text is a different domain.
-    expect(gateFqdnGrant({ stage: "prod", unitName: "acme", fqdn: "not-m1.internal.example", unitApex: "customers.example", clusterDomain: "m1.internal.example", foreignFqdns: [] }).status).toBe("pass");
+    expect(gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: "not-m1.internal.example", unitApex: "customers.example", clusterDomain: "m1.internal.example", foreignFqdns: [] }).status).toBe("pass");
   });
 
   it("fails THIS unit's fqdn when its own OTHER stage already attests it — one FQDN cannot serve two stages", () => {
     const g = gateFqdnGrant({
       stage: "prod",
       unitName: "acme",
+      hostLabel: "acme",
       fqdn: "shop.example.org",
       unitApex: "units.example.com",
       clusterDomain: null,
@@ -269,7 +287,7 @@ describe("G19 fqdn grant (hard)", () => {
   });
 
   it("fails the whole set of gates — it is a HARD gate", () => {
-    const g19 = gateFqdnGrant({ stage: "prod", unitName: "acme", fqdn: "shop.example.org", unitApex: null, clusterDomain: null, foreignFqdns: foreign });
+    const g19 = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: "shop.example.org", unitApex: null, clusterDomain: null, foreignFqdns: foreign });
     expect(composeReport(runnerReport(), [gateRepoAccess({ ok: true, detail: "ok" }), g19]).verdict).toBe("fail");
   });
 });

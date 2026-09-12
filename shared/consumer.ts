@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { UnitQuotaSchema, UnitSizeSchema, MongodbModeSchema, type UnitQuota, type UnitSize, type MongodbMode } from "./unit-size.ts";
 import { STAGE, type Stage } from "./enums.ts";
+import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "./unit-host.ts";
 
 /** WHERE a consumer repository keeps its manifest. One spelling, because two readers ask for it:
  *  the sandbox's structure gate, and the manager on the one path that does not dispatch a sandbox
@@ -16,6 +17,14 @@ export const CONSUMER_MANIFEST_PATH = "deploy/platform.yaml";
  *  manifest name == chart name == repo name == unit, and the namespace is `<unit>-<stage>`
  *  (consumerNamespace below). */
 const consumerName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/);
+
+/** The unit's public host LABEL — one DNS label the unit stands on under its stage's zone,
+ *  `<label>.<stage apex>` (shared/unit-host.ts). Not the name: `digita-auth` is the identity, `auth` is
+ *  what a person types. A stage word is refused because the stage words ARE the zones. */
+export const hostLabel = z
+  .string()
+  .regex(HOST_LABEL_RE, "one DNS label: lower-case letters, digits and hyphens, at most 63 characters")
+  .refine((l) => !RESERVED_HOST_LABELS.includes(l), { message: "a stage word cannot be a host label — the stage words are the zones" });
 
 /** The backing services a consumer may request in its manifest (contract v1.3). THIS list is the
  *  vocabulary's one owner: the published schema restates it for the reader, and hostyour-cloud's
@@ -208,6 +217,10 @@ export const ConsumerManifestSchema = z.object({
   apiVersion: z.literal("hostyour.cloud/v1"),
   kind: z.literal("ConsumerManifest"),
   name: consumerName,
+  // The public host label, `<host>.<stage apex>`; absent, the unit stands on its name. Declared
+  // and then ATTESTED into the stage registration by the onboarding, which holds it against every
+  // other label and every tenant subdomain under the same zone (gate G23).
+  host: hostLabel.optional(),
   owner: z.string().min(1),
   envs: z.array(z.enum(STAGE)).min(1),
   // v1.3: chart is OPTIONAL — present = self-contained (the repo carries its own deploy); absent =
@@ -242,7 +255,7 @@ export const ConsumerManifestSchema = z.object({
   // sets. That is why no size field stands beside it: a unit has ONE size, and a second size field is
   // a second answer to a question already answered.
   mongodb: MongodbModeSchema.default("shared"),
-  // The OPTIONAL extra public FQDN the consumer serves under IN ADDITION to `<name>-<stage>.<unitApex>`
+  // The OPTIONAL extra public FQDN the consumer serves under IN ADDITION to `<label>.<stage apex>`
   // — never instead: one Ingress, two spec.rules entries, told apart by the Host header. Declaring is
   // not granting: the onboard run kind ATTESTS the value into the stage registration (the builds[]
   // declare-and-attest shape), and the admission policy admits only the ATTESTED value, so a
@@ -323,6 +336,13 @@ export type ConsumerManifest = z.infer<typeof ConsumerManifestSchema>;
  *  string, so a second spelling anywhere would deploy into a namespace nothing fences. */
 export function consumerNamespace(consumerName: string, stage: Stage): string {
   return `${consumerName}-${stage}`;
+}
+
+/** The label a manifest puts its unit on — `host` where it declares one, the name otherwise. Read
+ *  ONCE at the onboarding and attested into the stage registration; everything after reads the
+ *  registration or the inventory row, never the manifest again. */
+export function consumerHostLabel(manifest: { name: string; host?: string | undefined }): string {
+  return manifest.host ?? manifest.name;
 }
 
 /** The NAME of the Application the consumers ApplicationSet generates from a registration — the
@@ -420,10 +440,16 @@ export const ConsumerRegistrationSchema = z
     // Part of the deploy group: a stage registration always carries it, and the ApplicationSet reads
     // it bare, so an absent one is a render failure rather than a namespace with no ceiling.
     quota: UnitQuotaSchema.optional(),
+    // The ATTESTED public host label — what the manifest declared as `host`, or the unit's name where
+    // it declared none — copied here by the onboarding after gate G23 held it against the zone. The
+    // consumers ApplicationSet composes `unitHost` from it and the fence pins that host; nothing
+    // reads the manifest for it again. Part of the deploy group: a stage registration always carries
+    // it, because the Application it generates always serves a host.
+    host: hostLabel.optional(),
     // The ATTESTED extra public FQDN — the onboard run kind copies the manifest's `fqdn` here AFTER
     // refusing a name the platform already serves. The admission policy and the consumer chart read
     // THIS value, never the manifest, which is what makes declaring different from being granted.
-    // OPTIONAL even in the stage form (most units serve only `<name>-<stage>.<unitApex>`), so it stands
+    // OPTIONAL even in the stage form (most units serve only `<label>.<stage apex>`), so it stands
     // OUTSIDE the deploy group's stands-or-falls rule; never in build.yaml (checked below).
     fqdn: publicFqdn.optional(),
     // ---- build.yaml only ----
@@ -444,7 +470,7 @@ export const ConsumerRegistrationSchema = z
     // Field-level exclusivity. `cluster` is the discriminator: with it, this is a stage file and the
     // WHOLE deploy group must stand (services included, possibly empty — a chart source gates on it
     // bare); without it, this is build.yaml and no deploy-group field may appear.
-    const deployGroup = ["chartPath", "cluster", "databases", "services", "size", "mongodb", "quota"] as const;
+    const deployGroup = ["chartPath", "cluster", "databases", "services", "size", "mongodb", "quota", "host"] as const;
     if (e.cluster === undefined) {
       for (const k of deployGroup) {
         if (e[k] !== undefined) {
@@ -473,8 +499,9 @@ export type ConsumerRegistration = z.infer<typeof ConsumerRegistrationSchema>;
 /** A registration read out of a STAGE file, with the deploy group narrowed to present. The schema
  *  refuses a stage form without it, but the two forms share one object type, so a reader that has
  *  ESTABLISHED it holds a stage registration says so with this type instead of falling back per field. */
-export type ConsumerStageRegistration = Omit<ConsumerRegistration, "chartPath" | "cluster" | "databases" | "services" | "size" | "mongodb" | "quota"> & {
+export type ConsumerStageRegistration = Omit<ConsumerRegistration, "chartPath" | "cluster" | "databases" | "services" | "size" | "mongodb" | "quota" | "host"> & {
   chartPath: string;
+  host: string;
   cluster: string;
   databases: string[];
   services: ConsumerService[];

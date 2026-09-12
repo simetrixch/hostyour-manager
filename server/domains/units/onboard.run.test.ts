@@ -35,7 +35,7 @@ const BASE = {
 function params(over: Partial<DeployableOnboardParams> = {}): OnboardParams {
   return OnboardParams.parse({
     ...BASE, form: "deployable", stage: "prod", domain: "s1.example",
-    clusterId: "cls_1", cluster: "s1", namespace: "acme-prod", unitApex: "example.com",
+    clusterId: "cls_1", cluster: "s1", namespace: "acme-prod", unitApex: "example.com", host: "acme",
     chartPath: "deploy/chart", argoAppName: "acme-prod", report: passReport(),
     ...over,
   });
@@ -166,7 +166,7 @@ describe("onboard run definition", () => {
 
     // provision-dns created the unit's ONE record, pointing at the target cluster's own address
     const dns = prt.dns as FakeDnsProvider;
-    expect(dns.record("acme-prod.example.com", "A")).toBe("203.0.113.10");
+    expect(dns.record("acme.example.com", "A")).toBe("203.0.113.10");
 
     // provision-repo-credential put the ArgoCD repository Secret beside the Applications
     const cred = (prt.repoCredential as FakeRepoCredentialWriter).get("argocd", "repo-acme-prod");

@@ -8,7 +8,7 @@ import { clusters } from "../../db/schema/inventory.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE } from "../../../shared/release.ts";
 import { GateReportSchema, UngatedOnboardSchema } from "../../../shared/gates.ts";
-import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, consumerArgoAppName, consumerNamespace } from "../../../shared/consumer.ts";
+import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, consumerArgoAppName, consumerNamespace, consumerHostLabel, hostLabel } from "../../../shared/consumer.ts";
 import type { Activator } from "../../adapters/activation/port.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { BuildPlane } from "../../adapters/build-plane/port.ts";
@@ -130,9 +130,13 @@ export const DeployableOnboardParams = OnboardParamsBase.extend({
   cluster: z.string().min(1),
   namespace: z.string().min(1), // == consumerNamespace(consumerName, stage): <name>-<stage>
   // The cluster's public apex, read out of its own values chain at plan time (global.unitApex). The
-  // unit's ONE host is <consumerName>-<stage>.<unitApex> — the admission policy pins it and
+  // unit's ONE host is <host>.<stage apex> (shared/unit-host.ts) — the fence pins it and
   // provision-dns creates exactly that record.
   unitApex: z.string().min(1),
+  // The public host LABEL, frozen from the validated manifest at plan (`host`, or the name where it
+  // declares none) and attested into the stage registration by write-registration. G23 held it
+  // against every label and tenant subdomain of the zone before this plan was offered.
+  host: hostLabel,
   chartPath: z.string().regex(/^[^/].*$/),
   argoAppName: z.string().min(1),
   // The LITERAL Mongo database name(s) frozen from the validated manifest (report.manifest.databases)
@@ -161,7 +165,7 @@ export const DeployableOnboardParams = OnboardParamsBase.extend({
   size: UnitSizeSchema.default(DEFAULT_UNIT_SIZE),
   // The manifest's declared extra public FQDN, frozen at plan AFTER G19 proved the platform serves
   // no such name yet. write-registration copies it into the stage registration — the ATTEST — and
-  // apply-admission-policy admits it beside `<name>.<unitApex>`. Absent ⇒ the unit serves only its
+  // apply-admission-policy admits it beside `<label>.<stage apex>`. Absent ⇒ the unit serves only its
   // platform address.
   fqdn: z.string().optional(),
   // The manifest-declared secrets (seed-secrets): full specs, not bare keys — the step must know
@@ -653,6 +657,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         argoAppName: r.argoAppName,
         databases: outcome.report.manifest?.databases ?? [], // literal DB name(s) from the manifest, copied verbatim
         keyPatterns: outcome.report.manifest?.keyPatterns ?? [], // literal redis key patterns, copied verbatim
+        host: consumerHostLabel({ name: req.consumerName, host: outcome.report.manifest?.host }),
         services: outcome.report.manifest?.services ?? [], // claimed services from the manifest, copied verbatim
         // How this consumer runs MongoDB, copied verbatim. Written unconditionally, because the
         // registration is the outward projection and a consumer that changes its mind later must
@@ -676,7 +681,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
           // The grant is the operator's act, so the plan being approved names it — and names what the
           // grant IS: the admission policy admits the name; serving it stays the unit's own chart's
           // work (a second Ingress rule plus a tls entry of its own).
-          (outcome.report.manifest?.fqdn ? ` The manifest declares the extra FQDN ${outcome.report.manifest.fqdn} — approving attests it, so the unit MAY serve it beside ${consumerUnitHost(req.consumerName, req.stage, unitApex)}; its chart must carry the extra Ingress rule and its own tls entry, or the name stays unserved.` : ""),
+          (outcome.report.manifest?.fqdn ? ` The manifest declares the extra FQDN ${outcome.report.manifest.fqdn} — approving attests it, so the unit MAY serve it beside ${consumerUnitHost(params.host, req.stage, unitApex)}; its chart must carry the extra Ingress rule and its own tls entry, or the name stays unserved.` : ""),
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [], // no host owned — the Manager acts master-locally
         locks: [

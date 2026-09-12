@@ -72,7 +72,7 @@ async function deployedRegistrations(over: { repoCredentialId?: string; suspende
       ...(over.repoCredentialId ? { repoCredentialId: over.repoCredentialId } : {}),
     },
     builds: [],
-    deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
     runId: "run_onb",
   });
   return reg;
@@ -126,7 +126,7 @@ describe("adopt-consumer run definition", () => {
 
   it("plan refuses when an UNSETTLED row already tracks the consumer — nothing invisible to adopt", async () => {
     seedCluster();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "manager", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", provenance: "manager", status: "active" }).run();
     const def = makeAdoptConsumerDef(ports(await deployedRegistrations()));
     await expect(def.plan(PARAMS, { db: db.db })).rejects.toThrow(/already tracked/);
   });
@@ -135,7 +135,7 @@ describe("adopt-consumer run definition", () => {
     // approve re-validates nothing, so the run re-asks the plan-time refusal itself: a finishing
     // onboard (or a second adopt) that recorded the row in between must not be overwritten.
     seedCluster();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "manager", status: "suspended" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", provenance: "manager", status: "suspended" }).run();
     const step = makeAdoptConsumerDef(ports(await deployedRegistrations())).steps(PARAMS).find((s) => s.name === "read-pointer")!;
     await expect(step.run(ctx("read-pointer", []))).rejects.toThrow(/already tracked/);
   });
@@ -152,7 +152,7 @@ describe("adopt-consumer run definition", () => {
     // Registrations live on `master` (REGISTRATION_BRANCH), never on the domain's own install branch.
     repo.seed(repo.booksBranch, "registrations/acme/prod.yaml", serializePointer(ConsumerRegistrationSchema, {
       name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false,
-      chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
+      chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
     }));
     const step = makeAdoptConsumerDef(ports(new Registrations(repo))).steps(PARAMS).find((s) => s.name === "read-pointer")!;
     await expect(step.run(ctx("read-pointer", []))).rejects.toThrow(/disagrees with its directory name/);
@@ -242,7 +242,7 @@ describe("adopt-consumer run definition", () => {
     // A settled row records a removal that already ran; a registration standing again means the
     // consumer is back. The (clusterId, name, stage) upsert finds the old row instead of duplicating.
     seedCluster();
-    db.db.insert(apps).values({ id: "app_old", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "manager", status: "offboarded" }).run();
+    db.db.insert(apps).values({ id: "app_old", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", provenance: "manager", status: "offboarded" }).run();
     await runAll(ports(await deployedRegistrations()), []);
     const all = db.db.select().from(apps).all();
     expect(all).toHaveLength(1);

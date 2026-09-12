@@ -66,6 +66,11 @@ class FakeAttestedBuilds implements AttestedBuildReader, AttestedFqdnReader {
     this.askedFqdns.push(`${except.unit}@${except.stage}`);
     return this.fqdns.filter((a) => !(a.unit === except.unit && a.stage === except.stage));
   }
+  /** The labels other units stand on — every attested unit on its own name here, which is what a
+   *  registration without `host` means. */
+  async listAttestedHostLabels(_stage: "dev" | "test" | "prod", except: { unit: string }): Promise<{ unit: string; host: string }[]> {
+    return [...new Set(this.attested.map((a) => a.unit))].filter((u) => u !== except.unit).map((u) => ({ unit: u, host: u }));
+  }
 }
 
 function deps(repo: RepoReader, runner: GateRunner, over: Partial<ValidateDeps> = {}): ValidateDeps {

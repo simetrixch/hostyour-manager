@@ -62,7 +62,7 @@ async function seedTwoStages(reg: Registrations): Promise<void> {
     await reg.commitRegistration({
       unit,
       builds: ["acme"],
-      deploy: { ...deploy, chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+      deploy: { ...deploy, host: "acme", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
       runId: `run_onb_${deploy.stage}`,
     });
   }
@@ -72,14 +72,14 @@ async function seedTwoStages(reg: Registrations): Promise<void> {
 function seedProdApp(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_prod" }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_prod" }).run();
 }
 
 /** dev: its OWN server, cluster and row (app_2) on s2. The row the "last stage" offboard is driven from. */
 function seedDevApp(): void {
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "dev", domain: "s2.example", status: "active" }).run();
-  db.db.insert(apps).values({ id: "app_2", clusterId: "cls_2", name: "acme", stage: "dev", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_dev" }).run();
+  db.db.insert(apps).values({ id: "app_2", clusterId: "cls_2", name: "acme", stage: "dev", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_dev" }).run();
 }
 
 /** The one grant the Manager still writes, as the two onboards left it: one mail-ops pair PER STAGE,
@@ -134,8 +134,8 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
     const seeder = new FakeSeeder();
     const dns = new FakeDnsProvider();
-    dns.seed("acme-prod.s1.example", "A", "203.0.113.10"); // prod's own host
-    dns.seed("acme-dev.s2.example", "A", "203.0.113.20"); // dev's — under the OTHER cluster's apex
+    dns.seed("acme.s1.example", "A", "203.0.113.10"); // prod's own host
+    dns.seed("acme.dev.s2.example", "A", "203.0.113.20"); // dev's — under the OTHER cluster's apex
     const revoked: string[] = [];
     const creds = {
       open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")),
@@ -151,7 +151,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
 
     // PER STAGE — prod's own objects are gone.
     expect(await reg.readRegistration("prod", "acme")).toBeNull();
-    expect(dns.record("acme-prod.s1.example", "A")).toBeUndefined();
+    expect(dns.record("acme.s1.example", "A")).toBeUndefined();
     expect(seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]);
     expect(db.db.select().from(apps).where(eq(apps.id, "app_1")).get()?.status).toBe("offboarded");
     // The sealed clone credential is the ROW's own — every stage's onboard seals its own — so revoking
@@ -170,7 +170,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     expect(github.deletedCalls).toEqual([]);
     expect(consumerRepo.commits).toEqual([]);
     expect(seeder.deleted).toEqual([]);
-    expect(dns.record("acme-dev.s2.example", "A")).toBeDefined();
+    expect(dns.record("acme.dev.s2.example", "A")).toBeDefined();
     // One skip line per per-unit cleanup: the webhook, the release kit, the PAT.
     expect(logs.filter((l) => l.includes("stays registered at dev"))).toHaveLength(3);
   });

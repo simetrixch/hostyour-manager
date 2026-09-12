@@ -156,7 +156,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
       { unit: "example-platform", build: "example-engine" },
       { unit: "swissbookai", build: "swissbookai-api" },
     ],
-    consumerNames: async () => ["example-platform", "swissbookai"],
+    consumerHostLabels: async () => ["example-platform", "swissbookai"],
     ...portOver,
   };
 }

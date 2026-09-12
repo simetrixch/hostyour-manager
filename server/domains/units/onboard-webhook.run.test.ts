@@ -37,7 +37,7 @@ function params(over: Partial<OnboardParams> = {}): OnboardParams {
     // owner is the HUMAN/team owner "team-acme" — the step must use the GitHub org "x" from repoURL instead.
     form: "deployable", consumerName: "acme", repoURL: "https://github.com/x/acme.git", owner: "team-acme",
     version: "1.0.0", channel: "stable", builds: ["acme-api"], repoCredentialId: "cred_pat", resolvedSha: SHA, chartPath: "deploy/chart",
-    domain: "s1.example", stage: "prod", clusterId: "cls_1", cluster: "s1", namespace: "acme", unitApex: "example.com",
+    domain: "s1.example", stage: "prod", clusterId: "cls_1", cluster: "s1", namespace: "acme", unitApex: "example.com", host: "acme",
     report: { contractVersion: "1.5", runnerVersion: "t", repoURL: "https://github.com/x/acme.git", requestedRef: SHA, resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest: null, dependencies: [], gates: [], verdict: "pass", reportHash: "h", sandbox: { mustFailTargets: [], mustFailTargetsDeclaredListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true } },
     argoAppName: "acme-prod", ...over,
   });
@@ -177,7 +177,7 @@ describe("onboard setup-webhook step", () => {
     await registrations.commitRegistration({
       unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
       builds: ["acme"],
-      deploy: { stage: "dev", cluster: "s2", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+      deploy: { stage: "dev", host: "acme", cluster: "s2", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
       runId: "run_onb_dev",
     });
     const github = new FakeGitHubConsumer();

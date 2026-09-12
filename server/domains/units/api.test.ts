@@ -251,7 +251,7 @@ describe("consumer API", () => {
 
   it("lists onboarded consumers with their cluster", async () => {
     seedCluster();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
     const { app, cookie } = await make(true);
     const rows = (await (await app.request("/api/consumers", authed(cookie))).json()) as Array<{ name: string; domain: string; provenance: string }>;
     expect(rows).toHaveLength(1);
@@ -268,7 +268,7 @@ describe("consumer API", () => {
 
   it("offboard: 201 + runId for an existing consumer", async () => {
     seedCluster();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "manager", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", provenance: "manager", status: "active" }).run();
     const { app, cookie } = await make(true);
     const res = await app.request("/api/consumers/app_1/offboard", { method: "POST", ...authed(cookie), body: "{}" });
     expect(res.status).toBe(201);
@@ -336,7 +336,7 @@ function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
-    consumerNames: async () => [],
+    consumerHostLabels: async () => [],
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
   };

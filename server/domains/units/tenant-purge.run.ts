@@ -353,7 +353,7 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
         }
         const c = loadPurgeCluster(ctx.db, p);
         const unitApex = await ports.resolveUnitApex(c.domain, c.stage);
-        await removeUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantWildcardHost(p.target.subdomain, unitApex) });
+        await removeUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantWildcardHost(p.target.subdomain, c.stage, unitApex) });
       },
     },
   ];

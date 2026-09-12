@@ -120,7 +120,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
-    consumerNames: async () => [],
+    consumerHostLabels: async () => [],
     ...over,
   };
 }

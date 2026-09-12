@@ -201,7 +201,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     const appId = c.req.param("appId");
     const found = db
       .select({
-        id: apps.id, name: apps.name, clusterId: apps.clusterId, domain: clusters.domain,
+        id: apps.id, name: apps.name, host: apps.host, clusterId: apps.clusterId, domain: clusters.domain,
         stage: apps.stage, repoUrl: apps.repoUrl, status: apps.status,
       })
       .from(apps)
@@ -216,7 +216,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     if (!resolver) return c.json({ row, unitHost: null, cluster: null, argo: null, drift: null, argocdUrl: null, reason: "onboarding-not-configured" } satisfies ConsumerLiveView);
     const [probe, unitHost] = await Promise.all([
       probeConsumerLive(db, resolver, { clusterId: row.clusterId, name: row.name, stage: row.stage, repoUrl }),
-      readUnitHost(registrations, row.name, row.domain, row.stage),
+      readUnitHost(registrations, row.host, row.domain, row.stage),
     ]);
     return c.json({ row, unitHost, ...probe } satisfies ConsumerLiveView);
   });

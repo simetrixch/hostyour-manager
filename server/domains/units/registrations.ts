@@ -163,7 +163,7 @@ export interface RegistrationCommit {
   /** The deploy group of ONE stage, plus the OPTIONAL attested fqdn — the manifest's declared extra
    *  FQDN, copied here by the onboard run kind after G19 refused every name the platform already serves.
    *  Absent ⇒ a build-only unit: build.yaml is written, no stage file. */
-  deploy?: { stage: Stage; chartPath: string; cluster: string; databases: string[]; keyPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string };
+  deploy?: { stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string };
 }
 
 export class Registrations {
@@ -203,7 +203,7 @@ export class Registrations {
 
   /** Every unit that holds a registration — one directory under `registrations/`, whatever stages or
    *  build.yaml it carries. The create-tenant subdomain belt holds a requested subdomain against
-   *  this set: a consumer serves `<name>-<stage>.<unitApex>`, a label under the very parent a tenant
+   *  this set: a consumer serves `<label>.<stage apex>`, a label under the very parent a tenant
    *  of that subdomain scopes its session cookies to (unit-dns.ts). The DIRECTORY is the answer here,
    *  not the files inside it — a unit half-way through an onboard or a teardown still owns the name. */
   async listUnitNames(): Promise<string[]> {
@@ -271,6 +271,29 @@ export class Registrations {
     });
   }
 
+  /** The host LABEL every OTHER unit stands on at [stage], off the stage registrations — G23's input
+   *  for the one-zone-one-name-space clause. A registration without `host` (none is written without
+   *  one any more) stands on its name. */
+  async listAttestedHostLabels(stage: Stage, except: { unit: string }): Promise<{ unit: string; host: string }[]> {
+    return this.repo.withBranch(this.branch, async (books) => {
+      const attested: { unit: string; host: string }[] = [];
+      for (const unit of await books.listDir("registrations")) {
+        if (unit === except.unit) continue;
+        const path = stagePath(stage, unit);
+        const raw = await books.readFile(path);
+        if (raw === null) continue; // the unit does not deploy at this stage
+        let entry: ConsumerRegistration;
+        try {
+          entry = ConsumerRegistrationSchema.parse(parseRegistration(raw));
+        } catch (e) {
+          throw errValidation(`${path} is not a readable stage registration, so the host-label check cannot be trusted: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        attested.push({ unit, host: entry.host ?? unit });
+      }
+      return attested;
+    });
+  }
+
   /** Every consumer REGISTERED at this stage on this cluster, read from the GitOps registrations alone,
    *  AND every one the scan had to skip — the consumer twin of the tenant registrations's listTenantPointers,
    *  for the same reason: a consumer whose onboard died before record-inventory
@@ -308,13 +331,13 @@ export class Registrations {
         // A file at <stage>.yaml MUST carry the deploy group. The schema alone cannot say so — both
         // forms share one object type and a deploy-group-less body parses as the BUILD form — so the
         // path's own claim is checked here, which is also what narrows the entry for every reader.
-        const { chartPath, cluster: on, databases, services, size, mongodb, quota } = r.data;
-        if (chartPath === undefined || on === undefined || databases === undefined || services === undefined || size === undefined || mongodb === undefined || quota === undefined) {
-          skipped.push({ name, stage, reason: `${path} carries no deploy group (chartPath/cluster/databases/services/size/mongodb/quota) — a stage registration must` });
+        const { chartPath, cluster: on, databases, services, size, mongodb, quota, host } = r.data;
+        if (chartPath === undefined || on === undefined || databases === undefined || services === undefined || size === undefined || mongodb === undefined || quota === undefined || host === undefined) {
+          skipped.push({ name, stage, reason: `${path} carries no deploy group (chartPath/cluster/databases/services/size/mongodb/quota/host) — a stage registration must` });
           continue;
         }
         if (on !== cluster) continue; // registered at this stage, but on another cluster
-        registrations.push({ name, entry: { ...r.data, chartPath, cluster: on, databases, services, size, mongodb, quota } });
+        registrations.push({ name, entry: { ...r.data, chartPath, cluster: on, databases, services, size, mongodb, quota, host } });
       } catch (e) {
         // parseRegistration throws AppError on invalid YAML and on a document that is not a mapping.
         skipped.push({ name, stage, reason: `${path} is not readable registration YAML: ${e instanceof Error ? e.message : String(e)}` });
@@ -350,6 +373,7 @@ export class Registrations {
           ...unit,
           chartPath: deploy.chartPath,
           cluster: deploy.cluster,
+          host: deploy.host,
           databases: deploy.databases,
           keyPatterns: deploy.keyPatterns,
           services: deploy.services,

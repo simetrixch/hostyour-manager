@@ -132,6 +132,9 @@ export function stageRegistration(input: {
     quiesced: input.quiesced ?? false,
     chartPath: input.chartPath,
     cluster: input.cluster,
+    // The host label, part of the deploy group since hostyour-cloud#208: a unit stands on its name
+    // where the fixture states nothing else, as a manifest declaring no `host` does.
+    host: input.name,
     databases: [],
     services: [],
     // Part of the deploy group since the size choice was wired: a stage registration without it

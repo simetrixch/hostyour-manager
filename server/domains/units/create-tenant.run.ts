@@ -87,10 +87,11 @@ export interface TenantOnboardPorts {
    *  A build name is the flat image repository, so this is what turns the images a tenant pulls into
    *  the build namespaces whose release pipelines may sync it (tenantSyncUnits). */
   attestedBuilds: () => Promise<{ unit: string; build: string }[]>;
-  /** Every unit that holds a registration (Registrations.listUnitNames). The subdomain belt refuses a
-   *  subdomain that is one of them: the consumer of that name serves `<name>.<unitApex>`, which is
-   *  the host this tenant's IdP would scope its session cookies to (unit-dns.ts). */
-  consumerNames: () => Promise<string[]>;
+  /** The host label of every consumer standing at any stage (Registrations.listAttestedHostLabels over
+   *  the stages). The subdomain belt refuses a subdomain that is one of them: the consumer on that
+   *  label serves `<label>.<stage apex>`, which is the host this tenant's IdP would scope its session
+   *  cookies to (unit-dns.ts). */
+  consumerHostLabels: () => Promise<string[]>;
   /** Makes the tenant first-admin invite call (create-tenant-activate.ts) over the tenant's public
    *  example-auth ingress. Optional: only the `activate` step needs it, and only when the operator
    *  supplied an admin email — a tenant onboarded without one never touches this port. Supplied WITH an
@@ -308,7 +309,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
     },
     // The execute-time subdomain belt (tenant-replace.ts): a concurrent create-tenant that took the
     // subdomain after this plan froze its replace set stops the run here, before any write.
-    ensureSubdomainFreeStep(ports.registrations, ports.consumerNames, p),
+    ensureSubdomainFreeStep(ports.registrations, ports.consumerHostLabels, p),
     {
       name: "record-provisional",
       title: "Record the tenant as provisioning (before anything is deployed)",
@@ -453,13 +454,13 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
       name: "provision-dns",
       title: "Provision the tenant's public DNS record",
       run: async (ctx) => {
-        // ONE wildcard record per unit: every member sits exactly one level below
-        // <subdomain>.<unitApex> (`<member>-<stage>.`; nothing lives on the bare <subdomain>), so
-        // `*.<subdomain>.<unitApex>` covers them all — members and stages added later included — and
+        // ONE wildcard record per tenant STAGE: every member sits exactly one level below the tenant's
+        // zone `<subdomain>.<stage apex>` (`<member>.`; nothing lives on the bare zone), so
+        // `*.<subdomain>.<stage apex>` covers a stage's members — members added later included — and
         // a move changes one record. The idempotent-by-subdomain replace needs no removal of its own:
         // the replacing tenant carries the SAME subdomain, so this upsert re-points the standing record.
         const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
-        await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantWildcardHost(p.subdomain, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
+        await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantWildcardHost(p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
       },
     },
     {

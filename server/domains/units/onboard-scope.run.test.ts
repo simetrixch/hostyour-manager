@@ -32,12 +32,12 @@ beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
 /** acme onboarding to prod on s1.example, whose apex is example.com — so its host is
- *  acme-prod.example.com, the same host any other cluster under that apex would compose for prod. */
+ *  acme.example.com, the same host any other cluster under that apex would compose for prod. */
 function params(over: Partial<OnboardParams> = {}): OnboardParams {
   return OnboardParams.parse({
     form: "deployable", consumerName: "acme", repoURL: REPO, owner: "team-acme",
     version: "1.0.0", channel: "stable", builds: ["acme-api"], repoCredentialId: "cred_pat", resolvedSha: SHA, chartPath: "deploy/chart",
-    domain: "s1.example", stage: "prod", clusterId: "cls_1", cluster: "s1", namespace: "acme-prod", unitApex: "example.com",
+    domain: "s1.example", stage: "prod", clusterId: "cls_1", cluster: "s1", namespace: "acme-prod", unitApex: "example.com", host: "acme",
     report: { contractVersion: "1.5", runnerVersion: "t", repoURL: REPO, requestedRef: SHA, resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest: null, dependencies: [], gates: [], verdict: "pass", reportHash: "h", sandbox: { mustFailTargets: [], mustFailTargetsDeclaredListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true } },
     argoAppName: "acme-prod", ...over,
   });
@@ -53,7 +53,7 @@ async function seedDevStage(reg: Registrations): Promise<void> {
   await reg.commitRegistration({
     unit: { name: "acme", repoURL: REPO, suspended: false, quiesced: false },
     builds: ["acme-api"],
-    deploy: { stage: "dev", cluster: "s2", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    deploy: { stage: "dev", host: "acme", cluster: "s2", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
     runId: "run_onb_dev",
   });
 }
@@ -81,19 +81,19 @@ describe("onboard scope — a second stage beside a live one", () => {
   it("provision-dns REFUSES a host another cluster already answers, and leaves that address alone", async () => {
     const dns = new FakeDnsProvider();
     dns.seed("s1.example", "A", "203.0.113.10"); // this cluster's own address
-    dns.seed("acme-prod.example.com", "A", "203.0.113.20"); // the same stage on another cluster, under the shared apex
+    dns.seed("acme.example.com", "A", "203.0.113.20"); // the same stage on another cluster, under the shared apex
     const step = provisionDnsStep({ dns } as unknown as OnboardPorts, params() as DeployableOnboardParams);
     await expect(step.run(ctx("provision-dns", []))).rejects.toThrow(/already answers with 203\.0\.113\.20/);
-    expect(dns.record("acme-prod.example.com", "A")).toBe("203.0.113.20"); // untouched
+    expect(dns.record("acme.example.com", "A")).toBe("203.0.113.20"); // untouched
   });
 
   it("provision-dns is idempotent over its OWN record — the same address is a re-run, not a takeover", async () => {
     const dns = new FakeDnsProvider();
     dns.seed("s1.example", "A", "203.0.113.10");
-    dns.seed("acme-prod.example.com", "A", "203.0.113.10"); // what a previous pass of this same step wrote
+    dns.seed("acme.example.com", "A", "203.0.113.10"); // what a previous pass of this same step wrote
     const step = provisionDnsStep({ dns } as unknown as OnboardPorts, params() as DeployableOnboardParams);
     await expect(step.run(ctx("provision-dns", []))).resolves.toBeUndefined();
-    expect(dns.record("acme-prod.example.com", "A")).toBe("203.0.113.10");
+    expect(dns.record("acme.example.com", "A")).toBe("203.0.113.10");
   });
 
   it("the abort cleanup takes THIS stage's mail-ops grant and leaves the other stage's standing", async () => {

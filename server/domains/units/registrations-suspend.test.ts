@@ -20,8 +20,8 @@ function unit(over: Partial<ConsumerRegistration> = {}) {
   return { name: "acme", repoURL: REPO, ...over } as ConsumerRegistration;
 }
 
-function deploy(over: Partial<{ stage: Stage; chartPath: string; cluster: string; databases: string[]; keyPatterns: string[]; services: ConsumerRegistration["services"]; size: "small" | "medium" | "large"; mongodb: "shared" | "standalone" | "replicaset"; quota: UnitQuota; fqdn: string }> = {}) {
-  return { stage: "prod" as Stage, chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"), fqdn: "acme.example.com", ...over };
+function deploy(over: Partial<{ stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; services: ConsumerRegistration["services"]; size: "small" | "medium" | "large"; mongodb: "shared" | "standalone" | "replicaset"; quota: UnitQuota; fqdn: string }> = {}) {
+  return { stage: "prod" as Stage, chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [], keyPatterns: [], services: [], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"), fqdn: "acme.example.com", ...over };
 }
 
 
@@ -48,7 +48,7 @@ describe("Registrations suspend / quiesce", () => {
     const repo = new FakePlatformRepo();
     const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: ["acme"], deploy: deploy(), runId: "run_1" });
-    await reg.commitRegistration({ unit: unit(), builds: ["acme"], deploy: { ...deploy(), stage: "dev", cluster: "s1dev" }, runId: "run_2" });
+    await reg.commitRegistration({ unit: unit(), builds: ["acme"], deploy: { ...deploy(), stage: "dev", host: "acme", cluster: "s1dev" }, runId: "run_2" });
 
     // dev paused, prod still serving: the unit must keep building, or prod would never get another
     // release because someone paused dev.

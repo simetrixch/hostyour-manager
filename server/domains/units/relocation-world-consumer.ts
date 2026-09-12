@@ -47,10 +47,10 @@ async function readStageRegistration(ports: ConsumerRelocationPorts, stage: Stag
   const read = await ports.registrations.readRegistration(stage, name);
   if (!read) throw errValidation(`consumer "${name}" is not registered at ${stage} — nothing to relocate`);
   const e = read.entry;
-  if (e.chartPath === undefined || e.cluster === undefined || e.databases === undefined || e.services === undefined || e.size === undefined || e.mongodb === undefined || e.quota === undefined) {
+  if (e.chartPath === undefined || e.cluster === undefined || e.databases === undefined || e.services === undefined || e.size === undefined || e.mongodb === undefined || e.quota === undefined || e.host === undefined) {
     throw errValidation(`registrations/${name}/${stage}.yaml carries no deploy group — a stage registration must`);
   }
-  return { ...e, chartPath: e.chartPath, cluster: e.cluster, databases: e.databases, services: e.services, size: e.size, mongodb: e.mongodb, quota: e.quota };
+  return { ...e, chartPath: e.chartPath, cluster: e.cluster, databases: e.databases, services: e.services, size: e.size, mongodb: e.mongodb, quota: e.quota, host: e.host };
 }
 
 /** The consumer world factory — resolved fresh at every step from the apps row + the registration. */
@@ -79,7 +79,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       sourceClusterId: ac.clusterId,
       sourceDomain: ac.domain,
       sourceCluster: clusterShortName(ac.domain),
-      publicHost: consumerUnitHost(ac.name, ac.stage, await unitApex()),
+      publicHost: consumerUnitHost(ac.host, ac.stage, await unitApex()),
       namespaces: [namespace],
       homeNamespace: namespace,
       setQuiesced: (q, runId) => ports.registrations.setQuiesced(ac.stage, ac.name, q, runId),
@@ -177,7 +177,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
           builds: [],
           // The unit's OWN stage: the dump is re-committed at the path it was dumped from, on the
           // target cluster, whatever stage that cluster's map carries.
-          deploy: { stage: ac.stage, chartPath: entry.chartPath!, cluster: target.cluster, databases: entry.databases ?? [],
+          deploy: { stage: ac.stage, chartPath: entry.chartPath!, cluster: target.cluster, host: entry.host ?? ac.name, databases: entry.databases ?? [],
                     // The redis grant travels with the unit, for the reason the size below does: a
                     // move must land it with what it ran with. Dropped here, the unit would arrive
                     // granted NOTHING and its ACL user would be refused its own keys.
@@ -205,7 +205,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         c.log("meta", `source Application ${appName} is gone — the source released the unit`);
       },
       // The chain is (the TARGET cluster's domain, the UNIT's stage).
-      dnsRecordName: async (_c, target) => consumerUnitHost(ac.name, ac.stage, unitApexFromChain(await ports.registrations.readClusterValueFiles(target.domain, ac.stage))),
+      dnsRecordName: async (_c, target) => consumerUnitHost(ac.host, ac.stage, unitApexFromChain(await ports.registrations.readClusterValueFiles(target.domain, ac.stage))),
       clearSourceCluster: async (c) => {
         const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
         await clusterReader.deleteAdmissionPolicy(consumerAdmissionPolicyName(ac.name, ac.stage));

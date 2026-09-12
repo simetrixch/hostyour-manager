@@ -54,7 +54,7 @@ export function seedClusters(db: DbHandle): void {
 }
 
 export function seedConsumerRow(db: DbHandle, status: AppStatus = "active"): void {
-  db.db.insert(apps).values({ id: "app_1", clusterId: SOURCE.clusterId, name: CONSUMER, stage: "prod", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: SOURCE.clusterId, name: CONSUMER, stage: "prod", host: CONSUMER, repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status }).run();
 }
 
 export function seedTenantRows(db: DbHandle, status: TenantStatus = "active"): void {
@@ -177,7 +177,7 @@ export async function seedConsumerRegistration(
     unit: { name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: over.quiesced ?? false },
     builds: [],
     deploy: {
-      stage: "prod",
+      stage: "prod", host: "acme",
       chartPath: "deploy/chart",
       cluster: SOURCE.cluster,
       keyPatterns: over.keyPatterns ?? [],

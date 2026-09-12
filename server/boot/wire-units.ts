@@ -14,7 +14,7 @@ import type { DnsProvider } from "../adapters/dns/port.ts";
 import type { ClusterValueFile } from "../../shared/cluster-values.ts";
 import { readClusterValueChain } from "../domains/inventory/cluster-value-chain.ts";
 import { unitApexFromChain } from "../domains/units/admission-policy.ts";
-import type { Stage } from "../../shared/enums.ts";
+import { STAGE, type Stage } from "../../shared/enums.ts";
 import { buildPlaneFqdnFromMarkings } from "../domains/inventory/cluster-marking.ts";
 import { readChannelStages } from "../domains/inventory/channel-stages.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
@@ -655,9 +655,11 @@ function buildTenantOnboarding(
     buildRbac,
     attestedBuilds: () => registrations.listAttestedBuildNames(),
     // The mirror of G23's tenant-subdomain clause, read off the consumer registration tree: a
-    // subdomain that is an onboarded unit's name would put this tenant's session cookies on the host
-    // that consumer already serves (unit-dns.ts).
-    consumerNames: () => registrations.listUnitNames(),
+    // subdomain that is an onboarded unit's host label would put this tenant's session cookies on
+    // the host that consumer already serves (unit-dns.ts). Over every stage, as G23 reads the
+    // subdomains over every stage.
+    consumerHostLabels: async () =>
+      (await Promise.all(STAGE.map((stage) => registrations.listAttestedHostLabels(stage, { unit: "" })))).flat().map((l) => l.host),
     // The tenant first-admin invite (create-tenant-activate.ts) — the SAME activation client the consumer
     // family uses (one instance, from buildUnits). Used only when the operator supplies an admin email.
     activator,

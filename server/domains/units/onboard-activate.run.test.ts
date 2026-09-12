@@ -118,7 +118,7 @@ function params(over: Partial<DeployableOnboardParams> = {}): DeployableOnboardP
   return DeployableOnboardParams.parse({
     form: "deployable", consumerName: "acme", repoURL: "https://github.com/x/acme.git", owner: "team-acme",
     version: "1.0.0", channel: "stable", builds: ["acme-api"], repoCredentialId: "cred_pat", resolvedSha: SHA, chartPath: "deploy/chart",
-    domain: "s1.example", stage: "prod", clusterId: "cls_1", cluster: "s1", unitApex: "example.com",
+    domain: "s1.example", stage: "prod", clusterId: "cls_1", cluster: "s1", unitApex: "example.com", host: "acme",
     namespace: "acme",
     report: passReport(), argoAppName: "acme-prod", ...over,
   });
@@ -165,7 +165,7 @@ describe("onboard post-onboard activation step", () => {
     expect(activator.calls).toHaveLength(1);
     const call = activator.calls[0]!;
     // The unit's ONE host, <name>.<unitApex> — the same composition the admission policy pins.
-    expect(call.url).toBe("https://acme-prod.example.com/api/v1/bootstrap/invite-admin");
+    expect(call.url).toBe("https://acme.example.com/api/v1/bootstrap/invite-admin");
     expect(call.method).toBe("POST");
     expect(call.tokenHeader).toBe("X-Bootstrap-Token");
     expect(call.body).toEqual({ email: "admin@acme.test" });

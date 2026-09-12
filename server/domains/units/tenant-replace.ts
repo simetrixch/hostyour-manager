@@ -151,7 +151,7 @@ export async function resolveTeardownTarget(
  *  carry the subdomain. Construction dereferences no param (the armed check builds steps({})). */
 export function ensureSubdomainFreeStep(
   registrations: TenantRegistrations,
-  consumerNames: () => Promise<string[]>,
+  consumerHostLabels: () => Promise<string[]>,
   p: { guid: string; subdomain: string; stage: Stage; replaces?: { guid: string }[] },
 ): Step {
   return {
@@ -166,15 +166,16 @@ export function ensureSubdomainFreeStep(
           `subdomain "${p.subdomain}" is no longer free — tenant ${foreign.map((t) => t.guid).join(", ")} took it since this plan was approved (a concurrent create-tenant). Two tenants must not serve one public FQDN; discard this run and plan the create-tenant again.`,
         );
       }
-      // The MIRROR of gate G23's tenant-subdomain clause: a consumer name and a tenant subdomain are
-      // one label under one apex, and this tenant's IdP would scope every session cookie to a host
-      // that consumer already serves — see the name-space paragraph in unit-dns.ts. A consumer is
-      // never a replace target: the replace set tears down TENANTS, and a live consumer means the
-      // subdomain is simply not available.
-      const units = await consumerNames();
-      if (units.includes(p.subdomain)) {
+      // The MIRROR of gate G23's tenant-subdomain clause: a consumer's host LABEL and a tenant's
+      // subdomain are one label under one stage zone, and this tenant's IdP would scope every session
+      // cookie to the very host that consumer serves — see the name-space paragraph in unit-dns.ts.
+      // Held over every stage, as G23 holds the other direction. A consumer is never a replace
+      // target: the replace set tears down TENANTS, and a live consumer means the subdomain is
+      // simply not available.
+      const labels = await consumerHostLabels();
+      if (labels.includes(p.subdomain)) {
         throw errValidation(
-          `subdomain "${p.subdomain}" is the name of the onboarded consumer "${p.subdomain}", which serves the host <name>.<unitApex> — the exact host this tenant's example-auth would scope its session cookies to, so every one of its users' browsers would send the session to that consumer. Name the tenant differently, or offboard the consumer first.`,
+          `subdomain "${p.subdomain}" is the host label of an onboarded consumer, which serves <label>.<stage apex> — the exact host this tenant's identity provider would scope its session cookies to, so every one of its users' browsers would send the session to that consumer. Name the tenant differently, or offboard the consumer first.`,
         );
       }
       ctx.log("meta", `subdomain "${p.subdomain}" is held by no consumer and by no tenant this plan does not replace (${approved.size} approved replace target(s))`);

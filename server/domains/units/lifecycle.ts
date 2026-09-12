@@ -31,6 +31,8 @@ export interface LifecyclePorts {
 
 export interface AppCluster {
   name: string;
+  /** The public host label the row attests — what the unit's address is composed from, never the name. */
+  host: string;
   domain: string;
   stage: Stage;
   clusterId: string;
@@ -43,7 +45,7 @@ export function loadAppCluster(db: Db, appId: string): AppCluster {
   if (!app) throw errNotFound(`app ${appId}`);
   const cluster = db.select().from(clusters).where(eq(clusters.id, app.clusterId)).get();
   if (!cluster) throw errNotFound(`cluster ${app.clusterId} for app ${appId}`);
-  return { name: app.name, domain: cluster.domain, stage: app.stage, clusterId: cluster.id };
+  return { name: app.name, host: app.host, domain: cluster.domain, stage: app.stage, clusterId: cluster.id };
 }
 
 /** Fail-closed deploy-state gate, shared by every consumer AND tenant attest-target step: the target
@@ -86,7 +88,7 @@ export function attestTargetStep(ports: LifecyclePorts, appId: string): Step {
  *  generated Application `<name>-<stage>`, the isolation AppProject, the admission policy
  *  `consumer-<name>-<stage>`, the namespace `<name>-<stage>`, the ArgoCD repository credential
  *  `repo-<name>-<stage>`, the argo-sync grant `<name>-<stage>-argo-sync`, the mail-ops grant
- *  `<name>-<stage>-smtp-ops`, the public DNS record `<name>-<stage>.<unitApex>` and the
+ *  `<name>-<stage>-smtp-ops`, the public DNS record `<label>.<stage apex>` and the
  *  `<stage>/consumer/<name>/*` Vault entries. Two stages of one unit may share one cluster and always
  *  share the relay's namespace, which is why none of these may be named per unit. What is per UNIT,
  *  one copy shared by every stage: the `<name>-build` namespace with its EventListener and

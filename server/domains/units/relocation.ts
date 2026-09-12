@@ -40,7 +40,7 @@ export interface RelocationWorld {
   sourceDomain: string;
   /** The source cluster's SHORT name (what the registration's cluster field carries). */
   sourceCluster: string;
-  /** The unit's public host — a consumer's `<name>.<unitApex>`, a tenant's auth member (every
+  /** The unit's public host — a consumer's `<label>.<stage apex>`, a tenant's auth member (every
    *  tenant has one), which is what verify-quiesced probes from the outside. */
   publicHost: string;
   /** Every namespace of the unit on its cluster (a consumer: one; a tenant: one per member). */

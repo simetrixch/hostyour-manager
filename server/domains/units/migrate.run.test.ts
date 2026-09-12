@@ -64,7 +64,7 @@ describe("migrate (consumer)", () => {
     const ports = consumerPorts(f);
     await seedConsumerRegistration(ports.registrations);
     // The unit's record already stands (the onboard created it) — the move must UPDATE it, not mint a pair.
-    f.dns.seed(`${CONSUMER}-prod.${TARGET.domain}`, "A", SOURCE.ip);
+    f.dns.seed(`${CONSUMER}.${TARGET.domain}`, "A", SOURCE.ip);
     f.source.reader.setJobResult(`reloc-list-source-${CONSUMER}`, { succeeded: true, logs: "DB acme_db" });
 
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
@@ -78,8 +78,8 @@ describe("migrate (consumer)", () => {
     expect(reg?.entry.cluster).toBe(TARGET.cluster);
     expect(reg?.entry.quiesced).toBe(false);
     // ONE record, updated in place with the target cluster's own address.
-    const upsert = f.dns.upserts.find((u) => u.name === `${CONSUMER}-prod.${TARGET.domain}`);
-    expect(upsert).toEqual({ name: `${CONSUMER}-prod.${TARGET.domain}`, type: "A", content: TARGET.ip, created: false });
+    const upsert = f.dns.upserts.find((u) => u.name === `${CONSUMER}.${TARGET.domain}`);
+    expect(upsert).toEqual({ name: `${CONSUMER}.${TARGET.domain}`, type: "A", content: TARGET.ip, created: false });
     // Dump ran on the source, restore + completeness on the target, the clear on the source — and
     // the clear came AFTER the target held everything (the job orders on each side say so).
     expect(jobNames(f.source)).toContain(`reloc-dump-mongo-${CONSUMER}`);

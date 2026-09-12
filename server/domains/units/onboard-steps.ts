@@ -170,7 +170,7 @@ export function removeDnsCleanup(ports: OnboardPorts, p: DeployableOnboardParams
         ctx.log("meta", `no DNS provider wired — provision-dns could never have created a record on this manager, nothing to remove`);
         return;
       }
-      await removeUnitDns(ctx, { dns: ports.dns, unit: p.consumerName, recordName: consumerUnitHost(p.consumerName, p.stage, p.unitApex) });
+      await removeUnitDns(ctx, { dns: ports.dns, unit: p.consumerName, recordName: consumerUnitHost(p.host, p.stage, p.unitApex) });
     },
   };
 }
@@ -325,7 +325,7 @@ export function provisionSmtpOpsGrantStep(ports: OnboardPorts, p: DeployableOnbo
   };
 }
 
-/** provision-dns: create the unit's ONE public record — A `<name>-<stage>.<unitApex>`, pointing at
+/** provision-dns: create the unit's ONE public record — A `<label>.<stage apex>`, pointing at
  *  the target cluster's own address — and register the remove inverse (the address belongs to
  *  the unit; a move is a content update of exactly this record). Fail-closed: an unwired provider or
  *  an API failure breaks the run. */
@@ -337,7 +337,7 @@ export function provisionDnsStep(ports: OnboardPorts, p: DeployableOnboardParams
       await provisionUnitDns(ctx, {
         dns: ports.dns,
         unit: p.consumerName,
-        recordName: consumerUnitHost(p.consumerName, p.stage, p.unitApex),
+        recordName: consumerUnitHost(p.host, p.stage, p.unitApex),
         clusterFqdn: p.domain,
         runKind: "consumer-onboard",
       });
@@ -377,6 +377,7 @@ export interface AppRowValues {
   clusterId: string;
   name: string;
   stage: Stage;
+  host: string;
   repoUrl: string;
   chartPath: string;
   repoCredentialId: string | null;
@@ -433,6 +434,7 @@ export function recordProvisionalStep(_ports: OnboardPorts, p: DeployableOnboard
             clusterId: p.clusterId,
             name: p.consumerName,
             stage: p.stage,
+            host: p.host,
             repoUrl: p.repoURL,
             chartPath: p.chartPath,
             repoCredentialId: p.repoCredentialId,
@@ -465,6 +467,7 @@ export function recordInventoryStep(_ports: OnboardPorts, p: DeployableOnboardPa
           clusterId: p.clusterId,
           name: p.consumerName,
           stage: p.stage,
+          host: p.host,
           repoUrl: p.repoURL,
           chartPath: p.chartPath,
           repoCredentialId: p.repoCredentialId,

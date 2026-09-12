@@ -155,7 +155,7 @@ export async function probeConsumerLive(
   return { cluster, argo, drift, argocdUrl };
 }
 
-/** WHERE the consumer serves: `<name>-<stage>.<unitApex>`, the one host its ingress renders, its
+/** WHERE the consumer serves: `<label>.<stage apex>`, the one host its ingress renders, its
  *  admission policy admits and its DNS record names. Composed here rather than in the browser because the apex
  *  is not on the SQL row and cannot be derived from it: `clusters.domain` is where the CLUSTER is
  *  reached, while `global.unitApex` — read off that cluster's own values chain — is where its UNITS
@@ -167,13 +167,13 @@ export async function probeConsumerLive(
  *  guess would be a link to a name nothing serves. */
 export async function readUnitHost(
   registrations: { readClusterValueFiles(domain: string, stage: Stage): Promise<readonly ClusterValueFile[]> } | undefined,
-  name: string,
+  host: string,
   domain: string,
   stage: Stage,
 ): Promise<string | null> {
   if (!registrations) return null;
   try {
-    return consumerUnitHost(name, stage, unitApexFromChain(await registrations.readClusterValueFiles(domain, stage)));
+    return consumerUnitHost(host, stage, unitApexFromChain(await registrations.readClusterValueFiles(domain, stage)));
   } catch {
     return null;
   }

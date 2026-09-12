@@ -53,7 +53,7 @@ describe("backup (consumer)", () => {
     // The row is untouched: a backup changes nothing about where or whether the unit runs.
     expect(db.db.select().from(apps).where(eq(apps.id, "app_1")).get()?.status).toBe("active");
     // Access was MEASURED closed on the unit's public host, never assumed.
-    expect(f.probe.probed).toEqual([`https://${CONSUMER}-prod.${SOURCE.domain}/`]);
+    expect(f.probe.probed).toEqual([`https://${CONSUMER}.${SOURCE.domain}/`]);
     // The dump ran where the stores are (the registration copy in the unit ns, mongo in the platform
     // ns) and the folder was verified; nothing cleared anything.
     const names = jobNames(f.source);
@@ -70,7 +70,7 @@ describe("backup (consumer)", () => {
     const f = makeFakes();
     const ports = consumerPorts(f);
     await seedConsumerRegistration(ports.registrations);
-    f.probe.set(`https://${CONSUMER}-prod.${SOURCE.domain}/`, { reachable: true, detail: "HTTP 200" });
+    f.probe.set(`https://${CONSUMER}.${SOURCE.domain}/`, { reachable: true, detail: "HTTP 200" });
 
     const steps = makeBackupDef(ports).steps({ appId: "app_1" });
     await expect(driveSteps(db, steps, { appId: "app_1" }, [])).rejects.toThrow(/still answers/);

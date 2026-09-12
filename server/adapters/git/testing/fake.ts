@@ -97,7 +97,7 @@ export class FakePlatformRepo implements PlatformRepo {
    *  fail whichever reader a test did not have in mind.
    *
    *  unitApex rides along because it is not optional to a caller: the admission policy pins the
-   *  unit's ONE host to <name>.<unitApex>, so a chain without it fails the plan on a tree the test
+   *  unit's ONE host to <label>.<stage apex>, so a chain without it fails the plan on a tree the test
    *  never meant to be incomplete. Each cluster gets its OWN apex, which is what a unit standing at
    *  two stages requires — provision-dns refuses a second stage whose host another cluster's address
    *  already answers (domains/units/unit-dns.ts). A real install may well give two clusters one

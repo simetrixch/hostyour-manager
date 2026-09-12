@@ -55,7 +55,8 @@ export type AdoptConsumerPorts = LifecyclePorts;
 
 /** The adopt target — the four facts every consumer lifecycle run resolves off its row, here
  *  derived from the request. */
-type AdoptTarget = AppCluster;
+/** Name, stage and cluster — the label is the registration's and is read from it, so it is not here. */
+type AdoptTarget = Omit<AppCluster, "host">;
 
 /** Read the target's STAGE registration, refusing everything that would make an adopt write a mixed
  *  identity. Both steps that need it call this rather than one caching the read for the other: steps
@@ -77,12 +78,12 @@ async function readStageRegistration(ports: AdoptConsumerPorts, t: AdoptTarget):
       `registration body name "${e.name}" disagrees with its directory name "${t.name}" — refusing to adopt a mixed identity; fix the file in GitOps first`,
     );
   }
-  if (e.chartPath === undefined || e.cluster === undefined || e.databases === undefined || e.services === undefined || e.size === undefined || e.mongodb === undefined || e.quota === undefined) {
+  if (e.chartPath === undefined || e.cluster === undefined || e.databases === undefined || e.services === undefined || e.size === undefined || e.mongodb === undefined || e.quota === undefined || e.host === undefined) {
     throw errValidation(
-      `registrations/${t.name}/${t.stage}.yaml carries no deploy group (chartPath/cluster/databases/services/size/mongodb/quota) — it registers a build, not a deployment, so there is nothing to adopt`,
+      `registrations/${t.name}/${t.stage}.yaml carries no deploy group (chartPath/cluster/databases/services/size/mongodb/quota/host) — it registers a build, not a deployment, so there is nothing to adopt`,
     );
   }
-  return { ...e, chartPath: e.chartPath, cluster: e.cluster, databases: e.databases, keyPatterns: e.keyPatterns, services: e.services, size: e.size, mongodb: e.mongodb, quota: e.quota };
+  return { ...e, chartPath: e.chartPath, cluster: e.cluster, databases: e.databases, keyPatterns: e.keyPatterns, services: e.services, size: e.size, mongodb: e.mongodb, quota: e.quota, host: e.host };
 }
 
 /** Derive the target identity from name+stage+cluster ALONE — no inventory row exists (that is the
@@ -235,6 +236,7 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
             clusterId: t.clusterId,
             name: t.name,
             stage: t.stage,
+            host: current.host,
             repoUrl: current.repoURL,
             chartPath: current.chartPath,
             repoCredentialId: current.repoCredentialId ?? null,

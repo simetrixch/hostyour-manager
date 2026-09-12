@@ -2,18 +2,18 @@
 // provisioned at onboard/create-tenant, removed at offboard AND at both purge run kinds, over the
 // DnsProvider port (adapters/dns). One record per unit STANDING AT A STAGE, by kind of unit:
 //
-//   consumer — A `<name>-<stage>.<unitApex>`. The chart renders exactly ONE host, and by DNS rule a
+//   consumer — A `<label>.<stage apex>`. The chart renders exactly ONE host, and by DNS rule a
 //              wildcard does NOT cover a bare label, so the record is the host itself.
-//   tenant   — wildcard A `*.<subdomain>.<unitApex>`. Every member sits exactly one level below
-//              (`<member>-<stage>.<subdomain>.`, nothing lives on the bare <subdomain>), so ONE
-//              wildcard covers them all — members and stages added later included — and a move
-//              changes ONE record.
+//   tenant   — wildcard A `*.<subdomain>.<stage apex>`, one PER STAGE. Every member sits exactly one
+//              level below (`<member>.<subdomain>.<stage apex>`, nothing lives on the bare zone), so
+//              one wildcard covers a stage's members — members added later included — and a move
+//              changes ONE record per stage.
 //
-// THE CONSUMER'S RECORD NAME CARRIES THE STAGE, and the apex is the target cluster's own
-// (global.unitApex off its values chain). Two clusters may well share one apex — install.sh defaults
+// THE STAGE IS THE ZONE (`<stage>.<unitApex>`, and the apex itself for prod), and the apex is the
+// target cluster's own (global.unitApex off its values chain). Two clusters may well share one apex — install.sh defaults
 // `unit-apex` to the FQDN minus its first label precisely so a unit KEEPS its address when it moves
 // between two clusters in one zone — and under a shared apex two stages of one unit are two records
-// with two names, so both may stand in one zone and on one cluster. What the name does NOT separate
+// in two zones, so both may stand in one installation and on one cluster. What the name does NOT separate
 // is two CLUSTERS claiming the same stage of one unit: the host can answer for exactly one cluster,
 // so provisionUnitDns REFUSES a host that already answers with another cluster's address. A standing
 // record at another address is a takeover, whatever put it there.
@@ -30,47 +30,26 @@
 // are the idempotent no-op (delete-by-(name,type) resolves 0).
 import type { StepCtx } from "../../executor/types.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
-import type { Stage } from "../../../shared/enums.ts";
-import { consumerNamespace } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
-// A CONSUMER NAME AND A TENANT SUBDOMAIN ARE ONE NAME SPACE. Both stand as a single DNS label
-// directly under the apex: the consumer serves `<name>-<stage>.<unitApex>`, and the tenant's members
-// sit one level below `<subdomain>.<unitApex>`. That parent is not merely the tenant's wildcard root —
+// A CONSUMER'S HOST LABEL AND A TENANT SUBDOMAIN ARE ONE NAME SPACE. Both stand as a single DNS
+// label directly under a stage zone: the consumer serves `<label>.<stage apex>`, and the tenant's
+// members sit one level below `<subdomain>.<stage apex>`. That parent is not merely the tenant's wildcard root —
 // it is the Domain its IdP scopes every session cookie to (`example-auth.cookieDomain` in
 // catalog/charts/example-auth/templates/_helpers.tpl, delivered as AUTH_COOKIE_DOMAIN and set
 // on the access and refresh cookies in example-auth/backend/src/auth/cookies.ts). A browser sends a
-// cookie to every host at or below its Domain, so a consumer named `<subdomain>-<stage>` would stand
-// on a label a tenant's cookies reach for. Both onboarding run kinds therefore hold their candidate
-// against the other side's set: gate G23 refuses a consumer name a tenant already stands on
+// cookie to every host at or below its Domain, so a consumer labelled `<subdomain>` would stand on
+// the very host a tenant's cookies reach for. Both onboarding run kinds therefore hold their candidate
+// against the other side's set: gate G23 refuses a consumer label a tenant already stands on
 // (gates/compose.ts), and the create-tenant step ensure-subdomain-free refuses a subdomain a consumer
 // already holds (tenant-replace.ts).
 
-/** The consumer's one public host at one stage, `<name>-<stage>.<unitApex>` — the same composition
- *  the admission policy pins and G19 grants. The label is the namespace, so the host and the
- *  namespace cannot drift apart. */
-export function consumerUnitHost(consumerName: string, stage: Stage, unitApex: string): string {
-  return `${consumerNamespace(consumerName, stage)}.${unitApex}`;
-}
-
-/** The tenant's one wildcard — covering every member host `<member>-<stage>.<subdomain>.<unitApex>`,
- *  at every stage the tenant stands at. */
-export function tenantWildcardHost(subdomain: string, unitApex: string): string {
-  return `*.${subdomain}.${unitApex}`;
-}
-
-/** ONE member's own public host at one stage — a single name the wildcard above covers, for the
- *  callers that must ADDRESS a member rather than resolve it (the first-admin invite over the
- *  tenant's example-auth, the relocation probe). The parts are exactly what the member charts
- *  render: every tenant-mode ingress host in catalog is
- *  `<member>-<stage>.<tenant.subdomain>.<global.unitApex>` (charts/example-auth/templates/_helpers.tpl
- *  and its jobs/report/ui/web siblings, each of which `required`s the apex). Composing from the
- *  cluster's own domain instead names a host no ingress serves and no record resolves, because
- *  install.sh defaults `unit-apex` to the cluster FQDN minus its first label — so the two differ on
- *  every cluster that is not itself the apex. */
-export function tenantMemberHost(member: string, stage: Stage, subdomain: string, unitApex: string): string {
-  return `${member}-${stage}.${subdomain}.${unitApex}`;
-}
+/** The compositions themselves live in shared/unit-host.ts — ONE place for the Manager and, by the
+ *  same strings, for hostyour-cloud's ApplicationSets — and are re-exported here for the callers of
+ *  this module: a consumer stands at `<label>.<stage apex>`, a tenant's members at
+ *  `<member>.<subdomain>.<stage apex>`, under ONE wildcard PER STAGE (the zones differ). The label is
+ *  the registration's / the row's `host`, never the name (simetrixch/hostyour-cloud#208). */
+export { consumerUnitHost, tenantMemberHost, tenantWildcardHost, tenantZone, stageApex } from "../../../shared/unit-host.ts";
 
 function requireDns(dns: DnsProvider | undefined, unit: string, runKind: string): DnsProvider {
   if (!dns) {

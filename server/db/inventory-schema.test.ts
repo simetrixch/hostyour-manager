@@ -129,14 +129,14 @@ describe("apps.stage", () => {
   }
 
   const insert = (db: DbHandle, id: string, stage: string | null): void => {
-    db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, stage) VALUES (?, 'cls_1', 'acme', ?)").run(id, stage);
+    db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host, stage) VALUES (?, 'cls_1', 'acme', 'acme', ?)").run(id, stage);
   };
 
   it("refuses a row that names no stage", () => {
     const db = fresh();
     seedCluster(db);
     expect(() => insert(db, "app_1", null)).toThrow(/NOT NULL/i);
-    expect(() => db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name) VALUES ('app_2','cls_1','acme')").run()).toThrow(/NOT NULL/i);
+    expect(() => db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host) VALUES ('app_2','cls_1','acme','acme')").run()).toThrow(/NOT NULL/i);
   });
 
   it("holds UNIQUE(name, stage) across clusters — the upsert key finds one row or none, and one name at two stages on one cluster is two rows", () => {
@@ -147,7 +147,7 @@ describe("apps.stage", () => {
     insert(db, "app_1", "prod");
     expect(() => insert(db, "app_2", "prod")).toThrow(/UNIQUE/i);
     // The same (name, stage) on ANOTHER cluster is the same unit twice — refused.
-    expect(() => db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, stage) VALUES ('app_3', 'cls_2', 'acme', 'prod')").run()).toThrow(/UNIQUE/i);
+    expect(() => db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host, stage) VALUES ('app_3', 'cls_2', 'acme', 'acme', 'prod')").run()).toThrow(/UNIQUE/i);
     // The same name at another stage on the SAME cluster is the unit's second stage — allowed.
     insert(db, "app_4", "test");
   });
@@ -160,7 +160,7 @@ describe("apps.stage", () => {
   it("defaults provenance to the product's name in the DDL, on apps and on tenants", () => {
     const db = fresh();
     seedCluster(db);
-    db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, stage) VALUES ('app_d','cls_1','acme','prod')").run();
+    db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host, stage) VALUES ('app_d','cls_1','acme','acme','prod')").run();
     expect(db.sqlite.prepare("SELECT provenance FROM apps WHERE id='app_d'").get()).toEqual({ provenance: "manager" });
 
     db.sqlite

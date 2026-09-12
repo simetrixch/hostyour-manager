@@ -50,9 +50,9 @@ export function activateStep(ports: OnboardPorts, p: DeployableOnboardParams, ru
       }
       if (!ports.activator) throw errValidation(`consumer "${p.consumerName}" declares an activation but no activator is wired on this manager — refusing to skip a declared activation silently`);
       // The call goes to the consumer's OWN public ingress — the unit's one host
-      // <name>-<stage>.<unitApex>, the same composition the admission policy pins and provision-dns
+      // <label>.<stage apex>, the same composition the admission policy pins and provision-dns
       // resolved. The token rides ONLY the declared header — never the URL/body/log.
-      const url = `https://${consumerUnitHost(p.consumerName, p.stage, p.unitApex)}${act.path}`;
+      const url = `https://${consumerUnitHost(p.host, p.stage, p.unitApex)}${act.path}`;
       ctx.log("meta", `activating: ${act.method} ${url} with header ${act.tokenHeader} (token withheld)${act.prompt.length ? ` + fields ${act.prompt.map((x) => x.field).join(", ")}` : ""}`);
       const res = await ports.activator.invoke({ url, method: act.method, tokenHeader: act.tokenHeader, token, body, signal: ctx.signal });
       // Drop the in-run token as soon as the call has consumed it (hygiene; it is GC'd with the closure

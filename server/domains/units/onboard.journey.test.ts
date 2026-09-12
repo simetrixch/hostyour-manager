@@ -192,7 +192,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const github = ports.github as FakeGitHubConsumer;
     expect(github.dispatches).toHaveLength(1);
     expect(github.dispatches[0]!.inputs).toEqual({ version: "1.0.0", channel: "stable", stage: "prod" });
-    expect((ports.dns as FakeDnsProvider).record("acme-prod.example.com", "A")).toBe("203.0.113.10");
+    expect((ports.dns as FakeDnsProvider).record("acme.example.com", "A")).toBe("203.0.113.10");
   });
 
   it("a rejected validation settles the run failed with no steps and no inventory", async () => {
@@ -267,7 +267,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const call = activator.calls[0]!;
     const mintedToken = seeder.seeded[0]!.data["AUTH_BOOTSTRAP_TOKEN"]!;
     // The unit's ONE host, <name>.<unitApex> — the same composition the admission policy pins.
-    expect(call.url).toBe("https://acme-prod.example.com/api/v1/bootstrap/invite-admin");
+    expect(call.url).toBe("https://acme.example.com/api/v1/bootstrap/invite-admin");
     expect(call.token).toBe(mintedToken);
     expect(call.body).toEqual({ email: "admin@acme.test" });
 

@@ -92,7 +92,7 @@ function params(over: Partial<DeployableOnboardParams> = {}): OnboardParams {
     consumerName: "acme", repoURL: "https://github.com/x/acme.git", owner: "team-acme",
     repoCredentialId: "cred_pat", version: "1.0.0", channel: "stable", resolvedSha: SHA,
     builds: ["acme-api"], form: "deployable", stage: "prod", domain: "s1.example",
-    clusterId: "cls_1", cluster: "s1", namespace: "acme", unitApex: "example.com",
+    clusterId: "cls_1", cluster: "s1", namespace: "acme", unitApex: "example.com", host: "acme",
     chartPath: "deploy/chart", argoAppName: "acme-prod", report: passReport(),
     ...over,
   });

@@ -113,7 +113,7 @@ describe("ConsumerManifestSchema fqdn (the declared extra public FQDN)", () => {
 describe("ConsumerRegistrationSchema fqdn (the ATTESTED extra FQDN)", () => {
   const stage = {
     name: "acme", repoURL: "https://github.com/x/acme.git",
-    chartPath: "deploy/chart", cluster: "s1", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
+    chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
   };
 
   it("is OPTIONAL in the stage form — outside the deploy group's stands-or-falls rule", () => {
@@ -137,7 +137,7 @@ describe("keyPatterns (the redis grant, the sibling of databases)", () => {
   } as const;
   const stage = {
     name: "acme", repoURL: "https://github.com/x/acme.git",
-    chartPath: "deploy/chart", cluster: "s1", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
+    chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
   };
 
   // One redis serves every consumer of a cluster out of ONE keyspace, so a pattern is a claim on a
@@ -174,7 +174,7 @@ describe("keyPatterns (the redis grant, the sibling of databases)", () => {
 describe("ConsumerRegistrationSchema databases (verbatim copy carried in the registration)", () => {
   const stage = {
     name: "acme", repoURL: "https://github.com/x/acme.git",
-    chartPath: "deploy/chart", cluster: "s1", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
+    chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
   };
 
   it("requires databases[] in a stage registration — the whole deploy group stands together", () => {
@@ -193,7 +193,7 @@ describe("ConsumerRegistrationSchema databases (verbatim copy carried in the reg
 describe("ConsumerRegistrationSchema services (the per-consumer postgres switch carried in the registration)", () => {
   const stage = {
     name: "acme", repoURL: "https://github.com/x/acme.git",
-    chartPath: "deploy/chart", cluster: "s1", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
+    chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
   };
 
   it("requires services[] in a stage registration (empty is fine) — a chart source gates on it bare", () => {
@@ -218,7 +218,7 @@ describe("ConsumerRegistrationSchema field-level exclusivity (the deploy group v
   const buildOnly = { name: "acme", repoURL: "https://github.com/x/acme.git", builds: ["acme-backend"] };
   const stage = {
     name: "acme", repoURL: "https://github.com/x/acme.git",
-    chartPath: "deploy/chart", cluster: "s1", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
+    chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
   };
 
   it("accepts a build registration (no deploy group, builds[] present)", () => {

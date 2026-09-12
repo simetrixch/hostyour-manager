@@ -163,7 +163,7 @@ function ports(registrations: TenantRegistrations): TenantOnboardPorts {
     dns: seededDns(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
-    consumerNames: async () => [],
+    consumerHostLabels: async () => [],
   };
 }
 
@@ -508,7 +508,7 @@ describe("ensure-subdomain-free — the execute-time uniqueness belt", () => {
     seedClusters();
     const registrations = makeRegistrations();
     const p = params();
-    const prt = { ...ports(registrations), consumerNames: async () => ["unrelated", SUB] };
+    const prt = { ...ports(registrations), consumerHostLabels: async () => ["unrelated", SUB] };
     await expect(runAll(p, prt, [])).rejects.toThrow(/onboarded consumer/);
     // Refused BEFORE anything landed — the belt sits ahead of record-provisional.
     expect(db.db.select().from(tenants).where(eq(tenants.guid, GUID)).get()).toBeUndefined();

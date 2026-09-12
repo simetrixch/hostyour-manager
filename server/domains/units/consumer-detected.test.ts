@@ -44,7 +44,7 @@ async function seedRegistration(
       ...(opts.onboardedAt ? { onboardedAt: opts.onboardedAt } : {}),
     },
     builds: [],
-    deploy: { stage: opts.stage ?? "prod", chartPath: "deploy/chart", cluster: opts.cluster, databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    deploy: { stage: opts.stage ?? "prod", host: name, chartPath: "deploy/chart", cluster: opts.cluster, databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
     runId: `run_${name}`,
   });
 }
@@ -53,7 +53,7 @@ async function seedRegistration(
 function seedApp(name: string, over: { status?: "active" | "suspended" | "offboarded" } = {}): void {
   db.db
     .insert(apps)
-    .values({ id: `app_${name}`, clusterId: "cls_1", name, stage: "prod", repoUrl: `https://github.com/x/${name}.git`, chartPath: "deploy/chart", provenance: "manager", status: over.status ?? "active" })
+    .values({ id: `app_${name}`, clusterId: "cls_1", name, stage: "prod", host: name, repoUrl: `https://github.com/x/${name}.git`, chartPath: "deploy/chart", provenance: "manager", status: over.status ?? "active" })
     .run();
 }
 
@@ -130,7 +130,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
     // ghost is TRACKED on cls_2 but its registration targets cls_1 ("s1") — that deployment is unknown.
-    db.db.insert(apps).values({ id: "app_ghost2", clusterId: "cls_2", name: "ghost", stage: "prod", provenance: "manager", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_ghost2", clusterId: "cls_2", name: "ghost", stage: "prod", host: "ghost", provenance: "manager", status: "active" }).run();
     const registrations = new Registrations(new FakePlatformRepo());
     await seedRegistration(registrations, "ghost", { cluster: "s1" });
     const found = await scanDetectedConsumers({ db: db.db, registrations });
@@ -158,7 +158,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
     const registrations = new Registrations(repo);
     repo.seed(repo.booksBranch, "registrations/ghost/prod.yaml", serializePointer(ConsumerRegistrationSchema, {
       name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false,
-      chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
+      chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
     }));
     const found = await scanDetectedConsumers({ db: db.db, registrations });
     expect(found.detected).toEqual([]); // NOT { name: "acme", … } at the path of ghost

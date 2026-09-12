@@ -202,7 +202,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         c.log("meta", `source fan-out for ${tc.guid} is pruned (${names.length} Application(s)) — the source released the tenant`);
       },
       // The chain is (the TARGET cluster's domain, the TENANT's stage).
-      dnsRecordName: async (_c, target) => tenantWildcardHost(tc.subdomain, await ports.resolveUnitApex(target.domain, tc.stage)),
+      dnsRecordName: async (_c, target) => tenantWildcardHost(tc.subdomain, tc.stage, await ports.resolveUnitApex(target.domain, tc.stage)),
       verifyCompletenessExtra: async (c, target) => {
         // The crypto material never travels (Vault is one shared mount) — what must be PROVEN is
         // that the target's ESO materialized it, or every member boots into SecretSyncedError.

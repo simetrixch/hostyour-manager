@@ -133,7 +133,7 @@ export async function assertNoOrphans(ctx: StepCtx, ports: OrphanScanPorts, unit
       `cannot look for a leftover DNS record of ${unit.name}: no DNS provider is wired on this manager (CLOUDFLARE_DNS_API_TOKEN unset) — the unit's address is a mandatory part of the run kind, never a silent skip`,
     );
   }
-  const host = consumerUnitHost(unit.name, unit.stage, unitApexFromChain(await ports.registrations.readClusterValueFiles(unit.domain, unit.stage)));
+  const host = consumerUnitHost(unit.host, unit.stage, unitApexFromChain(await ports.registrations.readClusterValueFiles(unit.domain, unit.stage)));
   look(`DNS A ${host}`, (await ports.dns.readRecordContent({ name: host, type: "A", signal: ctx.signal })) !== null);
 
   if (left.length > 0) {

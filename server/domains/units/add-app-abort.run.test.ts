@@ -114,7 +114,7 @@ function harness(): Harness {
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
-    consumerNames: async () => [],
+    consumerHostLabels: async () => [],
   };
   const def = makeAddAppDef(ports) as unknown as AnyRunDefinition;
   const executor = new Executor({ db: db.db, creds: fakeCreds, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh, actor: () => "op_system" });

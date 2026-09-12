@@ -286,7 +286,7 @@ export function Consumers() {
                   {c.domain} · {c.stage}
                 </div>
                 {/* Row facts only. The unit's public address is NOT one of them — it is
-                    <name>.<unitApex>, and the apex comes off the target cluster's values chain — so
+                    <label>.<stage apex>, and the apex comes off the target cluster's values chain — so
                     it arrives with the live payload below. */}
                 <div className="servercard__chips">
                   <span className="chip">{c.provenance}</span>

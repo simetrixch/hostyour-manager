@@ -15,7 +15,7 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
  *  will TRIGGER (version + channel — the repo's release script mints the tag), state the unit's OWN
  *  stage, and pick where it lands: any active cluster for a unit that deploys itself, nothing more
  *  for a build-only unit. The stage is the unit's, not the cluster's: the namespace `<name>-<stage>`,
- *  the host `<name>-<stage>.<unitApex>`, the registration `registrations/<name>/<stage>.yaml` and the
+ *  the host `<label>.<stage apex>` (the manifest's `host`, or the name; prod is the apex itself), the registration `registrations/<name>/<stage>.yaml` and the
  *  Vault path all follow it, and the channel table says which stages a channel may reach. The heavy
  *  lifting (the gates, the registration, the kit injection, the triggered release cycle and its
  *  watches) is the onboard Run; this screen only gathers the request. */

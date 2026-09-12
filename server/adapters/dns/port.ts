@@ -1,5 +1,5 @@
 // The unit DNS port (the public address belongs to the unit, not to the server). A unit gets
-// EXACTLY ONE record — a consumer the A record `<name>.<unitApex>`, a tenant the wildcard A
+// EXACTLY ONE record — a consumer the A record `<label>.<stage apex>`, a tenant the wildcard A
 // `*.<subdomain>.<unitApex>` that covers every member one level below — created at onboarding,
 // updated on a move, removed at offboard and purge. Kept a PORT so the run steps depend on the
 // abstraction; the Cloudflare impl is cloudflare-dns.ts, the fake is testing/fake.ts.

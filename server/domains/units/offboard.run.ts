@@ -42,7 +42,7 @@ import { assertNoOrphans } from "./offboard-orphans.ts";
 // the stage or to the whole unit. Per stage, because every name of it carries the stage: the
 // registration, the Application, the AppProject, the repository credential, the admission policy, the
 // namespace `<name>-<stage>`, the argo-sync grant, the mail-ops grant, the DNS record
-// `<name>-<stage>.<unitApex>` and the <stage>/consumer/<name>/* Vault entries — two stages of one unit
+// `<label>.<stage apex>` and the <stage>/consumer/<name>/* Vault entries — two stages of one unit
 // may share one cluster, so nothing per stage may be named per unit (lifecycle.ts unitStaysRegistered
 // lists the split). Per unit: the <name>-build namespace's two grants, secret/build/<name>/repo-pat,
 // the ONE build webhook on the consumer repo and the release kit in it. The per-unit steps ask
@@ -222,11 +222,11 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
       run: async (ctx) => {
         // The inverse of provision-dns (no address is left pointing nowhere — without
         // exception, which is why this one teardown step is fail-CLOSED where its neighbours are
-        // fail-soft). The unit's host is <name>-<stage>.<unitApex>; the apex comes off the cluster's
+        // fail-soft). The unit's host is <label>.<stage apex>; the apex comes off the cluster's
         // values chain, the same read provision-dns's plan made.
         const ac = loadAppCluster(ctx.db, appId);
         const unitApex = unitApexFromChain(await ports.registrations.readClusterValueFiles(ac.domain, ac.stage));
-        await removeUnitDns(ctx, { dns: ports.dns, unit: ac.name, recordName: consumerUnitHost(ac.name, ac.stage, unitApex) });
+        await removeUnitDns(ctx, { dns: ports.dns, unit: ac.name, recordName: consumerUnitHost(ac.host, ac.stage, unitApex) });
       },
     },
     {

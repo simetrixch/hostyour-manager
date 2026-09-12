@@ -38,7 +38,7 @@ async function seedRegistration(reg: Registrations): Promise<void> {
   await reg.commitRegistration({
     unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
     builds: [],
-    deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
     runId: "run_onb",
   });
 }
@@ -100,7 +100,7 @@ function seedCluster(): void {
 /** The cluster PLUS the consumer's inventory row (a healthy, fully-onboarded consumer). */
 function seedApp(over: { repoCredentialId?: string } = {}): void {
   seedCluster();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: over.repoCredentialId ?? null }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: over.repoCredentialId ?? null }).run();
 }
 
 async function runAll(prt: PurgePorts, logs: string[], creds?: CredentialStore): Promise<void> {
@@ -266,10 +266,10 @@ describe("purge run definition", () => {
   it("remove-dns removes the unit's record and STILL fails the run on a DNS API failure (purge's one fail-closed teardown step)", async () => {
     seedCluster();
     const dns = new FakeDnsProvider();
-    dns.seed("acme-prod.s1.example", "A", "203.0.113.10"); // unitApex == the branch in the fake chain
+    dns.seed("acme.s1.example", "A", "203.0.113.10"); // unitApex == the branch in the fake chain
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { dns })).steps(PARAMS).find((s) => s.name === "remove-dns")!;
     await step.run(ctx("remove-dns", []));
-    expect(dns.record("acme-prod.s1.example", "A")).toBeUndefined();
+    expect(dns.record("acme.s1.example", "A")).toBeUndefined();
 
     const failingDns = new FakeDnsProvider();
     failingDns.failWith = new Error("Cloudflare DNS refused DELETE: [10000] Authentication error");
@@ -388,7 +388,7 @@ describe("purge run definition", () => {
     const reg = new Registrations(platform);
     const unit = { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false };
     for (const deploy of [{ stage: "prod" as const, cluster: "s1" }, { stage: "dev" as const, cluster: "s2" }]) {
-      await reg.commitRegistration({ unit, builds: ["acme"], deploy: { ...deploy, chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: `run_onb_${deploy.stage}` });
+      await reg.commitRegistration({ unit, builds: ["acme"], deploy: { ...deploy, host: "acme", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: `run_onb_${deploy.stage}` });
     }
 
     const buildRbac = new FakeBuildRbacWriter();

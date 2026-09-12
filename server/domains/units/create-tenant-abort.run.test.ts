@@ -178,7 +178,7 @@ function fakeTenantSeeder(): VaultSeeder {
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
-    consumerNames: async () => [],
+    consumerHostLabels: async () => [],
     ...(over.activator ? { activator: over.activator } : {}),
   };
   // The sanctioned type-erasure at the registrations boundary, exactly as wire-units.ts does it.

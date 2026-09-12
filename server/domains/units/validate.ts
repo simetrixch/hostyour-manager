@@ -22,6 +22,7 @@ import type { GateReport, GateResult } from "../../../shared/gates.ts";
 import { sandboxProvenance } from "../../../shared/gates.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { Stage } from "../../../shared/enums.ts";
+import { consumerHostLabel } from "../../../shared/consumer.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
 import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
@@ -87,6 +88,8 @@ export interface AttestedBuildReader {
  *  stage-less manifest fqdn would otherwise be attested at two stages. */
 export interface AttestedFqdnReader {
   listAttestedFqdns(except: { unit: string; stage: Stage }): Promise<ForeignFqdn[]>;
+  /** The host label every OTHER unit stands on at [stage] — G23's one-zone-one-name-space input. */
+  listAttestedHostLabels(stage: Stage, except: { unit: string }): Promise<{ unit: string; host: string }[]>;
 }
 
 /** Every subdomain a TENANT stands at, over every stage — TenantRegistrations.listTenantSubdomains over
@@ -227,9 +230,14 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
     // operator submitted. Neither reads the repository's manifest, so both stand whatever the report
     // carried. The name goes first: it is the identity every later fact hangs off (namespace,
     // AppProject, build namespace, host), so a reserved name is refused before uniqueness is asked.
+    // The LABEL is the manifest's to declare, so G23 reads it off the report where one stands and
+    // holds the name alone where none does — the name IS the label then. The other units' labels at
+    // this stage come off the registrations, the same way G16 reads the other units' builds.
+    const hostLabel = consumerHostLabel({ name: req.consumerName, host: runnerReport.manifest?.host });
+    const foreignHostLabels = await deps.registrations.listAttestedHostLabels(target.stage, { unit: req.consumerName });
     const managerGates: GateResult[] = [
       gateRepoAccess({ ok: true, detail: `cloned ${req.repoURL} at ${cloned.resolvedSha}` }),
-      gateUnitName({ unitName: req.consumerName, stage: target.stage, tenantSubdomains }),
+      gateUnitName({ unitName: req.consumerName, stage: target.stage, hostLabel, tenantSubdomains, foreignHostLabels }),
     ];
 
     // THE MANIFEST DECIDES WHETHER THE REST OF THE MANAGER-SIDE GATES RUN AT ALL. Below this branch
@@ -281,7 +289,7 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
     managerGates.push(
       gateBuildNameUniqueness({ unitName: req.consumerName, buildNames: declaredBuilds, foreignBuilds }),
       gateBuildDeclaration({ declaredBuilds, chart }),
-      gateFqdnGrant({ unitName: req.consumerName, stage: target.stage, fqdn: declaredFqdn, unitApex, clusterDomain, foreignFqdns }),
+      gateFqdnGrant({ unitName: req.consumerName, hostLabel, stage: target.stage, fqdn: declaredFqdn, unitApex, clusterDomain, foreignFqdns }),
       gateUnitSize({ unitName: req.consumerName, size: req.size, brings, quota: brings ? deps.resolveQuota(req.size, brings) : null }),
     );
     for (const g of managerGates) deps.log(`${g.id} ${g.status} — ${g.detail}`);

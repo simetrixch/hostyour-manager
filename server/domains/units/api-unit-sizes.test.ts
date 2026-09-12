@@ -30,12 +30,12 @@ afterEach(() => { db.sqlite.close(); });
 async function seedConsumer(registrations: Registrations, brings: { postgresql: boolean; mongodb: "shared" | "standalone" | "replicaset" }): Promise<void> {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
   await registrations.commitRegistration({
     unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
     builds: [],
     deploy: {
-      stage: "prod", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [],
+      stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [],
       services: brings.postgresql ? ["postgresql"] : [],
       size: "small", mongodb: brings.mongodb, quota: seedQuota("small", brings),
     },
@@ -131,7 +131,7 @@ describe("what the three sizes cost ONE unit", () => {
     // uncomposed beats quoting a ceiling that silently omits the unit's own database.
     db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", provenance: "manager", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", provenance: "manager", status: "active" }).run();
     const { app, cookie } = await make();
 
     const body = (await (await app.request("/api/consumers/app_1/sizes", authed(cookie))).json()) as { composed: boolean; sizes: Array<{ quota: { requestsCpu: string } }> };

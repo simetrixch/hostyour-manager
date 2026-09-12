@@ -118,7 +118,7 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         // read the create side made.
         const tc = loadTenantCluster(ctx.db, tenantId);
         const unitApex = await ports.resolveUnitApex(tc.domain, tc.stage);
-        await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName: tenantWildcardHost(tc.subdomain, unitApex) });
+        await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName: tenantWildcardHost(tc.subdomain, tc.stage, unitApex) });
       },
     },
     {

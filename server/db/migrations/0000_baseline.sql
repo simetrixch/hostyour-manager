@@ -71,6 +71,7 @@ CREATE TABLE `apps` (
 	`cluster_id` text NOT NULL,
 	`name` text NOT NULL,
 	`stage` text NOT NULL,
+	`host` text NOT NULL,
 	`repo_url` text,
 	`chart_path` text,
 	`repo_credential_id` text,

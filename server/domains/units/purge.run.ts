@@ -119,7 +119,9 @@ export type PurgePorts = LifecyclePorts & {
  *  derived from the request: the cluster row is the authority for the domain, and the stage is the
  *  unit's own, as given. Nothing cross-checks it against the cluster's `stage` column, which is the
  *  platform's and decides nothing about a unit. */
-type PurgeTarget = AppCluster;
+/** Name, stage and cluster — the label is resolved where it is needed (the DNS removal), from the row
+ *  or the registration where either stands, and from the name where neither does. */
+type PurgeTarget = Omit<AppCluster, "host">;
 
 /** Derive the target identity from name+stage+cluster ALONE — no inventory row required (that is the
  *  whole point). */
@@ -325,7 +327,11 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         // idempotent no-op, so a true orphan that never reached provision-dns removes nothing.
         const t = loadPurgeTarget(ctx.db, p);
         const unitApex = unitApexFromChain(await ports.registrations.readClusterValueFiles(t.domain, t.stage));
-        await removeUnitDns(ctx, { dns: ports.dns, unit: t.name, recordName: consumerUnitHost(t.name, t.stage, unitApex) });
+        // The LABEL the record was written under: the row's where one stands, the registration's
+        // where that still does, and the name where neither — a true orphan of an onboarding that
+        // died before write-registration provisioned no record under any other label.
+        const label = findAppRow(ctx.db, t)?.host ?? (await ports.registrations.readRegistration(t.stage, t.name))?.entry.host ?? t.name;
+        await removeUnitDns(ctx, { dns: ports.dns, unit: t.name, recordName: consumerUnitHost(label, t.stage, unitApex) });
       },
     },
     {
@@ -434,7 +440,9 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         // looking would let the backstop record exactly what the stricter run kind declined to record.
         // What counts as an orphan, and what the platform keeps on purpose, is stated in
         // offboard-orphans.ts; both answers depend on whether the unit still stands at another stage.
-        await assertNoOrphans(ctx, ports, loadPurgeTarget(ctx.db, p), "consumer-purge");
+        const t = loadPurgeTarget(ctx.db, p);
+        const label = findAppRow(ctx.db, t)?.host ?? (await ports.registrations.readRegistration(t.stage, t.name))?.entry.host ?? t.name;
+        await assertNoOrphans(ctx, ports, { ...t, host: label }, "consumer-purge");
       },
     },
     {

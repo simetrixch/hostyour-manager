@@ -60,7 +60,7 @@ function seedCluster(): void {
  *  suspended row is the case where an absent Application is the operator's own intended outcome. */
 function seedConsumer(status: AppStatus = "active"): void {
   seedCluster();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: CONSUMER_REPO, status }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: CONSUMER_REPO, status }).run();
 }
 
 const SMOKE_OK: SmokeResult = { namespaceExists: true, workloads: [{ kind: "Deployment", name: "acme", available: true, desired: 1, ready: 1 }], externalSecretsReady: true };
@@ -145,13 +145,13 @@ describe("the consumer's public address on the live payload", () => {
     // The cluster is reached at s1.example; the unit serves at the cluster's apex. The two differ
     // on every cluster whose FQDN carries a first label, which is the case this whole field exists for.
     expect(body.row.domain).toBe("s1.example");
-    expect(body.unitHost).toBe("acme-prod.example.com");
+    expect(body.unitHost).toBe("acme.example.com");
   });
 
   it("follows the apex the chain states, so a cluster that IS its own apex composes that instead", async () => {
     seedConsumer();
     const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })), apexRegistrations("s1.example"));
-    expect((await live(app, cookie)).unitHost).toBe("acme-prod.s1.example");
+    expect((await live(app, cookie)).unitHost).toBe("acme.s1.example");
   });
 
   it("is null — no link at all — when no chain can be read, rather than a guessed host", async () => {
@@ -276,7 +276,7 @@ describe("consumer live reconciliation (GET /api/consumers/:appId/live)", () => 
   // nothing runs. Nothing was compared there either, and "in sync" was equally unearned.
   it("an ACTIVE consumer with no Application reads 'not-deployed' by the row's status too — nothing was compared", async () => {
     seedCluster();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: CONSUMER_REPO, status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: CONSUMER_REPO, status: "active" }).run();
     const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, null));
     expect((await live(app, cookie)).drift).toEqual({ pinned: null, deployed: null, verdict: "not-deployed" });
   });

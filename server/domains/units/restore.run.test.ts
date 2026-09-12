@@ -109,7 +109,7 @@ describe("restore (consumer)", () => {
     const ports = consumerPorts(f);
     const dumped = serializePointer(ConsumerRegistrationSchema, {
       name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false,
-      chartPath: "deploy/chart", cluster: "s1", databases: ["acme_db"], services: ["mongodb"], size: "medium", mongodb: "shared",
+      chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services: ["mongodb"], size: "medium", mongodb: "shared",
       quota: seedQuota("medium"),
     });
     scriptDumpedRegistration(f.target.reader, CONSUMER, dumped);
@@ -129,7 +129,7 @@ describe("restore (consumer)", () => {
     // what "medium" means there today.
     expect(restored?.entry.quota).toEqual(seedQuota("medium"));
     expect(jobNames(f.target)).toContain(`reloc-restore-mongo-${CONSUMER}`);
-    expect(f.dns.record(`${CONSUMER}-prod.${TARGET.domain}`, "A")).toBe(TARGET.ip);
+    expect(f.dns.record(`${CONSUMER}.${TARGET.domain}`, "A")).toBe(TARGET.ip);
     const row = db.db.select().from(apps).where(eq(apps.id, "app_1")).get();
     expect(row?.status).toBe("active");
     expect(row?.clusterId).toBe(TARGET.clusterId);

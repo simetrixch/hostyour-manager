@@ -50,16 +50,16 @@ class FakeSeeder implements VaultSeeder {
 function seedApp(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
 }
 
 /** Register acme at prod on s1, and — when `alsoDev` — at dev on s2 as well, then git-rm the
  *  prod stage the way remove-registration does. What is left is the tree the scan reads. */
 async function seedRegistrationsAndRemoveProd(reg: Registrations, alsoDev: boolean): Promise<void> {
   const unit = { name: "acme", repoURL: REPO, suspended: false, quiesced: false };
-  await reg.commitRegistration({ unit, builds: ["acme"], deploy: { stage: "prod", cluster: "s1", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: "run_onb_prod" });
+  await reg.commitRegistration({ unit, builds: ["acme"], deploy: { stage: "prod", host: "acme", cluster: "s1", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: "run_onb_prod" });
   if (alsoDev) {
-    await reg.commitRegistration({ unit, builds: ["acme"], deploy: { stage: "dev", cluster: "s2", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: "run_onb_dev" });
+    await reg.commitRegistration({ unit, builds: ["acme"], deploy: { stage: "dev", host: "acme", cluster: "s2", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: "run_onb_dev" });
   }
   await reg.removeRegistration("prod", "acme", "run_off");
 }
@@ -112,7 +112,7 @@ describe("offboard assert-no-orphans", () => {
     await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 3 } });
     const dns = new FakeDnsProvider();
-    dns.seed("acme-prod.s1.example", "A", "203.0.113.10");
+    dns.seed("acme.s1.example", "A", "203.0.113.10");
 
     const step = scanStep(ports(reg, { cluster, projects: new FakeMasterProjectWriter(), buildRbac, repoCredential, dns }));
     const failure = await step.run(ctx([])).then(() => null, (e: Error) => e);
@@ -123,7 +123,7 @@ describe("offboard assert-no-orphans", () => {
     // Every leftover is NAMED with where it stands — a report of what is gone would be useless here.
     for (const object of [
       "ArgoCD repository Secret argocd/repo-acme-prod",
-      "DNS A acme-prod.s1.example",
+      "DNS A acme.s1.example",
       "Role postfix/acme-prod-smtp-ops",
       "RoleBinding postfix/acme-prod-smtp-ops",
     ]) {

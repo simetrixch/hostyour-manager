@@ -152,6 +152,11 @@ export const apps = sqliteTable("apps", {
   // while upsertAppRow looks the existing row up with `stage = ?` — which never matches a NULL. That
   // one writer would then insert a second row beside the first on every run.
   stage: text("stage", { enum: STAGE }).notNull(),
+  // The unit's public host LABEL, `<host>.<stage apex>` (shared/unit-host.ts) — the manifest's `host`
+  // attested at the onboarding, or the name where it declared none. NOT NULL for the same reason as
+  // stage: the one INSERT carries it, and every reader that addresses the unit — the DNS record it
+  // removes, the host it probes, the activation it calls — composes from this and never from the name.
+  host: text("host").notNull(),
   repoUrl: text("repo_url"),                                       // the consumer repo URL
   chartPath: text("chart_path"),                                   // path to the Helm chart inside the repo
   // the credential-store id of a private repo's read credential; NULL = public. A loose ref

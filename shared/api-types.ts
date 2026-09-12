@@ -593,7 +593,7 @@ export interface ConsumerLiveProbeView {
  *  by the Consumers reconciliation tab (a slow/unreachable slave spins only its own card). The live
  *  half is ConsumerLiveProbeView above; this row-keyed route additionally echoes the row. */
 export interface ConsumerLiveView extends ConsumerLiveProbeView {
-  /** Where this consumer SERVES: `<name>.<unitApex>` — the one host its ingress renders, its
+  /** Where this consumer SERVES: `<host>.<stage apex>` — the one host its ingress renders, its
    *  admission policy admits and its DNS record names. The apex is the target cluster's own
    *  (`global.unitApex` off that cluster's values chain) and is NOT the cluster's domain, so the
    *  browser cannot compose this from the row and is handed the finished host instead. Null when the
@@ -606,6 +606,8 @@ export interface ConsumerLiveView extends ConsumerLiveProbeView {
   row: {
     id: string;
     name: string;
+    /** The public host label the row attests (`host` of the manifest, or the name). */
+    host: string;
     clusterId: string;
     domain: string;
     stage: Stage;

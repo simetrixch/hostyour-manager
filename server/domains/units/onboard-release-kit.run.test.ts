@@ -30,7 +30,7 @@ function params(over: Partial<DeployableOnboardParams> = {}): DeployableOnboardP
   return DeployableOnboardParams.parse({
     form: "deployable", consumerName: "acme", repoURL: REPO_URL, owner: "team-acme",
     version: "1.0.0", channel: "stable", builds: ["acme-api"], repoCredentialId: "cred_pat", resolvedSha: SHA, chartPath: "deploy/chart",
-    domain: "s1.example", stage: "prod", clusterId: "cls_1", cluster: "s1", namespace: "acme", unitApex: "example.com",
+    domain: "s1.example", stage: "prod", clusterId: "cls_1", cluster: "s1", namespace: "acme", unitApex: "example.com", host: "acme",
     report: { contractVersion: "1.5", runnerVersion: "t", repoURL: REPO_URL, requestedRef: SHA, resolvedSha: SHA, startedAt: 1, finishedAt: 2, manifest: null, dependencies: [], gates: [], verdict: "pass", reportHash: "h", sandbox: { mustFailTargets: [], mustFailTargetsDeclaredListening: true, mustFailDenied: true, managerAddrDenied: true, mustPassReached: true } },
     argoAppName: "acme-prod", ...over,
   });
