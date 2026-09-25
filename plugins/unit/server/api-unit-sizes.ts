@@ -8,7 +8,8 @@ import { errValidation, errNotFound } from "#core/server/kernel/errors.ts";
 import { UNIT_SIZE, SIZE_COMPONENT, type UnitSize, type SizeComponent } from "../shared/unit-size.ts";
 import { listUnitSizes } from "./unit-size.ts";
 
-// The size table's own API — read it, and change one size.
+// The size table's own API — read it, and change one size. Registered by the unit plugin's routes
+// hook, so the core serves both under /api/unit.
 //
 // WHAT AN EDIT HERE DOES, AND WHAT IT DOES NOT. It changes what the WORDS mean, for every unit
 // registered from this moment on. It reaches no running unit: a unit's registration carries the
@@ -54,12 +55,12 @@ export function registerUnitSizeRoutes(app: Hono<AppEnv>, deps: UnitSizeApiDeps)
   // The whole table, in the vocabulary's order. Unconditional: it is a read, it needs no adapter, and
   // it answers on a manager with onboarding switched off — the sizes are what this installation
   // sells whether or not it can currently onboard anything.
-  app.get("/api/unit-sizes", (c) => c.json({ sizes: listUnitSizes(db) }));
+  app.get("/sizes", (c) => c.json({ sizes: listUnitSizes(db) }));
 
   // One ROW, addressed by both halves of its key. A row is a component at a size — what `base` means
   // at `medium`, what a `mongodb` MEMBER costs at `medium` — because a unit's ceiling is summed from
   // its parts and each part is priced on its own.
-  app.put("/api/unit-sizes/:component/:name", async (c) => {
+  app.put("/sizes/:component/:name", async (c) => {
     const component = c.req.param("component");
     const name = c.req.param("name");
     if (!(SIZE_COMPONENT as readonly string[]).includes(component)) {

@@ -11,6 +11,8 @@ import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testin
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { listOwnerIdentities, readOwnerIdentity, recordPackagesReader, recordRepositoryPat, forgetOwnerCredential, type OwnerDeps } from "#unit/server/owners.ts";
 import { registerOwnerRoutes } from "#unit/server/api-owners.ts";
+import { registerPluginRoutes } from "../../http/plugins-route.ts";
+import type { Executor } from "../../executor/executor.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { OwnersListView } from "../../../shared/api-types-owners.ts";
 
@@ -111,7 +113,7 @@ describe("the owners over HTTP", () => {
     const app = createApp({
       config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
       registerAuth: () => undefined,
-      registerProtected: (a) => registerOwnerRoutes(a, deps()),
+      registerProtected: (a) => registerPluginRoutes(a, [{ name: "unit", wiring: { definitions: [], routes: (u) => registerOwnerRoutes(u, deps()) } }], { executor: {} as Executor }),
     });
     const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
     return { app, cookie };
@@ -123,16 +125,16 @@ describe("the owners over HTTP", () => {
 
   it("PUT measures and records, answering the fingerprint only; GET lists; DELETE forgets; a body without the token is refused by field name", async () => {
     const { app, cookie } = await serve();
-    const put = await app.request(`/api/owners/${ORG}/packages-reader`, { method: "PUT", ...headers(cookie, { token: "ghp_reads" }) });
+    const put = await app.request(`/api/unit/owners/${ORG}/packages-reader`, { method: "PUT", ...headers(cookie, { token: "ghp_reads" }) });
     expect(put.status).toBe(200);
     const body = (await put.json()) as { packagesReader: { fingerprint: string } };
     expect(JSON.stringify(body)).not.toContain("ghp_reads");
-    const list = (await (await app.request("/api/owners", headers(cookie))).json()) as OwnersListView;
+    const list = (await (await app.request("/api/unit/owners", headers(cookie))).json()) as OwnersListView;
     expect(list.owners[0]?.packagesReader?.fingerprint).toBe(body.packagesReader.fingerprint);
-    const refused = await app.request(`/api/owners/${ORG}/packages-reader`, { method: "PUT", ...headers(cookie, { pat: "x" }) });
+    const refused = await app.request(`/api/unit/owners/${ORG}/packages-reader`, { method: "PUT", ...headers(cookie, { pat: "x" }) });
     expect(refused.status).toBe(400);
     expect(await refused.text()).toContain("one field, token");
-    const gone = await app.request(`/api/owners/${ORG}/packages-reader`, { method: "DELETE", ...headers(cookie) });
+    const gone = await app.request(`/api/unit/owners/${ORG}/packages-reader`, { method: "DELETE", ...headers(cookie) });
     expect(gone.status).toBe(200);
     expect(readOwnerIdentity(db.db, ORG)).toBeNull();
   });

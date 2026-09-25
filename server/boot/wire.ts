@@ -41,14 +41,12 @@ import { registerBranchRoutes } from "../domains/branches/api.ts";
 import { registerReleaseRoutes } from "../domains/releases/api.ts";
 import { searchPlatformApps } from "../domains/registry-cleanup/search.ts";
 import { registerConsumerRoutes, registerTenantRoutes } from "../domains/units/api.ts";
-import { registerUnitSizeRoutes } from "#unit/server/api-unit-sizes.ts";
 import { registerSetSizeRoutes } from "../domains/units/api-set-size.ts";
 import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerConsumerSecretsRoute } from "../domains/units/api-consumer-secrets.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
 import { ensureAppIdentityRow } from "../security/app-identity.ts";
-import { registerOwnerRoutes } from "#unit/server/api-owners.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { refreshAppTokens } from "#unit/server/app-token-refresh.ts";
 import { sweepRepoCredentials } from "../domains/units/repo-credential-sweep.ts";
@@ -350,9 +348,7 @@ export async function wire(): Promise<Wired> {
       // above registered it with its real git/kube/vault/gate-runner adapters).
       // store: the onboard POST seals the operator's raw repo PAT into the credential store BEFORE
       // the run exists — only the sealed reference enters the executor.
-      // The size table: a read and one write, both unconditional — they need no adapter, and what
-      // this installation sells is a fact whether or not onboarding is currently configured.
-      registerUnitSizeRoutes(a, { db: db.db });
+      // What sizes ONE unit and puts it on a size; the size table itself is the unit plugin's.
       registerSetSizeRoutes(a, { db: db.db, executor, ...(units.registrations ? { registrations: units.registrations } : {}), onboardingEnabled: units.enabled, tenantEnabled: units.tenantEnabled });
       registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });
       registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });
@@ -364,9 +360,6 @@ export async function wire(): Promise<Wired> {
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
       // The secrets of a standing consumer (#245) — gated like the other consumer triggers.
       registerConsumerSecretsRoute(a, { executor, onboardingEnabled: units.enabled });
-      // The owner identities (#219): recorded here, derived per unit by every onboarding. The
-      // measurement rides the unit plugin's GitHub client; without the plugin nothing can be recorded.
-      if (unit) registerOwnerRoutes(a, { db: db.db, store, github: unit.github, githubApp, actor: runActor });
       // One tenant's own catalog, read through the same closure tenant-add-app judges against.
       registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
       registerResetRoutes(a, {

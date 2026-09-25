@@ -9,6 +9,9 @@ import { RUN_KIND } from "../../shared/enums.ts";
 import type { Executor } from "../executor/executor.ts";
 import { compiledPlugins } from "../plugins.ts";
 import { activatePlugins } from "./plugin-set.ts";
+import { Hono } from "hono";
+import type { AppEnv } from "../http/app-env.ts";
+import { registerPluginRoutes } from "../http/plugins-route.ts";
 import { unitPorts } from "#unit/server/plugin.ts";
 
 // THE PRODUCT'S OWN SET, activated the way a boot activates it (wire.ts): the plugins this build
@@ -64,6 +67,19 @@ describe("the plugins this product compiles", () => {
     expect(c.db.select().from(unitSizes).all()).toEqual([]);
     await wiring.onBoot?.({ executor: {} as Executor });
     expect(c.db.select().from(unitSizes).all()).toHaveLength(9);
+  });
+
+  it("serves the size table under /api/unit, where the core mounts the unit plugin's routes", async () => {
+    const c = core();
+    const active = activatePlugins(compiledPlugins, ["unit"], c, {}, coreKinds);
+    await active[0]!.wiring.onBoot?.({ executor: {} as Executor });
+    const app = new Hono<AppEnv>();
+    registerPluginRoutes(app, active, { executor: {} as Executor });
+    const sizes = await app.request("/api/unit/sizes");
+    expect(sizes.status).toBe(200);
+    expect(((await sizes.json()) as { sizes: unknown[] }).sizes).toHaveLength(9);
+    expect((await app.request("/api/unit-sizes")).status).toBe(404);
+    expect(((await (await app.request("/api/plugins")).json()) as { active: string[] }).active).toEqual(["unit"]);
   });
 
   it("hands the families the staging area and the job image its keys configure", () => {

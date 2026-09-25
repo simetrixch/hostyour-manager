@@ -232,14 +232,14 @@ export const createOperatorKey = (input: { label: string; publicKey: string }): 
  *  still finds the key on a host — the removal run kind needs this row to name the line it deletes. */
 export const deleteOperatorKey = (id: string): Promise<unknown> => req(`/api/operator-keys/${id}`, { method: "DELETE" });
 
-/** The owner identities (GET /api/owners, server plugins/unit/server/owners.ts): what
+/** The owner identities (GET /api/unit/owners, server plugins/unit/server/owners.ts): what
  *  every unit of an owner is onboarded with. A credential is recorded with one PUT carrying
  *  the token once; only its fingerprint comes back. */
-export const listOwners = (): Promise<OwnersListView> => req("/api/owners");
+export const listOwners = (): Promise<OwnersListView> => req("/api/unit/owners");
 export const recordOwnerCredential = (org: string, which: "packages-reader" | "repository-pat", token: string): Promise<unknown> =>
-  req(`/api/owners/${encodeURIComponent(org)}/${which}`, { method: "PUT", body: JSON.stringify({ token } satisfies OwnerCredentialInput) });
+  req(`/api/unit/owners/${encodeURIComponent(org)}/${which}`, { method: "PUT", body: JSON.stringify({ token } satisfies OwnerCredentialInput) });
 export const forgetOwnerCredential = (org: string, which: "packages-reader" | "repository-pat"): Promise<unknown> =>
-  req(`/api/owners/${encodeURIComponent(org)}/${which}`, { method: "DELETE" });
+  req(`/api/unit/owners/${encodeURIComponent(org)}/${which}`, { method: "DELETE" });
 /** Put ONE key in ONE host's authorized_keys. One server per run on purpose: which hosts carry a key
  *  is a per-server state, so five that took it and a sixth that refused are five runs that succeeded
  *  and one that failed, each with its own log. */
@@ -365,7 +365,7 @@ export interface UnitSizeView {
   pods: number;
   persistentVolumeClaims: number;
 }
-export const listUnitSizes = (): Promise<{ sizes: UnitSizeView[] }> => req<{ sizes: UnitSizeView[] }>("/api/unit-sizes");
+export const listUnitSizes = (): Promise<{ sizes: UnitSizeView[] }> => req<{ sizes: UnitSizeView[] }>("/api/unit/sizes");
 
 /** The three sizes as they apply to ONE unit: the figures already SUMMED from what that unit brings,
  *  with the parts they were summed from. The picker shows these rather than the bare table, because a
@@ -388,7 +388,7 @@ export const unitSizeOptions = (kind: "consumer" | "tenant", id: string): Promis
  *  written with, so an already-deployed unit moves only when setConsumerSize/setTenantSize rewrites
  *  it. Two acts on purpose — re-pricing a table and re-sizing a customer are not the same thing. */
 export const updateUnitSize = (component: string, name: string, size: Omit<UnitSizeView, "name" | "component">): Promise<{ size: UnitSizeView }> =>
-  put<{ size: UnitSizeView }>(`/api/unit-sizes/${component}/${name}`, size as unknown as Record<string, unknown>);
+  put<{ size: UnitSizeView }>(`/api/unit/sizes/${component}/${name}`, size as unknown as Record<string, unknown>);
 /** Put a consumer on a size — and, when it is the size it already has, onto that size's CURRENT
  *  figures. This is the only path by which a table edit reaches something already deployed. */
 /** Change a standing consumer's declared secrets (#245). Plans through the streaming planner — the

@@ -5,9 +5,12 @@
 // and the relocation surface its keys configure.
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "#core/server/plugin.ts";
+import { runActor } from "#core/server/kernel/actor.ts";
 import { unitSizes } from "#core/server/db/schema/inventory.ts";
 import { UnitEnv, unitConfig } from "./config.ts";
 import { seedUnitSizes } from "./unit-size.ts";
+import { registerUnitSizeRoutes } from "./api-unit-sizes.ts";
+import { registerOwnerRoutes } from "./api-owners.ts";
 import type { StorageBoxAccess } from "./relocation-jobs.ts";
 import { HttpActivator } from "./adapters/activation/activation-http.ts";
 import type { Activator } from "./adapters/activation/port.ts";
@@ -60,6 +63,12 @@ export const unitPlugin: Plugin<typeof UnitEnv> = {
     };
     return {
       definitions: [],
+      // The size table (a read and one write: what this installation sells) and the owner identities
+      // the onboardings derive per unit, measured with the unit's own GitHub client.
+      routes: (app) => {
+        registerUnitSizeRoutes(app, { db: core.db });
+        registerOwnerRoutes(app, { db: core.db, store: core.store, github: provides.github, githubApp: core.githubApp, actor: runActor });
+      },
       // Fill in any of the sizes this database does not carry yet, and touch none that it does:
       // create-only, so an installation that edited a size keeps its figures across every restart.
       onBoot: async () => {

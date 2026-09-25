@@ -9,6 +9,8 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps, unitSizes } from "../../db/schema/inventory.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerUnitSizeRoutes } from "#unit/server/api-unit-sizes.ts";
+import { registerPluginRoutes } from "../../http/plugins-route.ts";
+import type { Executor } from "../../executor/executor.ts";
 import { registerSetSizeRoutes } from "./api-set-size.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { Registrations } from "#unit/server/registrations.ts";
@@ -51,7 +53,7 @@ async function make(registrations?: Registrations): Promise<{ app: Hono<AppEnv>;
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
     registerAuth: () => undefined,
     registerProtected: (a) => {
-      registerUnitSizeRoutes(a, { db: db.db });
+      registerPluginRoutes(a, [{ name: "unit", wiring: { definitions: [], routes: (u) => registerUnitSizeRoutes(u, { db: db.db }) } }], { executor: {} as Executor });
       registerSetSizeRoutes(a, { db: db.db, ...(registrations ? { registrations } : {}), onboardingEnabled: false, tenantEnabled: false });
     },
   });
@@ -63,7 +65,7 @@ const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION
 describe("the size table", () => {
   it("serves NINE rows — every component at every size", async () => {
     const { app, cookie } = await make();
-    const body = (await (await app.request("/api/unit-sizes", authed(cookie))).json()) as { sizes: Array<{ component: string; name: string }> };
+    const body = (await (await app.request("/api/unit/sizes", authed(cookie))).json()) as { sizes: Array<{ component: string; name: string }> };
     expect(body.sizes).toHaveLength(9);
     expect(body.sizes.map((s) => `${s.component}/${s.name}`)).toEqual([
       "base/small", "base/medium", "base/large",
@@ -74,7 +76,7 @@ describe("the size table", () => {
 
   it("edits ONE row, addressed by component AND size — the other components' rows are untouched", async () => {
     const { app, cookie } = await make();
-    const res = await app.request("/api/unit-sizes/mongodb/medium", {
+    const res = await app.request("/api/unit/sizes/mongodb/medium", {
       method: "PUT", ...authed(cookie),
       headers: { ...(authed(cookie).headers as Record<string, string>), "content-type": "application/json" },
       body: JSON.stringify({ requestsCpu: "999m", requestsMemory: "1Gi", limitsCpu: "2", limitsMemory: "4Gi", pods: 1, persistentVolumeClaims: 1 }),
@@ -95,13 +97,13 @@ describe("the size table", () => {
       headers: { ...(authed(cookie).headers as Record<string, string>), "content-type": "application/json" },
       body: JSON.stringify({ requestsCpu: "1", requestsMemory: "1Gi", limitsCpu: "1", limitsMemory: "1Gi", pods: 1, persistentVolumeClaims: 1 }),
     });
-    expect((await put("/api/unit-sizes/redis/medium")).status).toBe(404);
-    expect((await put("/api/unit-sizes/base/enormous")).status).toBe(404);
+    expect((await put("/api/unit/sizes/redis/medium")).status).toBe(404);
+    expect((await put("/api/unit/sizes/base/enormous")).status).toBe(404);
   });
 
   it("refuses a figure Kubernetes could not read, before it reaches a cluster", async () => {
     const { app, cookie } = await make();
-    const res = await app.request("/api/unit-sizes/base/small", {
+    const res = await app.request("/api/unit/sizes/base/small", {
       method: "PUT",
       headers: { ...(authed(cookie).headers as Record<string, string>), "content-type": "application/json" },
       body: JSON.stringify({ requestsCpu: "lots", requestsMemory: "1Gi", limitsCpu: "1", limitsMemory: "1Gi", pods: 1, persistentVolumeClaims: 1 }),
