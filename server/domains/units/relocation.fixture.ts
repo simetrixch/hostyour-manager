@@ -157,7 +157,7 @@ export function tenantPorts(f: RelocationFakes): TenantRelocationPorts & { regis
     dns: f.dns,
     storageBox: { ...BOX },
     dbtoolsImage: DBTOOLS_IMAGE,
-    deployRepoUrl: "https://github.com/acme/acme-catalog.git",
+    deployRepoUrl: "https://github.com/acme/acme-deploy.git",
     platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
     buildRbac: f.buildRbac,
     resolveUnitApex: async () => "example.com",

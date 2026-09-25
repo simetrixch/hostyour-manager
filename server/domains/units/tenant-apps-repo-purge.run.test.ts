@@ -54,19 +54,19 @@ async function registered(reg: Registrations, name: string, opts: { stage?: bool
 }
 
 /** The catalog's own build units — what tenant.buildRepos names on the books branch. */
-const CATALOG_UNITS = ["digita-auth", "digita-platform"];
+const DEPLOY_BUILD_UNITS = ["digita-auth", "digita-platform"];
 
 function ports(over: Partial<TenantLifecyclePorts> = {}): TenantLifecyclePorts {
   return {
     registrations: new TenantRegistrations(new FakePlatformRepo()),
-    deployBuildUnits: async () => CATALOG_UNITS,
+    deployBuildUnits: async () => DEPLOY_BUILD_UNITS,
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } }),
       argoReader: new FakeMasterArgoReader(),
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    deployRepoUrl: "https://github.com/acme/acme-catalog.git",
+    deployRepoUrl: "https://github.com/acme/acme-deploy.git",
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     ...over,
@@ -96,7 +96,7 @@ describe("scanOrphanBuilds", () => {
     await registered(builds, "example-apps-other");      // named by a tenant below
     await registered(builds, "digita-platform");         // the catalog's own build unit, build-only (#241)
     await tenants.commitTenant({ stage: "prod", guid: GUID, registration: entry({ appsRepo: `https://github.com/${ORG}/example-apps-other.git`, appsImage: "example-apps-other", appsImageTag: "1.0.0" }), runId: "run_onb" });
-    expect(await scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, deployBuildUnits: async () => CATALOG_UNITS })).toEqual([{ unit: UNIT, repoURL: REPO }]);
+    expect(await scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, deployBuildUnits: async () => DEPLOY_BUILD_UNITS })).toEqual([{ unit: UNIT, repoURL: REPO }]);
   });
 
   it("finds nothing where every build registration is accounted for, and refuses where the catalog cannot be read", async () => {
@@ -104,7 +104,7 @@ describe("scanOrphanBuilds", () => {
     await registered(builds, "acme", { stage: true });
     await registered(builds, "digita-platform");
     const tenants = new TenantRegistrations(new FakePlatformRepo());
-    expect(await scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, deployBuildUnits: async () => CATALOG_UNITS })).toEqual([]);
+    expect(await scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, deployBuildUnits: async () => DEPLOY_BUILD_UNITS })).toEqual([]);
     await expect(scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, deployBuildUnits: async () => { throw new Error("catalog unreachable"); } })).rejects.toThrow(/catalog unreachable/);
   });
 });
@@ -125,8 +125,8 @@ describe("tenant-apps-repo-purge run", () => {
     for (const unit of ["acme", "digita-platform", "never-registered"]) {
       await expect(def.plan({ unit }, { db: db.db })).rejects.toThrow(/not an orphaned build registration/);
     }
-    const { deployBuildUnits: _unwired, ...withoutCatalog } = ports({ buildRegistrations: builds });
-    await expect(makeTenantAppsRepoPurgeDef(withoutCatalog).plan({ unit: UNIT }, { db: db.db })).rejects.toThrow(/cannot be read on this manager/);
+    const { deployBuildUnits: _unwired, ...withoutDeployBuildUnits } = ports({ buildRegistrations: builds });
+    await expect(makeTenantAppsRepoPurgeDef(withoutDeployBuildUnits).plan({ unit: UNIT }, { db: db.db })).rejects.toThrow(/cannot be read on this manager/);
   });
 
   it("removes the registration and the Vault entry and leaves the repository standing; a resume finds each already gone", async () => {

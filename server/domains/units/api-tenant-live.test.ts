@@ -36,7 +36,7 @@ const TGUID = "zsjs023ctne0"; // a live-shaped throwaway guid (matches the tenan
 // The ONE repo every tenant's charts live in — the platform constant the route resolves the fan-out's
 // pin against. Byte-identical to what the appsets render their source repoURL from (hostyour-cloud
 // apps/slave/values-common.yaml `repo.deployUrl`), which is what makes the per-repo lookup match.
-const DEPLOY_REPO = "https://github.com/acme/acme-catalog.git";
+const DEPLOY_REPO = "https://github.com/acme/acme-deploy.git";
 const config = parseConfig({ ...REQUIRED_ENV, PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
@@ -201,7 +201,7 @@ describe("tenant live reconciliation (GET /api/tenants/:id/live)", () => {
     // pins. Positional reading is exactly what handed the Consumers card an install-branch NAME where a
     // SHA belonged.
     const foreign = authApp(SHA, SHA);
-    const set = statuses({ [AUTH_APP]: { ...foreign, targetSources: [{ repoURL: "https://github.com/x/not-catalog.git", targetRevision: DEPLOYED }] } });
+    const set = statuses({ [AUTH_APP]: { ...foreign, targetSources: [{ repoURL: "https://github.com/x/not-deploy.git", targetRevision: DEPLOYED }] } });
     const { app, cookie } = await makeTenantLive(liveResolver(SMOKE_OK, set));
     const body = (await (await app.request("/api/tenants/tnt_1/live", authed(cookie))).json()) as { drift: Drift };
     expect(body.drift).toEqual({ pinned: null, deployed: SHA, verdict: "drift" });

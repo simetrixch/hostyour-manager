@@ -44,7 +44,7 @@ const GUID = "zsjs023ctne0";
 const NEW_APP = "crm";
 const EXPECTED = [memberApplication(GUID, NEW_APP, "prod")];
 const REGISTRY_HOST = "zot.m1.example";
-const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 
 const logger = pino({ level: "silent" });
@@ -60,7 +60,7 @@ const fakeCreds = {
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, prod]
 builds:

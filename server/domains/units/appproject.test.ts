@@ -3,11 +3,11 @@ import { renderTenantAppProject } from "./appproject.ts";
 import { CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL } from "../../adapters/kube/port.ts";
 
 describe("renderTenantAppProject", () => {
-  const CATALOG = "https://github.com/acme/acme-catalog.git";
+  const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
   const PLATFORM = "https://github.com/simetrixch/hostyour-cloud.git";
   const GUID = "e2e8ymj86dk8";
   const render = (member: string) =>
-    renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: "s1", deployRepoUrl: CATALOG, platformRepoURL: PLATFORM, cluster: "s1" });
+    renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: "s1", deployRepoUrl: DEPLOY_URL, platformRepoURL: PLATFORM, cluster: "s1" });
   const project = render("auth");
 
   it("names the project == namespace == <guid>-<member>-<stage> and lives in the per-slave ArgoCD namespace", () => {
@@ -37,7 +37,7 @@ describe("renderTenantAppProject", () => {
 
   it("allows catalog AND the platform repo — a member Application pulls its chart from one and its $values chain from the other", () => {
     // The whole list — so the consumer-scoped prometheus-community repo cannot appear here either.
-    expect(project.spec.sourceRepos).toEqual([CATALOG, PLATFORM]);
+    expect(project.spec.sourceRepos).toEqual([DEPLOY_URL, PLATFORM]);
   });
 
   it("pins a single destination to the tenant's OWN cluster by ArgoCD name + THAT MEMBER's namespace (never server '*')", () => {

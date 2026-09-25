@@ -256,7 +256,7 @@ describe("ConsumerManifest tenant: fan-out block", () => {
     return {
       apiVersion: "hostyour.cloud/v1",
       kind: "ConsumerManifest", mongodb: "shared" as const,
-      name: "catalog",
+      name: "deploy",
       owner: "platform",
       envs: ["dev", "test", "prod"],
       builds: [{ name: "hostyour-tenant-operator", containerfile: "operator/Dockerfile" }],

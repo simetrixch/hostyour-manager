@@ -34,7 +34,7 @@ function tenantPorts(deployState: DeployState | null): TenantLifecyclePorts {
       argoNamespace: "argocd",
     }),
     argoWatchTimeoutMs: 1000,
-    deployRepoUrl: "https://github.com/acme/acme-catalog.git",
+    deployRepoUrl: "https://github.com/acme/acme-deploy.git",
   } as unknown as TenantLifecyclePorts;
 }
 

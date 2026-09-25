@@ -55,7 +55,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0"; // a live-shaped throwaway guid
-const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const APPS = [{ name: "erp" }];
 const EXPECTED = tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod");
@@ -65,7 +65,7 @@ const ABORT_STEPS = [`abort-${GUID}-remove-apps-registration`, `abort-${GUID}-re
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, prod]
 builds:

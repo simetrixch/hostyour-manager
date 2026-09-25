@@ -36,7 +36,7 @@ const EXPECTED = MEMBERS.map((m) => memberApplication(GUID, m, "prod"));
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, prod]
 builds:
@@ -88,7 +88,7 @@ const RELEASED = {
 `,
 };
 
-const CATALOG = "https://github.com/acme/acme-catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 /** The member entries the last plan resolved — what "the new entries" means to the fakes below. */
 let resolved: TenantMemberRecord[] = [];
 
@@ -103,8 +103,8 @@ function rendering(members: readonly TenantMemberRecord[], approved: Record<stri
       namespaceLabels: { "platform/tenant": GUID, ...m.namespaceLabels },
       syncSources: [
         { repoURL: "https://github.com/simetrixch/hostyour-cloud.git", revision: SHA },
-        { repoURL: CATALOG, revision: SHA },
-        ...m.sources.map((src) => ({ repoURL: CATALOG, revision: SHA, path: src.chart, valueFiles: ["values.yaml", ...src.valueFiles], valuesObject: { tenant: { guid: GUID, approvedTags: approved }, ...src.values } })),
+        { repoURL: DEPLOY_URL, revision: SHA },
+        ...m.sources.map((src) => ({ repoURL: DEPLOY_URL, revision: SHA, path: src.chart, valueFiles: ["values.yaml", ...src.valueFiles], valuesObject: { tenant: { guid: GUID, approvedTags: approved }, ...src.values } })),
       ],
     } as ArgoAppStatus];
   }));
@@ -134,7 +134,7 @@ function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?:
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    deployRepoUrl: CATALOG,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
@@ -368,30 +368,30 @@ describe("rendersEntry, clause by clause", () => {
   const entry = (over: Partial<TenantMemberRecord> = {}): TenantMemberRecord => ({ name: "erp", namespaceLabels: {}, sources: [src()], ...over });
   const render = (m: TenantMemberRecord, labels: Record<string, string> = {}): ArgoAppStatus => ({
     syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy", namespaceLabels: labels,
-    syncSources: m.sources.map((s) => ({ repoURL: CATALOG, revision: SHA, path: s.chart, valueFiles: ["values.yaml", ...s.valueFiles], valuesObject: { tenant: {}, ...s.values } })),
+    syncSources: m.sources.map((s) => ({ repoURL: DEPLOY_URL, revision: SHA, path: s.chart, valueFiles: ["values.yaml", ...s.valueFiles], valuesObject: { tenant: {}, ...s.values } })),
   });
   it("holds the entry's value files in their order, searched after the template's own", () => {
     const want = entry({ sources: [src({ valueFiles: ["a.yaml", "values.yaml"] })] });
-    expect(rendersEntry(render(want), want, undefined, CATALOG)).toBe(true);
+    expect(rendersEntry(render(want), want, undefined, DEPLOY_URL)).toBe(true);
     const swapped = entry({ sources: [src({ valueFiles: ["values.yaml", "a.yaml"] })] });
-    expect(rendersEntry(render(entry({ sources: [src({ valueFiles: ["b.yaml", "a.yaml"] })] })), entry({ sources: [src({ valueFiles: ["a.yaml", "b.yaml"] })] }), undefined, CATALOG)).toBe(false);
-    expect(rendersEntry(render(swapped), swapped, undefined, CATALOG)).toBe(true);
+    expect(rendersEntry(render(entry({ sources: [src({ valueFiles: ["b.yaml", "a.yaml"] })] })), entry({ sources: [src({ valueFiles: ["a.yaml", "b.yaml"] })] }), undefined, DEPLOY_URL)).toBe(false);
+    expect(rendersEntry(render(swapped), swapped, undefined, DEPLOY_URL)).toBe(true);
   });
   it("refuses a value file the previous entry had and the new one dropped", () => {
     const was = entry({ sources: [src({ valueFiles: ["old.yaml"] })] });
-    expect(rendersEntry(render(was), entry(), was, CATALOG)).toBe(false);
-    expect(rendersEntry(render(entry()), entry(), was, CATALOG)).toBe(true);
+    expect(rendersEntry(render(was), entry(), was, DEPLOY_URL)).toBe(false);
+    expect(rendersEntry(render(entry()), entry(), was, DEPLOY_URL)).toBe(true);
   });
   it("refuses a value key the previous entry had and the new one dropped", () => {
     const was = entry({ sources: [src({ values: { debug: true } })] });
-    expect(rendersEntry(render(was), entry(), was, CATALOG)).toBe(false);
-    expect(rendersEntry(render(entry()), entry(), was, CATALOG)).toBe(true);
+    expect(rendersEntry(render(was), entry(), was, DEPLOY_URL)).toBe(false);
+    expect(rendersEntry(render(entry()), entry(), was, DEPLOY_URL)).toBe(true);
   });
   it("refuses a namespace label the previous entry had and the new one dropped, and a label of another value", () => {
     const was = entry({ namespaceLabels: { stale: "yes" } });
-    expect(rendersEntry(render(entry(), { stale: "yes" }), entry(), was, CATALOG)).toBe(false);
-    expect(rendersEntry(render(entry(), {}), entry(), was, CATALOG)).toBe(true);
+    expect(rendersEntry(render(entry(), { stale: "yes" }), entry(), was, DEPLOY_URL)).toBe(false);
+    expect(rendersEntry(render(entry(), {}), entry(), was, DEPLOY_URL)).toBe(true);
     const want = entry({ namespaceLabels: { tier: "b" } });
-    expect(rendersEntry(render(want, { tier: "a" }), want, undefined, CATALOG)).toBe(false);
+    expect(rendersEntry(render(want, { tier: "a" }), want, undefined, DEPLOY_URL)).toBe(false);
   });
 });

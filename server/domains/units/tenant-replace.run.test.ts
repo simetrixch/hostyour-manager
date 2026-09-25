@@ -36,7 +36,7 @@ const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0"; // the NEW tenant (fixed-params runs green off the default statuses)
 const OLD = "e2e8ymj86dk8"; // the existing same-subdomain tenant to replace
 const SUB = "acme";
-const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const REGISTRY_HOST = "zot.m1.example";
 const APPS = [{ name: "erp" }];
@@ -57,7 +57,7 @@ const TRIO_PLUS_LEGACY = [...TEST_MEMBERS, "legacy"];
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, prod]
 builds:

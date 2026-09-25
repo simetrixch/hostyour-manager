@@ -32,7 +32,7 @@ const PROBE = "zsjs023ctne0"; // a live-shaped throwaway guid
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, prod]
 builds:
@@ -66,7 +66,7 @@ const CHAIN = [
   { path: clusterMapPath("m1.example"), content: "global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n" },
 ];
 
-const REPO_OF_REQ = "https://github.com/acme/acme-catalog.git";
+const REPO_OF_REQ = "https://github.com/acme/acme-deploy.git";
 function req(over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest {
   return { repoURL: REPO_OF_REQ, ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, subdomain: "acme", clusterValueFiles: CHAIN, ...over };
 }
@@ -86,7 +86,7 @@ describe("gateT1Manifest", () => {
     const t1 = gateT1Manifest(MANIFEST_YAML);
     expect(t1.result.status).toBe("pass");
     expect(t1.result.reason).toBeNull();
-    expect(t1.manifest?.name).toBe("catalog");
+    expect(t1.manifest?.name).toBe("deploy");
     expect(t1.spec?.members.find((m) => m.name === "auth")?.chart).toBe("charts/example-auth");
   });
 
@@ -290,7 +290,7 @@ describe("validateTenant", () => {
     expect(outcome.report.gates.map((g) => g.id)).toEqual(["T1", "T2", "T3", "T4", "G9"]);
     expect(outcome.report.appsValidated).toEqual(["erp"]);
     expect(outcome.report.resolvedMembers).toEqual(["auth", "jobs", "report", "erp-1", "erp-2"]);
-    expect(outcome.report.manifest?.name).toBe("catalog");
+    expect(outcome.report.manifest?.name).toBe("deploy");
 
     // each member rendered with the appset's release naming (<guid>-<render>) INTO ITS OWN member
     // namespace (<guid>-<member>): the trio each get their own namespace, while the app's engine and

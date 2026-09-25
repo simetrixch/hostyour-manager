@@ -60,7 +60,7 @@ function ports(reg: TenantRegistrations, dns: FakeDnsProvider, probe: FakePublic
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    deployRepoUrl: "https://github.com/acme/acme-catalog.git",
+    deployRepoUrl: "https://github.com/acme/acme-deploy.git",
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns,

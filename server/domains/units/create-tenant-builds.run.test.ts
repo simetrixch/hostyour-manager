@@ -35,7 +35,7 @@ import { RELEASE_KIT_PATHS } from "#unit/server/release-kit/release-kit.ts";
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
 const HOST = "zot.m1.example";
-const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const JOBS_REPO = "https://github.com/acme/example-jobs.git";
 const PLATFORM_REPO = "https://github.com/acme/example-platform.git";
@@ -43,7 +43,7 @@ const APPS = [{ name: "erp" }];
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, prod]
 builds:

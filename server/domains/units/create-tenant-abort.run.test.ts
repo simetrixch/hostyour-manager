@@ -67,7 +67,7 @@ const TEST_MEMBERS = ["auth", "jobs", "report"];
 
 const SHA = "a".repeat(40);
 const SUB = "acme";
-const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 // A zero-app tenant: the abort under test is about the run, and a tenant with an app would first create
 // and build its apps repository through the consumer onboarding, which this harness does not wire.
@@ -79,7 +79,7 @@ const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, prod]
 builds:

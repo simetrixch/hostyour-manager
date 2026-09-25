@@ -25,7 +25,7 @@ import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./t
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0"; // a live guid (matches the registrations/** path guard)
-const DEPLOY_REPO = "https://github.com/acme/acme-catalog.git";
+const DEPLOY_REPO = "https://github.com/acme/acme-deploy.git";
 const PLATFORM_REPO = "https://github.com/simetrixch/hostyour-cloud.git";
 
 let db: DbHandle;

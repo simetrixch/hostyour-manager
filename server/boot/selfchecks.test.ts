@@ -49,7 +49,7 @@ const wiredConfig = parseConfig({
   ONBOARD_GATE_MANAGER_ADDR: "10.152.183.5:8484",
   GITHUB_REPO: "example/platform",
   GITHUB_WRITE_PAT: "ghp_platform",
-  DEPLOY_REPO: "acme/acme-catalog",
+  DEPLOY_REPO: "acme/acme-deploy",
   // Both onboarding families write onto the branch this installation keeps its books on, which is
   // named after the cluster holding the master role — so a fully configured manager states it.
   MASTER_FQDN: "m1.example.com",

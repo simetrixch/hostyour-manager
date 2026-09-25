@@ -89,10 +89,10 @@ export const MASTER_MARKING_YAML = [
   // here as a plain scalar, and a scalar is what the writer produced from it too — so no test could
   // see that the first rewrite of a real map turned its recipients into one mailbox that is several.
   "  alertRecipients: ['ops@example.com']",
-  "  deployUrl: https://github.com/acme/acme-catalog.git",
+  "  deployUrl: https://github.com/acme/acme-deploy.git",
   // THE SAME REPOSITORY AS owner/name. A cluster cutting a SLAVE's branch reads it from the map,
   // because deployUrl is the wrong shape for what the argocd files stamp.
-  "  deployRepo: acme/acme-catalog",
+  "  deployRepo: acme/acme-deploy",
   // WHAT A REAL MASTER'S MAP CARRIES BESIDE THE NAMES ABOVE. A fixture
   // that carries less than the thing it stands for cannot fail when the code drops something: a
   // slave composed from a handful of copied fields comes out short of a master's keys while every

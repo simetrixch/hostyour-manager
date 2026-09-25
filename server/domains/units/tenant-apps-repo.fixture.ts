@@ -17,14 +17,14 @@ export const SUBDOMAIN = "acme";
 export const BUNDLE = "example-apps"; // the template's name, tenant.appsBundle
 export const UNIT = tenantAppsUnit(BUNDLE, SUBDOMAIN); // example-apps-acme
 export const TENANT_URL = tenantAppsRepoURL(ORG, BUNDLE, SUBDOMAIN);
-export const CATALOG_URL = "https://github.com/acme/acme-catalog.git";
+export const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 export const TEMPLATE_URL = `https://github.com/${ORG}/example-apps.git`;
 export const IMAGE_TAG = "0.1.0-stable-20260101000000-abc1234";
 
 export const deployManifest = (over: { appsOrg?: string; appsBundle?: string } = { appsOrg: ORG, appsBundle: "example-apps" }): string => `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: acme-catalog
+name: acme-deploy
 owner: platform
 envs: [dev, prod]
 tenant:

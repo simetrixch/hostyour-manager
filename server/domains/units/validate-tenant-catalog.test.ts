@@ -17,13 +17,13 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
 const PROBE = "zsjs023ctne0"; // a live-shaped throwaway guid
-const REPO_OF_REQ = "https://github.com/acme/acme-catalog.git";
+const REPO_OF_REQ = "https://github.com/acme/acme-deploy.git";
 
 // The same fan-out manifest validate-tenant.test.ts validates against.
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, prod]
 builds:

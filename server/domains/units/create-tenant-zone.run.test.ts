@@ -37,7 +37,7 @@ const WILDCARD = `*.${SUB}.example.com`;
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, prod]
 builds:
@@ -82,7 +82,7 @@ function ports(dns: FakeDnsProvider | undefined, store = new FakeObjectStore()):
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({ clusterReader: new FakeClusterReader({}), argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" }),
-    deployRepoUrl: "https://github.com/acme/acme-catalog.git", platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git", argoWatchTimeoutMs: 1000,
+    deployRepoUrl: "https://github.com/acme/acme-deploy.git", platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git", argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com", resolveClusterValueFiles: async () => CHAIN,
     registryProbe: new FakeRegistryProbe(), buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [], consumerHostLabels: async () => [],
@@ -108,7 +108,7 @@ function ctx(p: CreateTenantParams, logs: string[]): StepCtx {
 
 describe("G27 over the tenant's wildcard — validateTenant reads the zone where the plan will write it", () => {
   const req = (over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest => ({
-    repoURL: "https://github.com/acme/acme-catalog.git", ref: "master", stage: "prod", apps: [], probeGuid: GUID, subdomain: SUB, clusterValueFiles: CHAIN, clusterFqdn: "s1.example", ...over,
+    repoURL: "https://github.com/acme/acme-deploy.git", ref: "master", stage: "prod", apps: [], probeGuid: GUID, subdomain: SUB, clusterValueFiles: CHAIN, clusterFqdn: "s1.example", ...over,
   });
   const deps = (over: Partial<ValidateTenantDeps> = {}): ValidateTenantDeps => ({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),

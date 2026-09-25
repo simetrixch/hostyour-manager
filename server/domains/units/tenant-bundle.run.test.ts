@@ -41,7 +41,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const GUID = "zsjs023ctne0";
 const HOST = "zot.m1.example";
-const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
+const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const APPS = [{ name: "erp" }];
 const BUILT_TAG = "0.1.0-stable-20260202000000-def5678";
@@ -49,7 +49,7 @@ const APPS_REPO_STEPS = ["create-repository", "write-tree", "onboard-build-only"
 const deployManifest = (spec: string): string => `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, prod]
 builds:

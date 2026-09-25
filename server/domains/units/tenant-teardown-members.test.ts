@@ -35,7 +35,7 @@ import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./t
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
 const SUB = "simetrix";
-const DEPLOY_REPO = "https://github.com/acme/acme-catalog.git";
+const DEPLOY_REPO = "https://github.com/acme/acme-deploy.git";
 const PLATFORM_REPO = "https://github.com/simetrixch/hostyour-cloud.git";
 const THREE_APPS = ["erp", "web", "buildproject"];
 const APP_ENTRIES = THREE_APPS.map((name) => ({ name, seedReference: false, seedDemo: false, selections: {} }));

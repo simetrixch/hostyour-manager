@@ -45,7 +45,7 @@ const enabledEnv = {
   ONBOARD_GATE_MANAGER_ADDR: "10.152.183.5:8484",
   GITHUB_REPO: "example/platform",
   GITHUB_WRITE_PAT: "ghp_platform",
-  DEPLOY_REPO: "acme/acme-catalog",
+  DEPLOY_REPO: "acme/acme-deploy",
   MASTER_FQDN: "m1.example.com",
   MASTER_SSH_USER: "m1",
   MASTER_STAGE: "prod",

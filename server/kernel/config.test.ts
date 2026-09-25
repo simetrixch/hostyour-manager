@@ -174,8 +174,8 @@ describe("tenant onboarding config (deploy repository)", () => {
   // The App is the deploy repository's one identity (hostyour-cloud#237): DEPLOY_REPO names the
   // repository and nothing else is asked; the row deploy.identity measures the App's reach at boot.
   it("takes DEPLOY_REPO as the deploy repository, read and written with the GitHub App", () => {
-    const c = parseConfig({ ...validEnv, DEPLOY_REPO: "acme/acme-catalog" });
-    expect(c.deployRepo).toEqual({ repoURL: "https://github.com/acme/acme-catalog.git" });
+    const c = parseConfig({ ...validEnv, DEPLOY_REPO: "acme/acme-deploy" });
+    expect(c.deployRepo).toEqual({ repoURL: "https://github.com/acme/acme-deploy.git" });
   });
 
   it("rejects a malformed DEPLOY_REPO", () => {
@@ -183,7 +183,7 @@ describe("tenant onboarding config (deploy repository)", () => {
   });
 
   it("is independent of the consumer gate-runner (tenant charts validate manager-side)", () => {
-    const c = parseConfig({ ...validEnv, DEPLOY_REPO: "acme/acme-catalog" });
+    const c = parseConfig({ ...validEnv, DEPLOY_REPO: "acme/acme-deploy" });
     expect(c.deployRepo).toBeDefined();
     expect(c.onboarding).toBeUndefined(); // no ONBOARD_GATE_MANAGER_ADDR, yet tenant config still resolves
   });

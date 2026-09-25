@@ -15,13 +15,13 @@ import {
  *  the test states it rather than importing a constant the module does not own. */
 const ENGINE_CHART = "charts/example-engine";
 const APPS_REPO = "https://github.com/acme/acme-apps.git";
-const REPO_URL = "https://github.com/acme/acme-catalog.git";
+const REPO_URL = "https://github.com/acme/acme-deploy.git";
 
 /** The product's manifest WITH an apps template: `appsRepo` is the repository the catalog is read
  *  from, and no buildRepos entry builds it. */
 const MANIFEST = (appsBundle: string | null): string => `apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
-name: catalog
+name: deploy
 owner: platform
 envs: [dev, test, prod]
 builds:
