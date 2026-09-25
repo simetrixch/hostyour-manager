@@ -15,6 +15,7 @@ import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { provisionArgoSyncStep } from "./tenant-builds.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
+import { syncedRevisionFor, type ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 
 // `tenant-refresh-members` — resolve every member of a STANDING tenant again from the product's
 // manifest and write the entries into its registration.
@@ -29,8 +30,14 @@ import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
 // and the plan refuses it. It builds no image either: an image the new render pulls must already stand
 // in the registry, which ensure-images proves before anything is written.
 //
-// THE KNOWN GAP. Between the product's push and the end of this run, a member whose chart moved does
-// not answer: the registration still names the old chart. The plan says so.
+// THE KNOWN GAP. From the carry of the product's change into the books branch until this run's write
+// has synced, a member whose chart moved does not answer: the registration still names the old chart.
+// The plan says so.
+//
+// THE WAIT. The member Applications stand already and read Synced/Healthy before the write, so being
+// Synced/Healthy proves nothing here. A member counts as synced once its catalog source reads a
+// revision other than the one it stood at before the write: the books branch only moves forward, so
+// any later revision carries this run's entries.
 
 const MemberList = z.array(TenantMemberRecordSchema).min(1);
 
@@ -59,6 +66,17 @@ function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberR
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/** The catalog revision each member Application's chart source reads right now (null where it reads
+ *  none, or the Application is missing). */
+async function catalogRevisions(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Promise<Record<string, string | null>> {
+  const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
+  const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, () => true, { timeoutMs: 1, labelSelector: `platform/tenant=${p.guid}` });
+  return Object.fromEntries(p.expectedApps.map((name) => {
+    const s = byName.get(name);
+    return [name, s ? syncedRevisionFor(s, ports.catalogRepoUrl) : null];
+  }));
+}
+
 /** On abort: write back the member entries the registration carried before this run — only while it
  *  still carries this run's own entries. Entries another run wrote since are that run's, and stay. */
 function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Cleanup {
@@ -68,7 +86,7 @@ function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMember
     run: async (ctx) => {
       const current = await ports.registrations.readTenant(p.stage, p.guid);
       if (!current || !sameMembers(current.entry.members, p.members)) {
-        ctx.log("meta", `tenant ${p.guid}'s member entries are not this run's any more — another run wrote them since; left as they are`);
+        ctx.log("meta", `tenant ${p.guid}'s member entries are not the ones this run writes — this run never wrote them, or another run wrote others since; left as they are`);
         return;
       }
       const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.previous, ctx.runId);
@@ -77,9 +95,9 @@ function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMember
   };
 }
 
-/** Refuses the abort once every member Application reads Synced/Healthy at the new entries: the
- *  tenant then serves from them, and writing the previous entries back would put it on charts the
- *  product no longer carries. A retry of the failed step is the way on. */
+/** Refuses the abort while the registration carries this run's entries and every member Application
+ *  reads Synced/Healthy: the tenant may already serve from them, and writing the previous entries back
+ *  would put it on charts the product no longer carries. A retry of the failed step is the way on. */
 async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Promise<void> {
   const current = await ports.registrations.readTenant(p.stage, p.guid);
   if (!current || !sameMembers(current.entry.members, p.members)) return;
@@ -88,7 +106,7 @@ async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefres
   const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, { timeoutMs: 1, labelSelector: `platform/tenant=${p.guid}` });
   if (until(byName)) {
     throw errValidation(
-      `every member of tenant ${p.guid} is Synced + Healthy at the new entries — an abort would write back entries whose charts the product no longer carries. ` +
+      `the registration of tenant ${p.guid} carries this run's entries and every member is Synced + Healthy — an abort would write back entries whose charts the product no longer carries. ` +
       `Retry the failed step instead so the run settles green.`,
     );
   }
@@ -112,7 +130,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
     provisionArgoSyncStep(ports, { guid: p.guid, clusterId: p.clusterId, expectedApps: p.expectedApps, syncUnits: p.syncUnits }, {}),
     {
       name: "write-members",
-      title: "Write the resolved member entries into the registration",
+      title: "Write the resolved member entries and wait until every member has synced them",
       run: async (ctx) => {
         const current = await ports.registrations.readTenant(p.stage, p.guid);
         if (!current) throw errNotFound(`tenant ${p.guid} is not onboarded (no registration at ${p.stage})`);
@@ -121,26 +139,32 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         if (!sameMembers(current.entry.members, p.previous) && !sameMembers(current.entry.members, p.members)) {
           throw errValidation(`tenant ${p.guid}'s member entries changed since this run was planned — plan it again`);
         }
+        // The revisions the members stand at before the write, kept across a retry of this step so a
+        // retry after the write still waits for a move past them.
+        const before = ctx.readCheckpoint<{ before: Record<string, string | null> }>()?.before ?? (await catalogRevisions(ports, p));
+        ctx.checkpoint({ before });
         ctx.registerCleanup(restoreMembersCleanup(ports, p));
         const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId);
         ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
-        ctx.checkpoint({ commit });
-        ctx.log("meta", `tenant ${p.guid} member entries written (${commit}) — the master ArgoCD renders them at its next sync`);
-      },
-    },
-    {
-      name: "watch-sync-set",
-      title: "Wait for ArgoCD to sync every member at the new entries",
-      run: async (ctx) => {
-        const until = syncedAt(p.expectedApps);
+        ctx.checkpoint({ before, commit });
+        ctx.log("meta", `tenant ${p.guid} member entries written (${commit}) — waiting until every member syncs a catalog revision past the one it stood at`);
+        const moved = (byName: ArgoAppStatusMap): boolean => p.expectedApps.every((name) => {
+          const s = byName.get(name);
+          return s !== undefined && syncedRevisionFor(s, ports.catalogRepoUrl) !== before[name];
+        });
+        const until = (byName: ArgoAppStatusMap): boolean => syncedAt(p.expectedApps)(byName) && moved(byName);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
         const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, {
           timeoutMs: ports.argoWatchTimeoutMs,
           signal: ctx.signal,
           labelSelector: `platform/tenant=${p.guid}`,
         });
-        if (!until(byName)) throw errValidation(describeUnsynced(p.expectedApps, byName));
-        ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy at ${p.chartsRef.slice(0, 7)}`);
+        if (!syncedAt(p.expectedApps)(byName)) throw errValidation(describeUnsynced(p.expectedApps, byName));
+        if (!moved(byName)) {
+          const stale = p.expectedApps.filter((name) => { const st = byName.get(name); return st === undefined || syncedRevisionFor(st, ports.catalogRepoUrl) === before[name]; });
+          throw errValidation(`${stale.join(", ")} still read${stale.length === 1 ? "s" : ""} the catalog revision ${stale.length === 1 ? "it" : "they"} stood at before the write — ArgoCD has not rendered the new entries yet; retry this step`);
+        }
+        ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy past the revisions they stood at`);
       },
     },
   ];

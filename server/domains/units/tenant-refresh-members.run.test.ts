@@ -16,7 +16,7 @@ import { TenantRegistrationSchema, type TenantMemberRecord } from "../../../shar
 import type { StepCtx, PlanStreamCtx, Cleanup } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
+import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -72,21 +72,35 @@ function platformRepo(members: TenantMemberRecord[]): FakePlatformRepo {
   return repo;
 }
 
-function synced(): Map<string, ArgoAppStatus> {
-  return new Map(EXPECTED.map((n) => [n, { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } as ArgoAppStatus]));
+const BEFORE = "b".repeat(40);
+const AFTER = "c".repeat(40);
+
+function synced(revision = AFTER): Map<string, ArgoAppStatus> {
+  return new Map(EXPECTED.map((n) => [n, { syncRevision: revision, targetRevision: null, sync: "Synced", health: "Healthy" } as ArgoAppStatus]));
+}
+
+/** The member Applications as the live set-watch sees them over time: the first read answers the
+ *  revision they stand at before the write, every later one the next scripted answer (the last one
+ *  repeats). Models ArgoCD rendering the new entries after the write. */
+class SteppingArgo extends FakeMasterArgoReader {
+  private reads = 0;
+  constructor(private readonly answers: readonly Map<string, ArgoAppStatus>[]) { super(); }
+  override async watchApplicationSet(): Promise<ArgoAppStatusMap> {
+    return new Map(this.answers[Math.min(this.reads++, this.answers.length - 1)]);
+  }
 }
 
 const IMAGE = `${REGISTRY_HOST}/example-app:1.0.0`;
 const DEPLOYMENT = { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "app", image: IMAGE }] } } } };
 
-function ports(members: TenantMemberRecord[], over: { missing?: string[]; statuses?: Map<string, ArgoAppStatus>; carried?: string[] } = {}): TenantOnboardPorts {
+function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly Map<string, ArgoAppStatus>[]; carried?: string[]; carry?: () => Promise<void> } = {}): TenantOnboardPorts {
   return withAppsTemplate({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment", { raw: DEPLOYMENT })] } }),
     registrations: new TenantRegistrations(platformRepo(members)),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } }),
-      argoReader: new FakeMasterArgoReader({ statuses: over.statuses ?? synced() }),
+      argoReader: new SteppingArgo(over.argo ?? [synced(BEFORE), synced(AFTER)]),
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
@@ -96,7 +110,7 @@ function ports(members: TenantMemberRecord[], over: { missing?: string[]; status
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     registryProbe: new FakeRegistryProbe({ missing: over.missing ?? [] }),
-    carryTrunkToBooksBranch: async () => { over.carried?.push("carried"); },
+    carryTrunkToBooksBranch: over.carry ?? (async () => { over.carried?.push("carried"); }),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => ["example-platform"],
@@ -112,13 +126,14 @@ function seedTenant(): void {
 
 const planCtx = (): PlanStreamCtx => ({ db: db.db, log: () => undefined, signal: new AbortController().signal });
 
-function stepCtx(p: TenantRefreshMembersParams, cleanups: Cleanup[], logs: string[]): StepCtx {
+/** A step context whose checkpoint survives between two runs of one step when handed the same box. */
+function stepCtx(p: TenantRefreshMembersParams, cleanups: Cleanup[], logs: string[], box: { data?: unknown } = {}): StepCtx {
   return {
     runId: "run_refresh", stepName: "x", db: db.db, creds: {} as unknown as CredentialStore, params: p,
     secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
-    log: (_s, t) => logs.push(t), checkpoint: () => undefined, readCheckpoint: () => undefined, registerCleanup: (c) => cleanups.push(c),
+    log: (_s, t) => logs.push(t), checkpoint: (d) => { box.data = d; }, readCheckpoint: <T>() => box.data as T | undefined, registerCleanup: (c) => cleanups.push(c),
   };
 }
 
@@ -193,15 +208,34 @@ describe("tenant-refresh-members", () => {
     await expect(ensure.run(stepCtx(p, [], []))).rejects.toThrow(/example-app/);
   });
 
-  it("write-members resumed after its own write commits nothing new and keeps its cleanup", async () => {
+  it("does not take a member that was Synced + Healthy before the write for one that synced it", async () => {
     seedTenant();
-    const prt = ports(staleMembers());
+    const prt = ports(staleMembers(), { argo: [synced(BEFORE)] });
+    const p = await planned(prt);
+    const write = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-members")!;
+    await expect(write.run(stepCtx(p, [], []))).rejects.toThrow(/still read.*the catalog revision.*stood at before the write/);
+  });
+
+  it("write-members retried after its own write waits past the revisions it recorded before the write", async () => {
+    seedTenant();
+    // The first attempt reads the old revision before the write, then times out on it; the retry
+    // must keep the revision it recorded then: read afresh after the write, it would take the new
+    // revision for its starting point and wait for a move that already happened.
+    const prt = ports(staleMembers(), { argo: [synced(BEFORE), synced(BEFORE), synced(AFTER)] });
     const p = await planned(prt);
     const write = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-members")!;
     const cleanups: Cleanup[] = [];
-    await write.run(stepCtx(p, cleanups, []));
-    await write.run(stepCtx(p, cleanups, []));
+    const box = {};
+    await expect(write.run(stepCtx(p, cleanups, [], box))).rejects.toThrow(/still read/);
+    await write.run(stepCtx(p, cleanups, [], box));
     expect(cleanups.map((c) => c.name)).toEqual(["restore-members", "restore-members"]);
+    expect(db.db.select({ r: tenants.lastRunId }).from(tenants).get()?.r).toBe("run_refresh");
+  });
+
+  it("fails the plan when the catalog trunk cannot be carried: it never plans over a stale books branch", async () => {
+    seedTenant();
+    const prt = ports(staleMembers(), { carry: async () => { throw new Error("push rejected"); } });
+    await expect(makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx())).rejects.toThrow(/push rejected/);
   });
 
   it("REFUSES the abort once every member is Synced + Healthy at the new entries; the restore leaves entries another run wrote", async () => {
@@ -220,7 +254,7 @@ describe("tenant-refresh-members", () => {
 
   it("allows the abort while the members have not converged", async () => {
     seedTenant();
-    const prt = ports(staleMembers(), { statuses: new Map() });
+    const prt = ports(staleMembers(), { argo: [synced(BEFORE), synced(AFTER), new Map()] });
     const p = await planned(prt);
     const def = makeTenantRefreshMembersDef(prt);
     await def.steps(p).find((s) => s.name === "write-members")!.run(stepCtx(p, [], []));
