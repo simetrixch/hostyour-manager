@@ -224,11 +224,11 @@ const FULL_MAP = [
   "  unitApex: example.com",
   "  platformDomain: example.com",
   "  alertRecipients: ['ops@example.com']",
-  "  catalogUrl: https://github.com/acme/acme-catalog.git",
+  "  deployUrl: https://github.com/acme/acme-catalog.git",
   // THE SAME REPOSITORY AS owner/name, which is a different thing to read: every argocd file of
   // the platform stamps the bare owner/name into a URL of its own, so the map states both and a
   // writer that dropped this one would leave the next slave's branch cut with nothing to stamp.
-  "  catalogRepo: acme/acme-catalog",
+  "  deployRepo: acme/acme-catalog",
   // WHICH AUTHORITY ISSUES THIS INSTALLATION'S CERTIFICATES. A rewrite that dropped it hands the
   // next regeneration nothing, the answer falls to the program's default of platform-local, and
   // every certificate is reissued from the cluster's own root while the run reports itself green.
@@ -284,9 +284,9 @@ describe("map rewrite — a writer keeps every value the map carried", () => {
       "letsencryptEmail: ops@example.com",
       "letsencryptServer: https://acme-v02.api.letsencrypt.org/directory",
       "203.0.113.7/32",
-      // THE SAME REPOSITORY, TWICE: catalogUrl is composed from catalogRepo, so the two stand or
+      // THE SAME REPOSITORY, TWICE: deployUrl is composed from deployRepo, so the two stand or
       // fall together and a writer that emitted only one would satisfy neither reader.
-      "catalogRepo: acme/acme-catalog", "catalogUrl: https://github.com/acme/acme-catalog.git",
+      "deployRepo: acme/acme-catalog", "deployUrl: https://github.com/acme/acme-catalog.git",
       // The release pin is a key this manager never writes, so a rewrite that lost it would erase
       // the only statement of which platform release the cluster stands on. It is a TOP-LEVEL key,
       // which the `global:` comparison above does not reach.

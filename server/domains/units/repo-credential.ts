@@ -14,7 +14,7 @@ import type { Stage } from "../../../shared/enums.ts";
 import { consumerNamespace } from "../../../shared/consumer.ts";
 
 /** The Secret name of one unit's repository credential AT ONE STAGE — `repo-<name>-<stage>`, the
- *  naming the per-slave ArgoCD repo Secrets already use (repo-platform, repo-catalog), prefixed per
+ *  naming the per-slave ArgoCD repo Secrets already use (repo-platform, repo-deploy), prefixed per
  *  unit and stage. Per stage because two stages of one unit may share one cluster's ArgoCD namespace,
  *  and an offboard of one stage must not take the other's credential away. */
 export function consumerRepoCredentialName(consumerName: string, stage: Stage): string {

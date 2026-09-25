@@ -49,7 +49,7 @@ export function masterKubeFakes(): MasterKubeFakes {
   });
   const cluster = new FakeClusterReader({
     externalSecretsByNamespace: {
-      [SLAVE_ARGO_NS]: [externalSecretRow("cluster-slave"), externalSecretRow("repo-platform"), externalSecretRow("repo-catalog")],
+      [SLAVE_ARGO_NS]: [externalSecretRow("cluster-slave"), externalSecretRow("repo-platform"), externalSecretRow("repo-deploy")],
     },
   });
   const resolver = new FakeClusterKubeResolver({

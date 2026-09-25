@@ -115,7 +115,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // emit and the register were given as their answer — the fixture's api_server_url/ca_data rows
       // are what judged those, so the green register run above IS the proof the answers matched.
       const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath("s1.example.com")) ?? "";
-      for (const want of ["  master: m1.example.com", "booksCluster: m1.example.com", "  apiHost: 100.64.0.11", "  apiPort: 16443", "role: slave", "  catalogUrl: https://github.com/acme/acme-catalog.git"]) {
+      for (const want of ["  master: m1.example.com", "booksCluster: m1.example.com", "  apiHost: 100.64.0.11", "  apiPort: 16443", "role: slave", "  deployUrl: https://github.com/acme/acme-catalog.git"]) {
         expect(map).toContain(want);
       }
 

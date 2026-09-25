@@ -48,9 +48,9 @@
 //   endpoints.mail.host  the host LABEL the installation's shared mail service stands on — reached
 //                at `<label>.<stage apex>` by a unit in the same stage zone; absent on an installation
 //                that runs none.
-//   catalog-repo the <owner>/<name> of the repository holding this installation's tenant charts
-//                and their per-stage pins. The branch programs demand it (nothing composes a
-//                repository this cloud does not own).
+//   deploy-repo  the <owner>/<name> of the deploy repository: the one holding this installation's
+//                tenant charts and their per-stage pins. The branch programs demand it (nothing
+//                composes a repository this cloud does not own).
 //
 // This module PARSES the map and REGENERATES it key by key, so every key the file may carry has to
 // be declared below even where nothing here decides anything with it: a key the schema does not
@@ -128,7 +128,7 @@ const ClusterMarkingFileSchema = z.object({
     unitApex: z.string().min(1).optional(),
     platformDomain: z.string().min(1).optional(),
     alertRecipients: z.union([z.string(), z.array(z.string())]).optional(),
-    catalogUrl: z.string().min(1).optional(),
+    deployUrl: z.string().min(1).optional(),
     // THE ONE AUTHORITY OF THIS INSTALLATION, the mailbox it writes to, and WHICH authority issues
     // at all. Read rather than merely carried: a machine added to an installation later is told them
     // from here instead of being asked for them again, because they are the installation's answer
@@ -208,7 +208,7 @@ export interface ClusterMarking {
    *  to a slave's regeneration as `mail_host`, and never read here for anything else. */
   mailHost?: string;
   /** Carried, never read here. */
-  catalogRepo?: string;
+  deployRepo?: string;
   /** Which authority issues this installation's certificates, the authority it registers with, and
    *  the mailbox that one writes to. Handed to the machine-layer programs of a machine that joins
    *  later, so nobody is asked twice for one answer of the installation. */
@@ -253,7 +253,7 @@ function headerOf(text: string): string | undefined {
  *  globalRest - a key written from both would stand in the file twice. */
 const NAMED_GLOBALS = new Set([
   "domain", "clusterName", "booksCluster", "buildPlane", "master", "apiHost", "apiPort",
-  "unitApex", "platformDomain", "alertRecipients", "catalogUrl",
+  "unitApex", "platformDomain", "alertRecipients", "deployUrl",
   "clusterIssuer", "letsencryptEmail", "letsencryptServer", "timeSources",
   "registryPullUser", "registryPushUser",
 ]);
@@ -268,11 +268,11 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
   const m = parsed.data;
   const g = m.global;
   const header = text === undefined ? undefined : headerOf(text);
-  // THE OWNER/NAME OF THE CATALOGUE, derived from the URL the map carries rather than written a
-  // second time beside it. The map states one thing about the catalogue — where a build clones it
-  // from — and every other spelling of it follows from that one.
-  const catalogRepo = g.catalogUrl?.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
-  // Derived, like catalogRepo: the unit stands in the endpoints block, which travels whole in
+  // THE OWNER/NAME OF THE DEPLOY REPOSITORY, derived from the URL the map carries rather than written
+  // a second time beside it. The map states one thing about the deploy repository — where a build
+  // clones it from — and every other spelling of it follows from that one.
+  const deployRepo = g.deployUrl?.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
+  // Derived, like deployRepo: the unit stands in the endpoints block, which travels whole in
   // globalRest, so reading it by name here does not make this module a second writer of it.
   const mailHost = (g.endpoints as { mail?: { host?: string } } | undefined)?.mail?.host;
   const objectStorage = g.objectStorage === undefined ? undefined : { accountId: g.objectStorage.r2.accountId, jurisdiction: g.objectStorage.r2.jurisdiction };
@@ -302,7 +302,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
       : {}),
     ...(mailHost !== undefined ? { mailHost } : {}),
     ...(objectStorage !== undefined ? { objectStorage } : {}),
-    ...(catalogRepo ? { catalogRepo } : {}),
+    ...(deployRepo ? { deployRepo } : {}),
     ...(g.clusterIssuer !== undefined ? { clusterIssuer: g.clusterIssuer } : {}),
     ...(g.letsencryptEmail !== undefined ? { letsencryptEmail: g.letsencryptEmail } : {}),
     ...(g.letsencryptServer !== undefined ? { letsencryptServer: g.letsencryptServer } : {}),
@@ -464,8 +464,8 @@ function serializeMarking(m: ClusterMarking): string {
     ...(m.alertRecipients !== undefined && m.alertRecipients.length > 0
       ? ([["alertRecipients", asYaml(`[${m.alertRecipients.map((r) => `'${r.replaceAll("'", "''")}'`).join(", ")}]`)]] as [string, { yaml: string }][])
       : []),
-    ...(m.catalogRepo !== undefined
-      ? ([["catalogUrl", `https://github.com/${m.catalogRepo}.git`]] as [string, string][])
+    ...(m.deployRepo !== undefined
+      ? ([["deployUrl", `https://github.com/${m.deployRepo}.git`]] as [string, string][])
       : []),
     // READ AND THEREFORE WRITTEN. A key this module names but does not emit is a key that survives
     // being read and vanishes on the next write — and the round-trip below is what caught it, which
