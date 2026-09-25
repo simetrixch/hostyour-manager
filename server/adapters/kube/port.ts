@@ -34,6 +34,11 @@ import type { ArgoSync, ArgoHealth } from "../../../shared/enums.ts";
 export interface ArgoSyncSource {
   repoURL: string | null;
   revision: string | null;
+  /** What that comparison rendered for the source, off the same `comparedTo.sources[i]`: the chart
+   *  path, the helm value files and the helm valuesObject. Absent where the source names none. */
+  path?: string | null;
+  valueFiles?: readonly string[];
+  valuesObject?: Readonly<Record<string, unknown>>;
 }
 
 /** One source of a MULTI-SOURCE Application's SPEC — the DESIRED twin of ArgoSyncSource: the
@@ -47,6 +52,9 @@ export interface ArgoTargetSource {
 
 export interface ArgoAppStatus {
   syncRevision: string | null; // the revision Argo last synced to (single-source apps)
+  /** The labels the Application's spec asks its managed namespace to carry
+   *  (`.spec.syncPolicy.managedNamespaceMetadata.labels`); absent where it asks for none. */
+  namespaceLabels?: Readonly<Record<string, string>>;
   /** MULTI-SOURCE apps only (the generated consumer Application carries several sources — the
    *  cluster's $values chain, the consumer chart, and a per-consumer service source when it claims
    *  one): Argo reports `status.sync.revisions[]` INSTEAD of the

@@ -72,39 +72,53 @@ function platformRepo(members: TenantMemberRecord[]): FakePlatformRepo {
   return repo;
 }
 
-const BEFORE = "b".repeat(40);
-const AFTER = "c".repeat(40);
+const CATALOG = "https://github.com/acme/acme-catalog.git";
+/** The member entries the last plan resolved — what "the new entries" means to the fakes below. */
+let resolved: TenantMemberRecord[] = [];
 
-function synced(revision = AFTER): Map<string, ArgoAppStatus> {
-  return new Map(EXPECTED.map((n) => [n, { syncRevision: revision, targetRevision: null, sync: "Synced", health: "Healthy" } as ArgoAppStatus]));
+/** Every member Application Synced + Healthy, its last comparison rendering `members` (by index,
+ *  in the order the plan lists the Applications): the chart sources off the catalog, their value
+ *  files and values, and the namespace labels on the spec. */
+function rendering(members: readonly TenantMemberRecord[]): Map<string, ArgoAppStatus> {
+  return new Map(EXPECTED.map((name, i) => {
+    const m = members[i]!;
+    return [name, {
+      syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy",
+      namespaceLabels: { "platform/tenant": GUID, ...m.namespaceLabels },
+      syncSources: [
+        { repoURL: "https://github.com/simetrixch/hostyour-cloud.git", revision: SHA },
+        { repoURL: CATALOG, revision: SHA },
+        ...m.sources.map((src) => ({ repoURL: CATALOG, revision: SHA, path: src.chart, valueFiles: ["values.yaml", ...src.valueFiles], valuesObject: { tenant: { guid: GUID }, ...src.values } })),
+      ],
+    } as ArgoAppStatus];
+  }));
 }
 
-/** The member Applications as the live set-watch sees them over time: the first read answers the
- *  revision they stand at before the write, every later one the next scripted answer (the last one
- *  repeats). Models ArgoCD rendering the new entries after the write. */
+/** The member Applications as the live set-watch sees them over time, one scripted answer per read
+ *  (the last one repeats), each asked for when read so it can name the entries the plan resolved. */
 class SteppingArgo extends FakeMasterArgoReader {
   private reads = 0;
-  constructor(private readonly answers: readonly Map<string, ArgoAppStatus>[]) { super(); }
+  constructor(private readonly answers: readonly (() => Map<string, ArgoAppStatus>)[]) { super(); }
   override async watchApplicationSet(): Promise<ArgoAppStatusMap> {
-    return new Map(this.answers[Math.min(this.reads++, this.answers.length - 1)]);
+    return this.answers[Math.min(this.reads++, this.answers.length - 1)]!();
   }
 }
 
 const IMAGE = `${REGISTRY_HOST}/example-app:1.0.0`;
 const DEPLOYMENT = { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "app", image: IMAGE }] } } } };
 
-function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly Map<string, ArgoAppStatus>[]; carried?: string[]; carry?: () => Promise<void> } = {}): TenantOnboardPorts {
+function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; carried?: string[]; carry?: () => Promise<void> } = {}): TenantOnboardPorts {
   return withAppsTemplate({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment", { raw: DEPLOYMENT })] } }),
     registrations: new TenantRegistrations(platformRepo(members)),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } }),
-      argoReader: new SteppingArgo(over.argo ?? [synced(BEFORE), synced(AFTER)]),
+      argoReader: new SteppingArgo(over.argo ?? [() => rendering(resolved)]),
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    catalogRepoUrl: "https://github.com/acme/acme-catalog.git",
+    catalogRepoUrl: CATALOG,
     platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
@@ -140,6 +154,7 @@ function stepCtx(p: TenantRefreshMembersParams, cleanups: Cleanup[], logs: strin
 async function planned(prt: TenantOnboardPorts): Promise<TenantRefreshMembersParams> {
   const result = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx());
   if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
+  resolved = result.params.members;
   expect(result.plan.summary).toMatch(/erp \(charts\/example-engine \+ charts\/old-ui → charts\/example-engine \+ charts\/example-ui\)/);
   return result.params;
 }
@@ -208,26 +223,30 @@ describe("tenant-refresh-members", () => {
     await expect(ensure.run(stepCtx(p, [], []))).rejects.toThrow(/example-app/);
   });
 
-  it("does not take a member that was Synced + Healthy before the write for one that synced it", async () => {
+  it("does not take a member Synced + Healthy on its old entry for one that rendered the new entry", async () => {
     seedTenant();
-    const prt = ports(staleMembers(), { argo: [synced(BEFORE)] });
+    const prt = ports(staleMembers(), { argo: [() => rendering(staleMembers())] });
     const p = await planned(prt);
-    const write = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-members")!;
-    await expect(write.run(stepCtx(p, [], []))).rejects.toThrow(/still read.*the catalog revision.*stood at before the write/);
+    const watch = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "watch-sync-set")!;
+    await expect(watch.run(stepCtx(p, [], []))).rejects.toThrow(/auth, erp are Synced \+ Healthy but ArgoCD has not rendered the new entries yet/);
   });
 
-  it("write-members retried after its own write waits past the revisions it recorded before the write", async () => {
+  it("does not take a render whose values or namespace labels still differ from the new entry", async () => {
     seedTenant();
-    // The first attempt reads the old revision before the write, then times out on it; the retry
-    // must keep the revision it recorded then: read afresh after the write, it would take the new
-    // revision for its starting point and wait for a move that already happened.
-    const prt = ports(staleMembers(), { argo: [synced(BEFORE), synced(BEFORE), synced(AFTER)] });
+    const prt = ports(staleMembers(), { argo: [() => rendering(resolved.map((m) => (m.name === "auth" ? { ...m, namespaceLabels: {} } : m)))] });
+    const p = await planned(prt);
+    const watch = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "watch-sync-set")!;
+    await expect(watch.run(stepCtx(p, [], []))).rejects.toThrow(/auth is Synced/);
+  });
+
+  it("write-members resumed after its own write commits nothing new, keeps its cleanup and stamps the tenant row", async () => {
+    seedTenant();
+    const prt = ports(staleMembers());
     const p = await planned(prt);
     const write = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-members")!;
     const cleanups: Cleanup[] = [];
-    const box = {};
-    await expect(write.run(stepCtx(p, cleanups, [], box))).rejects.toThrow(/still read/);
-    await write.run(stepCtx(p, cleanups, [], box));
+    await write.run(stepCtx(p, cleanups, []));
+    await write.run(stepCtx(p, cleanups, []));
     expect(cleanups.map((c) => c.name)).toEqual(["restore-members", "restore-members"]);
     expect(db.db.select({ r: tenants.lastRunId }).from(tenants).get()?.r).toBe("run_refresh");
   });
@@ -238,7 +257,7 @@ describe("tenant-refresh-members", () => {
     await expect(makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx())).rejects.toThrow(/push rejected/);
   });
 
-  it("REFUSES the abort once every member is Synced + Healthy at the new entries; the restore leaves entries another run wrote", async () => {
+  it("REFUSES the abort once every member renders the new entries; the restore leaves entries another run wrote", async () => {
     seedTenant();
     const prt = ports(staleMembers());
     const p = await planned(prt);
@@ -254,7 +273,7 @@ describe("tenant-refresh-members", () => {
 
   it("allows the abort while the members have not converged", async () => {
     seedTenant();
-    const prt = ports(staleMembers(), { argo: [synced(BEFORE), synced(AFTER), new Map()] });
+    const prt = ports(staleMembers(), { argo: [() => rendering(staleMembers())] });
     const p = await planned(prt);
     const def = makeTenantRefreshMembersDef(prt);
     await def.steps(p).find((s) => s.name === "write-members")!.run(stepCtx(p, [], []));

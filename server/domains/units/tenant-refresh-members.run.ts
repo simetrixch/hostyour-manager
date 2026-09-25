@@ -15,7 +15,8 @@ import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { provisionArgoSyncStep } from "./tenant-builds.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
-import { syncedRevisionFor, type ArgoAppStatusMap } from "../../adapters/kube/port.ts";
+import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
+import { isDeepStrictEqual } from "node:util";
 
 // `tenant-refresh-members` — resolve every member of a STANDING tenant again from the product's
 // manifest and write the entries into its registration.
@@ -34,10 +35,10 @@ import { syncedRevisionFor, type ArgoAppStatusMap } from "../../adapters/kube/po
 // has synced, a member whose chart moved does not answer: the registration still names the old chart.
 // The plan says so.
 //
-// THE WAIT. The member Applications stand already and read Synced/Healthy before the write, so being
-// Synced/Healthy proves nothing here. A member counts as synced once its catalog source reads a
-// revision other than the one it stood at before the write: the books branch only moves forward, so
-// any later revision carries this run's entries.
+// THE WAIT. The member Applications stand already and read Synced/Healthy before the write, and their
+// catalog revision moves with every commit on the books branch, so neither proves the new entries are
+// rendered. A member counts as synced once ArgoCD's last comparison rendered exactly its new entry:
+// each chart path in order, its value files and its values, and its namespace labels on the spec.
 
 const MemberList = z.array(TenantMemberRecordSchema).min(1);
 
@@ -66,15 +67,26 @@ function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberR
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** The catalog revision each member Application's chart source reads right now (null where it reads
- *  none, or the Application is missing). */
-async function catalogRevisions(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Promise<Record<string, string | null>> {
-  const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
-  const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, () => true, { timeoutMs: 1, labelSelector: `platform/tenant=${p.guid}` });
-  return Object.fromEntries(p.expectedApps.map((name) => {
-    const s = byName.get(name);
-    return [name, s ? syncedRevisionFor(s, ports.catalogRepoUrl) : null];
-  }));
+/** Whether ArgoCD's last comparison of a member Application rendered exactly this member entry: its
+ *  catalog sources carry the entry's charts in order, each with the entry's value files and values,
+ *  and the spec asks for the entry's namespace labels. */
+function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, catalogRepoUrl: string): boolean {
+  if (!status) return false;
+  const charts = (status.syncSources ?? []).filter((src) => src.repoURL === catalogRepoUrl && src.path);
+  if (charts.length !== member.sources.length) return false;
+  const sourcesMatch = member.sources.every((want, i) => {
+    const got = charts[i]!;
+    return got.path === want.chart
+      && want.valueFiles.every((f) => (got.valueFiles ?? []).includes(f))
+      && Object.entries(want.values).every(([k, v]) => isDeepStrictEqual(got.valuesObject?.[k], v));
+  });
+  return sourcesMatch && Object.entries(member.namespaceLabels).every(([k, v]) => status.namespaceLabels?.[k] === v);
+}
+
+/** Every member Application Synced + Healthy, each rendering its entry of `members`. */
+function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[], catalogRepoUrl: string): (byName: ArgoAppStatusMap) => boolean {
+  const synced = syncedAt(p.expectedApps);
+  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, catalogRepoUrl));
 }
 
 /** On abort: write back the member entries the registration carried before this run — only while it
@@ -95,18 +107,18 @@ function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMember
   };
 }
 
-/** Refuses the abort while the registration carries this run's entries and every member Application
- *  reads Synced/Healthy: the tenant may already serve from them, and writing the previous entries back
- *  would put it on charts the product no longer carries. A retry of the failed step is the way on. */
+/** Refuses the abort once every member Application is Synced/Healthy rendering this run's entries: the
+ *  tenant serves from them, and writing the previous entries back would put it on charts the product
+ *  no longer carries. A retry of the failed step is the way on. */
 async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Promise<void> {
   const current = await ports.registrations.readTenant(p.stage, p.guid);
   if (!current || !sameMembers(current.entry.members, p.members)) return;
-  const until = syncedAt(p.expectedApps);
+  const until = renderedAt(p, p.members, ports.catalogRepoUrl);
   const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
   const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, { timeoutMs: 1, labelSelector: `platform/tenant=${p.guid}` });
   if (until(byName)) {
     throw errValidation(
-      `the registration of tenant ${p.guid} carries this run's entries and every member is Synced + Healthy — an abort would write back entries whose charts the product no longer carries. ` +
+      `every member of tenant ${p.guid} is Synced + Healthy rendering this run's entries — an abort would write back entries whose charts the product no longer carries. ` +
       `Retry the failed step instead so the run settles green.`,
     );
   }
@@ -130,7 +142,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
     provisionArgoSyncStep(ports, { guid: p.guid, clusterId: p.clusterId, expectedApps: p.expectedApps, syncUnits: p.syncUnits }, {}),
     {
       name: "write-members",
-      title: "Write the resolved member entries and wait until every member has synced them",
+      title: "Write the resolved member entries into the registration",
       run: async (ctx) => {
         const current = await ports.registrations.readTenant(p.stage, p.guid);
         if (!current) throw errNotFound(`tenant ${p.guid} is not onboarded (no registration at ${p.stage})`);
@@ -139,20 +151,18 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         if (!sameMembers(current.entry.members, p.previous) && !sameMembers(current.entry.members, p.members)) {
           throw errValidation(`tenant ${p.guid}'s member entries changed since this run was planned — plan it again`);
         }
-        // The revisions the members stand at before the write, kept across a retry of this step so a
-        // retry after the write still waits for a move past them.
-        const before = ctx.readCheckpoint<{ before: Record<string, string | null> }>()?.before ?? (await catalogRevisions(ports, p));
-        ctx.checkpoint({ before });
         ctx.registerCleanup(restoreMembersCleanup(ports, p));
         const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId);
         ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
-        ctx.checkpoint({ before, commit });
-        ctx.log("meta", `tenant ${p.guid} member entries written (${commit}) — waiting until every member syncs a catalog revision past the one it stood at`);
-        const moved = (byName: ArgoAppStatusMap): boolean => p.expectedApps.every((name) => {
-          const s = byName.get(name);
-          return s !== undefined && syncedRevisionFor(s, ports.catalogRepoUrl) !== before[name];
-        });
-        const until = (byName: ArgoAppStatusMap): boolean => syncedAt(p.expectedApps)(byName) && moved(byName);
+        ctx.checkpoint({ commit });
+        ctx.log("meta", `tenant ${p.guid} member entries written (${commit}) — the master ArgoCD renders them once its ApplicationSet regenerates the member Applications`);
+      },
+    },
+    {
+      name: "watch-sync-set",
+      title: "Wait until every member is Synced + Healthy rendering its new entry",
+      run: async (ctx) => {
+        const until = renderedAt(p, p.members, ports.catalogRepoUrl);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
         const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, {
           timeoutMs: ports.argoWatchTimeoutMs,
@@ -160,11 +170,11 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
           labelSelector: `platform/tenant=${p.guid}`,
         });
         if (!syncedAt(p.expectedApps)(byName)) throw errValidation(describeUnsynced(p.expectedApps, byName));
-        if (!moved(byName)) {
-          const stale = p.expectedApps.filter((name) => { const st = byName.get(name); return st === undefined || syncedRevisionFor(st, ports.catalogRepoUrl) === before[name]; });
-          throw errValidation(`${stale.join(", ")} still read${stale.length === 1 ? "s" : ""} the catalog revision ${stale.length === 1 ? "it" : "they"} stood at before the write — ArgoCD has not rendered the new entries yet; retry this step`);
+        if (!until(byName)) {
+          const stale = p.members.filter((m, i) => !rendersEntry(byName.get(p.expectedApps[i]!), m, ports.catalogRepoUrl)).map((m) => m.name);
+          throw errValidation(`${stale.join(", ")} ${stale.length === 1 ? "is" : "are"} Synced + Healthy but ArgoCD has not rendered the new ${stale.length === 1 ? "entry" : "entries"} yet — retry this step once the ApplicationSet has regenerated ${stale.length === 1 ? "it" : "them"}`);
         }
-        ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy past the revisions they stood at`);
+        ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy, each rendering its new entry`);
       },
     },
   ];

@@ -37,6 +37,7 @@ interface RawArgoApp {
   spec?: {
     source?: { targetRevision?: unknown };
     sources?: Array<{ repoURL?: unknown; targetRevision?: unknown }>;
+    syncPolicy?: { managedNamespaceMetadata?: { labels?: unknown } };
   };
   status?: {
     sync?: {
@@ -45,7 +46,7 @@ interface RawArgoApp {
       /** MULTI-SOURCE apps: one synced revision per source, index-aligned with comparedTo.sources
        *  (the Argo API contract) — `revision` stays empty on such an app. */
       revisions?: unknown[];
-      comparedTo?: { sources?: Array<{ repoURL?: unknown }> };
+      comparedTo?: { sources?: Array<{ repoURL?: unknown; path?: unknown; helm?: { valueFiles?: unknown; valuesObject?: unknown } }> };
     };
     health?: { status?: string };
     operationState?: { message?: string; phase?: string };
@@ -73,8 +74,10 @@ export function mapArgoStatus(raw: unknown): ArgoAppStatus {
   const deletionError = argoDeletionError(status);
   const syncSources = mapSyncSources(status?.sync);
   const targetSources = mapTargetSources(app.spec);
+  const namespaceLabels = mapNamespaceLabels(app.spec);
   return {
     syncRevision: status?.sync?.revision ?? null,
+    ...(namespaceLabels !== undefined ? { namespaceLabels } : {}),
     ...(syncSources !== undefined ? { syncSources } : {}),
     targetRevision: text(app.spec?.source?.targetRevision),
     ...(targetSources !== undefined ? { targetSources } : {}),
@@ -110,7 +113,29 @@ function mapSyncSources(sync: NonNullable<RawArgoApp["status"]>["sync"]): ArgoSy
   const revisions = sync?.revisions;
   if (!Array.isArray(revisions) || revisions.length === 0) return undefined;
   const sources = sync?.comparedTo?.sources ?? [];
-  return revisions.map((rev, i) => ({ repoURL: text(sources[i]?.repoURL), revision: text(rev) }));
+  return revisions.map((rev, i) => {
+    const src = sources[i];
+    const valueFiles = src?.helm?.valueFiles;
+    const valuesObject = src?.helm?.valuesObject;
+    return {
+      repoURL: text(src?.repoURL),
+      revision: text(rev),
+      ...(src?.path !== undefined ? { path: text(src.path) } : {}),
+      ...(Array.isArray(valueFiles) ? { valueFiles: valueFiles.filter((f): f is string => typeof f === "string") } : {}),
+      ...(isRecord(valuesObject) ? { valuesObject } : {}),
+    };
+  });
+}
+
+/** `.spec.syncPolicy.managedNamespaceMetadata.labels`, kept only as a map of strings. */
+function mapNamespaceLabels(spec: RawArgoApp["spec"]): Record<string, string> | undefined {
+  const labels = spec?.syncPolicy?.managedNamespaceMetadata?.labels;
+  if (!isRecord(labels)) return undefined;
+  return Object.fromEntries(Object.entries(labels).filter((e): e is [string, string] => typeof e[1] === "string"));
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 function argoMessage(status: RawArgoApp["status"]): string | undefined {
