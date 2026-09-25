@@ -10,7 +10,7 @@
 // other triggers, and a file that is not readable as YAML, because nothing can say what it is.
 import { parse as parseYaml } from "yaml";
 import type { GateResult } from "../../../../shared/gates.ts";
-import { RELEASE_KIT_WORKFLOW } from "../release-kit/release-kit.ts";
+import { RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
 
 /** The trigger names a workflow declares under `on:`, in each of the three shapes GitHub reads —
  *  a string, a list or a map — or null for text that is not a workflow file. */

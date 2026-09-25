@@ -13,7 +13,7 @@ import { CONSUMER_MANIFEST_PATH, ConsumerManifestSchema } from "../../../shared/
 import type { Stage } from "../../../shared/enums.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { RELEASE_KIT_DIR, RELEASE_KIT_WORKFLOW } from "./release-kit/release-kit.ts";
+import { RELEASE_KIT_DIR, RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
 
 /** A tenant's apps unit: `<bundle>-<subdomain>` — the catalog's template name (tenant.appsBundle,
  *  the product the bundle is an instance of) carrying the tenant's subdomain (hostyour-manager#216).

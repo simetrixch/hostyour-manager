@@ -108,7 +108,7 @@ describe("release-kit embedded assets", () => {
   // their own, so there is ONE release script and a change to the kit is this repository's own
   // change too. A second copy here would be released from while every consumer receives the asset,
   // and nothing a developer sees would say the two had drifted.
-  const ASSETS = "server/domains/units/release-kit/assets";
+  const ASSETS = "plugins/unit/server/release-kit/assets";
 
   /** Every way a file under release/ can fail that, NAMED: an empty list is the property holding.
    *  Asked of any text, so the probe below can plant one and see it answer both ways. */

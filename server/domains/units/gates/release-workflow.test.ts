@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { gateReleaseWorkflow, workflowTriggers } from "./release-workflow.ts";
-import { RELEASE_KIT_WORKFLOW } from "../release-kit/release-kit.ts";
+import { RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
 
 const FOREIGN = "name: Publish packages\non:\n  push:\n    tags:\n      - 'v*.*.*'\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps: []\n";
 

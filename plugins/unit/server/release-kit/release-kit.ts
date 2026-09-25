@@ -11,7 +11,7 @@
 // inlined as template literals: the scripts contain backticks, $(), and the workflow's ${{ }} GitHub
 // expressions — a template literal would need fragile escaping and could silently corrupt them.
 // The server runs under tsx (no JS emit) and the Containerfile
-// COPYs the whole server/ tree, so import.meta.url resolves to this source dir at run time and the
+// COPYs the whole plugins/ tree, so import.meta.url resolves to this source dir at run time and the
 // assets travel next to it.
 import { readFileSync } from "node:fs";
 

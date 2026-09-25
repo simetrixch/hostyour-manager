@@ -20,7 +20,7 @@ import type { Step, StepCtx } from "../../executor/types.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 import type { RepoWriter } from "../../adapters/git/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { RELEASE_KIT_DIR, RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "./release-kit/release-kit.ts";
+import { RELEASE_KIT_DIR, RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "#unit/server/release-kit/release-kit.ts";
 
 /** The onboard `inject-release-kit` step: commit the release-kit (release/ scripts + the release
  *  workflow) into the consumer repo's default branch, replacing whatever kit stood there. Fails LOUD

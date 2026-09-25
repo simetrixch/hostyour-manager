@@ -30,7 +30,7 @@ import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclar
 import { gateUnitHost } from "#unit/server/unit-host-gate.ts";
 import { consumerUnitHost, type StandingHostReader } from "#unit/server/unit-dns.ts";
 import { gateReleaseWorkflow } from "./gates/release-workflow.ts";
-import { RELEASE_KIT_WORKFLOW } from "./release-kit/release-kit.ts";
+import { RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
 import type { UnitComposition, UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { mapBuildsToChartPins, type ChartPinMapping } from "./builds.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";

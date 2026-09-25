@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { injectReleaseKitStep, removeReleaseKit } from "./onboard-release-kit.ts";
 import { DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
-import { RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "./release-kit/release-kit.ts";
+import { RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "#unit/server/release-kit/release-kit.ts";
 import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { errUpstream } from "../../kernel/errors.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";

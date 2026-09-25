@@ -6,7 +6,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { GateRunner, GateJobProgress } from "../../adapters/gate-runner/port.ts";
 import { MANIFEST_FED_GATE_IDS } from "./gates/compose.ts";
-import { RELEASE_KIT_WORKFLOW } from "./release-kit/release-kit.ts";
+import { RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
 import { SHA, req, target, report, g1Pass, g1Fail, FakeAttestedBuilds, deps, manifestWith, APEX_CHAIN, pinFile } from "./validate.fixture.ts";
 
 /** The gates a passing onboarding is judged by: the sandbox's, then these from the Manager. The
