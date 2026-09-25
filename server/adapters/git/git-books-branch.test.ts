@@ -7,7 +7,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { join } from "node:path";
 import { GitPlatformRepo } from "./git.ts";
-import { advanceTrunk, dropRoots, git, makeTrunkOnlyOrigin, newRoot } from "./testing/origin-fixture.ts";
+import { advanceTrunk, commitAll, dropRoots, git, makeTrunkOnlyOrigin, newRoot } from "./testing/origin-fixture.ts";
 
 const SLOW = 60_000;
 
@@ -168,14 +168,14 @@ describe("GitPlatformRepo, the books branch", () => {
       // the trunk's new directory in and leaves the pin where the branch wrote it.
       const { originDir, originURL, seed } = makeTrunkOnlyOrigin();
       git(seed, "mv", "charts", "old-ui");
-      git(seed, "commit", "-qm", "the product keeps its chart in a directory");
+      commitAll(seed, "the product keeps its chart in a directory");
       git(seed, "push", "-q", "origin", "master");
       const repo = makeRepo(originURL);
       await repo.carryTrunkToBooksBranch();
       await repo.withBranch(BOOKS, (books) =>
         books.commit({ message: "release: pin prod [run_1]", write: [{ path: "old-ui/pins-prod.yaml", content: "tag: 1\n" }] }));
       git(seed, "mv", "old-ui", "new-app");
-      git(seed, "commit", "-qm", "the product renames its chart");
+      commitAll(seed, "the product renames its chart");
       git(seed, "push", "-q", "origin", "master");
 
       await repo.carryTrunkToBooksBranch();
