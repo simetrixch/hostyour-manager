@@ -40,14 +40,14 @@ export async function probeTenantTarget(ports: TenantOnboardPorts, p: CreateTena
 
 /** write-registration's probe: the catalog is readable with the manager's credential. Whether it is
  *  pushable is proven by the commit: the registrations' repository carries its own push identity. */
-export async function probeCatalog(ports: TenantOnboardPorts, p: CreateTenantParams): Promise<PreflightCheck[]> {
-  const title = `The catalog ${ports.catalogRepoUrl}`;
+export async function probeDeploy(ports: TenantOnboardPorts, p: CreateTenantParams): Promise<PreflightCheck[]> {
+  const title = `The catalog ${ports.deployRepoUrl}`;
   const out: PreflightCheck[] = [];
   try {
     const guids = await ports.registrations.listTenantGuids(p.stage);
-    out.push(check("catalog.read", title, "hard", "pass", `readable; ${guids.length} tenant(s) registered at ${p.stage}`));
+    out.push(check("deploy.read", title, "hard", "pass", `readable; ${guids.length} tenant(s) registered at ${p.stage}`));
   } catch (err) {
-    return [check("catalog.read", title, "hard", "fail", `cannot be read: ${err instanceof Error ? err.message : String(err)}`, "the manager's deploy repository credential or DEPLOY_REPO is wrong")];
+    return [check("deploy.read", title, "hard", "fail", `cannot be read: ${err instanceof Error ? err.message : String(err)}`, "the manager's deploy repository credential or DEPLOY_REPO is wrong")];
   }
   return out;
 }

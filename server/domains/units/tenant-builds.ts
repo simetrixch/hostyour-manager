@@ -325,8 +325,8 @@ export interface RefreshImagesPorts {
   repo: RepoReader;
   helm: HelmRenderer;
   registrations: { branch: string };
-  catalogRepoUrl: string;
-  catalogCredentialId?: string;
+  deployRepoUrl: string;
+  deployCredentialId?: string;
   resolveClusterValueFiles: (domain: string, stage: Stage) => Promise<ClusterValueFile[]>;
   attestedBuilds: () => Promise<{ unit: string; build: string }[]>;
 }
@@ -363,7 +363,7 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
       }
       const outcome = await validateTenant(
         {
-          repoURL: ports.catalogRepoUrl,
+          repoURL: ports.deployRepoUrl,
           ref: ports.registrations.branch,
           stage: p.stage,
           apps: p.apps,
@@ -373,7 +373,7 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
           clusterValueFiles,
           ...(p.appsImage !== undefined ? { appsImage: p.appsImage } : {}),
           ...(appsImageTag !== undefined ? { appsImageTag } : {}),
-          ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
+          ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}),
         },
         { repo: ports.repo, helm: ports.helm, log: (l) => ctx.log("meta", l), signal: ctx.signal },
       );

@@ -93,12 +93,12 @@ export function stagePinFiles(): PinFile[] {
 /** The catalogue's per-installation pin for one stage, `charts/<chart>/pins-<stage>.yaml` on the
  *  books branch — what the release pipeline writes and the tenants ApplicationSet layers over the
  *  chart at deploy. */
-export function catalogPinFile(stage: Stage): string {
+export function deployPinFile(stage: Stage): string {
   return `pins-${stage}.yaml`;
 }
 
-export function catalogPinFiles(): PinFile[] {
-  return [{ file: "values.yaml", stage: null }, ...STAGE.map((stage) => ({ file: catalogPinFile(stage), stage }))];
+export function deployPinFiles(): PinFile[] {
+  return [{ file: "values.yaml", stage: null }, ...STAGE.map((stage) => ({ file: deployPinFile(stage), stage }))];
 }
 
 /**

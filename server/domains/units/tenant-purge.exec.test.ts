@@ -104,7 +104,7 @@ function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePo
       projectWriter: over.projects ?? new FakeMasterProjectWriter(),
       argoNamespace: ARGO_NS,
     }),
-    catalogRepoUrl: DEPLOY_REPO,
+    deployRepoUrl: DEPLOY_REPO,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),
@@ -189,7 +189,7 @@ describe("tenant-purge execution", () => {
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" }); // died after write-registration, before record-inventory
     const projects = new FakeMasterProjectWriter();
     for (const member of MEMBERS) {
-      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
+      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, deployRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
     }
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
     const prt = ports(reg, { projects, cluster });
@@ -240,7 +240,7 @@ describe("tenant-purge execution", () => {
     seedCluster(); // no row, no pointer — create-tenant died at/around apply-appproject
     const projects = new FakeMasterProjectWriter();
     for (const member of MEMBERS) {
-      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
+      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, deployRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
     }
     // NEITHER source knows this guid, so the frozen target names the trio alone. The erp namespace is
     // reachable only through the label the appsets stamp on every member namespace — which is why the
@@ -267,7 +267,7 @@ describe("tenant-purge execution", () => {
     const projects = new FakeMasterProjectWriter();
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, namespacesByLabel: { [TENANT_LABEL]: NAMESPACES } });
     for (const member of MEMBERS) {
-      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
+      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, deployRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
       await cluster.applyAdmissionPolicy({ metadata: { name: `tenant-${memberNamespace(GUID, member, "prod")}` } } as never, { metadata: { name: `tenant-${memberNamespace(GUID, member, "prod")}` } } as never);
     }
     const prt = ports(new TenantRegistrations(new FakePlatformRepo()), { projects, cluster });

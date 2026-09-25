@@ -41,7 +41,7 @@ import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import {
-  parseBuildPins, stagePinFile, stagePinFiles, catalogPinFiles,
+  parseBuildPins, stagePinFile, stagePinFiles, deployPinFiles,
   type GlobPinHit, type GlobSearch, type PinFile, type PinHit,
 } from "../../../shared/pin.ts";
 import { parse as parseYaml } from "yaml";
@@ -92,7 +92,7 @@ const REGISTRATIONS_DIR = "registrations";
 const DEPLOY_CHARTS_DIR = "charts";
 const CLOUD_APPS_DIR = "clusters/inventories";
 /** The repository each glob class stands in, as the carrier string names it. */
-const DEPLOY_LABEL = "catalog";
+const DEPLOY_LABEL = "deploy";
 const CLOUD_LABEL = "hostyour-cloud";
 
 /** The delivery branch a unit's chart pins stand on for one stage. */
@@ -109,7 +109,7 @@ const at = (repo: string, branch: string, path: string): string => `${repo}@${br
 export async function searchCarriers(deps: SearchDeps, signal?: AbortSignal): Promise<PinHit[]> {
   return [
     ...(await searchUnitCharts(deps, signal)),
-    ...(await searchCatalog(deps.deploy)),
+    ...(await searchDeploy(deps.deploy)),
     ...(await searchPlatformApps(deps.cloud)).hits,
   ];
 }
@@ -117,11 +117,11 @@ export async function searchCarriers(deps: SearchDeps, signal?: AbortSignal): Pr
 /** Classes (b) and (d) in ONE walk of the catalog's branches: the chart pins and the tenant
  *  registrations stand on the same branches, and a branch fetched twice is a branch fetched once
  *  too often. */
-async function searchCatalog(deploy: CarrierRepo): Promise<PinHit[]> {
+async function searchDeploy(deploy: CarrierRepo): Promise<PinHit[]> {
   const hits: PinHit[] = [];
   for (const branch of await deploy.listBranches()) {
     await deploy.withBranch(branch.name, async (scope) => {
-      hits.push(...(await globPins(scope, DEPLOY_LABEL, branch.name, DEPLOY_CHARTS_DIR, catalogPinFiles())).hits);
+      hits.push(...(await globPins(scope, DEPLOY_LABEL, branch.name, DEPLOY_CHARTS_DIR, deployPinFiles())).hits);
       hits.push(...(await tenantBundles(scope, branch.name)));
     });
   }

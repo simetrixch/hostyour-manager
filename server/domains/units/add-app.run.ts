@@ -85,7 +85,7 @@ export const AddAppParams = z.object({
   // the new app's images that are absent from the registry and that the tenant spec's buildRepos
   // build — resolved at plan time exactly as create-tenant resolves its own (planBuildUnits).
   buildUnits: z.array(BuildUnitSchema).default([]),
-  catalogRepoUrl: z.string().min(1),
+  deployRepoUrl: z.string().min(1),
   // THE TENANT'S BUNDLE (hostyour-manager#213, #215): every app lives in the tenant's own
   // `<bundle>-<subdomain>` repository, so adding one carries the bundle along — created from the
   // catalog's template where none stood, extended with this app's folder and entry where one does
@@ -237,7 +237,7 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
           member: p.app,
           stage: p.stage,
           argoNamespace,
-          catalogRepoUrl: p.catalogRepoUrl,
+          deployRepoUrl: p.deployRepoUrl,
           platformRepoURL: ports.platformRepoURL,
           cluster: p.cluster,
         });
@@ -394,7 +394,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       const { cluster } = current.entry;
       const outcome = await validateTenant(
         {
-          repoURL: ports.catalogRepoUrl,
+          repoURL: ports.deployRepoUrl,
           // The revision the member Application will read its chart at, and therefore the only one
           // worth rendering the gates over (tenant-registrations.ts, the `branch` getter).
           ref: ports.registrations.branch,
@@ -408,7 +408,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
           appsImage,
           appsImageTag,
           clusterValueFiles,
-          ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
+          ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}),
         },
         { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal },
       );
@@ -459,7 +459,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
         requiredImages,
         syncUnits,
         buildUnits: built.units,
-        catalogRepoUrl: ports.catalogRepoUrl,
+        deployRepoUrl: ports.deployRepoUrl,
         appsUnit,
         appsImage,
         subdomain: current.entry.subdomain,

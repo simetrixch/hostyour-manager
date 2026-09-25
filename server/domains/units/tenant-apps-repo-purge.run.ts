@@ -44,10 +44,10 @@ export type TenantAppsRepoPurgeParams = z.infer<typeof TenantAppsRepoPurgeParams
 export async function scanOrphanBuilds(deps: {
   registrations: Pick<TenantRegistrations, "listTenantPointers">;
   buildRegistrations: Pick<Registrations, "listBuildRegistrations" | "readUnitStages">;
-  catalogBuildUnits: (signal?: AbortSignal) => Promise<string[]>;
+  deployBuildUnits: (signal?: AbortSignal) => Promise<string[]>;
   signal?: AbortSignal;
 }): Promise<OrphanBuildView[]> {
-  const named = new Set<string>(await deps.catalogBuildUnits(deps.signal));
+  const named = new Set<string>(await deps.deployBuildUnits(deps.signal));
   for (const stage of STAGE) {
     for (const t of (await deps.registrations.listTenantPointers(stage)).pointers) if (t.appsImage) named.add(t.appsImage);
   }
@@ -61,10 +61,10 @@ export async function scanOrphanBuilds(deps: {
 }
 
 /** The scan over the ports a def or a route holds; a refusal where the catalog cannot be read. */
-export function orphanBuildsScan(ports: Pick<TenantLifecyclePorts, "registrations" | "buildRegistrations" | "catalogBuildUnits">): (signal?: AbortSignal) => Promise<OrphanBuildView[]> {
+export function orphanBuildsScan(ports: Pick<TenantLifecyclePorts, "registrations" | "buildRegistrations" | "deployBuildUnits">): (signal?: AbortSignal) => Promise<OrphanBuildView[]> {
   return (signal) => {
-    if (!ports.buildRegistrations || !ports.catalogBuildUnits) throw errValidation("the build registrations or the catalog's build units cannot be read on this manager — nothing is listed as orphaned, and nothing can be purged");
-    return scanOrphanBuilds({ registrations: ports.registrations, buildRegistrations: ports.buildRegistrations, catalogBuildUnits: ports.catalogBuildUnits, ...(signal ? { signal } : {}) });
+    if (!ports.buildRegistrations || !ports.deployBuildUnits) throw errValidation("the build registrations or the catalog's build units cannot be read on this manager — nothing is listed as orphaned, and nothing can be purged");
+    return scanOrphanBuilds({ registrations: ports.registrations, buildRegistrations: ports.buildRegistrations, deployBuildUnits: ports.deployBuildUnits, ...(signal ? { signal } : {}) });
   };
 }
 

@@ -15,8 +15,8 @@ import { bootMarker, type RegistrationMigration } from "./registration-laws.ts";
 import type { Registrations } from "./registrations.ts";
 
 /** Which books a migration ran over: the platform's (hostyour-cloud, the consumer registrations) or
- *  the catalog's (the tenant registrations). */
-export type BooksName = "platform" | "catalog";
+ *  the deploy repository's (the tenant registrations). */
+export type BooksName = "platform" | "deploy";
 
 export type MigratedBooks =
   | ({ books: BooksName; branch: string } & RegistrationMigration)
@@ -45,7 +45,7 @@ export async function migrateRegistrations(deps: MigrateRegistrationsDeps): Prom
   const marker = bootMarker(deps.version);
   const registries: { books: BooksName; registry: Registry | undefined }[] = [
     { books: "platform", registry: deps.registrations },
-    { books: "catalog", registry: deps.tenantRegistrations },
+    { books: "deploy", registry: deps.tenantRegistrations },
   ];
   const outcomes: MigratedBooks[] = [];
   for (const { books, registry } of registries) {

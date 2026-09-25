@@ -83,7 +83,7 @@ function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePo
       projectWriter: over.projects ?? new FakeMasterProjectWriter(),
       argoNamespace: ARGO_NS,
     }),
-    catalogRepoUrl: DEPLOY_REPO,
+    deployRepoUrl: DEPLOY_REPO,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),
@@ -157,7 +157,7 @@ describe("tenant-purge plan", () => {
     expect(plan.targetKind).toBe("cluster");
     expect(plan.targetId).toBe("cls_1");
     expect(plan.steps.map((s) => s.name)).toEqual(STEP_ORDER);
-    expect(plan.locks).toEqual([{ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` }, { resource: "master-kube", key: "m" }]);
+    expect(plan.locks).toEqual([{ resource: "git-branch", key: `deploy@${FAKE_BOOKS_BRANCH}` }, { resource: "master-kube", key: "m" }]);
     expect(plan.requiredSecrets).toEqual([]);
     // The frozen target: resolved purely from the live pointer, so tenantId is null and the fan-out
     // watch set is the one the pointer describes (read BEFORE the teardown git-rm's it).

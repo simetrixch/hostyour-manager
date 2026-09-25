@@ -107,7 +107,7 @@ function lifecyclePorts(registrations: TenantRegistrations, clusterReader: FakeC
       // allowed through runs to completion, so a run that does NOT is the belt refusing it.
       argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
     }),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),

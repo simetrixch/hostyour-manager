@@ -73,7 +73,7 @@ function threeClassFixture(opts: { withDeployCarrier?: boolean } = {}): {
   // With the carrier: the chart states its pin. Without it: the same chart on the same branch, stating
   // no pins — exactly the floor class (b) would leave behind if it were dropped from the search.
   // The catalog pin stands on THIS installation's books branch, never on the trunk every
-  // installation reads — see shared/pin.ts catalogPinFiles().
+  // installation reads — see shared/pin.ts deployPinFiles().
   deploy.seed(
     deploy.booksBranch,
     "charts/example-engine/pins-dev.yaml",

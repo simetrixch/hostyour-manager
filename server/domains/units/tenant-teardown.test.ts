@@ -86,7 +86,7 @@ function ports(reg: TenantRegistrations, over: FakeKube & { buildRbac?: FakeBuil
       projectWriter: over.projects ?? new FakeMasterProjectWriter(),
       argoNamespace: ARGO_NS,
     }),
-    catalogRepoUrl: DEPLOY_REPO,
+    deployRepoUrl: DEPLOY_REPO,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
   };
@@ -400,7 +400,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const projects = new FakeMasterProjectWriter();
     for (const member of MEMBERS) {
-      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
+      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, deployRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
     }
     for (const member of MEMBERS) expect(projects.get(ARGO_NS, memberAppProject(GUID, member, "prod"))).toBeDefined();
 

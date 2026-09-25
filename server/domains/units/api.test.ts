@@ -348,7 +348,7 @@ function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: reg,
     resolver: tenantResolver(),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: "https://github.com/x/hostyour-cloud.git",
     argoWatchTimeoutMs: 1000,
     // ensure-images defaults: every image present ⇒ the step is a pure probe/no-op here.
@@ -362,7 +362,7 @@ function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
 }
 
 function tenantLifecyclePorts(reg: TenantRegistrations): TenantLifecyclePorts {
-  return { registrations: reg, resolver: tenantResolver(), catalogRepoUrl: DEPLOY_URL, argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com" };
+  return { registrations: reg, resolver: tenantResolver(), deployRepoUrl: DEPLOY_URL, argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com" };
 }
 
 async function makeTenant(enabled: boolean): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string }> {

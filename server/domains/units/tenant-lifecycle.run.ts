@@ -47,7 +47,7 @@ export type RemoveAppParams = z.infer<typeof RemoveAppParams>;
 // consumer/tenant run (one master, one ArgoCD).
 const masterKubeLock: LockClaim = { resource: "master-kube", key: "m" };
 export const tenantLocks = (registrations: TenantRegistrations): LockClaim[] => [
-  { resource: "git-branch", key: `catalog@${registrations.branch}` },
+  { resource: "git-branch", key: `deploy@${registrations.branch}` },
   masterKubeLock,
 ];
 

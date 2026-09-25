@@ -150,7 +150,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
       projectWriter: projects ?? new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
@@ -171,7 +171,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: REGISTRY_HOST,
     apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
-    report: passReport(), expectedApps: EXPECTED, catalogRepoUrl: DEPLOY_URL,
+    report: passReport(), expectedApps: EXPECTED, deployRepoUrl: DEPLOY_URL,
     ...over,
   });
 }
@@ -416,7 +416,7 @@ describe("create-tenant's abort-with-cleanup IS the shared teardown", () => {
     // the teardown must reap it even though it was never row-backed.
     await projects.applyAppProject(
       "argocd",
-      renderTenantAppProject({ guid: GUID, member: "auth", stage: "prod", argoNamespace: "argocd", catalogRepoUrl: DEPLOY_URL, platformRepoURL: PLATFORM_URL, cluster: "s1" }),
+      renderTenantAppProject({ guid: GUID, member: "auth", stage: "prod", argoNamespace: "argocd", deployRepoUrl: DEPLOY_URL, platformRepoURL: PLATFORM_URL, cluster: "s1" }),
     );
     const prt = ports({ projects });
     const p = params();

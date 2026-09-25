@@ -265,24 +265,24 @@ describe("Registrations.migrateToSchema (the consumer registrations: stage files
 describe("migrateRegistrations (the boot act over both books)", () => {
   it("runs both registries with the boot marker and answers each outcome", async () => {
     const platform = new FakePlatformRepo({ booksBranch: "m1.example.com" });
-    const catalog = new FakePlatformRepo({ booksBranch: "m1.example.com" });
+    const deployRepo = new FakePlatformRepo({ booksBranch: "m1.example.com" });
     platform.seed(platform.booksBranch, BUILD_PATH, consumerBuildFile({}, ["removing"]));
-    catalog.seed(catalog.booksBranch, TENANT_PATH, tenantFile({}, ["appsImage", "appsImageTag"]));
+    deployRepo.seed(deployRepo.booksBranch, TENANT_PATH, tenantFile({}, ["appsImage", "appsImageTag"]));
     const lines: { level: string; args: unknown[] }[] = [];
-    const outcomes = await migrateRegistrations({ registrations: new Registrations(platform), tenantRegistrations: new TenantRegistrations(catalog), version: "0.8.203", logger: logger(lines) });
+    const outcomes = await migrateRegistrations({ registrations: new Registrations(platform), tenantRegistrations: new TenantRegistrations(deployRepo), version: "0.8.203", logger: logger(lines) });
     expect(outcomes).toEqual([
       { books: "platform", branch: "m1.example.com", read: 1, rewritten: [{ path: BUILD_PATH, fields: ["+removing"] }], refused: [], commit: "commit_1" },
-      { books: "catalog", branch: "m1.example.com", read: 1, rewritten: [{ path: TENANT_PATH, fields: ["+appsImage", "+appsImageTag"] }], refused: [], commit: "commit_1" },
+      { books: "deploy", branch: "m1.example.com", read: 1, rewritten: [{ path: TENANT_PATH, fields: ["+appsImage", "+appsImageTag"] }], refused: [], commit: "commit_1" },
     ]);
     expect(platform.commits[0]!.message).toMatch(/ \[boot 0\.8\.203\]$/);
-    expect(catalog.commits[0]!.message).toMatch(/ \[boot 0\.8\.203\]$/);
+    expect(deployRepo.commits[0]!.message).toMatch(/ \[boot 0\.8\.203\]$/);
     expect(lines.filter((l) => l.level === "info").map((l) => l.args[1])).toEqual(["registrations migrated to the schema", "registrations migrated to the schema"]);
   });
 
   it("does nothing and says so where no books are configured", async () => {
     const lines: { level: string; args: unknown[] }[] = [];
     expect(await migrateRegistrations({ version: "0.8.203", logger: logger(lines) })).toEqual([]);
-    expect(lines.map((l) => [l.level, (l.args[0] as { books: string }).books])).toEqual([["info", "platform"], ["info", "catalog"]]);
+    expect(lines.map((l) => [l.level, (l.args[0] as { books: string }).books])).toEqual([["info", "platform"], ["info", "deploy"]]);
     expect(lines.every((l) => String(l.args[1]).includes("no registration to migrate"))).toBe(true);
   });
 
@@ -291,24 +291,24 @@ describe("migrateRegistrations (the boot act over both books)", () => {
       booksBranch: "m1.example.com",
       withBranch: async () => { throw new Error('this installation\'s books branch "m1.example.com" does not exist on https://github.com/x/platform.git'); },
     };
-    const catalog = new FakePlatformRepo();
-    catalog.seed(catalog.booksBranch, TENANT_PATH, tenantFile());
+    const deployRepo = new FakePlatformRepo();
+    deployRepo.seed(deployRepo.booksBranch, TENANT_PATH, tenantFile());
     const lines: { level: string; args: unknown[] }[] = [];
-    const outcomes = await migrateRegistrations({ registrations: new Registrations(absent), tenantRegistrations: new TenantRegistrations(catalog), version: "0.8.203", logger: logger(lines) });
+    const outcomes = await migrateRegistrations({ registrations: new Registrations(absent), tenantRegistrations: new TenantRegistrations(deployRepo), version: "0.8.203", logger: logger(lines) });
     expect(outcomes[0]).toEqual({ books: "platform", branch: "m1.example.com", failed: expect.stringContaining("does not exist") });
-    expect(outcomes[1]).toEqual({ books: "catalog", branch: catalog.booksBranch, read: 1, rewritten: [], refused: [], commit: null });
+    expect(outcomes[1]).toEqual({ books: "deploy", branch: deployRepo.booksBranch, read: 1, rewritten: [], refused: [], commit: null });
     expect(lines.filter((l) => l.level === "error")).toHaveLength(1);
-    expect(catalog.commits).toEqual([]);
+    expect(deployRepo.commits).toEqual([]);
   });
 
   it("warns per refused file with its path and reason", async () => {
-    const catalog = new FakePlatformRepo();
-    catalog.seed(catalog.booksBranch, TENANT_PATH, tenantFile({ identityProvider: "nobody" }));
+    const deployRepo = new FakePlatformRepo();
+    deployRepo.seed(deployRepo.booksBranch, TENANT_PATH, tenantFile({ identityProvider: "nobody" }));
     const lines: { level: string; args: unknown[] }[] = [];
-    await migrateRegistrations({ tenantRegistrations: new TenantRegistrations(catalog), version: "0.8.203", logger: logger(lines) });
+    await migrateRegistrations({ tenantRegistrations: new TenantRegistrations(deployRepo), version: "0.8.203", logger: logger(lines) });
     const warned = lines.filter((l) => l.level === "warn");
     expect(warned).toHaveLength(1);
-    expect(warned[0]!.args[0]).toEqual({ books: "catalog", branch: catalog.booksBranch, path: TENANT_PATH, reason: expect.stringContaining("failed its schema") });
+    expect(warned[0]!.args[0]).toEqual({ books: "deploy", branch: deployRepo.booksBranch, path: TENANT_PATH, reason: expect.stringContaining("failed its schema") });
   });
 });
 
@@ -320,18 +320,18 @@ describe("checkRegistrationsMigrated (the registrations.schema self-check row)",
   it("is green with how much each books covered", () => {
     const row = checkRegistrationsMigrated([
       { books: "platform", branch: "m1.example.com", read: 3, rewritten: [{ path: BUILD_PATH, fields: ["+removing"] }], refused: [], commit: "abc" },
-      { books: "catalog", branch: "m1.example.com", read: 1, rewritten: [], refused: [], commit: null },
+      { books: "deploy", branch: "m1.example.com", read: 1, rewritten: [], refused: [], commit: null },
     ]);
-    expect(row).toEqual({ name: "registrations.schema", kind: "degrading", ok: true, detail: "platform m1.example.com: 3 read, 1 rewritten (abc), 0 refused; catalog m1.example.com: 1 read, 0 rewritten, 0 refused" });
+    expect(row).toEqual({ name: "registrations.schema", kind: "degrading", ok: true, detail: "platform m1.example.com: 3 read, 1 rewritten (abc), 0 refused; deploy m1.example.com: 1 read, 0 rewritten, 0 refused" });
   });
 
   it("is red naming every refused file with its reason, and a books that could not be read", () => {
     const row = checkRegistrationsMigrated([
       { books: "platform", branch: "m1.example.com", failed: "the branch does not exist" },
-      { books: "catalog", branch: "m1.example.com", read: 2, rewritten: [], refused: [{ path: TENANT_PATH, reason: "failed its schema: identityProvider nobody" }], commit: null },
+      { books: "deploy", branch: "m1.example.com", read: 2, rewritten: [], refused: [{ path: TENANT_PATH, reason: "failed its schema: identityProvider nobody" }], commit: null },
     ]);
     expect(row.kind).toBe("degrading");
     expect(row.ok).toBe(false);
-    expect(row.detail).toBe(`the platform books m1.example.com could not be read: the branch does not exist; catalog books m1.example.com: ${TENANT_PATH} failed its schema: identityProvider nobody — platform m1.example.com: not read; catalog m1.example.com: 2 read, 0 rewritten, 1 refused`);
+    expect(row.detail).toBe(`the platform books m1.example.com could not be read: the branch does not exist; deploy books m1.example.com: ${TENANT_PATH} failed its schema: identityProvider nobody — platform m1.example.com: not read; deploy m1.example.com: 2 read, 0 rewritten, 1 refused`);
   });
 });

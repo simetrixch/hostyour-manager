@@ -7,7 +7,7 @@ describe("renderTenantAppProject", () => {
   const PLATFORM = "https://github.com/simetrixch/hostyour-cloud.git";
   const GUID = "e2e8ymj86dk8";
   const render = (member: string) =>
-    renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: "s1", catalogRepoUrl: CATALOG, platformRepoURL: PLATFORM, cluster: "s1" });
+    renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: "s1", deployRepoUrl: CATALOG, platformRepoURL: PLATFORM, cluster: "s1" });
   const project = render("auth");
 
   it("names the project == namespace == <guid>-<member>-<stage> and lives in the per-slave ArgoCD namespace", () => {

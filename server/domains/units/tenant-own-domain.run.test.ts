@@ -85,7 +85,7 @@ describe("tenant-set-own-domain through the Executor", () => {
         clusterReader: new FakeClusterReader({ deployState: { domain: CLUSTER, stage: "prod", writtenAt: "x", generation: 1 } }),
         argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
       }),
-      catalogRepoUrl: "https://github.com/acme/acme-catalog.git", argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com",
+      deployRepoUrl: "https://github.com/acme/acme-catalog.git", argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com",
       dns, probe, routingWaitMs: 0, routingPollMs: 0,
     });
     const executor = new Executor({

@@ -129,9 +129,9 @@ async function makeTenantLive(resolver?: FakeClusterKubeResolver): Promise<{ app
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
     registerAuth: () => undefined,
-    // resolver + catalogRepoUrl are wired together (both come from config.deployRepo), so the
+    // resolver + deployRepoUrl are wired together (both come from config.deployRepo), so the
     // "not configured" case below drops BOTH — the live read needs both or it degrades to SQL-only.
-    registerProtected: (a) => registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: true, ...(resolver ? { resolver, catalogRepoUrl: DEPLOY_REPO } : {}) }),
+    registerProtected: (a) => registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: true, ...(resolver ? { resolver, deployRepoUrl: DEPLOY_REPO } : {}) }),
   });
   const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
   return { app, cookie };

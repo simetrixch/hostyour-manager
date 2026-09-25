@@ -13,7 +13,7 @@ import type { TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
-import { probeCatalog } from "./tenant-probes.ts";
+import { probeDeploy } from "./tenant-probes.ts";
 import { stagePinsOf } from "./tenant-versions.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 
@@ -28,7 +28,7 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
   return {
     name: "write-registration",
     title: "Commit the tenant registration (GitOps deploy)",
-    probe: () => probeCatalog(ports, p),
+    probe: () => probeDeploy(ports, p),
     run: async (ctx) => {
       // The bundle's tag: the one the apps-repo steps read off the release in this pass. A pass
       // resumed after them has none, and a registration naming an image without its tag would hand

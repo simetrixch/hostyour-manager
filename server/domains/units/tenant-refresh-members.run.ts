@@ -96,9 +96,9 @@ function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberR
  *  this one dropped, and the entry's values and no value key it dropped; the spec asks for the entry's
  *  namespace labels and none it dropped. The template's own value files and values around the entry's
  *  are the same before and after, so the previous entry is what tells a dropped part from them. */
-export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, catalogRepoUrl: string): boolean {
+export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, deployRepoUrl: string): boolean {
   if (!status) return false;
-  const charts = (status.syncSources ?? []).filter((src) => src.repoURL === catalogRepoUrl && src.path);
+  const charts = (status.syncSources ?? []).filter((src) => src.repoURL === deployRepoUrl && src.path);
   if (charts.length !== member.sources.length) return false;
   const sourcesMatch = member.sources.every((want, i) => {
     const got = charts[i]!;
@@ -120,9 +120,9 @@ export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMe
 }
 
 /** Every member Application Synced + Healthy, each rendering its entry of `members`. */
-function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[], catalogRepoUrl: string): (byName: ArgoAppStatusMap) => boolean {
+function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[], deployRepoUrl: string): (byName: ArgoAppStatusMap) => boolean {
   const synced = syncedAt(p.expectedApps);
-  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), catalogRepoUrl));
+  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), deployRepoUrl));
 }
 
 /** On abort: write back the member entries the registration carried before this run — only while it
@@ -149,7 +149,7 @@ function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMember
 async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Promise<void> {
   const current = await ports.registrations.readTenant(p.stage, p.guid);
   if (!current || !sameMembers(current.entry.members, p.members)) return;
-  const until = renderedAt(p, p.members, ports.catalogRepoUrl);
+  const until = renderedAt(p, p.members, ports.deployRepoUrl);
   const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
   const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, { timeoutMs: 1, labelSelector: `platform/tenant=${p.guid}` });
   if (until(byName)) {
@@ -210,7 +210,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
       name: "watch-sync-set",
       title: "Wait until every member is Synced + Healthy rendering its new entry",
       run: async (ctx) => {
-        const until = renderedAt(p, p.members, ports.catalogRepoUrl);
+        const until = renderedAt(p, p.members, ports.deployRepoUrl);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
         const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, {
           timeoutMs: ports.argoWatchTimeoutMs,
@@ -219,7 +219,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         });
         if (!syncedAt(p.expectedApps)(byName)) throw errValidation(`tenant ${p.guid} fan-out did not converge — ${describeUnsynced(p.expectedApps, byName)}`);
         if (!until(byName)) {
-          const stale = p.members.filter((m, i) => !rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), ports.catalogRepoUrl)).map((m) => m.name);
+          const stale = p.members.filter((m, i) => !rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), ports.deployRepoUrl)).map((m) => m.name);
           throw errValidation(`${stale.join(", ")} ${stale.length === 1 ? "is" : "are"} Synced + Healthy but ArgoCD has not rendered the new ${stale.length === 1 ? "entry" : "entries"} yet — retry this step once the ApplicationSet has regenerated ${stale.length === 1 ? "it" : "them"}`);
         }
         ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy, each rendering its new entry`);
@@ -274,7 +274,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       const { apps, appsImage, appsImageTag, seedUsers, subdomain } = current.entry;
       const outcome = await validateTenant(
         {
-          repoURL: ports.catalogRepoUrl,
+          repoURL: ports.deployRepoUrl,
           // The revision the member Applications read their charts at (tenant-registrations.ts, `branch`).
           ref: ports.registrations.branch,
           stage: tc.stage,
@@ -284,7 +284,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           seedUsers,
           ...(appsImage ? { appsImage, appsImageTag } : {}),
           clusterValueFiles,
-          ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
+          ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}),
         },
         { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal },
       );

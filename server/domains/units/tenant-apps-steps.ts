@@ -99,7 +99,7 @@ async function appCredentialId(ctx: StepCtx, runtime: TenantAppsRepoRuntime): Pr
  *  no credential of its own. */
 async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[]) => Promise<{ path: string; content: string }[]>; dispose: () => Promise<void> }> {
   const repo = ports.repo;
-  const cloned = await repo.cloneAtRef({ repoURL: templateRepoURL, ref: DEFAULT_BRANCH_HEAD, ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}), signal });
+  const cloned = await repo.cloneAtRef({ repoURL: templateRepoURL, ref: DEFAULT_BRANCH_HEAD, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), signal });
   try {
     const appsYaml = await repo.readFile(cloned.workdir, APPS_MANIFEST_PATH);
     if (appsYaml === null) throw errValidation(`${templateRepoURL} carries no ${APPS_MANIFEST_PATH} at its default branch — nothing says which apps the template offers`);
@@ -130,7 +130,7 @@ export async function resolveTenantAppsUnit(
   input: { subdomain: string; chosen: readonly string[]; spec: TenantSpec | null; owners: OwnerIdentityReader; signal: AbortSignal; log: (line: string) => void },
 ): Promise<{ outcome: "resolved"; unit: TenantAppsUnit } | { outcome: "refused"; why: string }> {
   const refuse = (why: string) => ({ outcome: "refused" as const, why });
-  if (!input.spec) return refuse(`the catalog ${ports.catalogRepoUrl} declares no tenant fan-out in ${TENANT_MANIFEST_PATH} on ${ports.registrations.branch}`);
+  if (!input.spec) return refuse(`the catalog ${ports.deployRepoUrl} declares no tenant fan-out in ${TENANT_MANIFEST_PATH} on ${ports.registrations.branch}`);
   const org = await requireGitHubApp(ports).installationOrg(input.signal);
   if (input.spec.appsOrg !== undefined && input.spec.appsOrg !== org) return refuse(`the catalog's tenant.appsOrg is "${input.spec.appsOrg}" and the GitHub App is installed in "${org}" — the repository would be created where the App has no rights; install the App in ${input.spec.appsOrg} or correct the catalog`);
   const template = tenantAppsTemplate(input.spec);

@@ -113,7 +113,7 @@ export interface UnitsWiring {
    *  tenantResolver: the live read asks the base Application which of its spec sources targets
    *  catalog, the way the consumer read asks with the app row's own repoUrl. Undefined exactly
    *  when tenantResolver is — both come from config.deployRepo. */
-  catalogRepoUrl?: string;
+  deployRepoUrl?: string;
   /** The tenant app catalog provider, threaded to registerTenantRoutes so GET
    *  /api/tenants/app-catalog can offer the wizard the apps of the apps repository's apps.yaml.
    *  Undefined when tenant onboarding is not configured — the catalog route then serves { apps: [] }. */
@@ -288,7 +288,7 @@ export function buildUnits(
     ...(consumer.github ? { github: consumer.github } : {}),
     ...(consumer.platformGitHub ? { platformGitHub: consumer.platformGitHub } : {}),
     ...(tenant.resolver ? { tenantResolver: tenant.resolver } : {}),
-    ...(tenant.catalogRepoUrl ? { catalogRepoUrl: tenant.catalogRepoUrl } : {}),
+    ...(tenant.deployRepoUrl ? { deployRepoUrl: tenant.deployRepoUrl } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
     ...(tenant.orphanBuilds ? { orphanBuilds: tenant.orphanBuilds } : {}),

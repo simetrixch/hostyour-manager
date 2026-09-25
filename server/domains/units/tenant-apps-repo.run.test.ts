@@ -12,7 +12,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeTenantAppsRepoDef, type TenantAppsRepoParams } from "./tenant-apps-repo.run.ts";
 import { mergeAppsManifest } from "./tenant-apps-tree.ts";
-import { CATALOG_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, TEMPLATE_FILES, TEMPLATE_MANIFEST, TEMPLATE_URL, TENANT_URL, UNIT, catalogManifest, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
+import { CATALOG_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, TEMPLATE_FILES, TEMPLATE_MANIFEST, TEMPLATE_URL, TENANT_URL, UNIT, deployManifest, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -63,7 +63,7 @@ function harness(over: { catalog?: string; ports?: Partial<TenantOnboardPorts>; 
   const githubApp = new FakeGitHubApp();
   githubApp.org = ORG;
   const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
-  const catalogReader = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.catalog ?? catalogManifest() } });
+  const catalogReader = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.catalog ?? deployManifest() } });
   catalogReader.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: TEMPLATE_FILES });
   const consumerRepo = new FakeRepoWriter();
   const github = new FakeGitHubConsumer();
@@ -80,9 +80,9 @@ function harness(over: { catalog?: string; ports?: Partial<TenantOnboardPorts>; 
       clusterReader: new FakeClusterReader({ deployState: { domain: "m1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } }),
       argoReader: new FakeMasterArgoReader({}), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
     }),
-    catalogRepoUrl: CATALOG_URL,
+    deployRepoUrl: CATALOG_URL,
     platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
-    catalogCredentialId: "catalog-read-pat",
+    deployCredentialId: "deploy-read-pat",
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [],
@@ -172,7 +172,7 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
     for (const key of ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"]) expect(r.summary).toContain(key);
   });
   it("refuses a catalog that names no apps bundle — there is no template", async () => {
-    const r = await plan(harness({ catalog: catalogManifest({ appsOrg: ORG }) }));
+    const r = await plan(harness({ catalog: deployManifest({ appsOrg: ORG }) }));
     expect(r.outcome).toBe("rejected");
     if (r.outcome !== "rejected") return;
     expect(r.summary).toMatch(/declares no tenant\.appsBundle/);
@@ -224,7 +224,7 @@ describe("tenant-apps-repo planStream — the plan", () => {
     expect(r.plan.targetId).toBe("cls_m");
     expect(r.plan.summary).toContain(`${ORG}/${UNIT}`);
     // The template was cloned through the catalog's reader with the catalog's read credential — it is no unit.
-    expect(h.catalogReader.clones).toContainEqual({ repoURL: TEMPLATE_URL, ref: "HEAD", credentialId: "catalog-read-pat" });
+    expect(h.catalogReader.clones).toContainEqual({ repoURL: TEMPLATE_URL, ref: "HEAD", credentialId: "deploy-read-pat" });
     expect(h.unitReader.clones).toEqual([]);
   });
   it("marks a unit already registered build-only, so its release is re-run", async () => {

@@ -176,7 +176,7 @@ function fakeTenantSeeder(): VaultSeeder {
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations,
     resolver: new FakeClusterKubeResolver({ clusterReader: cluster, argoReader: argo, projectWriter: projects, argoNamespace: "argocd" }),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
@@ -304,7 +304,7 @@ describe("aborting a create-tenant run that never got a usable plan", () => {
     // `failed` with the operator's RAW request frozen in params_json and NO steps at all — so there is
     // nothing to compensate, and the abort's only job is to settle the run. Parsing those raw params
     // against CreateTenantParams — which needs the guid, stage, domain, cluster, chartsRef,
-    // registryHost, report, expectedApps and catalogRepoUrl the plan never got to freeze — threw
+    // registryHost, report, expectedApps and deployRepoUrl the plan never got to freeze — threw
     // a ZodError out of the route, so the operator got a red banner instead of a settled run.
     seedClusters();
     const h = await harness();

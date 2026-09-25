@@ -120,7 +120,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({}), argoReader: new FakeMasterArgoReader({}), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
     }),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
@@ -139,7 +139,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     members: testMembers(APPS), identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
     apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
-    report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), catalogRepoUrl: DEPLOY_URL,
+    report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), deployRepoUrl: DEPLOY_URL,
     ...over,
   });
 }

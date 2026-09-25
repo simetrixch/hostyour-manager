@@ -395,7 +395,7 @@ export interface TenantApiDeps extends ConsumerApiDeps {
    *  consumer read asks with apps.repoUrl. Wired TOGETHER with `resolver` — both come from
    *  config.deployRepo (wire-units buildTenantOnboarding), so they are present or absent
    *  together, and the live route degrades to SQL-only unless it has BOTH. */
-  catalogRepoUrl?: string;
+  deployRepoUrl?: string;
   /** The post-onboard activation client — powers the operator-driven first-admin invite/resend
    *  (POST /api/tenants/:id/invite-admin). The SAME HttpActivator the create-tenant `activate` step
    *  uses. Absent when tenant onboarding is not wired ⇒ the invite route answers 501, like the other
@@ -439,7 +439,7 @@ function rollupFanoutStatus(statuses: readonly ArgoAppStatus[]): { sync: ArgoSyn
 }
 
 export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): void {
-  const { executor, db, onboardingEnabled, appCatalog, resolver, catalogRepoUrl, activator, registrations, orphanBuilds, resolveUnitApex } = deps;
+  const { executor, db, onboardingEnabled, appCatalog, resolver, deployRepoUrl, activator, registrations, orphanBuilds, resolveUnitApex } = deps;
   // The routing move — a route file of its own, the way the resize is.
   registerTenantActionRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
 
@@ -470,7 +470,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     // BOTH deps or none: the resolver reaches the cluster + ArgoCD, and the catalog URL is what
     // the pin is asked FOR (see TenantApiDeps). Without either there is no live answer to give, and a
     // half-answer here would mean pinning against the DB column — the very record-as-truth substitution this live read exists to avoid.
-    if (!resolver || !catalogRepoUrl) return c.json({ row, cluster: null, argo: null, drift: null, argocdUrl: null, reason: "onboarding-not-configured" } satisfies TenantLiveView);
+    if (!resolver || !deployRepoUrl) return c.json({ row, cluster: null, argo: null, drift: null, argocdUrl: null, reason: "onboarding-not-configured" } satisfies TenantLiveView);
 
     const { clusterReader, argoReader, argoNamespace } = await resolver.resolve(found.clusterId);
     // The EXPECTED fan-out Application names from inventory (the faithful DB projection of the
@@ -540,7 +540,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
       // this correct now that every member Application is multi-source: its chart comes from
       // catalog and its `$values` chain from hostyour-cloud, so source 0 would answer about the
       // wrong repo, exactly the defect the consumer path already fixed.
-      targeted = authStatus ? targetedRevisionFor(authStatus, catalogRepoUrl) : null;
+      targeted = authStatus ? targetedRevisionFor(authStatus, deployRepoUrl) : null;
       // The verdict compares the ANCHOR: the auth member's own sync status, not the rollup — a member
       // that is missing shows in the rolled-up health, and is not a drift of the anchor's revision.
       argoSync = authStatus ? authStatus.sync : null;

@@ -46,7 +46,7 @@ const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const APPS = [{ name: "erp" }];
 const BUILT_TAG = "0.1.0-stable-20260202000000-def5678";
 const APPS_REPO_STEPS = ["create-repository", "write-tree", "onboard-build-only"];
-const catalogManifest = (spec: string): string => `
+const deployManifest = (spec: string): string => `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
 name: catalog
@@ -67,7 +67,7 @@ ${spec}  buildRepos:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui }
 `;
-const MANIFEST_YAML = catalogManifest(TEMPLATE_SPEC);
+const MANIFEST_YAML = deployManifest(TEMPLATE_SPEC);
 const doc = (kind: string, over: Partial<RenderedDoc> = {}): RenderedDoc => ({
   apiVersion: "v1", kind, name: `${kind.toLowerCase()}-x`, namespace: `${GUID}`, raw: { kind }, ...over,
 });
@@ -120,7 +120,7 @@ function bare(over: Partial<TenantOnboardPorts> = {}, catalog = MANIFEST_YAML): 
       argoReader: new FakeMasterArgoReader({ everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
       projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
     }),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
@@ -140,7 +140,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     members: testMembers(APPS), identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
     apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
-    report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), catalogRepoUrl: DEPLOY_URL,
+    report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), deployRepoUrl: DEPLOY_URL,
     ...over,
   });
 }
@@ -242,7 +242,7 @@ describe("tenant-create planStream — the bundle derived, and the apps-repo ste
   });
   it("refuses a catalog that names no template, and one whose appsOrg is not the App's owner", async () => {
     seedClusters();
-    expect(await refused(ports({}, catalogManifest("")))).toMatch(/declares no tenant\.appsBundle and tenant\.appsRepo/);
+    expect(await refused(ports({}, deployManifest("")))).toMatch(/declares no tenant\.appsBundle and tenant\.appsRepo/);
     const other = ports();
     other.githubApp.org = "other-org";
     expect(await refused(other)).toMatch(/tenant\.appsOrg is "acme-org" and the GitHub App is installed in "other-org"/);
@@ -308,7 +308,7 @@ describe("tenant-create execute — one pass creates the repository, builds the 
 });
 
 describe("validateTenant — the bundle is delivered under tenant: as the ApplicationSet delivers it", () => {
-  const deps = (helm: FakeHelmRenderer) => ({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: catalogManifest(""), ...APP_OVERLAYS } }), helm, log: () => undefined, signal: new AbortController().signal });
+  const deps = (helm: FakeHelmRenderer) => ({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: deployManifest(""), ...APP_OVERLAYS } }), helm, log: () => undefined, signal: new AbortController().signal });
   const base = { repoURL: DEPLOY_URL, ref: "main", stage: "prod" as const, apps: APPS, probeGuid: GUID, subdomain: "acme", clusterValueFiles: CHAIN };
   it("hands every member the image and the tag, and the empty pair to a tenant without one", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [] } });

@@ -134,7 +134,7 @@ function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?:
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    catalogRepoUrl: CATALOG,
+    deployRepoUrl: CATALOG,
     platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",

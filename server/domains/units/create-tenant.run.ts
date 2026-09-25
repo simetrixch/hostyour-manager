@@ -78,12 +78,12 @@ export interface TenantOnboardPorts {
    *  clusterReader/argoReader/projectWriter + ArgoCD namespace at run time (tenants land only on
    *  slaves per POLICY). Replaces the single argo/cluster/projects clients. */
   resolver: ClusterKubeResolver;
-  catalogRepoUrl: string; // the platform constant every tenant's charts live in
+  deployRepoUrl: string; // the platform constant every tenant's charts live in
   /** The platform GitOps repo (hostyour-cloud). A member Application pulls its chart from catalog
    *  and its `$values` chain from here, so the member's AppProject must allow both or ArgoCD rejects
    *  the sync. */
   platformRepoURL: string;
-  catalogCredentialId?: string; // the manager's first-party catalog read credential
+  deployCredentialId?: string; // the manager's first-party catalog read credential
   /** Brings the catalog's trunk into this installation's books branch (adapters/git/git.ts). The plan
    *  runs it FIRST, because the books branch is what it reads and what every member Application
    *  reads its chart at — without it a chart fix on the trunk reaches no tenant until the next
@@ -204,7 +204,7 @@ export const CreateTenantParams = z.object({
   // image set, so the grant and the images it follows can never be computed from two different trees.
   syncUnits: z.array(z.string()).default([]),
   buildUnits: z.array(BuildUnitSchema).default([]), // the units this run onboards or re-releases before it fans out
-  catalogRepoUrl: z.string().min(1),
+  deployRepoUrl: z.string().min(1),
   // The operator's OPTIONAL first-admin email (the create-tenant wizard field). Threaded ONLY so the
   // final `activate` step can invite the tenant's first admin; deliberately NOT written to the
   // registration, the inventory, or the checkpoint (PII hygiene) — it lives only here in the run params
@@ -456,7 +456,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
             member,
             stage: p.stage,
             argoNamespace,
-            catalogRepoUrl: p.catalogRepoUrl,
+            deployRepoUrl: p.deployRepoUrl,
             platformRepoURL: ports.platformRepoURL,
             cluster: p.cluster,
           });
@@ -624,7 +624,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       }
       const outcome = await validateTenant(
         {
-          repoURL: ports.catalogRepoUrl,
+          repoURL: ports.deployRepoUrl,
           // The revision every member Application will read its chart at, and therefore the only one
           // worth rendering the gates over (tenant-registrations.ts, the `branch` getter).
           ref: ports.registrations.branch,
@@ -636,7 +636,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
           ...(appsImage !== undefined ? { appsImage, appsImageTag } : {}),
           clusterValueFiles,
           clusterFqdn: rc.domain, // G27 judges the wildcard's zone here, before seed-tenant-crypto writes
-          ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
+          ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}),
         },
         { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal, ...standingHostFrom(ports.dns, ctx.db, ctx.signal) },
       );
@@ -692,7 +692,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         requiredImages,
         syncUnits,
         buildUnits: built.units,
-        catalogRepoUrl: ports.catalogRepoUrl,
+        deployRepoUrl: ports.deployRepoUrl,
         replaces, // the existing same-subdomain tenants create-tenant prepends offboard steps for
         // Thread the operator's optional admin email into params so the `activate` step can invite the
         // first admin (spread conditionally — exactOptionalPropertyTypes forbids adminEmail: undefined).

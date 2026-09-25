@@ -127,7 +127,7 @@ function harness(): Harness {
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",

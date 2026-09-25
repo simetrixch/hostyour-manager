@@ -104,7 +104,7 @@ describe("readAppsManifest (the primitive: one apps repository, one credential)"
 describe("readAppCatalog (the manifest of the apps template, else the stand-in)", () => {
   const warns: string[] = [];
   const catalogOf = (repo: RepoReader, s = spec("acme-apps")) =>
-    readAppCatalog({ spec: s, catalog: { repo, workdir: "/w", credentialId: "catalog-read-pat" }, warn: (m) => warns.push(m) });
+    readAppCatalog({ spec: s, catalog: { repo, workdir: "/w", credentialId: "deploy-read-pat" }, warn: (m) => warns.push(m) });
 
   it("reads apps.yaml off the template repository (tenant.appsRepo) at its default branch head, with the catalog's credential, and warns of nothing", async () => {
     warns.length = 0;
@@ -114,7 +114,7 @@ describe("readAppCatalog (the manifest of the apps template, else the stand-in)"
     expect(c.apps[0]).toMatchObject({ title: "ERP", description: "Orders, stock and accounting.", databases: ["core", "logs", "master"] });
     expect(c.apps[0]!.selections.seedReference).toEqual({ title: "Reference data", default: true });
     expect(c.apps[1]!.selections).toEqual({});
-    expect(repo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD", credentialId: "catalog-read-pat" }]);
+    expect(repo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD", credentialId: "deploy-read-pat" }]);
     expect(warns).toEqual([]);
   });
 
@@ -154,11 +154,11 @@ describe("readAppCatalog (the manifest of the apps template, else the stand-in)"
 describe("listTenantAppCatalog (the provider's clone of the catalog)", () => {
   it("clones the catalog at ref with the read credential, then the template with the same credential, and returns the manifest", async () => {
     const repo = new FakeRepoReader({ files: files({ appsYaml: APPS_YAML }) });
-    const c = await listTenantAppCatalog({ repo, repoURL: REPO_URL, ref: "master", credentialId: "catalog-read-pat", warn: () => {} });
+    const c = await listTenantAppCatalog({ repo, repoURL: REPO_URL, ref: "master", credentialId: "deploy-read-pat", warn: () => {} });
     expect(c.apps.map((a) => a.name)).toEqual(["erp", "web"]);
     expect(repo.clones).toEqual([
-      { repoURL: REPO_URL, ref: "master", credentialId: "catalog-read-pat" },
-      { repoURL: APPS_REPO, ref: "HEAD", credentialId: "catalog-read-pat" },
+      { repoURL: REPO_URL, ref: "master", credentialId: "deploy-read-pat" },
+      { repoURL: APPS_REPO, ref: "HEAD", credentialId: "deploy-read-pat" },
     ]);
   });
 

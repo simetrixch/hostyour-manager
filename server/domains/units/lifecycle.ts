@@ -86,7 +86,7 @@ export interface TenantLifecyclePorts {
    *  clusterReader (smoke/attest), argoReader (watch), projectWriter (AppProject) + argoNamespace at
    *  run time. */
   resolver: ClusterKubeResolver;
-  catalogRepoUrl: string;
+  deployRepoUrl: string;
   argoWatchTimeoutMs: number;
   /** The tenant's ONE DNS record (the wildcard or the zone, as its routing names it): tenant-offboard
    *  and tenant-purge remove it, tenant-set-routing moves it. Optional but UNCONDITIONALLY needed by
@@ -119,7 +119,7 @@ export interface TenantLifecyclePorts {
   /** The units the catalog's `tenant.buildRepos` names, read off its books branch — what accounts
    *  for a build-only registration beside a tenant's own apps bundle (#241: the first purge listed
    *  the catalog's own build units as orphaned and took three of the customer's repositories). */
-  catalogBuildUnits?: (signal?: AbortSignal) => Promise<string[]>;
+  deployBuildUnits?: (signal?: AbortSignal) => Promise<string[]>;
 }
 
 /** A tenant + its cluster context, resolved from the tenants row (tnt_) and its clusters row. The

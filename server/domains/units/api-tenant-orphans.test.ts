@@ -119,7 +119,7 @@ function tenantResolver(): FakeClusterKubeResolver {
 }
 
 function lifecyclePorts(registrations: TenantRegistrations): TenantLifecyclePorts {
-  return { registrations, resolver: tenantResolver(), catalogRepoUrl: DEPLOY_URL, argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com", dns: new FakeDnsProvider() };
+  return { registrations, resolver: tenantResolver(), deployRepoUrl: DEPLOY_URL, argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com", dns: new FakeDnsProvider() };
 }
 
 /** A VaultSeeder for the tenant runs: create-tenant seeds the crypto entry through it, and nothing
@@ -152,7 +152,7 @@ function onboardPorts(registrations: TenantRegistrations): TenantOnboardPorts {
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations,
     resolver: tenantResolver(),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
     argoWatchTimeoutMs: 1000,
     registryProbe: new FakeRegistryProbe(),

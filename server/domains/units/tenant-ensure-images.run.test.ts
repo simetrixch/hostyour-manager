@@ -116,7 +116,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
@@ -137,7 +137,7 @@ function createParams(over: Partial<CreateTenantParams> = {}): CreateTenantParam
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
     apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
-    report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), catalogRepoUrl: DEPLOY_URL,
+    report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), deployRepoUrl: DEPLOY_URL,
     ...over,
   });
 }
@@ -146,7 +146,7 @@ function addParams(over: Partial<AddAppParams> = {}): AddAppParams {
   return AddAppParams.parse({
     tenantId: "tnt_1", guid: GUID, stage: "prod", clusterId: "cls_1", domain: "s1.example",
     cluster: "s1", registryHost: HOST, chartsRef: SHA, app: "crm", member: testMembers(["crm"])[3]!,
-    report: passReport(), expectedApps: [memberApplication(GUID, "crm", "prod")], catalogRepoUrl: DEPLOY_URL,
+    report: passReport(), expectedApps: [memberApplication(GUID, "crm", "prod")], deployRepoUrl: DEPLOY_URL,
     ...over,
   });
 }

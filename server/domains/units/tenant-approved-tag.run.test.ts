@@ -88,7 +88,7 @@ describe("tenant-set-approved-tag through the Executor", () => {
         clusterReader: new FakeClusterReader({ deployState: { domain: CLUSTER, stage: "prod", writtenAt: "x", generation: 1 } }),
         argoReader, projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
       }),
-      catalogRepoUrl: DEPLOY_REPO, argoWatchTimeoutMs: 1000, registryProbe,
+      deployRepoUrl: DEPLOY_REPO, argoWatchTimeoutMs: 1000, registryProbe,
       resolveClusterValueFiles: async () => [{ path: "clusters/s1.yaml", content: "global:\n  endpoints:\n    registry:\n      host: zot.s1.example\n" }],
     } as unknown as TenantOnboardPorts);
     const executor = new Executor({

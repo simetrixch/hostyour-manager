@@ -53,7 +53,7 @@ export type TenantAppsRepoParams = z.infer<typeof TenantAppsRepoParams>;
 /** The catalog's tenant spec off this installation's books branch — where `appsOrg`, `appsBundle`
  *  and `appsRepo` are stated (the same clone validateTenant makes). */
 export async function readTenantSpec(ports: TenantOnboardPorts, ctx: { signal?: AbortSignal }): Promise<TenantSpec | null> {
-  const cloned = await ports.repo.cloneAtRef({ repoURL: ports.catalogRepoUrl, ref: ports.registrations.branch, ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}) });
+  const cloned = await ports.repo.cloneAtRef({ repoURL: ports.deployRepoUrl, ref: ports.registrations.branch, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}) });
   try {
     const text = await ports.repo.readFile(cloned.workdir, TENANT_MANIFEST_PATH);
     if (text === null) return null;

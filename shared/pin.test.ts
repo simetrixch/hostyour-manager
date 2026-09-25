@@ -7,7 +7,7 @@ import { parseBuildPins, pinKey, stagePinFile } from "./pin.ts";
 
 describe("parseBuildPins", () => {
   it("reads the builds[] pins of a values file and keys them <image>:<tag>", () => {
-    const pins = parseBuildPins("catalog@master:charts/example-engine/values-dev.yaml", [
+    const pins = parseBuildPins("deploy@master:charts/example-engine/values-dev.yaml", [
       "global:",
       "  env: dev",
       "builds:",

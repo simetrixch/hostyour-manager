@@ -65,7 +65,7 @@ function ports(reg: TenantRegistrations, over: Partial<TenantLifecyclePorts> & F
       projectWriter: projects ?? new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    catalogRepoUrl: DEPLOY_REPO,
+    deployRepoUrl: DEPLOY_REPO,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),
@@ -204,7 +204,7 @@ describe("tenant-suspend run", () => {
     expect(plan.targetKind).toBe("tenant");
     expect(plan.targetId).toBe("tnt_1");
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "suspend-tenant", "watch-off", "verify-off", "record-suspended"]);
-    expect(plan.locks).toEqual([{ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` }, { resource: "master-kube", key: "m" }]);
+    expect(plan.locks).toEqual([{ resource: "git-branch", key: `deploy@${FAKE_BOOKS_BRANCH}` }, { resource: "master-kube", key: "m" }]);
     expect(plan.requiredSecrets).toEqual([]);
     // The summary says plainly what survives, because a suspend that read as a prune is what makes an
     // operator expect their data gone.
@@ -321,7 +321,7 @@ describe("tenant-offboard run", () => {
     expect(def.mutating).toBe(true);
     expect(plan.targetKind).toBe("tenant");
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-apps-registration", "remove-tenant", "watch-removal", "delete-appprojects", "remove-dns", "record-offboard"]);
-    expect(plan.locks).toEqual([{ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` }, { resource: "master-kube", key: "m" }]);
+    expect(plan.locks).toEqual([{ resource: "git-branch", key: `deploy@${FAKE_BOOKS_BRANCH}` }, { resource: "master-kube", key: "m" }]);
   });
 
   it("removes the registration, waits for the whole fan-out to drain, deletes EVERY member AppProject, and marks the rows offboarded (kept)", async () => {
@@ -331,7 +331,7 @@ describe("tenant-offboard run", () => {
     const projects = new FakeMasterProjectWriter();
     const members = ["auth", "jobs", "report", "erp", "web"];
     for (const member of members) {
-      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
+      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, deployRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
     }
     for (const member of members) expect(projects.get(ARGO_NS, memberAppProject(GUID, member, "prod"))).toBeDefined();
 

@@ -63,7 +63,7 @@ function tenantPorts(reg: TenantRegistrations, cluster: FakeClusterReader): Tena
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    catalogRepoUrl: "https://github.com/acme/acme-catalog.git",
+    deployRepoUrl: "https://github.com/acme/acme-catalog.git",
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),
@@ -175,7 +175,7 @@ describe("tenant-restart-workloads run", () => {
     // The operator approves a namespace LIST, not a count: the members are what can be checked against
     // the Vault entry whose value was just replaced.
     expect(plan.summary).toContain(memberNamespace(GUID, "erp", "prod"));
-    // Every OTHER tenant run kind claims `catalog@<books>` plus the cluster branch because it writes
+    // Every OTHER tenant run kind claims `deploy@<books>` plus the cluster branch because it writes
     // the registration; this one writes nothing, so it queues behind none of them.
     expect(plan.locks).toEqual([{ resource: "master-kube", key: "m" }]);
   });

@@ -42,7 +42,7 @@ import { memberAppProject, memberNamespace } from "./tenant-fanout.ts";
  *  stamp — so cross-tenant namespace safety does not rest on the sole-renderer property alone
  *  (the platform renders the fan-out; the tenant never authors these). Same fence-4 blacklist so a
  *  tenant chart can never mint an Application/AppProject/Role/RoleBinding. */
-export function renderTenantAppProject(input: { guid: string; member: string; stage: Stage; argoNamespace: string; catalogRepoUrl: string; platformRepoURL: string; cluster: string }): AppProjectManifest {
+export function renderTenantAppProject(input: { guid: string; member: string; stage: Stage; argoNamespace: string; deployRepoUrl: string; platformRepoURL: string; cluster: string }): AppProjectManifest {
   // Never hand-rolled — tenant-fanout is the source of truth for every tenant name.
   const name = memberAppProject(input.guid, input.member, input.stage);
   const namespace = memberNamespace(input.guid, input.member, input.stage);
@@ -52,7 +52,7 @@ export function renderTenantAppProject(input: { guid: string; member: string; st
     metadata: { name, namespace: input.argoNamespace, labels: { [TENANT_PROJECT_LABEL.key]: TENANT_PROJECT_LABEL.value } },
     spec: {
       description: `Per-member isolation project for tenant ${input.guid} member "${input.member}" at ${input.stage} (hostyour-cloud onboarding).`,
-      sourceRepos: [input.catalogRepoUrl, input.platformRepoURL],
+      sourceRepos: [input.deployRepoUrl, input.platformRepoURL],
       destinations: [{ name: input.cluster, namespace }],
       clusterResourceWhitelist: [{ group: "", kind: "Namespace" }],
       namespaceResourceBlacklist: [

@@ -74,7 +74,7 @@ async function makeTenant(appCatalog?: AppCatalogProvider): Promise<{ app: Hono<
 describe("GET /api/tenants/app-catalog", () => {
   it("serves the template repository's apps.yaml as-is (route→provider→clone→parse)", async () => {
     const repo = new FakeRepoReader({ files: { "deploy/platform.yaml": TENANT_MANIFEST, "apps.yaml": APPS_YAML } });
-    const { app, cookie } = await makeTenant(makeAppCatalogProvider({ repo, repoURL: DEPLOY_URL, ref: "master", credentialId: "catalog-read-pat", warn: () => {} }));
+    const { app, cookie } = await makeTenant(makeAppCatalogProvider({ repo, repoURL: DEPLOY_URL, ref: "master", credentialId: "deploy-read-pat", warn: () => {} }));
     expect(await (await app.request("/api/tenants/app-catalog", authed(cookie))).json()).toEqual({
       apps: [{ name: "erp", title: "ERP", description: "Orders and stock.", selections: { seedDemo: { title: "Demo data", default: true } } }],
       packageScopes: [], // the template routes no scope to GitHub Packages (#233)

@@ -128,7 +128,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}, template: Reco
       projectWriter: projects ?? new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
@@ -151,7 +151,7 @@ function params(over: Partial<AddAppParams> = {}): AddAppParams {
     tenantId: "tnt_1", guid: GUID, stage: "prod", clusterId: "cls_1", domain: "s1.example",
     cluster: "s1", registryHost: REGISTRY_HOST,
     chartsRef: SHA, app: NEW_APP, member: testMembers([NEW_APP])[3]!, report: passReport(), expectedApps: EXPECTED,
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     ...over,
   });
 }
@@ -315,7 +315,7 @@ describe("add-app streaming planner", () => {
     expect(result.params.expectedApps).toEqual([memberApplication(GUID, NEW_APP, "prod")]);
     expect(result.plan.targetKind).toBe("tenant");
     expect(result.plan.targetId).toBe("tnt_1");
-    expect(result.plan.locks).toContainEqual({ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` }); // the books branch, not the trunk the charts stand on
+    expect(result.plan.locks).toContainEqual({ resource: "git-branch", key: `deploy@${FAKE_BOOKS_BRANCH}` }); // the books branch, not the trunk the charts stand on
     expect(result.plan.steps.map((s) => s.name)).toEqual(def.steps(result.params).map((s) => s.name));
   });
 

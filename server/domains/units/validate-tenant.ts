@@ -26,7 +26,7 @@ import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, type
 import { readAppCatalog } from "./app-catalog.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 import { stageApex, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
-import { catalogPinFile } from "../../../shared/pin.ts";
+import { deployPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { gateUnitHost } from "#unit/server/unit-host-gate.ts";
 import type { StandingHostReader } from "#unit/server/unit-dns.ts";
@@ -284,7 +284,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
         // run freezes, are the ones the fan-out deploys. Absent while no release of this
         // installation has built the chart's images (the appset's ignoreMissingValueFiles); the
         // trunk default then stands and the image gate names it as missing (#154).
-        const pin = catalogPinFile(req.stage);
+        const pin = deployPinFile(req.stage);
         const pinned = (await deps.repo.readFile(cloned.workdir, `${member.chart}/${pin}`)) !== null;
         const result = await deps.helm.template({
           workdir: cloned.workdir,

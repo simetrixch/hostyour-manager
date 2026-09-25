@@ -67,7 +67,7 @@ function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePo
       projectWriter: over.projects ?? new FakeMasterProjectWriter(),
       argoNamespace: ARGO_NS,
     }),
-    catalogRepoUrl: DEPLOY_REPO,
+    deployRepoUrl: DEPLOY_REPO,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),
@@ -101,7 +101,7 @@ function seedTenant(opts: { status?: TenantStatus; appStatus?: TenantStatus; app
 /** One AppProject and one admission policy per member, as create-tenant's apply-appprojects leaves them. */
 async function standUp(projects: FakeMasterProjectWriter, cluster: FakeClusterReader, members: readonly string[]): Promise<void> {
   for (const member of members) {
-    await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
+    await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, deployRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
     const { policy, binding } = renderTenantMemberAdmissionPolicy({ guid: GUID, member, stage: "prod" });
     await cluster.applyAdmissionPolicy(policy, binding);
   }

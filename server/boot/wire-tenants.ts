@@ -68,7 +68,7 @@ const ROUTING_POLL_MS = 15_000;
 
 /** The credential id under which the tenant family's reader answers the catalog's configured read
  *  PAT — never a row of the store. Every other id the reader is handed is opened from the store. */
-const CATALOG_READ_CREDENTIAL_ID = "catalog-read-pat";
+const DEPLOY_READ_CREDENTIAL_ID = "deploy-read-pat";
 
 /** What the tenant family hands the composition (wire-units.ts buildUnits): its defs, its flag and
  *  the collaborators its read routes need. */
@@ -83,7 +83,7 @@ export interface TenantFamily {
   /** The reader of one tenant's own catalog. Undefined without the family or without a GitHub App. */
   /** The catalog URL its live read resolves the fan-out's pin against. Undefined when the family is
    *  not configured. */
-  catalogRepoUrl?: string;
+  deployRepoUrl?: string;
   /** The pointer registrations its orphan-scan read route diffs against the inventory. Undefined
    *  when the family is not configured. */
   tenantRegistrations?: TenantRegistrations;
@@ -146,7 +146,7 @@ export function buildTenantOnboarding(
   // and a tenant's OWN repository under the credential its build registration names: the one id
   // names the configured token, every other id is opened from the store — a `github-app` id by
   // minting the App's token at the open.
-  const repo = new GitRepoReader({ openCredential: (id) => (id === CATALOG_READ_CREDENTIAL_ID ? openDeployToken() : store.open(id, { purpose: "tenant-apps-read" })) });
+  const repo = new GitRepoReader({ openCredential: (id) => (id === DEPLOY_READ_CREDENTIAL_ID ? openDeployToken() : store.open(id, { purpose: "tenant-apps-read" })) });
   // ONE INSTALLATION, ONE BOOKS BRANCH NAME, IN BOTH REPOSITORIES, so the name is taken off the
   // platform repo rather than resolved a second time here and the two can never disagree. In
   // catalog it is the revision every member chart is read at — by the Manager below and by every
@@ -168,7 +168,7 @@ export function buildTenantOnboarding(
     // bring the catalog's trunk into it afterwards (adapters/git/git.ts).
     carriesTrunkToBooksBranch: true,
     workRoot: join(config.dataDir, "tenant-git"),
-    credentialId: "catalog-write-pat",
+    credentialId: "deploy-write-pat",
     openCredential: openDeployToken,
     pushBackoff: { retries: 6, baseDelayMs: 250, maxDelayMs: 8_000 },
   });
@@ -223,11 +223,11 @@ export function buildTenantOnboarding(
     helm,
     registrations: tenantRegistrations,
     resolver,
-    catalogRepoUrl: repoURL,
+    deployRepoUrl: repoURL,
     // The platform GitOps repo — a member Application's `$values` chain comes from it, so the member's
     // AppProject must allow it next to catalog.
     platformRepoURL,
-    catalogCredentialId: CATALOG_READ_CREDENTIAL_ID, // activates askpass on the validation clone
+    deployCredentialId: DEPLOY_READ_CREDENTIAL_ID, // activates askpass on the validation clone
     carryTrunkToBooksBranch,
     argoWatchTimeoutMs: TENANT_WATCH_TIMEOUT_MS,
     registryProbe,
@@ -270,7 +270,7 @@ export function buildTenantOnboarding(
     repo,
     repoURL,
     ref: books,
-    ...(onboardPorts.catalogCredentialId ? { credentialId: onboardPorts.catalogCredentialId } : {}),
+    ...(onboardPorts.deployCredentialId ? { credentialId: onboardPorts.deployCredentialId } : {}),
     warn: (fields, msg) => logger.warn(fields, msg),
   });
   // remove-app + tenant-suspend/-resume/-offboard only flip/drop the pointer + watch the fan-out — no
@@ -278,7 +278,7 @@ export function buildTenantOnboarding(
   const lifecyclePorts: TenantLifecyclePorts = {
     registrations: tenantRegistrations,
     resolver,
-    catalogRepoUrl: repoURL,
+    deployRepoUrl: repoURL,
     argoWatchTimeoutMs: TENANT_WATCH_TIMEOUT_MS,
     // Every removal deletes the argo-sync grant beside the member AppProjects — the same writer that
     // provisioned it, so what create-tenant wrote is what a teardown takes back.
@@ -297,7 +297,7 @@ export function buildTenantOnboarding(
     buildRegistrations: registrations,
     // What accounts for a build-only registration beside a tenant's bundle: the catalog's own build
     // units, read off its books branch at every scan (#241).
-    catalogBuildUnits: async (signal) => ((await readTenantSpec(onboardPorts, signal ? { signal } : {}))?.buildRepos ?? []).map((b) => unitNameFromRepoURL(b.repo)),
+    deployBuildUnits: async (signal) => ((await readTenantSpec(onboardPorts, signal ? { signal } : {}))?.buildRepos ?? []).map((b) => unitNameFromRepoURL(b.repo)),
   };
   const orphanBuilds = orphanBuildsScan(lifecyclePorts);
 
@@ -367,5 +367,5 @@ export function buildTenantOnboarding(
   // (GET /api/tenants/:id/live), and scan the LIVE tenant pointers for orphans (GET /api/tenants/orphans)
   // through the very registrations the runs commit pointers with — all the same instances (and the same one
   // repoURL the appsets are rendered from) the runs use, never a second one.
-  return { defs, enabled: true, resolver, catalogRepoUrl: repoURL, appCatalog, tenantRegistrations, orphanBuilds, carryTrunkToBooksBranch };
+  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, orphanBuilds, carryTrunkToBooksBranch };
 }

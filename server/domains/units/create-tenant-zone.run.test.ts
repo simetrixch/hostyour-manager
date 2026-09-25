@@ -82,7 +82,7 @@ function ports(dns: FakeDnsProvider | undefined, store = new FakeObjectStore()):
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({ clusterReader: new FakeClusterReader({}), argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" }),
-    catalogRepoUrl: "https://github.com/acme/acme-catalog.git", platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git", argoWatchTimeoutMs: 1000,
+    deployRepoUrl: "https://github.com/acme/acme-catalog.git", platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git", argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com", resolveClusterValueFiles: async () => CHAIN,
     registryProbe: new FakeRegistryProbe(), buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [], consumerHostLabels: async () => [],
@@ -215,7 +215,7 @@ describe("create-tenant plans the zone before the first write", () => {
     const prt = ports(dns);
     const p = CreateTenantParams.parse({
       guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: SHA, registryHost: "zot.m1.example",
-      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", expectedApps: [], catalogRepoUrl: prt.catalogRepoUrl,
+      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
       report: composeTenantReport({ resolvedSha: SHA, probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
     });
     const logs: string[] = [];

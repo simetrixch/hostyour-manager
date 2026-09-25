@@ -90,7 +90,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
     ): Promise<void> => {
       const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(target.clusterId);
       for (const member of memberNames) {
-        await projectWriter.applyAppProject(argoNamespace, renderTenantAppProject({ guid: tc.guid, member, stage: tc.stage, argoNamespace, catalogRepoUrl: ports.catalogRepoUrl, platformRepoURL: ports.platformRepoURL, cluster: target.cluster }));
+        await projectWriter.applyAppProject(argoNamespace, renderTenantAppProject({ guid: tc.guid, member, stage: tc.stage, argoNamespace, deployRepoUrl: ports.deployRepoUrl, platformRepoURL: ports.platformRepoURL, cluster: target.cluster }));
         // The member's admission boundary moves WITH the member, exactly as the consumer world
         // carries its policy: the target's ApplicationSet stamps the same labels off the same
         // registration, so the target policy admits the same managed namespace the source's did.

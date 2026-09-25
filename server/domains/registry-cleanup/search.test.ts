@@ -103,8 +103,8 @@ describe("searchCarriers — the four carrier classes", () => {
     const hits = await searchCarriers(deps({ deploy }));
 
     expect(hits.filter((h) => h.pin.image === TEST_BUNDLE.appsImage).map((h) => [h.carrier, pinKey(h.pin)]).sort()).toEqual([
-      ["catalog@c1.example.com:registrations/zsjs023ctne0/prod.yaml", `${TEST_BUNDLE.appsImage}:${TEST_BUNDLE.appsImageTag}`],
-      ["catalog@c2.example.com:registrations/zsjs023ctne0/dev.yaml", `${TEST_BUNDLE.appsImage}:0.2.0-stable-20260202000000-def5678`],
+      ["deploy@c1.example.com:registrations/zsjs023ctne0/prod.yaml", `${TEST_BUNDLE.appsImage}:${TEST_BUNDLE.appsImageTag}`],
+      ["deploy@c2.example.com:registrations/zsjs023ctne0/dev.yaml", `${TEST_BUNDLE.appsImage}:0.2.0-stable-20260202000000-def5678`],
     ]);
   });
 

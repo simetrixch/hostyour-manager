@@ -63,7 +63,7 @@ function seedTenant(status: TenantStatus): void {
  *  never move a tenant across stages, so a single-stage stand-in is all TenantRegistrations needs. */
 
 function lifecyclePorts(registrations: TenantRegistrations, resolver: FakeClusterKubeResolver): TenantLifecyclePorts {
-  return { registrations, resolver, catalogRepoUrl: DEPLOY_URL, argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com" };
+  return { registrations, resolver, deployRepoUrl: DEPLOY_URL, argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com" };
 }
 
 /** The tenant routes with the row-keyed lifecycle family wired, plus the resolver + apex resolver +

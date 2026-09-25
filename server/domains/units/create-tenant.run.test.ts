@@ -144,7 +144,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
       projectWriter: projects ?? new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    catalogRepoUrl: DEPLOY_URL,
+    deployRepoUrl: DEPLOY_URL,
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
@@ -172,7 +172,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: REGISTRY_HOST,
     apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
-    report: passReport(), expectedApps: EXPECTED, catalogRepoUrl: DEPLOY_URL,
+    report: passReport(), expectedApps: EXPECTED, deployRepoUrl: DEPLOY_URL,
     ...over,
   });
 }
@@ -330,7 +330,7 @@ describe("create-tenant streaming planner", () => {
     expect(result.params.expectedApps).toEqual(tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], result.params.guid, "prod"));
     expect(result.plan.targetKind).toBe("cluster");
     expect(result.plan.targetId).toBe("cls_1");
-    expect(result.plan.locks).toContainEqual({ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` }); // the books branch, not the trunk the charts stand on
+    expect(result.plan.locks).toContainEqual({ resource: "git-branch", key: `deploy@${FAKE_BOOKS_BRANCH}` }); // the books branch, not the trunk the charts stand on
     // NOTHING IS ASKED OF THE OPERATOR. The tenant's object storage used to be three values here —
     // the two halves of a bucket key and the endpoint — because this tier held no credential that
     // could make either. It holds one now, and seed-tenant-crypto makes the bucket and mints the key
@@ -365,7 +365,7 @@ describe("create-tenant streaming planner", () => {
     expect(refs.length).toBeGreaterThan(0);
     expect(new Set(refs)).toEqual(new Set([FAKE_BOOKS_BRANCH]));
     expect(FAKE_BOOKS_BRANCH).not.toBe(PRODUCT_BRANCH);
-    expect(result.plan.locks).toContainEqual({ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` });
+    expect(result.plan.locks).toContainEqual({ resource: "git-branch", key: `deploy@${FAKE_BOOKS_BRANCH}` });
   });
 
   it("resolves the slave's NAME off clusters.domain and freezes the registryHost the target cluster resolves to", async () => {

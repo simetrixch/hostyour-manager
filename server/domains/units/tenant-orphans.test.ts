@@ -93,7 +93,7 @@ describe("scanOrphanTenants — member objects with no pointer", () => {
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, namespacesByLabel: { [TENANT_LABEL_KEY]: guids.flatMap((g) => ["erp", "web"].map((m) => memberNamespace(g, m, "prod"))) } });
     for (const g of guids) {
       for (const member of ["erp", "web"]) {
-        await projects.applyAppProject("argocd", renderTenantAppProject({ guid: g, member, stage: "prod", argoNamespace: "argocd", catalogRepoUrl: "https://github.com/x/catalog.git", platformRepoURL: "https://github.com/x/platform.git", cluster: "s1" }));
+        await projects.applyAppProject("argocd", renderTenantAppProject({ guid: g, member, stage: "prod", argoNamespace: "argocd", deployRepoUrl: "https://github.com/x/catalog.git", platformRepoURL: "https://github.com/x/platform.git", cluster: "s1" }));
         await cluster.applyAdmissionPolicy({ metadata: { name: `tenant-${memberNamespace(g, member, "prod")}` } } as never, { metadata: { name: `tenant-${memberNamespace(g, member, "prod")}` } } as never);
       }
     }
