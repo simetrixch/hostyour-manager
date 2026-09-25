@@ -7,7 +7,8 @@ import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { STAGE, APP_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { consumerArgoAppName, consumerNamespace, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
 import { localTx } from "../../executor/stepkit.ts";
-import { assertDeployState, type AppCluster, type LifecyclePorts } from "./lifecycle.ts";
+import { type AppCluster, type LifecyclePorts } from "./lifecycle.ts";
+import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { upsertAppRow } from "./onboard-steps.ts";
 
 // adopt-consumer — the RECOVERY companion to purge.run.ts, and its structural

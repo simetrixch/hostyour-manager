@@ -36,14 +36,14 @@ import { RELEASE_CHANNEL, type ReleaseChannel } from "../../../shared/release.ts
 import { unitNameFromRepoURL, type TenantSpec } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
-import { judgeRepoIdentity, resolveRepoCredentialId, type OwnerIdentityReader, type RepoIdentityApp } from "./repo-identity.ts";
+import { judgeRepoIdentity, resolveRepoCredentialId, type OwnerIdentityReader, type RepoIdentityApp } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
 import { buildOnlySteps, type BuildOnlyOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { readUngatedOnboard } from "./first-master.ts";
 import { DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
-import { resolveNextVersion } from "./release-version.ts";
+import { resolveNextVersion } from "#unit/server/release-version.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
 import { recordBuildOnlyStep } from "./onboard-registration.ts";

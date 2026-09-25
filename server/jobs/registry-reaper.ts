@@ -17,7 +17,7 @@ import { activatePlugins, inDependencyOrder } from "../boot/plugin-set.ts";
 import { compiledPlugins } from "../plugins.ts";
 import { RUN_KIND } from "../../shared/enums.ts";
 import type { PinHit } from "../../shared/pin.ts";
-import { resolveRepoCredentialId } from "../domains/units/repo-identity.ts";
+import { resolveRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
 import { createGitHubPlatform, type GitHubPlatformConfig } from "../adapters/github-platform/github-platform-http.ts";

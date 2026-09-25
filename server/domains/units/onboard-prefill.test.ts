@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { OnboardPrefillRequest, readOnboardPrefill } from "./onboard-prefill.ts";
-import type { OwnerIdentityReader } from "./repo-identity.ts";
+import type { OwnerIdentityReader } from "#unit/server/repo-identity.ts";
 
 // The wizard's prefill: the version the onboarding will release, read off the release tags — the
 // next number, never the last one — and the repositories it was read over named in the source. The

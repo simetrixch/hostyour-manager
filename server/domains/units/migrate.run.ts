@@ -9,10 +9,10 @@ import type { RunDefinition, LockClaim, Step } from "../../executor/types.ts";
 import { attestTargetStep, attestTenantTargetStep, loadAppCluster, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { assertMovableTo } from "#unit/server/relocation-target.ts";
-import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, type RelocationPorts, type WorldOf } from "./relocation.ts";
-import { provisionTargetStep, watchTargetStep, restoreStep, verifyCompletenessStep, switchDnsStep, targetSmokeStep, recordStep } from "./relocation-restore.ts";
-import { repointStep, clearSourceStep } from "./relocation-migrate.ts";
-import { verifySourceReleasedStep } from "./verify-source-released.ts";
+import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, type RelocationPorts, type WorldOf } from "#unit/server/relocation.ts";
+import { provisionTargetStep, watchTargetStep, restoreStep, verifyCompletenessStep, switchDnsStep, targetSmokeStep, recordStep } from "#unit/server/relocation-restore.ts";
+import { repointStep, clearSourceStep } from "#unit/server/relocation-migrate.ts";
+import { verifySourceReleasedStep } from "#unit/server/verify-source-released.ts";
 import { consumerWorld, type ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
 import { tenantWorld, type TenantRelocationPorts } from "./relocation-world-tenant.ts";
 

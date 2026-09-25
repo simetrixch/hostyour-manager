@@ -48,9 +48,9 @@ import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-c
 import { ensureAppIdentityRow } from "../security/app-identity.ts";
 import { registerOwnerRoutes } from "../domains/units/api-owners.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
-import { refreshAppTokens } from "../domains/units/app-token-refresh.ts";
+import { refreshAppTokens } from "#unit/server/app-token-refresh.ts";
 import { sweepRepoCredentials } from "../domains/units/repo-credential-sweep.ts";
-import { migrateRegistrations } from "../domains/units/registrations-migration.ts";
+import { migrateRegistrations } from "#unit/server/registrations-migration.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
 import type { AppEnv } from "../http/app-env.ts";
@@ -78,12 +78,12 @@ export interface Wired {
   carryCatalogTrunk: () => Promise<void>;
   /** The build repo-pat of every unit whose credential is the platform's GitHub App, rewritten with
    *  a token minted now, and the unit's three build Secrets deleted so ESO materializes the entry
-   *  again (domains/units/app-token-refresh.ts). boot.ts runs it once behind the listening server
+   *  again (plugins/unit/server/app-token-refresh.ts). boot.ts runs it once behind the listening server
    *  and then every 45 minutes. Never rejects — every failure is logged per unit. A no-op where the
    *  consumer family is not wired: there are then no build registrations. */
   refreshAppTokens: () => Promise<void>;
   /** Every standing registration on both books brought to the schema this release ships
-   *  (domains/units/registrations-migration.ts): a file the schema now defaults a key of is
+   *  (plugins/unit/server/registrations-migration.ts): a file the schema now defaults a key of is
    *  rewritten with it, one commit per books per boot. boot.ts runs it once, behind the listening
    *  server and after the catalog carry, and never again until the next boot — a schema changes
    *  only with a release, and a release boots the Manager. Never rejects: every failure is logged,

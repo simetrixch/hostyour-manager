@@ -47,7 +47,7 @@ import { makeTenantAppsRepoPurgeDef, orphanBuildsScan } from "../domains/units/t
 import { readTenantSpec } from "../domains/units/tenant-apps-repo.run.ts";
 import { unitNameFromRepoURL } from "../../shared/consumer.ts";
 import type { OrphanBuildView } from "../../shared/api-types.ts";
-import type { RelocationPorts } from "../domains/units/relocation.ts";
+import type { RelocationPorts } from "#unit/server/relocation.ts";
 import type { TenantRelocationPorts } from "../domains/units/relocation-world-tenant.ts";
 import { makeTenantBackupDef } from "../domains/units/backup.run.ts";
 import { makeTenantRestoreDef } from "../domains/units/restore.run.ts";

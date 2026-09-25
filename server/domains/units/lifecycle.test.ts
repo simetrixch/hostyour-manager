@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
-import { assertDeployState, loadTenantCluster, attestTenantTargetStep, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { loadTenantCluster, attestTenantTargetStep, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { FakeClusterReader, FakeMasterArgoReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { AppError } from "../../kernel/errors.ts";
 import type { DeployState } from "../../adapters/kube/port.ts";

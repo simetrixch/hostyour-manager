@@ -9,7 +9,7 @@ import type { ClusterKubeResolver, RepoCredentialWriter } from "../../adapters/k
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
-import { appReachesRepoURL } from "./repo-identity.ts";
+import { appReachesRepoURL } from "#unit/server/repo-identity.ts";
 import { CONSUMER_LIVE_STATUS } from "./onboard-abort.ts";
 
 export interface SweepRepoCredentialsDeps {

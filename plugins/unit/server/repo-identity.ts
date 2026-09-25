@@ -17,12 +17,12 @@
 //    the repository's.
 // Callers: the onboard POST and its prefill (api.ts, api-onboard-prefill.ts), the tenant build
 // units (tenant-builds.ts) and the tenant's own apps repository (tenant-apps-steps.ts).
-import type { GitHubApp } from "../../adapters/github-app/port.ts";
-import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
-import type { CredentialStore } from "../../security/store.ts";
-import { appIdentityRowId } from "../../security/app-identity.ts";
-import { errValidation } from "../../kernel/errors.ts";
-import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import type { GitHubApp } from "#core/server/adapters/github-app/port.ts";
+import type { GitHubConsumer } from "#core/server/adapters/github-consumer/port.ts";
+import type { CredentialStore } from "#core/server/security/store.ts";
+import { appIdentityRowId } from "#core/server/security/app-identity.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
+import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
 
 export type RepoIdentityApp = Pick<GitHubApp, "reachesRepository" | "installationToken" | "identityFingerprint" | "installationOrg">;
 

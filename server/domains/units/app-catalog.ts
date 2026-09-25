@@ -26,7 +26,7 @@ import { ConsumerManifestSchema, tenantAppsTemplate, type TenantSpec } from "../
 import { errValidation } from "../../kernel/errors.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
-import { npmrcPackageScopes } from "./repo-identity.ts";
+import { npmrcPackageScopes } from "#unit/server/repo-identity.ts";
 
 /** values-<name>.yaml file-name shape; the capture group is the candidate app. The bare values.yaml
  *  (no `-<name>` suffix) never matches, so the chart base is excluded for free. */

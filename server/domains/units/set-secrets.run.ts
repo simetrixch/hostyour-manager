@@ -11,8 +11,8 @@ import { parse as parseYaml } from "yaml";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { CredentialStore } from "../../security/store.ts";
-import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
-import { judgeRepoIdentity, resolveRepoIdentity, type OwnerIdentityReader, type RepoIdentityApp } from "./repo-identity.ts";
+import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
+import { judgeRepoIdentity, resolveRepoIdentity, type OwnerIdentityReader, type RepoIdentityApp } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { ConsumerManifestSchema, CONSUMER_MANIFEST_PATH } from "../../../shared/consumer.ts";
 

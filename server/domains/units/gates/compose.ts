@@ -27,7 +27,8 @@ import { STAGE, type Stage } from "../../../../shared/enums.ts";
 import { consumerNamespace } from "../../../../shared/consumer.ts";
 import type { ChartPinMapping } from "../builds.ts";
 import { BUILD_NAMESPACE_SUFFIX } from "#unit/server/build-rbac.ts";
-import { consumerUnitHost, standingHostRefusal, type StandingHost } from "#unit/server/unit-dns.ts";
+import { consumerUnitHost } from "#unit/server/unit-dns.ts";
+import { capGateText } from "#unit/server/unit-host-gate.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
 import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, type UnitComposition, type UnitQuota, type UnitSize } from "#unit/shared/unit-size.ts";
 
@@ -43,12 +44,6 @@ export interface ForeignFqdn {
   stage: Stage;
   fqdn: string;
 }
-
-// The manifest's build names and the chart's values file are UNTRUSTED input, and GateResultSchema
-// caps expected/found/reason at 2000 chars — a report over the cap fails its own schema and would
-// wedge the run instead of rejecting it. Every list built from repo content goes through this.
-const TEXT_CAP = 600;
-const cap = (text: string): string => (text.length > TEXT_CAP ? `${text.slice(0, TEXT_CAP)}…` : text);
 
 /** The namespaces the PLATFORM itself stands in on a cluster, so no unit's namespace may be one —
  *  a unit's namespace is `<name>-<stage>` (the identity law), and the consumers ApplicationSet pins
@@ -167,7 +162,7 @@ export function gateUnitName(input: {
     expected: `the name "${name}" lies in no space the platform composes identities from: not a platform namespace (as "${name}" or as "${namespace}"), not under Kubernetes' kube- prefix, not in the derived build-namespace space <unit>${BUILD_NAMESPACE_SUFFIX}, not in the derived stage-namespace space <unit>-<stage>, not a shared ArgoCD project name; and the label "${label}" is neither a subdomain a tenant stands on nor the host of another unit at ${input.stage}`,
     found: ok
       ? `"${name}" collides with no reserved name space — the namespace and Application ${namespace}, the AppProject and the build namespace ${name}${BUILD_NAMESPACE_SUFFIX} are free to be this unit's, and the label "${label}" is free at ${input.stage} (checked against ${input.tenantSubdomains.length} tenant subdomain(s) and ${input.foreignHostLabels.length} other unit label(s))`
-      : cap(collisions.join("; ")),
+      : capGateText(collisions.join("; ")),
     reason: ok
       ? null
       : "a unit is deployed into the namespace <unit>-<stage>, fenced by the AppProject of that name and served at the host composed from it, so a reserved name hands it an identity another owner holds; a unit is named by its repo, so rename the repo and onboard again",
@@ -204,7 +199,7 @@ export function gateBuildNameUniqueness(input: {
     expected: `every build name "${input.unitName}" declares is claimed by no other unit — a build name is the flat image name, so two units on one name push to the same registrations repository`,
     found: ok
       ? `${input.buildNames.length} declared build name(s) checked against ${input.foreignBuilds.length} name(s) attested by other units — no collision`
-      : cap(collisions.map((c) => `build "${c.name}" is already attested by unit "${c.unit}"`).join("; ")),
+      : capGateText(collisions.map((c) => `build "${c.name}" is already attested by unit "${c.unit}"`).join("; ")),
     reason: ok ? null : "a build name claimed by two units routes both to one registrations repository; the onboarding is rejected",
     detail: ok ? "no foreign unit claims these names" : "build name already claimed",
     evidence: collisions.slice(0, 20).map((c) => ({ source: "manager" as const, name: c.name, value: c.unit.slice(0, 256) })),
@@ -250,7 +245,7 @@ export function gateBuildDeclaration(input: {
       severity: "hard",
       status: "pass",
       expected,
-      found: cap(`build-only — no chart to check; ${input.declaredBuilds.length} build(s) declared: ${input.declaredBuilds.join(", ")}`),
+      found: capGateText(`build-only — no chart to check; ${input.declaredBuilds.length} build(s) declared: ${input.declaredBuilds.join(", ")}`),
       reason: null,
       detail: "build-only unit",
     };
@@ -259,7 +254,7 @@ export function gateBuildDeclaration(input: {
   const { mapping, path, stage } = input.chart;
   const file = `${path}/values-${stage}.yaml`;
   const ok = mapping.error === null && mapping.missing.length === 0;
-  const found = cap(
+  const found = capGateText(
     mapping.error !== null
       ? `${file} is not readable as the builds[] pin grammar: ${mapping.error}`
       : ok
@@ -351,7 +346,7 @@ export function gateFqdnGrant(input: {
     expected,
     found: ok
       ? `fqdn "${input.fqdn}" declared beside the platform host ${platformHost} — checked against ${input.foreignFqdns.length} attested fqdn(s), the cluster's unitApex and the cluster's own FQDN, no collision`
-      : cap(collisions.join("; ")),
+      : capGateText(collisions.join("; ")),
     reason: ok ? null : "an FQDN the platform already serves cannot be attested twice — the ingress controller would resolve the conflict by arbitrary order; re-run the onboard after the name is free or the manifest names another",
     detail: ok ? `fqdn "${input.fqdn}" is free to attest` : "fqdn already served by this platform",
     evidence: ok ? [] : [{ source: "manager" as const, name: input.fqdn, value: collisions[0]!.slice(0, 256) }],
@@ -396,11 +391,11 @@ export function gateManifestInput(skippedGateIds: readonly string[]): GateResult
     status: "fail",
     expected:
       "the gate report carries the manifest the sandbox parsed out of deploy/platform.yaml, so the manager-side gates that judge what it declares have something to read",
-    found: cap(
+    found: capGateText(
       `the report carries no manifest, so ${skipped} did not run — none of them has read this repository's deploy/platform.yaml, ` +
         "and nothing here is a statement about what that file declares",
     ),
-    reason: cap(
+    reason: capGateText(
       "a gate that reads an absent input can only report an empty declaration, which reads exactly like a repository that declares nothing — so these gates are not run at all rather than made to invent a finding. " +
         "The onboarding is refused because it could not be judged, not because the repository is wrong: what the sandbox's own gates in this same report say is where the reason stands.",
     ),
@@ -495,10 +490,10 @@ export function gateUnitSize(input: {
     severity: "hard",
     status: ok ? "pass" : "fail",
     expected,
-    found: cap(`"${unitName}" is assigned size "${size}" and brings ${composition}; its namespace quota resolves to ${figures}`),
+    found: capGateText(`"${unitName}" is assigned size "${size}" and brings ${composition}; its namespace quota resolves to ${figures}`),
     reason: ok
       ? null
-      : cap(
+      : capGateText(
         `"${unitName}" brings ${composition}, and "${DEFAULT_UNIT_SIZE}" is the frugal preset a unit lands on when nobody names a size — ` +
         `its figures are derived from an application alone, and its mongodb row gives one member less than this platform gives the members of its own shared replica set. ` +
         "Either ask the operator to onboard this unit at a larger size, or declare no database units of its own in the manifest: " +
@@ -510,53 +505,4 @@ export function gateUnitSize(input: {
       { source: "manager" as const, name: unitName, fieldPath: "quota", value: figures.slice(0, 256) },
     ],
   };
-}
-
-/** G27 unit host (HARD). The ZONE, read before the run writes anything: the unit's host
- *  `<label>.<stage apex>` as the DNS provider answers it now, judged against this installation's own
- *  clusters (unit-dns.ts readStandingHost). The gates above hold the host against registrations and
- *  tenant subdomains, never against the zone — and the zone is exactly what stopped a run at its
- *  thirteenth step after twelve writes (hostyour-manager#151: a record the abandoned installation's
- *  onboarding had left at the old slave's address).
- *
- *  Four readings, two verdicts: a free host and a host already pointing at the target pass; a host
- *  whose record points at no cluster of this installation passes too and SAYS that provision-dns
- *  will replace it, with what stands there as evidence; a host pointing at another cluster of this
- *  installation fails with the sentence provision-dns would refuse it with. `standing: null` is a
- *  Manager with no DNS provider: a deployable unit cannot be onboarded there at all, and this row
- *  says so before provision-dns would have said it at step thirteen. */
-export function gateUnitHost(input: { host: string; unitName: string; clusterFqdn: string; standing: StandingHost | null }): GateResult {
-  const expected = `the host ${input.host} is free, already points at ${input.clusterFqdn}, or carries a record that points at no cluster of this installation (what an installation that is gone left in the zone, which provision-dns replaces) — never another cluster of this installation`;
-  const base = { id: "G27", title: "unit host", severity: "hard" as const, expected };
-  const s = input.standing;
-  if (s === null) {
-    return {
-      ...base, status: "fail",
-      found: "no DNS provider is wired on this manager, so the zone could not be read",
-      reason: "the unit's ONE public record is a mandatory part of this run kind (provision-dns fails loud without a provider); set CLOUDFLARE_DNS_API_TOKEN on the manager and plan the onboarding again",
-      detail: "no DNS provider — the host cannot be measured",
-    };
-  }
-  switch (s.kind) {
-    case "free":
-      return { ...base, status: "pass", found: `${input.host} is free — no record stands under it`, reason: null, detail: "host is free" };
-    case "ours":
-      return { ...base, status: "pass", found: `${input.host} already points at ${input.clusterFqdn} — a re-run of this onboarding, not a takeover`, reason: null, detail: "host already ours" };
-    case "leftover":
-      return {
-        ...base, status: "pass",
-        found: cap(`${input.host} stands as ${s.type} ${s.content}, which points at no cluster of this installation — what an installation that is gone left in the zone; provision-dns replaces it with a CNAME onto ${input.clusterFqdn}`),
-        reason: null,
-        detail: "host is a leftover of a gone installation — will be replaced",
-        evidence: [{ source: "manager" as const, name: input.host, fieldPath: "standing", value: `${s.type} ${s.content}` }],
-      };
-    case "collision":
-      return {
-        ...base, status: "fail",
-        found: cap(standingHostRefusal(input.host, input.unitName, s)),
-        reason: "one stage of a unit has ONE host, and another cluster of this installation serves it — offboard the unit there first, or give the two clusters different unit_apex answers",
-        detail: "host is served by another cluster of this installation",
-        evidence: [{ source: "manager" as const, name: input.host, fieldPath: "standing", value: `CNAME ${s.cluster}` }],
-      };
-  }
 }

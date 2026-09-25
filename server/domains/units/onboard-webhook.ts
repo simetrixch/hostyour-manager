@@ -32,31 +32,9 @@ import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import { WebhookScopeError, webhookTargetUrl } from "../../adapters/github-consumer/port.ts";
 import { probeWebhook } from "./onboard-probes.ts";
-import { unitStaysRegistered } from "./lifecycle.ts";
+import { unitStaysRegistered } from "#unit/server/lifecycle.ts";
+import { parseGitHubOwnerRepo, splitGitHubRepoURL } from "#unit/server/github-repo-url.ts";
 import { errValidation } from "../../kernel/errors.ts";
-
-/** Non-throwing split of a consumer repoURL (https://github.com/<owner>/<repo>.git) into its GitHub
- *  ORG owner + repo (the URL path), NEVER p.owner (the human/team owner). Returns null on any URL that
- *  is not a github.com/<owner>/<repo>.git — the webhook target is meaningless without both. */
-function splitGitHubRepoURL(repoURL: string): { owner: string; repo: string } | null {
-  let u: URL;
-  try {
-    u = new URL(repoURL);
-  } catch {
-    return null;
-  }
-  const segments = u.pathname.replace(/^\/+/, "").replace(/\.git$/, "").split("/");
-  if (u.hostname !== "github.com" || segments.length !== 2 || !segments[0] || !segments[1]) return null;
-  return { owner: segments[0], repo: segments[1] };
-}
-
-/** The fail-loud variant for onboard: a bad repoURL here is a hard error (the run cannot set up a hook
- *  without a real owner/repo). */
-export function parseGitHubOwnerRepo(repoURL: string): { owner: string; repo: string } {
-  const parsed = splitGitHubRepoURL(repoURL);
-  if (!parsed) throw errValidation(`cannot derive the GitHub owner/repo from "${repoURL}" — expected https://github.com/<owner>/<repo>.git`);
-  return parsed;
-}
 
 /** The onboard `setup-webhook` step: create (idempotently) the consumer's push-webhook to the build
  *  plane's image-builder EventListener. Fails LOUD on any missing prerequisite (unwired adapter, absent

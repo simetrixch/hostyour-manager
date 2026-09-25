@@ -166,7 +166,7 @@ export function refineAppsBundle(e: AppsBundleFields, ctx: z.RefinementCtx): voi
  *  before a field existed carries no key for it — and the tenants ApplicationSet reads the file bare,
  *  where a missing key is a render failure for the whole tenant. The Manager's boot parses every
  *  standing registration through this schema and commits the ones whose serialized form differs
- *  (server/domains/units/registrations-migration.ts), which is what brings a standing tenant onto a
+ *  (plugins/unit/server/registrations-migration.ts), which is what brings a standing tenant onto a
  *  new field with no offboard and no hand. That write-back can only fill what the schema itself
  *  fills: a field with a default reaches every standing file at the next boot; an OPTIONAL field
  *  (`appsRepo`, where absent is a meaning) is left absent; a REQUIRED field with no default refuses

@@ -23,7 +23,7 @@ import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { deleteTenantArgoSync } from "./tenant-teardown.ts";
 import { tenantMemberUrl, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
-import type { RelocationPorts, RelocationWorld, WorldOf } from "./relocation.ts";
+import type { RelocationPorts, RelocationWorld, WorldOf } from "#unit/server/relocation.ts";
 import {
   tenantDumpJobs,
   tenantRestoreJobs,
@@ -31,7 +31,7 @@ import {
   tenantSourceDbListJob,
   tenantClearSourceJobs,
   tenantExpectedDumpEntries,
-} from "./relocation-jobs.ts";
+} from "./relocation-jobs-tenant.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import type { TargetCluster } from "#unit/server/relocation-target.ts";
 

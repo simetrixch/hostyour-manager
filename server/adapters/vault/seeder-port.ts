@@ -226,7 +226,7 @@ export interface VaultSeeder {
    *  replaced where it stands, no check-and-set. The one write here that is not create-only, and
    *  the one value that EXPIRES: a unit whose credential is the platform's GitHub App holds an
    *  installation token that lives one hour, so its entry is rewritten with a token minted now on
-   *  a timer and before every release the Manager triggers (domains/units/app-token-refresh.ts). A
+   *  a timer and before every release the Manager triggers (plugins/unit/server/app-token-refresh.ts). A
    *  consumer's own PAT is never rewritten through this. Still write-only: nothing is read. */
   refreshBuildRepoPat(input: BuildRepoPatSeedInput): Promise<void>;
   /** Remove the unit's build repo PAT (offboard/purge). Idempotent — an absent entry (404) is ok. */

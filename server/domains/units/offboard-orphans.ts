@@ -59,7 +59,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { AppCluster, LifecyclePorts } from "./lifecycle.ts";
 import type { BuildRbacObject, BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
-import { unitApexFromChain } from "./admission-policy.ts";
+import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "#unit/server/build-rbac.ts";

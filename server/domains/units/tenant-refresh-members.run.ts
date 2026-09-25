@@ -8,7 +8,8 @@ import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts"
 import { validateTenant } from "./validate-tenant.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
-import { assertDeployState, loadTenantCluster } from "./lifecycle.ts";
+import { loadTenantCluster } from "./lifecycle.ts";
+import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { tenantSyncUnits } from "#unit/server/build-rbac.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";

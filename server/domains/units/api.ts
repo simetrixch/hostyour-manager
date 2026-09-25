@@ -4,7 +4,7 @@ import type { Db } from "../../db/client.ts";
 import type { Executor } from "../../executor/executor.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
-import { resolveRepoCredentialId, resolveRepoIdentity } from "./repo-identity.ts";
+import { resolveRepoCredentialId, resolveRepoIdentity } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { apps, clusters, servers, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound, errValidation } from "../../kernel/errors.ts";
@@ -13,9 +13,10 @@ import type { OrphanScanView, OrphanBuildView, DetectedScanView, LiveArgoView, C
 import type { ChannelStagesView } from "../../../shared/api-types-onboard.ts";
 import { singleSourceRevision, targetedRevisionFor, type ClusterKubeResolver, type ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { tenantArgocdUrl } from "../../../shared/tenant.ts";
-// The live reconciliation comparison — driftOf/the per-kind EXPECTED records/the consumer live probe —
-// lives in live-recon.ts (one implementation for every card).
-import { driftOf, probeConsumerLive, readUnitHost, smokeTenant } from "./live-recon.ts";
+// The live reconciliation comparison — the per-kind EXPECTED records and the consumer live probe in
+// live-recon.ts, and driftOf, the one deployment question every card asks, in the unit plugin.
+import { probeConsumerLive, readUnitHost, smokeTenant } from "./live-recon.ts";
+import { driftOf } from "#unit/server/live-drift.ts";
 import { getRunParams } from "../../executor/read.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import { OnboardRequest } from "./onboard.run.ts";
@@ -46,7 +47,7 @@ import { TENANT_COLUMNS } from "./tenant-columns.ts";
 import { inviteOrResendTenantAdmin, BOOTSTRAP_TOKEN_KEY, InviteAdminRequest } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import { tenantMemberUrl } from "#unit/server/unit-dns.ts";
-import { resolveNextVersion } from "./release-version.ts";
+import { resolveNextVersion } from "#unit/server/release-version.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 

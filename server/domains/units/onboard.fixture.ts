@@ -9,7 +9,7 @@ import { FakeRepoReader, FakePlatformRepo, FakeRepoWriter } from "../../adapters
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter, FakeRepoCredentialWriter } from "../../adapters/kube/testing/fake.ts";
 import type { ExternalSecretRow } from "../../adapters/kube/port.ts";
-import { BUILD_TARGET_SECRETS } from "./app-token-refresh.ts";
+import { BUILD_TARGET_SECRETS } from "#unit/server/app-token-refresh.ts";
 import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";

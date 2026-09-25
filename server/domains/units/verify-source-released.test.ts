@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { DbHandle } from "../../db/client.ts";
 import { tenantWorld } from "./relocation-world-tenant.ts";
-import { verifySourceReleasedStep } from "./verify-source-released.ts";
+import { verifySourceReleasedStep } from "#unit/server/verify-source-released.ts";
 import { makeTenantMigrateDef } from "./migrate.run.ts";
 import { consumerWorld } from "./relocation-world-consumer.ts";
 import {

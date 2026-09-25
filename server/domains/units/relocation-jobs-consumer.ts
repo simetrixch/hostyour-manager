@@ -1,14 +1,18 @@
-// The CONSUMER job builders of the relocation carrier — split from relocation-jobs.ts (which keeps
-// the shared script building blocks + the tenant builders) along the 400-line budget. Same design:
-// pure JobSpec composition, one job per Secret home, `DB`/`MISSING` lines as the wire format.
+// The CONSUMER job builders of the relocation carrier, composed from the unit's job algebra
+// (plugins/unit/server/relocation-jobs.ts). Same design: pure JobSpec composition, one job per Secret
+// home, `DB`/`MISSING` lines as the wire format.
 import type { ConsumerService } from "../../../shared/consumer.ts";
 import type { JobEnvVar } from "../../adapters/kube/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import {
   boxSpec, BOX_REMOTE, MONGO_FLAGS, mongoEnv, writeFile, quoted, relocationJobName,
-  MONGO_NAMESPACE, CONSUMER_POSTGRES,
+  MONGO_NAMESPACE,
   type RelocationJob,
-} from "./relocation-jobs.ts";
+} from "#unit/server/relocation-jobs.ts";
+
+/** The per-consumer PostgreSQL instance coordinates (service-provisioner naming:
+ *  `<claim>-<service>` with the claim named after the unit). */
+export const CONSUMER_POSTGRES = { host: "postgres", secret: "postgresql-credentials", key: "postgres-password", user: "postgres" } as const;
 
 /** The per-consumer PostgreSQL root password, off the instance's own Secret in the unit's namespace —
  *  the same one the dump and the restore dial with. */

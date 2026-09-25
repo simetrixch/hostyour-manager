@@ -7,7 +7,8 @@ import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts"
 import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
 import type { TenantPurgeInput } from "../../../shared/api-types.ts";
 import { guid as guidSchema } from "../../../shared/tenant.ts";
-import { assertDeployState, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { type TenantLifecyclePorts } from "./lifecycle.ts";
+import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { assertTenantNotLive, type TenantLiveRefusal } from "./tenant-live-guard.ts";
 import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";

@@ -5,14 +5,14 @@
 // and the one-record DNS switch. What differs per unit KIND (consumer vs tenant) is folded into ONE
 // object — the RelocationWorld — resolved fresh at every step from the inventory + the registration,
 // so the steps themselves can never fork into per-kind code paths that drift.
-import type { Step, StepCtx } from "../../executor/types.ts";
-import type { ClusterKubeResolver, JobResult, WorkloadStatus } from "../../adapters/kube/port.ts";
-import type { PublicProbe } from "../../adapters/http-probe/port.ts";
-import type { DnsProvider } from "../../adapters/dns/port.ts";
-import type { Stage } from "../../../shared/enums.ts";
-import { errValidation } from "../../kernel/errors.ts";
+import type { Step, StepCtx } from "#core/server/executor/types.ts";
+import type { ClusterKubeResolver, JobResult, WorkloadStatus } from "#core/server/adapters/kube/port.ts";
+import type { PublicProbe } from "#core/server/adapters/http-probe/port.ts";
+import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
+import type { Stage } from "#core/shared/enums.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
 import { boxSecretData, boxSecretName, jobReadsBoxSecret, verifyDumpJob, type RelocationJob, type StorageBoxAccess } from "./relocation-jobs.ts";
-import { loadActiveTargetCluster, type TargetCluster } from "#unit/server/relocation-target.ts";
+import { loadActiveTargetCluster, type TargetCluster } from "./relocation-target.ts";
 
 /** What every relocation step reaches the world through. `jobTimeoutMs` is the per-Job budget — a
  *  dump of a big store is the longest thing this domain runs. `storageBox`/`dbtoolsImage` are

@@ -9,7 +9,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { refreshRepoPatStep, seedRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { BuildOnlyOnboardParams, type OnboardPorts } from "./onboard.run.ts";
-import { BUILD_TARGET_SECRETS } from "./app-token-refresh.ts";
+import { BUILD_TARGET_SECRETS } from "#unit/server/app-token-refresh.ts";
 import { ports, buildSecretRows, FakeBuildPlaneClusterReader, FakeSeeder, BUILD_SECRETS_MATERIALIZED_AT } from "./onboard.fixture.ts";
 import { FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";

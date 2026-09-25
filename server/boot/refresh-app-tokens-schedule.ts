@@ -1,4 +1,4 @@
-// The App-token refresh on a TIMER (domains/units/app-token-refresh.ts): every 45 minutes, the build
+// The App-token refresh on a TIMER (plugins/unit/server/app-token-refresh.ts): every 45 minutes, the build
 // repo-pat of every unit whose credential is the platform's GitHub App is rewritten with a token
 // minted now, and the unit's three build Secrets are deleted behind the rewrite. A token lives 60
 // minutes, so 45 keeps the entry alive across one missed tick's worth of drift and never lets the

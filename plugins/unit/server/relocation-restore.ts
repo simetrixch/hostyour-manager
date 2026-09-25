@@ -2,12 +2,12 @@
 // run kind, and that a migrate composes after its dump half: provide the target, rebuild the unit from
 // the box folder, prove completeness BEFORE DNS, switch the one record, smoke, and settle the
 // inventory. Kind differences all live behind the RelocationWorld.
-import type { Step, StepCtx } from "../../executor/types.ts";
-import { errValidation } from "../../kernel/errors.ts";
+import type { Step, StepCtx } from "#core/server/executor/types.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
 import { assertDeployState } from "./lifecycle.ts";
-import { provisionUnitDns } from "#unit/server/unit-dns.ts";
+import { provisionUnitDns } from "./unit-dns.ts";
 import { readRegistrationJob, readRegistrationFromLogs, MONGO_NAMESPACE } from "./relocation-jobs.ts";
-import { loadActiveTargetCluster, type TargetCluster } from "#unit/server/relocation-target.ts";
+import { loadActiveTargetCluster, type TargetCluster } from "./relocation-target.ts";
 import { requireDbtoolsImage, requireStorageBox, runRelocationJob, type RelocationPorts, type WorldOf } from "./relocation.ts";
 
 /** The target of this run, resolved fresh at every step (active, like the plan said). */

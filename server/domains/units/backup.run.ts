@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { RunDefinition, LockClaim, Step } from "../../executor/types.ts";
 import { attestTargetStep, attestTenantTargetStep, loadAppCluster, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, type WorldOf } from "./relocation.ts";
+import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, type WorldOf } from "#unit/server/relocation.ts";
 import { consumerWorld, type ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
 import { tenantWorld, type TenantRelocationPorts } from "./relocation-world-tenant.ts";
 

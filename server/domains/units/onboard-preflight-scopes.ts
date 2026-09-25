@@ -17,7 +17,7 @@
 import type { Step } from "../../executor/types.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 import { WebhookScopeError } from "../../adapters/github-consumer/port.ts";
-import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { REQUIRED_CONSUMER_PAT_SCOPES, missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "#unit/server/pat-scopes.ts";
 import { probeIdentity } from "./onboard-probes.ts";

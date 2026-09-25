@@ -11,7 +11,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { bootMarker, parseRegistration, serializePointer } from "#unit/server/registration-laws.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import { migrateRegistrations } from "./registrations-migration.ts";
+import { migrateRegistrations } from "#unit/server/registrations-migration.ts";
 import { checkRegistrationsMigrated } from "../../boot/selfchecks.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
 

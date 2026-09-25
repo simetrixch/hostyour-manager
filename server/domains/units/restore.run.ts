@@ -8,7 +8,7 @@ import type { RunDefinition, LockClaim, Step } from "../../executor/types.ts";
 import { loadAppCluster, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { loadActiveTargetCluster } from "#unit/server/relocation-target.ts";
-import { openAccessStep, type RelocationPorts, type WorldOf } from "./relocation.ts";
+import { openAccessStep, type RelocationPorts, type WorldOf } from "#unit/server/relocation.ts";
 import {
   attestRestoreTargetStep,
   provisionTargetFromDumpStep,
@@ -18,7 +18,7 @@ import {
   switchDnsStep,
   targetSmokeStep,
   recordStep,
-} from "./relocation-restore.ts";
+} from "#unit/server/relocation-restore.ts";
 import { consumerWorld, type ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
 import { tenantWorld, type TenantRelocationPorts } from "./relocation-world-tenant.ts";
 

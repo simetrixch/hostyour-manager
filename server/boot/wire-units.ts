@@ -12,7 +12,7 @@ import { CloudflareR2 } from "../adapters/object-store/cloudflare-r2.ts";
 import type { DnsProvider } from "../adapters/dns/port.ts";
 import type { ClusterValueFile } from "../../shared/cluster-values.ts";
 import { readClusterValueChain } from "../domains/inventory/cluster-value-chain.ts";
-import { unitApexFromChain } from "../domains/units/admission-policy.ts";
+import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { type Stage } from "../../shared/enums.ts";
 import { buildPlaneFqdnFromMarkings } from "../domains/inventory/cluster-marking.ts";
 import { readChannelStages } from "../domains/inventory/channel-stages.ts";
@@ -41,7 +41,7 @@ import type { LifecyclePorts } from "../domains/units/lifecycle.ts";
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import type { AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import { HttpPublicProbe } from "../adapters/http-probe/http-probe.ts";
-import type { RelocationPorts } from "../domains/units/relocation.ts";
+import type { RelocationPorts } from "#unit/server/relocation.ts";
 import type { ConsumerRelocationPorts } from "../domains/units/relocation-world-consumer.ts";
 import { makeBackupDef } from "../domains/units/backup.run.ts";
 import { makeRestoreDef } from "../domains/units/restore.run.ts";
@@ -155,7 +155,7 @@ export interface UnitsWiring {
   repoReader?: RepoReader;
   /** The consumer-PAT GitHub client and the platform repository's GitHub identity, threaded to the
    *  onboard POST and the prefill so both read the version an onboarding releases off the release
-   *  tags (domains/units/release-version.ts). Undefined when consumer onboarding is not configured. */
+   *  tags (plugins/unit/server/release-version.ts). Undefined when consumer onboarding is not configured. */
   github?: GitHubConsumer;
   platformGitHub?: { owner: string; repo: string };
   /** A cluster's public unit apex (global.unitApex off its values chain), threaded to

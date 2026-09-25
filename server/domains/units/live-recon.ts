@@ -1,19 +1,20 @@
 // The LIVE RECONCILIATION comparison — the one place the product answers "does what the cluster RUNS
 // match what the GitOps pointer PINS?". Factored out of api.ts (which stays the thin route layer)
 // because THREE surfaces now answer through it: the consumer row card (GET /api/consumers/:appId/live),
-// the tenant card (GET /api/tenants/:id/live, which calls driftOf below), and the name-keyed detected
+// the tenant card (GET /api/tenants/:id/live, which calls driftOf, plugins/unit/server/live-drift.ts), and the name-keyed detected
 // probe (GET /api/consumers/live). One implementation is the whole guarantee
 // that no two cards can ever describe the same live situation differently.
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
-import { MASTER_ROLES, type Stage, type DriftVerdict, type ArgoSync } from "../../../shared/enums.ts";
-import type { LiveArgoView, LiveDriftView, ConsumerLiveProbeView } from "../../../shared/api-types.ts";
+import { MASTER_ROLES, type Stage, type ArgoSync } from "../../../shared/enums.ts";
+import type { LiveArgoView, ConsumerLiveProbeView } from "../../../shared/api-types.ts";
 import { syncedRevisionFor, targetedRevisionFor, type ClusterKubeResolver, type ClusterReader, type SmokeResult } from "../../adapters/kube/port.ts";
 import { consumerArgoAppName, consumerArgocdUrl, consumerNamespace } from "../../../shared/consumer.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
-import { unitApexFromChain } from "./admission-policy.ts";
+import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { consumerUnitHost } from "#unit/server/unit-dns.ts";
+import { driftOf } from "#unit/server/live-drift.ts";
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -30,48 +31,6 @@ export async function smokeTenant(clusterReader: ClusterReader, namespaces: read
     workloads: results.flatMap((r) => r.workloads),
     externalSecretsReady: results.every((r) => r.externalSecretsReady),
   };
-}
-
-/** The revision block of a live card: `pinned` is what the unit's chart source TARGETS as ArgoCD sees it
- *  — the delivery branch for a consumer, the books branch for a tenant, a SHA only where a pin says one
- *  — `deployed` is the commit ArgoCD synced from that source, and `verdict` is ArgoCD's own comparison
- *  of the two (deploymentVerdict). There is no second source and no fallback: the registration states
- *  no revision, and the revision the delivery branch stands on is the release cycle's to write. A unit
- *  whose Application cannot be read has nothing targeted, and that is what the card then says rather
- *  than promoting a Manager-side guess to a pin. `argoRead` says whether ArgoCD answered AT ALL. */
-export function driftOf(input: { targeted: string | null; deployed: string | null; sync: ArgoSync | null; argoRead: boolean }): LiveDriftView {
-  const { targeted, deployed, sync, argoRead } = input;
-  return {
-    pinned: targeted,
-    deployed,
-    verdict: deploymentVerdict({ pinned: targeted, deployed, sync, argoRead }),
-  };
-}
-
-/** The ONE deployment question: does what the cluster RUNS match what the Application TARGETS?
- *  (DRIFT_VERDICT, shared/enums.ts.) The answer is ARGOCD'S OWN COMPARISON, `status.sync.status`, and
- *  never a string comparison of the two revisions: what a consumer Application targets is the delivery
- *  BRANCH `deploy/<stage>` (a literal, by design — the registration pins no revision, the release
- *  cycle moves the branch), and what it runs is a commit, so `deployed === pinned` was false on every
- *  converged consumer and painted every card "drift" (hostyour-manager#141). ArgoCD resolved the branch
- *  when it compared; Synced means the cluster carries that head, OutOfSync means it does not.
- *
- *  "unknown" comes first because an unread ArgoCD leaves both revisions unknown rather than absent, so
- *  it must not fall through to a claim about them; "not-deployed" is the neutral answer where there is
- *  no Application at all — nothing targeted, nothing running, nothing compared (a suspended consumer,
- *  or a resume that died before its Application existed) — and never "converged", which is a
- *  statement about a comparison that must have taken place. One side missing is drift: a source that
- *  targets nothing of the unit's own repository any more (a foreign source written over the pin) or a
- *  target nothing has been synced from yet. A sync status ArgoCD itself calls Unknown (the repository
- *  unreachable, the comparison not made) is reported as exactly that. */
-function deploymentVerdict(input: { pinned: string | null; deployed: string | null; sync: ArgoSync | null; argoRead: boolean }): DriftVerdict {
-  const { pinned, deployed, sync, argoRead } = input;
-  if (!argoRead) return "unknown";
-  if (pinned === null && deployed === null) return "not-deployed";
-  if (pinned === null || deployed === null) return "drift";
-  if (sync === "Synced") return "converged";
-  if (sync === "OutOfSync") return "drift";
-  return "unknown";
 }
 
 /** The LIVE half of ONE consumer reconciliation read — the whole body of GET /api/consumers/:appId/live

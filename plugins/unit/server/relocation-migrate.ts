@@ -3,7 +3,7 @@
 // move runs is the shared backup half (relocation.ts) and the shared target half
 // (relocation-restore.ts): a move is a backup, a restore into the target, and a repoint — one
 // carrier, never a third code path.
-import type { Step } from "../../executor/types.ts";
+import type { Step } from "#core/server/executor/types.ts";
 import { requireDbtoolsImage, requireStorageBox, runRelocationJob, type RelocationPorts, type WorldOf } from "./relocation.ts";
 import { targetOf } from "./relocation-restore.ts";
 

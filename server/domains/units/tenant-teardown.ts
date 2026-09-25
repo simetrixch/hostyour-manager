@@ -31,7 +31,8 @@ import type { ArgoAppStatusMap, ResolvedClusterKube } from "../../adapters/kube/
 import { memberAppProject, memberNamespace } from "./tenant-fanout.ts";
 import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { renderTenantArgoSync } from "#unit/server/build-rbac.ts";
-import { clearRelocationHold, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { type TenantLifecyclePorts } from "./lifecycle.ts";
+import { clearRelocationHold } from "#unit/server/lifecycle.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 import { allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { renderTenantMemberAdmissionPolicy, unitApexFromChain, tenantMemberAdmissionPolicyName, TENANT_MANAGED_LABEL, VAULT_ALIAS_TENANT_ANNOTATION } from "./admission-policy.ts";
+import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName, TENANT_MANAGED_LABEL, VAULT_ALIAS_TENANT_ANNOTATION } from "./admission-policy.ts";
+import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { TENANT_PROJECT_LABEL } from "../../adapters/kube/port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 

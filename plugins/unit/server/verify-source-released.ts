@@ -18,11 +18,11 @@
 //       move of a store-less unit AFTER the repoint, with an accusation that is false.
 // There is deliberately NO Vault half: one shared KV mount serves every cluster and a move never
 // touches it — a check with no failure mode measures nothing.
-import type { Step } from "../../executor/types.ts";
-import { errValidation } from "../../kernel/errors.ts";
+import type { Step } from "#core/server/executor/types.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
 import { parseDbLines } from "./relocation-jobs.ts";
 import { requireDbtoolsImage, runRelocationJob, type RelocationPorts, type WorldOf } from "./relocation.ts";
-import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
+import { CLAIM_RELOCATING_ANNOTATION } from "#core/server/adapters/kube/port.ts";
 
 export function verifySourceReleasedStep(ports: RelocationPorts, worldOf: WorldOf): Step {
   return {

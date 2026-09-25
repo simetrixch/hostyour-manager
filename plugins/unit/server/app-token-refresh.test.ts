@@ -4,13 +4,13 @@
 // three build Secrets deleted behind the rewrite (#230); one unit's failure is logged and the rest go
 // on; nothing rejects.
 import { describe, it, expect } from "vitest";
-import type { Logger } from "../../kernel/logger.ts";
-import type { CredentialStore } from "../../security/store.ts";
-import type { BuildRepoPatSeedInput } from "../../adapters/vault/seeder-port.ts";
-import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
-import { Registrations } from "#unit/server/registrations.ts";
-import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
+import type { Logger } from "#core/server/kernel/logger.ts";
+import type { CredentialStore } from "#core/server/security/store.ts";
+import type { BuildRepoPatSeedInput } from "#core/server/adapters/vault/seeder-port.ts";
+import { FakePlatformRepo } from "#core/server/adapters/git/testing/fake.ts";
+import { FakeClusterReader } from "#core/server/adapters/kube/testing/fake.ts";
+import { Registrations } from "./registrations.ts";
+import { FakeGitHubApp } from "#core/server/adapters/github-app/testing/fake.ts";
 import { BUILD_TARGET_SECRETS, CATALOG_BUMP_UNIT, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshAppTokens, refreshUnitRepoPat } from "./app-token-refresh.ts";
 import type { OwnerIdentityReader } from "./repo-identity.ts";
 

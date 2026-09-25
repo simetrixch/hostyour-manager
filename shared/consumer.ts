@@ -518,7 +518,7 @@ export function consumerArgocdUrl(masterFqdn: string | null, argoNamespace: stri
  *
  *  A FIELD ADDED HERE HAS A DEFAULT, AND THE BOOT WRITES IT: the Manager's boot parses every standing
  *  registration through this schema and commits the ones whose serialized form differs
- *  (server/domains/units/registrations-migration.ts), so a standing unit meets a new key at the next
+ *  (plugins/unit/server/registrations-migration.ts), so a standing unit meets a new key at the next
  *  boot rather than at a hand. A field the schema cannot fill by itself — required, no default — is
  *  a run kind's job, never a boot's; an optional one, where absent is a meaning, stays absent.
  *

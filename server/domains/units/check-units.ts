@@ -22,7 +22,7 @@ import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import { probeIdentity, probeWebhook, probeDns } from "./onboard-probes.ts";
 import { probeTenantDns } from "./tenant-probes.ts";
-import { resolveRepoCredentialId } from "./repo-identity.ts";
+import { resolveRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 
 export interface CheckUnitsPorts {

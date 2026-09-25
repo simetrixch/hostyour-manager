@@ -44,15 +44,12 @@
 // through untouched. The chart's own policy is scoped the same way, and namespaceValidations below is
 // where the clause pair is authored.
 //
-// Boundary: a pure domain module — it renders manifests and reads YAML text, no IO. The writer
+// Boundary: a pure domain module — it renders manifests, no IO. The writer
 // (adapters/kube) applies what this returns.
-import { parse as parseYaml } from "yaml";
-import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { consumerNamespace } from "../../../shared/consumer.ts";
 import { TENANT_PROJECT_LABEL, type AdmissionPolicyBindingManifest, type AdmissionPolicyManifest, type AdmissionValidation } from "../../adapters/kube/port.ts";
 import { memberApplication, memberNamespace } from "./tenant-fanout.ts";
-import { errValidation } from "../../kernel/errors.ts";
 
 /** The annotation ArgoCD stamps on every object it applies. Its value starts with the Application's
  *  own name, which is what makes "does this unit own the object" answerable inside a CEL expression. */
@@ -135,27 +132,6 @@ function namespaceValidations(input: {
         `(${input.granted.map(([k, v]) => `${k}=${v}`).join(", ")}) — those label namespaces bind Vault roles, admit network reach and set pod security, so a self-written one is a self-granted permission`,
     },
   ];
-}
-
-/** The ONE `global.unitApex` the layered cluster values chain resolves to — the public apex a unit's
- *  address is composed under (`<label>.<stage apex>`). The chain is read in LAYERING order and the last
- *  file that states the key wins, exactly as helm layers it, so a cluster's own `installation/profile.yaml`
- *  overrides the platform defaults. A chain that states it nowhere is a VALIDATION error naming the
- *  files that were read: rendering the host rule against a guessed apex would fence the unit off its
- *  own ingress. */
-export function unitApexFromChain(files: readonly ClusterValueFile[]): string {
-  let found: string | null = null;
-  for (const file of files) {
-    const parsed: unknown = parseYaml(file.content);
-    const apex = (parsed as { global?: { unitApex?: unknown } } | null)?.global?.unitApex;
-    if (typeof apex === "string" && apex.length > 0) found = apex;
-  }
-  if (found === null) {
-    throw errValidation(
-      `no global.unitApex in the cluster values chain (${files.map((f) => f.path).join(", ")}) — a unit's public host is <label>.<stage apex>, so the admission policy cannot be rendered without it`,
-    );
-  }
-  return found;
 }
 
 /** The pair that marks a namespace as a consumer's, and the selector that finds every one of them on

@@ -10,19 +10,19 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { consumerArgoAppName, consumerNamespace, ConsumerRegistrationSchema, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
 import { localTx } from "../../executor/stepkit.ts";
-import { unitRepoCredentialId } from "./repo-identity.ts";
+import { unitRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { serializePointer, parseRegistration } from "#unit/server/registration-laws.ts";
 import type { Registrations } from "#unit/server/registrations.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
-import { unitApexFromChain } from "./admission-policy.ts";
+import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { } from "#unit/server/build-rbac.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
 import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/port.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
-import type { RelocationPorts, RelocationWorld, WorldOf } from "./relocation.ts";
+import type { RelocationPorts, RelocationWorld, WorldOf } from "#unit/server/relocation.ts";
 import {
   consumerDumpJobs,
   consumerRestoreJobs,

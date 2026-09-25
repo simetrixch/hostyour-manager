@@ -26,13 +26,14 @@ import { consumerHostLabel, type SmtpEntry } from "../../../shared/consumer.ts";
 import { gateMailSender } from "./gates/mail-sender.ts";
 import { errInternal, errUpstream } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
-import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitHost, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
+import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
+import { gateUnitHost } from "#unit/server/unit-host-gate.ts";
 import { consumerUnitHost, type StandingHostReader } from "#unit/server/unit-dns.ts";
 import { gateReleaseWorkflow } from "./gates/release-workflow.ts";
 import { RELEASE_KIT_WORKFLOW } from "./release-kit/release-kit.ts";
 import type { UnitComposition, UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { mapBuildsToChartPins, type ChartPinMapping } from "./builds.ts";
-import { unitApexFromChain } from "./admission-policy.ts";
+import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 
 /** The cluster's OWN FQDN (`global.domain`, stamped when the install branch is generated) off the values chain, read like
  *  unitApexFromChain — LAST file that states it wins. It anchors G19's infrastructure clause: the

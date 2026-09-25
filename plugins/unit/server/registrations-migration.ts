@@ -10,10 +10,9 @@
 // This is the write-back. It runs once per boot, behind the listener and after the catalog carry
 // (boot.ts), because a schema changes only with a release and a release boots the Manager; a timer
 // would measure the same files against the same schema.
-import type { Logger } from "../../kernel/logger.ts";
-import { bootMarker, type RegistrationMigration } from "#unit/server/registration-laws.ts";
-import type { Registrations } from "#unit/server/registrations.ts";
-import type { TenantRegistrations } from "./tenant-registrations.ts";
+import type { Logger } from "#core/server/kernel/logger.ts";
+import { bootMarker, type RegistrationMigration } from "./registration-laws.ts";
+import type { Registrations } from "./registrations.ts";
 
 /** Which books a migration ran over: the platform's (hostyour-cloud, the consumer registrations) or
  *  the catalog's (the tenant registrations). */
@@ -23,11 +22,13 @@ export type MigratedBooks =
   | ({ books: BooksName; branch: string } & RegistrationMigration)
   | { books: BooksName; branch: string; failed: string };
 
-type Registry = Pick<Registrations, "branch" | "migrateToSchema"> | Pick<TenantRegistrations, "branch" | "migrateToSchema">;
+/** A books registry as the migration drives it: the branch it writes, and its own migration to the
+ *  schema. Each of the two books carries one, over its own tree. */
+type Registry = Pick<Registrations, "branch" | "migrateToSchema">;
 
 export interface MigrateRegistrationsDeps {
-  registrations?: Pick<Registrations, "branch" | "migrateToSchema"> | undefined;
-  tenantRegistrations?: Pick<TenantRegistrations, "branch" | "migrateToSchema"> | undefined;
+  registrations?: Registry | undefined;
+  tenantRegistrations?: Registry | undefined;
   /** The running Manager's version — the boot marker every commit ends with. */
   version: string;
   logger: Logger;

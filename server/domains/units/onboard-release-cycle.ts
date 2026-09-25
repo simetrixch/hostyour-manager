@@ -20,7 +20,7 @@
 import type { Step } from "../../executor/types.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 import { WorkflowNotFoundError } from "../../adapters/github-consumer/port.ts";
-import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
 import { parseBuildPins } from "../../../shared/pin.ts";
 import { syncedRevisionFor, type ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { errValidation } from "../../kernel/errors.ts";

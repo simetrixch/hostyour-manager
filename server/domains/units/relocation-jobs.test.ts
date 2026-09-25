@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { DbHandle } from "../../db/client.ts";
-import { runRelocationJob } from "./relocation.ts";
+import { runRelocationJob } from "#unit/server/relocation.ts";
 import {
   boxSecretName, jobReadsBoxSecret,
-  tenantDumpJobs, tenantRestoreJobs, tenantVerifyCompletenessJobs, tenantClearSourceJobs, tenantSourceDbListJob,
   verifyDumpJob, readRegistrationJob,
   type RelocationJob,
-} from "./relocation-jobs.ts";
+} from "#unit/server/relocation-jobs.ts";
+import {
+  tenantDumpJobs, tenantRestoreJobs, tenantVerifyCompletenessJobs, tenantClearSourceJobs, tenantSourceDbListJob,
+} from "./relocation-jobs-tenant.ts";
 import {
   consumerDumpJobs, consumerRestoreJobs, consumerVerifyCompletenessJobs, consumerClearSourceJobs, consumerSourceDbListJob,
 } from "./relocation-jobs-consumer.ts";

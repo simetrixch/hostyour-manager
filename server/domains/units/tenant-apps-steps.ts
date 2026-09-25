@@ -26,14 +26,14 @@ import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
 import { buildOnlySteps, type BuildOnlyOnboardParams } from "./onboard.run.ts";
 import { readUngatedOnboard } from "./first-master.ts";
-import { resolveNextVersion } from "./release-version.ts";
+import { resolveNextVersion } from "#unit/server/release-version.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { channelReaching } from "./tenant-builds.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
 import { recordBuildOnlyStep } from "./onboard-registration.ts";
 import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
-import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "./repo-identity.ts";
+import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "#unit/server/repo-identity.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
 import { probeAppsRepository } from "./tenant-probes.ts";
 

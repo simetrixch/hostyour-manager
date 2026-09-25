@@ -11,7 +11,7 @@ import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provisionArgoSyncStep, type TenantBuildDeps, type TenantBuildRuntime, type RegisteredUnit } from "./tenant-builds.ts";
-import { assertDeployState } from "./lifecycle.ts";
+import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { tenantSyncUnits } from "#unit/server/build-rbac.ts";

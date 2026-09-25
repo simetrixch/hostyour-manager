@@ -6,7 +6,7 @@ import { OnboardPrefillRequest, readOnboardPrefill } from "./onboard-prefill.ts"
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import type { Db } from "../../db/client.ts";
 import type { CredentialStore } from "../../security/store.ts";
-import type { ReleaseVersionDeps } from "./release-version.ts";
+import type { ReleaseVersionDeps } from "#unit/server/release-version.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 
 // The wizard's PREFILL route, apart from api.ts the way api-unit-sizes.ts is: the version the

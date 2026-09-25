@@ -10,11 +10,11 @@
 // own GitHub owner reads its next number over the whole line — its own repository, the
 // platform repository and the engine's (clusters/platform/versions.yaml names it) — and a customer's
 // unit reads its own tags only.
-import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
-import type { PlatformRepo } from "../../adapters/git/port.ts";
-import { nextReleaseVersion } from "../../../shared/release.ts";
-import { readAnsiwiseUpstreamProject } from "../inventory/ansiwise-pin.ts";
-import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import type { GitHubConsumer } from "#core/server/adapters/github-consumer/port.ts";
+import type { PlatformRepo } from "#core/server/adapters/git/port.ts";
+import { nextReleaseVersion } from "#core/shared/release.ts";
+import { readAnsiwiseUpstreamProject } from "#core/server/domains/inventory/ansiwise-pin.ts";
+import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
 
 export interface ReleaseVersionDeps {
   github: GitHubConsumer;

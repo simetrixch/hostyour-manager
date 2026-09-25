@@ -37,7 +37,7 @@ import { writeRegistrationStep, writeBuildRegistrationStep, recordBuildOnlyStep 
 import type { BuildRbacWriter, RepoCredentialWriter, MasterArgoReader, ClusterReader } from "../../adapters/kube/port.ts";
 import { errNotFound, errInternal } from "../../kernel/errors.ts";
 import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome } from "./validate.ts";
-import { unitApexFromChain } from "./admission-policy.ts";
+import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { type BuildPlaneFqdnResolver } from "../inventory/cluster-marking.ts";
 import { assertChannelReaches, type ChannelStages } from "../inventory/channel-stages.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";

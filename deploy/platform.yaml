@@ -36,7 +36,7 @@ builds:
     containerfile: gate-runner/Containerfile
   # The client-tools image of the move / backup / restore job — mongodump,
   # mongosh, pg_dumpall, rclone, ssh. It is the tooling THIS manager runs
-  # (server/domains/units/relocation.ts), so it builds where its caller
+  # (plugins/unit/server/relocation.ts), so it builds where its caller
   # lives. Its two database client versions are stamped into the Dockerfile by
   # hostyour-deploy's sync-versions program, because the servers they talk to are
   # pinned in hostyour-cloud/platform/versions.yaml.

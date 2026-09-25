@@ -12,9 +12,9 @@
 import { z } from "zod";
 import type { OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import type { CredentialStore } from "../../security/store.ts";
-import { resolveNextVersion, type ReleaseVersionDeps } from "./release-version.ts";
-import { judgeRepoIdentity, npmrcPackageScopes, resolveRepoIdentity, type OwnerIdentityReader, type RepoIdentityApp } from "./repo-identity.ts";
-import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import { resolveNextVersion, type ReleaseVersionDeps } from "#unit/server/release-version.ts";
+import { judgeRepoIdentity, npmrcPackageScopes, resolveRepoIdentity, type OwnerIdentityReader, type RepoIdentityApp } from "#unit/server/repo-identity.ts";
+import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
 
 /** What the prefill is asked: the repository. */
 export const OnboardPrefillRequest = z.object({

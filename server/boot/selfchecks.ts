@@ -15,7 +15,7 @@ import { assertMirrorsDeployStateName, readDeployStateName } from "../domains/in
 import { readAnsiwisePin, ANSIWISE_PIN_PATH, ANSIWISE_PIN_BRANCH, ANSIWISE_PIN_KEY } from "../domains/inventory/ansiwise-pin.ts";
 import { readInstallOrder, holdsInstallOrder, INSTALL_ORDER_PATH } from "../domains/inventory/install-order.ts";
 import { PROGRAM_STEP_PREFIX } from "../domains/runs/defs/ansiwise-run.kit.ts";
-import type { MigratedBooks } from "../domains/units/registrations-migration.ts";
+import type { MigratedBooks } from "#unit/server/registrations-migration.ts";
 import type { PlatformRepo } from "../adapters/git/port.ts";
 import type { GitHubApp } from "../adapters/github-app/port.ts";
 import { spaBytes } from "../http/spa.ts";
@@ -490,7 +490,7 @@ async function checkCatalogIdentity(config: Config, githubApp: GitHubApp): Promi
 
 /**
  * DOES EVERY STANDING REGISTRATION STAND IN THE SCHEMA THIS RELEASE SHIPS? The boot migration
- * (domains/units/registrations-migration.ts) rewrites every registration the schema can fill and
+ * (plugins/unit/server/registrations-migration.ts) rewrites every registration the schema can fill and
  * names every one it REFUSES — a file every reader refuses the same way, so the unit it names is not
  * served until a person settles it. This row carries those names, and how much was covered per
  * books: files read, files rewritten, the commit.

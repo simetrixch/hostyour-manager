@@ -16,9 +16,9 @@
 import type { PreflightCheck } from "../../../shared/preflight.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
-import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
-import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderMissing, patHookRefusal } from "./repo-identity.ts";
+import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderMissing, patHookRefusal } from "#unit/server/repo-identity.ts";
 import { consumerUnitHost } from "#unit/shared/unit-host.ts";
 import { readStandingHost } from "#unit/server/unit-dns.ts";
 import { missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "#unit/server/pat-scopes.ts";

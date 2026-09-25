@@ -6,12 +6,12 @@ import type { Step } from "../../executor/types.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
-import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshUnitRepoPat } from "./app-token-refresh.ts";
+import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshUnitRepoPat } from "#unit/server/app-token-refresh.ts";
 import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
 import { sleep } from "./onboard-release-cycle.ts";
 import { probePackages } from "./onboard-probes.ts";
-import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderFor, packagesReaderMissing } from "./repo-identity.ts";
-import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderFor, packagesReaderMissing } from "#unit/server/repo-identity.ts";
+import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 

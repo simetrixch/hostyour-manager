@@ -6,7 +6,7 @@ import { appName, guid as guidSchema, subdomain as subdomainSchema } from "../..
 import { ConsumerManifestSchema, type TenantSpec } from "../../../shared/consumer.ts";
 import { errValidation, errInternal } from "../../kernel/errors.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
-import { assertDeployState } from "./lifecycle.ts";
+import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";

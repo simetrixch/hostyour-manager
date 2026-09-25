@@ -20,14 +20,14 @@
 // WHICH units: every build registration. The credential each unit's repository is reached with is
 // the owner's, resolved from the URL at every tick (repo-identity.ts resolveRepoCredentialId, #226):
 // the App's one row, or the owner's repository PAT row; what the id opens to is the store's business.
-import type { Logger } from "../../kernel/logger.ts";
-import type { CredentialStore, UseContext } from "../../security/store.ts";
-import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
-import type { ClusterReader } from "../../adapters/kube/port.ts";
-import type { Registrations } from "#unit/server/registrations.ts";
-import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
+import type { Logger } from "#core/server/kernel/logger.ts";
+import type { CredentialStore, UseContext } from "#core/server/security/store.ts";
+import type { VaultSeeder } from "#core/server/adapters/vault/seeder-port.ts";
+import type { ClusterReader } from "#core/server/adapters/kube/port.ts";
+import type { Registrations } from "./registrations.ts";
+import { unitBuildNamespace } from "./build-rbac.ts";
 import { packagesReaderFor, resolveRepoCredentialId, type OwnerIdentityReader } from "./repo-identity.ts";
-import type { GitHubApp } from "../../adapters/github-app/port.ts";
+import type { GitHubApp } from "#core/server/adapters/github-app/port.ts";
 import { appReachesRepoURL } from "./repo-identity.ts";
 
 /** The three Secrets of a unit's build namespace that carry its repo-pat, by the `target.name` of

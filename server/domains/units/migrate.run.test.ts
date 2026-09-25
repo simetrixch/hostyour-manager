@@ -4,7 +4,7 @@ import type { DbHandle } from "../../db/client.ts";
 import { apps, tenants } from "../../db/schema/inventory.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { makeMigrateDef, makeTenantMigrateDef } from "./migrate.run.ts";
-import { repointStep } from "./relocation-migrate.ts";
+import { repointStep } from "#unit/server/relocation-migrate.ts";
 import { consumerWorld } from "./relocation-world-consumer.ts";
 import {
   openFixtureDb, seedClusters, seedConsumerRow, seedTenantRows, seedConsumerRegistration, seedTenantWorld,
