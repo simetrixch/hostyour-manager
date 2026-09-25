@@ -54,6 +54,9 @@ param(
   [Parameter(Mandatory = $true, Position = 2)][ValidateSet('dev', 'test', 'prod')][string]$Stage
 )
 $ErrorActionPreference = 'Stop'
+# git's output is read, and this script's own is written, as UTF-8 — what the bash spelling reads and
+# writes — so a path with a non-ASCII byte is the same bytes on both sides.
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 # WHAT THIS SCRIPT PRINTS, AND WHO WRITES THE NEWLINE. Every printed line is ASCII and ends with the
 # one "`n" written here, because neither is the host's to choose. Write-Host and WriteLine end a line
 # with the HOST's ending, which on Windows is two bytes where the bash twin writes one; and
@@ -182,12 +185,13 @@ function Publish-BranchPin {
 # packages at the numbers they declare, and a package left at an older number is skipped by a publish
 # that finds that number already published.
 # Only the FIRST "version" line of a file is touched. That is the manifest's own; a version further
-# down belongs to a dependency and is not this release's to move.
+# down belongs to a dependency and is not this release's to move. The file keeps its line endings and
+# its byte order mark. Paths come unquoted, so a name with a non-ASCII byte is the file itself.
 # A repository with no package.json, or a file that declares no version, has nothing that could go
 # stale — that is said out loud and the release continues, because a unit written in another
 # language is the ordinary case for this script and not a broken one.
 function Set-ManifestVersion($Root, $Version, $Tag) {
-  $manifests = @(git -C $Root ls-files -- 'package.json' '*/package.json')
+  $manifests = @(git -c core.quotePath=false -C $Root ls-files -- 'package.json' '*/package.json')
   if ($manifests.Count -eq 0) {
     Say 'this repository carries no package.json - no version manifest to stamp'
     return
@@ -196,6 +200,8 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
   $stamped = @()
   foreach ($rel in $manifests) {
     $file = Join-Path $Root $rel
+    $bytes = [System.IO.File]::ReadAllBytes($file)
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
     $text = [System.IO.File]::ReadAllText($file)
     if (-not $rx.IsMatch($text)) {
       Say "$rel declares no version - nothing to stamp"
@@ -203,7 +209,7 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
     }
     $bumped = $rx.Replace($text, '$1"version": "' + $Version + '"', 1)
     if ($bumped -eq $text) { continue }
-    [System.IO.File]::WriteAllText($file, $bumped)
+    [System.IO.File]::WriteAllText($file, $bumped, [System.Text.UTF8Encoding]::new($hasBom))
     git add -- $file
     $stamped += $rel
   }

@@ -158,6 +158,9 @@ function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; workspace
     mkdirSync(join(work, "packages", "b"), { recursive: true });
     writeFileSync(join(work, "packages", "a", "package.json"), '{\n  "name": "a",\n  "version": "0.1.0",\n  "dependencies": { "x": "1.0.0" }\n}\n');
     writeFileSync(join(work, "packages", "b", "package.json"), '{\n  "name": "b"\n}\n');
+    // A name git would quote, and a file with a byte order mark and CRLF endings.
+    mkdirSync(join(work, "packages", "ü"), { recursive: true });
+    writeFileSync(join(work, "packages", "ü", "package.json"), '﻿{\r\n  "name": "u",\r\n  "version": "0.2.0"\r\n}\r\n');
   }
   git("add", "-A");
   git("commit", "-qm", "init", "--allow-empty");
@@ -370,17 +373,32 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   it("stamps every package.json the repository tracks in the one release commit, identically", RUNS, async () => {
     const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, workspace: true, origin: true }), ["1.2.3", "stable", "dev"]);
     const { stdout } = expectSameBytes(o);
-    expect(stdout.split("\n").slice(0, 3)).toEqual([
+    expect(stdout.split("\n").slice(0, 4)).toEqual([
       "release: packages/b/package.json declares no version - nothing to stamp",
       "release: package.json declares 1.2.3",
       "release: packages/a/package.json declares 1.2.3",
+      "release: packages/ü/package.json declares 1.2.3",
     ]);
     for (const f of [o.sh, o.ps1]) {
-      const shown = run("git", ["show", "--name-only", "--format=%s", "HEAD~0"], f.cwd).stdout;
-      expect(shown.split("\n").filter(Boolean)).toEqual([expect.stringMatching(/^release: 1\.2\.3-stable-\d{14}$/), "package.json", "packages/a/package.json"]);
+      const shown = run("git", ["-c", "core.quotePath=false", "show", "--name-only", "--format=%s", "HEAD"], f.cwd).stdout;
+      expect(shown.split("\n").filter(Boolean)).toEqual([expect.stringMatching(/^release: 1\.2\.3-stable-\d{14}$/), "package.json", "packages/a/package.json", "packages/ü/package.json"]);
       expect(readFileSync(join(f.cwd, "packages", "a", "package.json"), "utf8")).toContain('"version": "1.2.3",\n  "dependencies": { "x": "1.0.0" }');
       expect(readFileSync(join(f.cwd, "packages", "b", "package.json"), "utf8")).toBe('{\n  "name": "b"\n}\n');
+      // Only the version line moves: the byte order mark and the CRLF endings stay.
+      expect(readFileSync(join(f.cwd, "packages", "ü", "package.json"), "utf8")).toBe('﻿{\r\n  "name": "u",\r\n  "version": "1.2.3"\r\n}\r\n');
     }
+  });
+
+  it("commits nothing when every package.json already declares the version", RUNS, async () => {
+    const o = await bothSpellings(() => {
+      const f = fixtureRepo({ manifest: MANIFEST, origin: true });
+      writeFileSync(join(f.cwd, "package.json"), '{\n  "name": "probe",\n  "version": "1.2.3"\n}\n');
+      for (const args of [["add", "package.json"], ["commit", "-qm", "at the version"], ["push", "-q", "origin", "HEAD:master"]]) run("git", args, f.cwd);
+      return f;
+    }, ["1.2.3", "stable", "dev"]);
+    const { stdout } = expectSameBytes(o);
+    expect(stdout).not.toContain("declares");
+    for (const f of [o.sh, o.ps1]) expect(run("git", ["log", "-1", "--format=%s"], f.cwd).stdout.trim()).toBe("at the version");
   });
 
   // A RERUN FOR A VERSION THAT ALREADY STANDS ON ORIGIN, in its three shapes. A version names one

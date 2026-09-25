@@ -82,12 +82,14 @@ die() { warn "$*"; exit 1; }
 # packages at the numbers they declare, and a package left at an older number is skipped by a publish
 # that finds that number already published.
 # Only the FIRST "version" line of a file is touched. That is the manifest's own; a version further
-# down belongs to a dependency and is not this release's to move.
+# down belongs to a dependency and is not this release's to move. perl rewrites it, because it keeps
+# the file's line endings and byte order mark as they are and runs the same on BSD and GNU systems,
+# where `sed -i` differs. Paths come unquoted, so a name with a non-ASCII byte is the file itself.
 # A repository with no package.json, or a file that declares no version, has nothing that could go
 # stale — that is said out loud and the release continues, because a unit written in another
 # language is the ordinary case here and not a broken one.
 stamp_manifest_version() {
-  manifests=$(git -C "$ROOT" ls-files -- 'package.json' '*/package.json')
+  manifests=$(git -c core.quotePath=false -C "$ROOT" ls-files -- 'package.json' '*/package.json')
   if [ -z "$manifests" ]; then
     say "this repository carries no package.json - no version manifest to stamp"
     return 0
@@ -99,7 +101,7 @@ stamp_manifest_version() {
       say "$rel declares no version - nothing to stamp"
       continue
     fi
-    sed -i '0,/^\([[:space:]]*\)"version":[[:space:]]*"[^"]*"/s//\1"version": "'"$VERSION"'"/' "$file"
+    VERSION="$VERSION" perl -0pi -e 's/^([ \t]*)"version":[ \t]*"[^"]*"/$1"version": "$ENV{VERSION}"/m' "$file"
     git diff --quiet -- "$file" && continue
     git add -- "$file"
     stamped="$stamped$rel
