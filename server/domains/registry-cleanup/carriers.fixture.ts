@@ -1,6 +1,6 @@
 // The carrier fakes the pin search + the reaper are tested against — in-memory, no git, no network.
 // Two shapes, because the search reads two kinds of source: a GitOps repo it walks branch by branch
-// (hostyour-cloud, catalog) and a unit's own repo it clones once per stage at a delivery branch.
+// (hostyour-cloud, the deploy repository) and a unit's own repo it clones once per stage at a delivery branch.
 import type { CarrierRepo } from "./search.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import type { BranchScope, ClonedRepo, RepoReader } from "../../adapters/git/port.ts";

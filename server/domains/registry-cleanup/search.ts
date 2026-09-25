@@ -16,7 +16,7 @@
 //       suspended unit is resumable and its image stays live. A build.yaml registration contributes
 //       nothing here — it has no chartPath, and its images are pinned by whoever deploys them, in (b)
 //       or (c).
-//   (b) the tenant catalog: catalog, charts/* on EVERY branch, in the two files a catalog
+//   (b) the tenant charts: the deploy repository, charts/* on EVERY branch, in the two files a deploy repository
 //       chart pins in — values.yaml on the trunk (the product default a fresh installation renders)
 //       and pins-<stage>.yaml on an installation's books branch (what that installation actually
 //       runs). Both are floor: a tag either of them names is deployed somewhere and must not be
@@ -25,7 +25,7 @@
 //       install branches. An install branch stands on the release a cluster actually runs, which can
 //       be OLDER than master, so reading master alone would leave the tags of running clusters
 //       unprotected.
-//   (d) the tenants' own apps bundles: catalog, registrations/<guid>/<stage>.yaml on EVERY branch
+//   (d) the tenants' own apps bundles: the deploy repository, registrations/<guid>/<stage>.yaml on EVERY branch
 //       (an installation's books). A tenant's `<bundle>-<subdomain>` image is declared by no chart's
 //       builds[] and stands in no pins file: its pin is `appsImage` + `appsImageTag` on the tenant
 //       registration (shared/tenant.ts appsBundleFields, hostyour-manager#178), the one tag every
@@ -47,7 +47,7 @@ import {
 import { parse as parseYaml } from "yaml";
 import type { BranchScope, RepoReader } from "../../adapters/git/port.ts";
 
-/** A GitOps repo the search reads across ALL of its branches (hostyour-cloud, catalog). Narrower
+/** A GitOps repo the search reads across ALL of its branches (hostyour-cloud, the deploy repository). Narrower
  *  than the adapters it is composed from: the search only ever reads, and the adapters it is composed
  *  from are built with branch creation OFF (jobs/registry-reaper.ts) so that stays true of the
  *  concrete instances too — a floor built over a branch the reaper minted itself would be empty, and
@@ -69,7 +69,7 @@ export interface SearchDeps {
   /** hostyour-cloud: the registrations on the books branch (class a's index) and clusters/inventories/* on every
    *  branch (class c). */
   cloud: CarrierRepo;
-  /** catalog: charts/* (class b) and registrations/* (class d) on every branch. */
+  /** The deploy repository: charts/* (class b) and registrations/* (class d) on every branch. */
   deploy: CarrierRepo;
   /** A unit's OWN repo, opened per unit under its owner's identity (class a). */
   unit: Pick<RepoReader, "cloneAtRef" | "readFile" | "dispose">;
@@ -114,7 +114,7 @@ export async function searchCarriers(deps: SearchDeps, signal?: AbortSignal): Pr
   ];
 }
 
-/** Classes (b) and (d) in ONE walk of the catalog's branches: the chart pins and the tenant
+/** Classes (b) and (d) in ONE walk of the deploy repository's branches: the chart pins and the tenant
  *  registrations stand on the same branches, and a branch fetched twice is a branch fetched once
  *  too often. */
 async function searchDeploy(deploy: CarrierRepo): Promise<PinHit[]> {
@@ -231,7 +231,7 @@ async function readUnitChart(
  *  property of the REPOSITORY and therefore stated per class, not derived here: the platform's own
  *  repository always ships the directory its own charts live in, so an answer of nothing means this
  *  walk is looking at the wrong path — the state that actually happened when the platform moved its
- *  charts. A CUSTOMER's catalogue is not held to it, because a pure fan-out catalogue that ships no
+ *  charts. A CUSTOMER's deploy repository is not held to it, because a pure fan-out deploy repository that ships no
  *  chart of its own is a shape the platform supports and refusing it would break a correct
  *  installation. The refusal cannot tell a directory that is absent from one that is empty and does
  *  not try to: both mean the same thing here — the floor this class contributes is empty, and a floor

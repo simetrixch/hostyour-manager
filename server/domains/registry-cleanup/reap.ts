@@ -91,7 +91,7 @@ export async function reap(deps: ReapDeps): Promise<ReapResult> {
   const referenced = new Set(hits.map((h) => pinKey(h.pin)));
   if (referenced.size === 0) {
     throw new Error(
-      "registry-reaper: the referenced floor is EMPTY — the pin search over the unit charts, the catalog catalog and the hostyour-cloud platform apps found nothing. " +
+      "registry-reaper: the referenced floor is EMPTY — the pin search over the unit charts, the deploy repository and the hostyour-cloud platform apps found nothing. " +
         "Anything deployed pins an image, so an empty floor means the search did not see what it should have, and every aged tag would be on the delete plan. Refusing to prune; nothing deleted.",
     );
   }

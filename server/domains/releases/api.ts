@@ -57,7 +57,7 @@ function pinsByBranchStage(search: GlobSearch): Map<string, AppReleaseView[]> {
   const byKey = new Map<string, AppReleaseView[]>();
   for (const hit of search.hits) {
     // The platform-app class reads only the per-stage files, so every hit of it names a stage; the
-    // stage-less pin file belongs to the tenant catalog, which this surface does not read.
+    // stage-less pin file belongs to the deploy repository, which this surface does not read.
     if (hit.stage === null) continue;
     const key = `${hit.branch}\0${hit.stage}`;
     const app: AppReleaseView = { app: hit.chart, build: hit.pin.name, image: hit.pin.image, tag: hit.pin.tag };

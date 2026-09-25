@@ -452,7 +452,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         const repo = requirePlatformRepo(ports);
         // The slave inherits the installation's own values from the MASTER's map: where it pulls
         // images from, the public apex its units serve under, the business domain, where alerts
-        // go, and the catalog repository — a slave belongs to the SAME installation, so nothing
+        // go, and the deploy repository — a slave belongs to the SAME installation, so nothing
         // here is asked a second time.
         const masterMarking = await resolveClusterMarking(repo, masterFqdn);
         // The dial address, resolved by the ONE resolver create-mgmt also uses — the map's apiHost

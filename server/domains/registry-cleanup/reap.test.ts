@@ -52,7 +52,7 @@ function cloudCarryingNoPins(): FakeCarrierRepo {
 /**
  * The three carrier classes, together, as the floor sees them:
  *   (a) registration example-auth with a chartPath -> its repo's deploy/prod pins example-auth-backend
- *   (b) catalog books br. charts/example-engine/pins-dev.yaml    pins example-engine
+ *   (b) deploy repository books br. charts/example-engine/pins-dev.yaml    pins example-engine
  *   (c) hostyour-cloud master      clusters/inventories/manager/values-prod.yaml      pins manager (newer)
  *       hostyour-cloud m1 branch clusters/inventories/manager/values-prod.yaml     pins manager (OLDER)
  * Each of the three repositories additionally carries twelve aged, unpinned tags, all NEWER than the
@@ -72,7 +72,7 @@ function threeClassFixture(opts: { withDeployCarrier?: boolean } = {}): {
   const deploy = new FakeCarrierRepo();
   // With the carrier: the chart states its pin. Without it: the same chart on the same branch, stating
   // no pins — exactly the floor class (b) would leave behind if it were dropped from the search.
-  // The catalog pin stands on THIS installation's books branch, never on the trunk every
+  // The deploy repository pin stands on THIS installation's books branch, never on the trunk every
   // installation reads — see shared/pin.ts deployPinFiles().
   deploy.seed(
     deploy.booksBranch,
@@ -136,8 +136,8 @@ describe("reap — the floor IS the pin search, over all three carrier classes",
 
     const result = await reap({ ...deps, logger: makeLogger(), dryRun: false });
 
-    // The one pin class (b) contributed is gone from the floor, so the tag the live tenant catalog
-    // runs is now just an aged tag — planned for deletion, and deleted. That is the exact failure this
+    // The one pin class (b) contributed is gone from the floor, so the tag the deploy repository's live charts
+    // run is now just an aged tag — planned for deletion, and deleted. That is the exact failure this
     // carrier class prevents.
     expect(result.repos.find((r) => r.repo === "example-engine")!.delete).toContain(ENGINE_PIN);
     expect(registry.deleted.some((d) => d.digest === "sha256:example-engine-pin0")).toBe(true);

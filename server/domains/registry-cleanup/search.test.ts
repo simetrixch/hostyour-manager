@@ -60,17 +60,17 @@ describe("searchCarriers — the four carrier classes", () => {
     expect(unit.open.size).toBe(0); // every clone disposed
   });
 
-  // A catalog chart pins in TWO files and both are live: values.yaml on the trunk is the product
+  // A deploy repository chart pins in TWO files and both are live: values.yaml on the trunk is the product
   // default a fresh installation renders, pins-<stage>.yaml on an installation's books branch is
   // what that installation actually runs. Reading only one of them leaves real deployments
   // unprotected — the trunk default on an installation that has never built, the per-stage pin on
   // every installation that has.
-  it("(b) reads BOTH catalog pin files — the trunk default and the per-installation pins — on EVERY branch", async () => {
+  it("(b) reads BOTH deploy repository pin files — the trunk default and the per-installation pins — on EVERY branch", async () => {
     const deploy = new FakeCarrierRepo();
     deploy.seed("master", "charts/example-engine/values.yaml", pinFile([["example-engine", "0.3.0"]]));
     deploy.seed("c1.example.com", "charts/example-engine/pins-prod.yaml", pinFile([["example-engine", "0.2.0"]]));
     deploy.seed("c2.example.com", "charts/example-engine/pins-dev.yaml", pinFile([["example-engine", "0.5.0"]]));
-    // A stage values file of the catalog carries no pin any more — a tag there would stand on the
+    // A stage values file of the deploy repository carries no pin any more — a tag there would stand on the
     // trunk every installation reads, so nothing must be read out of it either.
     deploy.seed("master", "charts/example-engine/values-prod.yaml", pinFile([["example-engine", "9.9.9"]]));
 
@@ -94,7 +94,7 @@ describe("searchCarriers — the four carrier classes", () => {
     expect(new Set(hits.map((h) => pinKey(h.pin)))).toEqual(new Set(["manager:0.2.0", "manager:0.1.0"]));
   });
 
-  it("(d) reads every tenant's own apps bundle off its registration on EVERY branch of the catalog — the empty pair pins nothing", async () => {
+  it("(d) reads every tenant's own apps bundle off its registration on EVERY branch of the deploy repository — the empty pair pins nothing", async () => {
     const deploy = new FakeCarrierRepo();
     deploy.seed("c1.example.com", "registrations/zsjs023ctne0/prod.yaml", tenantRegistration(true));
     deploy.seed("c2.example.com", "registrations/zsjs023ctne0/dev.yaml", tenantRegistration(true).replace(TEST_BUNDLE.appsImageTag, "0.2.0-stable-20260202000000-def5678"));
@@ -128,7 +128,7 @@ describe("searchCarriers — the four carrier classes", () => {
     expect(unit.clones).toEqual([]); // no clone attempted, so no branch to be missing
   });
 
-  it("a pin file that pins nothing is not an error — a catalog chart may ship no image of its own", async () => {
+  it("a pin file that pins nothing is not an error — a deploy repository chart may ship no image of its own", async () => {
     const deploy = new FakeCarrierRepo();
     deploy.seed("master", "charts/example-auth/values-dev.yaml", "global:\n  env: dev\n");
     expect(await searchCarriers(deps({ deploy }))).toEqual([]);
@@ -209,12 +209,12 @@ describe("searchCarriers — FAIL-CLOSED (a carrier it cannot read is never read
     expect(await searchCarriers(deps({ cloud }))).toEqual([]);
   });
 
-  // A CUSTOMER's catalogue is deliberately NOT held to it: a pure fan-out catalogue that ships no
+  // A CUSTOMER's deploy repository is deliberately NOT held to it: a pure fan-out deploy repository that ships no
   // chart of its own is a shape this platform supports, and refusing it would break a correct
   // installation. Class (b) therefore answers empty where class (c) refuses.
-  it("a catalog carrying no charts at all is NOT a refusal — only the platform's own repository is held to it", async () => {
+  it("a deploy repository carrying no charts at all is NOT a refusal — only the platform's own repository is held to it", async () => {
     const deploy = new FakeCarrierRepo();
-    deploy.seed("master", "readme.md", "a fan-out catalogue with no chart of its own\n");
+    deploy.seed("master", "readme.md", "a fan-out deploy repository with no chart of its own\n");
     expect(await searchCarriers(deps({ deploy }))).toEqual([]);
   });
 });

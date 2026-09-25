@@ -277,7 +277,7 @@ export async function openServeConversation(
 }
 
 /** Answers a DEF is authoritative for beyond the inventory row — facts the manager holds in the
- *  platform repo (a cluster map's build plane, apex, catalog repository) and can therefore state
+ *  platform repo (a cluster map's build plane, apex, deploy repository) and can therefore state
  *  without asking the operator to re-type what stands written. Async because the source is the git
  *  port, and keyed by the PROGRAM's answer names: an entry no program declares is simply never
  *  sent (composeAnswers walks the declaration, not this record). A list-valued entry is an answer
