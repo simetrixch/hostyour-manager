@@ -129,7 +129,7 @@ async function makeTenantLive(resolver?: FakeClusterKubeResolver): Promise<{ app
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
     registerAuth: () => undefined,
-    // resolver + catalogRepoUrl are wired together (both come from config.catalog), so the
+    // resolver + catalogRepoUrl are wired together (both come from config.deployRepo), so the
     // "not configured" case below drops BOTH — the live read needs both or it degrades to SQL-only.
     registerProtected: (a) => registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: true, ...(resolver ? { resolver, catalogRepoUrl: DEPLOY_REPO } : {}) }),
   });

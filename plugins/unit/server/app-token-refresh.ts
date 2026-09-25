@@ -37,10 +37,10 @@ import { appReachesRepoURL } from "./repo-identity.ts";
  *  (the package read). Deleting one is what makes its ExternalSecret read Vault again. */
 export const BUILD_TARGET_SECRETS = ["build-git-https", "bump-git-https", "build-npmrc"] as const;
 
-/** The entry the release pipeline's bump pushes the catalog's books branch with
- *  (hostyour-cloud consumer-build externalsecret-bump.yaml reads secret/build/catalog/repo-pat):
- *  the seeder addresses it as the "unit" named catalog, which is exactly its path. */
-export const CATALOG_BUMP_UNIT = "catalog";
+/** The entry the release pipeline's bump pushes the deploy repository's books branch with
+ *  (hostyour-cloud consumer-build externalsecret-bump.yaml reads secret/build/deploy/repo-pat):
+ *  the seeder addresses it as the "unit" named deploy, which is exactly its path. */
+export const DEPLOY_BUMP_UNIT = "deploy";
 
 export interface AppTokenRefreshDeps {
   store: Pick<CredentialStore, "list" | "open">;
@@ -49,10 +49,10 @@ export interface AppTokenRefreshDeps {
   owners: OwnerIdentityReader;
   registrations: Pick<Registrations, "listBuildRegistrations">;
   seeder: Pick<VaultSeeder, "refreshBuildRepoPat">;
-  /** The catalog as configured (config.catalog): its bump entry is the Manager's to write from the
-   *  App on every tick (#197). Absent ⇒ no tenant family. */
-  catalog?: { repoURL: string } | undefined;
-  /** The platform's GitHub App — measured against the catalog and minting the bump token. */
+  /** The deploy repository as configured (config.deployRepo): its bump entry is the Manager's to
+   *  write from the App on every tick (#197). Absent ⇒ no tenant family. */
+  deployRepo?: { repoURL: string } | undefined;
+  /** The platform's GitHub App — measured against the deploy repository and minting the bump token. */
   githubApp: Pick<GitHubApp, "reachesRepository" | "installationToken" | "installationOrg">;
   /** The build plane's cluster reader — the master's own, the cluster this Manager runs on. Absent
    *  on a Manager whose kube is not wired: the entries are still rewritten, and the deletion that
@@ -119,7 +119,7 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
   for (const { unit, repoURL } of units) {
     // THE UNIT'S OWN FAILURE (#240): a repository the App no longer reaches — deleted by hand, moved,
     // its owner's PAT forgotten — is that unit's, logged by name and counted failed; the other units
-    // and the catalog's entry go on, because a refresh that stops at one leaves every other clone
+    // and the deploy repository's entry go on, because a refresh that stops at one leaves every other clone
     // reading a token that expires within the hour.
     let credentialId: string;
     try {
@@ -150,39 +150,39 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
     }
   }
   if (undeleted.length > 0) deps.logger.warn({ units: undeleted }, "no kube is wired on this Manager, so the build Secrets of these units were not deleted after the rewrite — ESO keeps the Secrets it wrote before, and the next clone reads the old token");
-  await refreshCatalogBumpToken(deps, buildUnits, refreshed, failed);
-  if (units.length > 0 || refreshed.includes(CATALOG_BUMP_UNIT)) deps.logger.info({ refreshed, failed }, "build repo-pat entries rewritten (App tokens minted now, PATs with their owner's packages reader) and their build Secrets deleted");
+  await refreshDeployBumpToken(deps, buildUnits, refreshed, failed);
+  if (units.length > 0 || refreshed.includes(DEPLOY_BUMP_UNIT)) deps.logger.info({ refreshed, failed }, "build repo-pat entries rewritten (App tokens minted now, PATs with their owner's packages reader) and their build Secrets deleted");
   return { refreshed, failed };
 }
 
-/** The catalog's bump entry, written from the App — the catalog's one identity (hostyour-cloud#237),
- *  its installation's reach measured now (repo-identity.ts, the rule of #194). Then `bump-git-https`
- *  deleted in EVERY build namespace, because every unit's release pushes the catalog's books branch
- *  with this one entry. */
-async function refreshCatalogBumpToken(deps: AppTokenRefreshDeps, buildUnits: readonly string[], refreshed: string[], failed: string[]): Promise<void> {
-  const { catalog, githubApp } = deps;
-  if (!catalog) return;
+/** The deploy repository's bump entry, written from the App — the deploy repository's one identity
+ *  (hostyour-cloud#237), its installation's reach measured now (repo-identity.ts, the rule of #194).
+ *  Then `bump-git-https` deleted in EVERY build namespace, because every unit's release pushes the
+ *  deploy repository's books branch with this one entry. */
+async function refreshDeployBumpToken(deps: AppTokenRefreshDeps, buildUnits: readonly string[], refreshed: string[], failed: string[]): Promise<void> {
+  const { deployRepo, githubApp } = deps;
+  if (!deployRepo) return;
   try {
-    if (!(await appReachesRepoURL(githubApp, catalog.repoURL))) {
-      deps.logger.error({ repoURL: catalog.repoURL }, "the GitHub App's installation does not reach the catalog — the release pipeline's bump has no credential (readiness row catalog.identity)");
-      failed.push(CATALOG_BUMP_UNIT);
+    if (!(await appReachesRepoURL(githubApp, deployRepo.repoURL))) {
+      deps.logger.error({ repoURL: deployRepo.repoURL }, "the GitHub App's installation does not reach the deploy repository — the release pipeline's bump has no credential (readiness row deploy.identity)");
+      failed.push(DEPLOY_BUMP_UNIT);
       return;
     }
     const token = Buffer.from(await githubApp.installationToken(), "utf8");
     try {
       // The bump entry is read by the release pipeline's push alone — no build installs packages with it.
-      await deps.seeder.refreshBuildRepoPat({ consumerName: CATALOG_BUMP_UNIT, pat: token.toString("utf8"), packages: "" });
+      await deps.seeder.refreshBuildRepoPat({ consumerName: DEPLOY_BUMP_UNIT, pat: token.toString("utf8"), packages: "" });
     } finally {
       token.fill(0);
     }
   } catch (err) {
-    failed.push(CATALOG_BUMP_UNIT);
-    deps.logger.error({ repoURL: catalog.repoURL, err: err instanceof Error ? err.message : String(err) }, "the App's token could not be written into the catalog's bump entry — the next release bumps the catalog with the value that stands, which dies an hour after it was minted");
+    failed.push(DEPLOY_BUMP_UNIT);
+    deps.logger.error({ repoURL: deployRepo.repoURL, err: err instanceof Error ? err.message : String(err) }, "the App's token could not be written into the deploy repository's bump entry — the next release bumps the deploy repository with the value that stands, which dies an hour after it was minted");
     return;
   }
   if (!deps.kube) {
-    refreshed.push(CATALOG_BUMP_UNIT);
-    if (buildUnits.length > 0) deps.logger.warn({ units: buildUnits }, "no kube is wired on this Manager, so bump-git-https was not deleted in the build namespaces after the catalog rewrite — the next bump reads the old token");
+    refreshed.push(DEPLOY_BUMP_UNIT);
+    if (buildUnits.length > 0) deps.logger.warn({ units: buildUnits }, "no kube is wired on this Manager, so bump-git-https was not deleted in the build namespaces after the deploy repository rewrite — the next bump reads the old token");
     return;
   }
   const kept: string[] = [];
@@ -191,8 +191,8 @@ async function refreshCatalogBumpToken(deps: AppTokenRefreshDeps, buildUnits: re
       await deps.kube.deleteSecret(unitBuildNamespace(unit), "bump-git-https");
     } catch (err) {
       kept.push(unit);
-      deps.logger.error({ unit, namespace: unitBuildNamespace(unit), err: err instanceof Error ? err.message : String(err) }, "the catalog's bump entry was rewritten but this unit's bump-git-https could not be deleted — its next bump reads the old token");
+      deps.logger.error({ unit, namespace: unitBuildNamespace(unit), err: err instanceof Error ? err.message : String(err) }, "the deploy repository's bump entry was rewritten but this unit's bump-git-https could not be deleted — its next bump reads the old token");
     }
   }
-  (kept.length > 0 ? failed : refreshed).push(CATALOG_BUMP_UNIT);
+  (kept.length > 0 ? failed : refreshed).push(DEPLOY_BUMP_UNIT);
 }

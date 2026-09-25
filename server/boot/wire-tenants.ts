@@ -1,7 +1,7 @@
 // The TENANT (multi-app) family of the unit composition, apart from wire-units.ts the way the
 // consumer family stands there: a SECOND GitPlatformRepo bound to catalog + the manager-side
 // HelmRenderer (tenant charts are trusted first-party, validated manager-side — NO gate-runner).
-// Goes live when CATALOG_REPO and the platform repository are configured; it is NOT gated on the
+// Goes live when DEPLOY_REPO and the platform repository are configured; it is NOT gated on the
 // consumer prerequisites, but a tenant's own apps are built by the consumer's build chain at run time
 // (wire-units.ts `lateBuild`). buildUnits calls it and merges what it returns with the consumer
 // family's.
@@ -132,14 +132,14 @@ export function buildTenantOnboarding(
 ): TenantFamily {
   // The platform repo coordinates are required: every member AppProject must allow the `$values`
   // source its Application pulls from, and a project written without it would fail every sync.
-  if (!config.catalog || !platformRepo || !resolveUnitApex || !resolveClusterValueFiles || !config.github) return { defs: [], enabled: false };
+  if (!config.deployRepo || !platformRepo || !resolveUnitApex || !resolveClusterValueFiles || !config.github) return { defs: [], enabled: false };
 
-  const repoURL = config.catalog.repoURL;
+  const repoURL = config.deployRepo.repoURL;
   const platformRepoURL = `https://github.com/${config.github.owner}/${config.github.repo}.git`;
   // ONE identity does BOTH jobs: the reader clones the repo at a ref for manager-side validation, and
   // the platform repo pushes tenant pointers — the App's installation token, minted at every open,
   // because a token GitHub issues for an hour must never be held (#194). The readiness row
-  // catalog.identity says whether the App reaches the catalog.
+  // deploy.identity says whether the App reaches the deploy repository.
   const openDeployToken = async (): Promise<Buffer> => Buffer.from(await githubApp.installationToken(), "utf8");
 
   // The reader clones the catalog and the apps template under the catalog's own read credential,

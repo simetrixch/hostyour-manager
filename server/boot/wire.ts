@@ -272,7 +272,7 @@ export async function wire(): Promise<Wired> {
   const refreshAppTokensLater = registrations && unit
     ? async (): Promise<void> => {
         try {
-          await refreshAppTokens({ store, registrations, seeder: unit.seeder, kube: masterKube.clusterReader, logger, catalog: config.catalog, githubApp, owners: (org) => readOwnerIdentity(db.db, org) });
+          await refreshAppTokens({ store, registrations, seeder: unit.seeder, kube: masterKube.clusterReader, logger, deployRepo: config.deployRepo, githubApp, owners: (org) => readOwnerIdentity(db.db, org) });
         } finally {
           if (unitResolver && repoCredential) {
             await sweepRepoCredentials({ db: db.db, githubApp, resolver: unitResolver, repoCredential, logger });

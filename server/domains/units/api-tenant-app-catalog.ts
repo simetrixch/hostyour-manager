@@ -38,7 +38,7 @@ export function registerTenantAppCatalogRoute(app: Hono<AppEnv>, deps: TenantApp
     const tenant = db.select({ guid: tenants.guid, stage: tenants.stage }).from(tenants).where(eq(tenants.id, id)).get();
     if (!tenant) throw errNotFound(`tenant ${id}`);
     const none = (reason: string): Response => c.json({ apps: [], reason } satisfies TenantAppCatalogView);
-    if (!registrations) return none("tenant onboarding is not configured on this manager — it needs CATALOG_REPO and the platform repository (GITHUB_REPO, GITHUB_WRITE_PAT)");
+    if (!registrations) return none("tenant onboarding is not configured on this manager — it needs DEPLOY_REPO and the platform repository (GITHUB_REPO, GITHUB_WRITE_PAT)");
     if (!appCatalog) return none("this Manager reads no app catalog — the catalog's template is what an app is chosen from");
     try {
       const current = await registrations.readTenant(tenant.stage, tenant.guid);

@@ -160,11 +160,11 @@ const EnvSchema = z.object({
   // non-standard cluster.
   GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(),
   BUILD_EVENTLISTENER_SUBDOMAIN: z.string().min(1).default("build"),
-  // THE PLATFORM'S OWN GITHUB IDENTITY — a GitHub App installed with the owner of the catalog and
-  // of every tenant repository (adapters/github-app). The three values come from Vault
+  // THE PLATFORM'S OWN GITHUB IDENTITY — a GitHub App installed with the owner of the deploy
+  // repository and of every tenant repository (adapters/github-app). The three values come from Vault
   // <stage>/app/github-app via the manager's own ExternalSecret (the seeder is write-only, so like
   // GITHUB_WEBHOOK_SECRET they arrive as env, never as a Vault read-back). REQUIRED, all three: the
-  // App is the identity the catalog is read and written with, and an installation without it does
+  // App is the identity the deploy repository is read and written with, and an installation without it does
   // not exist (hostyour-cloud#237); a missing one refuses the boot by name.
   //
   // The key is a PEM, and a PEM crosses a values file, a Vault entry and an env var before it gets
@@ -186,16 +186,16 @@ const EnvSchema = z.object({
   // DnsProvider is wired and the provision-dns/remove-dns steps work; unset ⇒ those steps fail LOUD
   // (DNS is a mandatory part of onboard, offboard and purge — never a silent skip).
   CLOUDFLARE_DNS_API_TOKEN: z.string().min(1).optional(),
-  // Tenant (multi-app) onboarding. The catalog GitOps repo the live ApplicationSets read is THE
+  // Tenant (multi-app) onboarding. The deploy repository the live ApplicationSets read is THE
   // INSTALLATION'S OWN repository (owner/repo), read and written with the platform's GitHub App —
   // the SAME identity clones it for manager-side validation AND pushes tenant registrations onto
   // the books branch. Set ⇒ the tenant Run family is registered (a SECOND platform repo bound to
-  // the catalog + the manager-side HelmRenderer, kube in-cluster over the pod SA); unset ⇒ the
+  // the deploy repository + the manager-side HelmRenderer, kube in-cluster over the pod SA); unset ⇒ the
   // tenant mutating routes answer 501. The tenant format is INDEPENDENT of the consumer gate-runner
   // (tenant charts are trusted first-party, validated manager-side — no consumer gate-runner).
   // NO DEFAULT, deliberately: the answer that supplies it says so in as many words, and no rule
   // composes its name out of anything else. A default here is a second name nobody chose.
-  CATALOG_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'CATALOG_REPO must be "owner/repo"').optional(),
+  DEPLOY_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'DEPLOY_REPO must be "owner/repo"').optional(),
   // WHERE A TENANT'S UPLOADS GO, and the one object-storage credential this installation holds. The
   // three values come from secret/<stage>/app/cloudflare-r2 via the manager's own ExternalSecret
   // (the seeder is write-only, so like STORAGE_BOX_* they arrive as env, never as a Vault read-back).
@@ -226,7 +226,7 @@ const EnvSchema = z.object({
   //
   // AND IT CARRIES NO CREDENTIAL, which is why it is one key and not a pair. The programs repository
   // is PUBLIC, so a clone of it authenticates with nothing and there is no partner secret to demand:
-  // pairing it with a PAT the way GITHUB_REPO and CATALOG_REPO are paired would make an installation
+  // pairing it with a PAT the way GITHUB_REPO and DEPLOY_REPO are paired would make an installation
   // mint a credential for a repository that turns nobody away.
   DEPLOY_PROGRAMS_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'DEPLOY_PROGRAMS_REPO must be "owner/repo"'),
   // The machine-side deployment programs. The redeploy master arm drives deploy-cluster /
@@ -370,11 +370,11 @@ export interface Config {
     fence: { mustFailTargets: string[]; managerAddr: string; mustPassTarget: string };
     kubeVersion: string;
   };
-  /** Present ⇒ tenant (multi-app) onboarding is wired: the installation's own catalog GitOps repo
+  /** Present ⇒ tenant (multi-app) onboarding is wired: the installation's own deploy repository
    *  the live ApplicationSets read, cloned for manager-side validation and pushed to with the
    *  platform's GitHub App (the token minted at every open). Absent ⇒ the tenant mutating routes
    *  answer 501. */
-  catalog?: {
+  deployRepo?: {
     repoURL: string;
   };
   /** The consumer build webhook. `subdomain` is the image-builder
@@ -388,8 +388,8 @@ export interface Config {
     secret?: string;
   };
   /** The platform's GitHub App identity (adapters/github-app): the App's id, its installation with
-   *  the owner of the catalog and of the tenant repositories, and the PEM private key its JWT is
-   *  signed with (line breaks restored). Always present: the App is the identity the catalog is
+   *  the owner of the deploy repository and of the tenant repositories, and the PEM private key its JWT is
+   *  signed with (line breaks restored). Always present: the App is the identity the deploy repository is
    *  read and written with (hostyour-cloud#237). */
   githubApp: {
     appId: string;
@@ -532,10 +532,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
           },
         }
       : {}),
-    // CATALOG_REPO is the discriminator: present ⇒ tenant onboarding is configured; the App is its
+    // DEPLOY_REPO is the discriminator: present ⇒ tenant onboarding is configured; the App is its
     // identity. The repoURL is built the same way the consumer platform URL is (https, never with
     // embedded credentials).
-    ...(e.CATALOG_REPO ? { catalog: { repoURL: `https://github.com/${e.CATALOG_REPO}.git` } } : {}),
+    ...(e.DEPLOY_REPO ? { deployRepo: { repoURL: `https://github.com/${e.DEPLOY_REPO}.git` } } : {}),
     // Always present: the subdomain always has its "build" default; only the HMAC secret is optional
     // (absent ⇒ the onboard setup-webhook step fails loud, never a silent no-build).
     webhook: {

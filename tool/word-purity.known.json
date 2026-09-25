@@ -2012,7 +2012,7 @@
     "server/jobs/registry-reaper.ts::hostyour-cloud": 1,
     "server/jobs/registry-reaper.ts::onboarding": 1,
     "server/jobs/registry-reaper.ts::registrations": 5,
-    "server/jobs/registry-reaper.ts::tenant": 4,
+    "server/jobs/registry-reaper.ts::tenant": 2,
     "server/jobs/registry-reaper.ts::tenants": 1,
     "server/jobs/registry-reaper.ts::unit": 12,
     "server/kernel/config-census.test.ts::consumer": 1,

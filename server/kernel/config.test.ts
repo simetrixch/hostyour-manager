@@ -166,25 +166,25 @@ describe("parseConfig", () => {
   });
 });
 
-describe("tenant onboarding config (catalog)", () => {
-  it("leaves catalog absent when CATALOG_REPO is not set", () => {
-    expect(parseConfig(validEnv).catalog).toBeUndefined();
+describe("tenant onboarding config (deploy repository)", () => {
+  it("leaves the deploy repository absent when DEPLOY_REPO is not set", () => {
+    expect(parseConfig(validEnv).deployRepo).toBeUndefined();
   });
 
-  // The App is the catalog's one identity (hostyour-cloud#237): CATALOG_REPO names the repository and
-  // nothing else is asked; the row catalog.identity measures the App's reach at boot.
-  it("takes CATALOG_REPO as the catalog, read and written with the GitHub App", () => {
-    const c = parseConfig({ ...validEnv, CATALOG_REPO: "acme/acme-catalog" });
-    expect(c.catalog).toEqual({ repoURL: "https://github.com/acme/acme-catalog.git" });
+  // The App is the deploy repository's one identity (hostyour-cloud#237): DEPLOY_REPO names the
+  // repository and nothing else is asked; the row deploy.identity measures the App's reach at boot.
+  it("takes DEPLOY_REPO as the deploy repository, read and written with the GitHub App", () => {
+    const c = parseConfig({ ...validEnv, DEPLOY_REPO: "acme/acme-catalog" });
+    expect(c.deployRepo).toEqual({ repoURL: "https://github.com/acme/acme-catalog.git" });
   });
 
-  it("rejects a malformed CATALOG_REPO", () => {
-    expect(() => parseConfig({ ...validEnv, CATALOG_REPO: "not-a-repo" })).toThrow(ConfigError);
+  it("rejects a malformed DEPLOY_REPO", () => {
+    expect(() => parseConfig({ ...validEnv, DEPLOY_REPO: "not-a-repo" })).toThrow(ConfigError);
   });
 
   it("is independent of the consumer gate-runner (tenant charts validate manager-side)", () => {
-    const c = parseConfig({ ...validEnv, CATALOG_REPO: "acme/acme-catalog" });
-    expect(c.catalog).toBeDefined();
+    const c = parseConfig({ ...validEnv, DEPLOY_REPO: "acme/acme-catalog" });
+    expect(c.deployRepo).toBeDefined();
     expect(c.onboarding).toBeUndefined(); // no ONBOARD_GATE_MANAGER_ADDR, yet tenant config still resolves
   });
 });

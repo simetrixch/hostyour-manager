@@ -30,7 +30,7 @@ const CONSUMER_KINDS: readonly string[] = RUN_FAMILY.consumer;
 const TENANT_KINDS: readonly string[] = RUN_FAMILY.tenant;
 
 // The full enable env for BOTH families — deliberately WITHOUT KUBECONFIG_PATH: the consumer gate
-// is ONBOARD_GATE_MANAGER_ADDR + github, the tenant gate is CATALOG_REPO. MASTER_*
+// is ONBOARD_GATE_MANAGER_ADDR + github, the tenant gate is DEPLOY_REPO. MASTER_*
 // is part of the enable set for both, because both write onto the branch this installation keeps its
 // books on and that branch is named after the cluster holding the master role.
 const enabledEnv = {
@@ -45,7 +45,7 @@ const enabledEnv = {
   ONBOARD_GATE_MANAGER_ADDR: "10.152.183.5:8484",
   GITHUB_REPO: "example/platform",
   GITHUB_WRITE_PAT: "ghp_platform",
-  CATALOG_REPO: "acme/acme-catalog",
+  DEPLOY_REPO: "acme/acme-catalog",
   MASTER_FQDN: "m1.example.com",
   MASTER_SSH_USER: "m1",
   MASTER_STAGE: "prod",
@@ -148,7 +148,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
   });
 
   it("hands BOTH repositories the same books branch — one installation, one books branch, two repos", () => {
-    // The tenant registrations live in catalog and the consumer ones in hostyour-cloud, and the
+    // The tenant registrations live in the deploy repository and the consumer ones in hostyour-cloud, and the
     // branch carries the same name in both: the deploy repo takes it off the platform repo rather
     // than deriving it a second time, so the two cannot drift apart.
     const args = setup();
@@ -158,15 +158,15 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     expect(wiring.registrations?.branch).toBe("m1.example.com");
   });
 
-  it("offers boot the act that brings the catalog's books branch into being, and only where there is a catalog", () => {
+  it("offers boot the act that brings the deploy repository's books branch into being, and only where there is one", () => {
     // The tenant ApplicationSet's git generator reads that branch from the moment the installation is
     // deployed. Until boot brought it into being it came into being on the first tenant registration,
     // so a correct fresh install showed the ApplicationSet — and the root Application above it — in
     // error, with nothing anywhere saying the red was expected.
     expect(buildUnits(...setup()).carryTrunkToBooksBranch).toBeTypeOf("function");
-    // Without a catalog there is no repository to write into, so boot has nothing to call and must
+    // Without a deploy repository there is nothing to write into, so boot has nothing to call and must
     // not be handed something that would fail on every start-up.
-    expect(buildUnits(...setup({ CATALOG_REPO: undefined })).carryTrunkToBooksBranch).toBeUndefined();
+    expect(buildUnits(...setup({ DEPLOY_REPO: undefined })).carryTrunkToBooksBranch).toBeUndefined();
   });
 
   it("consumer stays off without the gate-runner config; the tenant family is independent", () => {
@@ -179,8 +179,8 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     expect(wiring.registrations).toBeUndefined();
   });
 
-  it("tenant stays off without CATALOG_REPO; the consumer family is independent", () => {
-    const wiring = buildUnits(...setup({ CATALOG_REPO: undefined }));
+  it("tenant stays off without DEPLOY_REPO; the consumer family is independent", () => {
+    const wiring = buildUnits(...setup({ DEPLOY_REPO: undefined }));
     expect(wiring.enabled).toBe(true);
     expect(wiring.tenantEnabled).toBe(false);
     expect(wiring.defs.map((d) => d.kind).sort()).toEqual([...CONSUMER_KINDS].sort());
@@ -190,7 +190,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
   });
 
   it("returns the empty wiring when neither family is configured (routes answer 501)", () => {
-    const wiring = buildUnits(...setup({ ONBOARD_GATE_MANAGER_ADDR: undefined, CATALOG_REPO: undefined }));
+    const wiring = buildUnits(...setup({ ONBOARD_GATE_MANAGER_ADDR: undefined, DEPLOY_REPO: undefined }));
     expect(wiring.enabled).toBe(false);
     expect(wiring.tenantEnabled).toBe(false);
     expect(wiring.defs).toHaveLength(0);

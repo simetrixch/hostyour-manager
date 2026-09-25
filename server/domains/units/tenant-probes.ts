@@ -47,7 +47,7 @@ export async function probeCatalog(ports: TenantOnboardPorts, p: CreateTenantPar
     const guids = await ports.registrations.listTenantGuids(p.stage);
     out.push(check("catalog.read", title, "hard", "pass", `readable; ${guids.length} tenant(s) registered at ${p.stage}`));
   } catch (err) {
-    return [check("catalog.read", title, "hard", "fail", `cannot be read: ${err instanceof Error ? err.message : String(err)}`, "the manager's catalog credential or CATALOG_REPO is wrong")];
+    return [check("catalog.read", title, "hard", "fail", `cannot be read: ${err instanceof Error ? err.message : String(err)}`, "the manager's deploy repository credential or DEPLOY_REPO is wrong")];
   }
   return out;
 }

@@ -388,12 +388,12 @@ export interface TenantApiDeps extends ConsumerApiDeps {
    *  tenant onboarding is not configured (no adapters wired): the live endpoint then degrades to
    *  SQL-only (reason), mirroring the 501 mutating routes. */
   resolver?: ClusterKubeResolver;
-  /** The ONE repo every tenant's charts live in (config.catalog.repoURL) — what a tenant has
+  /** The ONE repo every tenant's charts live in (config.deployRepo.repoURL) — what a tenant has
    *  INSTEAD of a consumer's per-app repoUrl column, since a tenant's repo is a platform constant of
    *  the one-time catalog registration (shared/tenant.ts TenantEntrySchema). The live read needs
    *  it to ask the base Application which of its spec sources targets catalog, exactly as the
    *  consumer read asks with apps.repoUrl. Wired TOGETHER with `resolver` — both come from
-   *  config.catalog (wire-units buildTenantOnboarding), so they are present or absent
+   *  config.deployRepo (wire-units buildTenantOnboarding), so they are present or absent
    *  together, and the live route degrades to SQL-only unless it has BOTH. */
   catalogRepoUrl?: string;
   /** The post-onboard activation client — powers the operator-driven first-admin invite/resend
@@ -655,7 +655,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   // immediately; the run sits in `planning` while the T1..T4 fan-out gates validate, streaming gate
   // lines to /api/runs/:id/events, then settles `planned` (approve to deploy) or `failed` (rejected).
   app.post("/api/tenants", async (c) => {
-    if (!onboardingEnabled) throw errNotConfigured("tenant onboarding is not configured on this manager — it needs CATALOG_REPO and the platform repository (GITHUB_REPO, GITHUB_WRITE_PAT)");
+    if (!onboardingEnabled) throw errNotConfigured("tenant onboarding is not configured on this manager — it needs DEPLOY_REPO and the platform repository (GITHUB_REPO, GITHUB_WRITE_PAT)");
     const parsed = CreateTenantRequest.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) invalid("tenant-create", parsed.error);
     return c.json(await executor.planStreamed("tenant-create", parsed.data), 201);

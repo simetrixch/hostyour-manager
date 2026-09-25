@@ -5,7 +5,7 @@
 //
 // FAIL-CLOSED on config, too. The floor is a search over three carrier classes, and every one of them
 // needs a credential of its own: hostyour-cloud for the registrations and the platform apps,
-// catalog for the tenant catalog, and each unit's own sealed repo credential for its chart. A
+// the deploy repository for the tenant charts, and each unit's own sealed repo credential for its chart. A
 // missing one would not shrink the floor quietly — the search would abort — but there is no reason to
 // start a run that cannot finish, so the job refuses at wiring time and names what is unset.
 import { join } from "node:path";
@@ -62,9 +62,9 @@ async function main(): Promise<void> {
     logger.error({}, "registry-reaper: GITHUB_REPO/GITHUB_WRITE_PAT unset — the registrations and the platform app pins cannot be read, so the referenced floor cannot be built (fail-closed, nothing deleted)");
     process.exit(1);
   }
-  const deployCfg = config.catalog;
+  const deployCfg = config.deployRepo;
   if (!deployCfg) {
-    logger.error({}, "registry-reaper: CATALOG_REPO unset — the tenant catalog's pins cannot be read, so the referenced floor would miss every tenant image (fail-closed, nothing deleted)");
+    logger.error({}, "registry-reaper: DEPLOY_REPO unset — the deploy repository's pins cannot be read, so the referenced floor would miss every tenant image (fail-closed, nothing deleted)");
     process.exit(1);
   }
 
@@ -100,10 +100,10 @@ async function main(): Promise<void> {
   const deployRepoPath = deployCfg.repoURL.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "");
   const [deployOwner, deployRepo] = deployRepoPath.split("/");
   if (!deployOwner || !deployRepo) {
-    logger.error({ repoURL: deployCfg.repoURL }, "registry-reaper: CATALOG_REPO is not owner/repo — the tenant catalog's branches cannot be enumerated (fail-closed, nothing deleted)");
+    logger.error({ repoURL: deployCfg.repoURL }, "registry-reaper: DEPLOY_REPO is not owner/repo — the deploy repository's branches cannot be enumerated (fail-closed, nothing deleted)");
     process.exit(1);
   }
-  // The catalog's identity, the same as wire-tenants.ts's: the App's installation token — minted
+  // The deploy repository's identity, the same as wire-tenants.ts's: the App's installation token — minted
   // ONCE here, because this job runs for minutes and the token for an hour.
   const deployToken = await githubApp.installationToken();
   const deploy = carrierRepo({ owner: deployOwner, repo: deployRepo, token: deployToken }, config.dataDir, "reaper-deploy", books);

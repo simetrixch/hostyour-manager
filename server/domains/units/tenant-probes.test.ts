@@ -46,7 +46,7 @@ describe("probeCatalog", () => {
     const good = ports({ catalogRepoUrl: "https://github.com/acme/acme-catalog.git", registrations: new TenantRegistrations(new FakePlatformRepo()) });
     expect(await probeCatalog(good, p())).toMatchObject([{ id: "catalog.read", status: "pass", detail: "readable; 0 tenant(s) registered at prod" }]);
     const bad = ports({ catalogRepoUrl: "https://github.com/acme/acme-catalog.git", registrations: { listTenantGuids: async () => { throw new Error("401 from the catalog"); } } as unknown as TenantRegistrations });
-    expect(await probeCatalog(bad, p())).toMatchObject([{ status: "fail", severity: "hard", detail: "cannot be read: 401 from the catalog", hint: "the manager's catalog credential or CATALOG_REPO is wrong" }]);
+    expect(await probeCatalog(bad, p())).toMatchObject([{ status: "fail", severity: "hard", detail: "cannot be read: 401 from the catalog", hint: "the manager's deploy repository credential or DEPLOY_REPO is wrong" }]);
   });
 });
 

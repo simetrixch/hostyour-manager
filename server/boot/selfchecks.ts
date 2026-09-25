@@ -451,7 +451,7 @@ async function checkInstallOrder(platformRepo: PlatformRepo | undefined, runDefi
  * suspended installation looks exactly like a working one until a run asks. This asks at boot: one
  * read of the installation with the App's own JWT, which proves the key signs, the id resolves, and
  * names the owner the installation is bound to — the owner every plan holds the
- * catalog's `appsOrg` against. The owner rides onto /readyz as the row's detail, so a person
+ * deploy repository's `appsOrg` against. The owner rides onto /readyz as the row's detail, so a person
  * reading it sees WHICH owner this manager creates repositories in and not only that it can.
  *
  * DEGRADING, for the reason the checks above state: it reaches a REMOTE, and a GitHub that is down
@@ -468,21 +468,21 @@ async function checkGitHubAppInstallation(githubApp: GitHubApp): Promise<CheckRe
 }
 
 /**
- * DOES THE APP REACH THE CATALOG — the platform's GitHub App is the one identity that reads and
- * writes the catalog (wire-tenants.ts, hostyour-cloud#237), and whether its installation reaches
- * the catalog repository is a fact of GitHub, not of the configuration: MEASURED here, so a tenant
- * family wired on a promise GitHub refuses is red at boot, not at the first tenant. No catalog SKIPS.
- * DEGRADING, as every check that reaches a remote is.
+ * DOES THE APP REACH THE DEPLOY REPOSITORY — the platform's GitHub App is the one identity that
+ * reads and writes the deploy repository (wire-tenants.ts, hostyour-cloud#237), and whether its
+ * installation reaches it is a fact of GitHub, not of the configuration: MEASURED here, so a tenant
+ * family wired on a promise GitHub refuses is red at boot, not at the first tenant. No deploy
+ * repository SKIPS. DEGRADING, as every check that reaches a remote is.
  */
-async function checkCatalogIdentity(config: Config, githubApp: GitHubApp): Promise<CheckResult> {
-  const name = "catalog.identity";
-  const catalog = config.catalog;
-  if (!catalog) return { name, kind: "skipped", ok: false, detail: "no catalog is configured on this manager (CATALOG_REPO) — no tenant family, nothing to write" };
-  const [owner, repo] = catalog.repoURL.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "").split("/");
+async function checkDeployIdentity(config: Config, githubApp: GitHubApp): Promise<CheckResult> {
+  const name = "deploy.identity";
+  const deployRepo = config.deployRepo;
+  if (!deployRepo) return { name, kind: "skipped", ok: false, detail: "no deploy repository is configured on this manager (DEPLOY_REPO) — no tenant family, nothing to write" };
+  const [owner, repo] = deployRepo.repoURL.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "").split("/");
   try {
     const reached = await githubApp.reachesRepository({ owner: owner ?? "", repo: repo ?? "" });
     if (reached) return { name, kind: "degrading", ok: true, detail: `${owner}/${repo} is read and written with the GitHub App (its installation reaches it)` };
-    return { name, kind: "degrading", ok: false, detail: `the GitHub App's installation does not reach ${owner}/${repo} — the tenant family has no identity for its catalog; install the App on it` };
+    return { name, kind: "degrading", ok: false, detail: `the GitHub App's installation does not reach ${owner}/${repo} — the tenant family has no identity for its deploy repository; install the App on it` };
   } catch (e) {
     return { name, kind: "degrading", ok: false, detail: messageOf(e) };
   }
@@ -496,7 +496,7 @@ async function checkCatalogIdentity(config: Config, githubApp: GitHubApp): Promi
  * books: files read, files rewritten, the commit.
  *
  * DECLARED FROM THE MIGRATION'S OUTCOME rather than measured here, because the migration runs BEHIND
- * the listener (boot.ts, after the catalog carry) and a walk of both books ahead of it would hold
+ * the listener (boot.ts, after the deploy carry) and a walk of both books ahead of it would hold
  * /healthz shut for the length of two clones. The row is pushed onto the boot's checks once the
  * migration has run (wire.ts Wired.migrateRegistrations), so /readyz lists it from then on and not
  * before: unlisted is "not measured yet", never a green light. DEGRADING, as every check that reaches
@@ -541,7 +541,7 @@ export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; p
   results.push(await checkAnsiwisePinReadable(deps.platformRepo));
   results.push(await checkInstallOrder(deps.platformRepo, deps.runDefinitions));
   results.push(await checkGitHubAppInstallation(deps.githubApp));
-  results.push(await checkCatalogIdentity(deps.config, deps.githubApp));
+  results.push(await checkDeployIdentity(deps.config, deps.githubApp));
   return results;
 }
 

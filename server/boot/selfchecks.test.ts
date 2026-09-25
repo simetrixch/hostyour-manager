@@ -38,8 +38,8 @@ const BASE_ENV = {
   ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv;
-// The bare config wires NEITHER onboarding family (no gate-runner addr, no github, no catalog
-// PAT) — the boot a manager with onboarding off actually runs.
+// The bare config wires NEITHER onboarding family (no gate-runner addr, no github, no deploy
+// repository PAT) — the boot a manager with onboarding off actually runs.
 const config = parseConfig(BASE_ENV);
 // run-definitions.total reasons about the run families, and the two onboarding families are the opt-in ones
 // (wire-units.ts builds them only with their adapters) — so the check is exercised against the
@@ -49,7 +49,7 @@ const wiredConfig = parseConfig({
   ONBOARD_GATE_MANAGER_ADDR: "10.152.183.5:8484",
   GITHUB_REPO: "example/platform",
   GITHUB_WRITE_PAT: "ghp_platform",
-  CATALOG_REPO: "acme/acme-catalog",
+  DEPLOY_REPO: "acme/acme-catalog",
   // Both onboarding families write onto the branch this installation keeps its books on, which is
   // named after the cluster holding the master role — so a fully configured manager states it.
   MASTER_FQDN: "m1.example.com",
@@ -455,19 +455,19 @@ describe("boot self-checks", () => {
     expect(readinessOf(results).checks).toContainEqual({ name: "github-app.installation", ok: false });
   });
 
-  // DOES THE APP REACH THE CATALOG (#194, hostyour-cloud#237): the App is the catalog's one identity,
-  // so a family wired on a promise GitHub refuses is red at boot.
-  it("catalog.identity is green where the App's installation reaches the catalog, red where it does not, and skipped without a catalog", async () => {
+  // DOES THE APP REACH THE DEPLOY REPOSITORY (#194, hostyour-cloud#237): the App is the deploy
+  // repository's one identity, so a family wired on a promise GitHub refuses is red at boot.
+  it("deploy.identity is green where the App's installation reaches the deploy repository, red where it does not, and skipped without one", async () => {
     const { db } = fresh();
-    const withCatalog: Config = { ...config, catalog: { repoURL: "https://github.com/example-org/catalog.git" } };
+    const withDeployRepo: Config = { ...config, deployRepo: { repoURL: "https://github.com/example-org/deploy.git" } };
     const githubApp = new FakeGitHubApp();
-    const row = async (cfg: Config) => (await runAsyncSelfChecks({ db, config: cfg, githubApp })).find((r) => r.name === "catalog.identity");
-    const viaApp = await row(withCatalog);
+    const row = async (cfg: Config) => (await runAsyncSelfChecks({ db, config: cfg, githubApp })).find((r) => r.name === "deploy.identity");
+    const viaApp = await row(withDeployRepo);
     expect(viaApp?.ok).toBe(true);
-    expect(viaApp?.detail).toBe("example-org/catalog is read and written with the GitHub App (its installation reaches it)");
-    const outside = await row({ ...withCatalog, catalog: { repoURL: "https://github.com/other-org/catalog.git" } });
+    expect(viaApp?.detail).toBe("example-org/deploy is read and written with the GitHub App (its installation reaches it)");
+    const outside = await row({ ...withDeployRepo, deployRepo: { repoURL: "https://github.com/other-org/deploy.git" } });
     expect(outside?.ok).toBe(false);
-    expect(outside?.detail).toContain("does not reach other-org/catalog");
+    expect(outside?.detail).toContain("does not reach other-org/deploy");
     expect((await row(config))?.kind).toBe("skipped");
   });
 

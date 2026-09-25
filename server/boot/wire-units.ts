@@ -94,7 +94,7 @@ export interface UnitsWiring {
   defs: AnyRunDefinition[];
   /** Consumer onboarding routes go live (gate-runner + platform repo both configured). */
   enabled: boolean;
-  /** Tenant onboarding routes go live (CATALOG_REPO and the platform repository are configured). */
+  /** Tenant onboarding routes go live (DEPLOY_REPO and the platform repository are configured). */
   tenantEnabled: boolean;
   /** The consumer family's per-cluster kube resolver, threaded to registerConsumerRoutes so the
    *  per-consumer live reconciliation read (GET /api/consumers/:id/live) can reach the target
@@ -112,7 +112,7 @@ export interface UnitsWiring {
   /** The ONE repo every tenant's charts live in, threaded to registerTenantRoutes beside
    *  tenantResolver: the live read asks the base Application which of its spec sources targets
    *  catalog, the way the consumer read asks with the app row's own repoUrl. Undefined exactly
-   *  when tenantResolver is — both come from config.catalog. */
+   *  when tenantResolver is — both come from config.deployRepo. */
   catalogRepoUrl?: string;
   /** The tenant app catalog provider, threaded to registerTenantRoutes so GET
    *  /api/tenants/app-catalog can offer the wizard the apps of the apps repository's apps.yaml.
@@ -413,7 +413,7 @@ function buildConsumerOnboarding(
     tenantSubdomains: () => {
       if (!tenantRegistrations) {
         throw errValidation(
-          "onboarding a consumer requires the tenant pointer registrations (config.catalog) to check the unit name against the tenants' subdomains — a consumer named after one serves the host that tenant's example-auth scopes its session cookies to",
+          "onboarding a consumer requires the tenant pointer registrations (config.deployRepo) to check the unit name against the tenants' subdomains — a consumer named after one serves the host that tenant's example-auth scopes its session cookies to",
         );
       }
       return tenantRegistrations.listTenantSubdomains();
