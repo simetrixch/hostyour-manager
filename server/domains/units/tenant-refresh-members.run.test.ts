@@ -76,14 +76,17 @@ function synced(): Map<string, ArgoAppStatus> {
   return new Map(EXPECTED.map((n) => [n, { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } as ArgoAppStatus]));
 }
 
-function ports(members: TenantMemberRecord[]): TenantOnboardPorts {
+const IMAGE = `${REGISTRY_HOST}/example-app:1.0.0`;
+const DEPLOYMENT = { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "app", image: IMAGE }] } } } };
+
+function ports(members: TenantMemberRecord[], over: { missing?: string[]; statuses?: Map<string, ArgoAppStatus>; carried?: string[] } = {}): TenantOnboardPorts {
   return withAppsTemplate({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
-    helm: new FakeHelmRenderer({ fallback: { ok: true, docs: [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment")] } }),
+    helm: new FakeHelmRenderer({ fallback: { ok: true, docs: [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment", { raw: DEPLOYMENT })] } }),
     registrations: new TenantRegistrations(platformRepo(members)),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } }),
-      argoReader: new FakeMasterArgoReader({ statuses: synced() }),
+      argoReader: new FakeMasterArgoReader({ statuses: over.statuses ?? synced() }),
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
@@ -92,7 +95,8 @@ function ports(members: TenantMemberRecord[]): TenantOnboardPorts {
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
-    registryProbe: new FakeRegistryProbe(),
+    registryProbe: new FakeRegistryProbe({ missing: over.missing ?? [] }),
+    carryTrunkToBooksBranch: async () => { over.carried?.push("carried"); },
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => ["example-platform"],
@@ -159,6 +163,68 @@ describe("tenant-refresh-members", () => {
     seedTenant();
     const fewer = staleMembers().filter((m) => m.name !== "report");
     await expect(makeTenantRefreshMembersDef(ports(fewer)).planStream!({ tenantId: "tnt_1" }, planCtx())).rejects.toThrow(/not a refresh/);
+  });
+
+  it("carries the catalog trunk into the books branch before it resolves anything", async () => {
+    seedTenant();
+    const carried: string[] = [];
+    await planned(ports(staleMembers(), { carried }));
+    expect(carried).toEqual(["carried"]);
+  });
+
+  it("REFUSES a manifest that moves the identity provider, and a suspended tenant", async () => {
+    seedTenant();
+    const moved = staleMembers();
+    const prt = ports(moved);
+    const entry = (await prt.registrations.readTenant("prod", GUID))!.entry;
+    await prt.registrations.commitTenant({ stage: "prod", guid: GUID, runId: "run_x", registration: { ...entry, identityProvider: "jobs" } });
+    await expect(makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx())).rejects.toThrow(/moving the identity provider/);
+    db.db.update(tenants).set({ suspended: true }).run();
+    await expect(makeTenantRefreshMembersDef(ports(staleMembers())).planStream!({ tenantId: "tnt_1" }, planCtx())).rejects.toThrow(/suspended/);
+  });
+
+  it("fails at ensure-images, before any entry is written, when an image of the new render is not in the registry", async () => {
+    seedTenant();
+    const prt = ports(staleMembers(), { missing: ["example-app:1.0.0"] });
+    const p = await planned(prt);
+    expect(p.requiredImages.length).toBeGreaterThan(0);
+    const steps = makeTenantRefreshMembersDef(prt).steps(p);
+    const ensure = steps.find((s) => s.name === "ensure-images")!;
+    await expect(ensure.run(stepCtx(p, [], []))).rejects.toThrow(/example-app/);
+  });
+
+  it("write-members resumed after its own write commits nothing new and keeps its cleanup", async () => {
+    seedTenant();
+    const prt = ports(staleMembers());
+    const p = await planned(prt);
+    const write = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-members")!;
+    const cleanups: Cleanup[] = [];
+    await write.run(stepCtx(p, cleanups, []));
+    await write.run(stepCtx(p, cleanups, []));
+    expect(cleanups.map((c) => c.name)).toEqual(["restore-members", "restore-members"]);
+  });
+
+  it("REFUSES the abort once every member is Synced + Healthy at the new entries; the restore leaves entries another run wrote", async () => {
+    seedTenant();
+    const prt = ports(staleMembers());
+    const p = await planned(prt);
+    const def = makeTenantRefreshMembersDef(prt);
+    const cleanups: Cleanup[] = [];
+    await def.steps(p).find((s) => s.name === "write-members")!.run(stepCtx(p, cleanups, []));
+    await expect(def.assertAbortable!(p, { db: db.db })).rejects.toThrow(/Retry the failed step/);
+    const other = p.members.map((m) => (m.name === "erp" ? { ...m, namespaceLabels: { later: "yes" } } : m));
+    await prt.registrations.setMembers("prod", GUID, other, "run_other");
+    await cleanups[0]!.run(stepCtx(p, [], []));
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.members.find((m) => m.name === "erp")?.namespaceLabels).toEqual({ later: "yes" });
+  });
+
+  it("allows the abort while the members have not converged", async () => {
+    seedTenant();
+    const prt = ports(staleMembers(), { statuses: new Map() });
+    const p = await planned(prt);
+    const def = makeTenantRefreshMembersDef(prt);
+    await def.steps(p).find((s) => s.name === "write-members")!.run(stepCtx(p, [], []));
+    await expect(def.assertAbortable!(p, { db: db.db })).resolves.toBeUndefined();
   });
 
   it("the write asks the plan's facts again: entries changed since the plan fail without writing", async () => {

@@ -41,7 +41,7 @@ export const TenantRefreshMembersParams = z.object({
   clusterId: z.string().startsWith("cls_"),
   domain: z.string().min(1),
   /** The catalog commit the members were resolved and the gates rendered at. */
-  chartsRef: z.string().min(1),
+  chartsRef: z.string().regex(/^[0-9a-f]{40}$/),
   registryHost: z.string().min(1),
   /** The member entries the registration carried when this was planned; an abort writes them back. */
   previous: MemberList,
@@ -59,16 +59,39 @@ function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberR
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** On abort: write back the member entries the registration carried before this run. */
+/** On abort: write back the member entries the registration carried before this run — only while it
+ *  still carries this run's own entries. Entries another run wrote since are that run's, and stay. */
 function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Cleanup {
   return {
     name: "restore-members",
     title: "Write the previous member entries back into the registration",
     run: async (ctx) => {
+      const current = await ports.registrations.readTenant(p.stage, p.guid);
+      if (!current || !sameMembers(current.entry.members, p.members)) {
+        ctx.log("meta", `tenant ${p.guid}'s member entries are not this run's any more — another run wrote them since; left as they are`);
+        return;
+      }
       const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.previous, ctx.runId);
       ctx.log("meta", `tenant ${p.guid} members back to the entries before this run (${commit})`);
     },
   };
+}
+
+/** Refuses the abort once every member Application reads Synced/Healthy at the new entries: the
+ *  tenant then serves from them, and writing the previous entries back would put it on charts the
+ *  product no longer carries. A retry of the failed step is the way on. */
+async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Promise<void> {
+  const current = await ports.registrations.readTenant(p.stage, p.guid);
+  if (!current || !sameMembers(current.entry.members, p.members)) return;
+  const until = syncedAt(p.expectedApps);
+  const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
+  const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, { timeoutMs: 1, labelSelector: `platform/tenant=${p.guid}` });
+  if (until(byName)) {
+    throw errValidation(
+      `every member of tenant ${p.guid} is Synced + Healthy at the new entries — an abort would write back entries whose charts the product no longer carries. ` +
+      `Retry the failed step instead so the run settles green.`,
+    );
+  }
 }
 
 function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Step[] {
@@ -100,6 +123,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         }
         ctx.registerCleanup(restoreMembersCleanup(ports, p));
         const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId);
+        ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
         ctx.log("meta", `tenant ${p.guid} member entries written (${commit}) — the master ArgoCD renders them at its next sync`);
       },
@@ -122,11 +146,13 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
   ];
 }
 
-/** What one member's entry changes: its chart paths, and whether its value files or values move too. */
+/** What one member's entry changes: its chart paths, or else its value files and values, or else its
+ *  namespace labels. */
 function describeChange(before: TenantMemberRecord, after: TenantMemberRecord): string {
   const charts = (m: TenantMemberRecord): string => m.sources.map((s) => s.chart).join(" + ");
-  const moved = charts(before) !== charts(after) ? `${charts(before)} → ${charts(after)}` : charts(after);
-  return `${after.name} (${moved}${JSON.stringify(before.sources) !== JSON.stringify(after.sources) ? "" : ", labels only"})`;
+  if (charts(before) !== charts(after)) return `${after.name} (${charts(before)} → ${charts(after)})`;
+  const what = JSON.stringify(before.sources) !== JSON.stringify(after.sources) ? "value files or values" : "namespace labels";
+  return `${after.name} (${charts(after)}, ${what} change)`;
 }
 
 export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefinition<TenantRefreshMembersParams> {
@@ -146,6 +172,12 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       if (row?.suspended) throw errValidation(`tenant ${tc.subdomain} is suspended — its members render no workloads, so the wait could never end; resume it first`);
       const current = await ports.registrations.readTenant(tc.stage, tc.guid);
       if (!current) throw errNotFound(`tenant ${tc.guid} is not onboarded (no registration at ${tc.stage})`);
+      // The product's change reaches the books branch only when its trunk is carried there, and the
+      // members are resolved off that branch: planned over a branch one product state behind, the run
+      // would answer "nothing to refresh" right after the push it exists for.
+      if (!ports.carryTrunkToBooksBranch) throw errValidation("this manager carries no catalog trunk into the books branch, so the members cannot be resolved off the product's current manifest");
+      await ports.carryTrunkToBooksBranch();
+      ctx.log(`catalog trunk carried into the books branch ${ports.registrations.branch}`);
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       const { apps, appsImage, appsImageTag, seedUsers, subdomain } = current.entry;
@@ -182,6 +214,12 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `a member added, dropped or renamed is a new namespace and Application, not a refresh`,
         );
       }
+      if (outcome.identityProvider !== current.entry.identityProvider) {
+        throw errValidation(
+          `the product's manifest names ${outcome.identityProvider} as the identity provider of tenant ${tc.guid}, which stands with ${current.entry.identityProvider} — ` +
+          `moving the identity provider moves its users, which is not a refresh`,
+        );
+      }
       const changed = members.filter((m) => !sameMembers([m], previous.filter((b) => b.name === m.name)));
       if (changed.length === 0) throw errValidation(`every member entry of tenant ${tc.guid} already matches the product's manifest at ${outcome.resolvedSha.slice(0, 7)} — nothing to refresh`);
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
@@ -208,7 +246,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `Refresh the members of tenant ${tc.guid} on ${tc.domain} (${tc.stage}) from the product's manifest at ${outcome.resolvedSha.slice(0, 7)}: ` +
           `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` +
           `Every image the new render pulls must stand in the registry; then the entries are written and every member must sync. ` +
-          `A member whose chart moved does not answer from the product's push until its Application syncs here.`,
+          `A member whose chart moved does not answer from the carry of the product's change into the books branch until its Application syncs here.`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
@@ -219,5 +257,6 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
     },
     steps: (params) => tenantRefreshMembersSteps(ports, params),
     cleanups: (params) => [restoreMembersCleanup(ports, params)],
+    assertAbortable: (params) => assertRefreshAbortable(ports, params),
   };
 }

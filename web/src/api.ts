@@ -643,10 +643,11 @@ export const migrateTenant = (tenantId: string, targetClusterId: string): Promis
  *  identity provider answers at its new address. */
 export const setTenantRouting = (tenantId: string, routing: MemberRouting): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/routing`, { routing });
-/** Plan setting, switching or clearing ("") the tenant's own domain. */
+
 /** Plan tenant-refresh-members: every member entry resolved again off the product's manifest. */
 export const refreshTenantMembers = (tenantId: string): Promise<{ runId: string }> => post(`/api/tenants/${tenantId}/refresh-members`);
 
+/** Plan setting, switching or clearing ("") the tenant's own domain. */
 export const setTenantOwnDomain = (tenantId: string, ownDomain: string, ownDomainRedirects: string[]): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { ownDomain, ownDomainRedirects });
 
