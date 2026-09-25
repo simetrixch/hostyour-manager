@@ -177,6 +177,17 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       },
       writeRegistrationFromDump: async (c, registrationYaml, target) => {
         const entry = ConsumerRegistrationSchema.parse(parseRegistration(registrationYaml));
+        // The attested fqdn and the SMTP entry travel with the unit, and each is held unique at
+        // onboarding (G19, G29). While the unit was gone another may have taken either; restoring it
+        // then would admit one name on two clusters, or give the stage two mail senders.
+        if (entry.fqdn !== undefined) {
+          const taken = (await ports.registrations.listAttestedFqdns({ unit: entry.name, stage: ac.stage })).find((a) => a.fqdn === entry.fqdn);
+          if (taken) throw errValidation(`the dumped registration attests the fqdn ${entry.fqdn}, which ${taken.unit} now attests at ${taken.stage} — free it there before restoring ${entry.name}`);
+        }
+        if (entry.smtpEntry !== undefined) {
+          const sender = (await ports.registrations.listSmtpSenders(ac.stage)).find((s) => s.unit !== entry.name);
+          if (sender) throw errValidation(`the dumped registration makes ${entry.name} the mail sender at ${ac.stage}, which ${sender.unit} is now — a stage has one sender; offboard it there before restoring ${entry.name}`);
+        }
         // The dumped registration is re-committed AT THE TARGET, closed: the unit deploys quiesced,
         // its claims provision empty stores, and only after the data is restored does open-access lift it.
         await ports.registrations.commitRegistration({

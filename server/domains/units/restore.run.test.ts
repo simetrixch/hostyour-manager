@@ -159,4 +159,30 @@ describe("restore (consumer)", () => {
     expect(await ports.registrations.listSmtpSenders("prod")).toEqual([{ unit: CONSUMER, cluster: TARGET.cluster, entry: smtpEntry }]);
     expect(f.platformRepo.read(f.platformRepo.booksBranch, "installation/values/postfix-prod.yaml")).toContain("RELAYHOST: \"[100.64.0.12]:2525\"");
   });
+
+  it("REFUSES a restore whose fqdn or mail sender another unit took while it was gone", async () => {
+    const setup = async (other: { fqdn?: string; smtpEntry?: { service: string; port: number } }) => {
+      seedClusters(db);
+      seedConsumerRow(db, "offboarded");
+      const f = makeFakes();
+      const ports = consumerPorts(f);
+      f.platformRepo.seed(f.platformRepo.booksBranch, clusterMapPath(TARGET.domain), SLAVE_MARKING_YAML.replace(`domain: ${SLAVE_FQDN}`, `domain: ${TARGET.domain}`).replace("clusterName: s1", `clusterName: ${TARGET.cluster}`).replace("apiHost: 100.64.0.11", "apiHost: 100.64.0.12"));
+      await ports.registrations.commitRegistration({
+        unit: { name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false }, builds: [],
+        deploy: { stage: "prod", chartPath: "deploy/chart", cluster: TARGET.cluster, host: "other", databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"), ...other },
+        runId: "run_other",
+      });
+      scriptDumpedRegistration(f.target.reader, CONSUMER, serializePointer(ConsumerRegistrationSchema, {
+        name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false, removing: false,
+        chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services: ["mongodb"], size: "small", mongodb: "shared",
+        quota: seedQuota("small"), fqdn: "shop.customer.test", smtpEntry: { service: "acme-mta", port: 2525 },
+      }));
+      const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
+      return driveSteps(db, makeRestoreDef(ports).steps(params), params, []);
+    };
+    await expect(setup({ fqdn: "shop.customer.test" })).rejects.toThrow(/other now attests at prod/);
+    db.sqlite.close();
+    db = openFixtureDb();
+    await expect(setup({ smtpEntry: { service: "other-mta", port: 2525 } })).rejects.toThrow(/which other is now/);
+  });
 });
