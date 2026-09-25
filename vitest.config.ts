@@ -27,6 +27,7 @@ export default defineConfig({
           include: ["server/**/*.test.ts", "shared/**/*.test.ts", "gate-runner/**/*.test.ts", "web/**/*.test.ts"],
           exclude: ["**/*.ansiwise.test.ts", "**/node_modules/**"],
           environment: "node",
+          setupFiles: ["./vitest.setup.ts"],
           sequence: { groupOrder: 0 },
         },
       },
@@ -53,6 +54,7 @@ export default defineConfig({
           // Each fixture keeps its run records inside its own directory (serve-fixture.ts, #228),
           // so this is about load, never about records.
           fileParallelism: false,
+          setupFiles: ["./vitest.setup.ts"],
           sequence: { groupOrder: 1 },
         },
       },
