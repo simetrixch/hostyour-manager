@@ -47,7 +47,7 @@ function fakeTenantSeeder(): VaultSeeder {
 interface Harness {
   ports: TenantOnboardPorts;
   githubApp: FakeGitHubApp;
-  /** The catalog's reader: serves the catalog's manifest and the template (ports.repo). */
+  /** The deploy repository's reader: serves the deploy repository's manifest and the template (ports.repo). */
   deployReader: FakeRepoReader;
   /** The consumer family's reader: serves the tenant's repository once a test scripts it. */
   unitReader: FakeRepoReader;
@@ -171,7 +171,7 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
     if (r.outcome !== "rejected") return;
     for (const key of ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"]) expect(r.summary).toContain(key);
   });
-  it("refuses a catalog that names no apps bundle — there is no template", async () => {
+  it("refuses a deploy repository that names no apps bundle — there is no template", async () => {
     const r = await plan(harness({ manifest: deployManifest({ appsOrg: ORG }) }));
     expect(r.outcome).toBe("rejected");
     if (r.outcome !== "rejected") return;
@@ -195,7 +195,7 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
     if (r.outcome !== "rejected") return;
     expect(r.summary).toMatch(new RegExp(`owner ${ORG} records no packages reader, and ${ORG}/${UNIT} installs private npm packages of @${ORG} from GitHub Packages .* Add app form`));
   });
-  it("refuses a catalog whose appsOrg is not the owner the App is installed in", async () => {
+  it("refuses a deploy repository whose appsOrg is not the owner the App is installed in", async () => {
     const h = harness();
     h.githubApp.org = "other-org";
     const r = await plan(h);
@@ -213,7 +213,7 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
 });
 
 describe("tenant-apps-repo planStream — the plan", () => {
-  it("freezes the owner, the template and the master, and reads the template with the catalog's credential", async () => {
+  it("freezes the owner, the template and the master, and reads the template with the deploy repository's credential", async () => {
     const h = harness();
     const r = await plan(h);
     expect(r.outcome).toBe("planned");
@@ -223,7 +223,7 @@ describe("tenant-apps-repo planStream — the plan", () => {
     expect(r.plan.requiredSecrets).toEqual([]);
     expect(r.plan.targetId).toBe("cls_m");
     expect(r.plan.summary).toContain(`${ORG}/${UNIT}`);
-    // The template was cloned through the catalog's reader with the catalog's read credential — it is no unit.
+    // The template was cloned through the deploy repository's reader with the deploy repository's read credential — it is no unit.
     expect(h.deployReader.clones).toContainEqual({ repoURL: TEMPLATE_URL, ref: "HEAD", credentialId: "deploy-read-pat" });
     expect(h.unitReader.clones).toEqual([]);
   });

@@ -1,5 +1,5 @@
 // The tenant onboarding builds the images its fan-out lacks (hostyour-manager#165): the plan maps
-// every missing image to the repository the catalogue's tenant.buildRepos names and asks one PAT per
+// every missing image to the repository the deploy repository's tenant.buildRepos names and asks one PAT per
 // repository the installation has not registered; the run onboards each such unit build-only before
 // the tenant's own writes and re-reads the image set off the pins the builds wrote.
 import { dropCredentialRows } from "../../security/store.fixture.ts";
@@ -234,7 +234,7 @@ describe("create-tenant planStream — the build units and their owner's identit
   });
   it("refuses a render that pulls the apps TEMPLATE (tenant.appsBundle), by name, before the registry is asked — a stale chart is named, never built", async () => {
     seedClusters();
-    // The catalog names example-apps as the template; the fixture's engine chart still mounts it.
+    // The deploy repository names example-apps as the template; the fixture's engine chart still mounts it.
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [...TRUNK_DOCS, doc("Deployment", { name: "x", raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "n", image: `${HOST}/example-apps:0.9.0` }] } } } } })] } });
     const probe = new FakeRegistryProbe({ missing: [] }); // the registry still carries the template's image
     const prt = withAppsTemplate(ports({ helm, registryProbe: probe }));

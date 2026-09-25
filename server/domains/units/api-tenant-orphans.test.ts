@@ -187,7 +187,7 @@ async function makeTenant(enabled: boolean): Promise<{ app: Hono<AppEnv>; execut
   return { app, executor, cookie, registrations: reg, repo };
 }
 
-/** A live tenant.yaml in the fake catalog — the ONE thing that makes a tenant an orphan when no
+/** A live tenant.yaml in the fake deploy repository — the ONE thing that makes a tenant an orphan when no
  *  tenants row accompanies it. Committed through the real registrations, so the scan reads exactly the bytes
  *  a create-tenant would have written. */
 async function seedPointer(registrations: TenantRegistrations, guid: string, subdomain: string, over: Partial<TenantRegistration & { stage: Stage }> = {}): Promise<void> {
@@ -210,7 +210,7 @@ async function seedPointer(registrations: TenantRegistrations, guid: string, sub
 
 // The tenant lands on cls_2 here; placement is free, so this is a fixture choice, not a rule.
 // A zero-app tenant: these routes read the run's row, and a tenant with an app needs the GitHub App and the
-// catalog's template at the plan, which this harness does not wire.
+// deploy repository's template at the plan, which this harness does not wire.
 const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [] };
 
 describe("GET /api/tenants/orphans (the pointer scan)", () => {
@@ -254,15 +254,15 @@ describe("GET /api/tenants/orphans (the pointer scan)", () => {
     expect(String(body.skipped[0]!["reason"])).toContain("failed its schema");
   });
 
-  it("FAILS SOFT — an unreadable catalog answers 200 carrying the failure, never a bare empty list", async () => {
+  it("FAILS SOFT — an unreadable deploy repository answers 200 carrying the failure, never a bare empty list", async () => {
     // A silent [] would read as "no orphans found", the exact opposite of the truth, so the payload
     // carries `error` and the caller renders that instead of the (unknown) result. 200 keeps the Tenants
     // page alive through a git hiccup — the same degrade contract as the app-catalog route.
     const { app, cookie, registrations } = await makeTenant(true);
-    registrations.listTenantPointers = () => Promise.reject(new Error("catalog unreachable"));
+    registrations.listTenantPointers = () => Promise.reject(new Error("deploy repository unreachable"));
     const res = await app.request("/api/tenants/orphans", authed(cookie));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ orphans: [], skipped: [], builds: [], error: "catalog unreachable" });
+    expect(await res.json()).toEqual({ orphans: [], skipped: [], builds: [], error: "deploy repository unreachable" });
   });
 
   it("degrades to a reason (not 501) when tenant onboarding is not wired — it is a READ", async () => {

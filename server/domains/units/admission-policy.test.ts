@@ -159,7 +159,7 @@ describe("renderTenantMemberAdmissionPolicy", () => {
 
 describe("the fence against the admission request a tenant member sends", () => {
   it("DENIES the ESO workload label on the member's own namespace — the binding of the strongest ESO role on every slave", () => {
-    // A catalog chart change rendering `kind: Namespace, name: <guid>-auth, labels:
+    // A deploy repository chart change rendering `kind: Namespace, name: <guid>-auth, labels:
     // {hostyour.cloud/workload: "true"}` would bind the external-secrets Vault role
     // (hostyour-cloud/base/lib/seed-vault.sh selects on exactly this label) and read the cluster
     // mount's whole app tier. This is the request the fence exists to refuse.

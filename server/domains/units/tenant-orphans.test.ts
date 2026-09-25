@@ -63,7 +63,7 @@ beforeEach(() => {
 });
 afterEach(() => db.sqlite.close());
 
-/** A registrations whose fake catalog carries the given tenants as live pointers. */
+/** A registrations whose fake deploy repository carries the given tenants as live pointers. */
 async function deployed(...entries: TenantFixture[]): Promise<TenantRegistrations> {
   const registrations = new TenantRegistrations(new FakePlatformRepo());
   let n = 0;
@@ -72,7 +72,7 @@ async function deployed(...entries: TenantFixture[]): Promise<TenantRegistration
 }
 
 /** The same, plus RAW bytes seeded straight into the fake repo — how a pointer the scan CANNOT read
- *  gets there: no writer of ours would produce one, but a hand-written or drifted file in catalog
+ *  gets there: no writer of ours would produce one, but a hand-written or drifted file in the deploy repository
  *  is exactly the case this discovery has to stay honest about. */
 async function deployedWithRaw(raw: Record<string, string>, ...entries: TenantFixture[]): Promise<TenantRegistrations> {
   const repo = new FakePlatformRepo();
@@ -93,7 +93,7 @@ describe("scanOrphanTenants — member objects with no pointer", () => {
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, namespacesByLabel: { [TENANT_LABEL_KEY]: guids.flatMap((g) => ["erp", "web"].map((m) => memberNamespace(g, m, "prod"))) } });
     for (const g of guids) {
       for (const member of ["erp", "web"]) {
-        await projects.applyAppProject("argocd", renderTenantAppProject({ guid: g, member, stage: "prod", argoNamespace: "argocd", deployRepoUrl: "https://github.com/x/catalog.git", platformRepoURL: "https://github.com/x/platform.git", cluster: "s1" }));
+        await projects.applyAppProject("argocd", renderTenantAppProject({ guid: g, member, stage: "prod", argoNamespace: "argocd", deployRepoUrl: "https://github.com/x/deploy.git", platformRepoURL: "https://github.com/x/platform.git", cluster: "s1" }));
         await cluster.applyAdmissionPolicy({ metadata: { name: `tenant-${memberNamespace(g, member, "prod")}` } } as never, { metadata: { name: `tenant-${memberNamespace(g, member, "prod")}` } } as never);
       }
     }
@@ -203,9 +203,9 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
 
   it("propagates a registrations failure instead of answering an empty list", async () => {
     // Fail-soft is the ROUTE's job (it renders "the scan failed"); flattening it here would make an
-    // unreachable catalog read as "no orphans found" — the exact opposite of the truth.
-    const registrations = { listTenantPointers: () => Promise.reject(new Error("catalog unreachable")) } as unknown as TenantRegistrations;
-    await expect(scanOrphanTenants({ db: db.db, registrations })).rejects.toThrow("catalog unreachable");
+    // unreachable deploy repository read as "no orphans found" — the exact opposite of the truth.
+    const registrations = { listTenantPointers: () => Promise.reject(new Error("deploy repository unreachable")) } as unknown as TenantRegistrations;
+    await expect(scanOrphanTenants({ db: db.db, registrations })).rejects.toThrow("deploy repository unreachable");
   });
 });
 

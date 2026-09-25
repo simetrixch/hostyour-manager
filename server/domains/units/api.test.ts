@@ -304,7 +304,7 @@ describe("consumer API", () => {
 const TGUID = "zsjs023ctne0"; // a live-shaped throwaway guid (matches the tenants/** path guard)
 const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 
-// A schema-valid catalog fan-out manifest + a clean render (Namespace + Tenant CR only at
+// A schema-valid deploy repository fan-out manifest + a clean render (Namespace + Tenant CR only at
 // cluster scope) — the same shape create-tenant.run.test.ts validates green against the fakes.
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1

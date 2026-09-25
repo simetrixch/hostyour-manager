@@ -1,4 +1,4 @@
-// The fake template and catalog a tenant-apps-repo test reads: a catalog naming the template by
+// The fake template and deploy repository a tenant-apps-repo test reads: a deploy repository naming the template by
 // appsBundle + appsRepo, the template's apps.yaml with two apps, its build-only manifest, and the
 // tree the reader lists — root files, the release kit (never copied) and the two app folders. And
 // what every create-tenant test of a tenant WITH apps folds into its ports (withAppsTemplate).
@@ -79,7 +79,7 @@ export const TEMPLATE_FILES: Record<string, string> = {
   "web/site.json": "{}\n",
 };
 
-/** The three lines a test catalog's `tenant:` block carries so a tenant WITH apps can be planned:
+/** The three lines a test deploy repository's `tenant:` block carries so a tenant WITH apps can be planned:
  *  the owner the App is installed in, the template's build name and its repository. */
 export const TEMPLATE_SPEC = `  appsOrg: ${ORG}\n  appsBundle: example-apps\n  appsRepo: ${TEMPLATE_URL}\n`;
 
@@ -87,8 +87,8 @@ export const TEMPLATE_SPEC = `  appsOrg: ${ORG}\n  appsBundle: example-apps\n  a
 export const PLACEHOLDER_TAG = "0.0.0-placeholder";
 
 /** What a create-tenant test of a tenant WITH apps needs beside its own ports: the GitHub App the
- *  repository is created with (installed in ORG), the template scripted on the catalog's reader, and
- *  the placeholder tag on the chain. The catalog manifest itself carries TEMPLATE_SPEC. */
+ *  repository is created with (installed in ORG), the template scripted on the deploy repository's reader, and
+ *  the placeholder tag on the chain. The deploy repository manifest itself carries TEMPLATE_SPEC. */
 export function withAppsTemplate(ports: TenantOnboardPorts, files: Record<string, string> = {}): TenantOnboardPorts & { githubApp: FakeGitHubApp } {
   if (!(ports.repo instanceof FakeRepoReader)) throw new Error("withAppsTemplate scripts the template on a FakeRepoReader");
   ports.repo.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: { ...TEMPLATE_FILES, ...files } });
@@ -104,7 +104,7 @@ export function withAppsTemplate(ports: TenantOnboardPorts, files: Record<string
 
 /** The owner identities a tenant test stands on (#220, #225): the App's owner ORG
  *  records its packages reader (the App reaches every repository of it); `acme` — the owner of the
- *  test catalog's build repositories, which the App does not reach — and `x`, the owner of the
+ *  test deploy repository's build repositories, which the App does not reach — and `x`, the owner of the
  *  consumer tests' repository, record a packages reader and a repository PAT. Rows of the store
  *  with stable ids, opening to `token-of-<id>` under a real store. */
 export function recordTestOwners(db: Db): void {

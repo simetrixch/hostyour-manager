@@ -1,6 +1,6 @@
 // The tenant's own apps bundle through the tenant-create run: the plan DERIVES it for a tenant with
 // an app — the repository `<org>/<bundle>-<subdomain>` and the image `<bundle>-<subdomain>` — and refuses
-// without the GitHub App or the catalog's template; the apps-repo steps stand between the platform
+// without the GitHub App or the deploy repository's template; the apps-repo steps stand between the platform
 // build units and seed-tenant-crypto; the bundle is never a build unit and asks no PAT; the render is
 // handed the bundle at the placeholder and, after the build, at the tag the release stated; and the
 // registration carries the three facts after one execute pass — or the empty pair for a tenant
@@ -104,12 +104,12 @@ function fakeTenantSeeder(): VaultSeeder {
   };
 }
 /** The ports of a tenant WITHOUT the App and the template — what withAppsTemplate adds. */
-function bare(over: Partial<TenantOnboardPorts> = {}, catalog = MANIFEST_YAML): TenantOnboardPorts {
+function bare(over: Partial<TenantOnboardPorts> = {}, manifest = MANIFEST_YAML): TenantOnboardPorts {
   const dns = new FakeDnsProvider();
   return {
     seeder: fakeTenantSeeder(),
     objectStore: new FakeObjectStore(),
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: catalog, ...APP_OVERLAYS } }),
+    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: manifest, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: withBundle(PLACEHOLDER) } }),
     registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({
@@ -133,7 +133,7 @@ function bare(over: Partial<TenantOnboardPorts> = {}, catalog = MANIFEST_YAML): 
     ...over,
   };
 }
-const ports = (over: Partial<TenantOnboardPorts> = {}, catalog = MANIFEST_YAML) => withAppsTemplate(bare(over, catalog));
+const ports = (over: Partial<TenantOnboardPorts> = {}, manifest = MANIFEST_YAML) => withAppsTemplate(bare(over, manifest));
 function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
   return CreateTenantParams.parse({
     guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example",
@@ -240,7 +240,7 @@ describe("tenant-create planStream — the bundle derived, and the apps-repo ste
     const summary = await refused(bare());
     for (const key of ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"]) expect(summary).toContain(key);
   });
-  it("refuses a catalog that names no template, and one whose appsOrg is not the App's owner", async () => {
+  it("refuses a deploy repository that names no template, and one whose appsOrg is not the App's owner", async () => {
     seedClusters();
     expect(await refused(ports({}, deployManifest("")))).toMatch(/declares no tenant\.appsBundle and tenant\.appsRepo/);
     const other = ports();

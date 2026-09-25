@@ -55,7 +55,7 @@ const APPS_YAML = `apps:
 
 const overlays = (names: string[]): Record<string, string> => Object.fromEntries(names.map((n) => [`${ENGINE_CHART}/${n}`, "x"]));
 
-/** A fake serves ONE file map for every clone it makes — the catalog's and the apps repository's
+/** A fake serves ONE file map for every clone it makes — the deploy repository's and the apps repository's
  *  alike — so a fixture lays both trees into it and the clone log says which repository was asked. */
 const files = (over: { bundle?: string | null; appsYaml?: string; overlays?: string[] } = {}): Record<string, string> => ({
   "deploy/platform.yaml": MANIFEST(over.bundle === undefined ? "acme-apps" : over.bundle),
@@ -106,7 +106,7 @@ describe("readAppCatalog (the manifest of the apps template, else the stand-in)"
   const catalogOf = (repo: RepoReader, s = spec("acme-apps")) =>
     readAppCatalog({ spec: s, deployCheckout: { repo, workdir: "/w", credentialId: "deploy-read-pat" }, warn: (m) => warns.push(m) });
 
-  it("reads apps.yaml off the template repository (tenant.appsRepo) at its default branch head, with the catalog's credential, and warns of nothing", async () => {
+  it("reads apps.yaml off the template repository (tenant.appsRepo) at its default branch head, with the deploy repository's credential, and warns of nothing", async () => {
     warns.length = 0;
     const repo = new FakeRepoReader({ files: files({ appsYaml: APPS_YAML }) });
     const c = await catalogOf(repo);
@@ -128,7 +128,7 @@ describe("readAppCatalog (the manifest of the apps template, else the stand-in)"
     expect(warns.some((w) => w.includes(`carries no ${APPS_MANIFEST_PATH}`) && w.includes(`${ENGINE_CHART}/values-<app>.yaml`))).toBe(true);
   });
 
-  it("serves the stand-in, with a warning, where the catalog declares no appsBundle — and clones nothing", async () => {
+  it("serves the stand-in, with a warning, where the deploy repository declares no appsBundle — and clones nothing", async () => {
     warns.length = 0;
     const repo = new FakeRepoReader({ files: files({ bundle: null, overlays: ["values-web.yaml"] }) });
     const c = await catalogOf(repo, spec(null));
@@ -151,8 +151,8 @@ describe("readAppCatalog (the manifest of the apps template, else the stand-in)"
   });
 });
 
-describe("listTenantAppCatalog (the provider's clone of the catalog)", () => {
-  it("clones the catalog at ref with the read credential, then the template with the same credential, and returns the manifest", async () => {
+describe("listTenantAppCatalog (the provider's clone of the deploy repository)", () => {
+  it("clones the deploy repository at ref with the read credential, then the template with the same credential, and returns the manifest", async () => {
     const repo = new FakeRepoReader({ files: files({ appsYaml: APPS_YAML }) });
     const c = await listTenantAppCatalog({ repo, repoURL: REPO_URL, ref: "master", credentialId: "deploy-read-pat", warn: () => {} });
     expect(c.apps.map((a) => a.name)).toEqual(["erp", "web"]);
@@ -176,7 +176,7 @@ class ToggleRepoReader implements RepoReader {
   constructor(private readonly files: Record<string, string>) {}
   async cloneAtRef(): Promise<ClonedRepo> {
     this.clones++;
-    if (this.fail) throw new Error("catalog unreachable");
+    if (this.fail) throw new Error("deploy repository unreachable");
     return { workdir: "/w", resolvedSha: "f".repeat(40) };
   }
   async readFile(_workdir: string, relPath: string): Promise<string | null> {
@@ -198,13 +198,13 @@ class ToggleRepoReader implements RepoReader {
 describe("makeAppCatalogProvider (TTL cache + fail-soft)", () => {
   const names = (c: { apps: { name: string }[] }): string[] => c.apps.map((a) => a.name);
 
-  it("caches within the TTL (the catalog and the apps repository cloned once for repeated loads) and re-clones after it expires", async () => {
+  it("caches within the TTL (the deploy repository and the apps repository cloned once for repeated loads) and re-clones after it expires", async () => {
     const repo = new ToggleRepoReader(files({ appsYaml: APPS_YAML }));
     let clock = 1000;
     const p = makeAppCatalogProvider({ repo, repoURL: REPO_URL, ref: "master", warn: () => {}, ttlMs: 5000, now: () => clock });
     expect(names(await p.list())).toEqual(["erp", "web"]);
     expect(names(await p.list())).toEqual(["erp", "web"]);
-    expect(repo.clones).toBe(2); // the catalog + the apps repository; the second load hit the cache
+    expect(repo.clones).toBe(2); // the deploy repository + the apps repository; the second load hit the cache
     clock += 6000; // past the TTL
     expect(names(await p.list())).toEqual(["erp", "web"]);
     expect(repo.clones).toBe(4); // stale → both cloned again
@@ -229,7 +229,7 @@ describe("makeAppCatalogProvider (TTL cache + fail-soft)", () => {
     expect(names(await p.list())).toEqual(["erp", "web"]); // stale-but-good, never blank
   });
 
-  it("logs the stand-in through the pino-shaped sink, with the catalog's coordinates", async () => {
+  it("logs the stand-in through the pino-shaped sink, with the deploy repository's coordinates", async () => {
     const repo = new ToggleRepoReader(files({ overlays: ["values-web.yaml"] }));
     const logged: { fields: Record<string, unknown>; msg: string }[] = [];
     const p = makeAppCatalogProvider({ repo, repoURL: REPO_URL, ref: "master", warn: (fields, msg) => logged.push({ fields, msg }), now: () => 0 });

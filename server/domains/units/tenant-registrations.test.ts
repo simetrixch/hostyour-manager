@@ -292,7 +292,7 @@ describe("TenantRegistrations", () => {
 describe("the pointer scan reports what it could NOT read", () => {
   const OTHER = "e2e8ymj86dk8";
 
-  /** A registrations whose fake catalog carries GUID as a clean registration plus one seeded raw file. */
+  /** A registrations whose fake deploy repository carries GUID as a clean registration plus one seeded raw file. */
   async function withSeeded(path: string, content: string): Promise<TenantRegistrations> {
     const repo = new FakePlatformRepo();
     const reg = new TenantRegistrations(repo);

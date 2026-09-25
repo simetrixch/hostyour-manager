@@ -27,8 +27,8 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 const SHA = "a".repeat(40);
 const PROBE = "zsjs023ctne0"; // a live-shaped throwaway guid
 
-// A schema-valid catalog fan-out manifest: build-only (no chart) + a tenant: fan-out block.
-// A tenant repo has NO chart, so the schema requires a non-empty builds[] — catalog is build-only.
+// A schema-valid deploy repository fan-out manifest: build-only (no chart) + a tenant: fan-out block.
+// A tenant repo has NO chart, so the schema requires a non-empty builds[] — the deploy repository is build-only.
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
@@ -278,7 +278,7 @@ describe("composeTenantReport", () => {
 // ── validateTenant (orchestration over the fakes) ────────────────────────────────────────────────
 
 describe("validateTenant", () => {
-  it("pass: clones catalog, renders every member at the probe guid INTO ITS OWN member namespace, and freezes a T1..T4+G9 report", async () => {
+  it("pass: clones the deploy repository, renders every member at the probe guid INTO ITS OWN member namespace, and freezes a T1..T4+G9 report", async () => {
     const repo = repoWithManifest();
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC, doc("Deployment")] } });
     const lines: string[] = [];
@@ -363,7 +363,7 @@ describe("validateTenant", () => {
     await expect(validateTenant(req(), deps(throwingRepo, helm))).rejects.toThrow(/clone failed/);
   });
 
-  it("passes the credential to the clone (the manager's first-party catalog read credential)", async () => {
+  it("passes the credential to the clone (the manager's first-party deploy repository read credential)", async () => {
     const repo = repoWithManifest();
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC] } });
     await validateTenant(req({ apps: [], credentialId: "cred_deploy" }), deps(repo, helm));

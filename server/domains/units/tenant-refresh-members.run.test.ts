@@ -93,7 +93,7 @@ const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 let resolved: TenantMemberRecord[] = [];
 
 /** Every member Application Synced + Healthy, its last comparison rendering `members` (by index,
- *  in the order the plan lists the Applications): the chart sources off the catalog, their value
+ *  in the order the plan lists the Applications): the chart sources off the deploy repository, their value
  *  files and values, the tenant's versions, and the namespace labels on the spec. */
 function rendering(members: readonly TenantMemberRecord[], approved: Record<string, Record<string, string>> = HELD): Map<string, ArgoAppStatus> {
   return new Map(EXPECTED.map((name, i) => {

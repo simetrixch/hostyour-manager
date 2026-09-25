@@ -53,7 +53,7 @@ async function registered(reg: Registrations, name: string, opts: { stage?: bool
   });
 }
 
-/** The catalog's own build units — what tenant.buildRepos names on the books branch. */
+/** The deploy repository's own build units — what tenant.buildRepos names on the books branch. */
 const DEPLOY_BUILD_UNITS = ["digita-auth", "digita-platform"];
 
 function ports(over: Partial<TenantLifecyclePorts> = {}): TenantLifecyclePorts {
@@ -88,24 +88,24 @@ async function runAll(steps: Step[], logs: string[]): Promise<void> {
 }
 
 describe("scanOrphanBuilds", () => {
-  it("lists a build registration no stage file, no tenant and no catalog build unit names, and nothing else", async () => {
+  it("lists a build registration no stage file, no tenant and no build unit of the deploy repository names, and nothing else", async () => {
     const builds = new Registrations(new FakePlatformRepo());
     const tenants = new TenantRegistrations(new FakePlatformRepo());
     await registered(builds, UNIT);                      // orphaned
     await registered(builds, "acme", { stage: true });   // a consumer: its stage file stands beside it
     await registered(builds, "example-apps-other");      // named by a tenant below
-    await registered(builds, "digita-platform");         // the catalog's own build unit, build-only (#241)
+    await registered(builds, "digita-platform");         // the deploy repository's own build unit, build-only (#241)
     await tenants.commitTenant({ stage: "prod", guid: GUID, registration: entry({ appsRepo: `https://github.com/${ORG}/example-apps-other.git`, appsImage: "example-apps-other", appsImageTag: "1.0.0" }), runId: "run_onb" });
     expect(await scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, deployBuildUnits: async () => DEPLOY_BUILD_UNITS })).toEqual([{ unit: UNIT, repoURL: REPO }]);
   });
 
-  it("finds nothing where every build registration is accounted for, and refuses where the catalog cannot be read", async () => {
+  it("finds nothing where every build registration is accounted for, and refuses where the deploy repository cannot be read", async () => {
     const builds = new Registrations(new FakePlatformRepo());
     await registered(builds, "acme", { stage: true });
     await registered(builds, "digita-platform");
     const tenants = new TenantRegistrations(new FakePlatformRepo());
     expect(await scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, deployBuildUnits: async () => DEPLOY_BUILD_UNITS })).toEqual([]);
-    await expect(scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, deployBuildUnits: async () => { throw new Error("catalog unreachable"); } })).rejects.toThrow(/catalog unreachable/);
+    await expect(scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, deployBuildUnits: async () => { throw new Error("deploy repository unreachable"); } })).rejects.toThrow(/deploy repository unreachable/);
   });
 });
 

@@ -35,7 +35,7 @@ describe("renderTenantAppProject", () => {
     expect(project.metadata.labels).not.toHaveProperty(CONSUMER_PROJECT_LABEL.key);
   });
 
-  it("allows catalog AND the platform repo — a member Application pulls its chart from one and its $values chain from the other", () => {
+  it("allows the deploy repository AND the platform repo — a member Application pulls its chart from one and its $values chain from the other", () => {
     // The whole list — so the consumer-scoped prometheus-community repo cannot appear here either.
     expect(project.spec.sourceRepos).toEqual([DEPLOY_URL, PLATFORM]);
   });

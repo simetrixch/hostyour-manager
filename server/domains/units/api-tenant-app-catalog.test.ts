@@ -20,7 +20,7 @@ import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
-// GET /api/tenants/:id/app-catalog — one tenant's catalog over HTTP: the apps the catalog's
+// GET /api/tenants/:id/app-catalog — one tenant's catalog over HTTP: the apps the deploy repository's
 // TEMPLATE names (what can be added to any tenant, #215), each marked deployed where the
 // registration's apps[] carries it, and the read's degradations, each a sentence and never a bare
 // empty list.

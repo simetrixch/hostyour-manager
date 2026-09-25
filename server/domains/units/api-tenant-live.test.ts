@@ -71,7 +71,7 @@ function seedTenant(over: { status?: TenantStatus; suspended?: boolean } = {}): 
 const EXPECTED = tenantApplicationSet([...TEST_MEMBERS, "erp"], TGUID, "prod");
 const AUTH_APP = memberApplication(TGUID, "auth", "prod");
 
-/** The AUTH member's Application as the appset renders it: ONE source on catalog, targeting the
+/** The AUTH member's Application as the appset renders it: ONE source on the deploy repository, targeting the
  *  pointer's chartsRef and synced to whatever the cluster reached. Expressed through
  *  `sources`/`revisions` (not the singular fields), because a one-element `.spec.sources` array is
  *  exactly what the appset writes — which is why the singular `status.sync.revision` stays empty on
@@ -193,11 +193,11 @@ describe("tenant live reconciliation (GET /api/tenants/:id/live)", () => {
 
   it("resolves the pin PER REPO: a foreign source on the auth member yields no pin, never that source's revision", async () => {
     seedTenant();
-    // An auth member Application whose SYNC side is untouched (still catalog@SHA — what is
+    // An auth member Application whose SYNC side is untouched (still the deploy repository at SHA — what is
     // actually running) but whose TARGET side was rewritten to a foreign repo (a drifted/hand-edited
     // appset). targetedRevisionFor filters by repo, so the foreign source is never read positionally as
     // the pin: pinned comes back null (the tenants row carries no revision of its own to fall back on),
-    // never DEPLOYED — the foreign source's own revision, which would be a lie about what catalog
+    // never DEPLOYED — the foreign source's own revision, which would be a lie about what the deploy repository
     // pins. Positional reading is exactly what handed the Consumers card an install-branch NAME where a
     // SHA belonged.
     const foreign = authApp(SHA, SHA);
@@ -294,7 +294,7 @@ describe("tenant live reconciliation (GET /api/tenants/:id/live)", () => {
 
   it("a tenant whose AUTH member's Application is GONE reads the neutral not-deployed, never converged", async () => {
     // A missing auth member is a real fault whatever the row's status: the member carries the tenant's
-    // own catalog chart, and nothing but tenant-offboard/-purge ever removes it. The tenants row
+    // own chart in the deploy repository, and nothing but tenant-offboard/-purge ever removes it. The tenants row
     // carries no revision of its own any more (the route always passes recorded: null to driftOf), so
     // once ArgoCD cannot resolve the auth member's Application there is nothing left to promote to
     // `pinned`: no comparison took place, and the honest answer is the neutral not-deployed — never the

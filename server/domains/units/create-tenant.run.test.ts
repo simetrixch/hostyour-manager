@@ -43,7 +43,7 @@ const EXPECTED = tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.nam
  *  file lands its tenant on s1/prod, so a single-stage stand-in is all TenantRegistrations needs to
  *  satisfy commitTenant's stage boundary check. */
 
-// A schema-valid catalog fan-out manifest (build-only) — same shape validate-tenant.test.ts uses.
+// A schema-valid deploy repository fan-out manifest (build-only) — same shape validate-tenant.test.ts uses.
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
@@ -318,7 +318,7 @@ describe("create-tenant streaming planner", () => {
     expect(at("dev")).toMatch(/stage word cannot be a subdomain/);
   });
 
-  it("mints a free guid, validates the fan-out, and freezes a plan (targetKind cluster, catalog lock)", async () => {
+  it("mints a free guid, validates the fan-out, and freezes a plan (targetKind cluster, deploy repository lock)", async () => {
     seedClusters();
     const def = makeCreateTenantDef(withAppsTemplate(ports()));
     const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, size: "large" }, planCtx());
@@ -345,11 +345,11 @@ describe("create-tenant streaming planner", () => {
     const reader = repoWithManifest();
     await expect(makeCreateTenantDef(ports({ repo: reader })).planStream!({ clusterId: "cls_1", stage: "test", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx()))
       .rejects.toThrow(/tenant at test cannot be created on s1\.example, a prod cluster/);
-    expect(reader.clones).toEqual([]); // refused before the catalog was even cloned
+    expect(reader.clones).toEqual([]); // refused before the deploy repository was even cloned
   });
 
   it("validates the member CHARTS at the same books branch the registration is locked on, and never at the trunk", async () => {
-    // ONE REVISION OF THE CATALOG, because a member Application names that repository twice — its
+    // ONE REVISION OF THE DEPLOY REPOSITORY, because a member Application names that repository twice — its
     // pins source and its chart source — and ArgoCD's repo-server generates no manifest for an
     // Application whose two sources resolve one repository to two commits. Rendering the gates over
     // the trunk instead would approve a chart the cluster never reads.
@@ -359,7 +359,7 @@ describe("create-tenant streaming planner", () => {
       .planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
-    // The catalog at the books branch and nowhere else (read once for the apps unit's template, once
+    // The deploy repository at the books branch and nowhere else (read once for the apps unit's template, once
     // by the gates); the apps template is the other repository cloned.
     const refs = reader.clones.filter((c) => c.repoURL === DEPLOY_URL).map((c) => c.ref);
     expect(refs.length).toBeGreaterThan(0);

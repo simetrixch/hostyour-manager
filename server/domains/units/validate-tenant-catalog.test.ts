@@ -1,5 +1,5 @@
 // validateTenant with the app catalog (app-catalog.ts): the apps repository read through the
-// catalog's or a registered unit's credential, the `{databases}` token filled from the manifest,
+// deploy repository's or a registered unit's credential, the `{databases}` token filled from the manifest,
 // the value files held against the checkout, and T4 judging the request by the manifest's words.
 // Split from validate-tenant.test.ts so both files stay under the file-size doctrine.
 import { describe, it, expect } from "vitest";
@@ -153,7 +153,7 @@ describe("validateTenant — the app catalog", () => {
     const lines: string[] = [];
     const outcome = await validateTenant(req({ apps: [{ name: "erp", seedDemo: true }, app("crm")], credentialId: "cred_deploy" }), deps(repo, helm, (l) => lines.push(l)));
     expect(outcome.verdict).toBe("pass");
-    // The template was cloned after the catalog, at its default branch head, with the catalog's
+    // The template was cloned after the deploy repository, at its default branch head, with the deploy repository's
     // credential — the template is no unit, so no registration and no unit credential is asked for.
     expect(repo.clones).toEqual([{ repoURL: REPO_OF_REQ, ref: "master", credentialId: "cred_deploy" }, { repoURL: APPS_REPO, ref: "HEAD", credentialId: "cred_deploy" }]);
     // erp's engine: the list from the manifest, and its overlay, which stands; crm's engine: no
@@ -195,7 +195,7 @@ describe("validateTenant — the app catalog", () => {
     expect(helm.requests.find((r) => r.releaseName === `${PROBE}-erp-1`)?.valuesObject).not.toHaveProperty("databases");
   });
 
-  it("a failing clone of the apps repository throws like a failing clone of the catalog (a preflight rejection)", async () => {
+  it("a failing clone of the apps repository throws like a failing clone of the deploy repository (a preflight rejection)", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC] } });
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: WITH_BUNDLE } });
     const failing: RepoReader = {

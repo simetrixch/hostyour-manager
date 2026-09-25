@@ -165,7 +165,7 @@ describe("tenant-restart-workloads run", () => {
     expect(logs.join("\n")).toContain(`8 workload(s) across 4 member namespace(s) of ${GUID} rolled`);
   });
 
-  it("plans attest-target first, names the member namespaces, and claims no catalog books lock", async () => {
+  it("plans attest-target first, names the member namespaces, and claims no deploy repository books lock", async () => {
     seedTenant();
     const reg = new TenantRegistrations(new FakePlatformRepo());
     const plan = await makeTenantRestartWorkloadsDef(tenantPorts(reg, new FakeClusterReader(ATTESTING))).plan({ tenantId: "tnt_1" }, { db: db.db });

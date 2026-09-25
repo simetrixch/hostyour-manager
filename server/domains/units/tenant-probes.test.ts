@@ -42,11 +42,11 @@ describe("probeTenantTarget", () => {
 });
 
 describe("probeDeploy", () => {
-  it("passes where the registrations read the catalog, fails by name where the read throws", async () => {
+  it("passes where the registrations read the deploy repository, fails by name where the read throws", async () => {
     const good = ports({ deployRepoUrl: "https://github.com/acme/acme-deploy.git", registrations: new TenantRegistrations(new FakePlatformRepo()) });
     expect(await probeDeploy(good, p())).toMatchObject([{ id: "deploy.read", status: "pass", detail: "readable; 0 tenant(s) registered at prod" }]);
-    const bad = ports({ deployRepoUrl: "https://github.com/acme/acme-deploy.git", registrations: { listTenantGuids: async () => { throw new Error("401 from the catalog"); } } as unknown as TenantRegistrations });
-    expect(await probeDeploy(bad, p())).toMatchObject([{ status: "fail", severity: "hard", detail: "cannot be read: 401 from the catalog", hint: "the manager's deploy repository credential or DEPLOY_REPO is wrong" }]);
+    const bad = ports({ deployRepoUrl: "https://github.com/acme/acme-deploy.git", registrations: { listTenantGuids: async () => { throw new Error("401 from the deploy repository"); } } as unknown as TenantRegistrations });
+    expect(await probeDeploy(bad, p())).toMatchObject([{ status: "fail", severity: "hard", detail: "cannot be read: 401 from the deploy repository", hint: "the manager's deploy repository credential or DEPLOY_REPO is wrong" }]);
   });
 });
 

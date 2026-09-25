@@ -351,7 +351,7 @@ describe("tenant-offboard run", () => {
     // remove-tenant asks ONE question — "is this pointer already gone?" — and asking it through
     // the strict readTenant, which THROWS on a body that fails its schema, makes a live tenant whose
     // registration carries a malformed field fail AT THIS STEP, identically on every retry:
-    // no removal is ever committed, the pointer stays in catalog and the whole fan-out keeps
+    // no removal is ever committed, the pointer stays in the deploy repository and the whole fan-out keeps
     // serving. That would break the one NON-destructive removal run kind — the one api.ts deliberately keeps
     // open on a still-provisioning tenant because it is the clean way OUT — and leave tenant-purge, which
     // deletes the Tenant CR and with it the tenant's Mongo databases and Vault path, as the only way to

@@ -43,10 +43,10 @@ export function testMembers(apps: readonly ({ name: string; [k: string]: unknown
   ];
 }
 
-/** The engine chart's per-app overlays of the test product, as the files a fake catalog checkout
+/** The engine chart's per-app overlays of the test product, as the files a fake deploy repository checkout
  *  carries. While no apps repository carries an apps.yaml, the app catalog IS these overlays
  *  (app-catalog.ts fallbackCatalog), so a fixture that requests an app carries the app's overlay,
- *  the way the real catalog does. The names are the ones the run tests request. */
+ *  the way the real deploy repository does. The names are the ones the run tests request. */
 export const APP_OVERLAYS: Record<string, string> = Object.fromEntries(["erp", "web", "crm"].map((app) => [`charts/example-engine/values-${app}.yaml`, ""]));
 
 /** The ceiling a test tenant's member namespaces are bounded by — the shipped `small` figures. Lives
@@ -55,7 +55,7 @@ export const APP_OVERLAYS: Record<string, string> = Object.fromEntries(["erp", "
 export const TEST_QUOTA = seedQuota("small");
 
 /** The test tenant's OWN apps bundle: every tenant that selects an app mounts its own
- *  `<bundle>-<subdomain>` bundle and the catalog's is mounted by none, so every seeded registration of
+ *  `<bundle>-<subdomain>` bundle and the deploy repository's is mounted by none, so every seeded registration of
  *  a tenant with an app carries it. A create-tenant request never names it: the plan derives it
  *  (tenant-apps-repo.fixture.ts withAppsTemplate is what such a plan needs). The tag is the shape a
  *  release's PipelineRun states. */

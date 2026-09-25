@@ -17,7 +17,7 @@ import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
 // GET /api/tenants/app-catalog — the create-tenant wizard's picker, end-to-end over HTTP: the
-// wired provider clones a fake catalog whose manifest names an apps bundle, clones the apps
+// wired provider clones a fake deploy repository whose manifest names an apps bundle, clones the apps
 // repository and answers its apps.yaml as-is (titles, descriptions, selections). The provider's
 // fail-soft, its cache and the overlay stand-in are unit-tested in app-catalog.test.ts. A sibling
 // of api.test.ts because that file is at the file-size budget.
@@ -27,7 +27,7 @@ const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 
-/** The catalog's manifest, naming the apps template: the bundle's name and its repository. */
+/** The deploy repository's manifest, naming the apps template: the bundle's name and its repository. */
 const TENANT_MANIFEST = `apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
 name: deploy
@@ -79,7 +79,7 @@ describe("GET /api/tenants/app-catalog", () => {
       apps: [{ name: "erp", title: "ERP", description: "Orders and stock.", selections: { seedDemo: { title: "Demo data", default: true } } }],
       packageScopes: [], // the template routes no scope to GitHub Packages (#233)
     });
-    // The catalog at the books ref, then the template at its default branch head.
+    // The deploy repository at the books ref, then the template at its default branch head.
     expect(repo.clones.map((c) => [c.repoURL, c.ref])).toEqual([[DEPLOY_URL, "master"], ["https://github.com/acme/acme-apps.git", "HEAD"]]);
   });
 
