@@ -12,7 +12,7 @@ import type { StepCtx } from "../../executor/types.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { MASTER_ARGO_NAMESPACE } from "../inventory/cluster-kube.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";
-import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
+import { syncedAt } from "./tenant-watch.ts";
 import type { OnboardPorts } from "./onboard.run.ts";
 
 const sorted = (builds: readonly string[]): string => [...builds].sort().join(",");
@@ -33,8 +33,9 @@ export function renderedBuilds(status: ArgoAppStatus | undefined): string[] | nu
 }
 
 /** Attest `builds` for the registered unit where its build.yaml attests others, keeping every other
- *  field of the standing registration, and wait until the build Application renders them. Nothing is
- *  written, and nothing is waited for, where the attested set already equals the manifest's. */
+ *  field of the standing registration, and wait until the build Application renders them. The write
+ *  happens only where the sets differ; the render is asked every time, so a retry after a timed-out
+ *  wait, or a second run inside the ApplicationSet's poll window, still waits for it. */
 export async function attestBuildsAgain(
   ctx: StepCtx,
   ports: OnboardPorts,
@@ -42,14 +43,32 @@ export async function attestBuildsAgain(
   builds: readonly string[],
 ): Promise<void> {
   const standing = await ports.registrations.readBuildRegistration(unit);
-  if (!standing) throw errValidation(`build unit ${unit} is taken for registered, and its registrations/${unit}/build.yaml does not stand — plan the run again`);
+  if (!standing) throw errValidation(`build unit ${unit} was planned as registered, and its registrations/${unit}/build.yaml does not stand — plan the run again`);
+  if (!ports.buildArgo) throw errValidation(`the master ArgoCD reader is not wired — nothing can confirm that the build Application of ${unit} renders its builds before its release`);
   const attested = standing.entry.builds ?? [];
-  if (sorted(attested) === sorted(builds)) return;
+  if (sorted(attested) !== sorted(builds)) await writeAttestation(ctx, ports, unit, builds, standing.entry, attested);
+  const app = unitBuildNamespace(unit);
+  const rendered = (byName: ArgoAppStatusMap): boolean => syncedAt([app])(byName) && sorted(renderedBuilds(byName.get(app)) ?? []) === sorted(builds);
+  const byName = await ports.buildArgo.watchApplicationSet(MASTER_ARGO_NAMESPACE, [app], rendered, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal });
+  if (!rendered(byName)) {
+    const seen = renderedBuilds(byName.get(app));
+    const status = byName.get(app);
+    throw errUpstream(
+      `${MASTER_ARGO_NAMESPACE}/${app} does not render the builds ${sorted(builds)} yet ` +
+      `(${status ? `${status.sync}/${status.health}, rendering ${seen ? sorted(seen) || "no build" : "no build list"}` : "absent"}) — retry this step once it does; the attestation stands`,
+    );
+  }
+  ctx.log("meta", `${app} renders ${sorted(builds)} — the release may build them`);
+}
+
+async function writeAttestation(
+  ctx: StepCtx, ports: OnboardPorts, unit: string, builds: readonly string[],
+  entry: NonNullable<Awaited<ReturnType<OnboardPorts["registrations"]["readBuildRegistration"]>>>["entry"], attested: readonly string[],
+): Promise<void> {
   // G16's rule, held here as at onboarding: a build name is one unit's. Two units attesting one name
   // push to one registry repository, and each release would move the other's pins.
   const taken = (await ports.registrations.listAttestedBuildNames(unit)).filter((a) => builds.includes(a.build));
   if (taken.length > 0) throw errValidation(`build unit ${unit} now declares ${taken.map((t) => `${t.build} (attested by ${t.unit})`).join(", ")} — a build name is one unit's; rename the build in ${unit}'s manifest`);
-  const { entry } = standing;
   const { commit } = await ports.registrations.commitRegistration({
     unit: {
       name: unit, repoURL: entry.repoURL, ...(entry.owner ? { owner: entry.owner } : {}),
@@ -59,16 +78,4 @@ export async function attestBuildsAgain(
     runId: ctx.runId,
   });
   ctx.log("meta", `${unit}: builds attested again (${commit}) — ${sorted(attested) || "none"} → ${sorted(builds)}, as its manifest declares them now`);
-  if (!ports.buildArgo) throw errValidation(`the master ArgoCD reader is not wired — nothing can confirm that the build Application of ${unit} renders the new builds before its release`);
-  const app = unitBuildNamespace(unit);
-  const rendered = (byName: ArgoAppStatusMap): boolean => syncedAt([app])(byName) && sorted(renderedBuilds(byName.get(app)) ?? []) === sorted(builds);
-  const byName = await ports.buildArgo.watchApplicationSet(MASTER_ARGO_NAMESPACE, [app], rendered, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal });
-  if (!rendered(byName)) {
-    const seen = renderedBuilds(byName.get(app));
-    throw errUpstream(
-      `${MASTER_ARGO_NAMESPACE}/${app} has not rendered the builds ${sorted(builds)} within ${Math.round(ports.argoWatchTimeoutMs / 1000)}s ` +
-      `(${syncedAt([app])(byName) ? `it renders ${seen ? sorted(seen) : "no build list"}` : describeUnsynced([app], byName)}) — retry this step once it has; the attestation stands`,
-    );
-  }
-  ctx.log("meta", `${app} renders ${sorted(builds)} — the release may build them`);
 }

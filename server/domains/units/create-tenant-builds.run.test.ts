@@ -300,13 +300,13 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
       syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy",
       syncSources: [{ repoURL: "https://github.com/x/hostyour-cloud.git", revision: SHA }, { repoURL: "https://github.com/x/hostyour-cloud.git", revision: SHA, path: "clusters/inventories/consumer-build", valuesObject: { unit: { name: "example-jobs", buildsJson: JSON.stringify(builds) } } }],
     } as ArgoAppStatus]]) });
-    async function standing(extra: { buildArgo: FakeMasterArgoReader }) {
+    async function standing(extra: { buildArgo: FakeMasterArgoReader }, manifest = JOBS_MANIFEST_YAML, registration: { repoURL?: string; owner?: string; suspended?: boolean; quiesced?: boolean } = {}) {
       seedClusters();
       const buildPlane = new FakeBuildPlane();
       buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-2", releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
-      const onboard = onboardPorts({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": JOBS_MANIFEST_YAML } }), buildPlane, ...extra });
+      const onboard = onboardPorts({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": manifest } }), buildPlane, ...extra });
       await onboard.registrations.commitRegistration({
-        unit: { name: "example-jobs", repoURL: JOBS_REPO, owner: "team-acme", onboardedAt: "2026-01-01T00:00:00.000Z", suspended: false, quiesced: false },
+        unit: { name: "example-jobs", repoURL: registration.repoURL ?? JOBS_REPO, owner: registration.owner ?? "team-acme", onboardedAt: "2026-01-01T00:00:00.000Z", suspended: registration.suspended ?? false, quiesced: registration.quiesced ?? false },
         builds: ["example-jobs-old"], runId: "run_old",
       });
       const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: true, form: "build-only" as const };
@@ -324,8 +324,36 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
     });
     it("does not trigger the release while the build Application still renders the old builds", async () => {
       const { buildPlane, step } = await standing({ buildArgo: rendering(["example-jobs-old"]) });
-      await expect(step.run(ctx(params(), [], []))).rejects.toThrow(/has not rendered the builds example-jobs.*renders example-jobs-old/);
+      await expect(step.run(ctx(params(), [], []))).rejects.toThrow(/does not render the builds example-jobs yet.*rendering example-jobs-old/);
       expect(buildPlane.releaseWatches).toEqual([]);
+    });
+    it("waits on a retry too: builds already attested, the build Application still rendering the old ones", async () => {
+      const { onboard, buildPlane, step } = await standing({ buildArgo: rendering(["example-jobs-old"]) });
+      await onboard.registrations.commitRegistration({
+        unit: { name: "example-jobs", repoURL: JOBS_REPO, owner: "team-acme", onboardedAt: "2026-01-01T00:00:00.000Z", suspended: false, quiesced: false },
+        builds: ["example-jobs"], runId: "run_first_attempt",
+      });
+      await expect(step.run(ctx(params(), [], []))).rejects.toThrow(/does not render the builds example-jobs yet/);
+      expect(buildPlane.releaseWatches).toEqual([]);
+    });
+    it("waits for the sync as well: the new builds compared but the Application still OutOfSync", async () => {
+      const argo = rendering(["example-jobs"]);
+      const status = (argo as unknown as { scripted: { statuses: Map<string, ArgoAppStatus> } }).scripted.statuses.get("example-jobs-build")!;
+      argo.setStatuses(new Map([["example-jobs-build", { ...status, sync: "OutOfSync" }]]));
+      const { buildPlane, step } = await standing({ buildArgo: argo });
+      await expect(step.run(ctx(params(), [], []))).rejects.toThrow(/OutOfSync/);
+      expect(buildPlane.releaseWatches).toEqual([]);
+    });
+    it("keeps the unit's own names and every other field of the registration", async () => {
+      const both = `${JOBS_MANIFEST_YAML}  - name: example-jobs-old
+    containerfile: Containerfile
+`;
+      const { onboard, step } = await standing({ buildArgo: rendering(["example-jobs", "example-jobs-old"]) }, both,
+        { repoURL: "https://github.com/standing-owner/example-jobs.git", owner: "team-standing", suspended: true, quiesced: true });
+      await step.run(ctx(params(), [], []));
+      const entry = (await onboard.registrations.readBuildRegistration("example-jobs"))?.entry;
+      expect(entry?.builds).toEqual(["example-jobs", "example-jobs-old"]); // its own old name is no clash with itself
+      expect(entry).toMatchObject({ repoURL: "https://github.com/standing-owner/example-jobs.git", owner: "team-standing", suspended: true, quiesced: true });
     });
     it("refuses a build name another unit attests, writing nothing", async () => {
       const { onboard, step } = await standing({ buildArgo: rendering(["example-jobs"]) });

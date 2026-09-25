@@ -185,7 +185,7 @@ export async function planBuildUnits(input: {
     input.log(`build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} — ${u.registered ? "registered, its release is re-run" : "not registered, onboarded build-only by this run"} as ${as}`);
   }
   const warnings = units.length > 0
-    ? [`${units.length} build unit(s) are onboarded by this run before the tenant is deployed (${units.map((u) => `${u.unit}: ${u.images.join(", ")}`).join("; ")}) — each releases its next version onto ${input.stage} and pins it on the books branch`]
+    ? [`${units.length} build unit(s) build before anything of the tenant is written (${units.map((u) => `${u.unit}: ${u.images.join(", ")}, ${u.registered ? "registered, re-released with its builds attested as its manifest declares them now" : "onboarded build-only"}`).join("; ")}) — each releases its next version onto ${input.stage} and pins it on the books branch`]
     : [];
   return { outcome: "planned", builds: { units, warnings } };
 }
