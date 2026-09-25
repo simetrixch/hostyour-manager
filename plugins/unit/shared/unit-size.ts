@@ -8,7 +8,7 @@ import { addCpu, addMemory, timesCpu, timesMemory } from "./quantity.ts";
 //
 // WHERE THE NUMBERS LIVE, and why not here. The three presets below are the SEED — what a fresh
 // installation starts with. The table an installation actually runs on lives in the Manager's own
-// inventory (server/db/schema/inventory.ts, unitSizes), because it has to be editable while the
+// inventory (plugins/unit/server/schema.ts, unitSizes), because it has to be editable while the
 // platform runs: a size is a commercial fact, and it changes without a release.
 //
 // HOW A CHANGE REACHES A CLUSTER. Not by a chart reading this table — no cluster can read the

@@ -1,4 +1,4 @@
-/** GET /api/owners — the identity recorded for each owner (server
+/** GET /api/unit/owners — the identity recorded for each owner (server
  *  plugins/unit/server/owners.ts, hostyour-manager#219): its two credentials as fingerprints and
  *  dates, never values, and whether the platform's GitHub App is installed in it. */
 export interface OwnerCredentialView {
@@ -22,7 +22,7 @@ export interface OwnersListView {
   owners: OwnerIdentityView[];
 }
 
-/** PUT /api/owners/:org/packages-reader and /repository-pat — the one field, sent once
+/** PUT /api/unit/owners/:org/packages-reader and /repository-pat — the one field, sent once
  *  over TLS, measured and sealed on the server, never echoed. */
 export interface OwnerCredentialInput {
   token: string;
