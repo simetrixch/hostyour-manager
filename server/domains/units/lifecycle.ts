@@ -11,7 +11,7 @@ import type { Db } from "../../db/client.ts";
 import { apps, clusters, tenants } from "../../db/schema/inventory.ts";
 import { AppError, errNotFound } from "../../kernel/errors.ts";
 import type { MemberRouting, Stage } from "../../../shared/enums.ts";
-import type { Registrations } from "./registrations.ts";
+import type { Registrations } from "#unit/server/registrations.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import type { BuildRbacWriter, DeployState, ClusterKubeResolver, ClusterReader } from "../../adapters/kube/port.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";

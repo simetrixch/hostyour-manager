@@ -24,7 +24,7 @@ import type { ObjectStore } from "../adapters/object-store/port.ts";
 import type { Activator } from "../adapters/activation/port.ts";
 import type { GitHubApp } from "../adapters/github-app/port.ts";
 import { HelmCliRenderer } from "../adapters/helm/helm.ts";
-import { Registrations } from "../domains/units/registrations.ts";
+import { Registrations } from "#unit/server/registrations.ts";
 import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
 import { makeTenantRestartWorkloadsDef } from "../domains/units/restart-workloads.run.ts";
 import { makeTenantSetSizeDef } from "../domains/units/set-size.run.ts";

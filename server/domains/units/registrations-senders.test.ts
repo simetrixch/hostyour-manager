@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { Registrations } from "./registrations.ts";
+import { Registrations } from "#unit/server/registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { MASTER_FQDN, MASTER_MARKING_YAML, SLAVE_FQDN, SLAVE_MARKING_YAML } from "../runs/cluster-maps.fixture.ts";
 import type { Stage } from "../../../shared/enums.ts";

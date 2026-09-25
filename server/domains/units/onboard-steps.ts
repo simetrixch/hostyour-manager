@@ -17,11 +17,11 @@ import { probeTarget, probeDns } from "./onboard-probes.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import type { AppProvenance, AppStatus, Stage } from "../../../shared/enums.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
-import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "./build-rbac.ts";
-import { buildConsumerSecretDataWithDerivations } from "./secret-mint.ts";
+import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "#unit/server/build-rbac.ts";
+import { buildConsumerSecretDataWithDerivations } from "#unit/server/secret-mint.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
-import { provisionUnitDns, removeUnitDns, consumerUnitHost } from "./unit-dns.ts";
+import { provisionUnitDns, removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 
 // The compensations below are IDEMPOTENT WITHOUT SWALLOWING: each one tolerates exactly the

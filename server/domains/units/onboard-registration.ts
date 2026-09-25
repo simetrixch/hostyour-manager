@@ -2,7 +2,7 @@
 // onboard.run.ts (like onboard-check.ts) so the run file stays a thin orchestrator; the writer
 // itself is the Registrations (registrations.ts), the ONE writer of registrations/**.
 import type { Step } from "../../executor/types.ts";
-import { resolveUnitQuota } from "./unit-size.ts";
+import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { OnboardPorts, DeployableOnboardParams, BuildOnlyOnboardParams } from "./onboard.run.ts";
 import { deployableOnboardCleanups, buildOnlyOnboardCleanups } from "./onboard-abort.ts";
 import type { ReleaseCycleRuntime } from "./onboard-release-cycle.ts";

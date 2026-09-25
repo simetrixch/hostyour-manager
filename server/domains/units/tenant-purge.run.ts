@@ -14,7 +14,7 @@ import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { tenantLocks, tenantSelector, tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
-import { isTenantRecord, removeTenantBookedRecords, removeUnitDns, tenantRecordName } from "./unit-dns.ts";
+import { isTenantRecord, removeTenantBookedRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { tenantKeyName } from "./tenant-storage.ts";
 
 // tenant-purge / force-offboard by GUID — the tenant analogue of the consumer

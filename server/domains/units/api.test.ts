@@ -22,7 +22,7 @@ import { makeCreateTenantDef, type TenantOnboardPorts } from "./create-tenant.ru
 import { makeAddAppDef } from "./add-app.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "./tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "./tenant-offboard.run.ts";
-import { Registrations } from "./registrations.ts";
+import { Registrations } from "#unit/server/registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -40,7 +40,7 @@ import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { seedUnitSizes } from "./unit-size.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import { ORG, TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 

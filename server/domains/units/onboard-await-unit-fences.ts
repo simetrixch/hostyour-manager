@@ -2,7 +2,7 @@
 // the release cycle starts.
 import type { Step } from "../../executor/types.ts";
 import { errUpstream } from "../../kernel/errors.ts";
-import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
+import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 
 /** The two Applications hostyour-cloud's units-appset.yaml generates per (unit, stage) in the ArgoCD

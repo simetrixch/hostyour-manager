@@ -23,7 +23,7 @@
 // is what refuses to overwrite a live tenant's keys.
 //
 // Boundary: domain layer, pure. Node crypto only, through the shared mint helpers in secret-mint.ts.
-import { generateRsaKeypair, mintSecretValue } from "./secret-mint.ts";
+import { generateRsaKeypair, mintSecretValue } from "#unit/server/secret-mint.ts";
 
 /** The properties of `<stage>/tenants/<guid>`, in the spelling every reader uses. Four are read out of
  *  the member's app Secret (catalog/charts/example-lib/templates/_secret-kit.tpl, the

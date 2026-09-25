@@ -11,8 +11,8 @@
 // (boot.ts), because a schema changes only with a release and a release boots the Manager; a timer
 // would measure the same files against the same schema.
 import type { Logger } from "../../kernel/logger.ts";
-import { bootMarker, type RegistrationMigration } from "./registration-laws.ts";
-import type { Registrations } from "./registrations.ts";
+import { bootMarker, type RegistrationMigration } from "#unit/server/registration-laws.ts";
+import type { Registrations } from "#unit/server/registrations.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 
 /** Which books a migration ran over: the platform's (hostyour-cloud, the consumer registrations) or

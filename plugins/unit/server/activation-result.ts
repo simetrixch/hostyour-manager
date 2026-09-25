@@ -5,7 +5,7 @@
 // outcome — so the parsing + the operator-facing mail line live here ONCE rather than being
 // duplicated (and drifting) across the two steps. Pure: no IO, only shape-reads of an already-parsed
 // response body (the Activator port did the fetch + JSON.parse).
-import { ConsumerActivationMailSchema, type ConsumerActivationMail } from "../../../shared/consumer.ts";
+import { ConsumerActivationMailSchema, type ConsumerActivationMail } from "#core/shared/consumer.ts";
 
 /** Render the optional invite-mail outcome as one plain, operator-facing run-log line — in the
  *  same English + `✓`/plain style as the invite steps' other lines. Never carries a credential (the mail

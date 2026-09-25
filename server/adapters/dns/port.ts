@@ -6,7 +6,7 @@
 //
 // A unit record is only ever a CNAME onto the target cluster's FQDN, never an address: the cluster's
 // name is the one authority for where it is reachable, and DNS resolves it — through a master
-// identity that is itself a CNAME onto one of two machines as well (server/domains/units/unit-dns.ts).
+// identity that is itself a CNAME onto one of two machines as well (plugins/unit/server/unit-dns.ts).
 //
 // TXT rides the same three calls because the mail records of a sender domain (SPF, DKIM, DMARC) are
 // records of this installation too: the DNS inventory reads them and `dns-remove` and

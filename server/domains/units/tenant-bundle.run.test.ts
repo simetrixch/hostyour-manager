@@ -7,7 +7,7 @@
 // without an app.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "#unit/shared/unit-size.ts";
-import { seedUnitSizes } from "./unit-size.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -32,7 +32,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { RoleBindingManifest } from "../../adapters/kube/port.ts";
-import { unitBuildNamespace } from "./build-rbac.ts";
+import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { APP_OVERLAYS, STANDING_MEMBER_NAMES as TEST_MEMBERS, TEST_BUNDLE, testMembers } from "./tenant-members.fixture.ts";

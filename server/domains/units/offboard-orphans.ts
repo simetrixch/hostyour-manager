@@ -61,8 +61,8 @@ import type { BuildRbacObject, BuildRbacWriter, RepoCredentialWriter } from "../
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
-import { consumerUnitHost } from "./unit-dns.ts";
-import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "./build-rbac.ts";
+import { consumerUnitHost } from "#unit/server/unit-dns.ts";
+import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "#unit/server/build-rbac.ts";
 
 /** What the scan reads through: the lifecycle set (the registration branch + the per-cluster kube
  *  clients) plus the three writers whose objects it looks for. The writers are optional exactly as

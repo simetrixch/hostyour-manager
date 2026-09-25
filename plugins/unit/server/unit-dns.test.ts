@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { openDb, type DbHandle } from "../../db/client.ts";
-import { servers, clusters } from "../../db/schema/inventory.ts";
-import { listDnsWrites, recordDnsWrite } from "../../db/dns-writes.ts";
-import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import type { StepCtx } from "../../executor/types.ts";
-import type { CredentialStore } from "../../security/store.ts";
-import type { Logger } from "../../kernel/logger.ts";
+import { openDb, type DbHandle } from "#core/server/db/client.ts";
+import { servers, clusters } from "#core/server/db/schema/inventory.ts";
+import { listDnsWrites, recordDnsWrite } from "#core/server/db/dns-writes.ts";
+import { FakeDnsProvider } from "#core/server/adapters/dns/testing/fake.ts";
+import type { StepCtx } from "#core/server/executor/types.ts";
+import type { CredentialStore } from "#core/server/security/store.ts";
+import type { Logger } from "#core/server/kernel/logger.ts";
 import { isTenantRecord, provisionUnitDns, removeTenantBookedRecords, removeUnitDns } from "./unit-dns.ts";
 
 // The unit's ONE record and the book of DNS writes beside it: provisionUnitDns writes a CNAME onto the

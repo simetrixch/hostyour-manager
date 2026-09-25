@@ -12,7 +12,7 @@ import type { DnsProvider } from "../../adapters/dns/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { boxSecretData, boxSecretName, jobReadsBoxSecret, verifyDumpJob, type RelocationJob, type StorageBoxAccess } from "./relocation-jobs.ts";
-import { loadActiveTargetCluster, type TargetCluster } from "./relocation-target.ts";
+import { loadActiveTargetCluster, type TargetCluster } from "#unit/server/relocation-target.ts";
 
 /** What every relocation step reaches the world through. `jobTimeoutMs` is the per-Job budget — a
  *  dump of a big store is the longest thing this domain runs. `storageBox`/`dbtoolsImage` are

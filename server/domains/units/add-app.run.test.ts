@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "#unit/shared/unit-size.ts";
-import { seedUnitSizes } from "./unit-size.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
@@ -266,7 +266,7 @@ describe("add-app run definition", () => {
     await expect(step.run(ctx(p, "watch-sync-set", []))).resolves.toBeUndefined();
 
     const stalled = makeAddAppDef(ports({ argo: new FakeMasterArgoReader({}) })).steps(p).find((s) => s.name === "watch-sync-set")!;
-    await expect(stalled.run(ctx(p, "watch-sync-set", []))).rejects.toThrow(/did not fully reach Synced/);
+    await expect(stalled.run(ctx(p, "watch-sync-set", []))).rejects.toThrow(/fan-out did not converge — \d+ of \d+ Application\(s\) are not Synced\/Healthy/);
   });
 
   it("smoke checks the NEW member's own namespace (<guid>-<app>), never a sibling's", async () => {

@@ -52,7 +52,7 @@ import { APP_SETTLED_STATUS, STAGE, type Stage } from "../../../shared/enums.ts"
 import type {
   ClusterOrphanConsumerView, DetectedConsumerView, DetectedScan, SkippedConsumerPointerView, UnscannedClusterView,
 } from "../../../shared/api-types.ts";
-import type { Registrations } from "./registrations.ts";
+import type { Registrations } from "#unit/server/registrations.ts";
 import type { ClusterKubeResolver, WorkloadStatus } from "../../adapters/kube/port.ts";
 import { consumerNamespaceSelector } from "./admission-policy.ts";
 

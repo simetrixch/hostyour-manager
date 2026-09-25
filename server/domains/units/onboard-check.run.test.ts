@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { makeOnboardDef, OnboardParams, DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { CHANNEL_STAGES, emptyZone } from "./onboard.fixture.ts";
-import { Registrations } from "./registrations.ts";
+import { Registrations } from "#unit/server/registrations.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
@@ -13,7 +13,7 @@ import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { seedUnitSizes } from "./unit-size.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
 // The check step's DRIFT BELT (onboard-check.ts): the gates re-run at the current default-branch
 // head, and the facts the approval froze — builds, databases, services, fqdn, secret specs,

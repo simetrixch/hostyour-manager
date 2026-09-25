@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { RunDefinition, LockClaim, Step } from "../../executor/types.ts";
 import { attestTargetStep, attestTenantTargetStep, loadAppCluster, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { assertMovableTo } from "./relocation-target.ts";
+import { assertMovableTo } from "#unit/server/relocation-target.ts";
 import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, type RelocationPorts, type WorldOf } from "./relocation.ts";
 import { provisionTargetStep, watchTargetStep, restoreStep, verifyCompletenessStep, switchDnsStep, targetSmokeStep, recordStep } from "./relocation-restore.ts";
 import { repointStep, clearSourceStep } from "./relocation-migrate.ts";

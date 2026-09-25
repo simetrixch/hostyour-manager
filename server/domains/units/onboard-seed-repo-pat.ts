@@ -7,13 +7,13 @@ import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshUnitRepoPat } from "./app-token-refresh.ts";
-import { unitBuildNamespace } from "./build-rbac.ts";
+import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
 import { sleep } from "./onboard-release-cycle.ts";
 import { probePackages } from "./onboard-probes.ts";
 import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderFor, packagesReaderMissing } from "./repo-identity.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import type { StepCtx } from "../../executor/types.ts";
-import { readOwnerIdentity } from "./owners.ts";
+import { readOwnerIdentity } from "#unit/server/owners.ts";
 
 /** The onboard `seed-repo-pat` step: write the unit's build entry secret/build/<name>/repo-pat on
  *  the LOCAL Vault with its TWO values (#220): property `pat`, the repository token the Manager

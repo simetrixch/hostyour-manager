@@ -37,7 +37,7 @@ import { unitNameFromRepoURL, type TenantSpec } from "../../../shared/consumer.t
 import { errValidation } from "../../kernel/errors.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import { judgeRepoIdentity, resolveRepoCredentialId, type OwnerIdentityReader, type RepoIdentityApp } from "./repo-identity.ts";
-import { readOwnerIdentity } from "./owners.ts";
+import { readOwnerIdentity } from "#unit/server/owners.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
 import { buildOnlySteps, type BuildOnlyOnboardParams, type OnboardPorts } from "./onboard.run.ts";
@@ -50,7 +50,7 @@ import { recordBuildOnlyStep } from "./onboard-registration.ts";
 import { attestBuildsAgain } from "./build-unit-attest.ts";
 import { type RequiredImage, requiredImagesFrom } from "./ensure-images.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
-import { renderTenantArgoSync, tenantSyncUnits } from "./build-rbac.ts";
+import { renderTenantArgoSync, tenantSyncUnits } from "#unit/server/build-rbac.ts";
 import { validateTenant, type ValidateTenantRequest } from "./validate-tenant.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";

@@ -1,6 +1,6 @@
 import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "./unit-size.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { eq } from "drizzle-orm";
 import { pino } from "pino";
 import type { Hono } from "hono";

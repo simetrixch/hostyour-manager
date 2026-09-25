@@ -28,7 +28,7 @@ import { GUID_ALPHABET } from "../../shared/tenant.ts";
  *
  * These ids are ROW ids and never a capability: nothing authenticates by holding one. Every secret
  * this platform mints is drawn from node:crypto randomBytes instead (security/store.ts,
- * domains/access/session.ts, domains/units/secret-mint.ts), so a monotonic id gives a guesser
+ * domains/access/session.ts, plugins/unit/server/secret-mint.ts), so a monotonic id gives a guesser
  * nothing that a plain one did not.
  */
 const mint = monotonicFactory();

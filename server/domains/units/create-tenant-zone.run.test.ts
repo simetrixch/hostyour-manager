@@ -5,7 +5,7 @@
 // live key — and nothing took those back. Here it refuses the plan, before any write.
 import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "./unit-size.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";

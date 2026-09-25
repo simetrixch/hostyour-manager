@@ -14,19 +14,19 @@ import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { assertDeployState, loadTenantCluster } from "./lifecycle.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy } from "./admission-policy.ts";
-import { renderTenantArgoSync, tenantSyncUnits } from "./build-rbac.ts";
+import { renderTenantArgoSync, tenantSyncUnits } from "#unit/server/build-rbac.ts";
 import { memberApplication, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { tenantAppsUnit } from "./tenant-apps-tree.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { placeholderTagFromChain } from "./tenant-values.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
 import { readTenantSpec, recordAppsRepoStep } from "./tenant-apps-repo.run.ts";
-import { readOwnerIdentity } from "./owners.ts";
+import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { BuildUnitSchema, buildUnitStep, planBuildUnits, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { probeBuildUnit } from "./tenant-probes.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
+import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 
 // The "tenant-add-app" Run. The subset sibling of
 // create-tenant: it fans ONE new app into a LIVE tenant. It shares create-tenant's streaming-plan
@@ -297,7 +297,7 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
           signal: ctx.signal,
           labelSelector: `platform/tenant=${p.guid}`,
         });
-        if (!until(byName)) throw errValidation(describeUnsynced(p.expectedApps, byName));
+        if (!until(byName)) throw errValidation(`tenant ${p.guid} fan-out did not converge — ${describeUnsynced(p.expectedApps, byName)}`);
         ctx.log("meta", `app "${p.app}" Application(s) are Synced + Healthy at ${p.chartsRef.slice(0, 7)}`);
       },
     },

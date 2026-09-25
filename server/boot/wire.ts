@@ -7,7 +7,7 @@ import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessO
 import { bootPhases } from "./boot-phases.ts";
 import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
 import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
-import { seedUnitSizes } from "../domains/units/unit-size.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { createApp } from "../http/app.ts";
 import type { CredentialStore } from "../security/store.ts";
 import { buildCore } from "./core.ts";
@@ -47,7 +47,7 @@ import { registerConsumerSecretsRoute } from "../domains/units/api-consumer-secr
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
 import { ensureAppIdentityRow } from "../security/app-identity.ts";
 import { registerOwnerRoutes } from "../domains/units/api-owners.ts";
-import { readOwnerIdentity } from "../domains/units/owners.ts";
+import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { refreshAppTokens } from "../domains/units/app-token-refresh.ts";
 import { sweepRepoCredentials } from "../domains/units/repo-credential-sweep.ts";
 import { migrateRegistrations } from "../domains/units/registrations-migration.ts";
@@ -265,7 +265,7 @@ export async function wire(): Promise<Wired> {
         }
       }
     : async (): Promise<void> => undefined;
-  // The size table (domains/units/unit-size.ts): fill in any of the three sizes this database
+  // The size table (plugins/unit/server/unit-size.ts): fill in any of the three sizes this database
   // does not carry yet, and touch none that it does. Create-only, so an installation that edited a
   // size keeps its figures across every restart — the same rule the Vault seeder follows, and for the
   // same reason: a re-run must never silently re-price a unit that is already running on a value.

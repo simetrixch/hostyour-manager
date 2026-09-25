@@ -14,7 +14,7 @@ import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provi
 import { assertDeployState } from "./lifecycle.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
-import { tenantSyncUnits } from "./build-rbac.ts";
+import { tenantSyncUnits } from "#unit/server/build-rbac.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
@@ -30,8 +30,8 @@ import type { Activator } from "../../adapters/activation/port.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
-import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
-import { provisionUnitDns, standingHostFrom, tenantRecordName } from "./unit-dns.ts";
+import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
+import { provisionUnitDns, standingHostFrom, tenantRecordName } from "#unit/server/unit-dns.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { tenantActivateStep } from "./create-tenant-activate.ts";
 import { writeRegistrationStep } from "./create-tenant-registration.ts";
@@ -42,7 +42,7 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
 import { readTenantSpec } from "./tenant-apps-repo.run.ts";
-import { readOwnerIdentity } from "./owners.ts";
+import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 
 // The "tenant-create" Run — the onboarding of a tenant's platform, the tenant analogue of
@@ -506,7 +506,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
           signal: ctx.signal,
           labelSelector: `platform/tenant=${p.guid}`,
         });
-        if (!until(byName)) throw errValidation(describeUnsynced(p.expectedApps, byName));
+        if (!until(byName)) throw errValidation(`tenant ${p.guid} fan-out did not converge — ${describeUnsynced(p.expectedApps, byName)}`);
         ctx.log("meta", `all ${p.expectedApps.length} fan-out Application(s) are Synced + Healthy`);
       },
     },

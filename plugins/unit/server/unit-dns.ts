@@ -44,14 +44,14 @@
 // what the DNS page shows first: a record inserted or updated here is a row, and the removal takes
 // the row out beside the record. A write that found the record already pointing at the target
 // changed nothing and enters nothing — the book says what this Manager changed, not what it was asked.
-import type { StepCtx } from "../../executor/types.ts";
-import type { Db } from "../../db/client.ts";
+import type { StepCtx } from "#core/server/executor/types.ts";
+import type { Db } from "#core/server/db/client.ts";
 import { eq } from "drizzle-orm";
-import { clusters } from "../../db/schema/inventory.ts";
-import { findDnsWrite, forgetDnsWrite, listDnsWrites, recordDnsWrite } from "../../db/dns-writes.ts";
-import type { DnsProvider } from "../../adapters/dns/port.ts";
-import { errValidation } from "../../kernel/errors.ts";
-import type { DnsWriteOwnerKind, Stage } from "../../../shared/enums.ts";
+import { clusters } from "#core/server/db/schema/inventory.ts";
+import { findDnsWrite, forgetDnsWrite, listDnsWrites, recordDnsWrite } from "#core/server/db/dns-writes.ts";
+import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
+import type { DnsWriteOwnerKind, Stage } from "#core/shared/enums.ts";
 
 // A CONSUMER'S HOST LABEL AND A TENANT SUBDOMAIN ARE ONE NAME SPACE. Both stand as a single DNS
 // label directly under a stage zone: the consumer serves `<label>.<stage apex>`, and the tenant's
@@ -71,7 +71,7 @@ import type { DnsWriteOwnerKind, Stage } from "../../../shared/enums.ts";
  *  `<member>.<subdomain>.<stage apex>` under ONE wildcard PER STAGE (host routing) or at
  *  `<subdomain>.<stage apex>/<member>` under ONE record for the zone (path routing). The label is
  *  the registration's / the row's `host`, never the name (simetrixch/hostyour-cloud#208). */
-export { consumerUnitHost, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, stageApex } from "#unit/shared/unit-host.ts";
+export { consumerUnitHost, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, stageApex } from "../shared/unit-host.ts";
 
 function requireDns(dns: DnsProvider | undefined, unit: string, runKind: string): DnsProvider {
   if (!dns) {

@@ -33,9 +33,9 @@
 // the units that BUILD the images its charts pin.
 //
 // Pure: no IO. The writer (adapters/kube) applies what this renders.
-import { CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL, type BuildRbacGrant, type RoleBindingManifest, type RoleManifest } from "../../adapters/kube/port.ts";
-import type { Stage } from "../../../shared/enums.ts";
-import { consumerArgoAppName, consumerNamespace } from "../../../shared/consumer.ts";
+import { CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL, type BuildRbacGrant, type RoleBindingManifest, type RoleManifest } from "#core/server/adapters/kube/port.ts";
+import type { Stage } from "#core/shared/enums.ts";
+import { consumerArgoAppName, consumerNamespace } from "#core/shared/consumer.ts";
 
 /** The ServiceAccount every PipelineRun in a unit's build namespace runs under. One per build
  *  namespace, so a unit's pipeline holds exactly this unit's grants and no other's. */

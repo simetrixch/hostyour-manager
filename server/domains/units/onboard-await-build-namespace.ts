@@ -3,9 +3,9 @@
 // stands with it and the shared step file stays under its line budget.
 import type { Step } from "../../executor/types.ts";
 import { errValidation, errUpstream } from "../../kernel/errors.ts";
-import { unitBuildNamespace } from "./build-rbac.ts";
+import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
 import { MASTER_ARGO_NAMESPACE } from "../inventory/cluster-kube.ts";
-import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
+import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 
 /** await-build-namespace: wait for GitOps to render the unit's `<name>-build` namespace, which the

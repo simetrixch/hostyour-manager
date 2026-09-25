@@ -3,7 +3,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, DeployableOnboardParams, type OnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { CHANNEL_STAGES, emptyZone } from "./onboard.fixture.ts";
-import { Registrations } from "./registrations.ts";
+import { Registrations } from "#unit/server/registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
@@ -17,7 +17,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome } from "./vault-seeder.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { seedUnitSizes } from "./unit-size.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
 // Focused tests for the post-onboard `activate` step (impl: onboard-activate.ts). Kept apart from
 // onboard.run.test.ts so each file stays within the per-file line budget; the harness below is a

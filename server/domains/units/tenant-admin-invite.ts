@@ -14,7 +14,7 @@ import { z } from "zod";
 import type { Activator } from "../../adapters/activation/port.ts";
 import type { ConsumerActivationMail } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { extractActivateUrl, extractMail } from "./activation-result.ts";
+import { extractActivateUrl, extractMail } from "#unit/server/activation-result.ts";
 
 /** The key the tenant's auth member materializes the bootstrap token under (via ESO) inside
  *  TENANT_SECRET, in its own namespace <guid>-auth. example-auth accepts it as the one-shot

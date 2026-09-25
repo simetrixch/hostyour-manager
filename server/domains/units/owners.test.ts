@@ -9,7 +9,7 @@ import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
-import { listOwnerIdentities, readOwnerIdentity, recordPackagesReader, recordRepositoryPat, forgetOwnerCredential, type OwnerDeps } from "./owners.ts";
+import { listOwnerIdentities, readOwnerIdentity, recordPackagesReader, recordRepositoryPat, forgetOwnerCredential, type OwnerDeps } from "#unit/server/owners.ts";
 import { registerOwnerRoutes } from "./api-owners.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { OwnersListView } from "../../../shared/api-types-owners.ts";

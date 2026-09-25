@@ -21,14 +21,14 @@
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 import { sleep } from "./onboard-release-cycle.ts";
-import { mintSecretValue } from "./secret-mint.ts";
+import { mintSecretValue } from "#unit/server/secret-mint.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
 import { EPHEMERAL_STREAM } from "../../../shared/enums.ts";
 // The activate_url / mail readers + the mail line live in activation-result.ts, shared with the
 // tenant's create-tenant-activate.ts so both invite steps parse + surface the response identically.
-import { extractActivateUrl, extractMail, mailLine } from "./activation-result.ts";
-import { consumerUnitHost } from "./unit-dns.ts";
+import { extractActivateUrl, extractMail, mailLine } from "#unit/server/activation-result.ts";
+import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 
 type Wait = { budgetMs: number; intervalMs: number };
 const DEFAULT_WAIT: Wait = { budgetMs: 10 * 60_000, intervalMs: 10_000 };

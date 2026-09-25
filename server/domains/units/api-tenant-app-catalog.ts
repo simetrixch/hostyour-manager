@@ -9,7 +9,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import type { AppCatalogProvider } from "./app-catalog.ts";
-import { packagesReaderView } from "./owners.ts";
+import { packagesReaderView } from "#unit/server/owners.ts";
 
 // The catalog of ONE tenant, apart from api.ts the way api-tenant-apps-repo.ts is: the apps the
 // catalog's TEMPLATE names (app-catalog.ts — what can be added to any tenant), each marked deployed

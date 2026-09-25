@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../../http/app-env.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { OwnersListView } from "../../../shared/api-types-owners.ts";
-import { assertOrgLogin, forgetOwnerCredential, listOwnerIdentities, recordPackagesReader, recordRepositoryPat, type OwnerDeps } from "./owners.ts";
+import { assertOrgLogin, forgetOwnerCredential, listOwnerIdentities, recordPackagesReader, recordRepositoryPat, type OwnerDeps } from "#unit/server/owners.ts";
 
 // The owner identities over HTTP (hostyour-manager#219): the list, and one PUT per
 // credential — the token rides the body once over TLS, is measured and sealed by the domain, and

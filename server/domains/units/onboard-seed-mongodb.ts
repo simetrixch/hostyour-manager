@@ -4,7 +4,7 @@
 import type { Step } from "../../executor/types.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
-import { mintMongodbRootPassword, mintMongodbKeyfile } from "./secret-mint.ts";
+import { mintMongodbRootPassword, mintMongodbKeyfile } from "#unit/server/secret-mint.ts";
 
 /** The onboard `seed-mongodb-instance` step. MANIFEST-DRIVEN through one word: the consumer's
  *  `mongodb` says whether it runs on the CLUSTER's shared replica set — which every tenant uses and

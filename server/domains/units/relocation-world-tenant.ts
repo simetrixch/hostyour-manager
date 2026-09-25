@@ -11,18 +11,18 @@ import { TENANT_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
 import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { parse as parseYaml } from "yaml";
 import { localTx } from "../../executor/stepkit.ts";
-import { serializePointer } from "./registration-laws.ts";
+import { serializePointer } from "#unit/server/registration-laws.ts";
 import { loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantSelector, allPruned, lingering } from "./tenant-lifecycle.run.ts";
 import { memberAppProject, memberApplication, memberNamespace, tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
-import { renderTenantArgoSync } from "./build-rbac.ts";
+import { renderTenantArgoSync } from "#unit/server/build-rbac.ts";
 
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { deleteTenantArgoSync } from "./tenant-teardown.ts";
-import { tenantMemberUrl, tenantRecordName } from "./unit-dns.ts";
-import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
+import { tenantMemberUrl, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { RelocationPorts, RelocationWorld, WorldOf } from "./relocation.ts";
 import {
   tenantDumpJobs,
@@ -33,7 +33,7 @@ import {
   tenantExpectedDumpEntries,
 } from "./relocation-jobs.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
-import type { TargetCluster } from "./relocation-target.ts";
+import type { TargetCluster } from "#unit/server/relocation-target.ts";
 
 /** The tenant relocation port set — the kind-neutral relocation ports over the tenant lifecycle set
  *  (TenantRegistrations + resolver + the apex/DNS/argo-sync plumbing the tenant run kinds already carry). */

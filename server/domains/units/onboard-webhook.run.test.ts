@@ -4,7 +4,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { setupWebhookStep, removeWebhookCleanup, removeConsumerWebhook } from "./onboard-webhook.ts";
 import { OnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { seedClusterMaps, BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
-import { Registrations } from "./registrations.ts";
+import { Registrations } from "#unit/server/registrations.ts";
 import { buildPlaneFqdnFromMarkings } from "../inventory/cluster-marking.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";

@@ -1,5 +1,5 @@
 /** GET /api/owners — the identity recorded for each owner (server
- *  domains/units/owners.ts, hostyour-manager#219): its two credentials as fingerprints and
+ *  plugins/unit/server/owners.ts, hostyour-manager#219): its two credentials as fingerprints and
  *  dates, never values, and whether the platform's GitHub App is installed in it. */
 export interface OwnerCredentialView {
   fingerprint: string;

@@ -4,9 +4,9 @@
 // the AppProject destination pin carry. The unit keeps its own stage through a relocation — the
 // registration keeps its path — and the cluster's stage is the platform's, so no stage is read here.
 import { eq } from "drizzle-orm";
-import type { Db } from "../../db/client.ts";
-import { clusters } from "../../db/schema/inventory.ts";
-import { errNotFound, errValidation } from "../../kernel/errors.ts";
+import type { Db } from "#core/server/db/client.ts";
+import { clusters } from "#core/server/db/schema/inventory.ts";
+import { errNotFound, errValidation } from "#core/server/kernel/errors.ts";
 
 export interface TargetCluster {
   clusterId: string;

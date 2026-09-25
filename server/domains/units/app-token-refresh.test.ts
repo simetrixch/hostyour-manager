@@ -9,7 +9,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { BuildRepoPatSeedInput } from "../../adapters/vault/seeder-port.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
-import { Registrations } from "./registrations.ts";
+import { Registrations } from "#unit/server/registrations.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { BUILD_TARGET_SECRETS, CATALOG_BUMP_UNIT, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshAppTokens, refreshUnitRepoPat } from "./app-token-refresh.ts";
 import type { OwnerIdentityReader } from "./repo-identity.ts";

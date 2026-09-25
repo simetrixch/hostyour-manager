@@ -13,7 +13,7 @@ import { syncedRevisionFor, targetedRevisionFor, type ClusterKubeResolver, type 
 import { consumerArgoAppName, consumerArgocdUrl, consumerNamespace } from "../../../shared/consumer.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
-import { consumerUnitHost } from "./unit-dns.ts";
+import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 

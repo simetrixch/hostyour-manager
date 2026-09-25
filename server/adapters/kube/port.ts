@@ -527,7 +527,7 @@ export interface MasterProjectWriter {
 
 // ---- BuildRbacWriter (a unit's build grants) ------------------------------------------------
 
-/** A namespaced Role the Manager writes (domains/units/build-rbac.ts). `resourceNames` is what
+/** A namespaced Role the Manager writes (plugins/unit/server/build-rbac.ts). `resourceNames` is what
  *  keeps the argo-sync grant to the unit's OWN Applications in a namespace that holds everyone's. */
 export interface RoleManifest {
   apiVersion: "rbac.authorization.k8s.io/v1";

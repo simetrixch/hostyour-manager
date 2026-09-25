@@ -13,7 +13,7 @@
 //
 // WHAT IS EXPECTED. A unit's record carries the address of the cluster it stands on, read off THAT
 // CLUSTER'S own A record — the one authority for where a cluster is reachable, the same reading
-// provision-dns makes before it writes (server/domains/units/unit-dns.ts). A record carrying
+// provision-dns makes before it writes (plugins/unit/server/unit-dns.ts). A record carrying
 // anything else is not a mistake to be silently corrected here: it is what an installation that is
 // gone left behind, and naming it is the whole point of this page.
 //

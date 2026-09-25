@@ -7,7 +7,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { provisionUnitDns, removeUnitDns, tenantMemberUrl, tenantRecordName } from "./unit-dns.ts";
+import { provisionUnitDns, removeUnitDns, tenantMemberUrl, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { sleep } from "./onboard-release-cycle.ts";
 
 // `tenant-set-routing` — move a STANDING tenant onto another member routing (MEMBER_ROUTING).

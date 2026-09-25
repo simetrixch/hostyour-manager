@@ -1,11 +1,11 @@
 import { and, eq } from "drizzle-orm";
-import type { Db } from "../../db/client.ts";
-import { unitSizes } from "../../db/schema/inventory.ts";
-import { errNotFound } from "../../kernel/errors.ts";
+import type { Db } from "#core/server/db/client.ts";
+import { unitSizes } from "#core/server/db/schema/inventory.ts";
+import { errNotFound } from "#core/server/kernel/errors.ts";
 import {
   UNIT_SIZE, SIZE_COMPONENT, UNIT_SIZE_SEED, composeQuota,
   type UnitQuota, type UnitSize, type SizeComponent, type UnitComposition,
-} from "#unit/shared/unit-size.ts";
+} from "../shared/unit-size.ts";
 
 // The size table's two operations: fill it on a fresh database, and work out the ONE quota a unit
 // gets. What a size means, and where the seed figures come from, is stated once in plugins/unit/shared/unit-size.ts.

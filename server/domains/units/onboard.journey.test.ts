@@ -1,6 +1,6 @@
 import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "./unit-size.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { eq } from "drizzle-orm";
 import { pino } from "pino";
 import { openDb, type DbHandle } from "../../db/client.ts";
@@ -12,7 +12,7 @@ import { buildRunDefinitions } from "../../domains/runs/run-definitions.ts";
 import { getRun, readEvents } from "../../executor/read.ts";
 import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
 import { CHANNEL_STAGES } from "./onboard.fixture.ts";
-import { Registrations } from "./registrations.ts";
+import { Registrations } from "#unit/server/registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";

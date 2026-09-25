@@ -20,19 +20,19 @@
 // the relay target the relay of a stage loads. It follows the stage's mail sender — the one unit whose
 // SMTP entry is attested there (G29) — in the very commit that changes the sender's registration
 // (relayTarget below), so the relay and the books never disagree about where the stage's mail goes.
-import { ConsumerRegistrationSchema, type ConsumerRegistration, type ConsumerStageRegistration, type SmtpEntry } from "../../../shared/consumer.ts";
-import { clusterMapPath, type ClusterValueFile } from "../../../shared/cluster-values.ts";
-import { readClusterValueChain } from "../inventory/cluster-value-chain.ts";
-import type { UnitQuota } from "#unit/shared/unit-size.ts";
-import { STAGE, type Stage } from "../../../shared/enums.ts";
+import { ConsumerRegistrationSchema, type ConsumerRegistration, type ConsumerStageRegistration, type SmtpEntry } from "#core/shared/consumer.ts";
+import { clusterMapPath, type ClusterValueFile } from "#core/shared/cluster-values.ts";
+import { readClusterValueChain } from "#core/server/domains/inventory/cluster-value-chain.ts";
+import type { UnitQuota } from "../shared/unit-size.ts";
+import { STAGE, type Stage } from "#core/shared/enums.ts";
 // The scan's skipped-registration shape is a WIRE shape: the detected-consumer scan
 // (consumer-detected.ts) hands these to the browser verbatim, so it is declared once in
 // shared/api-types.ts and used here — the same rule tenant-registrations.ts follows for
 // SkippedTenantPointerView.
-import type { SkippedConsumerPointerView } from "../../../shared/api-types.ts";
-import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
-import { errValidation } from "../../kernel/errors.ts";
-import { resolveClusterMarkingIn } from "../inventory/cluster-marking.ts";
+import type { SkippedConsumerPointerView } from "#core/shared/api-types.ts";
+import type { BranchScope, PlatformRepo } from "#core/server/adapters/git/port.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
+import { resolveClusterMarkingIn } from "#core/server/domains/inventory/cluster-marking.ts";
 import { makeRegistrationGuard, migrateRegistrationFiles, parseRegistration, schemaWhy, serializePointer, trailer, type RegistrationMigration } from "./registration-laws.ts";
 
 const REGISTRATION_GUARD = /^registrations\/[a-z0-9-]+\/(dev|test|prod|build)\.yaml$/;

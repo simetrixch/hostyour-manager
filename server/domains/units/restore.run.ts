@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { RunDefinition, LockClaim, Step } from "../../executor/types.ts";
 import { loadAppCluster, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { loadActiveTargetCluster } from "./relocation-target.ts";
+import { loadActiveTargetCluster } from "#unit/server/relocation-target.ts";
 import { openAccessStep, type RelocationPorts, type WorldOf } from "./relocation.ts";
 import {
   attestRestoreTargetStep,

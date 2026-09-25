@@ -11,7 +11,7 @@ import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run
 import type { TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { resolveUnitQuota } from "./unit-size.ts";
+import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { probeCatalog } from "./tenant-probes.ts";
 
 /** The reset nonce a fresh tenant starts at, in its registration. Nothing acts on a change to it: no

@@ -30,7 +30,7 @@ import { STAGE, atLeastAsSettledAs, type Stage, type TenantSettledStatus } from 
 import type { ArgoAppStatusMap, ResolvedClusterKube } from "../../adapters/kube/port.ts";
 import { memberAppProject, memberNamespace } from "./tenant-fanout.ts";
 import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
-import { renderTenantArgoSync } from "./build-rbac.ts";
+import { renderTenantArgoSync } from "#unit/server/build-rbac.ts";
 import { clearRelocationHold, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 import { allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";

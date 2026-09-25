@@ -8,10 +8,10 @@
 // suspended, both files move in one commit, and a quiesce — the other, narrower pause — does not
 // touch it.
 import { describe, it, expect } from "vitest";
-import { seedQuota, type UnitQuota } from "#unit/shared/unit-size.ts";
-import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import type { ConsumerRegistration } from "../../../shared/consumer.ts";
-import type { Stage } from "../../../shared/enums.ts";
+import { seedQuota, type UnitQuota } from "../shared/unit-size.ts";
+import { FakePlatformRepo } from "#core/server/adapters/git/testing/fake.ts";
+import type { ConsumerRegistration } from "#core/shared/consumer.ts";
+import type { Stage } from "#core/shared/enums.ts";
 import { Registrations } from "./registrations.ts";
 
 const REPO = "https://github.com/x/acme.git";

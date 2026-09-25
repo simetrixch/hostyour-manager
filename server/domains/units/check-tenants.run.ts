@@ -26,7 +26,7 @@ import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { BOOTSTRAP_TOKEN_KEY } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
-import { tenantMemberUrl } from "./unit-dns.ts";
+import { tenantMemberUrl } from "#unit/server/unit-dns.ts";
 import { checkUnitsStep, type CheckUnitsPorts } from "./check-units.ts";
 
 /** The header the tenant's auth reads its bootstrap token from — the same one the invite uses. */

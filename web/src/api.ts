@@ -232,7 +232,7 @@ export const createOperatorKey = (input: { label: string; publicKey: string }): 
  *  still finds the key on a host — the removal run kind needs this row to name the line it deletes. */
 export const deleteOperatorKey = (id: string): Promise<unknown> => req(`/api/operator-keys/${id}`, { method: "DELETE" });
 
-/** The owner identities (GET /api/owners, server domains/units/owners.ts): what
+/** The owner identities (GET /api/owners, server plugins/unit/server/owners.ts): what
  *  every unit of an owner is onboarded with. A credential is recorded with one PUT carrying
  *  the token once; only its fingerprint comes back. */
 export const listOwners = (): Promise<OwnersListView> => req("/api/owners");

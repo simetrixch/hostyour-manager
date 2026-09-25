@@ -14,7 +14,7 @@ import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerConsumerRoutes } from "./api.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { Registrations } from "./registrations.ts";
+import { Registrations } from "#unit/server/registrations.ts";
 import type { DetectedScanView } from "../../../shared/api-types.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";

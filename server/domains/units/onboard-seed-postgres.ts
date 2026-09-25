@@ -4,7 +4,7 @@
 import type { Step } from "../../executor/types.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
-import { mintPostgresSuperuserPassword } from "./secret-mint.ts";
+import { mintPostgresSuperuserPassword } from "#unit/server/secret-mint.ts";
 
 /** The onboard `seed-postgres-superuser` step. SERVICE-DRIVEN, not
  *  manifest-declared: the per-consumer PostgreSQL instance-superuser password is never in the

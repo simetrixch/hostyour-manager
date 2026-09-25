@@ -1,12 +1,12 @@
-import type { Db } from "../../db/client.ts";
-import { writeAudit } from "../../db/audit-writer.ts";
-import { ownerIdentity, ownersWithIdentity } from "../../security/store.ts";
-import { errNotFound, errValidation } from "../../kernel/errors.ts";
-import { fingerprintSecret } from "../../security/fingerprint.ts";
-import type { CredentialStore } from "../../security/store.ts";
-import type { GitHubApp } from "../../adapters/github-app/port.ts";
-import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
-import type { OwnerIdentityView, OwnerCredentialView } from "../../../shared/api-types-owners.ts";
+import type { Db } from "#core/server/db/client.ts";
+import { writeAudit } from "#core/server/db/audit-writer.ts";
+import { ownerIdentity, ownersWithIdentity } from "#core/server/security/store.ts";
+import { errNotFound, errValidation } from "#core/server/kernel/errors.ts";
+import { fingerprintSecret } from "#core/server/security/fingerprint.ts";
+import type { CredentialStore } from "#core/server/security/store.ts";
+import type { GitHubApp } from "#core/server/adapters/github-app/port.ts";
+import type { GitHubConsumer } from "#core/server/adapters/github-consumer/port.ts";
+import type { OwnerIdentityView, OwnerCredentialView } from "#core/shared/api-types-owners.ts";
 import { missingConsumerPatScopes } from "./pat-scopes.ts";
 
 // THE IDENTITY OF AN OWNER (hostyour-manager#218, #219, #225): recorded once, measured

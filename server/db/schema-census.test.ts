@@ -130,8 +130,8 @@ function schemaColumns(): Column[] {
   return columns;
 }
 
-/** Every shipped .ts under server/ that could hold a write — tests, the schema itself and the
- *  adapter fakes are not writers. */
+/** Every shipped .ts under server/ and plugins/ that could hold a write — tests, the schema itself and
+ *  the adapter fakes are not writers. */
 function writerSources(): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
@@ -139,7 +139,7 @@ function writerSources(): string[] {
       const full = join(dir, entry.name);
       const path = relative(ROOT, full).replaceAll("\\", "/");
       if (entry.isDirectory()) {
-        if (path !== SCHEMA_DIR && !/^server\/adapters\/[^/]+\/testing$/.test(path)) walk(full);
+        if (path !== SCHEMA_DIR && !/^(server|plugins\/[^/]+\/server)\/adapters\/[^/]+\/testing$/.test(path)) walk(full);
         continue;
       }
       if (!entry.name.endsWith(".ts") || entry.name.endsWith(".test.ts")) continue;
@@ -147,6 +147,7 @@ function writerSources(): string[] {
     }
   };
   walk(join(ROOT, "server"));
+  walk(join(ROOT, "plugins"));
   return out;
 }
 

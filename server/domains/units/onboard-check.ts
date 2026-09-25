@@ -4,9 +4,9 @@
 import type { Step } from "../../executor/types.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 import { validateOnboard, type OnboardTarget } from "./validate.ts";
-import { standingHostFrom } from "./unit-dns.ts";
+import { standingHostFrom } from "#unit/server/unit-dns.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { resolveUnitQuota } from "./unit-size.ts";
+import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
 
 /** The ref cloned before the gates run — the remote's default branch head. The onboarding validates

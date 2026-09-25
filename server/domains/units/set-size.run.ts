@@ -5,7 +5,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import { attestTargetStep, loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { resolveUnitQuota } from "./unit-size.ts";
+import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { UnitComposition } from "#unit/shared/unit-size.ts";
 import type { Stage } from "../../../shared/enums.ts";
 

@@ -1,11 +1,11 @@
 // The concrete BuildRbacWriter — a unit's build Roles + RoleBindings, written by the Manager because
 // the unit's AppProject blacklists both kinds, so nothing the unit deploys through ArgoCD can create
 // them. Which of them belong to the unit and which to the unit at ONE stage is stated where they are
-// rendered (domains/units/build-rbac.ts); this writer applies and deletes whatever it is handed.
+// rendered (plugins/unit/server/build-rbac.ts); this writer applies and deletes whatever it is handed.
 // A sibling of kube.ts rather than part of it: same adapter, same clients, its own file so neither
 // grows past what one reader can hold. Master-local — the unit's `<name>-build` namespace and the
 // ArgoCD namespace both live on the cluster this pod runs on. Like the other IO shells here it NEEDS a
-// live cluster and is integration-tested there; the render is pure (domains/units/build-rbac.ts).
+// live cluster and is integration-tested there; the render is pure (plugins/unit/server/build-rbac.ts).
 import { RbacAuthorizationV1Api } from "@kubernetes/client-node";
 import type { BuildRbacWriter, BuildRbacGrant, BuildRbacObject, RoleManifest, RoleBindingManifest } from "./port.ts";
 import { MANAGER_PROJECT_LABELS } from "./port.ts";

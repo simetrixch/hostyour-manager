@@ -120,7 +120,7 @@ export class FakePlatformRepo implements PlatformRepo {
    *  unit's ONE host to <label>.<stage apex>, so a chain without it fails the plan on a tree the test
    *  never meant to be incomplete. Each cluster gets its OWN apex, which is what a unit standing at
    *  two stages requires — provision-dns refuses a second stage whose host another cluster's address
-   *  already answers (domains/units/unit-dns.ts). A real install may well give two clusters one
+   *  already answers (plugins/unit/server/unit-dns.ts). A real install may well give two clusters one
    *  apex, so a test that wants THAT world seeds the map itself (units/cluster-map.fixture.ts). */
   private materializeMap(branch: string, relPath: string): string | null {
     if (branch !== this.booksBranch || !this.materialized.has(branch)) return null;

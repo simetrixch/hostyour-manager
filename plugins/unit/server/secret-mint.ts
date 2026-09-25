@@ -1,12 +1,12 @@
-// server/domains/units/secret-mint.ts
+// plugins/unit/server/secret-mint.ts
 // Builds a consumer's Vault secret entry at seed time: every manifest `generate` key is MINTED here
 // (the operator is never asked), required non-generate keys come from the operator, and every minted
 // value is VERIFIED (length / key size / PEM shape / private↔public match) before it is written — a
 // weak or corrupt mint fails the run rather than shipping to Vault. Split out of onboard.run.ts so the
 // crypto stays a small, unit-tested unit.
 import { randomBytes, randomUUID, generateKeyPairSync, createPublicKey } from "node:crypto";
-import { errValidation, errMissingRunSecret } from "../../kernel/errors.ts";
-import type { ConsumerSecretSpec } from "../../../shared/consumer.ts";
+import { errValidation, errMissingRunSecret } from "#core/server/kernel/errors.ts";
+import type { ConsumerSecretSpec } from "#core/shared/consumer.ts";
 
 /** The single-value mint kinds (hex/uuid). Keypair kinds (rsa2048*) are minted in
  *  buildConsumerSecretData, which owns the shared keypair context.

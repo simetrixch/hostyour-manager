@@ -9,7 +9,7 @@ import { tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";
 import { attestTenantTargetStep, clearRelocationHold, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { TenantLifecycleParams, tenantLocks, tenantTeardownMembers, allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
 import { deleteTenantArgoSync, deleteTenantMembers, describeTenantMemberDeletes } from "./tenant-teardown.ts";
-import { isTenantRecord, removeTenantBookedRecords, removeUnitDns, tenantRecordName } from "./unit-dns.ts";
+import { isTenantRecord, removeTenantBookedRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 
 // tenant-offboard — the tenant analogue of the consumer

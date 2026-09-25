@@ -9,7 +9,7 @@ import { validateTenant } from "./validate-tenant.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { assertDeployState, loadTenantCluster } from "./lifecycle.ts";
-import { tenantSyncUnits } from "./build-rbac.ts";
+import { tenantSyncUnits } from "#unit/server/build-rbac.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { BuildUnitSchema, buildUnitStep, planBuildUnits, provisionArgoSyncStep, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
@@ -17,7 +17,7 @@ import { probeBuildUnit } from "./tenant-probes.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { readOwnerIdentity } from "./owners.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
+import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { isDeepStrictEqual } from "node:util";
 
@@ -213,7 +213,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
           signal: ctx.signal,
           labelSelector: `platform/tenant=${p.guid}`,
         });
-        if (!syncedAt(p.expectedApps)(byName)) throw errValidation(describeUnsynced(p.expectedApps, byName));
+        if (!syncedAt(p.expectedApps)(byName)) throw errValidation(`tenant ${p.guid} fan-out did not converge — ${describeUnsynced(p.expectedApps, byName)}`);
         if (!until(byName)) {
           const stale = p.members.filter((m, i) => !rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), ports.catalogRepoUrl)).map((m) => m.name);
           throw errValidation(`${stale.join(", ")} ${stale.length === 1 ? "is" : "are"} Synced + Healthy but ArgoCD has not rendered the new ${stale.length === 1 ? "entry" : "entries"} yet — retry this step once the ApplicationSet has regenerated ${stale.length === 1 ? "it" : "them"}`);

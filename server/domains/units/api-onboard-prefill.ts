@@ -3,7 +3,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import { errNotConfigured, errValidation } from "../../kernel/errors.ts";
 import type { OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import { OnboardPrefillRequest, readOnboardPrefill } from "./onboard-prefill.ts";
-import { readOwnerIdentity } from "./owners.ts";
+import { readOwnerIdentity } from "#unit/server/owners.ts";
 import type { Db } from "../../db/client.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { ReleaseVersionDeps } from "./release-version.ts";

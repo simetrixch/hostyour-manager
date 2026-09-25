@@ -33,7 +33,7 @@ import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts"
 import type { SkippedTenantPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { errInternal, errValidation } from "../../kernel/errors.ts";
-import { serializePointer, makeRegistrationGuard, trailer, schemaWhy, migrateRegistrationFiles, type RegistrationMigration } from "./registration-laws.ts";
+import { serializePointer, makeRegistrationGuard, trailer, schemaWhy, migrateRegistrationFiles, type RegistrationMigration } from "#unit/server/registration-laws.ts";
 
 /** registrations/<guid>/<stage>.yaml — the ONE per-tenant-per-stage file. The guid segment mirrors
  *  shared/tenant.ts:guid (12 chars of Crockford base32 minus i/l/o/u). */

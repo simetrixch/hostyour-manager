@@ -23,7 +23,7 @@ import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run
 import { probeIdentity, probeWebhook, probeDns } from "./onboard-probes.ts";
 import { probeTenantDns } from "./tenant-probes.ts";
 import { resolveRepoCredentialId } from "./repo-identity.ts";
-import { readOwnerIdentity } from "./owners.ts";
+import { readOwnerIdentity } from "#unit/server/owners.ts";
 
 export interface CheckUnitsPorts {
   /** The consumer onboarding's ports, handed late (the consumer family is wired after the tenant's). */

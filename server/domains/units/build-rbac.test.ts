@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderConsumerArgoSync, renderSmtpOpsGrant, renderTenantArgoSync, tenantSyncUnits, unitBuildNamespace, RELAY_NAMESPACE, BUILD_PIPELINE_SERVICE_ACCOUNT } from "./build-rbac.ts";
+import { renderConsumerArgoSync, renderSmtpOpsGrant, renderTenantArgoSync, tenantSyncUnits, unitBuildNamespace, RELAY_NAMESPACE, BUILD_PIPELINE_SERVICE_ACCOUNT } from "#unit/server/build-rbac.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { CONSUMER_PROJECT_LABEL, TENANT_PROJECT_LABEL, type RoleManifest, type RoleBindingManifest } from "../../adapters/kube/port.ts";
 

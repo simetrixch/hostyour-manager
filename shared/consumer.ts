@@ -580,7 +580,7 @@ export const ConsumerRegistrationSchema = z
     // conditional MongoDB source on it, and the quota above was summed from it.
     mongodb: MongodbModeSchema.optional(),
     // The six figures that bound this consumer's namespace, resolved by the Manager from its size
-    // table when it writes the registration (domains/units/unit-size.ts resolveUnitQuota) and
+    // table when it writes the registration (plugins/unit/server/unit-size.ts resolveUnitQuota) and
     // passed straight through to hostyour-cloud/apps/unit-quota by the ApplicationSet.
     //
     // The NUMBERS and not a size NAME, deliberately. A name would have to be resolved on the cluster

@@ -16,8 +16,8 @@
 //     an approved+succeeded Run.
 import type { z } from "zod";
 import { parse as parseYaml } from "yaml";
-import type { BranchScope } from "../../adapters/git/port.ts";
-import { errInternal } from "../../kernel/errors.ts";
+import type { BranchScope } from "#core/server/adapters/git/port.ts";
+import { errInternal } from "#core/server/kernel/errors.ts";
 
 /** Mint a path guard for one registration namespace: a write path MUST match `pattern` and contain no
  *  `..` traversal, else it is a programming error (INTERNAL), never a commit. Each registrations binds its

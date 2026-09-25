@@ -9,7 +9,7 @@ import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import { memberAppProject, tenantApplicationSet } from "./tenant-fanout.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
-import { renderTenantArgoSync } from "./build-rbac.ts";
+import { renderTenantArgoSync } from "#unit/server/build-rbac.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";

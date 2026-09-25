@@ -27,7 +27,7 @@ import type { Activator } from "../adapters/activation/port.ts";
 import { HttpGitHubConsumer } from "../adapters/github-consumer/github-consumer-http.ts";
 import type { GitHubConsumer } from "../adapters/github-consumer/port.ts";
 import type { GitHubApp } from "../adapters/github-app/port.ts";
-import { Registrations } from "../domains/units/registrations.ts";
+import { Registrations } from "#unit/server/registrations.ts";
 import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
 import { makeOnboardDef, type OnboardPorts } from "../domains/units/onboard.run.ts";
 import { makeOffboardDef } from "../domains/units/offboard.run.ts";

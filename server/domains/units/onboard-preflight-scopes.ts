@@ -19,7 +19,7 @@ import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 import { WebhookScopeError } from "../../adapters/github-consumer/port.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { REQUIRED_CONSUMER_PAT_SCOPES, missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
+import { REQUIRED_CONSUMER_PAT_SCOPES, missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "#unit/server/pat-scopes.ts";
 import { probeIdentity } from "./onboard-probes.ts";
 
 /** The onboard `preflight-scopes` step: verify the consumer PAT carries EVERY right the onboard needs

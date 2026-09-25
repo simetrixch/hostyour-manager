@@ -29,7 +29,7 @@ import { stageApex, tenantRecordName, tenantZone } from "#unit/shared/unit-host.
 import { catalogPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import { gateUnitHost } from "./gates/compose.ts";
-import type { StandingHostReader } from "./unit-dns.ts";
+import type { StandingHostReader } from "#unit/server/unit-dns.ts";
 import type { TenantMemberRecord } from "../../../shared/tenant.ts";
 import type { TenantSpec } from "../../../shared/consumer.ts";
 import { collectContainerImages } from "./ensure-images.ts";

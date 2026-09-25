@@ -26,8 +26,8 @@ import { hardGatesPass, type GateReport, type GateResult } from "../../../../sha
 import { STAGE, type Stage } from "../../../../shared/enums.ts";
 import { consumerNamespace } from "../../../../shared/consumer.ts";
 import type { ChartPinMapping } from "../builds.ts";
-import { BUILD_NAMESPACE_SUFFIX } from "../build-rbac.ts";
-import { consumerUnitHost, standingHostRefusal, type StandingHost } from "../unit-dns.ts";
+import { BUILD_NAMESPACE_SUFFIX } from "#unit/server/build-rbac.ts";
+import { consumerUnitHost, standingHostRefusal, type StandingHost } from "#unit/server/unit-dns.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
 import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, type UnitComposition, type UnitQuota, type UnitSize } from "#unit/shared/unit-size.ts";
 

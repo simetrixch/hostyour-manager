@@ -27,7 +27,7 @@ export type DnsRowType = DnsRecordType | "PTR";
 
 /** WHOSE record a row is, which is also what decides whether this Manager may take it back:
  *   - consumer / tenant — the unit's ONE record per stage, written by provision-dns and removed by
- *                         offboard and purge (server/domains/units/unit-dns.ts).
+ *                         offboard and purge (plugins/unit/server/unit-dns.ts).
  *   - mail             — a sender domain's SPF, DKIM or DMARC, published by mail-dns-publish.
  *   - installer        — a record of the installation that no run of this Manager wrote: the sender
  *                        domain's own address record, and the reverse DNS of the egress address,

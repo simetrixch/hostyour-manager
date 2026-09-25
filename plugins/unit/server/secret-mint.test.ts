@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createPublicKey } from "node:crypto";
 import { buildConsumerSecretData, mintPostgresSuperuserPassword } from "./secret-mint.ts";
-import type { ConsumerSecretSpec } from "../../../shared/consumer.ts";
+import type { ConsumerSecretSpec } from "#core/shared/consumer.ts";
 
 describe("mintPostgresSuperuserPassword (per-consumer postgres superuser)", () => {
   it("mints 64 hex chars (32 random bytes = 256 bits) — no escaping hazard for a DATABASE_URL / ALTER ROLE", () => {

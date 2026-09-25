@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 // in them reaches nobody through the product's surfaces, which is what this census is about.
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-const SOURCE_ROOTS = ["server", "shared", "web/src", "gate-runner/src"];
+const SOURCE_ROOTS = ["server", "shared", "web/src", "gate-runner/src", "plugins"];
 const SELF = "server/domains/runs/run-kind-word-census.test.ts";
 
 /** The files carrying the Kubernetes RBAC field `verbs` and kube's own noun for one grant in a
@@ -40,7 +40,7 @@ const SELF = "server/domains/runs/run-kind-word-census.test.ts";
 const KUBE_RBAC_FILES = [
   "server/adapters/kube/kube.ts",
   "server/adapters/kube/port.ts",
-  "server/domains/units/build-rbac.ts",
+  "plugins/unit/server/build-rbac.ts",
   "server/domains/units/build-rbac.test.ts",
 ];
 

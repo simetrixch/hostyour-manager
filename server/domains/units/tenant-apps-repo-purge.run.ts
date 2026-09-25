@@ -7,7 +7,7 @@ import { assertDeployState, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
-import type { Registrations } from "./registrations.ts";
+import type { Registrations } from "#unit/server/registrations.ts";
 
 // "tenant-apps-repo-purge" — the removal of a build registration nothing accounts for (#241).
 //

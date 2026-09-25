@@ -14,9 +14,9 @@ import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run
 import { errValidation } from "../../kernel/errors.ts";
 import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
 import { EPHEMERAL_STREAM } from "../../../shared/enums.ts";
-import { extractActivateUrl, extractMail, mailLine } from "./activation-result.ts";
+import { extractActivateUrl, extractMail, mailLine } from "#unit/server/activation-result.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
-import { tenantMemberUrl } from "./unit-dns.ts";
+import { tenantMemberUrl } from "#unit/server/unit-dns.ts";
 // The bootstrap-token Secret coordinates live in tenant-admin-invite.ts so this step and the
 // operator-driven POST /api/tenants/:id/invite-admin route share ONE source (no drift).
 import { BOOTSTRAP_TOKEN_KEY } from "./tenant-admin-invite.ts";

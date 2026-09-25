@@ -6,11 +6,11 @@ import type { Db } from "../../db/client.ts";
 import { unitSizes } from "../../db/schema/inventory.ts";
 import { errValidation, errNotFound, errNotConfigured } from "../../kernel/errors.ts";
 import { UNIT_SIZE, SIZE_COMPONENT, type UnitSize, type SizeComponent } from "#unit/shared/unit-size.ts";
-import { listUnitSizes, explainUnitQuota } from "./unit-size.ts";
+import { listUnitSizes, explainUnitQuota } from "#unit/server/unit-size.ts";
 import { SetSizeParams, TenantSetSizeParams, TENANT_BRINGS, consumerComposition } from "./set-size.run.ts";
 import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";
 import { loadAppCluster } from "./lifecycle.ts";
-import type { Registrations } from "./registrations.ts";
+import type { Registrations } from "#unit/server/registrations.ts";
 import type { Executor } from "../../executor/executor.ts";
 
 // The size table's own API — read it, and change one size.

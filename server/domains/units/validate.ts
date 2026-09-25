@@ -27,7 +27,7 @@ import { gateMailSender } from "./gates/mail-sender.ts";
 import { errInternal, errUpstream } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
 import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitHost, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
-import { consumerUnitHost, type StandingHostReader } from "./unit-dns.ts";
+import { consumerUnitHost, type StandingHostReader } from "#unit/server/unit-dns.ts";
 import { gateReleaseWorkflow } from "./gates/release-workflow.ts";
 import { RELEASE_KIT_WORKFLOW } from "./release-kit/release-kit.ts";
 import type { UnitComposition, UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";

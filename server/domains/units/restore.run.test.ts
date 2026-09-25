@@ -7,7 +7,7 @@ import type { DbHandle } from "../../db/client.ts";
 import { apps, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
-import { serializePointer } from "./registration-laws.ts";
+import { serializePointer } from "#unit/server/registration-laws.ts";
 import { makeRestoreDef, makeTenantRestoreDef } from "./restore.run.ts";
 import {
   openFixtureDb, seedClusters, seedConsumerRow, seedTenantRows, makeFakes, consumerPorts, tenantPorts,
