@@ -38,7 +38,8 @@ import { isDeepStrictEqual } from "node:util";
 // THE WAIT. The member Applications stand already and read Synced/Healthy before the write, and their
 // catalog revision moves with every commit on the books branch, so neither proves the new entries are
 // rendered. A member counts as synced once ArgoCD's last comparison rendered exactly its new entry:
-// each chart path in order, its value files and its values, and its namespace labels on the spec.
+// each chart path in order, its value files and its values, and its namespace labels on the spec,
+// with nothing left that the previous entry carried and this one dropped.
 
 const MemberList = z.array(TenantMemberRecordSchema).min(1);
 
@@ -67,26 +68,37 @@ function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberR
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** Whether ArgoCD's last comparison of a member Application rendered exactly this member entry: its
- *  catalog sources carry the entry's charts in order, each with the entry's value files and values,
- *  and the spec asks for the entry's namespace labels. */
-function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, catalogRepoUrl: string): boolean {
+/** Whether ArgoCD's last comparison of a member Application rendered exactly this member entry and
+ *  none of what the previous one carried beyond it: its catalog sources carry the entry's charts in
+ *  order; each carries the entry's value files in their order and no file the previous entry had and
+ *  this one dropped, and the entry's values and no value key it dropped; the spec asks for the entry's
+ *  namespace labels and none it dropped. The template's own value files and values around the entry's
+ *  are the same before and after, so the previous entry is what tells a dropped part from them. */
+function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, catalogRepoUrl: string): boolean {
   if (!status) return false;
   const charts = (status.syncSources ?? []).filter((src) => src.repoURL === catalogRepoUrl && src.path);
   if (charts.length !== member.sources.length) return false;
   const sourcesMatch = member.sources.every((want, i) => {
     const got = charts[i]!;
-    return got.path === want.chart
-      && want.valueFiles.every((f) => (got.valueFiles ?? []).includes(f))
-      && Object.entries(want.values).every(([k, v]) => isDeepStrictEqual(got.valuesObject?.[k], v));
+    const was = previous?.sources[i];
+    const files = got.valueFiles ?? [];
+    const at = want.valueFiles.map((f) => files.indexOf(f));
+    const filesMatch = at.every((n, k) => n >= 0 && (k === 0 || n > at[k - 1]!))
+      && (was?.valueFiles ?? []).every((f) => want.valueFiles.includes(f) || !files.includes(f));
+    const valuesMatch = Object.entries(want.values).every(([k, v]) => isDeepStrictEqual(got.valuesObject?.[k], v))
+      && Object.keys(was?.values ?? {}).every((k) => k in want.values || got.valuesObject?.[k] === undefined);
+    return got.path === want.chart && filesMatch && valuesMatch;
   });
-  return sourcesMatch && Object.entries(member.namespaceLabels).every(([k, v]) => status.namespaceLabels?.[k] === v);
+  const labels = status.namespaceLabels ?? {};
+  const labelsMatch = Object.entries(member.namespaceLabels).every(([k, v]) => labels[k] === v)
+    && Object.keys(previous?.namespaceLabels ?? {}).every((k) => k in member.namespaceLabels || labels[k] === undefined);
+  return sourcesMatch && labelsMatch;
 }
 
 /** Every member Application Synced + Healthy, each rendering its entry of `members`. */
 function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[], catalogRepoUrl: string): (byName: ArgoAppStatusMap) => boolean {
   const synced = syncedAt(p.expectedApps);
-  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, catalogRepoUrl));
+  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), catalogRepoUrl));
 }
 
 /** On abort: write back the member entries the registration carried before this run — only while it
@@ -171,7 +183,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         });
         if (!syncedAt(p.expectedApps)(byName)) throw errValidation(describeUnsynced(p.expectedApps, byName));
         if (!until(byName)) {
-          const stale = p.members.filter((m, i) => !rendersEntry(byName.get(p.expectedApps[i]!), m, ports.catalogRepoUrl)).map((m) => m.name);
+          const stale = p.members.filter((m, i) => !rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), ports.catalogRepoUrl)).map((m) => m.name);
           throw errValidation(`${stale.join(", ")} ${stale.length === 1 ? "is" : "are"} Synced + Healthy but ArgoCD has not rendered the new ${stale.length === 1 ? "entry" : "entries"} yet — retry this step once the ApplicationSet has regenerated ${stale.length === 1 ? "it" : "them"}`);
         }
         ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy, each rendering its new entry`);

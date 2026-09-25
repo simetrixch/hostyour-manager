@@ -140,14 +140,13 @@ function seedTenant(): void {
 
 const planCtx = (): PlanStreamCtx => ({ db: db.db, log: () => undefined, signal: new AbortController().signal });
 
-/** A step context whose checkpoint survives between two runs of one step when handed the same box. */
-function stepCtx(p: TenantRefreshMembersParams, cleanups: Cleanup[], logs: string[], box: { data?: unknown } = {}): StepCtx {
+function stepCtx(p: TenantRefreshMembersParams, cleanups: Cleanup[], logs: string[]): StepCtx {
   return {
     runId: "run_refresh", stepName: "x", db: db.db, creds: {} as unknown as CredentialStore, params: p,
     secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
-    log: (_s, t) => logs.push(t), checkpoint: (d) => { box.data = d; }, readCheckpoint: <T>() => box.data as T | undefined, registerCleanup: (c) => cleanups.push(c),
+    log: (_s, t) => logs.push(t), checkpoint: () => undefined, readCheckpoint: () => undefined, registerCleanup: (c) => cleanups.push(c),
   };
 }
 
@@ -237,6 +236,32 @@ describe("tenant-refresh-members", () => {
     const p = await planned(prt);
     const watch = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "watch-sync-set")!;
     await expect(watch.run(stepCtx(p, [], []))).rejects.toThrow(/auth is Synced/);
+  });
+
+  it("holds a render exact: an added or dropped value, value file or label, and a chart count off by one, all count as not rendered", async () => {
+    seedTenant();
+    const prt = ports(staleMembers());
+    const p = await planned(prt);
+    const watch = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "watch-sync-set")!;
+    const erpAt = p.members.findIndex((m) => m.name === "erp");
+    const withErp = (erp: TenantMemberRecord): (() => Map<string, ArgoAppStatus>) => () => rendering(p.members.map((m, i) => (i === erpAt ? erp : m)));
+    const erp = p.members[erpAt]!;
+    const was = p.previous.find((m) => m.name === "erp")!;
+    // The previous erp engine carried a value file and a value the new entry drops: still rendered, not synced.
+    const stale = { ...erp, sources: [{ ...erp.sources[0]!, valueFiles: was.sources[0]!.valueFiles, values: was.sources[0]!.values }, erp.sources[1]!] };
+    const cases: TenantMemberRecord[] = [
+      stale,
+      { ...erp, sources: [{ ...erp.sources[0]!, values: { ...erp.sources[0]!.values, extra: 1 } }, erp.sources[1]!] }, // extra is harmless only when neither side named it
+      { ...erp, sources: [erp.sources[0]!] },
+      { ...erp, namespaceLabels: { ...erp.namespaceLabels, gone: "yes" } },
+    ];
+    const verdicts: boolean[] = [];
+    for (const c of cases) {
+      const run = makeTenantRefreshMembersDef(ports(staleMembers(), { argo: [withErp(c)] })).steps(p).find((s) => s.name === "watch-sync-set")!;
+      verdicts.push(await run.run(stepCtx(p, [], [])).then(() => true, () => false));
+    }
+    expect(verdicts).toEqual([false, true, false, true]);
+    await expect(watch.run(stepCtx(p, [], []))).resolves.toBeUndefined();
   });
 
   it("write-members resumed after its own write commits nothing new, keeps its cleanup and stamps the tenant row", async () => {

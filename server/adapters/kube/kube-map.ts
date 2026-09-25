@@ -1,5 +1,5 @@
 // Pure mapping layer for the concrete kube adapter (kube.ts): raw API objects in, port types
-// out. NO IO here — everything in this file is unit-tested in kube-impl.test.ts against
+// out. NO IO here — everything in this file is unit-tested in kube-impl.test.ts and kube-map.test.ts against
 // hand-built raw objects, so the live calls in kube.ts stay thin (integration-tested on the
 // live clusters). The Raw* shapes are structural subsets of the @kubernetes/client-node models
 // (every field optional), so the live code passes V1Deployment & friends straight in.
