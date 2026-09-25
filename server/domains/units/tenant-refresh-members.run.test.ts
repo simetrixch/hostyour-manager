@@ -3,7 +3,7 @@ import { seedQuota } from "../../../shared/unit-size.ts";
 import { seedUnitSizes } from "./unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
-import { makeTenantRefreshMembersDef, type TenantRefreshMembersParams } from "./tenant-refresh-members.run.ts";
+import { makeTenantRefreshMembersDef, rendersEntry, type TenantRefreshMembersParams } from "./tenant-refresh-members.run.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { memberApplication } from "./tenant-fanout.ts";
@@ -238,7 +238,7 @@ describe("tenant-refresh-members", () => {
     await expect(watch.run(stepCtx(p, [], []))).rejects.toThrow(/auth is Synced/);
   });
 
-  it("holds a render exact: an added or dropped value, value file or label, and a chart count off by one, all count as not rendered", async () => {
+  it("refuses a render that still carries a dropped value file and value or lacks a chart, and takes one with an extra value or label nobody named", async () => {
     seedTenant();
     const prt = ports(staleMembers());
     const p = await planned(prt);
@@ -313,5 +313,38 @@ describe("tenant-refresh-members", () => {
     await prt.registrations.setMembers("prod", GUID, other, "run_other");
     const write = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-members")!;
     await expect(write.run(stepCtx(p, [], []))).rejects.toThrow(/changed since this run was planned/);
+  });
+});
+
+describe("rendersEntry, clause by clause", () => {
+  const src = (over: Partial<TenantMemberRecord["sources"][number]> = {}): TenantMemberRecord["sources"][number] => ({ chart: "charts/x", valueFiles: [], values: {}, ...over });
+  const entry = (over: Partial<TenantMemberRecord> = {}): TenantMemberRecord => ({ name: "erp", namespaceLabels: {}, sources: [src()], ...over });
+  const render = (m: TenantMemberRecord, labels: Record<string, string> = {}): ArgoAppStatus => ({
+    syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy", namespaceLabels: labels,
+    syncSources: m.sources.map((s) => ({ repoURL: CATALOG, revision: SHA, path: s.chart, valueFiles: ["values.yaml", ...s.valueFiles], valuesObject: { tenant: {}, ...s.values } })),
+  });
+  it("holds the entry's value files in their order, searched after the template's own", () => {
+    const want = entry({ sources: [src({ valueFiles: ["a.yaml", "values.yaml"] })] });
+    expect(rendersEntry(render(want), want, undefined, CATALOG)).toBe(true);
+    const swapped = entry({ sources: [src({ valueFiles: ["values.yaml", "a.yaml"] })] });
+    expect(rendersEntry(render(entry({ sources: [src({ valueFiles: ["b.yaml", "a.yaml"] })] })), entry({ sources: [src({ valueFiles: ["a.yaml", "b.yaml"] })] }), undefined, CATALOG)).toBe(false);
+    expect(rendersEntry(render(swapped), swapped, undefined, CATALOG)).toBe(true);
+  });
+  it("refuses a value file the previous entry had and the new one dropped", () => {
+    const was = entry({ sources: [src({ valueFiles: ["old.yaml"] })] });
+    expect(rendersEntry(render(was), entry(), was, CATALOG)).toBe(false);
+    expect(rendersEntry(render(entry()), entry(), was, CATALOG)).toBe(true);
+  });
+  it("refuses a value key the previous entry had and the new one dropped", () => {
+    const was = entry({ sources: [src({ values: { debug: true } })] });
+    expect(rendersEntry(render(was), entry(), was, CATALOG)).toBe(false);
+    expect(rendersEntry(render(entry()), entry(), was, CATALOG)).toBe(true);
+  });
+  it("refuses a namespace label the previous entry had and the new one dropped, and a label of another value", () => {
+    const was = entry({ namespaceLabels: { stale: "yes" } });
+    expect(rendersEntry(render(entry(), { stale: "yes" }), entry(), was, CATALOG)).toBe(false);
+    expect(rendersEntry(render(entry(), {}), entry(), was, CATALOG)).toBe(true);
+    const want = entry({ namespaceLabels: { tier: "b" } });
+    expect(rendersEntry(render(want, { tier: "a" }), want, undefined, CATALOG)).toBe(false);
   });
 });

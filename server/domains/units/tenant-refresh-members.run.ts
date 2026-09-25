@@ -74,7 +74,7 @@ function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberR
  *  this one dropped, and the entry's values and no value key it dropped; the spec asks for the entry's
  *  namespace labels and none it dropped. The template's own value files and values around the entry's
  *  are the same before and after, so the previous entry is what tells a dropped part from them. */
-function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, catalogRepoUrl: string): boolean {
+export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, catalogRepoUrl: string): boolean {
   if (!status) return false;
   const charts = (status.syncSources ?? []).filter((src) => src.repoURL === catalogRepoUrl && src.path);
   if (charts.length !== member.sources.length) return false;
@@ -82,8 +82,10 @@ function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRec
     const got = charts[i]!;
     const was = previous?.sources[i];
     const files = got.valueFiles ?? [];
-    const at = want.valueFiles.map((f) => files.indexOf(f));
-    const filesMatch = at.every((n, k) => n >= 0 && (k === 0 || n > at[k - 1]!))
+    // Each of the entry's files after the one before it, so a file the template also names cannot
+    // stand in for the entry's own.
+    let from = 0;
+    const filesMatch = want.valueFiles.every((f) => { const n = files.indexOf(f, from); from = n + 1; return n >= 0; })
       && (was?.valueFiles ?? []).every((f) => want.valueFiles.includes(f) || !files.includes(f));
     const valuesMatch = Object.entries(want.values).every(([k, v]) => isDeepStrictEqual(got.valuesObject?.[k], v))
       && Object.keys(was?.values ?? {}).every((k) => k in want.values || got.valuesObject?.[k] === undefined);

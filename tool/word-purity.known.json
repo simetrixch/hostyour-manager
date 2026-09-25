@@ -1990,7 +1990,7 @@
     "server/domains/units/tenant-refresh-members.run.test.ts::registration": 4,
     "server/domains/units/tenant-refresh-members.run.test.ts::registrations": 9,
     "server/domains/units/tenant-refresh-members.run.test.ts::simetrixch": 2,
-    "server/domains/units/tenant-refresh-members.run.test.ts::tenant": 19,
+    "server/domains/units/tenant-refresh-members.run.test.ts::tenant": 20,
     "server/domains/units/tenant-refresh-members.run.test.ts::tenants": 5,
     "server/domains/units/tenant-refresh-members.run.test.ts::unit": 3,
     "server/domains/units/tenant-refresh-members.run.ts::helm": 2,
