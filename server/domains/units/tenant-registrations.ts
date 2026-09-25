@@ -409,7 +409,7 @@ export class TenantRegistrations {
 
   /** Every registrations/<guid>/<stage>.yaml brought to the schema this release ships
    *  (registration-laws.ts migrateRegistrationFiles), in ONE turn and at most ONE commit ending in
-   *  `marker`. The boot runs it once (registrations-migration.ts), after the catalog carry. A file
+   *  `marker`. The boot runs it once (registrations-migration.ts), after the deploy carry. A file
    *  the schema refuses is answered by path and reason, never rewritten. */
   async migrateToSchema(marker: string): Promise<RegistrationMigration> {
     return this.repo.withBranch(this.branch, async (books) => {

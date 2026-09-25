@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { wire } from "./wire.ts";
-import { scheduleCatalogCarry } from "./carry-catalog-schedule.ts";
+import { scheduleDeployCarry } from "./carry-deploy-schedule.ts";
 import { scheduleAppTokenRefresh } from "./refresh-app-tokens-schedule.ts";
 
 /**
@@ -48,10 +48,10 @@ export async function boot(): Promise<void> {
   // this release's schema, once per boot and never on a timer — a schema changes only with a release,
   // and a release boots the Manager. After the carry rather than beside it only so the log reads in
   // order; the carry brings charts and rewrites no registration.
-  void wired.carryCatalogTrunk().then(wired.migrateRegistrations);
-  // ... and again every ten minutes, so a change on the catalog's trunk reaches a standing tenant
+  void wired.carryDeployTrunk().then(wired.migrateRegistrations);
+  // ... and again every ten minutes, so a change on the deploy trunk reaches a standing tenant
   // without a boot or a plan (#169).
-  scheduleCatalogCarry(wired.carryCatalogTrunk, logger);
+  scheduleDeployCarry(wired.carryDeployTrunk, logger);
   // The App tokens behind the build repo-pat entries: rewritten once now, behind the listener, and
   // then every 45 minutes — a token lives 60, so a unit whose credential is the platform's GitHub
   // App can release at any hour, not only the one after its onboarding (#184). The same tick takes a

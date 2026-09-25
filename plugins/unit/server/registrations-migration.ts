@@ -7,7 +7,7 @@
 // a reader that reads the file BARE — the ApplicationSets read under missingkey=error — refuses the
 // whole unit. The Manager's own reads fill the default in memory and nothing wrote it back, so an
 // upgrade needed a hand: the standing tenant offboarded before the release and onboarded after it.
-// This is the write-back. It runs once per boot, behind the listener and after the catalog carry
+// This is the write-back. It runs once per boot, behind the listener and after the deploy carry
 // (boot.ts), because a schema changes only with a release and a release boots the Manager; a timer
 // would measure the same files against the same schema.
 import type { Logger } from "#core/server/kernel/logger.ts";

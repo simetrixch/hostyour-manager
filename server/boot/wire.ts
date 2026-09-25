@@ -73,12 +73,12 @@ export interface Wired {
   emergencyApp: Hono;
   serveEmergencySocket: () => void;
   checks: CheckResult[];
-  /** The catalog's trunk carried into this installation's books branch — a clone and a merge over
+  /** The deploy trunk carried into this installation's books branch — a clone and a merge over
    *  the network, the one slow act of boot. boot.ts starts it AFTER the server listens: awaited
    *  before, it held /healthz silent for the length of the carry and the liveness probe killed
    *  every rollout once. Never rejects — a failure is logged and the branch stays one product
    *  state behind, never a wrong one. */
-  carryCatalogTrunk: () => Promise<void>;
+  carryDeployTrunk: () => Promise<void>;
   /** The build repo-pat of every unit whose credential is the platform's GitHub App, rewritten with
    *  a token minted now, and the unit's three build Secrets deleted so ESO materializes the entry
    *  again (plugins/unit/server/app-token-refresh.ts). boot.ts runs it once behind the listening server
@@ -93,18 +93,18 @@ export interface Wired {
   /** Every standing registration on both books brought to the schema this release ships
    *  (plugins/unit/server/registrations-migration.ts): a file the schema now defaults a key of is
    *  rewritten with it, one commit per books per boot. boot.ts runs it once, behind the listening
-   *  server and after the catalog carry, and never again until the next boot — a schema changes
+   *  server and after the deploy carry, and never again until the next boot — a schema changes
    *  only with a release, and a release boots the Manager. Never rejects: every failure is logged,
    *  and the outcome becomes the `registrations.schema` self-check row on /readyz. */
   migrateRegistrations: () => Promise<void>;
 }
 
-/** The carry as boot runs it: LOG AND CONTINUE on failure — a catalog that is unreachable at
+/** The carry as boot runs it: LOG AND CONTINUE on failure — a deploy repository that is unreachable at
  *  start-up must not take the Manager down, and what a failure leaves behind is a branch one
  *  product state behind, never a wrong one. It is logged at error because this is the only place
  *  that can say which branch and why — /readyz carries a verdict, not a reason. Absent where the
- *  Manager writes no books (no catalog configured): then there is nothing to carry. */
-export function carryCatalogTrunkLater(carry: (() => Promise<void>) | undefined, logger: Logger): () => Promise<void> {
+ *  Manager writes no books (no deploy repository configured): then there is nothing to carry. */
+export function carryDeployTrunkLater(carry: (() => Promise<void>) | undefined, logger: Logger): () => Promise<void> {
   return async () => {
     if (!carry) return;
     try {
@@ -112,7 +112,7 @@ export function carryCatalogTrunkLater(carry: (() => Promise<void>) | undefined,
     } catch (err) {
       logger.error(
         { err: String(err) },
-        "the catalog's trunk could not be carried into this installation's books branch there — if the branch does not exist yet, the tenant ApplicationSet's git generator has no revision to resolve and it and the root Application above it stay in error; if it does, every tenant goes on rendering the member charts it already carried"
+        "the deploy trunk could not be carried into this installation's books branch there — if the branch does not exist yet, the tenant ApplicationSet's git generator has no revision to resolve and it and the root Application above it stay in error; if it does, every tenant goes on rendering the member charts it already carried"
       );
     }
   };
@@ -261,10 +261,10 @@ export async function wire(): Promise<Wired> {
   scheduleTenantCheck(executor, logger);
   await seedMaster(db.db, store, config, logger);
   phase("master seed");
-  // The catalog's books branch, brought into being and up to the catalog's trunk by boot — behind
-  // the listening server, see Wired.carryCatalogTrunk — rather than at the first tenant
+  // The deploy repository's books branch, brought into being and up to the deploy trunk by boot —
+  // behind the listening server, see Wired.carryDeployTrunk — rather than at the first tenant
   // registration (wire-units.ts carryTrunkToBooksBranch); every tenant plan carries it again.
-  const carryCatalogTrunk = carryCatalogTrunkLater(units.carryTrunkToBooksBranch, logger);
+  const carryDeployTrunk = carryDeployTrunkLater(units.carryTrunkToBooksBranch, logger);
   // The deletion after each rewrite reaches the build namespaces over the master-local cluster
   // reader: they stand on this cluster whatever cluster a unit targets. The same tick takes a token
   // repository Secret off every live unit the App reaches (repo-credential-sweep.ts).
@@ -396,7 +396,7 @@ export async function wire(): Promise<Wired> {
     emergencyApp,
     serveEmergencySocket: () => void serveAdminSocket(config.adminSocketPath, emergencyDeps),
     checks,
-    carryCatalogTrunk,
+    carryDeployTrunk,
     refreshAppTokens: refreshAppTokensLater,
     syncReleaseKits: registrations && consumerRepo
       ? () => syncReleaseKits({

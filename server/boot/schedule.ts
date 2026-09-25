@@ -1,5 +1,5 @@
 // A timer inside this process, for the acts that have to recur without a run behind them: the
-// catalog carry (carry-catalog-schedule.ts) and the App-token refresh (refresh-app-tokens-schedule.ts)
+// deploy carry (carry-deploy-schedule.ts) and the App-token refresh (refresh-app-tokens-schedule.ts)
 // stand on it. Never overlapping: a tick that finds the last act still running does nothing, so a slow
 // network never stacks two carries or two Vault writes. Never throwing through the timer: a rejection
 // is logged and the schedule goes on, because a timer that died silently on one bad tick is the

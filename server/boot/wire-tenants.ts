@@ -61,7 +61,7 @@ import { makeTenantMigrateDef } from "../domains/units/migrate.run.ts";
 const TENANT_WATCH_TIMEOUT_MS = 15 * 60_000;
 
 // How long the routing move waits for the IdP to answer at its new address, and how often it asks:
-// the product's charts reach the cluster through the catalog carry and an ArgoCD sync, which take
+// the product's charts reach the cluster through the deploy carry and an ArgoCD sync, which take
 // minutes, so the budget is the carry's interval twice over.
 const ROUTING_WAIT_MS = 30 * 60_000;
 const ROUTING_POLL_MS = 15_000;

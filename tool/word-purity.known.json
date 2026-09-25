@@ -263,7 +263,7 @@
     "server/boot/boot.ts::registrations": 1,
     "server/boot/boot.ts::tenant": 1,
     "server/boot/boot.ts::unit": 4,
-    "server/boot/carry-catalog-schedule.ts::tenant": 5,
+    "server/boot/carry-deploy-schedule.ts::tenant": 5,
     "server/boot/check-tenants-schedule.test.ts::tenant": 6,
     "server/boot/check-tenants-schedule.test.ts::tenants": 2,
     "server/boot/check-tenants-schedule.ts::onboarding": 1,
