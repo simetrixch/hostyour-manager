@@ -123,7 +123,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     const wiring = buildUnits(...setup({ KUBECONFIG_PATH: file }));
     expect(wiring.enabled).toBe(true);
     expect(wiring.tenantEnabled).toBe(true);
-    expect(wiring.defs).toHaveLength(28); // 12 consumer (incl. purge, adopt-consumer, restart-workloads, set-size, set-secrets, backup/restore/migrate) + 16 tenant (those 12, plus check-tenants, tenant-apps-repo, tenant-apps-repo-purge and tenant-set-routing)
+    expect(wiring.defs).toHaveLength(29); // 12 consumer (incl. purge, adopt-consumer, restart-workloads, set-size, set-secrets, backup/restore/migrate) + 17 tenant (those 12, plus check-tenants, tenant-apps-repo, tenant-apps-repo-purge, tenant-set-routing and tenant-set-own-domain)
   });
 
   it("BOTH families stay off without MASTER_FQDN — nothing may write the books without knowing which branch they are", () => {

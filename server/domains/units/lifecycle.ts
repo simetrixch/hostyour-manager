@@ -233,6 +233,8 @@ export interface TenantCluster {
   /** How the tenant's members are addressed below its zone, as recorded on its row: what its DNS
    *  record is named and where its IdP answers (shared/unit-host.ts). */
   routing: MemberRouting;
+  /** The tenant's own domain, or "" where it is reached at its zone (shared/unit-host.ts). */
+  ownDomain: string;
   /** The owner the tenant was onboarded under — what a bundle created later is onboarded under too. */
   owner: string;
 }
@@ -252,6 +254,7 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     members: tenant.members,
     identityProvider: tenant.identityProvider,
     routing: tenant.routing,
+    ownDomain: tenant.ownDomain,
     owner: tenant.owner ?? tenant.subdomain,
   };
 }

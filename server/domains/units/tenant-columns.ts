@@ -20,6 +20,7 @@ export const TENANT_COLUMNS = {
   // How the members are addressed below the zone: every view that shows or calls a member address
   // composes it from this beside the two above.
   routing: tenants.routing,
+  ownDomain: tenants.ownDomain,
   seedUsers: tenants.seedUsers,
   suspended: tenants.suspended,
   owner: tenants.owner,

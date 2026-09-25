@@ -11,7 +11,7 @@ import { UnitQuotaSchema } from "./unit-size.ts";
 // tenant, and tenant is a pure leaf (it imports consumer/gates/enums; nothing imports it back).
 import { z } from "zod";
 import { GateResultSchema } from "./gates.ts";
-import { ConsumerManifestSchema } from "./consumer.ts";
+import { ConsumerManifestSchema, publicFqdn } from "./consumer.ts";
 import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "./unit-host.ts";
 import { SEED_SELECTIONS } from "./app-selections.ts";
 import { MEMBER_ROUTING } from "./enums.ts";
@@ -198,6 +198,11 @@ export const TenantRegistrationSchema = z
     // create time, moved on a standing file only by the run that also moves its DNS record. Defaulted
     // to `host`, the addressing every file written before the field existed was made under.
     routing: z.enum(MEMBER_ROUTING).default("host"),
+    // The tenant's OWN DOMAIN, or "" where the tenant is reached at its zone: one FQDN the customer
+    // brings, which replaces the zone as the tenant's one host, every member under a path of it. Moved
+    // on a standing file only by tenant-set-own-domain, which also moves its DNS record. Defaulted to
+    // "" for every file written before the field existed.
+    ownDomain: z.union([z.literal(""), publicFqdn]).default(""),
     // The ceiling EVERY member namespace of this tenant is bounded by, resolved by the Manager from
     // its size table when it writes the registration and passed to hostyour-cloud/apps/unit-quota by the
     // tenant ApplicationSet. Per MEMBER and not per tenant, because a tenant owns one namespace per

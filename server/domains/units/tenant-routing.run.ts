@@ -123,7 +123,7 @@ function tenantSetRoutingSteps(ports: TenantSetRoutingPorts, p: TenantSetRouting
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
-        const url = `${tenantMemberUrl(p.routing, tc.identityProvider, tc.stage, tc.subdomain, apex)}/`;
+        const url = `${tenantMemberUrl(p.routing, tc.identityProvider, tc.stage, tc.subdomain, apex, tc.ownDomain)}/`;
         const deadline = Date.now() + ports.routingWaitMs;
         for (;;) {
           const seen = await ports.probe.probe(url, { signal: ctx.signal });
@@ -162,12 +162,13 @@ export function makeTenantSetRoutingDef(ports: TenantSetRoutingPorts): RunDefini
       const row = db.select({ suspended: tenants.suspended, status: tenants.status }).from(tenants).where(eq(tenants.id, params.tenantId)).get();
       if (row?.status === "provisioning") throw errValidation(`tenant ${tc.subdomain} is still provisioning — finish or remove its create-tenant run before moving its routing`);
       if (row?.status === "offboarded" || row?.status === "purged") throw errValidation(`tenant ${tc.subdomain} is ${row.status} — nothing serves it, so there is no routing to move`);
+      if (tc.ownDomain !== "" && params.routing !== "path") throw errValidation(`tenant ${tc.subdomain} is reached at its own domain ${tc.ownDomain}, which serves every member under a path — clear the domain before moving it off path routing`);
       if (tc.routing !== params.previous) throw errValidation(`tenant ${tc.subdomain} stands on the ${tc.routing} routing, not on ${params.previous} as this request says — it moved since; ask again`);
       // A suspended tenant renders no ingress, so the wait could never be answered.
       if (row?.suspended) throw errValidation(`tenant ${tc.subdomain} is suspended — its ingress is down, so its new address could never answer; resume it before moving its routing`);
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       const record = tenantRecordName(params.routing, tc.subdomain, tc.stage, apex);
-      const url = tenantMemberUrl(params.routing, tc.identityProvider, tc.stage, tc.subdomain, apex);
+      const url = tenantMemberUrl(params.routing, tc.identityProvider, tc.stage, tc.subdomain, apex, tc.ownDomain);
       const old = otherRoutings(params.routing).map((r) => tenantRecordName(r, tc.subdomain, tc.stage, apex)).join(", ");
       const stepDefs = tenantSetRoutingSteps(ports, params);
       return {

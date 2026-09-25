@@ -113,7 +113,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       sourceCluster: (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.cluster ?? "",
       // Every tenant has its IdP member, at the address its routing gives it — so the IdP is the probe
       // target that exists for EVERY tenant.
-      publicUrl: tenantMemberUrl(tc.routing, tc.identityProvider, tc.stage, tc.subdomain, await ports.resolveUnitApex(tc.domain, tc.stage)),
+      publicUrl: tenantMemberUrl(tc.routing, tc.identityProvider, tc.stage, tc.subdomain, await ports.resolveUnitApex(tc.domain, tc.stage), tc.ownDomain),
       namespaces: tenantNamespaces(allMembers, tc.guid, tc.stage),
       homeNamespace: memberNamespace(tc.guid, tc.identityProvider, tc.stage),
       setQuiesced: (q, runId) => ports.registrations.setTenantQuiesced(tc.stage, tc.guid, q, runId),

@@ -14,7 +14,7 @@ import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { tenantLocks, tenantSelector, tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
-import { isTenantRecord, removeUnitDns, tenantRecordName } from "./unit-dns.ts";
+import { isTenantRecord, removeTenantBookedRecords, removeUnitDns, tenantRecordName } from "./unit-dns.ts";
 import { tenantKeyName } from "./tenant-storage.ts";
 
 // tenant-purge / force-offboard by GUID — the tenant analogue of the consumer
@@ -395,6 +395,8 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
           }
           await removeUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName });
         }
+        // Every other record the book names as this tenant's: its own domain's, where written here.
+        await removeTenantBookedRecords(ctx, { dns: ports.dns, guid: p.guid, stage: c.stage, except: [] });
       },
     },
   ];

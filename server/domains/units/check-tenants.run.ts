@@ -62,6 +62,7 @@ interface Candidate {
   domain: string;
   identityProvider: string;
   routing: MemberRouting;
+  ownDomain: string;
   clusterId: string;
 }
 
@@ -109,6 +110,7 @@ function checkStep(ports: CheckTenantsPorts): Step {
           stage: tenants.stage,
           identityProvider: tenants.identityProvider,
           routing: tenants.routing,
+          ownDomain: tenants.ownDomain,
           clusterId: tenants.clusterId,
           suspended: tenants.suspended,
           status: tenants.status,
@@ -153,7 +155,7 @@ function checkStep(ports: CheckTenantsPorts): Step {
             // under the apex off the target cluster's values chain and never off the cluster's own
             // domain — composing from the domain asks a host nothing serves.
             const apex = await ports.resolveUnitApex(t.domain, t.stage);
-            const idpUrl = tenantMemberUrl(t.routing, t.identityProvider, t.stage, t.subdomain, apex);
+            const idpUrl = tenantMemberUrl(t.routing, t.identityProvider, t.stage, t.subdomain, apex, t.ownDomain);
             const answer = await ports.health.read({
               url: `${idpUrl}/api/v1/bootstrap/status`,
               tokenHeader: BOOTSTRAP_TOKEN_HEADER,

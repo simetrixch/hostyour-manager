@@ -8,7 +8,7 @@ import { tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";
 import { attestTenantTargetStep, clearRelocationHold, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { TenantLifecycleParams, tenantLocks, tenantTeardownMembers, allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
 import { deleteTenantArgoSync, deleteTenantMembers, describeTenantMemberDeletes } from "./tenant-teardown.ts";
-import { removeUnitDns, tenantRecordName } from "./unit-dns.ts";
+import { isTenantRecord, removeTenantBookedRecords, removeUnitDns, tenantRecordName } from "./unit-dns.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 
 // tenant-offboard — the tenant analogue of the consumer
@@ -124,7 +124,13 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         // create side made.
         const tc = loadTenantCluster(ctx.db, tenantId);
         const unitApex = await ports.resolveUnitApex(tc.domain, tc.stage);
-        await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName: tenantRecordName(tc.routing, tc.subdomain, tc.stage, unitApex) });
+        const recordName = tenantRecordName(tc.routing, tc.subdomain, tc.stage, unitApex);
+        await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName });
+        // The own domain's record, where this installation wrote it; one in a zone nobody here manages
+        // is the operator's to remove, which is decided before the book forgets what it removes.
+        const ownDomainBooked = tc.ownDomain !== "" && isTenantRecord(ctx.db, tc.ownDomain, tc.guid);
+        await removeTenantBookedRecords(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, except: [recordName] });
+        if (tc.ownDomain !== "" && !ownDomainBooked) ctx.log("meta", `the own domain ${tc.ownDomain} is not recorded as written here — remove its record at its provider`);
       },
     },
     {

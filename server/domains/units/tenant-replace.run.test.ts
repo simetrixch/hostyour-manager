@@ -106,7 +106,7 @@ function syncedStatuses(names: readonly string[], ref: string): Map<string, Argo
 
 /** A well-formed existing tenant registration (subdomain SUB) the registrations can commit as the replace target. */
 function oldRegistration(over: Partial<TenantRegistration> = {}): TenantRegistration {
-  return { cluster: "s1", subdomain: SUB, members: testMembers([]), identityProvider: "auth", routing: "host", apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "", ...over };
+  return { cluster: "s1", subdomain: SUB, members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "", ...over };
 }
 
 /** A shared registrations over a seedable FakePlatformRepo, so a test can pre-commit the old pointer AND
@@ -174,7 +174,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
   return CreateTenantParams.parse({
     guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example",
     members: testMembers(APPS),
-    identityProvider: "auth", routing: "host",
+    identityProvider: "auth", routing: "host", ownDomain: "",
     cluster: "s1", chartsRef: SHA, registryHost: REGISTRY_HOST,
     apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
     report: passReport(), expectedApps: EXPECTED, catalogRepoUrl: DEPLOY_URL,

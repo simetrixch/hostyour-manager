@@ -73,7 +73,7 @@ describe("loadTenantCluster", () => {
       domain: "s1.example", clusterId: "cls_1",
       // The tenant's own recorded facts ride along: every caller that names a namespace, an
       // AppProject or the tenant's auth host reads them from here.
-      members: ["auth", "jobs", "report"], identityProvider: "auth", routing: "host", owner: "simetrix", // no owner recorded ⇒ the subdomain
+      members: ["auth", "jobs", "report"], identityProvider: "auth", routing: "host", ownDomain: "", owner: "simetrix", // no owner recorded ⇒ the subdomain
     });
   });
 

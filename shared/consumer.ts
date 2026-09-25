@@ -46,7 +46,7 @@ const chartPath = z.string().regex(/^[^/].*$/);
  *  and the registration's attested one, so the two ends of the grant validate identically. The
  *  character set (lowercase alphanumerics, `-`, `.`) is also what keeps the value safe to inline
  *  into the admission policy's CEL string literals. */
-const publicFqdn = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/);
+export const publicFqdn = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/);
 
 /** A unit's SMTP submission entry: the ClusterIP Service of the MTA the unit brings, and the port it
  *  takes submissions on. Declared in the manifest and ATTESTED into the stage registration by the

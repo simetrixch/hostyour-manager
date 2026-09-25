@@ -71,6 +71,8 @@ export interface ScannedTenant {
   /** How the tenant's members are addressed below its zone, off its own registration — what the DNS
    *  inventory names the tenant's record by (the wildcard or the zone). */
   routing: MemberRouting;
+  /** The tenant's own domain, or "" — the inventory lists its record beside the zone's. */
+  ownDomain: string;
 }
 
 /** The three HONEST outcomes of reading ONE tenant registration, kept apart because the callers act
@@ -145,7 +147,7 @@ export class TenantRegistrations {
     }
     const r = TenantRegistrationSchema.safeParse(parsed);
     if (!r.success) return { status: "unreadable", reason: `${path} failed its schema: ${schemaWhy(r.error)}` };
-    return { status: "read", entry: { guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps, members: r.data.members.map((m) => m.name), appsImage: r.data.appsImage, routing: r.data.routing } };
+    return { status: "read", entry: { guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps, members: r.data.members.map((m) => m.name), appsImage: r.data.appsImage, routing: r.data.routing, ownDomain: r.data.ownDomain } };
   }
 
   /** The ONE scan of the registrations at a stage: scanTenantDir over every guid directory, bucketed
@@ -303,6 +305,15 @@ export class TenantRegistrations {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     return this.write(stage, guid, { ...current.entry, routing }, `routing(${guid}): ${routing} ${trailer(runId)}`);
+  }
+
+  /** Write the tenant's own domain ("" = none, the tenant is reached at its zone). One field of one
+   *  file, like the flips above; writing the domain it already has commits nothing.
+   *  tenant-set-own-domain moves the DNS record around this write. */
+  async setOwnDomain(stage: Stage, guid: string, ownDomain: string, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
+    return this.write(stage, guid, { ...current.entry, ownDomain }, `own-domain(${guid}): ${ownDomain || "none"} ${trailer(runId)}`);
   }
 
   /** Write the tenant's own apps bundle — the repository, the image it builds and the tag its last

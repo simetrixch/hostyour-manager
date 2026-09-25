@@ -40,7 +40,7 @@ function entry(guid: string, subdomain: string, over: Partial<TenantRegistration
     registration: {
       cluster: "s1",
       members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
-      identityProvider: "auth", routing: "host",
+      identityProvider: "auth", routing: "host", ownDomain: "",
       subdomain,
       apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
       seedUsers: false, quota: seedQuota("small"),

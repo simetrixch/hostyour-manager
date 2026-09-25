@@ -50,11 +50,12 @@ export function tenantRecordName(routing: MemberRouting, subdomain: string, stag
 
 /** ONE member's public base URL at one stage, for the callers that must ADDRESS a member rather than
  *  resolve it (the first-admin invite over the identity provider, the administrator check, the
- *  relocation probe): `https://<member>.<zone>` under `host` routing, `https://<zone>/<member>` under
- *  `path` routing. A caller appends its API path to it. */
-export function tenantMemberUrl(routing: MemberRouting, member: string, stage: Stage, subdomain: string, unitApex: string): string {
+ *  relocation probe): `https://<member>.<zone>` under `host` routing, `https://<host>/<member>` under
+ *  `path` routing, where the host is the tenant's own domain if it has one ("" = none) and its zone
+ *  otherwise. A caller appends its API path to it. */
+export function tenantMemberUrl(routing: MemberRouting, member: string, stage: Stage, subdomain: string, unitApex: string, ownDomain: string): string {
   const zone = tenantZone(subdomain, stage, unitApex);
-  return routing === "path" ? `https://${zone}/${member}` : `https://${member}.${zone}`;
+  return routing === "path" ? `https://${ownDomain || zone}/${member}` : `https://${member}.${zone}`;
 }
 
 /** The words no label and no subdomain may be: the stage words are the zones themselves, so a

@@ -195,7 +195,7 @@ async function seedPointer(registrations: TenantRegistrations, guid: string, sub
   const registration: TenantRegistration = {
     cluster: "s2", // clusterShortName of cls_2's domain (s2.example)
     members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
-    identityProvider: "auth", routing: "host",
+    identityProvider: "auth", routing: "host", ownDomain: "",
     subdomain,
     apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"),

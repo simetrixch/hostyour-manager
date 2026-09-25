@@ -4,7 +4,7 @@ import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
   getTenant, getTenantAppCatalog, addTenantApp, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
-  setTenantSize, setTenantRouting,
+  setTenantSize, setTenantRouting, setTenantOwnDomain,
   backupTenant, restoreTenant, migrateTenant, listTenantTargets, listRuns,
   type TenantDetailView,
 } from "../api.ts";
@@ -15,6 +15,7 @@ import { relocationRun, relocationLine } from "../relocationBand.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { SetRoutingAction } from "../components/SetRoutingAction.tsx";
+import { SetOwnDomainAction } from "../components/SetOwnDomainAction.tsx";
 import { TypeToConfirm } from "../components/TypeToConfirm.tsx";
 import { PurgeTenantDialog } from "../components/PurgeTenantDialog.tsx";
 import { RelocationTargetDialog } from "../components/RelocationTargetDialog.tsx";
@@ -291,6 +292,7 @@ export function TenantDetail() {
           {/* Not offered on a suspended tenant: it renders no ingress, so its new address could never
               answer and the run's wait could not end — the route refuses it too. */}
           {!unfinished && !t.suspended && <SetRoutingAction subdomain={t.subdomain} routing={t.routing} busy={busy} onRoute={(next) => void act(() => setTenantRouting(tenantId, next))} />}
+          {!unfinished && !t.suspended && t.routing === "path" && <SetOwnDomainAction subdomain={t.subdomain} ownDomain={t.ownDomain} busy={busy} onSet={(next) => void act(() => setTenantOwnDomain(tenantId, next))} />}
           {!unfinished && (
             <button type="button" className="btn" disabled={busy} onClick={() => setBackupT(t)}>
               Back up

@@ -71,6 +71,13 @@
       "when": 1790312886609,
       "tag": "0009_tenants-routing",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790339857540,
+      "tag": "0010_tenants-own-domain",
+      "breakpoints": true
     }
   ]
 }

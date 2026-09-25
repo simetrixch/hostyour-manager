@@ -30,7 +30,7 @@ function tenantParsed(): Record<string, unknown> {
   return {
     cluster: "s1", subdomain: "simetrix",
     apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
-    members: testMembers(["erp"]), identityProvider: "auth", routing: "host",
+    members: testMembers(["erp"]), identityProvider: "auth", routing: "host", ownDomain: "",
     quota: seedQuota("small"), seedUsers: false, resetNonce: "1", suspended: false, quiesced: false,
   };
 }
@@ -83,6 +83,15 @@ describe("TenantRegistrations.migrateToSchema", () => {
     expect(second.commit).toBeNull();
     expect(second.rewritten).toEqual([]);
     expect(repo.commits).toHaveLength(1);
+  });
+
+  it("rewrites a registration written before the own domain existed with none: the tenant stays at its zone", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new TenantRegistrations(repo);
+    repo.seed(repo.booksBranch, TENANT_PATH, tenantFile({}, ["ownDomain"]));
+    const outcome = await reg.migrateToSchema(MARKER);
+    expect(outcome.rewritten).toEqual([{ path: TENANT_PATH, fields: ["+ownDomain"] }]);
+    expect(repo.read(repo.booksBranch, TENANT_PATH)).toBe(tenantFile());
   });
 
   it("rewrites a registration written before the routing existed with host, the addressing it was made under", async () => {

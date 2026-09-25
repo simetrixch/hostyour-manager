@@ -6,7 +6,7 @@ import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import { isTenantRecord, provisionUnitDns, removeUnitDns } from "./unit-dns.ts";
+import { isTenantRecord, provisionUnitDns, removeTenantBookedRecords, removeUnitDns } from "./unit-dns.ts";
 
 // The unit's ONE record and the book of DNS writes beside it: provisionUnitDns writes a CNAME onto the
 // target cluster's name and enters what it changed — inserted where nothing stood, updated where
@@ -122,6 +122,24 @@ describe("isTenantRecord — what a tenant's purge may remove", () => {
     expect(isTenantRecord(db.db, "acme.example.com", "zsjs023ctne0")).toBe(false);
     recordDnsWrite(db.db, { name: "acme.example.com", type: "CNAME", content: CLUSTER, act: "updated", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_t" });
     expect(isTenantRecord(db.db, "acme.example.com", "zsjs023ctne0")).toBe(true);
+  });
+});
+
+describe("removeTenantBookedRecords — the records a tenant's offboard and purge take along", () => {
+  it("removes a record booked to the tenant at this stage while it points where the book says, and nothing else", async () => {
+    const dns = new FakeDnsProvider();
+    const book = (name: string, content: string, stage: "prod" | "dev"): void =>
+      recordDnsWrite(db.db, { name, type: "CNAME", content, act: "inserted", owner: { kind: "tenant", name: "zsjs023ctne0", stage }, runId: "run_t" });
+    dns.seed("www.customer.test", "CNAME", "acme.example.com");
+    book("www.customer.test", "acme.example.com", "prod");
+    dns.seed("moved.customer.test", "CNAME", "shop.elsewhere.test");
+    book("moved.customer.test", "acme.example.com", "prod");
+    dns.seed("acme.dev.example.com", "CNAME", CLUSTER);
+    book("acme.dev.example.com", CLUSTER, "dev");
+    await removeTenantBookedRecords(ctx([]), { dns, guid: "zsjs023ctne0", stage: "prod", except: [] });
+    expect(dns.record("www.customer.test", "CNAME")).toBeUndefined();
+    expect(dns.record("moved.customer.test", "CNAME")).toBe("shop.elsewhere.test");
+    expect(dns.record("acme.dev.example.com", "CNAME")).toBe(CLUSTER);
   });
 });
 

@@ -31,10 +31,15 @@ describe("a tenant's zone and members — <member>.<subdomain>.<stage apex>", ()
   });
 
   it("addresses a member on a host of its own under host routing, and under a path of the zone under path routing", () => {
-    expect(tenantMemberUrl("host", "idp", "prod", "acme", "example.test")).toBe("https://idp.acme.example.test");
-    expect(tenantMemberUrl("host", "idp", "dev", "acme", "example.test")).toBe("https://idp.acme.dev.example.test");
-    expect(tenantMemberUrl("path", "idp", "prod", "acme", "example.test")).toBe("https://acme.example.test/idp");
-    expect(tenantMemberUrl("path", "idp", "dev", "acme", "example.test")).toBe("https://acme.dev.example.test/idp");
+    expect(tenantMemberUrl("host", "idp", "prod", "acme", "example.test", "")).toBe("https://idp.acme.example.test");
+    expect(tenantMemberUrl("host", "idp", "dev", "acme", "example.test", "")).toBe("https://idp.acme.dev.example.test");
+    expect(tenantMemberUrl("path", "idp", "prod", "acme", "example.test", "")).toBe("https://acme.example.test/idp");
+    expect(tenantMemberUrl("path", "idp", "dev", "acme", "example.test", "")).toBe("https://acme.dev.example.test/idp");
+  });
+
+  it("addresses a member under a path of the tenant's own domain where it has one, instead of its zone", () => {
+    expect(tenantMemberUrl("path", "idp", "prod", "acme", "example.test", "www.customer.example")).toBe("https://www.customer.example/idp");
+    expect(tenantMemberUrl("path", "idp", "dev", "acme", "example.test", "customer.example")).toBe("https://customer.example/idp");
   });
 
   it("names the one record the routing needs: the wildcard under host routing, the zone itself under path routing", () => {

@@ -92,12 +92,12 @@ async function seedTenant(reg: TenantRegistrations): Promise<void> {
   seedCluster();
   db.db.insert(tenants).values({
     id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "simetrix", stage: "prod",
-    members: ["auth", "jobs", "report"], identityProvider: "auth", routing: "host", suspended: false, status: "active",
+    members: ["auth", "jobs", "report"], identityProvider: "auth", routing: "host", ownDomain: "", suspended: false, status: "active",
   }).run();
   await reg.commitTenant({
     stage: "prod", guid: GUID, runId: "run_crt",
     registration: {
-      cluster: "s1", subdomain: "simetrix", apps: [], members: testMembers(), identityProvider: "auth", routing: "host",
+      cluster: "s1", subdomain: "simetrix", apps: [], members: testMembers(), identityProvider: "auth", routing: "host", ownDomain: "",
       seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     },
   });

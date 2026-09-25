@@ -52,6 +52,7 @@ describe("check-tenants — who gets asked", () => {
     domain: "m1.example.com",
     identityProvider: "auth",
     routing: "host" as const,
+    ownDomain: "",
     clusterId: "clu_1",
   };
 

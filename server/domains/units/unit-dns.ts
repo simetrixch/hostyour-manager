@@ -48,7 +48,7 @@ import type { StepCtx } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { eq } from "drizzle-orm";
 import { clusters } from "../../db/schema/inventory.ts";
-import { findDnsWrite, forgetDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
+import { findDnsWrite, forgetDnsWrite, listDnsWrites, recordDnsWrite } from "../../db/dns-writes.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { DnsWriteOwnerKind, Stage } from "../../../shared/enums.ts";
@@ -203,6 +203,24 @@ export function isTenantRecord(db: Db, recordName: string, guid: string): boolea
   if (recordName.startsWith("*.")) return true;
   const booked = findDnsWrite(db, { name: recordName, type: "CNAME" });
   return booked?.owner.kind === "tenant" && booked.owner.name === guid;
+}
+
+/** Remove every other CNAME the book of DNS writes names as this tenant's at this stage — its own
+ *  domain's record where this installation wrote it (tenant-set-own-domain) — beside the record its
+ *  routing names, which the caller removes itself. Offboard and purge. A record is deleted only while it
+ *  still carries the content the book recorded: one re-pointed elsewhere since is somebody else's now,
+ *  and stays. */
+export async function removeTenantBookedRecords(ctx: StepCtx, opts: { dns: DnsProvider | undefined; guid: string; stage: Stage; except: readonly string[] }): Promise<void> {
+  const booked = listDnsWrites(ctx.db).filter(
+    (w) => w.type === "CNAME" && w.owner.kind === "tenant" && w.owner.name === opts.guid && w.owner.stage === opts.stage && !opts.except.includes(w.name),
+  );
+  if (booked.length === 0) return;
+  const dns = requireDns(opts.dns, opts.guid, "remove");
+  for (const w of booked) {
+    const { deleted } = await dns.deleteRecord({ name: w.name, type: "CNAME", content: w.content, signal: ctx.signal });
+    forgetDnsWrite(ctx.db, { name: w.name, type: "CNAME" });
+    ctx.log("meta", deleted > 0 ? `DNS record ${w.name} → ${w.content} removed` : `DNS record ${w.name} no longer points at ${w.content} — left standing, it is not this tenant's any more`);
+  }
 }
 
 /** Remove the unit's ONE record (offboard + both purge run kinds). Fail-closed on the API, absent=ok:

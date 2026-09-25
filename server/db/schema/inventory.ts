@@ -216,6 +216,9 @@ export const tenants = sqliteTable("tenants", {
   // How the members are addressed below the zone (MEMBER_ROUTING), beside the IdP for the same reason:
   // every path that reaches a member composes its address and its DNS record from it, and holds a row.
   routing: text("routing", { enum: MEMBER_ROUTING }).notNull().default("host"),
+  // The tenant's own domain, or "" where it is reached at its zone — beside the routing for the same
+  // reason: every path that addresses a member composes its host from it.
+  ownDomain: text("own_domain").notNull().default(""),
   // Whether the tenant's IdP boot-seeds initial accounts. Also a registration field (the registration
   // is what the charts read); recorded here as the platform's own trace of what was asked for.
   seedUsers: integer("seed_users", { mode: "boolean" }).notNull().default(false),

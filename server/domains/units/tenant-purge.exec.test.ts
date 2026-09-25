@@ -64,7 +64,7 @@ afterEach(() => { db.sqlite.close(); });
 /** The tenant as it stands in GitOps (one app) — committed by the tests that need a pointer. */
 function entry(cluster = "s1"): TenantRegistration {
   return {
-    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]), identityProvider: "auth", routing: "host",
+    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]), identityProvider: "auth", routing: "host", ownDomain: "",
     cluster, subdomain: SUB, apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
   };

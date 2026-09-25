@@ -56,7 +56,8 @@ export function tenantActivateStep(ports: TenantOnboardPorts, p: CreateTenantPar
       // unit-host.ts tenantMemberUrl) — the address its chart renders the ingress for. The apex is read
       // off the TARGET cluster's own values chain (the resolver provision-dns composes the tenant's
       // record from), so the address this posts to is one that record covers.
-      const idpUrl = tenantMemberUrl(p.routing, p.identityProvider, p.stage, p.subdomain, await ports.resolveUnitApex(p.domain, p.stage));
+      // A tenant is created at its zone; an own domain is set on it later (tenant-set-own-domain).
+      const idpUrl = tenantMemberUrl(p.routing, p.identityProvider, p.stage, p.subdomain, await ports.resolveUnitApex(p.domain, p.stage), "");
       const url = `${idpUrl}/api/v1/bootstrap/invite-admin`;
       // The token rides ONLY the declared header — never the URL, the body, or a log line.
       ctx.log("meta", `inviting the first tenant admin: POST ${url} with header X-Bootstrap-Token (token withheld)`);

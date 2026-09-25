@@ -29,6 +29,7 @@ import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
 import { makeTenantRestartWorkloadsDef } from "../domains/units/restart-workloads.run.ts";
 import { makeTenantSetSizeDef } from "../domains/units/set-size.run.ts";
 import { makeTenantSetRoutingDef } from "../domains/units/tenant-routing.run.ts";
+import { makeTenantSetOwnDomainDef } from "../domains/units/tenant-own-domain.run.ts";
 import type { TenantLifecyclePorts } from "../domains/units/lifecycle.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/units/create-tenant.run.ts";
 import type { RegisteredUnit, TenantBuildDeps } from "../domains/units/tenant-builds.ts";
@@ -329,6 +330,7 @@ export function buildTenantOnboarding(
     // The routing move reads the IdP at its new address with the same public probe the moves between
     // clusters read with.
     makeTenantSetRoutingDef({ ...lifecyclePorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
+    makeTenantSetOwnDomainDef({ ...lifecyclePorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
     makeOffboardTenantDef(lifecyclePorts),
     // tenant-purge / force-offboard removes a tenant's WHOLE footprint BY GUID even with no inventory
     // row (the orphaned partial create-tenant), and additionally destroys the crypto entry (the deprovision
