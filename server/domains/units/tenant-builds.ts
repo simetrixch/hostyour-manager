@@ -47,6 +47,7 @@ import { resolveNextVersion } from "./release-version.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
 import { recordBuildOnlyStep } from "./onboard-registration.ts";
+import { attestBuildsAgain } from "./build-unit-attest.ts";
 import { type RequiredImage, requiredImagesFrom } from "./ensure-images.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import { renderTenantArgoSync, tenantSyncUnits } from "./build-rbac.ts";
@@ -299,26 +300,8 @@ export function buildUnitStep(
         builds: ungated.builds,
         ungated,
       };
-      // A REGISTERED unit's builds are attested again before its release is re-run: the release
-      // pipeline refuses a build its manifest declares and build.yaml does not attest, so a unit that
-      // renamed or added a build since its onboarding would release nothing. The rest of the standing
-      // registration is kept as it is.
-      if (unit.registered) {
-        const standing = await ports.registrations.readBuildRegistration(unit.unit);
-        const attested = [...(standing?.entry.builds ?? [])].sort().join(",");
-        if (standing && attested !== [...ungated.builds].sort().join(",")) {
-          const { entry } = standing;
-          const { commit } = await ports.registrations.commitRegistration({
-            unit: {
-              name: unit.unit, repoURL: unit.repoURL, owner: entry.owner ?? p.owner,
-              ...(entry.onboardedAt ? { onboardedAt: entry.onboardedAt } : {}), suspended: entry.suspended, quiesced: entry.quiesced,
-            },
-            builds: ungated.builds,
-            runId: ctx.runId,
-          });
-          ctx.log("meta", `${unit.unit}: builds attested again (${commit}) — ${attested || "none"} → ${[...ungated.builds].sort().join(",")}, as its manifest declares them now`);
-        }
-      }
+      // A registered unit's builds are attested again, and rendered, before its release (build-unit-attest.ts).
+      if (unit.registered) await attestBuildsAgain(ctx, ports, unit.unit, ungated.builds);
       const release: ReleaseCycleRuntime = {};
       const chain: Step[] = unit.registered
         ? [triggerReleaseStep(ports, params), watchReleaseBuildStep(ports, params, release), recordBuildOnlyStep(ports, params, release)]

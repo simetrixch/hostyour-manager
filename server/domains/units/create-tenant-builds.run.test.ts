@@ -16,6 +16,7 @@ import { ports as onboardPorts } from "./onboard.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
+import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
@@ -294,26 +295,46 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
     expect(buildPlane.releaseWatches).toEqual([{ unit: "example-jobs", version: "0.1.0", channel: "stable" }]);
     expect(logs.some((l) => l.includes("build unit example-jobs done"))).toBe(true);
   });
-  it("attests a registered unit's builds again before its release, as its manifest declares them now", async () => {
-    seedClusters();
-    const buildPlane = new FakeBuildPlane();
-    buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-2", releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
-    const onboard = onboardPorts({
-      repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": JOBS_MANIFEST_YAML } }),
-      buildPlane,
+  describe("a registered unit whose manifest declares other builds than it attests", () => {
+    const rendering = (builds: string[]): FakeMasterArgoReader => new FakeMasterArgoReader({ statuses: new Map([["example-jobs-build", {
+      syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy",
+      syncSources: [{ repoURL: "https://github.com/x/hostyour-cloud.git", revision: SHA }, { repoURL: "https://github.com/x/hostyour-cloud.git", revision: SHA, path: "clusters/inventories/consumer-build", valuesObject: { unit: { name: "example-jobs", buildsJson: JSON.stringify(builds) } } }],
+    } as ArgoAppStatus]]) });
+    async function standing(extra: { buildArgo: FakeMasterArgoReader }) {
+      seedClusters();
+      const buildPlane = new FakeBuildPlane();
+      buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-2", releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
+      const onboard = onboardPorts({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": JOBS_MANIFEST_YAML } }), buildPlane, ...extra });
+      await onboard.registrations.commitRegistration({
+        unit: { name: "example-jobs", repoURL: JOBS_REPO, owner: "team-acme", onboardedAt: "2026-01-01T00:00:00.000Z", suspended: false, quiesced: false },
+        builds: ["example-jobs-old"], runId: "run_old",
+      });
+      const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: true, form: "build-only" as const };
+      return { onboard, buildPlane, step: buildUnitStep(() => ({ ports: onboard }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit) };
+    }
+    it("attests them again, keeps the rest of the registration, and releases once the build Application renders them", async () => {
+      const { onboard, buildPlane, step } = await standing({ buildArgo: rendering(["example-jobs"]) });
+      const logs: string[] = [];
+      await step.run(ctx(params(), logs, []));
+      const entry = (await onboard.registrations.readBuildRegistration("example-jobs"))?.entry;
+      expect(entry?.builds).toEqual(["example-jobs"]);
+      expect(entry?.onboardedAt).toBe("2026-01-01T00:00:00.000Z");
+      expect(buildPlane.releaseWatches).toHaveLength(1);
+      expect(logs.some((l) => l.includes("builds attested again"))).toBe(true);
     });
-    // The unit stands registered with a build its manifest no longer declares (a renamed image).
-    await onboard.registrations.commitRegistration({
-      unit: { name: "example-jobs", repoURL: JOBS_REPO, owner: "team-acme", onboardedAt: "2026-01-01T00:00:00.000Z", suspended: false, quiesced: false },
-      builds: ["example-jobs-old"], runId: "run_old",
+    it("does not trigger the release while the build Application still renders the old builds", async () => {
+      const { buildPlane, step } = await standing({ buildArgo: rendering(["example-jobs-old"]) });
+      await expect(step.run(ctx(params(), [], []))).rejects.toThrow(/has not rendered the builds example-jobs.*renders example-jobs-old/);
+      expect(buildPlane.releaseWatches).toEqual([]);
     });
-    const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: true, form: "build-only" as const };
-    const logs: string[] = [];
-    await buildUnitStep(() => ({ ports: onboard }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit).run(ctx(params(), logs, []));
-    const standing = await onboard.registrations.readBuildRegistration("example-jobs");
-    expect(standing?.entry.builds).toEqual(["example-jobs"]);
-    expect(standing?.entry.onboardedAt).toBe("2026-01-01T00:00:00.000Z"); // the rest of the registration stands as it was
-    expect(logs.some((l) => l.includes("builds attested again"))).toBe(true);
+    it("refuses a build name another unit attests, writing nothing", async () => {
+      const { onboard, step } = await standing({ buildArgo: rendering(["example-jobs"]) });
+      await onboard.registrations.commitRegistration({
+        unit: { name: "other-unit", repoURL: "https://github.com/acme/other-unit.git", suspended: false, quiesced: false }, builds: ["example-jobs"], runId: "run_other",
+      });
+      await expect(step.run(ctx(params(), [], []))).rejects.toThrow(/example-jobs \(attested by other-unit\)/);
+      expect((await onboard.registrations.readBuildRegistration("example-jobs"))?.entry.builds).toEqual(["example-jobs-old"]);
+    });
   });
 
   // The rule of #220 on the tenant path: a unit the App reaches is reached with the App's one row, one

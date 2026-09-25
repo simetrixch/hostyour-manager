@@ -337,7 +337,8 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
-        warnings: planned.builds.warnings,
+        warnings: planned.builds.units.map((u) =>
+          `build unit ${u.unit} builds ${u.images.join(", ")}: ${u.registered ? "registered, so its builds are attested again as its manifest declares them now and its release is re-run; the attestation stays after an abort, and a tenant still pulling a build it drops stays on that build's last pin" : "not registered, so it is onboarded build-only"} — its next version is pinned for ${tc.stage} on the books branch`),
         requiredSecrets: [],
       };
       return { outcome: "planned", params, plan };
