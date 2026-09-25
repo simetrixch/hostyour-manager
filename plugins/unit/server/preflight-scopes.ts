@@ -14,19 +14,19 @@
 //
 // SECURITY: the consumer PAT is opened from the sealed store in-run, sent only as the GitHub Bearer
 // auth header (readTokenScopes), and its Buffer is zeroed after use — never logged.
-import type { Step } from "../../executor/types.ts";
-import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
-import { WebhookScopeError } from "../../adapters/github-consumer/port.ts";
-import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
-import { errValidation } from "../../kernel/errors.ts";
-import { REQUIRED_CONSUMER_PAT_SCOPES, missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "#unit/server/pat-scopes.ts";
-import { probeIdentity } from "./onboard-probes.ts";
+import type { Step } from "#core/server/executor/types.ts";
+import type { BuildPorts, BuildParams } from "./build-chain.ts";
+import { WebhookScopeError } from "#core/server/adapters/github-consumer/port.ts";
+import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
+import { REQUIRED_CONSUMER_PAT_SCOPES, missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
+import { probeIdentity } from "./build-probes.ts";
 
 /** The onboard `preflight-scopes` step: verify the consumer PAT carries EVERY right the onboard needs
  *  on the consumer repo — repo + workflow + admin:repo_hook — up front, before any mutation, and fail
  *  with the COMPLETE missing set (never one scope at a time). Fail-closed on an unwired client, a
  *  fine-grained/invalid token, or any missing scope. */
-export function preflightScopesStep(ports: OnboardPorts, p: OnboardParams): Step {
+export function preflightScopesStep(ports: BuildPorts, p: BuildParams): Step {
   return {
     name: "preflight-scopes",
     title: "Pre-flight the repository PAT scopes (repo + workflow + admin:repo_hook)",

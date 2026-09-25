@@ -13,7 +13,7 @@
 //  - the PACKAGES identity: the owner's PACKAGES READER, required for a unit whose
 //    repository routes a scope to GitHub Packages (its `.npmrc`, npmrcPackageScopes) and for no
 //    other (#221). An App installation token reads no private npm package whatever the App's
-//    permissions say, so a build's `.npmrc` carries this token (onboard-seed-repo-pat.ts), never
+//    permissions say, so a build's `.npmrc` carries this token (seed-repo-pat.ts), never
 //    the repository's.
 // Callers: the onboard POST and its prefill (api.ts, api-onboard-prefill.ts), the tenant build
 // units (tenant-builds.ts) and the tenant's own apps repository (tenant-apps-steps.ts).

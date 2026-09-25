@@ -25,9 +25,9 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { AppStatus } from "../../../shared/enums.ts";
 import {
   markRemovingCleanup, removeRegistrationCleanup, watchConsumerPruneCleanup, deleteSmtpOpsGrantCleanup,
-  deleteRepoCredentialCleanup, removeDnsCleanup, removeBuildRegistrationCleanup, settleProvisionalRowCleanup,
+  deleteRepoCredentialCleanup, removeDnsCleanup, settleProvisionalRowCleanup,
 } from "./onboard-steps.ts";
-import { removeWebhookCleanup } from "./onboard-webhook.ts";
+import { removeWebhookCleanup } from "#unit/server/build-webhook.ts";
 // Type-only, so there is no runtime import cycle back into onboard.run.ts — the create-tenant-abort.ts shape.
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 
@@ -50,17 +50,6 @@ export function deployableOnboardCleanups(ports: OnboardPorts, p: DeployableOnbo
     removeWebhookCleanup(ports, p),
     // LAST, after every mutation behind the row is undone: the intent the row recorded is settled.
     settleProvisionalRowCleanup(ports, p),
-  ];
-}
-
-/** The build-only form's compensations, in RUN order — armed by its write-registration the same way.
- *  Nothing of a build-only unit deploys, so there is no prune to wait for; every entry already asks
- *  the registration tree before it removes a UNIT-scoped object (the grants and the webhook go only
- *  with the unit's last stage, and build.yaml is kept while any stage file stands). */
-export function buildOnlyOnboardCleanups(ports: OnboardPorts, p: OnboardParams): Cleanup[] {
-  return [
-    removeBuildRegistrationCleanup(ports, p),
-    removeWebhookCleanup(ports, p),
   ];
 }
 

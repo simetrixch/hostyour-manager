@@ -1,4 +1,4 @@
-// The `refresh-repo-pat` step (onboard-seed-repo-pat.ts): the unit's build repo-pat is rewritten,
+// The `refresh-repo-pat` step (plugins/unit/server/seed-repo-pat.ts): the unit's build repo-pat is rewritten,
 // its three build Secrets are deleted behind the rewrite, and the step holds until ESO has
 // materialized them again — read off the ExternalSecrets' refreshTime — before the release is
 // dispatched. Kept apart from onboard.run.test.ts like the other per-step files; the step is built
@@ -7,8 +7,9 @@ import { dropCredentialRows } from "../../security/store.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
-import { refreshRepoPatStep, seedRepoPatStep } from "./onboard-seed-repo-pat.ts";
-import { BuildOnlyOnboardParams, type OnboardPorts } from "./onboard.run.ts";
+import { refreshRepoPatStep, seedRepoPatStep } from "#unit/server/seed-repo-pat.ts";
+import { type OnboardPorts } from "./onboard.run.ts";
+import { BuildOnlyParams } from "#unit/server/build-chain.ts";
 import { BUILD_TARGET_SECRETS } from "#unit/server/app-token-refresh.ts";
 import { ports, buildSecretRows, FakeBuildPlaneClusterReader, FakeSeeder, BUILD_SECRETS_MATERIALIZED_AT } from "./onboard.fixture.ts";
 import { FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
@@ -24,8 +25,8 @@ beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
 const DELETES = BUILD_TARGET_SECRETS.map((name) => ({ op: "delete" as const, namespace: NS, name }));
 
-function params(): BuildOnlyOnboardParams {
-  return BuildOnlyOnboardParams.parse({
+function params(): BuildOnlyParams {
+  return BuildOnlyParams.parse({
     form: "build-only", consumerName: "acme", repoURL: "https://github.com/x/acme.git", owner: "team-acme",
     version: "1.0.0", channel: "stable", builds: ["acme-api"], repoCredentialId: "cred_app", resolvedSha: SHA,
     domain: "m1.example", stage: "prod",

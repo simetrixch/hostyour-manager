@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
-import { admitFirstMasterUngated, readUngatedOnboard, type FirstMasterAdmission } from "./first-master.ts";
+import { admitFirstMasterUngated, type FirstMasterAdmission } from "./first-master.ts";
+import { readUngatedOnboard } from "#unit/server/ungated-build.ts";
 import { CONSUMER_MANIFEST_PATH } from "../../../shared/consumer.ts";
 
 const SHA = "b".repeat(40);

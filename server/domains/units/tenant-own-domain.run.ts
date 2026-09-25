@@ -11,7 +11,7 @@ import { attestTenantTargetStep, loadTenantCluster, type TenantCluster } from ".
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { isTenantRecord, removeTenantBookedRecord, tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
 import { tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
-import { sleep } from "./onboard-release-cycle.ts";
+import { sleep } from "#unit/server/release-cycle.ts";
 import type { TenantSetRoutingPorts } from "./tenant-routing.run.ts";
 
 // `tenant-set-own-domain` — set, switch or clear the ONE own domain of a standing tenant.

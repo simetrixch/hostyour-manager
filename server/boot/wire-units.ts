@@ -48,6 +48,8 @@ import { makeRestoreDef } from "../domains/units/restore.run.ts";
 import { makeMigrateDef } from "../domains/units/migrate.run.ts";
 import { errValidation } from "../kernel/errors.ts";
 import { buildTenantOnboarding } from "./wire-tenants.ts";
+import { consumerUnitProbes } from "../domains/units/consumer-unit-probes.ts";
+import type { UnitProbes } from "#unit/server/check-units.ts";
 
 // The unit composition — the only place the real
 // unit adapters are constructed and handed to the Run families. Kept out of wire.ts to keep that
@@ -263,10 +265,14 @@ export function buildUnits(
   // THE TENANT FAMILY IS WIRED FIRST (the consumer family needs its registrations) AND YET RUNS THE
   // CONSUMER'S BUILD CHAIN per build unit it lacks (tenant-builds.ts) — so the consumer ports reach it
   // through a holder filled once both stand. The tenant defs read it at run time, never at wiring.
-  const lateBuild: { deps?: TenantBuildDeps } = {};
-  const tenant = buildTenantOnboarding(config, store, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps, githubApp);
+  const lateBuild: { deps?: TenantBuildDeps; onboard?: OnboardPorts } = {};
+  // The unit check's slot: the consumer family's probes are registered first, the order the check has
+  // always walked the families in, and read the consumer onboarding's ports late like the builds do.
+  const unitProbes: UnitProbes[] = resolveUnitApex ? [consumerUnitProbes({ onboard: () => lateBuild.onboard, resolveUnitApex, githubApp })] : [];
+  const tenant = buildTenantOnboarding(config, store, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps, unitProbes, githubApp);
   const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube, githubApp);
   if (consumer.onboardPorts) {
+    lateBuild.onboard = consumer.onboardPorts;
     lateBuild.deps = {
       ports: consumer.onboardPorts,
       ...(consumer.platformGitHub ? { platformGitHub: consumer.platformGitHub } : {}),

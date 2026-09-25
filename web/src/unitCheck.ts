@@ -5,7 +5,7 @@ import { checkAttention, type UnitCheck } from "../../shared/preflight.ts";
 // Tenants pages both show it, so stating it once is what stops one calling a unit fine that the
 // other calls drifted.
 //
-// The check itself is the check-units step of tenant-check (server/domains/units/check-units.ts),
+// The check itself is the check-units step of tenant-check (plugins/unit/server/check-units.ts),
 // on the same six-hour schedule as the administrator check. It records every finding; this shows
 // the ones worth a look — a failure of either severity, or a warning — and stays QUIET on a unit
 // whose every probe passed, because a page where every row shouts is a page where the one row that

@@ -27,7 +27,7 @@ import { BOOTSTRAP_TOKEN_KEY } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
 import { tenantMemberUrl } from "#unit/server/unit-dns.ts";
-import { checkUnitsStep, type CheckUnitsPorts } from "./check-units.ts";
+import { checkUnitsStep, type UnitProbes } from "#unit/server/check-units.ts";
 
 /** The header the tenant's auth reads its bootstrap token from — the same one the invite uses. */
 const BOOTSTRAP_TOKEN_HEADER = "X-Bootstrap-Token";
@@ -43,9 +43,10 @@ export interface CheckTenantsPorts {
   resolver: ClusterKubeResolver;
   health: TenantHealthReader;
   resolveUnitApex: (domain: string, stage: Stage) => Promise<string>;
-  /** The second step's ports (check-units.ts): every standing unit's probes, run again. Optional so
-   *  a harness of the administrator check alone needs none; the wiring hands them. */
-  units?: CheckUnitsPorts;
+  /** The second step's slot (plugins/unit/server/check-units.ts): every family's registered probes of
+   *  its standing units, run again. Optional so a harness of the administrator check alone needs none;
+   *  the wiring hands it. */
+  units?: () => readonly UnitProbes[];
 }
 
 /** No parameters: the check is over every tenant this manager knows, and a check that could be

@@ -1,19 +1,19 @@
 // The onboard `seed-repo-pat` step, and the `refresh-repo-pat` step a release of a unit whose
 // credential is the platform's GitHub App runs first. Split out of onboard.run.ts (like
-// onboard-webhook.ts / onboard-activate.ts / secret-mint.ts) so the run file stays a thin
+// build-webhook.ts / onboard-activate.ts / secret-mint.ts) so the run file stays a thin
 // orchestrator and the per-unit PAT writes are a small, self-contained unit.
-import type { Step } from "../../executor/types.ts";
-import { KV_MOUNT } from "../../adapters/vault/port.ts";
-import { errValidation } from "../../kernel/errors.ts";
-import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
-import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshUnitRepoPat } from "#unit/server/app-token-refresh.ts";
-import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
-import { sleep } from "./onboard-release-cycle.ts";
-import { probePackages } from "./onboard-probes.ts";
-import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderFor, packagesReaderMissing } from "#unit/server/repo-identity.ts";
-import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
-import type { StepCtx } from "../../executor/types.ts";
-import { readOwnerIdentity } from "#unit/server/owners.ts";
+import type { Step } from "#core/server/executor/types.ts";
+import { KV_MOUNT } from "#core/server/adapters/vault/port.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
+import type { BuildPorts, BuildParams } from "./build-chain.ts";
+import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshUnitRepoPat } from "./app-token-refresh.ts";
+import { unitBuildNamespace } from "./build-rbac.ts";
+import { sleep } from "./release-cycle.ts";
+import { probePackages } from "./build-probes.ts";
+import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderFor, packagesReaderMissing } from "./repo-identity.ts";
+import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
+import type { StepCtx } from "#core/server/executor/types.ts";
+import { readOwnerIdentity } from "./owners.ts";
 
 /** The onboard `seed-repo-pat` step: write the unit's build entry secret/build/<name>/repo-pat on
  *  the LOCAL Vault with its TWO values (#220): property `pat`, the repository token the Manager
@@ -32,7 +32,7 @@ import { readOwnerIdentity } from "#unit/server/owners.ts";
  *  `.npmrc` at the pinned commit, read the way the packages probe reads it), null where it routes
  *  none — and a refusal, naming the owner and the scopes, where a scope is routed and the
  *  owner records no reader (#221). */
-async function packagesReaderOrRefuse(ports: OnboardPorts, p: OnboardParams, ctx: StepCtx): Promise<string | null> {
+async function packagesReaderOrRefuse(ports: BuildPorts, p: BuildParams, ctx: StepCtx): Promise<string | null> {
   const id = packagesReaderFor((org) => readOwnerIdentity(ctx.db, org), p.repoURL);
   if (id) return id;
   const clone = await ports.repo.cloneAtRef({ repoURL: p.repoURL, ref: p.resolvedSha, credentialId: p.repoCredentialId, signal: ctx.signal });
@@ -50,7 +50,7 @@ async function packagesReaderOrRefuse(ports: OnboardPorts, p: OnboardParams, ctx
   return null;
 }
 
-export function seedRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
+export function seedRepoPatStep(ports: BuildPorts, p: BuildParams): Step {
   return {
     name: "seed-repo-pat",
     title: "Seed the unit's repository token and its owner's packages reader into the local build Vault",
@@ -95,7 +95,7 @@ export function seedRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
  *  True across the deletion, and the Manager holds no `get` on Secrets. Runs only in the release
  *  re-run of a unit already registered (tenant-apps-steps.ts): the first onboarding seeds the entry
  *  through seed-repo-pat and clones within the hour. */
-export function refreshRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
+export function refreshRepoPatStep(ports: BuildPorts, p: BuildParams): Step {
   return {
     name: "refresh-repo-pat",
     title: "Rewrite the unit's repo PAT in the local build Vault with a value minted now, and carry it into the build Secrets",

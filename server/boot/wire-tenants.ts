@@ -34,6 +34,8 @@ import type { TenantLifecyclePorts } from "../domains/units/lifecycle.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/units/create-tenant.run.ts";
 import type { RegisteredUnit, TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import { makeCheckTenantsDef } from "../domains/units/check-tenants.run.ts";
+import { tenantUnitProbes } from "../domains/units/tenant-unit-probes.ts";
+import type { UnitProbes } from "#unit/server/check-units.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
 import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
@@ -120,6 +122,9 @@ export function buildTenantOnboarding(
   /** The consumer onboarding's ports, handed late: the tenant defs run its build-only chain per build
    *  unit a tenant lacks (tenant-builds.ts), and that family is wired after this one. */
   onboard: () => TenantBuildDeps | undefined,
+  /** The unit check's slot (plugins/unit/server/check-units.ts): the tenant family registers its own
+   *  probes into it, beside the ones the other family registered. */
+  unitProbes: UnitProbes[],
   /** The platform's GitHub App — the identity the catalog is read and written with, and a tenant's
    *  own repository is created with. */
   githubApp: GitHubApp,
@@ -303,6 +308,7 @@ export function buildTenantOnboarding(
     platformRepoURL,
   };
 
+  unitProbes.push(tenantUnitProbes(onboardPorts));
   const defs: AnyRunDefinition[] = [
     makeCreateTenantDef(onboardPorts),
     // The periodic administrator check. It reads only — a Secret off each target cluster and one
@@ -312,9 +318,9 @@ export function buildTenantOnboarding(
       resolver: onboardPorts.resolver,
       resolveUnitApex: onboardPorts.resolveUnitApex,
       health: new HttpTenantHealthReader(),
-      // Every standing unit's probes, run again on the same schedule (#210): the consumer
-      // onboarding's ports are handed late, the way the build units get them.
-      units: { onboard: () => onboard(), tenant: onboardPorts },
+      // Every standing unit's probes, run again on the same schedule (#210): whatever each family
+      // registered into the slot by the time the run starts.
+      units: () => unitProbes,
     }),
     makeAddAppDef(onboardPorts),
     // The members of a standing tenant resolved again off the product's manifest: the same port set

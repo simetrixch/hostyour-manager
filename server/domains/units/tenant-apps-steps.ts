@@ -23,15 +23,15 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
-import { DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
-import { buildOnlySteps, type BuildOnlyOnboardParams } from "./onboard.run.ts";
-import { readUngatedOnboard } from "./first-master.ts";
+import { DEFAULT_BRANCH_HEAD } from "#unit/server/build-chain.ts";
+import { buildOnlySteps, type BuildOnlyParams } from "#unit/server/build-chain.ts";
+import { readUngatedOnboard } from "#unit/server/ungated-build.ts";
 import { resolveNextVersion } from "#unit/server/release-version.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { channelReaching } from "./tenant-builds.ts";
-import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
-import { recordBuildOnlyStep } from "./onboard-registration.ts";
-import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
+import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
+import { recordBuildOnlyStep } from "#unit/server/build-registration.ts";
+import { refreshRepoPatStep } from "#unit/server/seed-repo-pat.ts";
 import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "#unit/server/repo-identity.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
@@ -68,7 +68,7 @@ export interface TenantAppsStepParams extends TenantAppsUnit {
 }
 
 /** In-run memory of one execute() pass: the id of the `github-app` credential sealed for the unit,
- *  and the image tag the bundle's release built (read off its PipelineRun, onboard-release-cycle.ts).
+ *  and the image tag the bundle's release built (read off its PipelineRun, plugins/unit/server/release-cycle.ts).
  *  A resumed pass seals afresh — the id sealed before is not in its memory — and carries no tag,
  *  which the step that needs it refuses rather than guessing one. */
 export interface TenantAppsRepoRuntime {
@@ -250,13 +250,13 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
           { repoURL: url, ref: DEFAULT_BRANCH_HEAD, consumerName: unit, repoCredentialId: credentialId },
           { cluster: master.domain, admittedBy: [`apps repository of tenant ${p.guid}, created by this run from the catalog's ${p.templateBuild}; its manifest was written by this run and its image is mounted by a fan-out the tenant gates judge`] },
         );
-        const params: BuildOnlyOnboardParams = {
+        const params: BuildOnlyParams = {
           form: "build-only", consumerName: unit, repoURL: url, repoCredentialId: credentialId, owner: p.owner,
           version, channel, stage: p.stage, resolvedSha: ungated.resolvedSha, domain: master.domain, builds: ungated.builds, ungated,
         };
         // A registered unit's release re-run rewrites its build repo-pat first: the entry seeded at
         // the onboarding holds a token that died an hour later, and the pipeline's clone reads it.
-        // The chain's scope preflight skips itself for the App credential (onboard-preflight-scopes.ts).
+        // The chain's scope preflight skips itself for the App credential (plugins/unit/server/preflight-scopes.ts).
         const release: ReleaseCycleRuntime = {};
         const chain: Step[] = p.registered
           ? [refreshRepoPatStep(onboard, params), triggerReleaseStep(onboard, params), watchReleaseBuildStep(onboard, params, release), recordBuildOnlyStep(onboard, params, release)]

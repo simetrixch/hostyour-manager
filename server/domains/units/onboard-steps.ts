@@ -1,11 +1,11 @@
 // The onboard step factories + compensations, extracted from onboard.run.ts so that file stays a thin
-// orchestrator — the DRY companion to onboard-seed-repo-pat.ts / onboard-seed-postgres.ts (which are
+// orchestrator — the DRY companion to plugins/unit/server/seed-repo-pat.ts / onboard-seed-postgres.ts (which are
 // already such factories). Every step here reads only p.stage/p.clusterId/p.domain/
 // p.consumerName/p.argoAppName/etc. The onboard-ONLY steps (check, write-registration, the build-only
 // record) stay in the run file.
 //
 // Types come from onboard.run.ts as a TYPE-ONLY import (erased at runtime), exactly like
-// onboard-seed-repo-pat.ts — so the value dependency is one-directional (onboard.run.ts imports these
+// plugins/unit/server/seed-repo-pat.ts — so the value dependency is one-directional (onboard.run.ts imports these
 // factories) and there is no runtime import cycle.
 import { eq, and } from "drizzle-orm";
 import type { Step, Cleanup } from "../../executor/types.ts";
@@ -13,7 +13,7 @@ import type { Db } from "../../db/client.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { appId } from "../../kernel/ids.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { probeTarget, probeDns } from "./onboard-probes.ts";
+import { probeTarget, probeDns } from "./onboard-deploy-probes.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import type { AppProvenance, AppStatus, Stage } from "../../../shared/enums.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
@@ -22,7 +22,7 @@ import { buildConsumerSecretDataWithDerivations } from "#unit/server/secret-mint
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
 import { provisionUnitDns, removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
-import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
+import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 
 // The compensations below are IDEMPOTENT WITHOUT SWALLOWING: each one tolerates exactly the
 // "already absent" outcome (a read-first skip, or a delete that resolves deleted:false) and lets every
@@ -129,22 +129,6 @@ export function removeRegistrationCleanup(ports: OnboardPorts, p: DeployableOnbo
   };
 }
 
-/** The build-only twin of removeRegistrationCleanup: take back registrations/<name>/build.yaml — the
- *  registrations itself keeps it (removed:false) when a stage file still stands (the unit is deployed
- *  elsewhere and its build attestation must survive this run's abort). */
-export function removeBuildRegistrationCleanup(ports: OnboardPorts, p: OnboardParams): Cleanup {
-  return {
-    name: "remove-build-registration",
-    title: "Remove the build registration",
-    run: async (ctx) => {
-      const { removed } = await ports.registrations.removeBuildRegistration(p.consumerName, ctx.runId);
-      ctx.log("meta", removed
-        ? `build registration for ${p.consumerName} removed`
-        : `build registration for ${p.consumerName} kept — already absent, or a stage file still stands and the attestation belongs to it`);
-    },
-  };
-}
-
 /** The offboard inverse of provision-repo-credential, run only on an explicit abort-with-cleanup. An
  *  already-absent Secret resolves deleted:false; an unwired writer never provisioned one. */
 export function deleteRepoCredentialCleanup(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
@@ -238,7 +222,7 @@ export function attestTargetStep(ports: OnboardPorts, p: DeployableOnboardParams
   return {
     name: "attest-target",
     title: "Attest the target cluster (deploy-state fresh)",
-    // The same reading before the approve (onboard-probes.ts); the step re-asks it at run time,
+    // The same reading before the approve (onboard-deploy-probes.ts); the step re-asks it at run time,
     // because step 0 of a mutating run is where the world is measured last before anything moves.
     probe: () => probeTarget(ports, p),
     run: async (ctx) => {

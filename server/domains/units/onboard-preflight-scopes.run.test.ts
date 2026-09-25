@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { preflightScopesStep } from "./onboard-preflight-scopes.ts";
+import { preflightScopesStep } from "#unit/server/preflight-scopes.ts";
 import { OnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 
-// Focused tests for the onboard `preflight-scopes` step (impl: onboard-preflight-scopes.ts). It
+// Focused tests for the onboard `preflight-scopes` step (impl: plugins/unit/server/preflight-scopes.ts). It
 // only touches ports.webhook (readTokenScopes) + the sealed PAT, so the harness mirrors the tiny
 // onboard-webhook.run.test.ts one. The repoURL github.com/x/acme means the step checks owner "x".
 const SHA = "a".repeat(40);

@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { apps, clusters, servers, tenants } from "../../db/schema/inventory.ts";
-import { checkUnitsStep } from "./check-units.ts";
+import { checkUnitsStep } from "#unit/server/check-units.ts";
+import { consumerUnitProbes } from "./consumer-unit-probes.ts";
+import { tenantUnitProbes } from "./tenant-unit-probes.ts";
 import { ports as onboardPorts, emptyZone } from "./onboard.fixture.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
@@ -52,7 +54,8 @@ describe("check-units", () => {
     github.scopeError = true; // the consumer's stored PAT lost admin:repo_hook
     const o = onboardPorts({ github, dns });
     const logs: string[] = [];
-    await checkUnitsStep({ onboard: () => ({ ports: o }), tenant: { dns, resolveUnitApex: async () => "example.com", githubApp: appWith("x") } }).run(ctx(logs));
+    const apex = async (): Promise<string> => "example.com";
+    await checkUnitsStep(() => [consumerUnitProbes({ onboard: () => o, resolveUnitApex: apex, githubApp: appWith("x") }), tenantUnitProbes({ dns, resolveUnitApex: apex })]).run(ctx(logs));
 
     const consumer = db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_1")).get()?.check;
     expect(consumer?.findings.map((f) => [f.id, f.status])).toEqual([["identity", "pass"], ["webhook", "fail"], ["dns.record", "pass"]]);
@@ -68,9 +71,10 @@ describe("check-units", () => {
 
   it("says not measured on a unit it cannot probe — no onboarding wired, or a row without a repository", async () => {
     db.db.insert(apps).values({ id: "app_adopted", clusterId: "cls_1", name: "found", stage: "prod", host: "found", provenance: "adopted", status: "active" }).run();
-    await checkUnitsStep({ onboard: () => ({ ports: onboardPorts() }), tenant: { dns: emptyZone(), resolveUnitApex: async () => "example.com" } }).run(ctx([]));
+    const apex = async (): Promise<string> => "example.com";
+    await checkUnitsStep(() => [consumerUnitProbes({ onboard: () => onboardPorts(), resolveUnitApex: apex })]).run(ctx([]));
     expect(db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_adopted")).get()?.check?.findings).toMatchObject([{ status: "warn", detail: "not measured: the row records no repository (an adopted unit)" }]);
-    await checkUnitsStep({ tenant: { dns: emptyZone(), resolveUnitApex: async () => "example.com" } }).run(ctx([]));
+    await checkUnitsStep(() => [consumerUnitProbes({ onboard: () => undefined, resolveUnitApex: apex })]).run(ctx([]));
     expect(db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_adopted")).get()?.check?.findings).toMatchObject([{ detail: "not measured: the consumer onboarding is not wired on this manager" }]);
   });
 

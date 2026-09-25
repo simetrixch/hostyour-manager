@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { setupWebhookStep, removeWebhookCleanup, removeConsumerWebhook } from "./onboard-webhook.ts";
+import { setupWebhookStep, removeWebhookCleanup, removeConsumerWebhook } from "#unit/server/build-webhook.ts";
 import { OnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { seedClusterMaps, BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { Registrations } from "#unit/server/registrations.ts";
@@ -13,7 +13,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 
 // Focused tests for the onboard `setup-webhook` step + the removal it shares with offboard/purge (impl:
-// onboard-webhook.ts). Kept apart from onboard.run.test.ts so each file stays within the per-file line
+// plugins/unit/server/build-webhook.ts). Kept apart from onboard.run.test.ts so each file stays within the per-file line
 // budget (the onboard-activate pattern). The step is built in isolation (setupWebhookStep) — it only
 // touches ports.github/webhookSecret/webhookSubdomain/resolveBuildPlaneFqdn + the sealed PAT, never the
 // kube/vault clients, so the harness stays tiny. The removal takes fewer of those still: it matches the

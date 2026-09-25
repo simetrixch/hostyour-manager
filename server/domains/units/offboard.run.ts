@@ -13,14 +13,14 @@ import type { VaultSeeder } from "./vault-seeder.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { RepoWriter } from "../../adapters/git/port.ts";
 import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
-import { removeConsumerWebhook } from "./onboard-webhook.ts";
+import { removeConsumerWebhook } from "#unit/server/build-webhook.ts";
 import { unitRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
-import { removeReleaseKit } from "./onboard-release-kit.ts";
+import { removeReleaseKit } from "#unit/server/inject-release-kit.ts";
 import { assertNoOrphans } from "./offboard-orphans.ts";
 
 // offboard: mark the registration removing, wait for the master ArgoCD to prune the Application, remove
@@ -269,7 +269,7 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
         // The inverse of onboard's setup-webhook: delete the consumer's push-webhook so no build fires
         // for an offboarded consumer. It names no host — the delete matches the EventListener path on
         // whichever address the hook carries, so a hook from a time when another cluster held the build
-        // plane goes too (onboard-webhook.ts). PER UNIT — the repo carries exactly ONE hook however many
+        // plane goes too (plugins/unit/server/build-webhook.ts). PER UNIT — the repo carries exactly ONE hook however many
         // stages the unit is deployed at (ensureHook removes the stale ones), so it is kept while
         // another stage stands; that stage's releases fire through this hook. Runs BEFORE
         // remove-repo-pat — that step REVOKES the sealed clone credential, and this delete needs to open

@@ -1,12 +1,12 @@
 // The onboard `await-build-namespace` step. Split out of onboard-steps.ts (like
-// onboard-seed-repo-pat.ts / onboard-webhook.ts) so the reasoning that belongs to this one wait
+// seed-repo-pat.ts / build-webhook.ts) so the reasoning that belongs to this one wait
 // stands with it and the shared step file stays under its line budget.
-import type { Step } from "../../executor/types.ts";
-import { errValidation, errUpstream } from "../../kernel/errors.ts";
-import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
-import { MASTER_ARGO_NAMESPACE } from "../inventory/cluster-kube.ts";
-import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
-import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
+import type { Step } from "#core/server/executor/types.ts";
+import { errValidation, errUpstream } from "#core/server/kernel/errors.ts";
+import { unitBuildNamespace } from "./build-rbac.ts";
+import { MASTER_ARGO_NAMESPACE } from "#core/server/domains/inventory/cluster-kube.ts";
+import { syncedAt, describeUnsynced } from "./argo-app-status.ts";
+import type { BuildPorts, BuildParams } from "./build-chain.ts";
 
 /** await-build-namespace: wait for GitOps to render the unit's `<name>-build` namespace, which the
  *  step after this one writes into.
@@ -36,7 +36,7 @@ import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
  *  And a BUILD-ONLY unit carries no `clusterId` at all — it deploys nothing, so it has no cluster —
  *  so there is nothing to resolve with in the very form this step exists for. `buildArgo` is
  *  injected the way `buildRbac` beside it is, and for the same reason. */
-export function awaitBuildNamespaceStep(ports: OnboardPorts, p: OnboardParams): Step {
+export function awaitBuildNamespaceStep(ports: BuildPorts, p: BuildParams): Step {
   return {
     name: "await-build-namespace",
     title: "Wait for GitOps to render the unit's build namespace",

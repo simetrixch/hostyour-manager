@@ -1,4 +1,4 @@
-// The release-cycle steps (onboard-release-cycle.ts) — split out of onboard.run.test.ts, which is at
+// The release-cycle steps (plugins/unit/server/release-cycle.ts) — split out of onboard.run.test.ts, which is at
 // the max-lines cap. The steps read only the github/buildPlane/repo/resolver ports + the release
 // identity off params, so a minimal cast scaffold exercises them directly (the extracted-step test
 // pattern, cf. onboard-webhook.run.test.ts).
@@ -10,7 +10,8 @@
 // the bump wrote (never computing it) and holds the Application to the bump commit, fail-fast on a
 // terminally failed sync operation.
 import { describe, it, expect } from "vitest";
-import { triggerReleaseStep, watchReleaseBuildStep, watchDeploymentStep, type ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
+import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
+import { watchDeploymentStep } from "./onboard-watch-deployment.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";

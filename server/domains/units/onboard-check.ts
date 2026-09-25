@@ -1,5 +1,5 @@
-// The onboard `check` step. Split out of onboard.run.ts (like onboard-webhook.ts /
-// onboard-release-kit.ts) so the run file stays a thin orchestrator; the gates themselves live in
+// The onboard `check` step. Split out of onboard.run.ts (like plugins/unit/server/build-webhook.ts /
+// plugins/unit/server/inject-release-kit.ts) so the run file stays a thin orchestrator; the gates themselves live in
 // validate.ts — this step only runs them and holds the outcome against the approved facts.
 import type { Step } from "../../executor/types.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
@@ -8,10 +8,7 @@ import { standingHostFrom } from "#unit/server/unit-dns.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
-
-/** The ref cloned before the gates run — the remote's default branch head. The onboarding validates
- *  what the repo IS, not a pin: only the release cycle ever turns a commit into something deployable. */
-export const DEFAULT_BRANCH_HEAD = "HEAD";
+import { DEFAULT_BRANCH_HEAD } from "#unit/server/build-chain.ts";
 
 /** The gates against the repo's default-branch head — at EXECUTE time, so the repo the run
  *  mutates is the repo that was checked, not a plan-time snapshot. There is no pin to hold it to:

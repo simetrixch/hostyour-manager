@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { injectReleaseKitStep, removeReleaseKit } from "./onboard-release-kit.ts";
+import { injectReleaseKitStep, removeReleaseKit } from "#unit/server/inject-release-kit.ts";
 import { DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "#unit/server/release-kit/release-kit.ts";
 import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
@@ -11,7 +11,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 
 // Focused tests for the onboard `inject-release-kit` step + the shared offboard/purge removal helper
-// (impl: onboard-release-kit.ts). Kept apart from onboard.run.test.ts so each file stays within the
+// (impl: plugins/unit/server/inject-release-kit.ts). Kept apart from onboard.run.test.ts so each file stays within the
 // per-file line budget (the onboard-webhook pattern). The step is built in isolation
 // (injectReleaseKitStep) — it only touches ports.consumerRepo + the sealed PAT, never the kube/vault
 // clients, so the harness stays tiny.

@@ -27,19 +27,19 @@
 // payload's config.secret and is never logged. A missing secret makes the step fail LOUD: a hook whose
 // secret does not match the EventListener's would have every delivery rejected by its
 // X-Hub-Signature-256 check — a silent no-build.
-import type { Step, StepCtx, Cleanup } from "../../executor/types.ts";
-import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
-import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
-import { WebhookScopeError, webhookTargetUrl } from "../../adapters/github-consumer/port.ts";
-import { probeWebhook } from "./onboard-probes.ts";
-import { unitStaysRegistered } from "#unit/server/lifecycle.ts";
-import { parseGitHubOwnerRepo, splitGitHubRepoURL } from "#unit/server/github-repo-url.ts";
-import { errValidation } from "../../kernel/errors.ts";
+import type { Step, StepCtx, Cleanup } from "#core/server/executor/types.ts";
+import type { BuildPorts, BuildParams } from "./build-chain.ts";
+import type { GitHubConsumer } from "#core/server/adapters/github-consumer/port.ts";
+import { WebhookScopeError, webhookTargetUrl } from "#core/server/adapters/github-consumer/port.ts";
+import { probeWebhook } from "./build-probes.ts";
+import { unitStaysRegistered } from "./lifecycle.ts";
+import { parseGitHubOwnerRepo, splitGitHubRepoURL } from "./github-repo-url.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
 
 /** The onboard `setup-webhook` step: create (idempotently) the consumer's push-webhook to the build
  *  plane's image-builder EventListener. Fails LOUD on any missing prerequisite (unwired adapter, absent
  *  HMAC secret, an unreadable cluster map) or a missing-scope PAT — no hook, no build. */
-export function setupWebhookStep(ports: OnboardPorts, p: OnboardParams): Step {
+export function setupWebhookStep(ports: BuildPorts, p: BuildParams): Step {
   return {
     name: "setup-webhook",
     title: "Set up the consumer's build webhook (push → Tekton)",
@@ -104,7 +104,7 @@ export function setupWebhookStep(ports: OnboardPorts, p: OnboardParams): Step {
  *  ensureHook only found the first stage's hook already there — so without the read, aborting the
  *  onboard of a second stage deletes the hook the live stage releases through, and its pushes stop
  *  reaching the platform entirely. */
-export function removeWebhookCleanup(ports: OnboardPorts, p: OnboardParams): Cleanup {
+export function removeWebhookCleanup(ports: BuildPorts, p: BuildParams): Cleanup {
   return {
     name: "remove-consumer-webhook",
     title: "Remove the consumer build webhook (the unit's own goes with its last stage)",

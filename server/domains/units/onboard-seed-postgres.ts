@@ -1,5 +1,5 @@
-// The onboard `seed-postgres-superuser` step. Split out of onboard.run.ts (like onboard-seed-repo-pat.ts
-// / onboard-webhook.ts / onboard-activate.ts) so the run file stays a thin orchestrator and the one
+// The onboard `seed-postgres-superuser` step. Split out of onboard.run.ts (like plugins/unit/server/seed-repo-pat.ts
+// / plugins/unit/server/build-webhook.ts / onboard-activate.ts) so the run file stays a thin orchestrator and the one
 // per-consumer PostgreSQL superuser write is a small, self-contained unit.
 import type { Step } from "../../executor/types.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";

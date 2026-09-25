@@ -40,13 +40,13 @@ import { judgeRepoIdentity, resolveRepoCredentialId, type OwnerIdentityReader, t
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
-import { buildOnlySteps, type BuildOnlyOnboardParams, type OnboardPorts } from "./onboard.run.ts";
-import { readUngatedOnboard } from "./first-master.ts";
-import { DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
+import { buildOnlySteps, type BuildOnlyParams, type BuildPorts } from "#unit/server/build-chain.ts";
+import { readUngatedOnboard } from "#unit/server/ungated-build.ts";
+import { DEFAULT_BRANCH_HEAD } from "#unit/server/build-chain.ts";
 import { resolveNextVersion } from "#unit/server/release-version.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
-import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
-import { recordBuildOnlyStep } from "./onboard-registration.ts";
+import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
+import { recordBuildOnlyStep } from "#unit/server/build-registration.ts";
 import { attestBuildsAgain } from "./build-unit-attest.ts";
 import { type RequiredImage, requiredImagesFrom } from "./ensure-images.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
@@ -190,11 +190,12 @@ export async function planBuildUnits(input: {
   return { outcome: "planned", builds: { units, warnings } };
 }
 
-/** The consumer onboarding's ports and the two release-version inputs beside them, handed to the
- *  tenant run LATE: the consumer family is wired after the tenant family (it needs the tenant
- *  registrations), so the tenant defs hold a getter the wiring fills once both stand. */
+/** The build ports (plugins/unit/server/build-chain.ts) and the two release-version inputs beside
+ *  them, handed to the tenant run LATE: they are built with the consumer family, which is wired after
+ *  the tenant family (it needs the tenant registrations), so the tenant defs hold a getter the wiring
+ *  fills once both stand. */
 export interface TenantBuildDeps {
-  ports: OnboardPorts;
+  ports: BuildPorts;
   platformGitHub?: { owner: string; repo: string };
   platformRepo?: PlatformRepo;
   /** The platform's GitHub App — the identity of a unit it reaches, sealed by the step (repo-identity.ts). */
@@ -286,7 +287,7 @@ export function buildUnitStep(
           ],
         },
       );
-      const params: BuildOnlyOnboardParams = {
+      const params: BuildOnlyParams = {
         form: "build-only",
         consumerName: unit.unit,
         repoURL: unit.repoURL,

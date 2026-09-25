@@ -1,5 +1,5 @@
 // The onboard `seed-mongodb-instance` step. Split out of onboard.run.ts (like onboard-seed-postgres.ts
-// / onboard-seed-repo-pat.ts / onboard-webhook.ts) so the run file stays a thin orchestrator and the
+// / plugins/unit/server/seed-repo-pat.ts / plugins/unit/server/build-webhook.ts) so the run file stays a thin orchestrator and the
 // one per-consumer MongoDB credential write is a small, self-contained unit.
 import type { Step } from "../../executor/types.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";

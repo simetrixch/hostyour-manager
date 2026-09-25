@@ -1,11 +1,11 @@
-// The onboard `write-registration` steps — one per form — plus the build-only `record`. Split out of
-// onboard.run.ts (like onboard-check.ts) so the run file stays a thin orchestrator; the writer
-// itself is the Registrations (registrations.ts), the ONE writer of registrations/**.
+// The deployable form's `write-registration` step. Split out of onboard.run.ts (like onboard-check.ts)
+// so the run file stays a thin orchestrator; the build-only form's twin and its record are the unit's
+// (plugins/unit/server/build-registration.ts), and the writer itself is the Registrations, the ONE
+// writer of registrations/**.
 import type { Step } from "../../executor/types.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
-import type { OnboardPorts, DeployableOnboardParams, BuildOnlyOnboardParams } from "./onboard.run.ts";
-import { deployableOnboardCleanups, buildOnlyOnboardCleanups } from "./onboard-abort.ts";
-import type { ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
+import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
+import { deployableOnboardCleanups } from "./onboard-abort.ts";
 
 /** The deployable form's registration commit: build.yaml (the attested build names) PLUS this
  *  stage's file, in ONE commit. It runs FIRST after the check — the registration is what
@@ -68,60 +68,6 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
       });
       ctx.checkpoint({ commit, registration: `registrations/${p.consumerName}/${p.stage}.yaml` });
       ctx.log("meta", `registration committed (${commit}) — the unit's release pipeline renders from build.yaml, and the ArgoCD on ${p.domain} generates the Application (it converges once the release cycle below fills the delivery branch)`);
-    },
-  };
-}
-
-/** The build-only form's registration commit: build.yaml alone — a build-only unit has no stage
- *  file. For a unit hand-seeded before the run kind existed this is the ATTEST case: identical content
- *  commits nothing (the platform repo's empty-staged-diff no-op), a changed fact (a new sealed
- *  credential id, a new build name) commits the correction — either way the manager is the writer
- *  of the registration. */
-export function writeBuildRegistrationStep(ports: OnboardPorts, p: BuildOnlyOnboardParams): Step {
-  return {
-    name: "write-registration",
-    title: "Commit the build registration (GitOps)",
-    run: async (ctx) => {
-      // The build-only form's whole rollback, armed the same way (onboard-abort.ts).
-      for (const c of buildOnlyOnboardCleanups(ports, p)) ctx.registerCleanup(c);
-      const { commit } = await ports.registrations.commitRegistration({
-        unit: {
-          name: p.consumerName,
-          repoURL: p.repoURL,
-          owner: p.owner,
-          onboardedAt: new Date().toISOString(),
-          suspended: false,
-          quiesced: false,
-        },
-        builds: p.builds,
-        runId: ctx.runId,
-      });
-      ctx.checkpoint({ commit, registration: `registrations/${p.consumerName}/build.yaml` });
-      ctx.log("meta", `build registration committed (${commit}) — the build fan-out renders this unit's release pipeline from it`);
-    },
-  };
-}
-
-/** The build-only form's final record. A build-only unit deploys nowhere and runs on no cluster, so
- *  the apps inventory (keyed on a cluster) has no row for it — its durable record is
- *  registrations/<name>/build.yaml plus THIS run: the checkpoint ties the attested builds to the
- *  release the triggered cycle proved, which is what the manager's read-check-record duty
- *  amounts to here. */
-export function recordBuildOnlyStep(_ports: OnboardPorts, p: BuildOnlyOnboardParams, release: ReleaseCycleRuntime): Step {
-  return {
-    name: "record",
-    title: "Record the build-only unit in the run record",
-    run: async (ctx) => {
-      ctx.checkpoint({
-        registration: `registrations/${p.consumerName}/build.yaml`,
-        builds: p.builds,
-        ...(release.releaseTag ? { releaseTag: release.releaseTag } : {}),
-      });
-      ctx.log(
-        "meta",
-        `build-only unit ${p.consumerName} recorded — builds [${p.builds.join(", ")}] attested` +
-          (release.releaseTag ? `, release ${release.releaseTag} proven through the injected cycle` : ""),
-      );
     },
   };
 }

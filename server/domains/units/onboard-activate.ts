@@ -20,7 +20,7 @@
 // in ONE line on the live-only ephemeral stream — the only place it is ever shown — and stored nowhere.
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
-import { sleep } from "./onboard-release-cycle.ts";
+import { sleep } from "#unit/server/release-cycle.ts";
 import { mintSecretValue } from "#unit/server/secret-mint.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";

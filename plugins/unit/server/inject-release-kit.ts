@@ -1,5 +1,5 @@
 // The onboard `inject-release-kit` step + the shared offboard/purge release-kit removal. Split out
-// of onboard.run.ts (like onboard-webhook.ts / onboard-seed-repo-pat.ts) so the release-kit concern
+// of onboard.run.ts (like build-webhook.ts / seed-repo-pat.ts) so the release-kit concern
 // is one small, testable unit and both sides of it (commit + git-rm) share one place for the file
 // set + the fail direction.
 //
@@ -16,17 +16,17 @@
 //
 // The offboard/purge removal (removeReleaseKit) is FAIL-SOFT (like removeConsumerWebhook): a failure
 // to git-rm the release-kit NEVER blocks teardown — every failure path logs a warning and returns.
-import type { Step, StepCtx } from "../../executor/types.ts";
-import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
-import type { RepoWriter } from "../../adapters/git/port.ts";
-import { errValidation } from "../../kernel/errors.ts";
-import { RELEASE_KIT_DIR, RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "#unit/server/release-kit/release-kit.ts";
+import type { Step, StepCtx } from "#core/server/executor/types.ts";
+import type { BuildPorts, BuildParams } from "./build-chain.ts";
+import type { RepoWriter } from "#core/server/adapters/git/port.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
+import { RELEASE_KIT_DIR, RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "./release-kit/release-kit.ts";
 
 /** The onboard `inject-release-kit` step: commit the release-kit (release/ scripts + the release
  *  workflow) into the consumer repo's default branch, replacing whatever kit stood there. Fails LOUD
  *  on any missing prerequisite (an unwired writer) or a failed push — no release tooling, the
  *  consumer cannot cut a release, so this must never be a silent skip (setup-webhook precedent). */
-export function injectReleaseKitStep(ports: OnboardPorts, p: OnboardParams): Step {
+export function injectReleaseKitStep(ports: BuildPorts, p: BuildParams): Step {
   return {
     name: "inject-release-kit",
     title: "Commit the release kit into the consumer repo (release/ + workflow)",

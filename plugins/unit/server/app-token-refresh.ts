@@ -3,7 +3,7 @@
 // reads it off secret/build/<unit>/repo-pat, so a value seeded once at the onboarding lets the unit
 // build exactly once. The entry is therefore REWRITTEN — every 45 minutes on a timer
 // (boot/refresh-app-tokens-schedule.ts, once at boot too) and before every release the Manager
-// triggers for such a unit (onboard-seed-repo-pat.ts refreshRepoPatStep). A unit whose credential is
+// triggers for such a unit (seed-repo-pat.ts refreshRepoPatStep). A unit whose credential is
 // a PAT is rewritten on the same ticks (hostyour-manager#230): its `pat` does not expire, but the
 // `packages` beside it is the packages reader of its owner, recorded and replaced on the
 // Owners page, and an entry written once at the onboarding never learns of that — which is

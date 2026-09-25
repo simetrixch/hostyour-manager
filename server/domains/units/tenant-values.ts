@@ -1,6 +1,6 @@
 // tenant-values.ts — the plan-time resolvers that turn INVENTORY (and the cluster values chain)
 // into the facts a tenant run needs, extracted from create-tenant.run.ts the way onboard.run.ts
-// extracted onboard-seed-repo-pat.ts. The manager DB is the sole authority for cluster
+// extracted plugins/unit/server/seed-repo-pat.ts. The manager DB is the sole authority for cluster
 // coordinates — never a hardcoded name:
 //   - resolveTenantCluster:     the cluster a tenant is created on, at the tenant's stage.
 //   - registryHostFromChain:    the registry host a cluster pulls its first-party images from, read

@@ -7,44 +7,43 @@ import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE } from "../../../shared/release.ts";
-import { GateReportSchema, UngatedOnboardSchema } from "../../../shared/gates.ts";
+import { GateReportSchema } from "../../../shared/gates.ts";
 import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, SmtpEntrySchema, consumerArgoAppName, consumerNamespace, consumerHostLabel, hostLabel } from "../../../shared/consumer.ts";
 import type { Activator } from "../../adapters/activation/port.ts";
-import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
-import type { BuildPlane } from "../../adapters/build-plane/port.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { activateStep } from "./onboard-activate.ts";
-import { preflightScopesStep } from "./onboard-preflight-scopes.ts";
-import { setupWebhookStep } from "./onboard-webhook.ts";
-import { injectReleaseKitStep } from "./onboard-release-kit.ts";
-import { awaitBuildNamespaceStep } from "./onboard-await-build-namespace.ts";
+import { preflightScopesStep } from "#unit/server/preflight-scopes.ts";
+import { setupWebhookStep } from "#unit/server/build-webhook.ts";
+import { injectReleaseKitStep } from "#unit/server/inject-release-kit.ts";
+import { awaitBuildNamespaceStep } from "#unit/server/await-build-namespace.ts";
 import { awaitUnitFencesStep } from "./onboard-await-unit-fences.ts";
-import { seedRepoPatStep } from "./onboard-seed-repo-pat.ts";
+import { seedRepoPatStep } from "#unit/server/seed-repo-pat.ts";
 import { seedPostgresSuperuserStep } from "./onboard-seed-postgres.ts";
 import { seedMongodbInstanceStep } from "./onboard-seed-mongodb.ts";
 import {
   attestTargetStep, seedSecretsStep, provisionRepoCredentialStep,
   provisionSmtpOpsGrantStep, provisionDnsStep, smokeStep, recordProvisionalStep, recordInventoryStep, removeCeremonySecretsCleanup,
 } from "./onboard-steps.ts";
-import { deployableOnboardCleanups, buildOnlyOnboardCleanups, assertOnboardAbortable } from "./onboard-abort.ts";
+import { deployableOnboardCleanups, assertOnboardAbortable } from "./onboard-abort.ts";
+import { buildOnlyCleanups } from "#unit/server/build-registration.ts";
 import {
-  triggerReleaseStep, watchReleaseBuildStep, watchDeploymentStep, type ReleaseCycleRuntime,
-} from "./onboard-release-cycle.ts";
-import { checkStep, DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
+  triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime,
+} from "#unit/server/release-cycle.ts";
+import { watchDeploymentStep } from "./onboard-watch-deployment.ts";
+import { checkStep } from "./onboard-check.ts";
+import {
+  BuildParamsBase, BuildOnlyParams, buildOnlySteps, DEFAULT_BRANCH_HEAD, unitNameSchema, repoURLSchema, type BuildPorts,
+} from "#unit/server/build-chain.ts";
 import { admitFirstMasterUngated, planUngatedFirstMaster } from "./first-master.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
-import { writeRegistrationStep, writeBuildRegistrationStep, recordBuildOnlyStep } from "./onboard-registration.ts";
-import type { BuildRbacWriter, RepoCredentialWriter, MasterArgoReader, ClusterReader } from "../../adapters/kube/port.ts";
+import { writeRegistrationStep } from "./onboard-registration.ts";
+import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import { errNotFound, errInternal } from "../../kernel/errors.ts";
 import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome } from "./validate.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
-import { type BuildPlaneFqdnResolver } from "../inventory/cluster-marking.ts";
-import { assertChannelReaches, type ChannelStages } from "../inventory/channel-stages.ts";
+import { assertChannelReaches } from "../inventory/channel-stages.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { consumerUnitHost, standingHostFrom } from "#unit/server/unit-dns.ts";
-import type { Registrations } from "#unit/server/registrations.ts";
-import type { VaultSeeder } from "./vault-seeder.ts";
-import type { RepoReader, RepoWriter } from "../../adapters/git/port.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";
 import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 
@@ -75,51 +74,9 @@ import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 // be reached via the synchronous POST /runs path); onboard is registered opt-in, with its ports, in
 // wire.ts.
 
-const consumerNameSchema = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/);
-const repoURLSchema = z.string().regex(/^https:\/\/[^ ]+\.git$/);
-
-/** The fields BOTH forms of the frozen onboard params share: the operator's identity fields, the
- *  release the trigger fires ({version, channel} — never a tag: the release script mints or reuses
- *  the tag repo-side), and what the streaming plan phase resolved (the checked default-branch head,
- *  the approved report, the attested build names). The steps read this via ctx.params; the
- *  executor's StepCtx exposes params but not plan_json, so the plan phase hands the steps their
- *  inputs here. */
-const OnboardParamsBase = z.object({
-  consumerName: consumerNameSchema,
-  repoURL: repoURLSchema,
-  // The sealed repo read credential — REQUIRED: the API handler seals the operator's one repo PAT into
-  // the store and threads only this reference (the raw PAT never reaches params_json). The clone,
-  // the gate-runner sandbox clone, the kit commit, the workflow dispatch AND the build repo-pat seed
-  // all open it by this id.
-  repoCredentialId: z.string().min(1),
-  owner: z.string().min(1),
-  // What the trigger dispatches: the release script mints <version>-<channel>-<ts14> (or reuses the
-  // existing tag of that version+channel) and pushes the deploy ref for `stage`.
-  version: z.string().regex(RELEASE_VERSION_RE),
-  channel: z.enum(RELEASE_CHANNEL),
-  // The UNIT's own stage, the operator's input for both forms: the registration path
-  // registrations/<name>/<stage>.yaml, the namespace <name>-<stage>, the host, the Vault path
-  // <stage>/consumer/<name>/… and the deploy ref the triggered release pushes all follow it.
-  stage: z.enum(STAGE),
-  // The default-branch head the gates checked at plan time. Display/audit only — there is no pin:
-  // the check step re-runs the gates at the CURRENT head, and the release cycle builds whatever
-  // the minted tag points at.
-  resolvedSha: z.string().regex(/^[0-9a-f]{40}$/),
-  // The cluster this run is ABOUT. Deployable: the target cluster's FQDN — its values-chain branch,
-  // and the map whose `build-plane` field names where the build webhook points. Build-only: the
-  // master's FQDN, since nothing of the unit deploys and the gates run without a values chain; its map
-  // names the build plane the same way. Never the webhook host itself.
-  domain: z.string().min(1),
-  // The build NAMES the validated manifest declared — what write-registration commits into
-  // build.yaml as the build fan-out's source. A name IS the image name, and the tag is the release
-  // pipeline's to mint, so neither stands here. Never empty: the gates hard-fail a manifest
-  // without builds.
-  builds: z.array(z.string()),
-});
-
 /** The DEPLOYABLE form: everything the target cluster adds — its identity, the chart, and the
  *  manifest facts the registration carries. */
-export const DeployableOnboardParams = OnboardParamsBase.extend({
+export const DeployableOnboardParams = BuildParamsBase.extend({
   form: z.literal("deployable"),
   // The composed, approved gate report — kept in the run record, never committed. REQUIRED on this
   // form and with no counterpart beside it: a deployable unit is the one a gate renders a chart
@@ -186,21 +143,7 @@ export const DeployableOnboardParams = OnboardParamsBase.extend({
 });
 export type DeployableOnboardParams = z.infer<typeof DeployableOnboardParams>;
 
-/** The BUILD-ONLY form: no cluster and no chart, and the only form that can carry `ungated`
- *  instead of a report — the platform's own unit at the first installation in the master role
- *  (first-master.ts states every condition that admits it). */
-export const BuildOnlyOnboardParams = OnboardParamsBase.extend({
-  form: z.literal("build-only"),
-  // EXACTLY ONE of these two stands here, and the union's refine below is what says so. They are
-  // separate fields rather than one field of two shapes because a reader asking "was this gated?"
-  // must not have to inspect a value to find out, and because an ungated record is NOT a report and
-  // must never be read as one (shared/gates.ts UngatedOnboardSchema).
-  report: GateReportSchema.optional(),
-  ungated: UngatedOnboardSchema.optional(),
-});
-export type BuildOnlyOnboardParams = z.infer<typeof BuildOnlyOnboardParams>;
-
-export const OnboardParams = z.discriminatedUnion("form", [DeployableOnboardParams, BuildOnlyOnboardParams])
+export const OnboardParams = z.discriminatedUnion("form", [DeployableOnboardParams, BuildOnlyParams])
   .superRefine((p, ctx) => {
     if (p.form !== "build-only") return;
     if ((p.report === undefined) === (p.ungated === undefined)) {
@@ -217,57 +160,25 @@ export type OnboardParams = z.infer<typeof OnboardParams>;
  *  longer injected directly: the steps resolve the RIGHT clusterReader/argoReader/projectWriter +
  *  ArgoCD namespace for the target cluster (p.clusterId) at run time via the resolver, so a consumer
  *  onboarding to a slave reaches that slave while the master stays master-local. */
-export interface OnboardPorts {
-  repo: RepoReader;
+export interface OnboardPorts extends BuildPorts {
   runner: GateRunner;
-  registrations: Registrations;
   /** Every subdomain a TENANT stands at (TenantRegistrations over catalog — a second repo, hence a
    *  port of its own). G23 refuses a unit name that is one of them: the consumer would serve exactly
    *  the host that tenant's IdP scopes its session cookies to (unit-dns.ts). */
   tenantSubdomains: TenantSubdomainReader;
-  seeder: VaultSeeder;
   resolver: ClusterKubeResolver;
   declareListening: boolean;
   /** Bound of the whole validation poll (validate.ts pollBudgetMs). The wiring sets it a margin
    *  above the gate-runner's sandbox job budget, so the in-pod budget fires first on a healthy run
    *  and this bound only catches a PipelineRun that never settles. */
   validationBudgetMs?: number;
-  argoWatchTimeoutMs: number;
   /** How long the bump's commit may take to become VISIBLE on the delivery branch (a push lag of
    *  seconds); the deployment it produces is then followed without a clock. */
   deployRefVisibleMs: number;
-  /** How long the release PipelineRun may take to APPEAR on the build plane after the deploy ref was
-   *  pushed (a webhook delivery of seconds); the build itself is followed without a clock. */
-  releaseBuildAppearMs: number;
-  /** Poll tick of the release watches; overridable for tests. */
-  releasePollIntervalMs?: number;
-  /** How long the unit's three build Secrets may take to stand again after refresh-repo-pat deleted
-   *  them; the release is dispatched only once they do, or the clone would race the materialization.
-   *  Defaults to two minutes (ESO materializes an OnChange ExternalSecret whose target is gone within
-   *  seconds; two minutes outlasts a controller that is restarting); overridable for tests. */
-  buildSecretsMaterializeMs?: number;
-  /** The BUILD PLANE's cluster reader — this Manager's own cluster, where every unit's `<name>-build`
-   *  namespace stands (refresh-repo-pat deletes the unit's build Secrets there and reads their
-   *  ExternalSecrets' return). Injected directly, exactly as buildArgo is and for the same reason: the
-   *  build namespace is master-local whatever cluster the unit targets, and a build-only unit has no
-   *  clusterId to resolve one from. Optional but UNCONDITIONALLY needed by the release re-run —
-   *  absent ⇒ the step fails loud, because a rewrite whose Secrets are not deleted is a release that
-   *  clones with the old token. */
-  buildClusterReader?: ClusterReader;
-  /** The trigger's 404 retry window (a just-committed workflow indexes with a lag); overridable for
-   *  tests. Defaults to 60s at 5s ticks. */
-  dispatchRetry?: { budgetMs: number; intervalMs: number };
   /** Writes the unit's build grants (provision-build-rbac). Optional but UNCONDITIONALLY needed by
    *  onboard — absent ⇒ the step fails loud (no grants → the webhook creates no PipelineRun and the
    *  manager cannot watch the release run), never a silent skip (setup-webhook precedent). */
   buildRbac?: BuildRbacWriter;
-  /** Reads the MASTER's own ArgoCD Applications (await-build-namespace). Injected directly rather
-   *  than resolved, and for two reasons that both matter: the per-unit build Application is
-   *  master-local whatever cluster the unit targets, and a BUILD-ONLY unit carries no `clusterId`
-   *  at all — it has no cluster, so there is nothing to resolve a reader from. Optional but
-   *  UNCONDITIONALLY needed by onboard: absent ⇒ the step fails loud, because the alternative is
-   *  writing grants into a namespace nobody has confirmed exists. */
-  buildArgo?: MasterArgoReader;
   /** Writes the per-unit ArgoCD repository Secret (provision-repo-credential). Optional but
    *  UNCONDITIONALLY needed by the deployable form — absent ⇒ the step fails loud (ArgoCD could
    *  never fetch the private consumer repo), never a silent skip. */
@@ -280,53 +191,21 @@ export interface OnboardPorts {
   /** How long and how often the `activate` step waits: for the unit's host to answer over HTTPS, and
    *  after a token rotation for the workloads to roll. Default 10 minutes, every 10 seconds. */
   activationWait?: { budgetMs: number; intervalMs: number };
-  /** The per-call consumer-PAT GitHub client: the PAT scope preflight, the build webhook
-   *  (setup-webhook / remove-webhook), the release workflow dispatch (trigger-release) and the
-   *  workflow watch. Optional but UNCONDITIONALLY needed by onboard — absent ⇒ those steps fail loud
-   *  (no hook → no build; no dispatch → no cycle), never a silent skip. */
-  github?: GitHubConsumer;
-  /** Watches the unit's release PipelineRun in its own `<name>-build` namespace
-   *  (watch-release-build). Optional but UNCONDITIONALLY needed — absent ⇒ the step fails loud. */
-  buildPlane?: BuildPlane;
   /** The unit's ONE public DNS record (provision-dns / remove-dns). Optional but
    *  UNCONDITIONALLY needed by the deployable form — absent ⇒ the step fails loud (DNS is a
    *  mandatory part of the run kind), never a silent skip. */
   dns?: DnsProvider;
-  /** The shared HMAC secret (GITHUB_WEBHOOK_SECRET) the image-builder EventListener validates each
-   *  delivery's X-Hub-Signature-256 against. The seeder is write-only, so the manager reads it from
-   *  its own config/env; absent ⇒ setup-webhook fails loud (a hook without the matching secret never
-   *  triggers a build). */
-  webhookSecret?: string;
-  /** The image-builder EventListener ingress subdomain (default "build") the hook targets at
-   *  build.<build-plane-fqdn>/github; threaded so a non-standard cluster can override it. */
-  webhookSubdomain?: string;
-  /** WHERE the build webhook points: the FQDN in the map of the cluster this run is about
-   *  (`build-plane`, clusters/active/<fqdn>.yaml). The EventListener stands on the build plane alone,
-   *  so the host is read from the map instead of being taken from the target cluster. Required — a
-   *  consumer without a placeable hook can never build, and both forms of the run go through it. */
-  resolveBuildPlaneFqdn: BuildPlaneFqdnResolver;
-  /** The CONSUMER's OWN repo writer (inject-release-kit step): commits the release-kit — release/
-   *  scripts + .github/workflows/release.yml — into the consumer repo at onboard, and offboard/purge
-   *  remove it. Optional but UNCONDITIONALLY needed by onboard — absent ⇒ inject-release-kit fails
-   *  loud (no release kit → no release cycle), never a silent skip (setup-webhook precedent). */
-  consumerRepo?: RepoWriter;
   /** The consumer name of the PLATFORM'S OWN unit (config.ts PLATFORM_UNIT_NAME). The one unit that
    *  may be onboarded without a gate run, and only at the first installation in the master role —
    *  first-master.ts states the other three conditions. Absent ⇒ no onboarding on this Manager may
    *  skip the gate, which is where every Manager that does not install first masters stands. */
   platformUnitName?: string;
-  /** The channel ceiling — `global.channelStages` read off the platform repo's trunk
-   *  (domains/inventory/channel-stages.ts readChannelStages). The plan holds the requested stage
-   *  against it for BOTH forms before anything else is read: a stage the channel does not reach is
-   *  a release the pipeline refuses to pin, so the refusal belongs at the wizard, not three watches
-   *  later. Read per plan, never cached — the table changes without a Manager release. */
-  channelStages: () => Promise<ChannelStages>;
 }
 
 function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[] {
   // In-run memory shared across steps within ONE execute() pass (the executor calls def.steps() once
   // and iterates the array). seed-secrets (writer) and activate (reader) share the minted bootstrap
-  // token; the release-cycle steps share the trigger time + the minted tag (onboard-release-cycle.ts).
+  // token; the release-cycle steps share the trigger time + the minted tag (plugins/unit/server/release-cycle.ts).
   const runtime: { bootstrapToken?: string | undefined } = {};
   const release: ReleaseCycleRuntime = {};
   const steps: Step[] = [
@@ -396,39 +275,12 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
   return p.activation ? [...steps, activateStep(ports, p, runtime)] : steps;
 }
 
-/** Exported for the tenant onboarding, which runs this very chain per build unit it lacks (tenant-builds.ts). */
-/** `release` is the in-run memory the watch fills; a caller that reads what the release built (the
- *  tenant run, for the tenant's own bundle) hands its own in. */
-export function buildOnlySteps(ports: OnboardPorts, p: BuildOnlyOnboardParams, release: ReleaseCycleRuntime = {}): Step[] {
-  return [
-    // No attest-target: there is no target cluster whose deploy-state could be attested — the run kind
-    // touches git, the local Vault and the build plane's own namespaces, all on the cluster the
-    // manager itself runs on.
-    preflightScopesStep(ports, p),
-    // The check step RE-RUNS the gates at the current head, so the one onboarding that was admitted
-    // without a gate has no check to run: leaving it in would dispatch at execute time the very
-    // sandbox the plan established there is no point waiting for. Omitted rather than turned into a
-    // step that logs and passes — a step named "check" that checks nothing is a green light for a
-    // measurement that never happened.
-    ...(p.ungated ? [] : [checkStep(ports, p)]),
-    writeBuildRegistrationStep(ports, p),
-    seedRepoPatStep(ports, p),
-    // The build Application carries the two build-namespace grants now (hostyour-cloud#174), so this
-    // wait is what puts them there: without them the EventListener cannot create the release
-    // PipelineRun and the manager cannot watch it, and the trigger below would fire into nothing. A
-    // build-only unit gets nothing else — it has no Applications to sync, no namespace to run a
-    // dashboard in and no stage registration to claim a service on.
-    awaitBuildNamespaceStep(ports, p),
-    injectReleaseKitStep(ports, p),
-    setupWebhookStep(ports, p),
-    triggerReleaseStep(ports, p),
-    watchReleaseBuildStep(ports, p, release),
-    recordBuildOnlyStep(ports, p, release),
-  ];
-}
 
 function onboardSteps(ports: OnboardPorts, p: OnboardParams): Step[] {
-  return p.form === "build-only" ? buildOnlySteps(ports, p) : deployableSteps(ports, p as DeployableOnboardParams);
+  // The check step RE-RUNS the gates at the current head, so the one onboarding admitted without a
+  // gate has no check to run: leaving it in would dispatch at execute time the very sandbox the plan
+  // established there is no point waiting for.
+  return p.form === "build-only" ? buildOnlySteps(ports, p, {}, p.ungated ? undefined : checkStep(ports, p)) : deployableSteps(ports, p as DeployableOnboardParams);
 }
 
 /** The raw operator request from the onboard wizard. Carries the `channel` and no version: the
@@ -444,7 +296,7 @@ function onboardSteps(ports: OnboardPorts, p: OnboardParams): Step[] {
  *  planStreamed persists its raw params verbatim (params_json), so the raw PAT must never enter the
  *  executor. */
 const OnboardRequestFields = z.object({
-  consumerName: consumerNameSchema,
+  consumerName: unitNameSchema,
   repoURL: repoURLSchema,
   channel: z.enum(RELEASE_CHANNEL),
   owner: z.string().min(1),
@@ -745,7 +597,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
     // never fire for a run whose consumer has meanwhile gone live or been recorded.
     cleanups: (params) =>
       params.form === "build-only"
-        ? buildOnlyOnboardCleanups(ports, params)
+        ? buildOnlyCleanups(ports, params)
         : [...deployableOnboardCleanups(ports, params), removeCeremonySecretsCleanup(ports, params)],
     assertAbortable: (params, deps) => assertOnboardAbortable(ports, params, deps.db),
   };

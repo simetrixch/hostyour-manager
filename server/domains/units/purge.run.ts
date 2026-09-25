@@ -15,14 +15,14 @@ import type { VaultSeeder } from "./vault-seeder.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { RepoWriter } from "../../adapters/git/port.ts";
 import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
-import { removeConsumerWebhook } from "./onboard-webhook.ts";
+import { removeConsumerWebhook } from "#unit/server/build-webhook.ts";
 import { unitRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
-import { removeReleaseKit } from "./onboard-release-kit.ts";
+import { removeReleaseKit } from "#unit/server/inject-release-kit.ts";
 import { assertNoOrphans } from "./offboard-orphans.ts";
 
 // purge / force-offboard (the orphan-removal companion to offboard.run.ts). A consumer onboard that
@@ -327,7 +327,7 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
       title: "Remove the consumer's build webhook (self-contained teardown)",
       run: async (ctx) => {
         // The inverse of onboard's setup-webhook, BY NAME. It names no host — the delete matches the
-        // EventListener path on whichever address the hook carries (onboard-webhook.ts), which is what
+        // EventListener path on whichever address the hook carries (plugins/unit/server/build-webhook.ts), which is what
         // a purge needs most: the run kind exists for the states nobody recorded. PER UNIT — the repo
         // carries exactly ONE hook however many stages the unit is deployed at — so it is kept while
         // another stage stands, whose releases fire through it. Fail-soft: for a true orphan (no
