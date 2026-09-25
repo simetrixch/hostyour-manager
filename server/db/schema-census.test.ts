@@ -1,9 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDb, type DbHandle } from "./client.ts";
+import { compiledPlugins } from "../plugins.ts";
+import { inDependencyOrder } from "../boot/plugin-set.ts";
 
 // A census over the drizzle schema: every declared column must have a writer. A column nobody ever
 // writes is a promise the schema makes and the code never keeps — it reads as live data, ships in
@@ -36,8 +38,24 @@ interface Journal {
   entries: { idx: number; tag: string }[];
 }
 
-function readJournal(): Journal {
-  return JSON.parse(readFileSync(join(ROOT, MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as Journal;
+/** One tree the migrations are applied from: the core's, or a plugin's own folder, each with the
+ *  schema modules its migrations are generated from (npm run db:generate). */
+interface Tree {
+  name: string;
+  schemaFiles: string[];
+  migrations: string;
+}
+
+function trees(): Tree[] {
+  const core = { name: "core", schemaFiles: readdirSync(join(ROOT, SCHEMA_DIR)).filter((f) => f.endsWith(".ts")).map((f) => `${SCHEMA_DIR}/${f}`), migrations: MIGRATIONS_DIR };
+  const plugins = readdirSync(join(ROOT, "plugins"), { withFileTypes: true })
+    .filter((d) => d.isDirectory() && existsSync(join(ROOT, "plugins", d.name, "server/schema.ts")))
+    .map((d) => ({ name: d.name, schemaFiles: [`plugins/${d.name}/server/schema.ts`], migrations: `plugins/${d.name}/server/migrations` }));
+  return [core, ...plugins];
+}
+
+function readJournal(tree: Tree): Journal {
+  return JSON.parse(readFileSync(join(ROOT, tree.migrations, "meta/_journal.json"), "utf8")) as Journal;
 }
 
 /** The head snapshot as drizzle-kit writes it. Every object a CREATE TABLE can carry is in here —
@@ -56,12 +74,14 @@ interface SnapshotTable {
   checkConstraints: Record<string, { value: string }>;
 }
 
-/** The journal's HEAD entry — the snapshot drizzle-kit diffs the schema against on the next
+/** A tree's journal HEAD entry — the snapshot drizzle-kit diffs the tree's schema against on the next
  *  `db:generate`, and therefore the one that has to state the truth. */
-const HEAD = readJournal().entries.reduce((a, b) => (b.idx > a.idx ? b : a));
+function headOf(tree: Tree): { idx: number; tag: string } {
+  return readJournal(tree).entries.reduce((a, b) => (b.idx > a.idx ? b : a));
+}
 
-function readHeadSnapshot(): { tables: Record<string, SnapshotTable> } {
-  const file = join(ROOT, MIGRATIONS_DIR, `meta/${String(HEAD.idx).padStart(4, "0")}_snapshot.json`);
+function readHeadSnapshot(tree: Tree): { tables: Record<string, SnapshotTable> } {
+  const file = join(ROOT, tree.migrations, `meta/${String(headOf(tree).idx).padStart(4, "0")}_snapshot.json`);
   return JSON.parse(readFileSync(file, "utf8")) as { tables: Record<string, SnapshotTable> };
 }
 
@@ -108,10 +128,10 @@ function balanced(text: string, open: number): string {
   throw new Error(`unbalanced { at index ${open}`);
 }
 
-function schemaColumns(): Column[] {
+function schemaColumns(files: readonly string[] = trees().flatMap((tr) => tr.schemaFiles)): Column[] {
   const columns: Column[] = [];
-  for (const file of readdirSync(join(ROOT, SCHEMA_DIR)).filter((f) => f.endsWith(".ts"))) {
-    const text = readFileSync(join(ROOT, SCHEMA_DIR, file), "utf8");
+  for (const file of files) {
+    const text = readFileSync(join(ROOT, file), "utf8");
     for (const table of text.matchAll(/export const (\w+) = sqliteTable\(\s*"([^"]+)",\s*\{/g)) {
       const block = balanced(text, text.indexOf("{", table.index + table[0].length - 1));
       for (const line of block.split(/\r?\n/)) {
@@ -142,7 +162,7 @@ function writerSources(): string[] {
         if (path !== SCHEMA_DIR && !/^(server|plugins\/[^/]+\/server)\/adapters\/[^/]+\/testing$/.test(path)) walk(full);
         continue;
       }
-      if (!entry.name.endsWith(".ts") || entry.name.endsWith(".test.ts")) continue;
+      if (!entry.name.endsWith(".ts") || entry.name.endsWith(".test.ts") || /^plugins\/[^/]+\/server\/schema\.ts$/.test(path)) continue;
       out.push(readFileSync(full, "utf8"));
     }
   };
@@ -254,8 +274,8 @@ function migrationWrites(): Map<string, Set<string>> {
     for (const n of names) set.add(n);
     written.set(table, set);
   };
-  for (const file of readdirSync(join(ROOT, MIGRATIONS_DIR)).filter((f) => f.endsWith(".sql"))) {
-    const text = readFileSync(join(ROOT, MIGRATIONS_DIR, file), "utf8");
+  for (const file of trees().flatMap((tr) => readdirSync(join(ROOT, tr.migrations)).filter((f) => f.endsWith(".sql")).map((f) => join(tr.migrations, f)))) {
+    const text = readFileSync(join(ROOT, file), "utf8");
     for (const ins of text.matchAll(/INSERT\s+INTO\s+[`"]?(\w+)[`"]?\s*\(([^)]*)\)/gi)) {
       add(ins[1] as string, (ins[2] as string).split(",").map((c) => c.trim().replace(/[`"]/g, "")));
     }
@@ -303,15 +323,15 @@ describe("schema census: every column has a writer", () => {
 // missing into a new migration. A column dropped from the schema and from the baseline but left
 // standing in the head snapshot therefore comes back as `ALTER TABLE ... DROP COLUMN` against a
 // database created from the edited baseline, which never had it — and boot dies inside migrate().
-describe("schema census: the head migration snapshot declares the same schema", () => {
-  const snapshot = readHeadSnapshot();
-
-  it(`${HEAD.tag} is the snapshot drizzle-kit would diff against`, () => {
-    expect(Object.keys(snapshot.tables).length).toBeGreaterThanOrEqual(10);
+describe("schema census: each tree's head migration snapshot declares the same schema as that tree", () => {
+  it("reads the core's tree and every plugin's (the census has something to check)", () => {
+    expect(trees().map((tr) => tr.name)).toEqual(["core", ...inDependencyOrder(compiledPlugins).map((p) => p.name).filter((n) => existsSync(join(ROOT, "plugins", n, "server/schema.ts")))]);
+    expect(Object.keys(readHeadSnapshot(trees()[0]!).tables).length).toBeGreaterThanOrEqual(10);
   });
 
-  it("declares exactly the tables and columns the drizzle schema does", () => {
-    const columns = schemaColumns();
+  it.each(trees().map((tr) => [tr.name, tr] as const))("%s: declares exactly the tables and columns its drizzle schema does", (_name, tree) => {
+    const snapshot = readHeadSnapshot(tree);
+    const columns = schemaColumns(tree.schemaFiles);
     const schemaTables = new Set(columns.map((c) => c.sqlTable));
     expect([...Object.keys(snapshot.tables)].filter((t) => !schemaTables.has(t))).toEqual([]);
     expect([...schemaTables].filter((t) => !snapshot.tables[t])).toEqual([]);
@@ -334,16 +354,15 @@ describe("schema census: the head migration snapshot declares the same schema", 
 // snapshots beside them have to be deleted by hand. A leftover snapshot is the worse half, because
 // `npm run db:generate` picks the snapshot to diff against by the journal's head index — leave a
 // higher-numbered one and the next generate silently diffs against a schema nobody declares.
-describe("schema census: the migration folder holds exactly what the journal names", () => {
-  const journal = readJournal();
-
-  it("one SQL file and one snapshot per entry, and nothing besides", () => {
+describe("schema census: each migration folder holds exactly what its journal names", () => {
+  it.each(trees().map((tr) => [tr.name, tr] as const))("%s: one SQL file and one snapshot per entry, and nothing besides", (_name, tree) => {
+    const journal = readJournal(tree);
     expect(journal.entries.length).toBeGreaterThan(0);
-    const sql = readdirSync(join(ROOT, MIGRATIONS_DIR)).filter((f) => f.endsWith(".sql"));
+    const sql = readdirSync(join(ROOT, tree.migrations)).filter((f) => f.endsWith(".sql"));
     expect(sql.sort()).toEqual(journal.entries.map((e) => `${e.tag}.sql`).sort());
 
     const snapshots = journal.entries.map((e) => `${String(e.idx).padStart(4, "0")}_snapshot.json`);
-    expect(readdirSync(join(ROOT, MIGRATIONS_DIR, "meta")).sort()).toEqual(["_journal.json", ...snapshots].sort());
+    expect(readdirSync(join(ROOT, tree.migrations, "meta")).sort()).toEqual(["_journal.json", ...snapshots].sort());
   });
 });
 
@@ -362,16 +381,17 @@ describe("schema census: the database the migrations build declares the same sch
 
   it("creates exactly the tables and columns the drizzle schema declares", () => {
     dir = mkdtempSync(join(tmpdir(), "mgr-census-"));
-    handle = openDb(join(dir, "manager.db")); // the whole folder applied, exactly as boot applies it
+    handle = openDb(join(dir, "manager.db"), inDependencyOrder(compiledPlugins)); // every tree applied, exactly as boot applies them
     const { sqlite } = handle;
     const columns = schemaColumns();
     const schemaTables = new Set(columns.map((c) => c.sqlTable));
     expect(schemaTables.size).toBeGreaterThanOrEqual(10); // the census has something to check
 
-    // __drizzle_migrations is the migrator's own ledger and sqlite_* is SQLite's; neither is declared.
+    // __drizzle_migrations and each __drizzle_migrations_<plugin> are the migrator's own ledgers and
+    // sqlite_* is SQLite's; none is declared.
     const created = (sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[])
       .map((r) => r.name)
-      .filter((n) => n !== "__drizzle_migrations" && !n.startsWith("sqlite_"));
+      .filter((n) => !n.startsWith("__drizzle_migrations") && !n.startsWith("sqlite_"));
 
     const drift: string[] = [];
     for (const t of created) if (!schemaTables.has(t)) drift.push(`table ${t} is in the database and not in the schema`);
@@ -399,9 +419,9 @@ describe("schema census: the database the migrations build declares the same sch
   // carries all of it, and drizzle-kit writes it — so it is what the executed SQL is measured against.
   it("carries the indexes, keys, defaults and NOT NULLs the head snapshot declares", () => {
     dir = mkdtempSync(join(tmpdir(), "mgr-census-"));
-    handle = openDb(join(dir, "manager.db"));
+    handle = openDb(join(dir, "manager.db"), inDependencyOrder(compiledPlugins));
     const { sqlite } = handle;
-    const { tables } = readHeadSnapshot();
+    const tables = Object.assign({}, ...trees().map((tr) => readHeadSnapshot(tr).tables)) as Record<string, SnapshotTable>;
     const drift: string[] = [];
 
     for (const [table, declared] of Object.entries(tables)) {

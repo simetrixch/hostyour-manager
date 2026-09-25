@@ -1,10 +1,16 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, copyFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, type DbHandle } from "./client.ts";
 import { compiledPlugins } from "../plugins.ts";
 import { inDependencyOrder } from "../boot/plugin-set.ts";
+
+const CORE_MIGRATIONS = fileURLToPath(new URL("./migrations", import.meta.url));
 
 // A plugin's first migration ADOPTS a table the core already created — written `CREATE TABLE IF NOT
 // EXISTS`, so it creates nothing where the table stands and its rows stay — and adds one of its own.
@@ -66,9 +72,12 @@ describe("openDb over the migration trees of the compiled plugins", () => {
   });
 });
 
-// THE PRODUCT'S OWN TREES over a database that carries a row in EVERY table (the lesson of #229: an
-// empty table hides what SQLite refuses). Every compiled plugin's tree is applied the way boot applies
-// it, twice, and neither pass may change a row or the shape of the file.
+// THE PRODUCT'S OWN TREES over the database the release before the unit plugin leaves behind: the
+// core's migrations up to 0012, and a row in EVERY table (the lesson of #229: an empty table hides what
+// SQLite refuses). Boot then applies the core's 0013, which changes nothing, and the unit plugin's
+// first migration, which adopts unit_sizes; twice, and neither pass may change a row or the shape of
+// the file, while both ledgers stand.
+const PREVIOUS_HEAD = "0012_tenants-approved-tags";
 const ROW_IN_EVERY_TABLE = [
   "INSERT INTO servers (id, name, host, ssh_user) VALUES ('srv_1', 's1', '10.0.0.1', 'm1')",
   "INSERT INTO clusters (id, server_id, stage, domain, name) VALUES ('cl_1', 'srv_1', 'prod', 's1.example.com', 's1')",
@@ -95,31 +104,45 @@ describe("openDb over the trees of the plugins this product compiles", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  it("migrates every compiled tree over a database with a row in every table, twice, and changes nothing", () => {
+  it("carries the previous release's database with a row in every table over every tree, twice, rows and schema kept, both ledgers standing", () => {
     const dir = mkdtempSync(join(tmpdir(), "mgr-compiled-"));
     dirs.push(dir);
     const file = join(dir, "manager.db");
-    const tables = (h: DbHandle): string[] => (h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle_migrations%' ORDER BY name").all() as { name: string }[]).map((r) => r.name);
-    const rows = (h: DbHandle): Record<string, unknown[]> => Object.fromEntries(tables(h).map((t) => [t, h.sqlite.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all()]));
-    const shape = (h: DbHandle): unknown[] => h.sqlite.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name NOT LIKE '__drizzle_migrations%' ORDER BY type, name").all();
-    const ledger = (h: DbHandle, name: string): number => (h.sqlite.prepare(`SELECT count(*) AS c FROM "${name}"`).get() as { c: number }).c;
+    const tables = (s: Database.Database): string[] => (s.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle_migrations%' ORDER BY name").all() as { name: string }[]).map((r) => r.name);
+    const rows = (s: Database.Database): Record<string, unknown[]> => Object.fromEntries(tables(s).map((tb) => [tb, s.prepare(`SELECT * FROM "${tb}" ORDER BY rowid`).all()]));
+    const shape = (s: Database.Database): unknown[] => s.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name NOT LIKE '__drizzle_migrations%' ORDER BY type, name").all();
+    const ledger = (s: Database.Database, name: string): number => (s.prepare(`SELECT count(*) AS c FROM "${name}"`).get() as { c: number }).c;
 
-    const standing = openDb(file);
-    handles.push(standing);
-    for (const insert of ROW_IN_EVERY_TABLE) standing.sqlite.prepare(insert).run();
-    const empty = Object.entries(rows(standing)).filter(([, r]) => r.length === 0).map(([t]) => t);
+    // The core's folder up to the previous release's head, as a folder of its own.
+    const previous = join(dir, "previous");
+    mkdirSync(join(previous, "meta"), { recursive: true });
+    const journal = JSON.parse(readFileSync(join(CORE_MIGRATIONS, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
+    const upTo = journal.entries.findIndex((e) => e.tag === PREVIOUS_HEAD);
+    expect(upTo, `${PREVIOUS_HEAD} in the core's journal`).toBeGreaterThan(0);
+    expect(journal.entries.length, "the core carries a migration after the previous head").toBeGreaterThan(upTo + 1);
+    writeFileSync(join(previous, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, upTo + 1) }));
+    for (const e of journal.entries.slice(0, upTo + 1)) copyFileSync(join(CORE_MIGRATIONS, `${e.tag}.sql`), join(previous, `${e.tag}.sql`));
+
+    const standing = new Database(file);
+    migrate(drizzle(standing), { migrationsFolder: previous });
+    for (const insert of ROW_IN_EVERY_TABLE) standing.prepare(insert).run();
+    const empty = Object.entries(rows(standing)).filter(([, r]) => r.length === 0).map(([tb]) => tb);
     expect(empty, `tables the proof seeds no row in: ${empty.join(", ")}`).toEqual([]);
     const before = { rows: rows(standing), shape: shape(standing) };
-    standing.sqlite.close();
+    standing.close();
 
     const trees = inDependencyOrder(compiledPlugins);
-    expect(trees.map((t) => t.name)).toContain("unit");
+    expect(trees.map((tr) => tr.name)).toContain("unit");
     for (let pass = 1; pass <= 2; pass += 1) {
       const opened = openDb(file, trees);
       handles.push(opened);
-      expect(rows(opened), `pass ${pass}`).toEqual(before.rows);
-      expect(shape(opened), `pass ${pass}`).toEqual(before.shape);
-      for (const t of trees) expect(ledger(opened, `__drizzle_migrations_${t.name}`), `pass ${pass}`).toBeGreaterThanOrEqual(0);
+      expect(rows(opened.sqlite), `pass ${pass}`).toEqual(before.rows);
+      expect(shape(opened.sqlite), `pass ${pass}`).toEqual(before.shape);
+      expect(ledger(opened.sqlite, "__drizzle_migrations"), `pass ${pass}`).toBe(journal.entries.length);
+      for (const tr of trees) {
+        const own = JSON.parse(readFileSync(join(tr.migrations, "meta/_journal.json"), "utf8")) as { entries: unknown[] };
+        expect(ledger(opened.sqlite, `__drizzle_migrations_${tr.name}`), `pass ${pass}: ${tr.name}`).toBe(own.entries.length);
+      }
       opened.sqlite.close();
     }
   });

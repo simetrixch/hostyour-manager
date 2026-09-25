@@ -4,7 +4,7 @@ import pino from "pino";
 import { ConfigError } from "../kernel/config.ts";
 import type { Core, Plugin } from "../plugin.ts";
 import { openDb, type DbHandle } from "../db/client.ts";
-import { unitSizes } from "../db/schema/inventory.ts";
+import { unitSizes } from "#unit/server/schema.ts";
 import { RUN_KIND } from "../../shared/enums.ts";
 import type { Executor } from "../executor/executor.ts";
 import { compiledPlugins } from "../plugins.ts";

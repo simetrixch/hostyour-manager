@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import type { Db } from "#core/server/db/client.ts";
-import { unitSizes } from "#core/server/db/schema/inventory.ts";
+import { unitSizes } from "./schema.ts";
 import { errNotFound } from "#core/server/kernel/errors.ts";
 import {
   UNIT_SIZE, SIZE_COMPONENT, UNIT_SIZE_SEED, composeQuota,

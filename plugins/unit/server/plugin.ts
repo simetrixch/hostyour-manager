@@ -6,7 +6,7 @@
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "#core/server/plugin.ts";
 import { runActor } from "#core/server/kernel/actor.ts";
-import { unitSizes } from "#core/server/db/schema/inventory.ts";
+import { unitSizes } from "./schema.ts";
 import { UnitEnv, unitConfig } from "./config.ts";
 import { seedUnitSizes } from "./unit-size.ts";
 import { registerUnitSizeRoutes } from "./api-unit-sizes.ts";

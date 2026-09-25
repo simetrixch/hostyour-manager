@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { servers, clusters, apps, tenants, unitSizes } from "../../db/schema/inventory.ts";
+import { servers, clusters, apps, tenants } from "../../db/schema/inventory.ts";
+import { unitSizes } from "#unit/server/schema.ts";
 import { makeSetSizeDef, makeTenantSetSizeDef } from "./set-size.run.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { Registrations } from "#unit/server/registrations.ts";

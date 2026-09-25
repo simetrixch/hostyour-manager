@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import type { AppEnv } from "#core/server/http/app-env.ts";
 import type { Db } from "#core/server/db/client.ts";
-import { unitSizes } from "#core/server/db/schema/inventory.ts";
+import { unitSizes } from "./schema.ts";
 import { errValidation, errNotFound } from "#core/server/kernel/errors.ts";
 import { UNIT_SIZE, SIZE_COMPONENT, type UnitSize, type SizeComponent } from "../shared/unit-size.ts";
 import { listUnitSizes } from "./unit-size.ts";

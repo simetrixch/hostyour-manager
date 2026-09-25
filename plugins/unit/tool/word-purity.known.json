@@ -151,6 +151,7 @@
     "plugins/unit/server/repo-identity.ts::consumer": 5,
     "plugins/unit/server/repo-identity.ts::onboard": 2,
     "plugins/unit/server/repo-identity.ts::tenant": 6,
+    "plugins/unit/server/schema.ts::hostyour-cloud": 1,
     "plugins/unit/server/secret-mint.test.ts::consumer": 3,
     "plugins/unit/server/secret-mint.ts::consumer": 20,
     "plugins/unit/server/secret-mint.ts::onboard": 2,

@@ -1,5 +1,5 @@
 import type { UnitCheck } from "../../../shared/preflight.ts";
-import { sqliteTable, text, integer, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import {
   SERVER_STATUS, SERVER_ROLE, SERVER_TAILNET_STATE, SERVER_PASSWORD_LOGIN_STATE, SERVER_AUTHORIZED_KEYS_STATE,
@@ -263,32 +263,3 @@ export const tenantApps = sqliteTable("tenant_apps", {
   lastRunId: text("last_run_id"),                                 // loose ref to runs(id)
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
 }, (t) => [uniqueIndex("tenant_apps_tenant_name_uq").on(t.tenantId, t.name)]);
-
-// The size table — the ONE place an installation says what `small`, `medium` and `large` mean. A row
-// per size, seeded from plugins/unit/shared/unit-size.ts UNIT_SIZE_SEED when the database is created and EDITABLE
-// afterwards, because a size is what a unit is sold and that changes without a release.
-//
-// It is data and not a values file for a reason branch-classes.yaml states: a books path — what one
-// installation knows about itself — is never tracked on the trunk, so a table that both ships with the
-// product and gets overwritten in service could not be one file. The Manager holds it, resolves it
-// into each unit's registration when it writes one, and ArgoCD delivers the resolved figures. Nothing
-// on a cluster reads this table; a cluster reads registrations.
-//
-// The key is (component, name): nine rows, three per component. A unit's quota is base + postgresql +
-// mongodb x members, so what a size means depends on WHICH part is being asked for — and the operator
-// adjusts each part once instead of every combination of them.
-export const unitSizes = sqliteTable("unit_sizes", {
-  component: text("component").notNull(),                          // SIZE_COMPONENT: base | postgresql | mongodb
-  name: text("name").notNull(),                                    // UNIT_SIZE: small | medium | large
-  // The six figures of one namespace's ResourceQuota, field for field as
-  // hostyour-cloud/apps/unit-quota renders them. The four quantities stay TEXT: "500m" and "1Gi" are
-  // Kubernetes quantities, and storing them as numbers would force a unit and lose the notation an
-  // operator typed.
-  requestsCpu: text("requests_cpu").notNull(),
-  requestsMemory: text("requests_memory").notNull(),
-  limitsCpu: text("limits_cpu").notNull(),
-  limitsMemory: text("limits_memory").notNull(),
-  pods: integer("pods").notNull(),
-  persistentVolumeClaims: integer("persistent_volume_claims").notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(now),
-}, (t) => [primaryKey({ columns: [t.component, t.name] })]);

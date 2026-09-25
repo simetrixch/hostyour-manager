@@ -21,7 +21,8 @@
     "lint:css": "stylelint \"web/**/*.css\"",
     "test": "vitest run",
     "check": "npm run typecheck && npm run lint && npm run lint:boundaries && npm run lint:css && npm run build:web",
-    "db:generate": "drizzle-kit generate",
+    "db:generate": "drizzle-kit generate && npm run db:generate:unit",
+    "db:generate:unit": "drizzle-kit generate --dialect sqlite --schema ./plugins/unit/server/schema.ts --out ./plugins/unit/server/migrations",
     "build:web": "vite build",
     "start": "node --import tsx server/index.ts",
     "prepare": "git config core.hooksPath .githooks || true"
