@@ -1,0 +1,90 @@
+import type { StepCtx } from "../../executor/types.ts";
+import { ON_PATH } from "./deploy-slave.placement.fixture.ts";
+import type { SshSession } from "../../adapters/ssh/port.ts";
+import {
+  hostsFactory, logger, ELEVATION_PASSWORD, SLAVE_ID, PARAMS, ANSIWISE_DOWNLOAD_URL,
+  type HostsScript, type Harness,
+} from "./deploy-slave.fixture.ts";
+import { statedTarget, type DeploySlavePorts } from "./defs/deploy-slave.kit.ts";
+import { ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
+
+// What the bootstrap suite is stated with: the values a placement takes, the ports record the
+// manager's half reads them out of, and one step run against the scripted slave. It is a file of its
+// own because the scripted machine and the ports record are what a second bootstrap suite would have
+// to copy, and two scripted machines could disagree about what a placed one looks like.
+
+/** The ports the step takes, with one of them left out where a test is about an installation that
+ *  did not configure it, or a manager that was built without a release reader at all. */
+export function ports(h: Harness, variant?: "download-url" | "no-downloads"): DeploySlavePorts & AnsiwisePorts {
+  return {
+    platformRepo: h.platformRepo,
+    ...(variant === "download-url" ? {} : { ansiwiseDownloadUrl: ANSIWISE_DOWNLOAD_URL }),
+    ...(variant === "no-downloads" ? {} : { releaseDownloads: h.releases }),
+  };
+}
+
+/** One step run against the scripted slave. */
+export function placeCtx(h: Harness, hosts: HostsScript, runId: string, log: string[]): StepCtx {
+  const factory = hostsFactory(hosts);
+  const session = (): Promise<SshSession> => factory({
+    host: "10.1.1.11", port: 22, username: "ubuntu",
+    auth: { kind: "key", privateKey: Buffer.from("k") },
+  });
+  let checkpoint: unknown;
+  return {
+    runId,
+    stepName: "place-ansiwise",
+    db: h.db.db,
+    creds: h.store,
+    params: { serverId: SLAVE_ID },
+    secrets: {
+      get: (name) => (name === ANSIWISE_ELEVATION_SECRET ? Buffer.from(ELEVATION_PASSWORD, "utf8") : undefined),
+      wipe: () => undefined,
+    },
+    signal: new AbortController().signal,
+    logger,
+    ssh: session,
+    openPasswordSession: () => Promise.reject(new Error("not in this test")),
+    closePasswordSession: () => undefined,
+    attest: () => Promise.resolve(),
+    log: (_stream, text) => log.push(text),
+    checkpoint: (data) => (checkpoint = data),
+    readCheckpoint: <T,>() => checkpoint as T | undefined,
+    registerCleanup: () => undefined,
+  };
+}
+
+export const target = statedTarget(SLAVE_ID, PARAMS.domain, "prod");
+
+/** What was WRITTEN to the machine, in order, from `from` onwards — the whole of what the transfer
+ *  half of a placement can be asserted on. Empty means the run transferred nothing, which is what a
+ *  second run onto a machine already carrying the pin has to look like.
+ *
+ *  `from` is how a test says "what this RUN wrote" on a machine that already carried something: the
+ *  files a test planted before the step are the machine's state and have to stay readable, so they
+ *  are skipped rather than cleared — clearing them would make the machine answer `--version` with
+ *  nothing and turn every such test into a bare machine.  */
+export function transferred(hosts: HostsScript, from = 0): { path: string; content: string; mode: number }[] {
+  return hosts.files
+    .slice(from)
+    // What SFTP CARRIED, and not what an elevated `install` then copied out of it. The copy onto
+    // the machine's path writes a file too and the scripted machine records it as one, so without
+    // this every count of "what this run fetched" would double the moment the placement started
+    // putting the proven bytes where a machine looks for them.
+    .filter((f) => !f.path.startsWith(ON_PATH))
+    .map((f) => ({ path: f.path, content: f.content, mode: f.mode }));
+}
+
+/** Everything the machine keeps on its PATH, as the placement fixture records it. */
+export function onPath(hosts: HostsScript, from = 0): { path: string; content: string; mode: number }[] {
+  return hosts.files
+    .slice(from)
+    .filter((f) => f.path.startsWith(ON_PATH))
+    .map((f) => ({ path: f.path.slice(ON_PATH.length), content: f.content, mode: f.mode }));
+}
+
+/** Every command the step ran on the machine, in order. A bootstrap that composed a script would
+ *  show up here as a line with a shell in it — and there is one assertion that says so. */
+export function commands(hosts: HostsScript): string[] {
+  return hosts.log.map((l) => l.command);
+}

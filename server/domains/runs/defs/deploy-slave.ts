@@ -1,0 +1,839 @@
+import { z } from "zod";
+import { eq, and } from "drizzle-orm";
+import type { Step, Cleanup, RunDefinition } from "../../../executor/types.ts";
+import type { Db } from "../../../db/client.ts";
+import { servers, clusters } from "../../../db/schema/inventory.ts";
+import { STAGE, isMasterRole } from "../../../../shared/enums.ts";
+import { errValidation, errNotConfigured } from "../../../kernel/errors.ts";
+import { remoteScriptCapture, localTx } from "../../../executor/stepkit.ts";
+import { resolveTransport } from "../../../executor/transport.ts";
+import { registerSecret } from "../../../security/redact.ts";
+import { PREFLIGHT_SCRIPT, parsePreflightOutput, makeCheck, hardenPreflightForSlave, podCidrOverlapCheck, formatNicsLine } from "../preflight.ts";
+import { hasHardFailure, type PreflightReport } from "../../../../shared/preflight.ts";
+import {
+  APP_SYNC_TIMEOUT_MS,
+  loadServer, loadMaster, masterFqdnOf, masterClusterId, slaveApiHost,
+  removeSlaveMarkingCleanup, requirePlatformRepo, requireResolver, statedTarget,
+  type DeploySlavePorts, type SlaveInstallInput, type SlaveTarget,
+} from "./deploy-slave.kit.ts";
+import {
+  ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET,
+  type AnsiwisePorts, type ExtraAnswers,
+} from "./ansiwise-run.kit.ts";
+import {
+  proveElevationStep, generateKeyStep, installKeyStep, verifyKeyLoginStep, enableNtpStep,
+  removeSudoersStep, type FirstContactInput,
+} from "./manager-key.kit.ts";
+import { disablePasswordLoginStep, purgeBootstrapPasswordStep, restorePasswordLoginCleanup } from "./password-login.kit.ts";
+import { leaveHostCleanup, removeManagerKeyCleanup } from "./leave-host.kit.ts";
+import { placeAnsiwiseOnMasterStep, placeAnsiwiseStep } from "./place-ansiwise.step.ts";
+import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
+import { SLAVE_API_PORT, HOST_ADDRESS_COMMAND, hostAddressesFrom } from "./deploy-slave.remote.ts";
+import { rejoinStep, joinIfAbsentStep, readMembershipStep } from "./tailnet.kit.ts";
+import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
+import { resolveClusterMarking, writeClusterMarking, projectClusterMarking, type ClusterMarking } from "../../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../../shared/cluster-values.ts";
+import { attestTargetStep } from "./deploy-slave.attest.ts";
+import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
+
+// "cluster-deploy-slave" — the Run that gives a server the SLAVE PART, over the deployment PROGRAMS
+// of the machine's own catalogue (hostyour-deploy ansiwise/programs/), each driven over
+// `ansiwise-rest serve` and proven by a dry run the machine's gate then admits the real run against.
+//
+// ONE ARM, over TWO HOSTS: the MASTER marks the slave in its books and takes its registration
+// (register-slave); the SLAVE is built by the same three machine-layer programs every cluster is
+// (deploy-host, deploy-cluster, deploy-platform-services), joins the private network with a
+// credential the master mints, and emits the one credentials file the registration is made from.
+// NO BRANCH IS CUT: a slave has none, its map stands on the books branch beside every other map of
+// the installation, and its checkout stands on that same branch (deploy-branch names `master` alone
+// in its own roles line). The master is never a target of this run: it carries the slave part from
+// its own installation (hostyour-cloud#232), and the plan refuses it by name.
+//
+// IT STARTS ON A BARE MACHINE, and that is why first contact is the head of its step list rather
+// than a run kind of its own. Holding a key for a machine is a STATE, not an act somebody performs
+// once: this run establishes it where it does not exist and re-measures it where it does, so the
+// same list carries a box this manager has never logged in to and a box it deployed yesterday. What
+// a person is asked for is the password of the machine account, which raises every root command the
+// run sends and, on a machine holding no key of this manager's, opens the first login too.
+//
+// Before the first of those programs, place-ansiwise puts the binary they are driven through, the
+// catalogue they are read from and the platform checkout they act on onto the slave: a bare machine
+// carries none of them, and every program step would otherwise open a conversation with a command
+// that is not there.
+//
+// mutating: true ⇒ the attest-target law (guards.ts assertGuardsArmed) requires
+// steps()[0].name === "attest-target".
+//
+// The remaining remote scripts live in deploy-slave.remote.ts, the shared step-kit in
+// deploy-slave.kit.ts, the credential handshake in deploy-slave.mgmt.ts, verify-slave + register
+// in deploy-slave.verify.ts (the file-size doctrine, files ≤400 lines).
+
+/** A cluster's FQDN as this platform spells one: lowercase DNS labels, at least two of them. */
+export const ClusterFqdn = z.string().regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, "must be a lowercase FQDN");
+
+export const DeploySlaveParams = z.object({
+  serverId: z.string().startsWith("srv_"),
+  stage: z.enum(STAGE),
+  /** The slave's FQDN == clusters.domain == the name of its map on the books branch. */
+  domain: ClusterFqdn,
+  /** Explicit ordinal — used by a retry after a failed run (it is never recycled) or to take on a
+   *  slave provisioned by hand. Omitted ⇒ attest-target allocates max(slave_id)+1. */
+  slaveId: z.number().int().positive().optional(),
+});
+export type DeploySlaveParams = z.infer<typeof DeploySlaveParams>;
+
+export type { DeploySlavePorts };
+
+/** What the DEFINITION takes beyond what its steps do: the inventory, for the one question that must
+ *  be answered BEFORE the steps exist — which arm the target's ROLE earns. steps() is handed the
+ *  persisted params and no database, so the db is a port of the def exactly as the platform repo is
+ *  one, and it is not optional: an arm chosen off a port that may be absent would be an arm chosen by
+ *  whether this manager is configured.
+ *
+ *  It stands here rather than on DeploySlavePorts for the reason redeploy states the same field on
+ *  RedeployPorts (redeploy.ts): the step-level ports are what a STEP is handed, and no step of either
+ *  arm reads a database through them — every one of them has ctx.db. */
+export interface DeploySlaveDefPorts extends DeploySlavePorts, AnsiwisePorts {
+  db: Db;
+}
+
+/** Register [cleanup] before the step runs — for a step whose body is a generic program step and
+ *  cannot know which compensating action the RUN KIND arms around it. Registered before the first
+ *  mutating act, because a step that dies halfway leaves a partial resource only the cleanup can
+ *  compensate (every cleanup here tolerates already-absent state, so early registration is safe). */
+function armed(cleanup: Cleanup, step: Step): Step {
+  return {
+    ...step,
+    run: async (ctx) => {
+      ctx.registerCleanup(cleanup);
+      await step.run(ctx);
+    },
+  };
+}
+
+/** Answers the DEF is authoritative for on the machine-layer programs, read off the machine's OWN
+ *  cluster map — the record mark-slave wrote earlier in the same run (and re-reads on a redeploy) —
+ *  plus the ONE value that stands in no map at all, the registry pull credential (below).
+ *  books_fqdn is the master's domain (deploy-cluster/-gitops default it to the machine's own,
+ *  which for a slave would install a second books keeper); build_plane_fqdn is the map's, whose
+ *  self-naming form the programs read the same way as "this machine".
+ *
+ *  A MACHINE THAT KEEPS THE BOOKS ITSELF is answered by the same reading, and that is why redeploy's
+ *  master arm (redeploy.ts) composes this one rather than a second copy: its map names no books
+ *  cluster, so books_fqdn is omitted and the programs default to the machine's own — which for that
+ *  machine is the right answer, because it IS where the books are kept. */
+export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): ExtraAnswers {
+  const pull = registryPullAnswer(target, ports);
+  return async (ctx) => {
+    const { domain } = target.resolve(ctx.db);
+    const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
+    const books = marking.booksCluster ?? marking.master;
+    // THE INSTALLATION'S ANSWERS STAND IN THE BOOKS-KEEPING CLUSTER'S MAP, not in this machine's.
+    // A slave's map is written by mark-slave and says what THIS machine is; what the installation
+    // registers with is written once, by the program that generated the master. Read off the slave it
+    // was not there, and the machine layer was refused by name one step from the end of its work
+    // (apps4, 2026-08-29).
+    const installation = books !== undefined && books !== domain
+      ? await resolveClusterMarking(requirePlatformRepo(ports), books).catch(() => undefined)
+      : marking;
+    return {
+      ...(books !== undefined ? { books_fqdn: books } : {}),
+      build_plane_fqdn: marking.buildPlaneFqdn,
+      // THE INSTALLATION'S ANSWER AND NOT THIS MACHINE'S. One installation registers with one
+      // authority and gives it one mailbox; asking a person for them again per machine is asking
+      // for a second copy of something already written down, and two copies agree only until one is
+      // typed differently. A map that predates them carries neither, and then the program refuses
+      // by name, which is the sentence an operator can act on.
+      ...(installation?.letsencryptEmail !== undefined ? { letsencrypt_email: installation.letsencryptEmail } : {}),
+      ...(installation?.letsencryptServer !== undefined ? { letsencrypt_server: installation.letsencryptServer } : {}),
+      ...(await pull(ctx)),
+    };
+  };
+}
+
+/** The name `deploy-cluster` declares the registry pull credential under, and the ONE answer of that
+ *  program this manager holds a secret for. Every other answer it sends is a fact of the inventory
+ *  or of a cluster map. */
+export const REGISTRY_PULL_ANSWER = "registry_pull_dockerconfigjson";
+
+/** THE VALUE A CLUSTER THAT KEEPS NO BOOKS STILL READS, handed over as an answer of the run.
+ *
+ *  A cluster pulls its images through the installation's own registry, and `deploy-cluster`'s
+ *  `write_containerd_registry_mirror` row is what writes that mirror. On the cluster that keeps the
+ *  books the row reads the credential out of `secrets/secrets.<stage>`, the installation's
+ *  hand-filled input, which that cluster's own branch program writes. A cluster that keeps none has
+ *  no such file and never can: it is gitignored, so no branch carries it.
+ *
+ *  THE VALUE IS NOT COPIED OFF ANOTHER MACHINE. It is already this manager's own — the mounted
+ *  manager-registry-pull document its own image is pulled with, templated in the manager chart
+ *  against the installation's registry address — so nothing here reads another cluster's secrets.
+ *
+ *  AND IT NEVER TOUCHES A DISK ON THE MACHINE. It is a DECLARED SECRET answer: the engine redacts a
+ *  declared-secret answer in every record it writes, which is a thing a file-sourced value cannot
+ *  be, and it lives exactly as long as the machine run does. */
+export function registryPullAnswer(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): ExtraAnswers {
+  return async (ctx) => {
+    const { domain } = target.resolve(ctx.db);
+    if (ports.pullConfiguration === undefined) {
+      throw errNotConfigured(
+        "this manager holds no pull configuration of its own, and a cluster that keeps no books reads one off no " +
+        "file — give the manager the mounted manager-registry-pull dockerconfigjson its own chart already declares",
+      );
+    }
+    const pull = await ports.pullConfiguration(await registryHostOf(ports, domain));
+    registerSecret(ctx.runId, Buffer.from(pull, "utf8"));
+    return { [REGISTRY_PULL_ANSWER]: pull };
+  };
+}
+
+/** The registry a cluster pulls through, off its own map — `zot.<build plane>`, in the one place
+ *  this installation writes it down. Read rather than composed here, so the address the mirror is
+ *  written for and the address the charts pull from are one statement. */
+async function registryHostOf(ports: DeploySlavePorts, domain: string): Promise<string> {
+  const marking = await resolveClusterMarking(requirePlatformRepo(ports), domain);
+  const endpoints = marking.globalRest?.["endpoints"];
+  const host = typeof endpoints === "object" && endpoints !== null
+    ? (endpoints as { registry?: { host?: unknown } }).registry?.host
+    : undefined;
+  if (typeof host !== "string" || host.length === 0) {
+    throw errValidation(
+      `${domain}'s cluster map states no global.endpoints.registry.host, and that address is what this machine's ` +
+      "container runtime is pointed at — the map is written by mark-slave from the master's, so a master whose own " +
+      "map carries no registry endpoint is what to fix",
+    );
+  }
+  return host;
+}
+
+/** deploy-host's operator_public_key: the public half of the key this manager holds for the machine
+ *  (the newest ssh_key credential's stored public line, put on the host by `install-key`). The
+ *  program re-installs it idempotently and proves sshd would accept it. A credential row carrying no
+ *  public line sends nothing, and the program refuses the missing answer by name. */
+/** deploy-host's two checkout answers: WHICH repository the platform tree comes from, and WHICH
+ *  branch it stands on. The one extra a machine-layer program takes that nothing on the machine can
+ *  answer, because the checkout it would be read from is what the program establishes.
+ *
+ *  THE BRANCH IS THE INSTALLATION'S, never the trunk. Every machine's live tree stands on the
+ *  installation's one install branch — the books, named after the cluster carrying the master part.
+ *  That is what its reconciler follows and what release-cluster and deploy-branch read the
+ *  release out of. Answering `master` here would move the live tree onto the trunk — measured on
+ *  apps3, whose tree stood on master for twelve hours while ArgoCD went on reconciling from origin,
+ *  and whose release-cluster then refused because the file it records into was not there.
+ *
+ *  A machine being born as a master is the one case that takes `master`, and it is not this manager's
+ *  case: it has no cluster row yet and is installed by hostyour-cloud lifecycle/install-machine, which
+ *  answers this itself. */
+/** Everything deploy-host is owed that the machine cannot answer itself: the two checkout answers
+ *  above, the public half of the key this manager reaches the machine with, and the installation's
+ *  time servers. ONE `extra`, because a program step takes one — and both run kinds that drive
+ *  deploy-host owe the machine all four.
+ *
+ *  Note the DIFFERENT sources, which is why they are composed rather than read from one place: the
+ *  repository is this installation's setting, the branch is the master's cluster row, the key is a
+ *  sealed credential, and the time servers stand in the master's cluster map. */
+export function hostAnswers(serverId: string, ports: DeploySlavePorts): ExtraAnswers {
+  const checkout = checkoutAnswers(ports);
+  const key = operatorKeyAnswer(serverId);
+  return async (ctx) => {
+    // THE TIME SERVERS, off the MASTER's map. They are the installation's answer and not the
+    // machine's — the same reason the certificate authority is read from there — and a box that has
+    // just been reached knows none of them.
+    const repo = requirePlatformRepo(ports);
+    const masterFqdn = masterFqdnOf(ctx.db, loadMaster(ctx.db));
+    const { timeSources } = await resolveClusterMarking(repo, masterFqdn);
+    if (timeSources === undefined) {
+      throw errValidation(
+        `${clusterMapPath(masterFqdn)} on ${repo.booksBranch} states no global.timeSources, and deploy-host is answered with it: a machine asked for no time servers keeps a clock nothing corrects, and the program refuses rather than installing onto one. The master's own regeneration (deploy-branch) writes the key into that map — regenerate the master's branch, then run this again`,
+      );
+    }
+    return { ...(await checkout(ctx)), ...(await key(ctx)), time_sources: timeSources };
+  };
+}
+
+export function checkoutAnswers(ports: DeploySlavePorts): ExtraAnswers {
+  return async (ctx) => {
+    const origin = ports.platformOrigin;
+    if (origin === undefined || origin.length === 0) {
+      throw errNotConfigured(
+        "the platform repository is not named — deploy-host's git_clone row is answered with it as " +
+        "owner/name, and a machine cannot read it off a checkout that does not exist yet. It is " +
+        "built from GITHUB_OWNER + GITHUB_REPO, the same two settings this manager's own platform " +
+        "repo stands on",
+      );
+    }
+    // THE BOOKS BRANCH, WHICH IS THE ONLY INSTALL BRANCH AN INSTALLATION HAS. A machine carrying the
+    // master part keeps a branch named after its own domain, and that branch IS the books; a machine
+    // carrying only the slave part has none at all, and its checkout stands on the books branch
+    // beside the master's, where its own cluster map is. Answering the machine's own domain here
+    // would put a pure slave's checkout on a branch nothing ever cuts, and deploy-host's git_clone
+    // row is where the run would stop.
+    const masterFqdn = masterFqdnOf(ctx.db, loadMaster(ctx.db));
+    return { platform_repo: origin, platform_branch: masterFqdn };
+  };
+}
+
+export function operatorKeyAnswer(serverId: string): ExtraAnswers {
+  return async (ctx) => {
+    const key = (await ctx.creds.list({ subject: { kind: "server", id: serverId }, purpose: "ssh-key" })).at(-1);
+    return key?.publicKey !== undefined ? { operator_public_key: key.publicKey } : {};
+  };
+}
+
+/** The install step list BOTH cluster run kinds run: deploy-slave takes a machine from wherever it
+ *  stands — a box nothing has touched included — through it, and redeploy re-runs it against a slave
+ *  that is already live. `mode` decides two things. Per step, whether the compensating action that
+ *  would UNDO it is armed — never on a redeploy, where every one of them undoes a WORKING slave, and
+ *  where the redeploy definition implements none of them to be resolved against. And whether the ONE
+ *  BIRTH act runs at all: the branch cut, which a slave gets once — the program's push takes no
+ *  force, so re-cutting a standing branch is refused rather than rewritten.
+ *
+ *  THE TAILNET JOIN IS NOT A BIRTH ACT, and a list that treats it as one cannot finish a machine
+ *  reinstalled at the hosting provider — which is the machine a redeploy is asked for (redeploy.ts).
+ *  It is unconditional on a deployment, where the machine's membership is this platform's to
+ *  establish whatever the box arrived carrying, and MEASURED on a redeploy, where a machine
+ *  reinstalled at the hosting provider holds none and a live one must not be handed a fresh address
+ *  for nothing. Which of the two runs is decided here; what the measured one reads and why it acts
+ *  is written where it lives (tailnet.kit.ts joinIfAbsentStep).
+ *
+ *  THE FIRST-CONTACT STEPS RUN ON BOTH ARMS, and only their compensations are held back. Each of
+ *  them measures before it acts, so on a live slave they read a key that is installed, a login that
+ *  works and doors that are already shut, and each says so in a full sentence. A step left out of a
+ *  list is a step nobody can see was considered; a step that reports finding nothing to do is a
+ *  reading. */
+export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePorts & AnsiwisePorts): Step[] {
+  const { target, mode } = input;
+  const sid = target.serverId;
+  const redeploying = mode === "redeploy";
+  const machineAnswers = slaveMachineAnswers(target, ports);
+  // The password every root command of this run is raised with is also what opens the first login on
+  // a machine this manager holds no key for — one secret, named once, and the same one the machine's
+  // own programs are driven with (ansiwise-run.kit.ts).
+  const firstContact: FirstContactInput = { serverId: sid, secretName: ANSIWISE_ELEVATION_SECRET };
+  return [
+    attestTargetStep(input),
+    // ---- FIRST CONTACT: the manager's own key onto the machine, and the machine's doors left the
+    // way this platform keeps them. Every one of these steps is measure-then-act (manager-key.kit.ts),
+    // so a machine that already carries all of it is read by every one of them, written to by none,
+    // and reported on in a full sentence by each — which is what lets the same list run against a
+    // bare box and against a live slave. They stand HERE, before the preflight, because the
+    // preflight and everything after it reach the machine over ctx.ssh(), and ctx.ssh()
+    // authenticates with the key install-key puts there and verify-key-login proves.
+    proveElevationStep(firstContact),
+    generateKeyStep(firstContact),
+    // install-key is the one key step that leaves anything on the machine, and on a DEPLOYMENT it
+    // arms the act that takes it back: an aborted first install ends by leaving the machine, and a
+    // key line nobody removes is a way into the box for whoever owns it next. Armed HERE and
+    // therefore run LAST — the compensations run in reverse registration order, so everything else
+    // the abort does on the machine happens while this line is still the route to it. A REDEPLOY
+    // arms nothing: there the machine is a live slave this manager reaches over exactly that line.
+    installKeyStep(firstContact, { arm: !redeploying }),
+    verifyKeyLoginStep(firstContact),
+    enableNtpStep(firstContact),
+    // Last of the key steps, and it may only stand here because every root command this run sends
+    // afterwards is raised with the password the run carries: the programs by their own engine, the
+    // steps through the step-kit's `elevation`.
+    removeSudoersStep(firstContact),
+    {
+      name: "slave-preflight",
+      title: "Preflight the slave (hard policy)",
+      run: async (ctx) => {
+        // The machine's checks under the SLAVE-HARD policy: every severity becomes hard, and the
+        // two ingress ports and a missing snapd — which the catalogue grades soft, because a box
+        // carrying either is still a box — are promoted to failures, since a slave needs Traefik to
+        // own 80/443 and MicroK8s arrives as a snap (preflight.ts SLAVE_FAIL_ON_WARN).
+        //
+        // It stands AFTER first contact, and that ordering is what makes it the one preflight this
+        // machine gets: it is read over ctx.ssh(), which authenticates with the key the steps above
+        // installed, and a machine whose account cannot reach root has already been refused by
+        // prove-elevation, for the cost of one command rather than of a whole script.
+        const server = loadServer(ctx.db, sid);
+        const master = loadMaster(ctx.db);
+        const masterFqdn = masterFqdnOf(ctx.db, master);
+        const session = await ctx.ssh();
+        const cap = await remoteScriptCapture(ctx, session, "slave-preflight", PREFLIGHT_SCRIPT, { timeoutMs: 60_000 });
+        const parsed = parsePreflightOutput(cap.stdout);
+        ctx.log("meta", formatNicsLine(parsed));
+        // On a REDEPLOY the machine is a live slave and its own Traefik serves 80/443; the policy reads
+        // the served ports as the state a live slave must be in (hostyour-manager#149).
+        const checks = hardenPreflightForSlave(parsed.checks, { ingressServed: redeploying });
+
+        // Slave extra: the master's Vault must answer FROM THE SLAVE (the per-slave KV mount
+        // lives there; slave-ESO authenticates against it). Reached over the Traefik
+        // INGRESS (https://vault.<master>, :443) — the master's Vault is a ClusterIP with no
+        // host-port/nodeport, so :8200 is unreachable off-cluster; only the ingress (/v1/**
+        // IngressRoute) is externally reachable. curl WITHOUT -f on purpose: /v1/sys/health
+        // answers 429/472/473/501/503 for standby/uninitialized/sealed — ANY http code proves
+        // reachability; only a transport failure fails.
+        const url = `https://vault.${masterFqdn}/v1/sys/health`;
+        let httpCode = "";
+        const vr = await session.exec(`curl -4 -sS -o /dev/null --max-time 10 -w '%{http_code}' ${url}`, {
+          signal: ctx.signal,
+          onStdout: (l) => {
+            httpCode += l.trim();
+            ctx.log("stdout", l);
+          },
+          onStderr: (l) => ctx.log("stderr", l),
+        });
+        const reachable = vr.code === 0 && /^[1-5]\d\d$/.test(httpCode);
+        checks.push(makeCheck("vault.reachable", reachable ? "pass" : "fail",
+          reachable ? `HTTP ${httpCode} from ${url}` : `no HTTP answer from ${url} (curl exit ${vr.code}${httpCode ? `, code ${httpCode}` : ""})`));
+
+        // The pod (Calico) CIDR must be disjoint from the cluster LAN, or manager pods can't
+        // route to the slave's LAN IP (the `dial …:16443 i/o timeout` blocker). Purely LOCAL — the
+        // Manager already knows the cluster LAN (the /24 around the inventory lanHost) and the
+        // installer's default pod CIDR; no probe. Reads `lanHost` and NOT the address the slave is
+        // dialled on: this asks about the cluster network, and a slave dialled on its tailnet
+        // address is out of a pod pool's reach by construction. Skipped (no check pushed) when
+        // lanHost is unknown/not an IPv4 — a NAT/FQDN row yields no cluster LAN.
+        const overlap = podCidrOverlapCheck(server.lanHost);
+        if (overlap) checks.push(overlap);
+        else ctx.log("meta", `pod-CIDR/cluster-LAN overlap check skipped — server ${server.name} has no IPv4 lanHost to derive the cluster LAN from`);
+
+        const report: PreflightReport = { checkedAt: Date.now(), checks };
+        // Merge under its own key, never replace the column: the same JSON holds `hostKey`, which is
+        // the fingerprint every session to this machine is pinned on (executor/context.ts), and a
+        // report written over it would take the pin off the row.
+        const pf = (server.preflightJson as Record<string, unknown> | null) ?? {};
+        localTx(ctx, (tx) => tx.update(servers).set({ preflightJson: { ...pf, slavePreflight: report } }).where(eq(servers.id, sid)).run());
+        ctx.checkpoint({ checkCount: checks.length });
+
+        if (hasHardFailure(report)) {
+          const failed = report.checks.filter((c) => c.severity === "hard" && c.status === "fail");
+          throw errValidation(
+            `Slave preflight failed: ${failed.map((c) => `${c.title} — ${c.detail}${c.hint ? ` (${c.hint})` : ""}`).join("; ")}`,
+          );
+        }
+      },
+    },
+    // ---- THE TWO IRREVERSIBLE ACTS, and they stand exactly here for a reason that is narrower than
+    // "last": they run after everything that can fail WITHOUT this manager's own key. Shutting the
+    // daemon's password door and destroying the stored bootstrap password each remove a way in, so
+    // both wait until verify-key-login has proven the way in that stays — and a run that dies in the
+    // machine layer below therefore leaves a machine reachable by key and by this manager alone,
+    // which is the state a retry of this same run needs.
+    //
+    // AND THEY STAND AFTER `remove-sudoers`, WHICH IS THE ORDER THIS LIST IS BUILT ON. Each of the
+    // three takes away one route, and the list is ordered so that the route the NEXT step needs is
+    // still there when it runs:
+    //   - `remove-sudoers` takes away the standing passwordless-root grant. What is left is the
+    //     password this run carries, which every step after it raises its own commands with — the
+    //     step's own condition on any list that contains it (defs/manager-key.kit.ts), and the
+    //     reason `disable-password-login` ships its script raised whole rather than reaching root
+    //     through a rule the step before it deleted.
+    //   - `disable-password-login` takes away the daemon's password door, which is how a FIRST
+    //     session is opened on a machine this manager holds no key for. Every step that may need
+    //     one — the whole of first contact, through `openDoor` — has run by here, and everything
+    //     after it reaches the machine over ctx.ssh(). Shutting that door does not touch how this
+    //     run reaches root: `sudo -S` over the key session takes the same password it always did.
+    //   - `purge-bootstrap-password` takes away the password sealed beside the row, and it goes last
+    //     because it is the one thing no later step and no compensation could ask for again.
+    // Run the list a second time and each of the three measures first and finds its work done, so
+    // the order is a property of one pass rather than a state a retry has to be talked out of.
+    //
+    // ARMED ON A DEPLOYMENT, NEVER ON A REDEPLOY. A shut password door is the state every later run
+    // kind of this manager needs, so a redeploy putting it back would undo the one act the install
+    // existed to perform on a machine that is live. An aborted first install is the other case
+    // entirely: it ends by LEAVING the machine, and a machine left with its password door shut and
+    // this manager's key line gone is a machine nobody can reach at all. So the door goes back on,
+    // one compensation before the key line comes off (defs/leave-host.kit.ts states the order).
+    disablePasswordLoginStep(sid, { arm: !redeploying, secretName: firstContact.secretName }),
+    // No compensation at all, on either arm: a destroyed credential cannot be put back, and this run
+    // holds the operator's password in memory rather than a copy of the machine's sealed one. It is
+    // the one thing leaving a machine cannot restore, and `remove-manager-key` says so by name.
+    purgeBootstrapPasswordStep(sid),
+    {
+      name: "mark-slave",
+      title: "Mark the slave in the cluster map on the books branch",
+      run: async (ctx) => {
+        const { domain, stage, name } = target.resolve(ctx.db);
+        const server = loadServer(ctx.db, sid);
+        const master = loadMaster(ctx.db);
+        const masterFqdn = masterFqdnOf(ctx.db, master);
+        const repo = requirePlatformRepo(ports);
+        // The slave inherits the installation's own values from the MASTER's map: where it pulls
+        // images from, the public apex its units serve under, the business domain, where alerts
+        // go, and the catalog repository — a slave belongs to the SAME installation, so nothing
+        // here is asked a second time.
+        const masterMarking = await resolveClusterMarking(repo, masterFqdn);
+        // The dial address, resolved by the ONE resolver create-mgmt also uses — the map's apiHost
+        // and the api_server_url answer are two spellings of one resolution, never two sources.
+        const apiHost = slaveApiHost(server);
+        if (!/^[a-z0-9._:-]+$/i.test(apiHost)) {
+          throw errValidation(`server ${server.name} has a malformed API address "${apiHost}" — fix the inventory row (tailnetHost, lanHost or host)`);
+        }
+        // THE INSTALLATION, WITH THIS MACHINE'S FACTS OVER IT. Building a slave's map from a
+        // handful of fields copied by name leaves everything not named simply absent — ten of the
+        // seventeen keys a master's map carries. What goes missing is what every program on that
+        // machine reads, the address of the secret store among them, and its own machine layer then
+        // stops at "is not on this host".
+        //
+        // So the master's map is the ground and the overrides below are the whole of what differs.
+        // A key added to a master's map from now on reaches a slave without anybody remembering to
+        // copy it, which is the property a list of names could never have.
+        // A RELEASE PIN IS NOT INHERITED: it says which release THAT cluster stands on, and this
+        // machine stands on none until one is put there. Taken off here rather than overwritten,
+        // because an optional property set to undefined is not the same as one that is not there.
+        const { release: _theMastersRelease, ...installation } = masterMarking;
+        const inherited = masterMarking.globalRest ?? {};
+        // THE CLUSTER'S NAME AS IT STANDS ON ITS ROW, fixed at its adoption — never the first label
+        // of the domain it is on now, which a rename moves (cluster-marking.ts header).
+        const shortName = name;
+        const holdsBuildPlane = masterMarking.buildPlaneFqdn === domain;
+        // THIS MACHINE'S OWN ADDRESSES, read off this machine. Everything else below is inherited,
+        // and this is the one global key that is a fact about the box rather than about the
+        // installation. Its one reader is the gate sandbox's fence, and that chart carries
+        // `runsOn: master` — the app generator matches it against the cluster's ROLE, so nothing on
+        // a slave reads this key today and the wrong list cost nothing yet. What it did cost is the
+        // truth of the file: clusters/active/<fqdn>.yaml is the ONE place an installation's answers
+        // are written down, and a slave's said where the MASTER can be reached.
+        const seen = await (await ctx.ssh()).exec(HOST_ADDRESS_COMMAND, { signal: ctx.signal, timeoutMs: 30_000 });
+        const nodeCidrs = seen.code === 0 ? hostAddressesFrom(seen.stdoutTail) : [];
+        // AN EMPTY READING IS NOT A READING. A machine carries at least one address or nothing
+        // reached it — and a fence that names nothing to keep out reports itself drawn while
+        // standing open, which is worse than a run that stops here saying so.
+        if (nodeCidrs.length === 0) {
+          throw errValidation(
+            `${domain} lists no address of its own (\`${HOST_ADDRESS_COMMAND}\`), and global.nodeCidrs is what the gate sandbox draws its fence from — a map written without it would fence nothing`,
+          );
+        }
+        // The machine is a slave and nothing else: the plan refused the master as a target, so the
+        // word written here never demotes the books-keeping cluster in its own map.
+        const role = "slave" as const;
+        const slaveMarking: ClusterMarking = {
+          ...installation,
+          // WHAT THIS MACHINE IS, and nothing else.
+          fqdn: domain,
+          name: shortName,
+          stage,
+          role,
+          booksCluster: masterFqdn,
+          buildPlane: holdsBuildPlane,
+          buildPlaneFqdn: masterMarking.buildPlaneFqdn,
+          master: masterFqdn,
+          apiHost,
+          apiPort: SLAVE_API_PORT,
+          globalRest: {
+            ...inherited,
+            // Per cluster: the secret store's auth mount, named after the cluster, which is what
+            // tells two clusters of one installation apart when they log in. The name itself is
+            // written from `name` above.
+            vaultKubernetesAuthPath: `kubernetes-${shortName}`,
+            // Measured above, never inherited.
+            nodeCidrs,
+            // WHICH OF THE SHARED SERVICES STAND HERE. Two of the three follow from who keeps the
+            // books, and a slave keeps none: one installation has ONE Vault and ONE observability
+            // stack, both on the books-keeping cluster. Inherited from a master both said `true`,
+            // and what that reaches today is the CoreDNS hairpin, which then emits a rewrite of
+            // `vault.<this slave>` to this cluster's own Traefik — a name nothing dials, so the
+            // wrong flag sits latent. It is still a map saying this cluster runs a store it does
+            // not run, and the key exists so a chart can decide from it where to dial. The third
+            // follows from where the build plane is, which may be this machine.
+            servicesLocal: {
+              ...(typeof inherited["servicesLocal"] === "object" && inherited["servicesLocal"] !== null
+                ? (inherited["servicesLocal"] as Record<string, unknown>)
+                : {}),
+              registry: holdsBuildPlane,
+              vault: false,
+              observability: false,
+            },
+          },
+        };
+        // Armed BEFORE the write. Dropping the slave part again is the inverse: it takes the
+        // cluster out of the master's slaves ApplicationSet, whose finalizer then cascades the
+        // teardown of the management plane. NEVER armed on a redeploy — that cascade against a
+        // LIVE slave is exactly what must not happen.
+        if (!redeploying) ctx.registerCleanup(removeSlaveMarkingCleanup(ports));
+        // ONE WRITE, ON THE BOOKS BRANCH. It is where an installation keeps its maps and where one
+        // cluster reads about another — and, since a pure slave has no branch of its own, it is also
+        // the tree standing beside the machine, which is where a machine reads ITS OWN map (a slave
+        // whose map was missing there had its machine layer stop at "is not on this host" asking for
+        // the secret store's address; apps4, 2026-08-29).
+        const { changed } = await writeClusterMarking(repo, slaveMarking, ctx.runId);
+        // THE ROW FOLLOWS THE MAP. The map is the writable place and the inventory columns are the
+        // copy every role and stage decision in this process queries, so the act that rewrites the
+        // map moves the copy in the same step.
+        projectClusterMarking(ctx.db, slaveMarking, { actor: "system", runId: ctx.runId });
+        ctx.log("meta", changed
+          ? `${clusterMapPath(domain)} on ${repo.booksBranch} now marks ${slaveMarking.name}: role ${role}, stage ${stage}, ${apiHost}:${SLAVE_API_PORT}, build plane ${slaveMarking.buildPlaneFqdn}`
+          : `${clusterMapPath(domain)} already states this marking — nothing to commit`);
+        ctx.checkpoint({ branch: domain, apiHost, changed });
+      },
+    },
+    // The binary every program act below is spoken to through, the catalogue those programs are read
+    // from, and the platform checkout they act on. It stands FIRST among the machine-side acts
+    // because none of them can run without all three: `ansiwise-rest serve` is a binary reading a
+    // catalogue, and a machine at its first installation carries none of them. Idempotent by
+    // measurement, which is what lets a redeploy run the same step against a machine that carries them.
+    //
+    // leave-host is armed HERE, before the first thing this platform writes on the machine, and it
+    // covers everything the three programs below write as well: it acts on the paths
+    // defs/machine-state.ts declares rather than on a list of what a run got to, so a run that died
+    // in deploy-cluster and one that died in deploy-platform-services are put back by the same act.
+    // A redeploy arms nothing — stripping a live slave is not a repair of a failed run.
+    ...(redeploying
+      ? [placeAnsiwiseStep(target, ports)]
+      : [armed(leaveHostCleanup(firstContact.secretName), placeAnsiwiseStep(target, ports))]),
+    // ---- the machine layer, exactly as every cluster gets it: the three deployment programs on
+    // the slave's own surface, each dry-proven then run.
+    //
+    // deploy-host makes the box workable and stands FIRST of the three because it is also the ONE
+    // WRITER of /srv/hostyour-cloud, the tree the two programs after it act on: its git_clone row
+    // fetches the books branch and places the checkout on that branch's published tip, which is how
+    // the cluster map mark-slave pushed earlier in this run reaches the machine. The programs after
+    // it read that tree as it stands and deliberately fetch nothing themselves. Its own
+    // install_packages row is what puts `git` on the machine for that row.
+    ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(sid, ports) }),
+    // Nothing is armed around it: taking MicroK8s off again is a destructive act whose only effect
+    // on a retry is a second install of the same snap, and the step measures before it acts.
+    //
+    // WHY THE PULL CREDENTIAL IS REQUIRED ON THIS ARM AND ON NO OTHER: a cluster that keeps no books
+    // reads it off no file of its own, and the machine's own row for it is SATISFIED when there is no
+    // file — it warns and writes no mirror, so the machine pulls from the public registry and nothing
+    // says so. An answer the program does not declare is dropped by composeAnswers in silence, which
+    // would be that same degradation reached from this side. Named here, the step stops before the
+    // dry run instead. A machine that keeps the books still has the file its own branch program
+    // wrote, so the same answer going missing there is a fact and not a failure.
+    ansiwiseProgramStep(target, "deploy-cluster", ports, {
+      extra: machineAnswers,
+      requiredAnswers: [REGISTRY_PULL_ANSWER],
+    }),
+    // deploy-platform-services also declares elevation_password — the ENGINE fills that one from the
+    // password the POST carries beside the answers; sending it as an answer is refused.
+    ansiwiseProgramStep(target, "deploy-platform-services", ports, { extra: machineAnswers }),
+    // THE JOIN, and WHICH join is the one thing this guard still decides. A deployment joins the
+    // machine outright: mint on the master, carry the credential over the session, spend it in ONE
+    // program run on the slave (the tailnet kit's own step, because a first join is the same act —
+    // the program's logout-first is a no-op on a machine that was never on the network), and a
+    // machine that arrived carrying somebody else's membership is REPLACED rather than left on it.
+    // remove-slave is armed there, before the FIRST master-side per-slave state (the coordinator
+    // user) exists; it also covers everything create-mgmt makes later, and it tolerates absent
+    // state, so early registration is safe. A redeploy takes the measured form of the same act and
+    // arms nothing: it joins a machine that holds no address and says what it read of one that
+    // does (tailnet.kit.ts joinIfAbsentStep).
+    // THE MASTER'S ENGINE FIRST, because the join below mints on the master through the master's
+    // own `ansiwise-rest`, and the master's engine moves only when a run moves it (#133): every
+    // slave deployed after a release of the engine would otherwise ask the master's OLD binary to
+    // run a catalogue row the new one was released for. Idempotent by measurement; on a current
+    // master it is two readings.
+    placeAnsiwiseOnMasterStep(ports),
+    ...(redeploying
+      ? [joinIfAbsentStep(target, sid, ports)]
+      : [armed(removeSlaveCleanup(ports), rejoinStep(target, sid, ports))]),
+    // The reading that describes a managed slave, taken after whichever of the two ran — without it
+    // the row carries no membership at all for the machine the master's ArgoCD and Vault are talking
+    // to, and a redeploy would end showing the reading its own decision was made on rather than the
+    // one the machine holds now.
+    readMembershipStep(sid),
+    // WHICH address the machine holds there, asked of the one that handed it out — before the step
+    // below, because that step is the first thing to dial it, and on every deployment rather than
+    // only after a fresh join: a join hands the machine a NEW address, and a run that joined nothing
+    // is still the one that has to notice a row whose address went stale.
+    declareTailnetAddressStep(target, sid, ports),
+    // The machine's own surface, switched on. It stands HERE and not beside the placement at the
+    // head of the list because it binds an address of the private network: the join above is what
+    // measured that the machine holds one or put it back on the network, and the step right above is
+    // what states which address that is. Everything before this reached the machine over a held-open
+    // session; this is what makes the machine reachable without one, across a restart.
+    createMgmtStep(target, ports),
+    {
+      name: "gitops-handoff",
+      title: "Hand off to GitOps (wait for the master's slaves-appset to sync)",
+      run: async (ctx) => {
+        // The map's slave part IS the slave's management plane: wait — bounded, abortable — until
+        // the master's ArgoCD has GENERATED (slaves-appset) and SYNCED Application <name>-apps.
+        // The map landed BEFORE register-slave created the AppProject, so the generated
+        // Application legitimately waits on that missing project and syncs once it exists.
+        //
+        // READ THROUGH THE MASTER'S OWN CLUSTER, over the Manager pod's ServiceAccount. The
+        // namespace is the resolver's answer and not a literal: `argoNamespace` and the trio it
+        // comes with are decided together, and two spellings of that pairing are one rename away
+        // from coming apart (domains/inventory/cluster-kube.ts says so where the constant lives).
+        const { domain, name } = target.resolve(ctx.db);
+        const { argoReader, argoNamespace } = await requireResolver(ports).resolve(masterClusterId(ctx.db));
+        const appName = `${name}-apps`;
+        // watchApplication polls on its OWN cadence and writes nothing per tick, so the step's
+        // budget is what it is given and the log carries one line rather than one every ten seconds.
+        const last = await argoReader.watchApplication(
+          argoNamespace,
+          appName,
+          (status) => status.sync === "Synced",
+          { timeoutMs: APP_SYNC_TIMEOUT_MS, signal: ctx.signal },
+        );
+        if (last.sync !== "Synced") {
+          throw errValidation(`Application ${appName} did not reach Synced within ${APP_SYNC_TIMEOUT_MS / 60_000} min (last: ${last.sync}/${last.health}) — check the master's ArgoCD (slaves-appset) and the pushed map ${clusterMapPath(domain)}`);
+        }
+        ctx.checkpoint({ appName });
+        ctx.log("meta", `Application ${appName} is Synced — the ${name} slave-ArgoCD now drives the slave at ${domain}`);
+      },
+    },
+    // verify-slave: HARD — the instance's ESO-materialized credentials Ready
+    // in ns <name> (repo + cluster; with a force-sync kick against ESO error backoff), every
+    // Application in ns <name> Synced/Healthy, every slave ESO SecretStore Ready (one bounded
+    // retry window, with a rate-limited master-side diagnostic bundle while a gate fails);
+    // SOFT — master Prometheus sees up{cluster="<fqdn>"}, slave ingress certs issued.
+    verifySlaveStep(target, ports),
+    // register (local tx, overwrite-idempotent): cluster→active + provisionedAt + planeState
+    // ready + planeJson (ClusterPlaneV0, shared/plane.ts); server→healthy; plane facts logged.
+    registerStep(target),
+  ];
+}
+
+/** deploy-slave's own share of the shared step list: the operator stated the FQDN and the stage, so
+ *  the target lookup is a constant, and the mode arms every compensating action. */
+function installInput(params: DeploySlaveParams): SlaveInstallInput {
+  return {
+    target: statedTarget(params.serverId, params.domain, params.stage),
+    mode: "deploy",
+    slaveId: params.slaveId,
+  };
+}
+
+/** The master is refused as a target BY THE PLAN: it carries the slave part from its own
+ *  installation (hostyour-cloud#232), so there is nothing this run could add, and every act below
+ *  — the ordinal, the second cluster row, the per-slave management plane, the compensations that
+ *  leave the machine — would act on the control host itself. Asked of the inventory, because a role
+ *  is a fact of the row and never something an operator states. */
+function refuseMaster(db: Db, serverId: string): void {
+  const row = db.select({ name: servers.name, role: servers.role }).from(servers).where(eq(servers.id, serverId)).get();
+  if (row && isMasterRole(row.role)) {
+    throw errValidation(
+      `${row.name} stands at role ${row.role}: a master carries the slave part from its own installation, so there is nothing this run adds to it — ` +
+      "what rebuilds the machine layer of a master is the cluster-redeploy run kind",
+    );
+  }
+}
+
+export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<DeploySlaveParams> {
+  return {
+  kind: "cluster-deploy-slave",
+  paramsSchema: DeploySlaveParams,
+  mutating: true, // mutating ⇒ steps()[0] MUST be attest-target, asserted where the run definitions are assembled at boot
+  plan: async (params, { db }) => {
+    refuseMaster(db, params.serverId);
+    const slave = loadServer(db, params.serverId);
+    const master = loadMaster(db);
+    const stepDefs = deploySlaveSteps(installInput(params), ports);
+    // The address the run will actually dial. Neither target below states a transport, so the slave
+    // resolves the way every run always has — and the card must name the address the first connect
+    // line in the log names, or an operator approves one address and gets the other.
+    const dialled = resolveTransport(slave, "default");
+    return {
+      kind: "cluster-deploy-slave",
+      targetKind: "server",
+      targetId: params.serverId,
+      // WHAT THE PASSWORD IS SPENT ON is part of the summary and not of the warnings, because the
+      // approve card is what an operator reads before typing it (RunView carries a summary and no
+      // warnings). It says all three things the password does on this run: it raises every root
+      // command the run and the machine's own programs send, and where this manager holds no key for
+      // the machine yet it also opens the very first login and installs one.
+      summary:
+        `Deploy "${slave.name}" (${dialled.host}) as ${params.stage} slave ${params.domain}` +
+        `${params.slaveId !== undefined ? ` (slaveId ${params.slaveId})` : ""}: ` +
+        `${stepDefs.length} steps over two hosts — the slave (first contact, then the machine-layer programs on its own ` +
+        `ansiwise surface) and the master "${master.name}" (the books and the registration). ` +
+        `The password you enter raises every root command of this run, and where this manager holds no key for ` +
+        `"${slave.name}" it also opens the first login and installs one. It is held in memory for the length of the run ` +
+        `and stored nowhere. The machine is left taking key logins only, with the bootstrap password sealed beside its ` +
+        `row destroyed and no standing passwordless-root grant of this manager's on it. ` +
+        `Aborting this run with cleanup puts "${slave.name}" back instead: this manager's key line, the shut password ` +
+        `door and everything this platform wrote on it are taken off, and the bootstrap password — which nothing can ` +
+        `put back — is named so you can set a new one.`,
+      steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
+      // BOTH hosts are declared so ctx.ssh(slave) AND ctx.ssh(master) pass the plan gate;
+      // only the slave is owned (server:<slave> lock derives from ownsHost).
+      targets: [
+        { serverId: slave.id, ownsHost: true, label: `${slave.name} (slave)` },
+        { serverId: master.id, ownsHost: false, label: `${master.name} (master)` },
+      ],
+      // The locks beyond the derived server:<slave>: the ONE touched git branch — the books, which
+      // is the master's own install branch, the branch the slave's checkout is brought onto and the
+      // branch its map lands on — the master's Vault surface
+      // (register-slave's mounts/policies/roles), and the master's kube-apiserver (the handoff
+      // wait + verify reads). Key "m" and no per-cluster key, because the platform has ONE Vault
+      // and it sits on the master: a second deploy-slave (or any other master-vault Run)
+      // therefore serializes instead of interleaving Vault surgery.
+      locks: [
+        { resource: "git-branch", key: masterFqdnOf(db, master) },
+        { resource: "master-vault", key: "m" },
+        { resource: "master-kube", key: "m" },
+      ],
+      warnings: [
+        `The machine layer installs over the slave's own ansiwise surface — the base install (deploy-cluster) runs ~25 minutes detached on the machine, and a retry of its step re-attaches instead of starting a second run.`,
+      ],
+      // The programs raise their commands to root with a password the CALLER hands over per run
+      // (the installation's ansiwise.yaml: password_from_caller) — collected at approve, held in
+      // memory, sent with each POST /runs, persisted nowhere. Nothing is asked beyond it: what the
+      // machine-layer programs declare past the inventory stands in the master's own cluster map,
+      // and slaveMachineAnswers reads it there.
+      requiredSecrets: [ANSIWISE_ELEVATION_SECRET],
+    };
+  },
+  steps: (params) => deploySlaveSteps(installInput(params), ports),
+  // Every compensating action this run's steps may register, and each one has to be here: the
+  // executor resolves the persisted __cleanups by NAME against this list, so a name it does not
+  // carry ends an abort with a step that has no implementation.
+  //
+  // AN ABORT WITH CLEANUP LEAVES THE MACHINE, and the five acts below are what leaving one is. They
+  // run in REVERSE registration order, and that order is the whole of what makes them safe — each
+  // one runs while the route the next one needs is still open:
+  //
+  //   remove-slave           armed by the join, before the first master-side per-slave state exists.
+  //                          The master's per-slave management plane, the map's slave part FIRST
+  //                          (that program's own contract).
+  //   remove-slave-marking   armed by mark-slave, before the map write. By here remove-slave has
+  //                          already dropped the slave part, so this finds nothing left to drop.
+  //   leave-host             armed by place-ansiwise, before the first thing written on the machine.
+  //                          Every path defs/machine-state.ts declares, the two engine executables,
+  //                          the cluster snap with its data, the private-network membership.
+  //   restore-password-login armed by disable-password-login, unless it measured the door already
+  //                          shut. A machine left with no password door and no key line answers
+  //                          nobody, so the door goes back on before the line goes.
+  //   remove-manager-key     armed by install-key, unless the line was already standing. LAST,
+  //                          because it is the route every act above travels; it also purges the
+  //                          sealed private half and puts the server row back at `bare`.
+  //
+  // WHAT LEAVING CANNOT PUT BACK is named where the acts are (defs/leave-host.kit.ts): the destroyed
+  // bootstrap password, the packages deploy-host installed, and the clock sources it wrote. Each is
+  // said out loud in the run log rather than passed over.
+  //
+  // FOUR OF THE FIVE ARE ROOT ACTS ON A MACHINE THAT GRANTS THIS MANAGER NOTHING WITHOUT A PASSWORD,
+  // so the abort has to be given the run's password again (executor/executor.ts abortWithCleanup);
+  // without it they refuse by name, which is the loud form of the same fact rather than a master left
+  // half-registered or a machine left half-stripped. remove-manager-key is the one that needs none:
+  // it edits the login account's own file, which is what keeps the last act from being the one that
+  // fails for want of a secret.
+  //
+  // THE MASTER ARM REGISTERS NONE OF THEM, so this list is the pure-slave arm's alone. The list stays
+  // whole because the executor resolves persisted names against it, and a run of either arm may hold
+  // names from a run of its own.
+  cleanups: () => [
+    removeSlaveCleanup(ports),
+    removeSlaveMarkingCleanup(ports),
+    leaveHostCleanup(ANSIWISE_ELEVATION_SECRET),
+    restorePasswordLoginCleanup(ANSIWISE_ELEVATION_SECRET),
+    removeManagerKeyCleanup,
+  ],
+  onTerminal: (status, { db, params }) => {
+    if (status === "succeeded") return; // the register step set the terminal states
+    const sid = String(params.serverId);
+    const domain = String(params.domain);
+    // Free the server (provisioning→ready; never clobber another status) and park the
+    // cluster row back at `planned` KEEPING its allocated slaveId — the ordinal is never
+    // recycled (clusters_slave_id_uq); a retry resumes the row (or passes slaveId explicitly).
+    //
+    // BOTH ARE NO-OPS AFTER A MASTER-ARM RUN, and by the status guards rather than by a branch: that
+    // arm moves neither row, so its machine stands at `healthy` and its cluster at `active`
+    // throughout, and neither WHERE clause below matches. A failed run therefore leaves a live
+    // installation exactly as live as it found it.
+    db.update(servers)
+      .set({ status: "ready" })
+      .where(and(eq(servers.id, sid), eq(servers.status, "provisioning")))
+      .run();
+    db.update(clusters)
+      .set({ status: "planned" })
+      .where(and(eq(clusters.domain, domain), eq(clusters.status, "provisioning")))
+      .run();
+  },
+};
+}
+

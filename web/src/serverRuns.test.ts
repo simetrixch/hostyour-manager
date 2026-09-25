@@ -1,0 +1,61 @@
+import { describe, it, expect } from "vitest";
+import type { RunView } from "../../shared/api-types.ts";
+import type { RunKind, RunStatus } from "../../shared/enums.ts";
+import { relevantRun, runLine } from "./serverRuns.ts";
+
+const run = (over: { id?: string; kind?: RunKind; status?: RunStatus; targetId?: string }): RunView => ({
+  id: over.id ?? "run_1",
+  kind: over.kind ?? "cluster-deploy-slave",
+  targetKind: "server",
+  targetId: over.targetId ?? "srv_1",
+  status: over.status ?? "planned",
+  summary: "",
+  steps: [],
+  requiredSecrets: [],
+  optionalSecrets: [],
+  findings: [],
+  requiredInputs: [],
+  createdAt: 0,
+  startedAt: null,
+  endedAt: null,
+  deletedAt: null,
+  cleanupsRegistered: false,
+  aborted: false,
+  secretHints: {},
+});
+
+describe("relevantRun — the ONE run a server's card surfaces", () => {
+  it("prefers an OPEN run over a newer failed one, so a run waiting for approval is never invisible", () => {
+    const runs = [run({ id: "run_new", status: "failed" }), run({ id: "run_open", status: "planned" })];
+    expect(relevantRun("srv_1", runs)?.id).toBe("run_open");
+  });
+
+  it("falls back to the most recent run only when it FAILED — a succeeded one is not the next step", () => {
+    expect(relevantRun("srv_1", [run({ status: "failed" })])?.id).toBe("run_1");
+    expect(relevantRun("srv_1", [run({ status: "succeeded" })])).toBeUndefined();
+  });
+
+  it("never surfaces another server's run", () => {
+    expect(relevantRun("srv_1", [run({ targetId: "srv_2", status: "planned" })])).toBeUndefined();
+  });
+});
+
+describe("runLine — what the card calls the run", () => {
+  it("names the four tailnet run kinds in words, not in kind literals", () => {
+    expect(runLine(run({ kind: "cluster-tailnet-disconnect", status: "planned" }))).toBe("A tailnet disconnect is planned — approve it");
+    expect(runLine(run({ kind: "cluster-tailnet-reconnect", status: "running" }))).toBe("A tailnet reconnect is running — watch it");
+    expect(runLine(run({ kind: "cluster-tailnet-rejoin", status: "failed" }))).toBe("The last tailnet rejoin failed — open it to retry");
+    // The reading is a run like the three above and its line reads like one: an operator watching a
+    // card cannot tell from the sentence alone whether something is being changed, so the word says it.
+    expect(runLine(run({ kind: "cluster-tailnet-read", status: "running" }))).toBe("A tailnet reading is running — watch it");
+  });
+
+  it("falls back to '<kind> run' for a run kind whose name is already a noun phrase", () => {
+    expect(runLine(run({ kind: "cluster-redeploy", status: "planned" }))).toBe("A cluster-redeploy run is planned — approve it");
+  });
+
+  it("picks the article from the noun, so a vowel does not read as 'A operator key placement'", () => {
+    expect(runLine(run({ kind: "cluster-operator-key-place", status: "running" }))).toBe("An operator key placement is running — watch it");
+    expect(runLine(run({ kind: "cluster-deploy-slave", status: "planned" }))).toBe("A deployment is planned — approve it");
+  });
+});

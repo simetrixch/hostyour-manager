@@ -1,0 +1,66 @@
+# --- Node / build ---
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# --- env ---
+.env
+.env.*
+!.env.example
+
+# --- local state & CROWN JEWELS (this app holds SSH keys + PATs) — never commit ---
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+secrets/
+*.key
+*.pem
+id_rsa*
+id_ed25519*
+known_hosts
+
+# --- test artifacts ---
+test-results/
+playwright-report/
+.playwright/
+
+# --- logs (test-run output, local debugging) ---
+logs/
+*.log
+
+# --- os / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Agent instructions. Loaded from disk by whichever harness opens this repository, and never
+# tracked: they are ours, and this repository is meant to be cloned and used by anybody.
+CLAUDE.md
+AGENTS.md
+
+# The agent worktree container. Tooling state, never product — and a worktree committed into
+# the tree it is a worktree OF is a loop nobody unpicks.
+.claude/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+# setup-ai-core start: what agents and the harness put into a checkout is never committed
+/.ai-core/
+/GEMINI.md
+/.mcp.json
+/.agents/
+/.codex/
+/.openhands/microagents/
+/.gemini/
+/.cursorrules
+/.cursor/
+/.windsurfrules
+/.windsurf/
+/.github/copilot-instructions.md
+# setup-ai-core end

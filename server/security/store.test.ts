@@ -1,0 +1,297 @@
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openDb } from "../db/client.ts";
+import { createLogger } from "../kernel/logger.ts";
+import { parseConfig } from "../kernel/config.ts";
+import { REQUIRED_ENV } from "../kernel/config.fixture.ts";
+import { CredentialStore, holdsManagerKey } from "./store.ts";
+import { runAsActor } from "../kernel/actor.ts";
+import { FakeGitHubApp } from "../adapters/github-app/testing/fake.ts";
+
+const logger = createLogger(
+  parseConfig({
+    ...REQUIRED_ENV,
+    PUBLIC_URL: "https://m1.example",
+    OIDC_ISSUER: "https://idp.example/",
+    OIDC_CLIENT_ID: "c",
+    OIDC_CLIENT_SECRET: "s",
+    MANAGER_VERSION: "test",
+    DATA_DIR: "/data",
+    ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
+    LOG_LEVEL: "silent",
+  } as NodeJS.ProcessEnv),
+);
+
+describe("CredentialStore (plaintext pass-through)", () => {
+  const dirs: string[] = [];
+  const closers: Array<() => void> = [];
+  function fresh() {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-store-"));
+    dirs.push(dir);
+    const handle = openDb(join(dir, "manager.db"));
+    closers.push(() => handle.sqlite.close());
+    return { store: new CredentialStore({ db: handle.db, logger }), sqlite: handle.sqlite };
+  }
+  afterEach(() => {
+    for (const c of closers.splice(0)) c(); // close DB handles before rm (Windows file lock)
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("sets keystore.mode=plaintext on construction and boots unlocked", () => {
+    const { store, sqlite } = fresh();
+    expect(store.mode()).toBe("plaintext");
+    expect(store.isUnlocked()).toBe(true);
+    const row = sqlite.prepare("SELECT value FROM meta WHERE key='keystore.mode'").get() as { value: string };
+    expect(row.value).toBe("plaintext");
+  });
+
+  it("seal → open round-trips and zeroes the input buffer", async () => {
+    const { store } = fresh();
+    const plain = Buffer.from("super-secret-key-material");
+    const copy = Buffer.from(plain);
+    const ref = await store.seal({ kind: "pat", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "test PAT", plaintext: plain, fingerprint: "sha256:abc" });
+    expect(plain.every((b) => b === 0)).toBe(true); // memzeroed
+    const opened = await store.open(ref.id, { purpose: "test" });
+    expect(opened.equals(copy)).toBe(true);
+  });
+
+  it("audits seal/open with the request's operator when one is bound, else 'system'", async () => {
+    const { store, sqlite } = fresh();
+    // Inside a request the chokepoint binds the operator (kernel/actor.ts); the store's audit rows
+    // must name that human. Outside any request (boot seeding, resume) they stay "system".
+    const ref = await runAsActor("op_a", () => store.seal({ kind: "pat", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "x", plaintext: Buffer.from("secret-value"), fingerprint: "sha256:a" }));
+    await runAsActor("op_a", () => store.open(ref.id, { purpose: "test" }));
+    const actors = (sqlite.prepare("SELECT actor, action FROM audit WHERE target_id=? ORDER BY ts").all(ref.id) as { actor: string; action: string }[]);
+    expect(actors.map((a) => [a.action, a.actor])).toEqual([["credential.created", "op_a"], ["credential.used", "op_a"]]);
+    const boot = await store.seal({ kind: "pat", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "y", plaintext: Buffer.from("secret-value"), fingerprint: "sha256:b" });
+    const row = sqlite.prepare("SELECT actor FROM audit WHERE target_id=? AND action='credential.created'").get(boot.id) as { actor: string };
+    expect(row.actor).toBe("system");
+  });
+
+  it("open on a revoked credential throws; the blob is kept for audit", async () => {
+    const { store, sqlite } = fresh();
+    const ref = await store.seal({ kind: "pat", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "x", plaintext: Buffer.from("secret-value"), fingerprint: "sha256:def" });
+    await store.revoke(ref.id, "compromised");
+    await expect(store.open(ref.id, { purpose: "test" })).rejects.toThrow();
+    const row = sqlite.prepare("SELECT encrypted_blob, revoked_at FROM credentials WHERE id=?").get(ref.id) as {
+      encrypted_blob: string;
+      revoked_at: number | null;
+    };
+    expect(row.encrypted_blob.length).toBeGreaterThan(0);
+    expect(row.revoked_at).not.toBeNull();
+  });
+
+  it("rotate keeps the logical credential and sets rotated_at on the old row", async () => {
+    const { store, sqlite } = fresh();
+    const first = await store.seal({ kind: "ssh_key", subject: { kind: "server", id: "srv_1" }, purpose: "ssh-key", label: "s5 key", plaintext: Buffer.from("old-key"), fingerprint: "SHA256:aaa", publicKey: "ssh-ed25519 AAA old" });
+    const second = await store.rotate(first.id, { plaintext: Buffer.from("new-key"), fingerprint: "SHA256:bbb", publicKey: "ssh-ed25519 BBB new" });
+    expect(second.id).not.toBe(first.id);
+    const old = sqlite.prepare("SELECT rotated_at FROM credentials WHERE id=?").get(first.id) as { rotated_at: number | null };
+    expect(old.rotated_at).not.toBeNull();
+    const opened = await store.open(second.id, { purpose: "test" });
+    expect(opened.toString()).toBe("new-key");
+  });
+
+  it("the same fingerprint may be sealed on more than one row (correlator, not a key)", async () => {
+    // The create-mgmt shape: a slave's STABLE long-lived token re-sealed under a renamed
+    // label carries the fingerprint the first seal carries, which a global unique index over
+    // that column would refuse. Same shape: the constant "bootstrap-password" marker
+    // fingerprint shared by every server carrying a password sealed beside its row.
+    const { store } = fresh();
+    const a = await store.seal({ kind: "kubeconfig", subject: { kind: "server", id: "srv_1" }, purpose: "cluster-bearer", label: "edge1 cluster bearer (argocd-manager) — s1", plaintext: Buffer.from("stable-token"), fingerprint: "sha256:same" });
+    const b = await store.seal({ kind: "kubeconfig", subject: { kind: "server", id: "srv_1" }, purpose: "cluster-bearer", label: "s1 cluster bearer (argocd-manager)", plaintext: Buffer.from("stable-token"), fingerprint: "sha256:same" });
+    expect(b.id).not.toBe(a.id);
+    expect((await store.list()).map((r) => r.fingerprint)).toEqual(["sha256:same", "sha256:same"]);
+  });
+
+  // WHAT ORDERS list(). Callers pick "the newest key" with `.at(-1)` (deploy-slave's install-key reads
+  // the fingerprint that way), so the last row has to be the one sealed last. createdAt is a
+  // millisecond DB clock and ties under load; the id breaks the tie because kernel/ids.ts mints a
+  // monotonic ULID. These two are about that tie and nothing else.
+  const SEALS = 120;
+
+  async function sealInOrder(store: CredentialStore): Promise<void> {
+    for (let i = 0; i < SEALS; i++) {
+      await store.seal({ kind: "pat", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: String(i), plaintext: Buffer.from("x"), fingerprint: "sha256:tie" });
+    }
+  }
+
+  it("credentials sealed inside one millisecond come back in the order they were sealed", async () => {
+    const { store, sqlite } = fresh();
+    await sealInOrder(store);
+
+    // How much this covered: rows whose createdAt differs are ordered by the clock and say nothing
+    // about the tiebreak. Only the tied neighbours exercise it, so the count of those is asserted —
+    // a run where every seal got its own millisecond would pass the ordering check below while
+    // measuring nothing about it.
+    const stamps = (sqlite.prepare("SELECT created_at FROM credentials ORDER BY created_at, id").all() as { created_at: number }[])
+      .map((r) => r.created_at);
+    const tiedPairs = stamps.filter((ms, i) => i > 0 && ms === stamps[i - 1]).length;
+    expect(tiedPairs, `${SEALS} seals produced no two rows inside one millisecond, so the ordering assertion below was never exercised`).toBeGreaterThan(0);
+
+    expect((await store.list()).map((r) => r.label)).toEqual([...Array(SEALS).keys()].map(String));
+  });
+
+  // THE OTHER HALF, and it is the query's and not the minter's. The test above cannot see the
+  // second ORDER BY key at all: SQLite scans a plain rowid table in rowid order, so a bare
+  // `ORDER BY created_at` returns a tied group in insertion order too, and every row sealed
+  // through this store has its id and its rowid rising together. So the group is built HERE, by
+  // hand, with the two DISAGREEING — inserted in one order, named in the other — which is the only
+  // state in which "ordered by created_at and then by id" and "ordered by created_at and then by
+  // whatever SQLite scans" answer differently.
+  it("a tied createdAt group comes back ordered by id, not by the order the rows were inserted in", async () => {
+    const { store, sqlite } = fresh();
+    const insert = sqlite.prepare(
+      "INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint, created_at) VALUES (?, 'pat', ?, 'unit', 'acme', 'repository-identity', 'plain:v0:eA==', 'sha256:tie', 7000)",
+    );
+    for (const [id, label] of [["cred_C", "third"], ["cred_A", "first"], ["cred_B", "second"]]) insert.run(id, label);
+
+    expect((await store.list()).map((r) => r.label)).toEqual(["first", "second", "third"]);
+  });
+
+  // The counter-probe of the assertion above: it compares the labels against 0..N-1, and that
+  // comparison must be able to see a single pair out of place. The trail is built HERE, out of the
+  // labels themselves, and NOT read back from the store — a probe starting from whatever the store
+  // returned would, on a store that orders badly, start from an already scrambled array, and then
+  // it asserts only that a scrambled array is not sorted, which is true whatever the comparison does.
+  it("the ordering assertion rejects a list with one adjacent pair swapped", () => {
+    const inOrder = [...Array(SEALS).keys()].map(String);
+    const swapped = inOrder.map((label, i) => (i === 0 ? inOrder[1] : i === 1 ? inOrder[0] : label));
+
+    expect(swapped).not.toEqual(inOrder);
+  });
+
+  it("list returns active credentials only and writes the audit trail", async () => {
+    const { store, sqlite } = fresh();
+    const a = await store.seal({ kind: "pat", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "a", plaintext: Buffer.from("aaaa"), fingerprint: "sha256:a" });
+    await store.seal({ kind: "pat", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "b", plaintext: Buffer.from("bbbb"), fingerprint: "sha256:b" });
+    await store.revoke(a.id, "x");
+    const active = await store.list();
+    expect(active.map((r) => r.label)).toEqual(["b"]);
+    const created = sqlite.prepare("SELECT count(*) AS n FROM audit WHERE action='credential.created'").get() as { n: number };
+    const revoked = sqlite.prepare("SELECT count(*) AS n FROM audit WHERE action='credential.revoked'").get() as { n: number };
+    expect(created.n).toBe(2);
+    expect(revoked.n).toBe(1);
+  });
+});
+
+// A `github-app` credential stores no value: the store mints the App's installation token at every
+// open, because a stored one dies an hour after it was minted (the tenant's own apps repository,
+// tenant-apps-steps.ts).
+describe("CredentialStore — the github-app kind is minted at open, never stored", () => {
+  const dirs: string[] = [];
+  const closers: Array<() => void> = [];
+  function fresh(githubApp?: FakeGitHubApp) {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-store-app-"));
+    dirs.push(dir);
+    const handle = openDb(join(dir, "manager.db"));
+    closers.push(() => handle.sqlite.close());
+    return { store: new CredentialStore({ db: handle.db, logger, ...(githubApp ? { githubApp } : {}) }), sqlite: handle.sqlite };
+  }
+  afterEach(() => {
+    for (const c of closers.splice(0)) c();
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("opens to a token minted NOW — two opens answer two different tokens when the App's changes between them, and the row holds no value", async () => {
+    const app = new FakeGitHubApp();
+    const { store, sqlite } = fresh(app);
+    const ref = await store.seal({ kind: "github-app", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "GitHub App (acme-apps)", plaintext: Buffer.alloc(0), fingerprint: app.identityFingerprint() });
+    app.token = "ghs_first_hour";
+    expect((await store.open(ref.id, { purpose: "test" })).toString("utf8")).toBe("ghs_first_hour");
+    app.token = "ghs_second_hour";
+    expect((await store.open(ref.id, { purpose: "test" })).toString("utf8")).toBe("ghs_second_hour");
+    const row = sqlite.prepare("SELECT encrypted_blob, fingerprint, kind FROM credentials WHERE id=?").get(ref.id) as { encrypted_blob: string; fingerprint: string; kind: string };
+    expect(row.kind).toBe("github-app");
+    expect(row.encrypted_blob).not.toContain("ghs_");
+    expect(row.encrypted_blob).not.toContain(Buffer.from("ghs_first_hour").toString("base64"));
+    // The audit names the App identity's fingerprint — stable across every mint.
+    expect(row.fingerprint).toBe(app.identityFingerprint());
+    const used = sqlite.prepare("SELECT detail_json AS detail FROM audit WHERE target_id=? AND action='credential.used'").all(ref.id) as { detail: string }[];
+    expect(used).toHaveLength(2);
+    for (const u of used) expect(JSON.parse(u.detail)).toMatchObject({ fingerprint: app.identityFingerprint() });
+  });
+
+  it("a value handed to seal under the kind is never returned — the open still mints", async () => {
+    const app = new FakeGitHubApp();
+    app.token = "ghs_minted";
+    const { store } = fresh(app);
+    const ref = await store.seal({ kind: "github-app", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "x", plaintext: Buffer.from("ghs_stored_by_mistake"), fingerprint: "sha256:app" });
+    expect((await store.open(ref.id, { purpose: "test" })).toString("utf8")).toBe("ghs_minted");
+  });
+
+  it("is listed under its kind, and a revoked one is refused before any mint", async () => {
+    const app = new FakeGitHubApp();
+    const { store } = fresh(app);
+    const ref = await store.seal({ kind: "github-app", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "x", plaintext: Buffer.alloc(0), fingerprint: "sha256:app" });
+    await store.seal({ kind: "pat", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "y", plaintext: Buffer.from("pat-value"), fingerprint: "sha256:pat" });
+    expect((await store.list({ kind: "github-app" })).map((r) => r.id)).toEqual([ref.id]);
+    await store.revoke(ref.id, "offboarded");
+    app.failWith = new Error("must not be asked");
+    await expect(store.open(ref.id, { purpose: "test" })).rejects.toThrow(/revoked/);
+  });
+
+  it("refuses by name on a Manager that holds no GitHub App, and lets the App's own refusal through", async () => {
+    const { store } = fresh();
+    const ref = await store.seal({ kind: "github-app", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "x", plaintext: Buffer.alloc(0), fingerprint: "sha256:app" });
+    await expect(store.open(ref.id, { purpose: "test" })).rejects.toThrow(/holds no GitHub App identity: set GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY/);
+    const app = new FakeGitHubApp();
+    app.failWith = new Error("installation suspended");
+    const { store: withApp } = fresh(app);
+    const ref2 = await withApp.seal({ kind: "github-app", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "x", plaintext: Buffer.alloc(0), fingerprint: "sha256:app" });
+    await expect(withApp.open(ref2.id, { purpose: "test" })).rejects.toThrow(/installation suspended/);
+  });
+});
+
+// The two readings a PLANNER takes: which credentials stand, asked of the database and answered
+// without opening one. They are what stopped standing in for a server's status — a status says
+// where a machine is in its deployment and is written by a run that may never have opened a
+// session, so a predicate built on one answers "this manager holds a key" for a machine it has
+// never logged in to.
+describe("what a planner may read off the credentials table", () => {
+  const dirs: string[] = [];
+  const closers: Array<() => void> = [];
+  function fresh() {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-store-read-"));
+    dirs.push(dir);
+    const handle = openDb(join(dir, "manager.db"));
+    closers.push(() => handle.sqlite.close());
+    handle.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_a','s1','2.2.2.1','root','slave')").run();
+    handle.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_b','s2','2.2.2.2','root','slave')").run();
+    return { db: handle.db, store: new CredentialStore({ db: handle.db, logger }) };
+  }
+  afterEach(() => {
+    for (const c of closers.splice(0)) c();
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  const sealKey = (store: CredentialStore, serverId: string, fp = "SHA256:k") =>
+    store.seal({ kind: "ssh_key", label: `key ${serverId}`, plaintext: Buffer.from("private"), fingerprint: fp, subject: { kind: "server", id: serverId }, purpose: "ssh-key" });
+
+  it("holdsManagerKey answers for the credential ctx.ssh() would pick, and for nothing else", async () => {
+    const { db, store } = fresh();
+    expect(holdsManagerKey(db, "srv_a")).toBe(false);
+    const ref = await sealKey(store, "srv_a");
+    expect(holdsManagerKey(db, "srv_a")).toBe(true);
+    // Another server's key is another server's: this is asked per machine.
+    expect(holdsManagerKey(db, "srv_b")).toBe(false);
+    // A key sealed against no server at all is a PAT-shaped row and belongs to no machine.
+    await store.seal({ kind: "ssh_key", subject: { kind: "server", id: "srv_1" }, purpose: "ssh-key", label: "loose", plaintext: Buffer.from("x"), fingerprint: "SHA256:loose" });
+    expect(holdsManagerKey(db, "srv_b")).toBe(false);
+    await store.revoke(ref.id, "test");
+    expect(holdsManagerKey(db, "srv_a")).toBe(false);
+  });
+
+  it("a rotated-out key does not count — it is one the machine has already stopped taking", async () => {
+    const { db, store } = fresh();
+    const first = await sealKey(store, "srv_a");
+    await store.rotate(first.id, { plaintext: Buffer.from("newer"), fingerprint: "SHA256:k2" });
+    // The newer row stands, so the door is open; the superseded row alone would not open it.
+    expect(holdsManagerKey(db, "srv_a")).toBe(true);
+    for (const c of await store.list({ subject: { kind: "server", id: "srv_a" }, purpose: "ssh-key", excludeRotated: true })) await store.purge(c.id);
+    expect(holdsManagerKey(db, "srv_a")).toBe(false);
+  });
+
+});

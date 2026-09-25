@@ -1,0 +1,248 @@
+/* App shell — layout, top bar (mobile), NavRail (desktop), TabBar (mobile), page scaffold.
+   Mobile-first with the single 768px breakpoint: below it a sticky top bar + bottom TabBar,
+   at/above it the side NavRail owns brand + sign-out and the top bar disappears. */
+
+.layout {
+  min-height: 100vh;
+}
+
+.shell {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+/* ---- Top bar (mobile chrome) ---- */
+
+.topbar {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--topbar-h);
+  padding-inline: var(--sp-4);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-3);
+  letter-spacing: -0.01em;
+}
+
+.topbar__signout {
+  padding: 0.375rem 0.625rem;
+  color: var(--text-2);
+  font-size: var(--fs-2);
+  font-weight: 500;
+  text-decoration: none;
+  border-radius: var(--r-md);
+}
+
+.topbar__signout:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+/* ---- Content column ---- */
+
+.content {
+  width: 100%;
+  max-width: var(--content-max);
+  flex: 1;
+  margin-inline: auto;
+  padding: var(--sp-4);
+  padding-bottom: 5.5rem; /* clearance for the fixed TabBar */
+}
+
+/* ---- NavRail (desktop only; hidden by default) ---- */
+
+.navrail {
+  display: none;
+}
+
+/* ---- TabBar (mobile primary nav) ---- */
+
+.tabbar {
+  position: fixed;
+  z-index: 20;
+  inset-inline: 0;
+  bottom: 0;
+  display: flex;
+  padding: var(--sp-1) var(--sp-2);
+  padding-bottom: max(var(--sp-1), env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border);
+}
+
+.tabbar__item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.375rem var(--sp-1);
+  color: var(--text-2);
+  font-size: var(--fs-0);
+  font-weight: 500;
+  text-decoration: none;
+  border-radius: var(--r-md);
+}
+
+.tabbar__item--active {
+  color: var(--accent);
+}
+
+.tabbar__icon {
+  display: inline-flex;
+}
+
+/* ---- Page scaffold ---- */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.page__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.page__eyebrow {
+  display: block;
+  margin-bottom: var(--sp-1);
+  color: var(--accent);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.page__title {
+  font-size: var(--fs-5);
+  letter-spacing: -0.01em;
+}
+
+.page__desc {
+  max-width: 46rem;
+  margin-top: var(--sp-1);
+  color: var(--text-2);
+  font-size: var(--fs-2);
+}
+
+.page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ---- The single breakpoint: swap TabBar+topbar for the NavRail ---- */
+
+@media (width >= 768px) {
+  .layout {
+    display: flex;
+  }
+
+  .topbar {
+    display: none;
+  }
+
+  .tabbar {
+    display: none;
+  }
+
+  .navrail {
+    position: sticky;
+    top: 0;
+    display: flex;
+    height: 100vh;
+    flex: none;
+    flex-direction: column;
+    width: var(--rail-w);
+    padding: var(--sp-4) var(--sp-3);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+  }
+
+  .navrail__brand {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-1) var(--sp-2);
+    margin-bottom: var(--sp-5);
+    font-size: var(--fs-3);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .navrail__items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .navrail__item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 0.4375rem var(--sp-2);
+    color: var(--text-2);
+    font-size: var(--fs-2);
+    font-weight: 500;
+    text-decoration: none;
+    border-radius: var(--r-md);
+    transition: color 0.12s ease, background-color 0.12s ease;
+  }
+
+  .navrail__item:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+
+  .navrail__item--active {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+
+  .navrail__item--active:hover {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+
+  .navrail__icon {
+    display: inline-flex;
+    flex: none;
+  }
+
+  .navrail__foot {
+    margin-top: auto;
+    padding-top: var(--sp-3);
+    border-top: 1px solid var(--border);
+  }
+
+  .navrail__version {
+    padding: var(--sp-2) var(--sp-3) 0;
+    color: var(--text-3);
+    font-size: var(--fs-0);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .content {
+    padding: var(--sp-6);
+    padding-bottom: var(--sp-7);
+  }
+}

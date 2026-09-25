@@ -1,0 +1,283 @@
+// THE search over the image pins of the platform — the same one the release bump performs when it
+// asks "who pins the image I just built?", run here to answer the reaper's opposite question: "which
+// tags does anything still pin?". ONE search behind both, so a tag the bump would write can never be
+// a tag the reaper thinks nobody references.
+//
+// A THIRD reader takes class (c) alone (searchPlatformApps below): the release surface, which asks
+// which version each platform app runs on one installation. Same walk, so the versions it reports
+// and the tags the reaper protects come from one picture of the branches, never two.
+//
+// The search space is four carrier classes, over EVERY stage:
+//
+//   (a) the deployable units. Their registrations stand on this installation's books branch in
+//       hostyour-cloud (shared/branches.ts) as registrations/<unit>/<stage>.yaml; each one that carries a chartPath points at the unit's OWN
+//       repo, where the chart's pins live on the delivery branch deploy/<stage> at
+//       <chartPath>/values-<stage>.yaml. Suspended and quiesced units are read like any other: a
+//       suspended unit is resumable and its image stays live. A build.yaml registration contributes
+//       nothing here — it has no chartPath, and its images are pinned by whoever deploys them, in (b)
+//       or (c).
+//   (b) the tenant catalog: catalog, charts/* on EVERY branch, in the two files a catalog
+//       chart pins in — values.yaml on the trunk (the product default a fresh installation renders)
+//       and pins-<stage>.yaml on an installation's books branch (what that installation actually
+//       runs). Both are floor: a tag either of them names is deployed somewhere and must not be
+//       deleted.
+//   (c) the platform apps: hostyour-cloud, clusters/inventories/*/values-<stage>.yaml, on EVERY branch — master AND the
+//       install branches. An install branch stands on the release a cluster actually runs, which can
+//       be OLDER than master, so reading master alone would leave the tags of running clusters
+//       unprotected.
+//   (d) the tenants' own apps bundles: catalog, registrations/<guid>/<stage>.yaml on EVERY branch
+//       (an installation's books). A tenant's `<bundle>-<subdomain>` image is declared by no chart's
+//       builds[] and stands in no pins file: its pin is `appsImage` + `appsImageTag` on the tenant
+//       registration (shared/tenant.ts appsBundleFields, hostyour-manager#178), the one tag every
+//       engine of that tenant runs. The empty pair is a tenant without a bundle and pins nothing.
+//
+// FAIL-CLOSED throughout. A carrier that cannot be read aborts the whole search: an incomplete result
+// is indistinguishable from "nothing pins this", and acting on that difference is what deletes a live
+// image. Class (a) is the strict case — a stage registration whose delivery branch or pin file is
+// missing aborts, because the unit demonstrably deploys and the search cannot say from what. Classes
+// (b) and (c) glob over directories, so a chart that carries no file for a stage is simply not a
+// carrier at that stage.
+import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
+import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
+import {
+  parseBuildPins, stagePinFile, stagePinFiles, catalogPinFiles,
+  type GlobPinHit, type GlobSearch, type PinFile, type PinHit,
+} from "../../../shared/pin.ts";
+import { parse as parseYaml } from "yaml";
+import type { BranchScope, RepoReader } from "../../adapters/git/port.ts";
+
+/** A GitOps repo the search reads across ALL of its branches (hostyour-cloud, catalog). Narrower
+ *  than the adapters it is composed from: the search only ever reads, and the adapters it is composed
+ *  from are built with branch creation OFF (jobs/registry-reaper.ts) so that stays true of the
+ *  concrete instances too — a floor built over a branch the reaper minted itself would be empty, and
+ *  an empty floor calls every live image unreferenced. */
+export interface CarrierRepo {
+  /** The branch this installation's books stand on in this repo (adapters/git/port.ts). The
+   *  registration index of class (a) is read there and nowhere else. */
+  readonly booksBranch: string;
+  /** Every branch of the repo. A truncated enumeration must THROW, not return a short list — a
+   *  branch missed here is a pin missed, which is a live tag left unprotected. */
+  listBranches(): Promise<readonly { name: string }[]>;
+  /** One exclusive turn on a branch's worktree, exactly as PlatformRepo.withBranch gives it: the
+   *  reaper walks every registration, and a walk that a concurrent write can slide through would
+   *  build its protected-tag floor out of two different states of the books. */
+  withBranch<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T>;
+}
+
+export interface SearchDeps {
+  /** hostyour-cloud: the registrations on the books branch (class a's index) and clusters/inventories/* on every
+   *  branch (class c). */
+  cloud: CarrierRepo;
+  /** catalog: charts/* (class b) and registrations/* (class d) on every branch. */
+  deploy: CarrierRepo;
+  /** A unit's OWN repo, opened per unit under its owner's identity (class a). */
+  unit: Pick<RepoReader, "cloneAtRef" | "readFile" | "dispose">;
+  /** The credential a unit's repository is reached with, resolved from its URL now (repo-identity.ts
+   *  resolveRepoCredentialId, #226): the App's row or the owner's PAT row. */
+  unitCredential: (repoURL: string, signal?: AbortSignal) => Promise<string>;
+}
+
+/** The directory of hostyour-cloud that holds one registration per unit. */
+const REGISTRATIONS_DIR = "registrations";
+/** The chart directories of the two glob classes.
+ *
+ *  CLOUD_APPS_DIR is the platform repository's own path and not this repository's to choose. It read
+ *  `apps` until the platform gathered what a cluster is made of under `clusters/`, and nothing here
+ *  noticed: an absent directory is an empty listing, so the walk answered nothing and said nothing
+ *  (git-workdir.ts listWorkdirDir swallows ENOENT/ENOTDIR by contract). The release surface then
+ *  reported no app versions at all, and the reaper's keep floor lost the class that protects the
+ *  platform's own images. That is why searchGlob refuses an empty class (c) below, and why the tests
+ *  for both classes seed a LITERAL rather than these constants. */
+const DEPLOY_CHARTS_DIR = "charts";
+const CLOUD_APPS_DIR = "clusters/inventories";
+/** The repository each glob class stands in, as the carrier string names it. */
+const DEPLOY_LABEL = "catalog";
+const CLOUD_LABEL = "hostyour-cloud";
+
+/** The delivery branch a unit's chart pins stand on for one stage. */
+function deliveryBranch(stage: Stage): string {
+  return `deploy/${stage}`;
+}
+
+const at = (repo: string, branch: string, path: string): string => `${repo}@${branch}:${path}`;
+
+/**
+ * Run the search. Returns EVERY pin of EVERY carrier, each with its location. Throws on any
+ * unreadable carrier — the caller gets a complete answer or none.
+ */
+export async function searchCarriers(deps: SearchDeps, signal?: AbortSignal): Promise<PinHit[]> {
+  return [
+    ...(await searchUnitCharts(deps, signal)),
+    ...(await searchCatalog(deps.deploy)),
+    ...(await searchPlatformApps(deps.cloud)).hits,
+  ];
+}
+
+/** Classes (b) and (d) in ONE walk of the catalog's branches: the chart pins and the tenant
+ *  registrations stand on the same branches, and a branch fetched twice is a branch fetched once
+ *  too often. */
+async function searchCatalog(deploy: CarrierRepo): Promise<PinHit[]> {
+  const hits: PinHit[] = [];
+  for (const branch of await deploy.listBranches()) {
+    await deploy.withBranch(branch.name, async (scope) => {
+      hits.push(...(await globPins(scope, DEPLOY_LABEL, branch.name, DEPLOY_CHARTS_DIR, catalogPinFiles())).hits);
+      hits.push(...(await tenantBundles(scope, branch.name)));
+    });
+  }
+  return hits;
+}
+
+/** Class (d) on ONE branch: the apps bundle of every tenant registration there. A registration that
+ *  fails its schema THROWS — an image without its tag is refused there, and a tenant demonstrably
+ *  runs, so its pin is not optional to know. The pin's `name` is the image: a bundle is one flat
+ *  build whose name IS its image (tenant-apps-tree.ts tenantAppsManifest). */
+async function tenantBundles(scope: BranchScope, branch: string): Promise<PinHit[]> {
+  const hits: PinHit[] = [];
+  for (const guid of await scope.listDir(REGISTRATIONS_DIR)) {
+    for (const stage of STAGE) {
+      const path = `${REGISTRATIONS_DIR}/${guid}/${stage}.yaml`;
+      const raw = await scope.readFile(path);
+      if (raw === null) continue;
+      const entry = TenantRegistrationSchema.parse(parseYaml(raw));
+      if (!entry.appsImage || !entry.appsImageTag) continue; // the empty pair: no bundle
+      hits.push({ carrier: at(DEPLOY_LABEL, branch, path), pin: { name: entry.appsImage, image: entry.appsImage, tag: entry.appsImageTag } });
+    }
+  }
+  return hits;
+}
+
+/**
+ * Class (c) ON ITS OWN: what the platform apps pin, branch by branch and stage by stage. The same
+ * walk searchCarriers folds into the floor above — one enumeration, two readers, so the versions a
+ * surface reports and the tags the reaper protects can never come from two different pictures of the
+ * same branches.
+ *
+ * The reader that takes this class alone is the release surface: an install branch stands on the
+ * release a cluster actually runs, so `clusters/inventories/<app>/values-<stage>.yaml` on the branch named after a
+ * cluster's FQDN states which image version that cluster's platform apps run. Fail-closed as above — a
+ * truncated branch listing or an unparseable pin file throws rather than answering short.
+ */
+export function searchPlatformApps(cloud: CarrierRepo): Promise<GlobSearch> {
+  return searchGlob(cloud, CLOUD_LABEL, CLOUD_APPS_DIR, stagePinFiles(), { mustCarry: true });
+}
+
+/** Class (a): every stage registration with a chartPath, read out of its unit's own delivery branch. */
+async function searchUnitCharts(deps: SearchDeps, signal?: AbortSignal): Promise<PinHit[]> {
+  return deps.cloud.withBranch(deps.cloud.booksBranch, async (books) => {
+  const hits: PinHit[] = [];
+  for (const unit of await books.listDir(REGISTRATIONS_DIR)) {
+    for (const stage of STAGE) {
+      const path = `${REGISTRATIONS_DIR}/${unit}/${stage}.yaml`;
+      const raw = await books.readFile(path);
+      if (raw === null) continue; // the unit is not deployed at this stage
+      // A registration is flat `key: <json>`, which a real YAML parser reads as-is; the schema then
+      // decides whether this is the stage form. An unparseable or invalid one THROWS — the unit is
+      // registered, so its pins are not optional to know.
+      const entry = ConsumerRegistrationSchema.parse(parseYaml(raw));
+      if (entry.chartPath === undefined) continue; // build-only: its images are pinned in (b) or (c)
+      hits.push(...(await readUnitChart(deps, entry.name, entry.repoURL, await deps.unitCredential(entry.repoURL, signal), entry.chartPath, stage, signal)));
+    }
+  }
+  return hits;
+  });
+}
+
+/** Read ONE unit's pin file off its delivery branch. Both the branch and the file are required: the
+ *  registration states this unit deploys at this stage, so a missing carrier is a broken unit, not an
+ *  empty one, and continuing would drop its tags out of the floor without a word. */
+async function readUnitChart(
+  deps: SearchDeps,
+  name: string,
+  repoURL: string,
+  credentialId: string,
+  chartPath: string,
+  stage: Stage,
+  signal?: AbortSignal,
+): Promise<PinHit[]> {
+  const branch = deliveryBranch(stage);
+  const path = `${chartPath}/${stagePinFile(stage)}`;
+  let workdir: string | null = null;
+  try {
+    ({ workdir } = await deps.unit.cloneAtRef({
+      repoURL,
+      ref: branch,
+      credentialId,
+      ...(signal ? { signal } : {}),
+    }));
+  } catch (e) {
+    throw new Error(
+      `unit "${name}" is registered at ${stage} but its delivery branch ${branch} of ${repoURL} could not be read (${e instanceof Error ? e.message : String(e)}) — refusing to prune with a floor that cannot see this unit's images`,
+    );
+  }
+  try {
+    const text = await deps.unit.readFile(workdir, path);
+    if (text === null) {
+      throw new Error(
+        `unit "${name}" is registered at ${stage} but ${at(repoURL, branch, path)} does not exist — that file is where its image pins stand, so the floor cannot see them`,
+      );
+    }
+    return parseBuildPins(at(repoURL, branch, path), text).map((pin) => ({ carrier: at(repoURL, branch, path), pin }));
+  } finally {
+    await deps.unit.dispose(workdir);
+  }
+}
+
+/** Classes (b) and (c): the pin files of every immediate child of `dir`, on every branch
+ *  of one GitOps repo, in the pin files that class names. A chart without one of them is not a
+ *  carrier through it — unlike class (a), nothing claimed it was.
+ *
+ *  `mustCarry` says whether NO branch holding a single child under `dir` is a refusal. It is a
+ *  property of the REPOSITORY and therefore stated per class, not derived here: the platform's own
+ *  repository always ships the directory its own charts live in, so an answer of nothing means this
+ *  walk is looking at the wrong path — the state that actually happened when the platform moved its
+ *  charts. A CUSTOMER's catalogue is not held to it, because a pure fan-out catalogue that ships no
+ *  chart of its own is a shape the platform supports and refusing it would break a correct
+ *  installation. The refusal cannot tell a directory that is absent from one that is empty and does
+ *  not try to: both mean the same thing here — the floor this class contributes is empty, and a floor
+ *  that can silently be empty is a floor that can delete everything it was meant to protect. */
+async function searchGlob(
+  repo: CarrierRepo,
+  label: string,
+  dir: string,
+  files: readonly PinFile[],
+  opts: { mustCarry?: boolean } = {},
+): Promise<GlobSearch> {
+  const hits: GlobPinHit[] = [];
+  const branches: string[] = [];
+  let carrying = 0;
+  for (const branch of await repo.listBranches()) {
+    branches.push(branch.name);
+    await repo.withBranch(branch.name, async (scope) => {
+      const read = await globPins(scope, label, branch.name, dir, files);
+      if (read.carrying) carrying += 1;
+      hits.push(...read.hits);
+    });
+  }
+  if (opts.mustCarry === true && carrying === 0) {
+    throw new Error(
+      `not one of ${label}'s ${branches.length} branch(es) carries anything under "${dir}" — that directory is where this platform's own charts and their image pins stand, ` +
+      `so the search is looking at a path the repository does not have. Refusing to answer, because an empty answer here reads as "this platform pins no images": ` +
+      `the release surface would report no app versions at all, and the registry reaper's keep floor would lose the class that protects the platform's own images. ` +
+      `Branches read: ${branches.join(", ") || "(none)"}.`,
+    );
+  }
+  return { branches, hits };
+}
+
+/** The pin files of every immediate child of `dir` on ONE branch, and whether the branch carries
+ *  anything under it at all. */
+async function globPins(scope: BranchScope, label: string, branch: string, dir: string, files: readonly PinFile[]): Promise<{ carrying: boolean; hits: GlobPinHit[] }> {
+  const hits: GlobPinHit[] = [];
+  const charts = await scope.listDir(dir);
+  for (const chart of charts) {
+    for (const { file, stage } of files) {
+      const path = `${dir}/${chart}/${file}`;
+      const text = await scope.readFile(path);
+      if (text === null) continue;
+      const carrier = at(label, branch, path);
+      hits.push(...parseBuildPins(carrier, text).map((pin) => ({ carrier, pin, branch, chart, stage })));
+    }
+  }
+  return { carrying: charts.length > 0, hits };
+}

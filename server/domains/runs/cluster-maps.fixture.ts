@@ -1,0 +1,140 @@
+// THE CLUSTER MAPS THE FIXTURES STAND ON — clusters/active/<fqdn>.yaml as the two writers of that
+// file leave it: the map template on a master, and the manager's own mark-slave on a slave.
+//
+// A FIXTURE MAP THAT CARRIES LESS THAN A REAL ONE CANNOT FAIL when the code drops something. A
+// master's map holding only part of what a real one carries lets a slave composed from it come out
+// short while every test passes — the missing keys are what its own
+// programs read, so its machine layer stops at "is not on this host" asking for the address of
+// the secret store, measured on a real machine. Every key here is one a real map states.
+
+/** THE NAMES THESE MAPS ARE WRITTEN FOR, stated HERE and read by the harness that seeds them —
+ *  a map names the cluster it is about, so the name belongs beside the map and not the other way
+ *  round. The harness composes its PARAMS from these. */
+export const MASTER_FQDN = "m1.example.com";
+export const SLAVE_FQDN = "s1.example.com";
+export const FIXTURE_STAGE = "prod";
+
+/** THE INSTALLATION'S OWN TWO ANSWERS, which every cluster of it carries the same value of: the
+ *  authority it registers with and the mailbox that one writes to. Named here rather than written
+ *  into each map below, because a test that mirrors what a run composes has to state the value the
+ *  map states, and a value spelled twice is a value that can disagree with itself. */
+export const MAP_LETSENCRYPT_EMAIL = "ops@example.com";
+export const MAP_LETSENCRYPT_SERVER = "https://acme-v02.api.letsencrypt.org/directory";
+/** The time servers every machine of this installation asks the time of, in the flow shape both
+ *  writers of a map put a list down in. A machine added later is answered with them from the
+ *  master's map, so the line stands in both maps below and the value is stated once. */
+export const MAP_TIME_SOURCES = "['ntp1.example.com', 'ntp2.example.com']";
+/** Where the tailnet coordinator answers — `tale.<books cluster>`, one coordinator per installation,
+ *  so every cluster map of it states the same address. Named here because a test that re-seeds a map
+ *  with a DIFFERENT coordinator has to replace the line this states. */
+export const MAP_TAILNET_URL = `https://tale.${MASTER_FQDN}`;
+
+/** A slave's cluster map as mark-slave leaves it on the books branch — identity plus the slave
+ *  part that makes the master's slaves ApplicationSet able to dial it. Seeded by tests that start
+ *  from a slave that ALREADY IS one (redeploy); a fresh deploy writes its own. */
+export const SLAVE_MARKING_YAML = [
+  `stage: ${FIXTURE_STAGE}`,
+  "role: slave",
+  "booksCluster: m1.example.com",
+  "",
+  "global:",
+  `  domain: ${SLAVE_FQDN}`,
+  "  buildPlane: m1.example.com",
+  "  master: m1.example.com",
+  "  apiHost: 100.64.0.11",
+  "  apiPort: 16443",
+  // AND WHAT MARK-SLAVE COMPOSES OUT OF THE MASTER'S: a slave's map inherits the installation, and
+  // this fixture stands for a slave that HAS been marked. It carried five keys while the thing it
+  // stands for carries seventeen, which is a fixture that cannot fail when a reader finds one
+  // missing — the address of the registry this machine pulls through among them.
+  "  clusterName: s1",
+  "  unitApex: example.com",
+  "  platformDomain: example.com",
+  "  clusterIssuer: platform-acme",
+  `  letsencryptEmail: ${MAP_LETSENCRYPT_EMAIL}`,
+  `  letsencryptServer: ${MAP_LETSENCRYPT_SERVER}`,
+  `  timeSources: ${MAP_TIME_SOURCES}`,
+  "  vaultKubernetesAuthPath: kubernetes-s1",
+  "  nodeCidrs: [198.51.100.11/32]",
+  "  endpoints:",
+  "    registry:",
+  "      host: zot.m1.example.com",
+  "    vault:",
+  "      url: https://vault.m1.example.com",
+  "    idp:",
+  "      url: https://idp.m1.example.com",
+  "    tailnet:",
+  `      url: ${MAP_TAILNET_URL}`,
+  // A slave keeps no books and, here, does not build: all three false is what mark-slave writes.
+  "  servicesLocal:",
+  "    registry: false",
+  "    vault: false",
+  "    observability: false",
+].join("\n") + "\n";
+
+/** The MASTER's own cluster map: written when the master installed itself. mark-slave reads it to
+ *  compose the SLAVE's map — a slave belongs to the same installation, so its build plane, unit
+ *  apex, platform domain, alert recipients and catalog repository are the master's. */
+export const MASTER_MARKING_YAML = [
+  "stage: prod",
+  "role: master",
+  "booksCluster: m1.example.com",
+  "",
+  "global:",
+  "  domain: m1.example.com",
+  "  buildPlane: m1.example.com",
+  "  unitApex: example.com",
+  "  platformDomain: example.com",
+  // A LIST, which is what the map template writes and what the alert route ranges over. It stood
+  // here as a plain scalar, and a scalar is what the writer produced from it too — so no test could
+  // see that the first rewrite of a real map turned its recipients into one mailbox that is several.
+  "  alertRecipients: ['ops@example.com']",
+  "  catalogUrl: https://github.com/acme/acme-catalog.git",
+  // THE SAME REPOSITORY AS owner/name. A cluster cutting a SLAVE's branch reads it from the map,
+  // because catalogUrl is the wrong shape for what the argocd files stamp.
+  "  catalogRepo: acme/acme-catalog",
+  // WHAT A REAL MASTER'S MAP CARRIES BESIDE THE NAMES ABOVE. A fixture
+  // that carries less than the thing it stands for cannot fail when the code drops something: a
+  // slave composed from a handful of copied fields comes out short of a master's keys while every
+  // test passes.
+  //
+  // Two of them are the machine's OWN and a slave must not inherit them — the short name everything
+  // per cluster carries, and the auth mount that tells two clusters of one installation apart when
+  // they log in. The rest belong to the installation and must arrive untouched.
+  "  clusterName: m1",
+  "  clusterIssuer: platform-acme",
+  `  letsencryptEmail: ${MAP_LETSENCRYPT_EMAIL}`,
+  `  letsencryptServer: ${MAP_LETSENCRYPT_SERVER}`,
+  `  timeSources: ${MAP_TIME_SOURCES}`,
+  "  vaultKubernetesAuthPath: kubernetes-m1",
+  "  registryPullUser: puller",
+  "  registryPushUser: pusher",
+  // THE OBJECT STORAGE, on the one line the template writes it. A regeneration the manager drives
+  // has to hand both halves on, and a fixture without the line cannot fail when it does not.
+  `  objectStorage: {r2: {accountId: '0123456789abcdef0123456789abcdef', jurisdiction: 'eu'}}`,
+  // WHERE THE MACHINES OF THIS CLUSTER CAN BE REACHED. A fact about the MASTER's box, and the one
+  // global key a slave must not inherit — the fence the gate sandbox draws would otherwise be drawn
+  // around this machine while the slave's own address stood outside it.
+  "  nodeCidrs: [203.0.113.7/32]",
+  // ALL FIVE, as the map template writes them. Three of them follow the books-keeping cluster and
+  // one the build plane, so a slave inherits every one unchanged — and a fixture carrying only the
+  // one a single step happened to read cannot fail when the next step's address goes missing.
+  "  endpoints:",
+  "    registry:",
+  "      host: zot.m1.example.com",
+  // NO `mail` HERE ON PURPOSE. It is optional in the template — an installation running no mail
+  // service has none. The present case is proven where the round trip is, in
+  // cluster-marking.test.ts's FULL_MAP.
+  "    vault:",
+  "      url: https://vault.m1.example.com",
+  "    idp:",
+  "      url: https://idp.m1.example.com",
+  "    tailnet:",
+  `      url: ${MAP_TAILNET_URL}`,
+  // A MASTER HOLDS ALL THREE: it keeps the books and, here, also builds. Two of them are what a
+  // slave must be told it does NOT hold.
+  "  servicesLocal:",
+  "    registry: true",
+  "    vault: true",
+  "    observability: true",
+].join("\n") + "\n";

@@ -1,0 +1,207 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { RecordingTeardownSeeder } from "./teardown.fixture.ts";
+import { seedQuota } from "../../../shared/unit-size.ts";
+import { eq } from "drizzle-orm";
+import { openDb, type DbHandle } from "../../db/client.ts";
+import { servers, clusters, apps } from "../../db/schema/inventory.ts";
+import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
+import { renderSmtpOpsGrant } from "./build-rbac.ts";
+import { Registrations } from "./registrations.ts";
+import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
+import { FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
+import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
+import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
+import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
+import type { StepCtx } from "../../executor/types.ts";
+import type { CredentialStore } from "../../security/store.ts";
+import type { Logger } from "../../kernel/logger.ts";
+
+// The SCOPE half of offboard — split from offboard.run.test.ts, whose fixtures are all single-stage.
+// An offboard removes ONE STAGE of a unit, and a unit deployed at two stages is two of some things and
+// one of others. Per stage, every object whose name carries the stage: the registration, the
+// Application, the repository Secret repo-<name>-<stage>, the namespace <name>-<stage>, the host
+// <name>-<stage>.<unitApex>, the mail-ops grant <name>-<stage>-smtp-ops in the relay's namespace, the
+// <stage>/consumer/<name>/* Vault entries and the apps row. Per UNIT, one copy shared by every stage:
+// secret/build/<name>/repo-pat, the ONE build webhook on the consumer repo, and the release kit
+// committed into it. (The AppProject, the admission policy and the three build grants are on neither
+// list any more: they render from the registration and go with it, hostyour-cloud#174.) The two stages
+// stand on two clusters here, but nothing requires that — the stage is the unit's, the cluster any
+// active one. These tests hold both halves: offboarding prod while dev stands leaves dev everything it
+// releases and deploys through, and offboarding dev afterwards — the unit's last stage — takes the
+// shared set with it.
+
+let db: DbHandle;
+beforeEach(() => { db = openDb(":memory:"); });
+afterEach(() => { db.sqlite.close(); });
+
+
+const REPO = "https://github.com/x/acme.git";
+const KIT_PATHS = ["release/release.sh", ".github/workflows/release.yml"];
+
+
+/** Commit acme at BOTH stages: prod on s1 and dev on s2, each with the build.yaml both share. */
+async function seedTwoStages(reg: Registrations): Promise<void> {
+  const unit = { name: "acme", repoURL: REPO, suspended: false, quiesced: false };
+  for (const deploy of [{ stage: "prod" as const, cluster: "s1" }, { stage: "dev" as const, cluster: "s2" }]) {
+    await reg.commitRegistration({
+      unit,
+      builds: ["acme"],
+      deploy: { ...deploy, host: "acme", chartPath: "deploy/chart", databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+      runId: `run_onb_${deploy.stage}`,
+    });
+  }
+}
+
+/** prod: the master cluster s1.example + acme's row there (app_1) — the offboard under test. */
+function seedProdApp(): void {
+  db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
+}
+
+/** dev: its OWN server, cluster and row (app_2) on s2. The row the "last stage" offboard is driven from. */
+function seedDevApp(): void {
+  db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
+  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "dev", domain: "s2.example", name: "s2", status: "active" }).run();
+  db.db.insert(apps).values({ id: "app_2", clusterId: "cls_2", name: "acme", stage: "dev", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
+}
+
+/** The one grant the Manager still writes, as the two onboards left it: one mail-ops pair PER STAGE,
+ *  both in the relay's namespace. */
+async function seedBuildGrants(): Promise<FakeBuildRbacWriter> {
+  const buildRbac = new FakeBuildRbacWriter();
+  await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" }), renderSmtpOpsGrant({ name: "acme", stage: "dev" })]);
+  return buildRbac;
+}
+
+/** A resolver that answers each cluster with ITS ArgoCD namespace + deploy-state: cls_1 the master's
+ *  "argocd" on s1.example/prod, cls_2 the per-slave "s2" on s2.example/dev. */
+function twoClusterResolver(projects: FakeMasterProjectWriter): FakeClusterKubeResolver {
+  const pruned = new FakeMasterArgoReader({ status: { syncRevision: null, targetRevision: null, sync: "Unknown", health: "Missing" } });
+  const resolver = new FakeClusterKubeResolver({
+    clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 3 } }),
+    argoReader: pruned,
+    projectWriter: projects,
+    argoNamespace: "argocd",
+  });
+  resolver.set("cls_2", {
+    clusterReader: new FakeClusterReader({ deployState: { domain: "s2.example", stage: "dev", writtenAt: "x", generation: 4 } }),
+    argoReader: pruned,
+    projectWriter: projects,
+    argoNamespace: "s2",
+  });
+  return resolver;
+}
+
+/** The App installed with `owner`, reaching every repository of it (#226). */
+function appWith(owner: string): FakeGitHubApp {
+  const a = new FakeGitHubApp();
+  a.org = owner;
+  return a;
+}
+
+function ctx(stepName: string, logs: string[], creds: CredentialStore): StepCtx {
+  return {
+    runId: "run_off", stepName, db: db.db, creds, params: {},
+    secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
+    ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
+    closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
+    log: (_s, t) => logs.push(t), checkpoint: () => undefined, readCheckpoint: () => undefined, registerCleanup: () => undefined,
+  };
+}
+
+describe("offboard scope — one stage of a two-stage unit", () => {
+  it("leaves the other stage everything it needs to build, release and deploy", async () => {
+    seedProdApp();
+    const platform = new FakePlatformRepo();
+    const reg = new Registrations(platform);
+    await seedTwoStages(reg);
+
+    const buildRbac = await seedBuildGrants();
+    const projects = new FakeMasterProjectWriter();
+    const github = new FakeGitHubConsumer();
+    github.seedHook("x", "acme", BUILD_HOOK_URL);
+    const consumerRepo = new FakeRepoWriter();
+    for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
+    const seeder = new RecordingTeardownSeeder();
+    const dns = new FakeDnsProvider();
+    dns.seed("acme.s1.example", "CNAME", "s1.example"); // prod's own host
+    dns.seed("acme.dev.s2.example", "CNAME", "s2.example"); // dev's — under the OTHER cluster's apex
+    const revoked: string[] = [];
+    const creds = {
+      list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }],
+      open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")),
+      revoke: (id: string) => { revoked.push(id); return Promise.resolve(); },
+    } as unknown as CredentialStore;
+
+    const logs: string[] = [];
+    const prt: OffboardPorts = {
+      registrations: reg, resolver: twoClusterResolver(projects), argoWatchTimeoutMs: 1000,
+      seeder, dns, github, consumerRepo, buildRbac, githubApp: appWith("x"),
+    };
+    for (const step of makeOffboardDef(prt).steps({ appId: "app_1" })) await step.run(ctx(step.name, logs, creds));
+
+    // PER STAGE — prod's own objects are gone.
+    expect(await reg.readRegistration("prod", "acme")).toBeNull();
+    expect(dns.record("acme.s1.example", "CNAME")).toBeUndefined();
+    expect(seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]);
+    expect(db.db.select().from(apps).where(eq(apps.id, "app_1")).get()?.status).toBe("offboarded");
+    // No credential is the row's own (#226): the unit is reached with the owner x's identity, which
+    // outlives every stage, so nothing is revoked.
+    expect(revoked).toEqual([]);
+
+    // PER UNIT — everything dev still releases and deploys through is untouched.
+    expect(await reg.readRegistration("dev", "acme")).not.toBeNull();
+    expect(platform.read(platform.booksBranch, "registrations/acme/build.yaml")).not.toBeNull();
+    // The mail-ops grant is per stage: prod's pair went with prod, dev's pair stands.
+    expect(buildRbac.keys()).toEqual([
+      "Role postfix/acme-dev-smtp-ops",
+      "RoleBinding postfix/acme-dev-smtp-ops",
+    ]);
+    expect(github.hooksFor("x", "acme")).toHaveLength(1);
+    expect(github.deletedCalls).toEqual([]);
+    expect(consumerRepo.commits).toEqual([]);
+    expect(seeder.deleted).toEqual([]);
+    expect(dns.record("acme.dev.s2.example", "CNAME")).toBeDefined();
+    // One skip line per per-unit cleanup: the webhook, the release kit, the PAT.
+    expect(logs.filter((l) => l.includes("stays registered at dev"))).toHaveLength(3);
+  });
+
+  it("removes what the stages shared once the LAST stage is offboarded", async () => {
+    seedProdApp();
+    seedDevApp();
+    const platform = new FakePlatformRepo();
+    const reg = new Registrations(platform);
+    await seedTwoStages(reg);
+
+    const buildRbac = await seedBuildGrants();
+    const github = new FakeGitHubConsumer();
+    github.seedHook("x", "acme", BUILD_HOOK_URL); // both stages' onboards resolved this one host, so there is one hook
+    const consumerRepo = new FakeRepoWriter();
+    for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
+    const seeder = new RecordingTeardownSeeder();
+    const creds = {
+      list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }],
+      open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")),
+      revoke: () => Promise.resolve(),
+    } as unknown as CredentialStore;
+
+    const prt: OffboardPorts = {
+      registrations: reg, resolver: twoClusterResolver(new FakeMasterProjectWriter()), argoWatchTimeoutMs: 1000,
+      seeder, dns: new FakeDnsProvider(), github, consumerRepo, buildRbac, githubApp: appWith("x"),
+    };
+    const logs: string[] = [];
+    // prod first (the unit survives at dev), then dev — the run that IS the unit's last stage.
+    for (const step of makeOffboardDef(prt).steps({ appId: "app_1" })) await step.run(ctx(step.name, logs, creds));
+    for (const step of makeOffboardDef(prt).steps({ appId: "app_2" })) await step.run(ctx(step.name, logs, creds));
+
+    // The unit stands nowhere now, so removeRegistration took build.yaml and every per-unit cleanup ran.
+    expect(platform.read(platform.booksBranch, "registrations/acme/build.yaml")).toBeNull();
+    expect(buildRbac.keys()).toEqual([]);
+    expect(github.hooksFor("x", "acme")).toEqual([]);
+    expect(consumerRepo.commits.map((c) => c.remove)).toEqual([["release", ".github/workflows/release.yml"]]);
+    expect(seeder.deleted).toEqual([{ consumerName: "acme" }]);
+    expect(db.db.select().from(apps).where(eq(apps.id, "app_2")).get()?.status).toBe("offboarded");
+  });
+});

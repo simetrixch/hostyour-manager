@@ -1,0 +1,365 @@
+// The onboard validation core. The gates run at ONBOARDING and nowhere
+// else: the Manager clones the (possibly private) consumer repo ITSELF to resolve the ref (
+// the read credential stays here), dispatches the gate PipelineRun (which clones the repo at that
+// revision), streams the sandbox gates as they land, composes the runner's report with the
+// manager-side gates, and returns the verdict.
+//
+// Every gate is HARD — the composed report either passes or the onboarding is rejected. The one
+// conditional path is the manifest: the four manager-side gates that read it (G16/G18/G19/G24) do
+// not run when the report carries none, because a gate handed no input can only report an empty
+// declaration, and that reads exactly like a repository declaring nothing. G26 stands in their place
+// and rejects the run. What a later sync could still get wrong is not asked here at all: the
+// namespace fence, the allowed kinds, the Secret writer, the unit's one host and the restricted pod
+// security are held by the AppProject, the ValidatingAdmissionPolicy and the namespace's Pod Security
+// Admission label, all provisioned at onboarding, so they hold for every future release without a
+// per-release check.
+//
+// This function is pure orchestration over the ports — no db, no executor, no timers of its own
+// except the poll pacing — so it is exercised end-to-end against the in-memory fakes.
+import type { RepoReader } from "../../adapters/git/port.ts";
+import type { GateRunner } from "../../adapters/gate-runner/port.ts";
+import type { GateReport, GateResult } from "../../../shared/gates.ts";
+import { sandboxProvenance } from "../../../shared/gates.ts";
+import { clusterMapPath, type ClusterValueFile } from "../../../shared/cluster-values.ts";
+import type { Stage } from "../../../shared/enums.ts";
+import { consumerHostLabel, type SmtpEntry } from "../../../shared/consumer.ts";
+import { gateMailSender } from "./gates/mail-sender.ts";
+import { errInternal, errUpstream } from "../../kernel/errors.ts";
+import { parse as parseYaml } from "yaml";
+import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitHost, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
+import { consumerUnitHost, type StandingHostReader } from "./unit-dns.ts";
+import { gateReleaseWorkflow } from "./gates/release-workflow.ts";
+import { RELEASE_KIT_WORKFLOW } from "./release-kit/release-kit.ts";
+import type { UnitComposition, UnitQuota, UnitSize } from "../../../shared/unit-size.ts";
+import { mapBuildsToChartPins, type ChartPinMapping } from "./builds.ts";
+import { unitApexFromChain } from "./admission-policy.ts";
+
+/** The cluster's OWN FQDN (`global.domain`, stamped when the install branch is generated) off the values chain, read like
+ *  unitApexFromChain — LAST file that states it wins. It anchors G19's infrastructure clause: the
+ *  platform's own hostnames (vault.<fqdn>, argo.<fqdn>, build.<fqdn>, zot.<fqdn>) are composed
+ *  under it and have no registration, so the attested-fqdn set cannot see them. Null when the chain
+ *  states none — then there is no cluster FQDN to hold a declared name against, and the gate's
+ *  other clauses still stand. */
+function clusterDomainFromChain(files: readonly ClusterValueFile[]): string | null {
+  let found: string | null = null;
+  for (const file of files) {
+    const parsed: unknown = parseYaml(file.content);
+    const domain = (parsed as { global?: { domain?: unknown } } | null)?.global?.domain;
+    if (typeof domain === "string" && domain.length > 0) found = domain;
+  }
+  return found;
+}
+
+/** What the operator submits from the wizard (the immutable identity of an onboard). */
+export interface OnboardRequest {
+  repoURL: string;
+  /** The size the OPERATOR assigned this unit — never the consumer's to declare. G24 holds it
+   *  against the composition the manifest declares. */
+  size: UnitSize;
+  /** The revision the gates check — the default branch head ("HEAD"): the onboarding validates
+   *  what the repo IS, and only the release cycle ever turns a commit into something deployable. */
+  ref: string;
+  consumerName: string;
+  repoCredentialId?: string; // a Manager-side credential id for a private repo
+}
+
+/** The platform-computed context the plan phase derives from the target cluster's row and the
+ *  operator's request. */
+export interface OnboardTarget {
+  domain: string; // the GitOps branch the registration's cluster lives on, e.g. "s1.example"
+  /** The UNIT's stage — the operator's input, never the cluster's. */
+  stage: Stage;
+  /** The chart subpath inside the repo. ABSENT for a build-only unit — one that carries a build
+   *  registration and no stage file, so nothing of it is ever deployed and there is no chart to
+   *  render or to pin a build in. */
+  chartPath?: string;
+  /** The target cluster's values chain, read off its install branch — the render's cluster-value
+   *  source (shared/cluster-values.ts). */
+  clusterValueFiles: readonly ClusterValueFile[];
+}
+
+/** Reads the build names the OTHER units have attested. Registrations implements it over
+ *  `registrations/<unit>/build.yaml` on the registration branch; G16 holds the candidate unit's
+ *  declared names against the result. */
+export interface AttestedBuildReader {
+  listAttestedBuildNames(exceptUnit: string): Promise<ForeignBuild[]>;
+}
+
+/** Reads every attested extra FQDN except the candidate's own registration at the stage being
+ *  onboarded (a re-onboard must not collide with itself). Registrations implements it over every
+ *  `registrations/<unit>/<stage>.yaml` on the registration branch; G19 holds the candidate's
+ *  declared fqdn against the result — the same unit's OTHER stages included, because the
+ *  stage-less manifest fqdn would otherwise be attested at two stages. */
+export interface AttestedFqdnReader {
+  listAttestedFqdns(except: { unit: string; stage: Stage }): Promise<ForeignFqdn[]>;
+  /** The host label every OTHER unit stands on at [stage] — G23's one-zone-one-name-space input. */
+  listAttestedHostLabels(stage: Stage, except: { unit: string }): Promise<{ unit: string; host: string }[]>;
+}
+
+/** Every unit whose stage registration at [stage] carries an attested SMTP entry, with its cluster —
+ *  the stage's mail sender, which G29 holds a candidate declaring an entry against. */
+export interface AttestedSmtpSenderReader {
+  listSmtpSenders(stage: Stage): Promise<{ unit: string; cluster: string; entry: SmtpEntry }[]>;
+}
+
+/** Every subdomain a TENANT stands at, over every stage — TenantRegistrations.listTenantSubdomains over
+ *  the catalog pointers. It is a second repo and therefore a dep of its own, not a method on
+ *  the consumer registrations above. G23 holds the candidate unit name against it: the two spaces compose
+ *  the same label under the same apex, and a tenant's session cookies are scoped to it (unit-dns.ts).
+ *  Not optional: a reader that answered nothing would silently hand the gate a pass. */
+export type TenantSubdomainReader = () => Promise<string[]>;
+
+export interface ValidateDeps {
+  repo: RepoReader;
+  runner: GateRunner;
+  /** The registration reader the uniqueness gates (G16 builds, G19 fqdn) are held against. Not
+   *  optional: a gate that cannot read the other units' claims would have nothing to check. */
+  registrations: AttestedBuildReader & AttestedFqdnReader & AttestedSmtpSenderReader;
+  /** The tenant subdomains G23's host clause is held against (see TenantSubdomainReader). */
+  tenantSubdomains: TenantSubdomainReader;
+  /** Gate-line sink -> events rows (append-only). Called once per gate as it lands. */
+  log: (line: string) => void;
+  signal: AbortSignal;
+  /** The Manager's DECLARATION that the must-fail probe targets were listening. Nothing measures it
+   *  (boot/wire-units.ts states it as a constant), which is why the report's leg is named for what it
+   *  is; `sandboxProvenance` is what puts that on the record of a run that passed. */
+  declareListening: boolean;
+  /** The size table, bound to the Manager's own inventory by the caller — G24 needs the six figures
+   *  a size resolves to for what the unit brings, and this module holds no db of its own. */
+  resolveQuota: (size: UnitSize, brings: UnitComposition) => UnitQuota;
+  /** The unit's host as the DNS provider answers it now, judged against this installation's own
+   *  clusters (unit-dns.ts readStandingHost) — G27's input, bound by the caller to the provider and
+   *  the inventory through standingHostFrom. Absent where the Manager has no DNS provider: G27 then
+   *  fails a deployable target before the run writes anything, where provision-dns would have failed
+   *  at its thirteenth step for the same reason. */
+  standingHost?: StandingHostReader;
+  /** Poll pacing; the fake returns "done" on the first poll, so this never fires in tests. */
+  pollIntervalMs?: number;
+  /** Terminating deadline of the whole runner poll (default DEFAULT_POLL_BUDGET_MS). The sandbox
+   *  CLI enforces its own job budget INSIDE the gate pod, but with the Tekton controller down or
+   *  the CRDs unserved the PipelineRun never settles at all — this bound is what stops the poll
+   *  then, instead of parking the onboard run in `planning` forever. The wiring passes a value a
+   *  margin above the sandbox job budget, so a healthy run always settles first. */
+  pollBudgetMs?: number;
+}
+
+export interface ValidationOutcome {
+  verdict: "pass" | "fail";
+  resolvedSha: string;
+  report: GateReport; // the composed report (runner sandbox gates + manager-side gates)
+  /** The build NAMES the manifest declared, present iff verdict === "pass"; null on any rejection.
+   *  They are what the build registration attests. No image and no tag: the image name IS the build
+   *  name, and the tag is the release pipeline's to mint. */
+  builds: string[] | null;
+}
+
+const abortError = (): Error => Object.assign(new Error("aborted"), { name: "AbortError" });
+
+/** A margin above the wiring's sandbox job budget (8 minutes), so the in-pod budget always fires
+ *  first on a healthy run and this bound only catches a PipelineRun that never settles. */
+const DEFAULT_POLL_BUDGET_MS = 10 * 60_000;
+
+const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(abortError());
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => { clearTimeout(t); reject(abortError()); }, { once: true });
+  });
+
+/** Poll the runner to "done", streaming each sandbox gate exactly once as it lands. Bounded by
+ *  pollBudgetMs: a PipelineRun that never settles (Tekton controller down, CRDs unserved) would
+ *  otherwise be polled forever — the sandbox's own job budget runs inside the gate pod and cannot
+ *  fire when no pod ever starts. */
+async function pollToDone(deps: ValidateDeps, jobId: string): Promise<GateReport> {
+  const streamed = new Set<string>();
+  const budgetMs = deps.pollBudgetMs ?? DEFAULT_POLL_BUDGET_MS;
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    if (deps.signal.aborted) throw abortError();
+    const progress = await deps.runner.poll(jobId);
+    for (const g of progress.gatesSoFar) {
+      if (!streamed.has(g.id)) {
+        streamed.add(g.id);
+        deps.log(`${g.id} ${g.status} — ${g.detail}`);
+      }
+    }
+    if (progress.phase === "done") {
+      if (!progress.report) throw errInternal("gate-runner reported done without a report");
+      return progress.report;
+    }
+    if (Date.now() >= deadline) {
+      throw errUpstream(`the gate-run did not settle within ${budgetMs}ms — the Tekton controller may be down or the PipelineRun stuck unscheduled; the validation stops here instead of polling forever`);
+    }
+    await sleep(deps.pollIntervalMs ?? 1500, deps.signal);
+  }
+}
+
+/** Clone -> resolve the revision (G17 access proof) -> dispatch the gate-run -> poll -> compose. The
+ *  gate PipelineRun clones the repo ITSELF at that revision; the Manager passes the private-repo
+ *  read credential id so the run can clone it. A hard-gate failure returns verdict "fail" with the
+ *  full composed report so the operator sees every expected/found/reason. */
+export async function validateOnboard(req: OnboardRequest, target: OnboardTarget, deps: ValidateDeps): Promise<ValidationOutcome> {
+  const cloned = await deps.repo.cloneAtRef({
+    repoURL: req.repoURL,
+    ref: req.ref,
+    ...(req.repoCredentialId ? { credentialId: req.repoCredentialId } : {}),
+    signal: deps.signal,
+  });
+  deps.log(`cloned ${req.repoURL} @ ${req.ref} -> ${cloned.resolvedSha}`);
+  try {
+    const { jobId } = await deps.runner.submit({
+      targetName: req.consumerName,
+      stage: target.stage,
+      // A build-only unit has no chart directory, and the ABSENCE is what the gate reads. Sending an
+      // empty string instead made the two sides mean different things by the same value: the CLI
+      // refused it as an unset required input and the whole run died before a single gate ran.
+      ...(target.chartPath !== undefined ? { chartPath: target.chartPath } : {}),
+      repoURL: req.repoURL,
+      requestedRef: req.ref,
+      resolvedSha: cloned.resolvedSha,
+      clusterValueFiles: target.clusterValueFiles,
+      mustFailTargetsDeclaredListening: deps.declareListening,
+      ...(req.repoCredentialId ? { repoCredentialId: req.repoCredentialId } : {}),
+    });
+    let runnerReport: GateReport;
+    try {
+      runnerReport = await pollToDone(deps, jobId);
+    } catch (err) {
+      // Abort, a poll error, or the poll budget: the run's objects still stand in the gate
+      // namespace — above all the PAT-bearing credential Secret — and a poll that never returns
+      // "done" means the runner's own settled-path reap never fires. cancel() is that reap;
+      // best-effort, so the original error (what the operator must read) is never replaced.
+      await deps.runner.cancel(jobId).catch(() => undefined);
+      throw err;
+    }
+    // WHAT THE FENCE PROOF RESTS ON, written onto the record of a run that PASSED it. The receipt-time
+    // refusal prints `sandboxFailures` when a leg did not hold; a run where every leg held printed
+    // nothing at all, so the one leg that is nobody's measurement left no trace on the run that
+    // relied on it. This line is that trace.
+    deps.log(sandboxProvenance(runnerReport.sandbox));
+
+    // Read unconditionally: the unit's platform host is composed from its name whether or not the
+    // manifest declares an extra fqdn, so the tenant-subdomain clause of G23 always has an object.
+    const tenantSubdomains = await deps.tenantSubdomains();
+
+    // The three gates whose subject the Manager holds itself: the clone it just made, the name the
+    // operator submitted, and the workflow file the kit is about to write over. None reads the
+    // repository's manifest, so all three stand whatever the report carried. The name goes first: it
+    // is the identity every later fact hangs off (namespace, AppProject, build namespace, host), so a
+    // reserved name is refused before uniqueness is asked. The LABEL is the manifest's to declare, so
+    // G23 reads it off the report where one stands and holds the name alone where none does — the
+    // name IS the label then. The other units' labels at this stage come off the registrations, the
+    // same way G16 reads the other units' builds.
+    const hostLabel = consumerHostLabel({ name: req.consumerName, host: runnerReport.manifest?.host });
+    const foreignHostLabels = await deps.registrations.listAttestedHostLabels(target.stage, { unit: req.consumerName });
+    const releaseWorkflow = await deps.repo.readFile(cloned.workdir, RELEASE_KIT_WORKFLOW.path);
+    const managerGates: GateResult[] = [
+      gateRepoAccess({ ok: true, detail: `cloned ${req.repoURL} at ${cloned.resolvedSha}` }),
+      gateUnitName({ unitName: req.consumerName, stage: target.stage, hostLabel, tenantSubdomains, foreignHostLabels }),
+      gateReleaseWorkflow({ found: releaseWorkflow }),
+    ];
+
+    // THE MANIFEST DECIDES WHETHER THE REST OF THE MANAGER-SIDE GATES RUN AT ALL. Below this branch
+    // every read is `manifest.x`, never `manifest?.x ?? <empty>`: the empty default is what lets the
+    // manifest-fed gates judge a repository from an input the report never carried, and G18 then
+    // reports "no build declared in deploy/platform.yaml" about a file declaring three (measured on
+    // a real installation). The absent input is reported as absent instead, and the run is rejected.
+    const manifest = runnerReport.manifest;
+    if (manifest === null) {
+      managerGates.push(gateManifestInput(MANIFEST_FED_GATE_IDS));
+      for (const g of managerGates) deps.log(`${g.id} ${g.status} — ${g.detail}`);
+      const rejected = composeReport(runnerReport, managerGates);
+      return { verdict: rejected.verdict, resolvedSha: cloned.resolvedSha, report: rejected, builds: null };
+    }
+
+    // The builds the unit DECLARES — the manifest is the only source; nothing is derived from a
+    // pipeline inventory or a naming prefix any more.
+    const declaredBuilds = manifest.builds.map((b) => b.name);
+
+    // G18's chart half reads the per-stage values file of the pinned chart. A unit without a chartPath
+    // is build-only, and the half reports that instead of failing on a file that cannot exist.
+    let chart: { path: string; stage: Stage; mapping: ChartPinMapping } | null = null;
+    if (target.chartPath !== undefined) {
+      const source = `${target.chartPath}/values-${target.stage}.yaml`;
+      const valuesStageYaml = await deps.repo.readFile(cloned.workdir, source);
+      chart = { path: target.chartPath, stage: target.stage, mapping: mapBuildsToChartPins({ declaredBuilds, source, valuesStageYaml }) };
+    }
+
+    // WHAT THE UNIT BRINGS, off the manifest — G24's input. Null for a build-only unit: nothing of
+    // it deploys, so it holds no namespace and there is no quota to bound. The two fields are the
+    // ones that both add an Argo source of their own and add a component to the quota sum.
+    const brings: UnitComposition | null =
+      target.chartPath === undefined
+        ? null
+        : { postgresql: manifest.services.includes("postgresql"), mongodb: manifest.mongodb };
+
+    const foreignBuilds = await deps.registrations.listAttestedBuildNames(req.consumerName);
+
+    // G19's inputs exist only where a fqdn is declared: the attested set is read then (a stage file
+    // that fails its schema throws loud there, and only there), and the two structural anchors come
+    // off the target's values chain — empty for a build-only target, whose manifest cannot carry a
+    // fqdn anyway. The chain read excludes only the candidate's own registration at THIS stage, so
+    // its other stages' attestations count as taken.
+    const declaredFqdn = manifest.fqdn ?? null;
+    const unitApex = declaredFqdn !== null && target.clusterValueFiles.length > 0 ? unitApexFromChain(target.clusterValueFiles) : null;
+    const clusterDomain = declaredFqdn !== null ? clusterDomainFromChain(target.clusterValueFiles) : null;
+    const foreignFqdns = declaredFqdn !== null ? await deps.registrations.listAttestedFqdns({ unit: req.consumerName, stage: target.stage }) : [];
+
+    managerGates.push(
+      gateBuildNameUniqueness({ unitName: req.consumerName, buildNames: declaredBuilds, foreignBuilds }),
+      gateBuildDeclaration({ declaredBuilds, chart }),
+      gateFqdnGrant({ unitName: req.consumerName, hostLabel, stage: target.stage, fqdn: declaredFqdn, unitApex, clusterDomain, foreignFqdns }),
+      gateUnitSize({ unitName: req.consumerName, size: req.size, brings, quota: brings ? deps.resolveQuota(req.size, brings) : null }),
+    );
+    // G27 reads the ZONE, not a registration — the one obstacle the gates above cannot see. Only where
+    // something will be written under the host: a deployable target on a chain that names the apex
+    // (a build-only unit has no host, and a chain naming no apex is refused by the plan before this).
+    const hostApex = target.chartPath !== undefined ? unitApexIfStated(target.clusterValueFiles) : null;
+    if (hostApex !== null) {
+      const host = consumerUnitHost(hostLabel, target.stage, hostApex);
+      const standing = deps.standingHost ? await deps.standingHost(host, target.domain) : null;
+      managerGates.push(gateUnitHost({ host, unitName: req.consumerName, clusterFqdn: target.domain, standing }));
+    }
+    // G29 judges only a deployable unit that declares an SMTP entry: it becomes its stage's mail sender
+    // on the target cluster. A build-only target stands on no cluster — a manifest carrying the entry
+    // declares a chart, and the form check refuses it there.
+    if (manifest.smtpEntry !== undefined && target.chartPath !== undefined) {
+      const senders = await deps.registrations.listSmtpSenders(target.stage);
+      managerGates.push(gateMailSender({ unitName: req.consumerName, stage: target.stage, senders, cluster: target.domain, apiHost: apiHostFromChain(target.clusterValueFiles, target.domain) }));
+    }
+    for (const g of managerGates) deps.log(`${g.id} ${g.status} — ${g.detail}`);
+
+    const report = composeReport(runnerReport, managerGates);
+
+    return {
+      verdict: report.verdict,
+      resolvedSha: cloned.resolvedSha,
+      report,
+      builds: report.verdict === "pass" ? declaredBuilds : null,
+    };
+  } finally {
+    await deps.repo.dispose(cloned.workdir);
+  }
+}
+
+/** The target cluster's tailnet address — `global.apiHost` of its OWN map in the chain — or null where
+ *  the map states none. The map alone, because the map is what the relay target of the stage is
+ *  written from (registrations.ts relayTarget). */
+function apiHostFromChain(files: readonly ClusterValueFile[], domain: string): string | null {
+  const map = files.find((f) => f.path === clusterMapPath(domain));
+  const apiHost = map === undefined ? undefined : (parseYaml(map.content) as { global?: { apiHost?: unknown } } | null)?.global?.apiHost;
+  return typeof apiHost === "string" && apiHost.length > 0 ? apiHost : null;
+}
+
+/** The apex the chain states, or null where it states none — the tolerant read G27 takes, because a
+ *  chain naming no apex is the plan's refusal (unitApexFromChain, before any gate) and not this
+ *  gate's: the gate judges the zone under a host, and without an apex there is no host to judge. */
+function unitApexIfStated(files: readonly { path: string; content: string }[]): string | null {
+  let found: string | null = null;
+  for (const file of files) {
+    const parsed: unknown = parseYaml(file.content);
+    const apex = (parsed as { global?: { unitApex?: unknown } } | null)?.global?.unitApex;
+    if (typeof apex === "string" && apex.length > 0) found = apex;
+  }
+  return found;
+}

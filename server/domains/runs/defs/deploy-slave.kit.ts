@@ -1,0 +1,337 @@
+import { eq, inArray } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import type { Db } from "../../../db/client.ts";
+import type { StepCtx, Cleanup } from "../../../executor/types.ts";
+import { servers, clusters } from "../../../db/schema/inventory.ts";
+import { errValidation, errNotFound } from "../../../kernel/errors.ts";
+import { MASTER_ROLES, type Stage } from "../../../../shared/enums.ts";
+import { errNotConfigured } from "../../../kernel/errors.ts";
+import type { PlatformRepo } from "../../../adapters/git/port.ts";
+import type { MetricsQuery } from "../../../adapters/metrics/port.ts";
+import type { ClusterKubeResolver } from "../../../adapters/kube/port.ts";
+import { removeSlaveMarkingPart } from "../../inventory/cluster-marking.ts";
+import { clusterMapPath } from "../../../../shared/cluster-values.ts";
+
+// The deploy-slave step-kit: the db lookups, credential idioms,
+// timing helpers and compensating actions the steps share. Split out of deploy-slave.ts
+// (files ≤400 lines) — the def composes these; nothing here is a step.
+
+/** The platform repo: the WRITER through which the run marks the slave reachable in
+ *  clusters/active/<fqdn>.yaml on the books branch — the install branch of the cluster holding the
+ *  master role, which is where install.sh put the map — and the reader the pinned ansiwise version is
+ *  taken off. Optional because the run is registered unconditionally while the platform repo needs
+ *  GITHUB_REPO + GITHUB_WRITE_PAT — absent, the map step fails LOUD with what to configure rather
+ *  than deploying a slave the master can never reach.
+ *
+ *  THIS PORT CARRIES NO CLONE ADDRESS. Nothing in this manager clones a tree onto a machine — a
+ *  clone is a `git_clone` row of a program, which reads its origin and its credential out of the
+ *  machine's own settings files by NAME (hostyour-deploy ansiwise/programs/deploy-platform-services.yaml) rather
+ *  than taking either through a caller. */
+export interface DeploySlavePorts {
+  platformRepo?: PlatformRepo;
+  /** The platform repository as `owner/name`, which is what deploy-host's git_clone row is answered
+   *  with — the ONE thing about the checkout a bare machine cannot read off itself, because the
+   *  checkout is what the row establishes.
+   *
+   *  IT IS THIS INSTALLATION'S FACT AND NOT THE CATALOGUE'S. A repository written into a program
+   *  file would be one installation's shipped to every installation (hostyour-deploy
+   *  ansiwise/programs/deploy-host.yaml says so in its own header), and the manager already holds
+   *  it: GITHUB_REPO and GITHUB_OWNER are what its own platform repo is built from.
+   *
+   *  Optional for the same reason platformRepo is: without GITHUB_REPO there is no platform repo at
+   *  all, and a step that needs this fails loud naming it rather than a whole run kind disappearing
+   *  from the map. */
+  platformOrigin?: string;
+  /** The Prometheus-compatible query API the verify step's SOFT metrics check asks, wired from
+   *  METRICS_QUERY_URL.
+   *
+   *  OPTIONAL, and its ABSENCE is one of the check's three outcomes rather than a feature switch: a
+   *  manager that was given no address reports the check as SKIPPED and says so, which is a
+   *  different fact from an address that answered nothing and must never be reported as the same
+   *  one. Every other check in that step, and every other run kind, is untouched by it. */
+  metricsQuery?: MetricsQuery;
+  /** How long a slave that has just been built is given to push its first series, in milliseconds.
+   *
+   *  A machine deployed seconds ago has not pushed yet, so the check waits before it calls silence
+   *  silence. It stands here rather than as a constant because a test cannot wait two minutes to
+   *  watch a window close, and a window nobody can shorten is one nothing holds against its own
+   *  behaviour. Absent means the two minutes a real deployment is given. */
+  metricsFirstSeriesMs?: number;
+  /** WHAT THIS RUN KIND READS ARGOCD THROUGH — the SAME port every unit run kind already takes, and
+   *  not a second shape for the same job.
+   *
+   *  Three steps of a cluster deployment read ArgoCD. Reading it by running `microk8s kubectl` over
+   *  the master's SSH session raises every one of those reads to root with the machine's elevation
+   *  password, every ten seconds, for up to thirty minutes; through the Manager pod's own
+   *  ServiceAccount none of them is raised at all, and that is where the RBAC for it already stands.
+   *
+   *  OPTIONAL for the reason platformRepo is: a Manager built without in-cluster access registers the
+   *  run kinds and fails loud at the first watch, which is a sentence an operator can act on, rather
+   *  than a whole run kind disappearing from the map. */
+  resolver?: ClusterKubeResolver;
+}
+
+/** The resolver, or the loud refusal a step gives without it — the same shape requirePlatformRepo
+ *  has, for the same reason. */
+export function requireResolver(ports: DeploySlavePorts): ClusterKubeResolver {
+  if (!ports.resolver) {
+    throw errNotConfigured(
+      "this Manager has no in-cluster kube access, and this step reads the master's ArgoCD through it — the same " +
+      "access every consumer and tenant run kind resolves through. It is the pod's own ServiceAccount in a deployed " +
+      "Manager and KUBECONFIG_PATH in a development one; a process that was given neither cannot read an Application " +
+      "at all, and reading it over the machine's session instead is what this step stopped doing",
+    );
+  }
+  return ports.resolver;
+}
+
+/** WHICH run kind is driving the shared slave step list. The steps are the same either way — what
+ *  differs is what a failure means. `deploy` installs a slave that is not live yet, so every step
+ *  that creates something arms the compensating action that undoes it, and an abort with cleanup
+ *  LEAVES the machine (defs/leave-host.kit.ts). `redeploy` reconciles a slave that IS live and arms
+ *  none of them: taking the key line off, opening the password door, stripping the machine and
+ *  dropping the slave part of the cluster map each undo a WORKING slave rather than a half-finished
+ *  install. */
+export type SlaveInstallMode = "deploy" | "redeploy";
+
+/** WHAT the shared slave step list acts on, and when it may know it. The server is always named by
+ *  the operator; the FQDN and the stage are not. A redeploy names only the server and reads both off
+ *  the cluster row that server already carries — and a run definition's steps() is handed the
+ *  persisted params and no database. So the two arrive as a lookup the steps run against ctx.db,
+ *  never as strings frozen into the step closures. */
+export interface SlaveTarget {
+  serverId: string;
+  /** The cluster's FQDN, its stage and its NAME — the name fixed at its adoption, which a rename
+   *  of the FQDN leaves standing (cluster-marking.ts header). */
+  resolve(db: Db): { domain: string; stage: Stage; name: string };
+}
+
+/** deploy-slave's target: the operator named the FQDN and the stage, so the lookup is a constant. */
+export function statedTarget(serverId: string, domain: string, stage: Stage): SlaveTarget {
+  // A cluster is adopted under its server's name, which attest-target holds equal to the first
+  // label of the stated domain.
+  return { serverId, resolve: (db) => ({ domain, stage, name: loadServer(db, serverId).name }) };
+}
+
+/** redeploy's target: the ACTIVE cluster the server already carries states both. The lookup is at the
+ *  same time the run kind's guard — a server with no active cluster has no machine layer to rebuild — so
+ *  the two run kinds can never aim at the same cluster state. */
+export function activeClusterTarget(serverId: string): SlaveTarget {
+  return {
+    serverId,
+    resolve: (db) => {
+      const server = loadServer(db, serverId);
+      const cluster = db.select().from(clusters).where(eq(clusters.serverId, serverId)).get();
+      if (!cluster) throw errValidation(`server ${server.name} carries no cluster — there is no machine layer to rebuild; deploy it first`);
+      if (cluster.status !== "active") {
+        throw errValidation(`cluster ${cluster.id} for ${cluster.domain} is '${cluster.status}' — redeploy rebuilds a LIVE cluster; a planned or provisioning one is deploy-slave's to finish`);
+      }
+      return { domain: cluster.domain, stage: cluster.stage, name: cluster.name };
+    },
+  };
+}
+
+/** What the shared slave step list needs beyond its ports. `slaveId` describes the cluster ROW the
+ *  attest step inserts, so it is deploy-only: a redeploy finds the row already there. */
+export interface SlaveInstallInput {
+  target: SlaveTarget;
+  mode: SlaveInstallMode;
+  slaveId?: number | undefined;
+}
+
+export function requirePlatformRepo(ports: DeploySlavePorts): PlatformRepo {
+  if (!ports.platformRepo) {
+    throw errNotConfigured(
+      "the platform repo is not configured — deploy-slave cannot mark the slave reachable in its cluster map, and without that mark the master's slaves ApplicationSet never generates its management plane. Two settings build it: GITHUB_REPO + GITHUB_WRITE_PAT, and MASTER_FQDN, which names the branch this installation keeps its cluster maps on",
+    );
+  }
+  return ports.platformRepo;
+}
+
+/** Bounded wait for the slaves-appset to generate + sync Application <name>-apps (step 5).
+ *  The appset's own sync retry backoff maxes at 3m (slaves-appset.yaml); 10 min covers a
+ *  cold-bootstrap ArgoCD with margin. Poll cadence keeps the run log readable. */
+export const APP_SYNC_TIMEOUT_MS = 10 * 60_000;
+export const APP_SYNC_POLL_MS = 10_000;
+
+export function loadServer(db: Db, id: string): typeof servers.$inferSelect {
+  const row = db.select().from(servers).where(eq(servers.id, id)).get();
+  if (!row) throw errNotFound(`server ${id} not found`);
+  return row;
+}
+
+/** The address the MASTER's in-cluster components will dial this slave's kube-apiserver on, resolved
+ *  ONCE per run and used by everything that states it: the cluster map's apiHost field (prepare-branch),
+ *  the `--api-host` the slave composes its own credentials blob on (create-mgmt), the check that the
+ *  blob came back carrying that same address, and the plane the register step writes.
+ *
+ *  Resolved in ONE place because the two sources are independent: the map feeds the ArgoCD cluster
+ *  Secret through git, the blob feeds Vault's kubernetes_host, the shared dashboard's kubeconfig and
+ *  this process's per-slave kube client. Two resolutions that drift leave the master reaching a slave
+ *  for some things and not for others, which reads as a network fault.
+ *
+ *  `tailnet_host` first — the private network is what makes a slave outside the master's own network
+ *  reachable at all — then `lan_host` for a slave that sits in it, then the public `host`. */
+export function slaveApiHost(server: typeof servers.$inferSelect): string {
+  return server.tailnetHost ?? server.lanHost ?? server.host;
+}
+
+/** The one-master invariant (servers_one_master_uq guarantees ≤1; we require exactly 1):
+ *  the master hosts the slave-management plane, so deploying a slave without one is
+ *  meaningless. */
+export function loadMaster(db: Db): typeof servers.$inferSelect {
+  const row = db.select().from(servers).where(inArray(servers.role, [...MASTER_ROLES])).get();
+  if (!row) throw errValidation("no master server registered — the platform needs exactly one role=master server (this manager's host) before a slave can be deployed");
+  return row;
+}
+
+/** The id of the MASTER's own cluster row — what a resolve is keyed on when a step has to reach the
+ *  master's ArgoCD rather than a target's.
+ *
+ *  IT IS LOOKED UP AND REFUSED BY NAME HERE, because the resolver's own refusal names only an id
+ *  (domains/inventory/cluster-kube.ts) and an operator reading "cluster undefined" learns nothing.
+ *  `seed-master.ts` inserts this row at boot from MASTER_FQDN, so a Manager missing it is one that
+ *  was started without that setting or whose seeding was refused by a domain clash — both of which
+ *  the boot log named at the time. */
+export function masterClusterId(db: Db): string {
+  const master = loadMaster(db);
+  const cluster = db.select().from(clusters).where(eq(clusters.serverId, master.id)).get();
+  if (!cluster) {
+    throw errValidation(
+      `the master ${master.name} carries no cluster row, and this step reads the master's ArgoCD through it — ` +
+      "boot seeds that row from MASTER_FQDN (boot/seed-master.ts), so set it and restart the Manager, or clear the " +
+      "stray clusters row the boot log named when it refused to seed",
+    );
+  }
+  return cluster.id;
+}
+
+/** The master's FQDN (for `--master <fqdn>` and vault.<fqdn>): authoritative source is the
+ *  master's own cluster row (domain == its install branch == its FQDN); servers.host is the
+ *  fallback — the master is registered by name (m1.example.com), not by IP. */
+export function masterFqdnOf(db: Db, master: typeof servers.$inferSelect): string {
+  const cluster = db.select().from(clusters).where(eq(clusters.serverId, master.id)).get();
+  return cluster?.domain ?? master.host;
+}
+
+/** The stage of that same cluster row, and nothing in its place where the master carries no row.
+ *  There is no fallback the way `servers.host` stands in for the domain: which stage an installation
+ *  is, is stated in one place and nowhere else, so a master with no cluster row leaves it unsaid
+ *  rather than claiming one. Its one caller writes `--stage` onto the command that serves the
+ *  machine, where an unsaid stage stays the engine's own default (`dev`). */
+export function masterStageOf(db: Db, master: typeof servers.$inferSelect): Stage | undefined {
+  return db.select().from(clusters).where(eq(clusters.serverId, master.id)).get()?.stage;
+}
+
+/** The cluster row is the cross-step channel (attest-target's tx allocated the ordinal onto
+ *  it). Returns the FULL row (register keeps provisionedAt stable across re-runs), with
+ *  slaveId narrowed to number. */
+export function requireSlaveCluster(db: Db, domain: string): Omit<typeof clusters.$inferSelect, "slaveId"> & { slaveId: number } {
+  const row = db.select().from(clusters).where(eq(clusters.domain, domain)).get();
+  if (!row || row.slaveId === null) throw errValidation(`no cluster row with a slaveId for ${domain} — attest-target must run first`);
+  return { ...row, slaveId: row.slaveId };
+}
+
+/** The deterministic labels of the two durable slave credentials: step 4 seals under them,
+ *  step 7 (and later remove-/rebuild-slave Runs) find them again by kind+label. Keyed on the
+ *  slave NAME (unique per servers_name_uq), never the internal ordinal. */
+export function credLabels(name: string): { bearer: string; reviewer: string } {
+  return {
+    bearer: `${name} cluster bearer (argocd-manager)`,
+    reviewer: `${name} vault reviewer JWT`,
+  };
+}
+
+/** Seal a harvested token once, retry-robust. Three paths, each logged (the create-mgmt
+ *  incident law: every outcome must be visible in the run log):
+ *   - reuse    — an unrevoked credential with the same kind+label+fingerprint (same token
+ *                bytes) exists ⇒ a re-run/retry of step 4 never piles up duplicates;
+ *   - rotate   — a credential with the same kind+label but a DIFFERENT fingerprint exists
+ *                (the token changed: a rebuilt slave, a re-minted emit) ⇒ rotate it in
+ *                place (new row, old row marked rotated_at) instead of blind-inserting,
+ *                so later remove-/rebuild-slave Runs still find the newest (list order, the idiom
+ *                below) and provenance stays on the superseded row;
+ *   - seal     — no row for this kind+label yet ⇒ a fresh credential. */
+export async function sealTokenOnce(ctx: StepCtx, o: { kind: "kubeconfig" | "other"; purpose: "cluster-bearer" | "reviewer-jwt"; label: string; serverId: string; token: string }): Promise<string> {
+  const fingerprint = "sha256:" + createHash("sha256").update(o.token, "utf8").digest("hex");
+  const existing = await ctx.creds.list({ subject: { kind: "server", id: o.serverId }, purpose: o.purpose });
+  const sameLabel = existing.filter((c) => c.label === o.label);
+  const match = sameLabel.find((c) => c.fingerprint === fingerprint);
+  if (match) {
+    ctx.log("meta", `credential "${o.label}" already sealed (${match.id}) — reusing`);
+    return match.id;
+  }
+  const current = sameLabel.at(-1); // the newest row for this kind+label (list order)
+  if (current) {
+    const ref = await ctx.creds.rotate(current.id, { plaintext: Buffer.from(o.token, "utf8"), fingerprint });
+    ctx.log("meta", `credential "${o.label}" carries a changed token — rotated in place (${current.id} → ${ref.id})`);
+    return ref.id;
+  }
+  const ref = await ctx.creds.seal({ kind: o.kind, label: o.label, plaintext: Buffer.from(o.token, "utf8"), fingerprint, subject: { kind: "server", id: o.serverId }, purpose: o.purpose });
+  ctx.log("meta", `credential "${o.label}" sealed (${ref.id})`);
+  return ref.id;
+}
+
+/** Find the NEWEST sealed credential for kind+label on this server (the list-order idiom every
+ *  credential lookup here uses — a rebuilt slave sealed a fresh row; the last one wins). Step 7's resolver: the
+ *  credential store is the sanctioned cross-step channel for the step-4 IDs (a step never
+ *  reads another step's checkpoint row — the runs schema is executor-owned). */
+export async function newestCredId(ctx: StepCtx, o: { serverId: string; purpose: "cluster-bearer" | "reviewer-jwt"; label: string }): Promise<string | undefined> {
+  const list = await ctx.creds.list({ subject: { kind: "server", id: o.serverId }, purpose: o.purpose });
+  return list.filter((c) => c.label === o.label).at(-1)?.id;
+}
+
+/** Abortable sleep for the bounded remote waits (steps 5-6). Rejects with name "AbortError"
+ *  so the executor records a cancel (not a failure) when the operator aborts mid-wait. */
+export function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const fail = (): void => {
+      const e = new Error("aborted while waiting for a remote condition to converge");
+      e.name = "AbortError";
+      reject(e);
+    };
+    if (signal.aborted) {
+      fail();
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      fail();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+// Compensating actions. Registered at runtime by the step that creates the resource —
+// BEFORE its mutating remote call, because a step that dies halfway leaves a partial
+// resource only the cleanup can compensate (both tolerate already-absent state, so
+// early registration is safe). The executor resolves the persisted __cleanups names against
+// cleanups(); they run ONLY on an explicit abort-with-cleanup, never automatically.
+//
+// THE ONE BELOW ACTS ON THE MASTER'S BOOKS. What an abort does to the SLAVE is three more
+// compensating actions, and they live with the acts that put a machine back
+// (defs/leave-host.kit.ts): a run aborted with cleanup leaves the machine, and leaving it means the
+// key line, the password door and everything this platform wrote go with the master-side plane.
+
+/** The git-side inverse of the map write: drop the slave part again, which takes the cluster out of the
+ *  master's slaves ApplicationSet and cascades the teardown of its management plane. The map itself
+ *  stays — the cluster keeps its role, stage and build plane. Idempotent by contract: an absent map and
+ *  an already-stripped one are both a no-op. Built per run because a cleanup carries no ports of its
+ *  own; the def hands it the same PlatformRepo the step wrote through. */
+export function removeSlaveMarkingCleanup(ports: DeploySlavePorts): Cleanup {
+  return {
+    name: "remove-slave-marking",
+    title: "Drop the slave part of the cluster map on master",
+    run: async (ctx: StepCtx) => {
+      const domain = String(ctx.params.domain);
+      const { changed } = await removeSlaveMarkingPart(requirePlatformRepo(ports), domain, ctx.runId);
+      ctx.log("meta", changed
+        ? `dropped the slave part of ${clusterMapPath(domain)} on master`
+        : `${clusterMapPath(domain)} carries no slave part — nothing to drop`);
+    },
+  };
+}

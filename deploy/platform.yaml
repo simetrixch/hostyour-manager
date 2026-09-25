@@ -1,3 +1,47 @@
-name: probe-unit
+apiVersion: hostyour.cloud/v1
+kind: ConsumerManifest
+name: hostyour-manager
+owner: platform@simetrixch
+envs: [dev, test, prod]
+# The repository whose clusters/inventories/*/values-<stage>.yaml carry this unit's image pins.
+# release/release.sh reads it here and writes the pin itself once the images are built, so putting a
+# release on a stage is one act and not an act plus something somebody has to remember. A copy of
+# this manifest in another unit names ITS platform tree and can reach no other.
+#
+# DECLARING IT IS WHAT MAKES A RELEASE WAIT AND PIN. The two release scripts are one script that
+# every consumer receives, and this key is the only thing that tells the two shapes apart: a
+# manifest that declares it belongs to a unit whose images are built by its own repository and
+# whose pins only a machine may write, so the release waits for the build and writes them. A
+# customer manifest declares none, and there the build plane builds and pins on the deploy ref
+# alone — the release script says so and stops.
+platformRepo: simetrixch/hostyour-cloud
+
+# `name` is the UNIT name: it must equal basename(repoURL) and the registration directory
+# (hostyour-cloud/registrations/hostyour-manager/build.yaml). The release pipeline compares the two
+# and fails the run on a mismatch, so a rename here without the registration blocks every release.
+#
+# NO `chart:` — BUILD-ONLY. The manager is the control plane itself and cannot validate, pin or seed
+# its own deploy, so that stays bootstrap-owned in hostyour-cloud/clusters/inventories/manager. This
+# file exists so the three IMAGES build through the same release pipeline as every other unit.
+#
+# The build names are FLAT image names, not paths: each one IS the repo it pushes to in the central
+# registry, is what hostyour-cloud/clusters/inventories/*/values-<stage>.yaml carries as
+# `builds[].image`, and is what the registration attests. Renaming a build points it at a different
+# repo and makes it invisible to the release bump's search over those pins, so the running chart
+# would silently stay on the old image.
 builds:
-  - name: probe
+  - name: manager                  # the in-cluster app
+    containerfile: Containerfile   # repo root
+  - name: gate-runner              # the onboarding-sandbox image, run as a Tekton task in-cluster
+    containerfile: gate-runner/Containerfile
+  # The client-tools image of the move / backup / restore job — mongodump,
+  # mongosh, pg_dumpall, rclone, ssh. It is the tooling THIS manager runs
+  # (server/domains/units/relocation.ts), so it builds where its caller
+  # lives. Its two database client versions are stamped into the Dockerfile by
+  # hostyour-deploy's sync-versions program, because the servers they talk to are
+  # pinned in hostyour-cloud/platform/versions.yaml.
+  - name: dbtools
+    containerfile: docker/dbtools.Dockerfile
+
+services: []                  # the manager PROVISIONS mongodb/pg/redis/s3 for others; consumes none
+secrets: []                   # bootstrap secrets (OIDC, session, master key, GitOps PAT) are installer-seeded

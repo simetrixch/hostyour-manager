@@ -1,0 +1,6 @@
+{
+  "what": "Every place a closed value set that shared/enums.ts owns was already spelled a second time by hand when this check was written. The check refuses a copy that is not on this list, and reports a line of this list that no longer matches anything. Written by node fitness/record-known.mjs; a key is the file and the set, never a line, so a copy that moves inside its file stays known.",
+  "copies": [
+    "web/src/api.ts::STAGE"
+  ]
+}

@@ -1,0 +1,62 @@
+# Release — put a release of this consumer on one stage, from the GitHub UI.
+#
+# This workflow is a thin wrapper around release/release.sh: it checks out the
+# repo, sets a bot git identity, and runs the same dumb client an operator would
+# run locally. It does NOT build anything.
+#
+# The ACTUAL build trigger is the deploy ref release.sh pushes
+# (refs/tags/deploy/<stage>/<release-tag>), not this workflow: that push fires
+# this repo's external push webhook (Settings -> Webhooks -> build.<domain>)
+# into the platform's build plane, which runs the release build. This job only
+# mints the release tag and pushes the deploy ref.
+name: Release
+
+# Show the released version+channel in the Actions run list (otherwise every run
+# reads "Release #N: Manually run by <user>" with no context on WHICH release).
+run-name: "Release ${{ inputs.version }}-${{ inputs.channel }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version x.y.z (e.g. 0.8.0)"
+        required: true
+        type: string
+      channel:
+        description: "Maturity ceiling: alpha->dev, beta->test, stable->prod"
+        required: true
+        type: choice
+        default: stable
+        options:
+          - stable
+          - beta
+          - alpha
+      stage:
+        description: "Where this run puts the release. Must be at or below the channel's ceiling."
+        required: true
+        type: choice
+        default: dev
+        options:
+          - dev
+          - test
+          - prod
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "example-release[bot]"
+          git config user.email "218061504+example-release[bot]@users.noreply.github.com"
+
+      - name: Mint the release tag and push the deploy ref
+        run: bash release/release.sh "${{ inputs.version }}" "${{ inputs.channel }}" "${{ inputs.stage }}"
