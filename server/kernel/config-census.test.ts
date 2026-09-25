@@ -99,3 +99,27 @@ describe("config census: every Config field has a reader", () => {
     expect(orphaned, `Config fields nothing outside ${CONFIG_FILE} reads: ${orphaned.join(", ")}`).toEqual([]);
   });
 });
+
+// A plugin's keys are its own (server/plugin.ts env), declared in its config.ts: every one of them is
+// read there, in the plugin's refine or its mapping, or it is a key that looks live in the deployment
+// values while changing nothing.
+describe("config census: every plugin key is read", () => {
+  const configs = readdirSync(join(ROOT, "plugins"), { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => `plugins/${d.name}/server/config.ts`);
+
+  it("finds the plugins' keys (the census has something to check)", () => {
+    expect(configs).toContain("plugins/unit/server/config.ts");
+  });
+
+  it("reads every key a plugin declares", () => {
+    const unread: string[] = [];
+    for (const file of configs) {
+      const text = readFileSync(join(ROOT, file), "utf8");
+      const keys = [...text.matchAll(/^ {2}([A-Z][A-Z0-9_]*): z\./gm)].map((m) => m[1] as string);
+      expect(keys.length, file).toBeGreaterThan(0);
+      for (const key of keys) if (!new RegExp(`\\be\\.${key}\\b`).test(text)) unread.push(`${file}: ${key}`);
+    }
+    expect(unread, `plugin keys nothing reads: ${unread.join(", ")}`).toEqual([]);
+  });
+});

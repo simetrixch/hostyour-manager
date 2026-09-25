@@ -7,7 +7,8 @@ import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessO
 import { bootPhases } from "./boot-phases.ts";
 import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
 import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
+import { unitPlugin, unitPorts } from "#unit/server/plugin.ts";
+import { CloudflareDns } from "../adapters/dns/cloudflare-dns.ts";
 import { createApp } from "../http/app.ts";
 import type { CredentialStore } from "../security/store.ts";
 import { buildCore } from "./core.ts";
@@ -142,6 +143,9 @@ export async function wire(): Promise<Wired> {
   // stop the boot here, all named at once (boot/plugin-set.ts).
   const active = activatePlugins(compiledPlugins, config.plugins, core, process.env, new Set<string>(RUN_KIND));
   phase("plugins");
+  // The unit plugin's ports, which both families take from the set: neither is built without it.
+  const unitWiring = active.find((p) => p.name === unitPlugin.name)?.wiring;
+  const unit = unitWiring ? unitPorts(unitWiring.provides) : undefined;
   const bus = new RunEventBus();
   // Consumer onboarding: construct the real adapters and register the Run family — but only when the
   // Tekton gate-runner config (ONBOARD_GATE_MANAGER_ADDR) + platform repo are both configured
@@ -150,7 +154,11 @@ export async function wire(): Promise<Wired> {
   // family: a cluster deployment must not depend on consumer onboarding being configured.
   const masterKube = core.kube.master;
   const resolver = core.kube.resolver;
-  const units = buildUnits(config, store, logger, { master: masterKube, resolver }, githubApp, platformRepo);
+  // The DNS provider — ONE Cloudflare client for the core's own runs (the mail DNS, the records a
+  // renamed slave's units carry) and both families' provision-dns and remove-dns steps. Absent (no
+  // token) ⇒ those steps fail loud (DNS is a mandatory part of the run kinds), never a silent skip.
+  const dns = config.dns ? new CloudflareDns({ apiToken: config.dns.cloudflareApiToken }) : undefined;
+  const units = buildUnits(config, store, logger, { master: masterKube, resolver }, githubApp, platformRepo, dns, unit);
   // The mail DNS of the installation, measured at public resolvers: the Mail page's deps, and the
   // mail half of the DNS inventory below — one measurement, so the two pages can never disagree
   // about one record. The platform repo gives the two sender domains, and the registrations the
@@ -172,7 +180,7 @@ export async function wire(): Promise<Wired> {
   const dnsInventory: DnsInventoryDeps = {
     db: db.db,
     mail: () => readMailDns(mailDns),
-    ...(units.dns ? { dns: units.dns } : {}),
+    ...(dns ? { dns } : {}),
     ...(registrations
       ? { consumers: async (cluster: string, stage: Stage) => (await registrations.listConsumerRegistrations(cluster, stage)).registrations.map((r) => ({ name: r.name, host: r.entry.host })) }
       : {}),
@@ -198,12 +206,12 @@ export async function wire(): Promise<Wired> {
     // and carrying no credential — the setting defaults to the product's own repository and that
     // repository is public, so there is no pair to be half-configured.
     catalogueOrigin: { repoURL: config.deployProgramsRepoUrl },
-    ...(units.dns ? { dns: units.dns } : {}),
+    ...(dns ? { dns } : {}),
     mailEgress: (stage: Stage, masterDomain: string) => readMailEgress(mailDns, stage, masterDomain),
     // What a slave's rename repoints: every unit record naming its old FQDN, read off the unit rows of
     // the cluster and composed under the apex its map states.
-    ...(units.dns && units.resolveUnitApex
-      ? { unitRecords: (ctx, input) => repointUnitRecords({ dns: units.dns, unitApex: units.resolveUnitApex! }, ctx, input) }
+    ...(dns && units.resolveUnitApex
+      ? { unitRecords: (ctx, input) => repointUnitRecords({ dns, unitApex: units.resolveUnitApex! }, ctx, input) }
       : {}),
     // What dns-remove and mail-dns-unpublish are allowed to delete: a record is taken back only
     // where the inventory names it as this installation's, never by the name an operator typed.
@@ -255,10 +263,10 @@ export async function wire(): Promise<Wired> {
   // reader: they stand on this cluster whatever cluster a unit targets. The same tick takes a token
   // repository Secret off every live unit the App reaches (repo-credential-sweep.ts).
   const { resolver: unitResolver, repoCredential } = units;
-  const refreshAppTokensLater = registrations
+  const refreshAppTokensLater = registrations && unit
     ? async (): Promise<void> => {
         try {
-          await refreshAppTokens({ store, registrations, seeder: units.seeder, kube: masterKube.clusterReader, logger, catalog: config.catalog, githubApp, owners: (org) => readOwnerIdentity(db.db, org) });
+          await refreshAppTokens({ store, registrations, seeder: unit.seeder, kube: masterKube.clusterReader, logger, catalog: config.catalog, githubApp, owners: (org) => readOwnerIdentity(db.db, org) });
         } finally {
           if (unitResolver && repoCredential) {
             await sweepRepoCredentials({ db: db.db, githubApp, resolver: unitResolver, repoCredential, logger });
@@ -266,13 +274,6 @@ export async function wire(): Promise<Wired> {
         }
       }
     : async (): Promise<void> => undefined;
-  // The size table (plugins/unit/server/unit-size.ts): fill in any of the three sizes this database
-  // does not carry yet, and touch none that it does. Create-only, so an installation that edited a
-  // size keeps its figures across every restart — the same rule the Vault seeder follows, and for the
-  // same reason: a re-run must never silently re-price a unit that is already running on a value.
-  const seededSizes = seedUnitSizes(db.db);
-  phase("unit sizes");
-  if (seededSizes.length > 0) logger.info({ sizes: seededSizes }, "unit size table seeded");
   // Each active plugin's own boot work, once, after the core's seeds (server/plugin.ts onBoot).
   for (const p of active) await p.wiring.onBoot?.({ executor });
   phase("plugin boot");
@@ -364,14 +365,15 @@ export async function wire(): Promise<Wired> {
       // The secrets of a standing consumer (#245) — gated like the other consumer triggers.
       registerConsumerSecretsRoute(a, { executor, onboardingEnabled: units.enabled });
       // The owner identities (#219): recorded here, derived per unit by every onboarding. The
-      // measurement rides the consumer client where it is wired; without it nothing can be recorded.
-      if (units.github) registerOwnerRoutes(a, { db: db.db, store, github: units.github, githubApp, actor: runActor });
+      // measurement rides the unit plugin's GitHub client; without the plugin nothing can be recorded.
+      if (unit) registerOwnerRoutes(a, { db: db.db, store, github: unit.github, githubApp, actor: runActor });
       // One tenant's own catalog, read through the same closure tenant-add-app judges against.
       registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
       registerResetRoutes(a, {
         config, db: db.db, sqlite: db.sqlite, store, logger,
         github,
         reseedMaster: async () => { stopMasterReconcile(); await seedMaster(db.db, store, config, logger); },
+        plugins: compiledPlugins,
       });
       // What each active plugin serves, under /api/<its name>, and the names of the active ones.
       registerPluginRoutes(a, active, { executor });

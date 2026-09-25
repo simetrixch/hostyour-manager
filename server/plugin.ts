@@ -64,8 +64,11 @@ export interface Plugin<E extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.Zod
   readonly requires?: readonly string[];
   /** Parsed for an active plugin; a key it declares may not be set while it is inactive. */
   readonly env: E;
-  /** Its tables. */
+  /** Its tables. A reset wipes them, except those `keep` names. */
   readonly schema: Readonly<Record<string, SQLiteTable>>;
+  /** The tables of `schema` a reset leaves standing, by their SQL names: what an installation holds
+   *  that outlives what it knows. */
+  readonly keep?: readonly string[];
   /** The folder of its generated migrations, applied under its own ledger. */
   readonly migrations: string;
   activate(core: Core, config: z.output<E>): Wiring;

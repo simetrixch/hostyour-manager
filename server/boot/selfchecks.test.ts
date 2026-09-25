@@ -1,3 +1,4 @@
+import { unitPortsOver } from "#unit/server/plugin.fixture.ts";
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -74,7 +75,7 @@ describe("boot self-checks", () => {
       buildClusterReader: (input) => new KubeClusterReader(input),
     });
     const platformRepo = buildPlatformRepo(onboardingConfig, db.db);
-    const onboarding = buildUnits(onboardingConfig, store, logger, { master, resolver }, new FakeGitHubApp(), platformRepo);
+    const onboarding = buildUnits(onboardingConfig, store, logger, { master, resolver }, new FakeGitHubApp(), platformRepo, undefined, unitPortsOver(onboardingConfig));
     const runDefinitions = buildRunDefinitions({ db: db.db, resolver, ...(platformRepo ? { platformRepo } : {}) }, onboarding.defs);
     return { db, store, bus: new RunEventBus(), runDefinitions };
   }

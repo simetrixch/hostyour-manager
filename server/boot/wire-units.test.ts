@@ -18,6 +18,7 @@ import { masterKubeClients } from "./master-kube.ts";
 import { KubeClusterReader } from "../adapters/kube/kube.ts";
 import { makeClusterKubeResolver } from "../domains/inventory/cluster-kube.ts";
 import { buildUnits } from "./wire-units.ts";
+import { unitPortsOver } from "#unit/server/plugin.fixture.ts";
 import { buildPlatformRepo } from "./platform-repo.ts";
 import { RUN_FAMILY } from "../../shared/enums.ts";
 import type { StepCtx } from "../executor/types.ts";
@@ -97,8 +98,16 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
       openCredential: (id) => store.open(id, { purpose: "cluster-kube:resolve" }),
       buildClusterReader: (input) => new KubeClusterReader(input),
     });
-    return [config, store, logger, { master, resolver }, new FakeGitHubApp(), buildPlatformRepo(config, h.db)];
+    return [config, store, logger, { master, resolver }, new FakeGitHubApp(), buildPlatformRepo(config, h.db), undefined, unitPortsOver(config)];
   }
+
+  it("builds neither family while the unit plugin is not active: both stand on it", () => {
+    const args = setup();
+    const wiring = buildUnits(...(args.slice(0, 7) as [typeof args[0], typeof args[1], typeof args[2], typeof args[3], typeof args[4], typeof args[5], typeof args[6]]), undefined);
+    expect(wiring.defs).toEqual([]);
+    expect(wiring.enabled).toBe(false);
+    expect(wiring.tenantEnabled).toBe(false);
+  });
 
   it("enables BOTH families WITHOUT a kubeconfig — in-cluster (pod SA) is the default kube access", () => {
     const wiring = buildUnits(...setup());

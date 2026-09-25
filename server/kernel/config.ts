@@ -196,14 +196,6 @@ const EnvSchema = z.object({
   // NO DEFAULT, deliberately: the answer that supplies it says so in as many words, and no rule
   // composes its name out of anything else. A default here is a second name nobody chose.
   CATALOG_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'CATALOG_REPO must be "owner/repo"').optional(),
-  // The Hetzner Storage Box behind move, backup and restore: the staging area every dump
-  // lands on and every restore reads from, reachable over SSH. The three values come from
-  // secret/<stage>/app/storage-box via the manager's own ExternalSecret (the seeder is write-only,
-  // so like GITHUB_WEBHOOK_SECRET they arrive as env, never as a Vault read-back). ALL THREE or NONE —
-  // a partial config is a boot error. Absent ⇒ the backup/restore/migrate dump steps fail loud.
-  STORAGE_BOX_HOST: z.string().min(1).optional(),
-  STORAGE_BOX_USER: z.string().min(1).optional(),
-  STORAGE_BOX_PASSWORD: z.string().min(1).optional(),
   // WHERE A TENANT'S UPLOADS GO, and the one object-storage credential this installation holds. The
   // three values come from secret/<stage>/app/cloudflare-r2 via the manager's own ExternalSecret
   // (the seeder is write-only, so like STORAGE_BOX_* they arrive as env, never as a Vault read-back).
@@ -285,11 +277,6 @@ const EnvSchema = z.object({
   METRICS_QUERY_URL: z.string().min(1).url()
     .regex(/^https?:\/\//, "METRICS_QUERY_URL must be an http:// or https:// address — the probe dials it with an HTTP GET")
     .optional(),
-  // The pinned dbtools job image (<registry-host>/dbtools:<tag>) the relocation Jobs
-  // run — mongodb tools, postgresql client, an S3 client and SSH for the staging area. The pin lives
-  // as a builds[] entry in apps/manager/values-<stage>.yaml and the Deployment projects it here,
-  // the same road MANAGER_VERSION travels. Absent ⇒ the dump/restore steps fail loud.
-  DBTOOLS_IMAGE: z.string().min(1).optional(),
 }).refine((e) => !e.VAULT_ADDR || Boolean(e.VAULT_K8S_AUTH_MOUNT), {
   message: "VAULT_K8S_AUTH_MOUNT is required when VAULT_ADDR is set (the auth mount is named after the cluster, kubernetes-<cluster>)",
   path: ["VAULT_K8S_AUTH_MOUNT"],
@@ -302,12 +289,6 @@ const EnvSchema = z.object({
 }).refine((e) => Boolean(e.GITHUB_REPO) === Boolean(e.GITHUB_WRITE_PAT), {
   message: "GITHUB_REPO and GITHUB_WRITE_PAT must be set together (both enable the Branches/Reset feature, or neither)",
   path: ["GITHUB_REPO"],
-}).refine((e) => {
-  const set = [e.STORAGE_BOX_HOST, e.STORAGE_BOX_USER, e.STORAGE_BOX_PASSWORD].filter(Boolean).length;
-  return set === 0 || set === 3;
-}, {
-  message: "STORAGE_BOX_HOST, STORAGE_BOX_USER and STORAGE_BOX_PASSWORD must be set together (the staging area needs all three, or none)",
-  path: ["STORAGE_BOX_HOST"],
 }).refine((e) => Boolean(e.CLOUDFLARE_R2_API_TOKEN) === Boolean(e.CLOUDFLARE_R2_ACCOUNT_ID), {
   message: "CLOUDFLARE_R2_API_TOKEN and CLOUDFLARE_R2_ACCOUNT_ID must be set together (a token addresses nothing without the account it manages, and an account nothing can be created in)",
   path: ["CLOUDFLARE_R2_API_TOKEN"],
@@ -421,13 +402,6 @@ export interface Config {
   dns?: {
     cloudflareApiToken: string;
   };
-  /** Present ⇒ the Hetzner Storage Box is wired: the SSH staging area every relocation dump
-   *  lands on. Absent ⇒ the dump/restore steps fail loud — the box is a mandatory part of the run kinds. */
-  storageBox?: {
-    host: string;
-    user: string;
-    password: string;
-  };
   /** Present ⇒ the object storage is wired: the account tenant buckets are made in, the jurisdiction
    *  they are made under, and the MANAGING token that makes them. Absent ⇒ create-tenant fails loud —
    *  a tenant with no bucket has an engine that refuses to boot. */
@@ -436,8 +410,6 @@ export interface Config {
     accountId: string;
     jurisdiction: "default" | "eu" | "fedramp";
   };
-  /** The pinned dbtools job image the relocation Jobs run. Absent ⇒ those steps fail loud. */
-  dbtoolsImage?: string;
   /** The deployment programs repository as a URL git can clone (DEPLOY_PROGRAMS_REPO) — what a
    *  machine's /srv/ansiwise-catalog is made from when it carries none. Always present: the
    *  repository is the product's own and the setting defaults to it, and it carries no credential
@@ -574,16 +546,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     // issued it.
     githubApp: { appId: e.GITHUB_APP_ID, installationId: e.GITHUB_APP_INSTALLATION_ID, privateKey: e.GITHUB_APP_PRIVATE_KEY },
     ...(e.CLOUDFLARE_DNS_API_TOKEN ? { dns: { cloudflareApiToken: e.CLOUDFLARE_DNS_API_TOKEN } } : {}),
-    // The refine above guarantees the three together; the triple guard narrows them.
-    ...(e.STORAGE_BOX_HOST && e.STORAGE_BOX_USER && e.STORAGE_BOX_PASSWORD
-      ? { storageBox: { host: e.STORAGE_BOX_HOST, user: e.STORAGE_BOX_USER, password: e.STORAGE_BOX_PASSWORD } }
-      : {}),
     // The refine above guarantees the token and the account together; the pair guard narrows them.
     // The jurisdiction always has its default, so it is never what makes the block absent.
     ...(e.CLOUDFLARE_R2_API_TOKEN && e.CLOUDFLARE_R2_ACCOUNT_ID
       ? { objectStorage: { apiToken: e.CLOUDFLARE_R2_API_TOKEN, accountId: e.CLOUDFLARE_R2_ACCOUNT_ID, jurisdiction: e.CLOUDFLARE_R2_JURISDICTION } }
       : {}),
-    ...(e.DBTOOLS_IMAGE ? { dbtoolsImage: e.DBTOOLS_IMAGE } : {}),
     // Unconditional, because the setting has a default and the repository is public: there is no
     // partner credential whose absence could turn this into a state the process has to describe.
     deployProgramsRepoUrl: `https://github.com/${e.DEPLOY_PROGRAMS_REPO}.git`,

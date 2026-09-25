@@ -10,7 +10,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import type { ResetResult, ResetBranchOutcome, ResetPointerOutcome } from "../../../shared/api-types.ts";
 import { AppError, errValidation, errNotConfigured, errIllegalTransition, errUpstream, errNotAMember, errResourceBusy, errInternal } from "../../kernel/errors.ts";
 import { writeAudit } from "../../db/audit-writer.ts";
-import { wipeManagerDb, rehearseManagerDbWipe, countLiveRuns, backupManagerDb } from "../../db/reset.ts";
+import { wipeManagerDb, rehearseManagerDbWipe, countLiveRuns, backupManagerDb, type ResetPlugin } from "../../db/reset.ts";
 import { booksBranch } from "../inventory/read.ts";
 import { CLUSTER_MAP_DIR } from "../../../shared/cluster-values.ts";
 
@@ -25,6 +25,9 @@ export interface ResetApiDeps {
   /** wire: stops the master-reconcile timer, then seedMaster (idempotent) — keeps the RUNNING
    *  pod coherent after the wipe (role=master row + self-SSH key re-materialized). */
   reseedMaster: () => Promise<void>;
+  /** The compiled plugins, active or not: their tables are wiped with the core's, except the ones
+   *  they keep (db/reset.ts). */
+  plugins: readonly ResetPlugin[];
 }
 
 const ResetInput = z.object({
@@ -176,7 +179,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       let wipeRehearsed = false;
       if (input.wipeDb) {
         try {
-          rehearseManagerDbWipe(deps.sqlite);
+          rehearseManagerDbWipe(deps.sqlite, deps.plugins);
           wipeRehearsed = true;
         } catch (err) {
           refuse(errInternal(`the database wipe would fail (${msg(err)}) — refused before anything was deleted; no branch and no cluster map was touched`));
@@ -254,7 +257,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
           // deleteVaultValues destroys: the value gone, and the snapshot unable to restore the row.
           const backupFile = backupManagerDb(deps.sqlite, deps.config.dataDir);
           const vaultRefs = deps.store.collectVaultRefs();
-          const rows = wipeManagerDb(deps.sqlite);
+          const rows = wipeManagerDb(deps.sqlite, deps.plugins);
           const vaultOrphans = await deps.store.deleteVaultValues(vaultRefs);
           dbResult = { wiped: true, rows, backupFile, vaultOrphans };
           log.warn({ rows, backupFile, vaultOrphans, actor: operator.sub },

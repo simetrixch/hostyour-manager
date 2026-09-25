@@ -1,4 +1,6 @@
 import Database from "better-sqlite3";
+import { getTableName } from "drizzle-orm";
+import type { Plugin } from "../plugin.ts";
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -39,16 +41,26 @@ const WIPE_ORDER = [
 //     rewrites the row.
 //   __drizzle_migrations — the migrator's own ledger. Emptied, the next openDb replays the baseline
 //     against tables that already exist and the Manager stops booting.
-//   unit_sizes — EDITED data, not derived data. The boot seed would refill it, which is exactly the
-//     problem: the three rows would come back carrying the SHIPPED figures, silently replacing the
-//     ones this installation sells. Nothing could restore them — the registrations in git carry
-//     resolved numbers, not the table they came from, so after a wipe the table and the units
-//     standing on it would disagree with no record of which was right. A reset ends what the
-//     manager KNOWS (its servers, clusters and units); what it SELLS outlives that.
-// This list and WIPE_ORDER together must name EVERY table in the database. reset.test.ts checks both
-// against sqlite_master, so a table a later migration adds falls into neither list and goes red
-// instead of quietly surviving every wipe.
-export const KEPT_TABLES = ["operators", "meta", "unit_sizes", "__drizzle_migrations"] as const;
+// Every compiled plugin adds its own: the tables its `keep` names, and its ledger
+// `__drizzle_migrations_<name>`, emptied as the core's would be (keptTables below).
+// These lists, WIPE_ORDER and every compiled plugin's tables together must name EVERY table in the
+// database. reset.test.ts checks them against sqlite_master, so a table a later migration adds falls
+// into none and goes red instead of quietly surviving every wipe.
+export const KEPT_TABLES = ["operators", "meta", "__drizzle_migrations"] as const;
+
+/** The compiled plugins as a reset reads them: their names, tables and the tables they keep. */
+export type ResetPlugin = Pick<Plugin, "name" | "schema" | "keep">;
+
+/** Every table a reset leaves standing: the core's, and each compiled plugin's kept tables and ledger. */
+export function keptTables(plugins: readonly ResetPlugin[]): string[] {
+  return [...KEPT_TABLES, ...plugins.flatMap((p) => [...(p.keep ?? []), `__drizzle_migrations_${p.name}`])];
+}
+
+/** The plugins' tables a wipe deletes, the last compiled plugin's first: a plugin's table may hang off
+ *  a table of a plugin it requires, and every plugin's may hang off the core's, which go after. */
+function pluginWipeOrder(plugins: readonly ResetPlugin[]): string[] {
+  return [...plugins].reverse().flatMap((p) => Object.values(p.schema).map((t) => getTableName(t)).filter((name) => !(p.keep ?? []).includes(name)));
+}
 
 const EVENTS_TRIGGER = "CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events is append-only'); END";
 const AUDIT_TRIGGER = "CREATE TRIGGER audit_no_delete BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT, 'audit is append-only'); END";
@@ -77,11 +89,11 @@ export function backupManagerDb(sqlite: Database.Database, dataDir: string): str
 // The wipe itself, inside whatever transaction the caller opened. Shared by the real wipe and the
 // rehearsal below so the two can never run different statements — a rehearsal that exercises
 // anything but the wipe proves nothing about the wipe.
-function wipeInFkOrder(sqlite: Database.Database): Record<string, number> {
+function wipeInFkOrder(sqlite: Database.Database, plugins: readonly ResetPlugin[]): Record<string, number> {
   const rows: Record<string, number> = {};
   sqlite.exec("DROP TRIGGER events_no_delete");
   sqlite.exec("DROP TRIGGER audit_no_delete");
-  for (const table of WIPE_ORDER) rows[table] = sqlite.prepare(`DELETE FROM ${table}`).run().changes;
+  for (const table of [...pluginWipeOrder(plugins), ...WIPE_ORDER]) rows[table] = sqlite.prepare(`DELETE FROM ${table}`).run().changes;
   sqlite.exec(EVENTS_TRIGGER);
   sqlite.exec(AUDIT_TRIGGER);
   return rows;
@@ -90,10 +102,10 @@ function wipeInFkOrder(sqlite: Database.Database): Record<string, number> {
 /** ONE immediate transaction: drop the two append-only DELETE triggers, wipe in FK order, recreate
  *  the triggers with text identical to the baseline migration's. DDL is transactional in SQLite, so
  *  a failure anywhere rolls back the triggers too. Returns rows deleted per table. */
-export function wipeManagerDb(sqlite: Database.Database): Record<string, number> {
+export function wipeManagerDb(sqlite: Database.Database, plugins: readonly ResetPlugin[]): Record<string, number> {
   let rows: Record<string, number> = {};
   sqlite.transaction(() => {
-    rows = wipeInFkOrder(sqlite);
+    rows = wipeInFkOrder(sqlite, plugins);
   }).immediate();
   return rows;
 }
@@ -106,10 +118,10 @@ export function wipeManagerDb(sqlite: Database.Database): Record<string, number>
  *  BEGIN/ROLLBACK by hand rather than better-sqlite3's transaction(): that helper COMMITS when its
  *  function returns and rolls back only by throwing, so discarding a SUCCESSFUL rehearsal through it
  *  means throwing an error the caller then has to tell apart from a real one. */
-export function rehearseManagerDbWipe(sqlite: Database.Database): void {
+export function rehearseManagerDbWipe(sqlite: Database.Database, plugins: readonly ResetPlugin[]): void {
   sqlite.exec("BEGIN IMMEDIATE");
   try {
-    wipeInFkOrder(sqlite);
+    wipeInFkOrder(sqlite, plugins);
   } finally {
     // Some statement errors roll the transaction back themselves; ROLLBACK then throws "cannot
     // rollback - no transaction is active" out of the finally block and replaces the failure that is

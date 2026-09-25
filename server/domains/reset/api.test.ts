@@ -1,3 +1,4 @@
+import { compiledPlugins } from "../../plugins.ts";
 import { describe, it, expect, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -100,7 +101,7 @@ describe("reset API (POST /api/reset)", () => {
     const app = createApp({
       config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
       registerAuth: () => undefined,
-      registerProtected: (a) => registerResetRoutes(a, { config, db: db.db, sqlite: db.sqlite, store, logger, github, reseedMaster }),
+      registerProtected: (a) => registerResetRoutes(a, { config, db: db.db, sqlite: db.sqlite, store, logger, github, reseedMaster, plugins: compiledPlugins }),
     });
     return { app, db, session, reseededAt: () => reseedCalledWithAuditCount };
   }

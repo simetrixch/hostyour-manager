@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, type DbHandle } from "./client.ts";
 import { writeAudit } from "./audit-writer.ts";
-import { wipeManagerDb, rehearseManagerDbWipe, countLiveRuns, backupManagerDb, KEPT_TABLES } from "./reset.ts";
+import { wipeManagerDb, rehearseManagerDbWipe, countLiveRuns, backupManagerDb, keptTables } from "./reset.ts";
+import { compiledPlugins } from "../plugins.ts";
+import { inDependencyOrder } from "../boot/plugin-set.ts";
 
 // Populate a representative slice of the cluster state — one row down each FK chain — so the wipe's
 // order + the KEEP set are both exercised.
@@ -42,7 +44,7 @@ describe("manager DB reset (db/reset.ts)", () => {
   function make(): DbHandle {
     const dir = mkdtempSync(join(tmpdir(), "mgr-reset-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "manager.db"));
+    const db = openDb(join(dir, "manager.db"), inDependencyOrder(compiledPlugins));
     handles.push(db);
     return db;
   }
@@ -55,7 +57,7 @@ describe("manager DB reset (db/reset.ts)", () => {
     const db = make();
     seedClusters(db);
 
-    const rows = wipeManagerDb(db.sqlite);
+    const rows = wipeManagerDb(db.sqlite, compiledPlugins);
     // every seeded table reported a deletion
     for (const t of ["servers", "clusters", "credentials", "runs", "steps", "events", "run_locks", "audit"]) {
       expect(rows[t]).toBeGreaterThanOrEqual(1);
@@ -78,7 +80,7 @@ describe("manager DB reset (db/reset.ts)", () => {
     seedClusters(db);
     seedTenant(db, false);
 
-    const rows = wipeManagerDb(db.sqlite);
+    const rows = wipeManagerDb(db.sqlite, compiledPlugins);
     expect(rows["tenants"]).toBe(1);
     expect(rowCount(db, "tenants")).toBe(0);
     expect(rowCount(db, "clusters")).toBe(0);
@@ -90,7 +92,7 @@ describe("manager DB reset (db/reset.ts)", () => {
     seedClusters(db);
     seedTenant(db, true);
 
-    const rows = wipeManagerDb(db.sqlite);
+    const rows = wipeManagerDb(db.sqlite, compiledPlugins);
     expect(rows["tenant_apps"]).toBe(1);
     expect(rowCount(db, "tenant_apps")).toBe(0);
     expect(rowCount(db, "tenants")).toBe(0);
@@ -100,7 +102,7 @@ describe("manager DB reset (db/reset.ts)", () => {
 
   // The census: a hand-ordered wipe list beside a schema that keeps growing is how tenants/tenant_apps
   // went missing in the first place. Every table the migrations actually create must be named by
-  // WIPE_ORDER or by KEPT_TABLES — the wipe's own return value IS the wipe list, one entry per table
+  // the wipe or by keptTables — the wipe's own return value IS the wipe list, one entry per table
   // it deleted from, so nothing here restates the order by hand.
   it("wipes or keeps EVERY table the migrations create", () => {
     const db = make();
@@ -108,9 +110,9 @@ describe("manager DB reset (db/reset.ts)", () => {
     expect(present).toContain("tenants"); // the census has something to check
     expect(present.length).toBeGreaterThanOrEqual(13);
 
-    const accounted = new Set<string>([...Object.keys(wipeManagerDb(db.sqlite)), ...KEPT_TABLES]);
+    const accounted = new Set<string>([...Object.keys(wipeManagerDb(db.sqlite, compiledPlugins)), ...keptTables(compiledPlugins)]);
     const unaccounted = present.filter((t) => !accounted.has(t));
-    expect(unaccounted, `tables in neither the wipe list nor KEPT_TABLES: ${unaccounted.join(", ")}`).toEqual([]);
+    expect(unaccounted, `tables in neither the wipe list nor the kept tables: ${unaccounted.join(", ")}`).toEqual([]);
     // and neither list names a table that no longer exists
     const gone = [...accounted].filter((t) => !present.includes(t));
     expect(gone, `tables reset.ts names but the migrations do not create: ${gone.join(", ")}`).toEqual([]);
@@ -119,7 +121,7 @@ describe("manager DB reset (db/reset.ts)", () => {
   it("recreates the append-only DELETE triggers (events + audit stay append-only after a wipe)", () => {
     const db = make();
     seedClusters(db);
-    wipeManagerDb(db.sqlite);
+    wipeManagerDb(db.sqlite, compiledPlugins);
 
     const triggers = db.sqlite
       .prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('events_no_delete','audit_no_delete')")
@@ -144,7 +146,7 @@ describe("manager DB reset (db/reset.ts)", () => {
     seedClusters(db);
     seedTenant(db, true);
 
-    rehearseManagerDbWipe(db.sqlite);
+    rehearseManagerDbWipe(db.sqlite, compiledPlugins);
 
     for (const t of ["servers", "clusters", "credentials", "runs", "steps", "events", "run_locks", "audit", "tenants", "tenant_apps"]) {
       expect(rowCount(db, t), `${t} lost rows to the rehearsal`).toBeGreaterThanOrEqual(1);
@@ -155,7 +157,7 @@ describe("manager DB reset (db/reset.ts)", () => {
     expect(() => db.sqlite.prepare("DELETE FROM audit").run()).toThrow(/append-only/);
     // and it left no transaction open for the real wipe that follows it
     expect(db.sqlite.inTransaction).toBe(false);
-    expect(Object.keys(wipeManagerDb(db.sqlite)).length).toBeGreaterThan(0);
+    expect(Object.keys(wipeManagerDb(db.sqlite, compiledPlugins)).length).toBeGreaterThan(0);
   });
 
   it("the rehearsal throws what the wipe would throw, and the wipe then throws the same", () => {
@@ -163,13 +165,13 @@ describe("manager DB reset (db/reset.ts)", () => {
     seedClusters(db);
     seedUnnamedChildTable(db);
 
-    expect(() => rehearseManagerDbWipe(db.sqlite)).toThrow(/FOREIGN KEY/i);
+    expect(() => rehearseManagerDbWipe(db.sqlite, compiledPlugins)).toThrow(/FOREIGN KEY/i);
     // the failed rehearsal is still a rollback: everything is where it was
     expect(rowCount(db, "servers")).toBe(1);
     expect(rowCount(db, "stragglers")).toBe(1);
     expect(db.sqlite.inTransaction).toBe(false);
     // the rehearsal predicted the real thing
-    expect(() => wipeManagerDb(db.sqlite)).toThrow(/FOREIGN KEY/i);
+    expect(() => wipeManagerDb(db.sqlite, compiledPlugins)).toThrow(/FOREIGN KEY/i);
     expect(rowCount(db, "servers")).toBe(1);
   });
 

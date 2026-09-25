@@ -7,7 +7,6 @@ import { GitRepoReader, GitRepoWriter } from "../adapters/git/git.ts";
 import type { PlatformRepo, RepoReader } from "../adapters/git/port.ts";
 import { KubeBuildRbacWriter } from "../adapters/kube/kube-rbac.ts";
 import { KubeRepoCredentialWriter } from "../adapters/kube/kube-repo-credential.ts";
-import { CloudflareDns } from "../adapters/dns/cloudflare-dns.ts";
 import { CloudflareR2 } from "../adapters/object-store/cloudflare-r2.ts";
 import type { DnsProvider } from "../adapters/dns/port.ts";
 import type { ClusterValueFile } from "../../shared/cluster-values.ts";
@@ -20,11 +19,8 @@ import type { ClusterKubeResolver, MasterKubeClients, RepoCredentialWriter } fro
 import { masterKubeInput } from "./master-kube.ts";
 import { TektonGateRunner } from "../adapters/gate-runner/gate-runner-tekton.ts";
 import { TektonBuildPlane } from "../adapters/build-plane/build-plane-tekton.ts";
-import { VaultSelfSeeder } from "#unit/server/adapters/vault/vault-self-seeder.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
-import { HttpActivator } from "#unit/server/adapters/activation/activation-http.ts";
 import type { Activator } from "#unit/server/adapters/activation/port.ts";
-import { HttpGitHubConsumer } from "#unit/server/adapters/github-consumer/github-consumer-http.ts";
 import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
 import type { GitHubApp } from "../adapters/github-app/port.ts";
 import { Registrations } from "#unit/server/registrations.ts";
@@ -40,7 +36,7 @@ import { makeSetSecretsDef, type SetSecretsPorts } from "../domains/units/set-se
 import type { LifecyclePorts } from "../domains/units/lifecycle.ts";
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import type { AppCatalogProvider } from "../domains/units/app-catalog.ts";
-import { HttpPublicProbe } from "#unit/server/adapters/http-probe/http-probe.ts";
+import type { UnitPorts } from "#unit/server/plugin.ts";
 import type { RelocationPorts } from "#unit/server/relocation.ts";
 import type { ConsumerRelocationPorts } from "../domains/units/relocation-world-consumer.ts";
 import { makeBackupDef } from "../domains/units/backup.run.ts";
@@ -90,9 +86,6 @@ const DEPLOY_REF_VISIBLE_MS = 5 * 60_000; // the bump's push becomes visible in 
 const RELEASE_BUILD_APPEAR_MS = 5 * 60_000; // the webhook fires the PipelineRun in seconds; five minutes is generous
 export interface UnitsWiring {
   defs: AnyRunDefinition[];
-  /** The DNS provider, for the mail DNS run kind (the master's egress address is read off its own
-   *  A record there) — the same instance the unit records are written with. Absent without one. */
-  dns?: DnsProvider;
   /** Consumer onboarding routes go live (gate-runner + platform repo both configured). */
   enabled: boolean;
   /** Tenant onboarding routes go live (CATALOG_REPO and the platform repository are configured). */
@@ -123,9 +116,9 @@ export interface UnitsWiring {
    *  build registration names — threaded to the route GET /api/tenants/:id/app-catalog; the SAME
    *  closure the tenant-add-app plan judges against. Undefined without tenant onboarding or without
    *  the App; the route then answers { apps: [], reason }. */
-  /** The shared activation client (ONE HttpActivator for the whole manager), threaded to
+  /** The shared activation client (the unit plugin's, ONE for the whole manager), threaded to
    *  registerTenantRoutes so the operator-driven POST /api/tenants/:id/invite-admin can call a
-   *  tenant's own example-auth first-admin bootstrap. Always constructed here. */
+   *  tenant's own example-auth first-admin bootstrap. Present wherever the families are built. */
   activator?: Activator;
   /** The TENANT family's catalog pointer registrations, threaded to registerTenantRoutes so the
    *  operator-triggered orphan scan (GET /api/tenants/orphans) can diff the LIVE pointers against the
@@ -147,9 +140,6 @@ export interface UnitsWiring {
    *  SAME Registrations the consumer runs commit through. Undefined when consumer onboarding is not
    *  configured; the scan route then degrades to an empty result with a reason. */
   registrations?: Registrations;
-  /** The ONE Vault seeder both families write through, threaded to the App-token refresh
-   *  (wire.ts): the entry it rewrites is the one the consumer family's seed-repo-pat created. */
-  seeder: VaultSeeder;
   /** The CONSUMER family's repository reader, threaded to registerConsumerRoutes so the wizard's
    *  prefill (POST /api/consumers/prefill) reads a consumer repository's version before any run
    *  exists — the SAME GitRepoReader the onboard run clones with. Undefined when consumer
@@ -204,16 +194,20 @@ export function buildUnits(
   /** The ONE writer of the platform repo, built in the composition root (boot/platform-repo.ts) —
    *  absent without GitHub coordinates or a books branch, and then neither family is built. */
   platformRepo: PlatformRepo | undefined,
+  /** The ONE DNS provider, built in the composition root: the core's own runs write through it too.
+   *  Absent (no token) ⇒ both families' provision-dns and remove-dns steps fail loud (DNS is a
+   *  mandatory part of the run kinds), never a silent skip. */
+  dns: DnsProvider | undefined,
+  /** The unit plugin's ports, taken from the set: both families stand on the unit plugin, so neither
+   *  is built while PLUGINS does not name it. */
+  unit: UnitPorts | undefined,
 ): UnitsWiring {
-  // ONE activation client for the whole manager — a plain fetch to a consumer's / tenant's OWN public
-  // ingress (no config gate; the target host is the unit's own). Constructed here and shared by BOTH
-  // families' invite steps (consumer onboard-activate + tenant create-tenant-activate) so there is a
-  // single instance, not one per family.
-  const activator = new HttpActivator();
-  // The unit DNS provider — ONE Cloudflare client for both families' provision-dns and
-  // remove-dns steps. Absent (no token) ⇒ those steps fail loud (DNS is a mandatory part of the
-  // run kinds), never a silent skip.
-  const dns = config.dns ? new CloudflareDns({ apiToken: config.dns.cloudflareApiToken }) : undefined;
+  if (!unit) return { defs: [], enabled: false, tenantEnabled: false };
+  // ONE activation client and ONE seeder for the whole manager, the unit plugin's: both families'
+  // invite steps call a unit's own public ingress through the same client, and there is one Vault and
+  // one Manager identity, so the consumer's ceremony secrets and a tenant's crypto entry are written
+  // and destroyed through the same seeder.
+  const { activator, seeder } = unit;
   // The tenant object store — ONE Cloudflare client for create-tenant's bucket and the key it mints
   // for it. Absent (no managing token, or no account for it to manage) ⇒ that step fails loud, never
   // a tenant whose engine refuses to boot for want of a bucket it can reach.
@@ -241,27 +235,14 @@ export function buildUnits(
   // probe verify-quiesced measures with, the per-Job budget, the storage box and the dbtools image
   // pin. Box + image are optional in the WIRING — the steps that need them fail loud when absent.
   const relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage"> = {
-    probe: new HttpPublicProbe(),
+    probe: unit.relocation.probe,
     jobTimeoutMs: RELOCATION_JOB_TIMEOUT_MS,
-    ...(config.storageBox ? { storageBox: config.storageBox } : {}),
-    ...(config.dbtoolsImage ? { dbtoolsImage: config.dbtoolsImage } : {}),
+    ...(unit.relocation.storageBox ? { storageBox: unit.relocation.storageBox } : {}),
+    ...(unit.relocation.dbtoolsImage ? { dbtoolsImage: unit.relocation.dbtoolsImage } : {}),
   };
   // The TENANT family is built FIRST: the consumer family's gate G23 must hold a candidate unit name
   // against the subdomains the tenants stand on (one name space, one apex — unit-dns.ts), and the
   // pointer registrations that answers that lives here.
-  // ONE seeder for BOTH families, because there is one Vault and one Manager identity: the
-  // consumer onboard seeds a consumer's ceremony secrets through it and create-tenant seeds a
-  // tenant's crypto entry, and each run kind's removal destroys what its own seed wrote. Built here
-  // rather than inside one family so neither can end up with a second identity.
-  // The seeder writes over the Manager's OWN kubernetes-auth login — the same VAULT_* surface the
-  // credential store authenticates with (config.vault) — because there is one Vault, on the master,
-  // and a slave's secrets live on it under the master's per-slave KV mount. Absent (dev/tests without
-  // Vault) every write fails closed inside the seeder rather than inventing an identity.
-  const seeder = new VaultSelfSeeder(
-    config.vault
-      ? { self: { addr: config.vault.addr, k8sAuthMount: config.vault.k8sAuthMount, k8sRole: config.vault.k8sRole, saTokenPath: config.vault.saTokenPath } }
-      : {},
-  );
   // THE TENANT FAMILY IS WIRED FIRST (the consumer family needs its registrations) AND YET RUNS THE
   // CONSUMER'S BUILD CHAIN per build unit it lacks (tenant-builds.ts) — so the consumer ports reach it
   // through a holder filled once both stand. The tenant defs read it at run time, never at wiring.
@@ -270,7 +251,7 @@ export function buildUnits(
   // always walked the families in, and read the consumer onboarding's ports late like the builds do.
   const unitProbes: UnitProbes[] = resolveUnitApex ? [consumerUnitProbes({ onboard: () => lateBuild.onboard, resolveUnitApex, githubApp })] : [];
   const tenant = buildTenantOnboarding(config, store, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps, unitProbes, githubApp);
-  const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube, githubApp);
+  const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube, githubApp, unit.github);
   if (consumer.onboardPorts) {
     lateBuild.onboard = consumer.onboardPorts;
     lateBuild.deps = {
@@ -292,7 +273,6 @@ export function buildUnits(
     ...(consumer.resolver ? { resolver: consumer.resolver } : {}),
     ...(consumer.onboardPorts?.repoCredential ? { repoCredential: consumer.onboardPorts.repoCredential } : {}),
     ...(consumer.registrations ? { registrations: consumer.registrations } : {}),
-    seeder,
     ...(consumer.repoReader ? { repoReader: consumer.repoReader } : {}),
     ...(consumer.github ? { github: consumer.github } : {}),
     ...(consumer.platformGitHub ? { platformGitHub: consumer.platformGitHub } : {}),
@@ -302,12 +282,9 @@ export function buildUnits(
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
     ...(tenant.orphanBuilds ? { orphanBuilds: tenant.orphanBuilds } : {}),
     ...(tenant.carryTrunkToBooksBranch ? { carryTrunkToBooksBranch: tenant.carryTrunkToBooksBranch } : {}),
-    // The shared activation client is always constructed above — surface it for the tenant invite route.
+    // The unit plugin's activation client, surfaced for the tenant invite route.
     activator,
     ...(resolveUnitApex ? { resolveUnitApex } : {}),
-    // The DNS provider rides up for the mail DNS run kind (the master's egress address is read off
-    // its own A record there) — the same instance the unit records are written with.
-    ...(dns ? { dns } : {}),
   };
 }
 
@@ -321,13 +298,18 @@ function buildConsumerOnboarding(
   dns: DnsProvider | undefined,
   relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage">,
   tenantRegistrations: TenantRegistrations | undefined,
-  /** The SAME seeder the tenant family writes through — built once in buildUnits, because there is
+  /** The SAME seeder the tenant family writes through — the unit plugin's, because there is
    *  one Vault and one Manager identity. */
   seeder: VaultSeeder,
   /** The master-local clients and the one resolver over them, built in the composition root. */
   kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
   /** The platform's GitHub App, for the cleanups that reach a unit's repository (#226). */
   githubApp: GitHubApp,
+  /** The per-call GitHub client of a consumer's repository, the unit plugin's: the scope preflight,
+   *  the build webhook (create at onboard, remove at offboard/purge) AND the release workflow dispatch
+   *  + watch. The HMAC secret is fed to the manager as env (config.webhook.secret) because the seeder
+   *  is write-only; absent ⇒ the onboard setup-webhook step fails loud (no hook → no build). */
+  github: GitHubConsumer,
 ): Family {
   if (!config.onboarding || !config.github || !platformRepo) return { defs: [], enabled: false };
 
@@ -376,13 +358,6 @@ function buildConsumerOnboarding(
   // AppProject live in the per-slave ArgoCD instance ON the master).
   const { argoReader: argo, clusterReader: buildClusterReader } = kube.master;
   const { resolver } = kube;
-
-  // The per-call consumer-PAT GitHub client: the scope preflight, the build webhook
-  // (create at onboard, remove at offboard/purge) AND the release workflow dispatch + watch. ONE
-  // stateless instance serves every consumer. The HMAC secret is fed to the manager as env
-  // (config.webhook.secret) because the seeder is write-only; absent ⇒ the onboard setup-webhook
-  // step fails loud (no hook → no build).
-  const github = new HttpGitHubConsumer();
 
   // The consumer-repo writer: commits the release-kit (release/ scripts + the
   // release workflow) into the CONSUMER's own repo at onboard, and offboard/purge git-rm it. It opens
@@ -456,7 +431,7 @@ function buildConsumerOnboarding(
     // The post-onboard activation client: a plain fetch to a consumer's PUBLIC ingress, used
     // only by the `activate` step of a consumer that declares an `activation:` block (e.g. example-auth's
     // first-admin bootstrap). No config gate — the target host is the consumer's own public host. Shared
-    // with the tenant family (buildUnits constructs the one instance).
+    // with the tenant family (the unit plugin's one instance).
     activator,
     // The consumer-PAT GitHub client (preflight-scopes, setup-webhook, trigger-release and the
     // workflow watch). The HMAC secret is optional in config (dev) but REQUIRED by setup-webhook —
