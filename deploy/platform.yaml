@@ -41,7 +41,7 @@ builds:
   # hostyour-deploy's sync-versions program, because the servers they talk to are
   # pinned in hostyour-cloud/platform/versions.yaml.
   - name: dbtools
-    containerfile: docker/dbtools.Dockerfile
+    containerfile: plugins/unit/docker/dbtools.Dockerfile
 
 services: []                  # the manager PROVISIONS mongodb/pg/redis/s3 for others; consumes none
 secrets: []                   # bootstrap secrets (OIDC, session, master key, GitOps PAT) are installer-seeded
