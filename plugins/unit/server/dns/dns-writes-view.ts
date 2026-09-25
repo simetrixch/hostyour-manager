@@ -4,10 +4,10 @@
 // public resolvers: the book's question is "does what this Manager wrote still stand where it wrote
 // it", and the provider is where it wrote it — a public resolver answers the receiver's question
 // and lags a write by the record's TTL, which would paint a row absent minutes after its run.
-import type { Db } from "../../db/client.ts";
-import { listDnsWrites } from "../../db/dns-writes.ts";
-import type { DnsProvider } from "../../adapters/dns/port.ts";
-import type { DnsVerdict, DnsWriteRow, DnsWritesView } from "../../../shared/dns.ts";
+import type { Db } from "#core/server/db/client.ts";
+import { listDnsWrites } from "#core/server/db/dns-writes.ts";
+import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
+import type { DnsVerdict, DnsWriteRow, DnsWritesView } from "#core/shared/dns.ts";
 
 export interface DnsWritesDeps {
   db: Db;

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { OwnerCredentialView, OwnerIdentityView } from "../../../shared/api-types-owners.ts";
-import { listOwners, recordOwnerCredential, forgetOwnerCredential } from "../api.ts";
+import type { OwnerCredentialView, OwnerIdentityView } from "#core/shared/api-types-owners.ts";
+import { listOwners, recordOwnerCredential, forgetOwnerCredential } from "#core/web/api.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 

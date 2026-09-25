@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import type { DnsInventoryView, DnsRecordRow, DnsRecordType, DnsWritesView } from "../../../shared/dns.ts";
-import { getDnsInventory, getDnsWrites, removeDnsRecords } from "../api.ts";
+import type { DnsInventoryView, DnsRecordRow, DnsRecordType, DnsWritesView } from "#core/shared/dns.ts";
+import { getDnsInventory, getDnsWrites, removeDnsRecords } from "#core/web/api.ts";
 import { DnsWritesTable, recordKey, useRecordSelection, type DnsRemoveRecord } from "./DnsWrites.tsx";
 
 // The DNS page in two tabs. FIRST the book: only the records a run of this Manager inserted or

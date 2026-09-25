@@ -7,7 +7,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { DnsInventoryView, DnsRecordRow } from "../../../shared/dns.ts";
 import { makeMailDnsUnpublishDef, type MailDnsUnpublishParams } from "./defs/mail-dns-unpublish.ts";
-import type { DnsRecordPorts } from "./defs/dns-record.kit.ts";
+import type { DnsRecordPorts } from "#unit/server/dns/dns-record.kit.ts";
 
 // mail-dns-unpublish is the inverse of mail-dns-publish: the SPF, the DKIM key and the DMARC policy
 // of ONE sender domain go in one act, and the two records this platform does not own stay — the

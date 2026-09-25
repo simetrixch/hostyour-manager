@@ -5,9 +5,9 @@ import { makeDeploySlaveDef, type DeploySlavePorts } from "./defs/deploy-slave.t
 import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
 import { makeMailDnsPublishDef } from "./defs/mail-dns-publish.ts";
-import { makeDnsRemoveDef } from "./defs/dns-remove.ts";
+import { makeDnsRemoveDef } from "#unit/server/dns/dns-remove.ts";
 import { makeMailDnsUnpublishDef } from "./defs/mail-dns-unpublish.ts";
-import type { DnsRecordPorts } from "./defs/dns-record.kit.ts";
+import type { DnsRecordPorts } from "#unit/server/dns/dns-record.kit.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import type { MailEgress } from "../../../shared/mail.ts";
 import type { Stage } from "../../../shared/enums.ts";

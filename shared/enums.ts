@@ -413,7 +413,7 @@ export const RUN_KIND = [
   "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
   "mail-dns-publish",                                           // the mail DNS of ONE sender domain, published from the master
   // The two run kinds that take a DNS record BACK. `dns-remove` deletes a LIST of records the DNS
-  // inventory names as this installation's (server/domains/dns/dns-inventory.ts), one step each,
+  // inventory names as this installation's (plugins/unit/server/dns/dns-inventory.ts), one step each,
   // and refuses the whole list on any other name — the deletion an abandoned installation needs
   // and the consumer and tenant offboards do not cover. `mail-dns-unpublish` is the inverse of mail-dns-publish: the SPF, DKIM and DMARC
   // of ONE sender domain in one act, because a domain stops sending as a whole and three separate

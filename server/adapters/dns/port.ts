@@ -10,7 +10,7 @@
 //
 // TXT rides the same three calls because the mail records of a sender domain (SPF, DKIM, DMARC) are
 // records of this installation too: the DNS inventory reads them and `dns-remove` and
-// `mail-dns-unpublish` take them back (server/domains/dns/dns-inventory.ts). Publishing them stays
+// `mail-dns-unpublish` take them back (plugins/unit/server/dns/dns-inventory.ts). Publishing them stays
 // the catalogue's publish-mail-dns program — one writer, as mail-dns-publish's header states — so
 // what enters through here for a TXT name is the READING and the REMOVAL, never a second writer of
 // the published content.
@@ -30,7 +30,7 @@ export interface DnsProvider {
    *  offboard and purge re-run safely, and a unit whose record was never created (a run that died
    *  before provision-dns) is a no-op, not an error. A TXT is always deleted BY CONTENT: a sender
    *  domain's apex carries other services' TXT beside the SPF, and a deletion by name alone would
-   *  take a record this platform never wrote (runs/defs/dns-record.kit.ts holds that rule). */
+   *  take a record this platform never wrote (plugins/unit/server/dns/dns-record.kit.ts holds that rule). */
   deleteRecord(input: { name: string; type: DnsRecordType; content?: string; signal?: AbortSignal }): Promise<{ deleted: number }>;
   /** Read one record's content, or null when no such record exists. provision-dns reads the target
    *  cluster's own A record with this — the unit record's content IS that address. */

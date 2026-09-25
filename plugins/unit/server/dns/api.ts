@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
-import type { AppEnv } from "../../http/app-env.ts";
-import type { DnsInventoryView, DnsWritesView } from "../../../shared/dns.ts";
+import type { AppEnv } from "#core/server/http/app-env.ts";
+import type { DnsInventoryView, DnsWritesView } from "#core/shared/dns.ts";
 import { readDnsInventory, type DnsInventoryDeps } from "./dns-inventory.ts";
 import { readDnsWrites } from "./dns-writes-view.ts";
 

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { openDb, type DbHandle } from "../../db/client.ts";
-import { clusters, servers } from "../../db/schema/inventory.ts";
-import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import type { MailDnsView } from "../../../shared/mail.ts";
+import { openDb, type DbHandle } from "#core/server/db/client.ts";
+import { clusters, servers } from "#core/server/db/schema/inventory.ts";
+import { FakeDnsProvider } from "#core/server/adapters/dns/testing/fake.ts";
+import type { MailDnsView } from "#core/shared/mail.ts";
 import { readDnsInventory, type DnsInventoryDeps } from "./dns-inventory.ts";
 
 // The DNS inventory over scripted registrations and a scripted provider: what the page lists, whose

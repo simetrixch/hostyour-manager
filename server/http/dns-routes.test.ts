@@ -2,17 +2,17 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApp } from "../../http/app.ts";
-import { parseConfig } from "../../kernel/config.ts";
-import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
-import { createLogger } from "../../kernel/logger.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
-import { clusters, servers } from "../../db/schema/inventory.ts";
-import { recordDnsWrite } from "../../db/dns-writes.ts";
-import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
-import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import type { DnsInventoryView, DnsWritesView } from "../../../shared/dns.ts";
-import { registerDnsRoutes } from "./api.ts";
+import { createApp } from "./app.ts";
+import { parseConfig } from "../kernel/config.ts";
+import { REQUIRED_ENV } from "../kernel/config.fixture.ts";
+import { createLogger } from "../kernel/logger.ts";
+import { openDb, type DbHandle } from "../db/client.ts";
+import { clusters, servers } from "../db/schema/inventory.ts";
+import { recordDnsWrite } from "../db/dns-writes.ts";
+import { SessionCodec, SESSION_COOKIE } from "../domains/access/session.ts";
+import { FakeDnsProvider } from "../adapters/dns/testing/fake.ts";
+import type { DnsInventoryView, DnsWritesView } from "../../shared/dns.ts";
+import { registerDnsRoutes } from "#unit/server/dns/api.ts";
 
 // GET /api/dns answers the inventory itself and GET /api/dns/writes the book — each route is a
 // reading and nothing more, so what is asserted here is that both stand behind the session

@@ -27,13 +27,13 @@
 // Boundary: this domain imports no other domain (the law in .dependency-cruiser.cjs), so the
 // registrations, the tenant registrations and the mail measurement arrive as FUNCTIONS bound at the
 // composition root (server/boot/wire.ts).
-import type { Db } from "../../db/client.ts";
-import { clusters } from "../../db/schema/inventory.ts";
-import { DnsZoneUnknownError, type DnsProvider } from "../../adapters/dns/port.ts";
-import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts";
-import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
-import type { MailDnsRecord, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
-import type { DnsInventoryView, DnsOwner, DnsRecordRow, DnsRowType } from "../../../shared/dns.ts";
+import type { Db } from "#core/server/db/client.ts";
+import { clusters } from "#core/server/db/schema/inventory.ts";
+import { DnsZoneUnknownError, type DnsProvider } from "#core/server/adapters/dns/port.ts";
+import { STAGE, type MemberRouting, type Stage } from "#core/shared/enums.ts";
+import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantZone } from "../../shared/unit-host.ts";
+import type { MailDnsRecord, MailDnsRow, MailDnsView } from "#core/shared/mail.ts";
+import type { DnsInventoryView, DnsOwner, DnsRecordRow, DnsRowType } from "#core/shared/dns.ts";
 
 export interface DnsInventoryDeps {
   /** The cluster rows: one record name is composed per unit PER CLUSTER, and each cluster's own

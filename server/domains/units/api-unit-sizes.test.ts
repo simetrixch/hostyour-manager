@@ -8,7 +8,8 @@ import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps, unitSizes } from "../../db/schema/inventory.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
-import { registerUnitSizeRoutes } from "./api-unit-sizes.ts";
+import { registerUnitSizeRoutes } from "#unit/server/api-unit-sizes.ts";
+import { registerSetSizeRoutes } from "./api-set-size.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -49,7 +50,10 @@ async function make(registrations?: Registrations): Promise<{ app: Hono<AppEnv>;
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
     registerAuth: () => undefined,
-    registerProtected: (a) => registerUnitSizeRoutes(a, { db: db.db, ...(registrations ? { registrations } : {}), onboardingEnabled: false, tenantEnabled: false }),
+    registerProtected: (a) => {
+      registerUnitSizeRoutes(a, { db: db.db });
+      registerSetSizeRoutes(a, { db: db.db, ...(registrations ? { registrations } : {}), onboardingEnabled: false, tenantEnabled: false });
+    },
   });
   return { app, cookie: await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" }) };
 }

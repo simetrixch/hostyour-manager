@@ -32,21 +32,22 @@ import { registerClustersRoutes, registerServerRoutes } from "../domains/invento
 import { NetTcpProbe } from "../adapters/net-probe/net-probe.ts";
 import { registerMailRoutes } from "../domains/mail/api.ts";
 import { readMailDns, readMailEgress, type MailDnsDeps } from "../domains/mail/mail-dns.ts";
-import { registerDnsRoutes } from "../domains/dns/api.ts";
-import { readDnsInventory, type DnsInventoryDeps } from "../domains/dns/dns-inventory.ts";
+import { registerDnsRoutes } from "#unit/server/dns/api.ts";
+import { readDnsInventory, type DnsInventoryDeps } from "#unit/server/dns/dns-inventory.ts";
 import { DohPublicDns } from "../adapters/dns/public-dns.ts";
 import { createGitHubPlatform } from "../adapters/github-platform/github-platform-http.ts";
 import { registerBranchRoutes } from "../domains/branches/api.ts";
 import { registerReleaseRoutes } from "../domains/releases/api.ts";
 import { searchPlatformApps } from "../domains/registry-cleanup/search.ts";
 import { registerConsumerRoutes, registerTenantRoutes } from "../domains/units/api.ts";
-import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
+import { registerUnitSizeRoutes } from "#unit/server/api-unit-sizes.ts";
+import { registerSetSizeRoutes } from "../domains/units/api-set-size.ts";
 import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerConsumerSecretsRoute } from "../domains/units/api-consumer-secrets.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
 import { ensureAppIdentityRow } from "../security/app-identity.ts";
-import { registerOwnerRoutes } from "../domains/units/api-owners.ts";
+import { registerOwnerRoutes } from "#unit/server/api-owners.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { refreshAppTokens } from "#unit/server/app-token-refresh.ts";
 import { sweepRepoCredentials } from "../domains/units/repo-credential-sweep.ts";
@@ -161,7 +162,7 @@ export async function wire(): Promise<Wired> {
     ...(units.registrations ? { smtpSenders: (stage: Stage) => units.registrations!.listSmtpSenders(stage) } : {}),
   };
   // EVERY RECORD THIS INSTALLATION IS RESPONSIBLE FOR at the DNS provider, derived from its own
-  // registrations and read there (domains/dns/dns-inventory.ts). That domain imports no other
+  // registrations and read there (plugins/unit/server/dns/dns-inventory.ts). That domain imports no other
   // domain, so the registration scans, the tenant pointers and the per-stage apex arrive as the
   // narrow functions it reads them through, bound here where both families are already built. A
   // family that is not configured simply contributes no reader, and the inventory says which part
@@ -350,7 +351,8 @@ export async function wire(): Promise<Wired> {
       // the run exists — only the sealed reference enters the executor.
       // The size table: a read and one write, both unconditional — they need no adapter, and what
       // this installation sells is a fact whether or not onboarding is currently configured.
-      registerUnitSizeRoutes(a, { db: db.db, executor, ...(units.registrations ? { registrations: units.registrations } : {}), onboardingEnabled: units.enabled, tenantEnabled: units.tenantEnabled });
+      registerUnitSizeRoutes(a, { db: db.db });
+      registerSetSizeRoutes(a, { db: db.db, executor, ...(units.registrations ? { registrations: units.registrations } : {}), onboardingEnabled: units.enabled, tenantEnabled: units.tenantEnabled });
       registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });
       registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });
       // Tenant (multi-app) onboarding routes — the SAME thin shape, gated on the tenant family's own

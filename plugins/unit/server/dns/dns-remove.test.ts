@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { openDb, type DbHandle } from "../../db/client.ts";
-import { listDnsWrites, recordDnsWrite } from "../../db/dns-writes.ts";
-import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import type { StepCtx } from "../../executor/types.ts";
-import type { CredentialStore } from "../../security/store.ts";
-import type { Logger } from "../../kernel/logger.ts";
-import type { DnsInventoryView, DnsRecordRow } from "../../../shared/dns.ts";
-import { DnsRemoveParams, makeDnsRemoveDef } from "./defs/dns-remove.ts";
-import type { DnsRecordPorts } from "./defs/dns-record.kit.ts";
+import { openDb, type DbHandle } from "#core/server/db/client.ts";
+import { listDnsWrites, recordDnsWrite } from "#core/server/db/dns-writes.ts";
+import { FakeDnsProvider } from "#core/server/adapters/dns/testing/fake.ts";
+import type { StepCtx } from "#core/server/executor/types.ts";
+import type { CredentialStore } from "#core/server/security/store.ts";
+import type { Logger } from "#core/server/kernel/logger.ts";
+import type { DnsInventoryView, DnsRecordRow } from "#core/shared/dns.ts";
+import { DnsRemoveParams, makeDnsRemoveDef } from "./dns-remove.ts";
+import type { DnsRecordPorts } from "./dns-record.kit.ts";
 
 // dns-remove takes a LIST of records back at the provider in one run, one step each. What these
 // tests hold is the refusal: the run deletes only what the DNS inventory names as this

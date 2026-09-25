@@ -1,7 +1,7 @@
 import { z } from "zod";
-import type { RunDefinition, Step } from "../../../executor/types.ts";
-import { ATTEST_TARGET_STEP } from "../../../executor/guards.ts";
-import { DNS_RECORD_TYPE, type DnsRecordType } from "../../../../shared/dns.ts";
+import type { RunDefinition, Step } from "#core/server/executor/types.ts";
+import { ATTEST_TARGET_STEP } from "#core/server/executor/guards.ts";
+import { DNS_RECORD_TYPE, type DnsRecordType } from "#core/shared/dns.ts";
 import { deleteRecord, ownedRecords, ownerSentence, removableRecord, removableRecords, requireDnsProvider, type DnsRecordPorts, type RemovableRecordRow } from "./dns-record.kit.ts";
 
 // dns-remove: take records of this installation back at the DNS provider, one run for the whole

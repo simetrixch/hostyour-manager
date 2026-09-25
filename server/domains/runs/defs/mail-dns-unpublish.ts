@@ -3,7 +3,7 @@ import type { RunDefinition, Step } from "../../../executor/types.ts";
 import { ATTEST_TARGET_STEP } from "../../../executor/guards.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import type { DnsRecordRow } from "../../../../shared/dns.ts";
-import { deleteRecord, ownedRecords, requireDnsProvider, type DnsRecordPorts, type RemovableRecordRow } from "./dns-record.kit.ts";
+import { deleteRecord, ownedRecords, requireDnsProvider, type DnsRecordPorts, type RemovableRecordRow } from "#unit/server/dns/dns-record.kit.ts";
 
 // mail-dns-unpublish: the inverse of mail-dns-publish — take the mail records of ONE sender domain
 // of this installation back out of the zone. Three records go, in one act: the domain's SPF, the
@@ -24,7 +24,7 @@ import { deleteRecord, ownedRecords, requireDnsProvider, type DnsRecordPorts, ty
 // `<stage>._domainkey.<domain>` that could drift from the one the publish writes. Each goes BY
 // CONTENT — the content the book of DNS writes holds, or for a record published before the book
 // the one its tag picks at the provider — so another service's TXT beside the SPF at the apex
-// stays (dns-record.kit.ts states the rule).
+// stays (plugins/unit/server/dns/dns-record.kit.ts states the rule).
 
 export const MailDnsUnpublishParams = z.object({
   /** One of the two domains this installation sends as, as the Mail page names it. */

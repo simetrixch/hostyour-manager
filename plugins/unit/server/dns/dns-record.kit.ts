@@ -2,7 +2,7 @@
 // inventory they are allowed to delete by, and the one deletion itself.
 //
 // THE INVENTORY IS THE PERMISSION. Neither run kind may delete a name an operator types: the
-// records this installation owns are exactly the ones server/domains/dns/dns-inventory.ts derives
+// records this installation owns are exactly the ones dns-inventory.ts derives
 // from the registrations, the cluster rows and the sender domains, and everything else in the zone
 // belongs to somebody — the installer, the customer's own mail service, another installation. So
 // both defs resolve their target IN the inventory, at the plan and again at the run's fail-closed
@@ -19,12 +19,12 @@
 // record's tag picks among those standing at the provider now. Where neither names a record,
 // nothing is deleted and the log says what stands and stays. An A record is a unit's own name and
 // is deleted as before.
-import type { StepCtx } from "../../../executor/types.ts";
-import { errValidation } from "../../../kernel/errors.ts";
-import { findDnsWrite, forgetDnsWrite } from "../../../db/dns-writes.ts";
-import type { DnsProvider } from "../../../adapters/dns/port.ts";
-import type { DnsInventoryView, DnsRecordRow, DnsRecordType, DnsRowType } from "../../../../shared/dns.ts";
-import { MAIL_RECORD_TAG, PUBLISHED_MAIL_RECORD, type PublishedMailRecord } from "../../../../shared/mail.ts";
+import type { StepCtx } from "#core/server/executor/types.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
+import { findDnsWrite, forgetDnsWrite } from "#core/server/db/dns-writes.ts";
+import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
+import type { DnsInventoryView, DnsRecordRow, DnsRecordType, DnsRowType } from "#core/shared/dns.ts";
+import { MAIL_RECORD_TAG, PUBLISHED_MAIL_RECORD, type PublishedMailRecord } from "#core/shared/mail.ts";
 
 /** A row of the inventory this Manager may take back — never a PTR, which stands where the egress
  *  address is rented rather than in the zone. */

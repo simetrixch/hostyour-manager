@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import type { DnsRemoveInput, DnsVerdict, DnsWriteRow, DnsWritesView } from "../../../shared/dns.ts";
+import type { DnsRemoveInput, DnsVerdict, DnsWriteRow, DnsWritesView } from "#core/shared/dns.ts";
 
 // The first tab of the DNS page: the book of what this Manager wrote. One row per record a run
 // here inserted or updated, with the run that did it and what stands under the name now. The

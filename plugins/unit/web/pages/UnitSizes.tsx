@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { listUnitSizes, updateUnitSize, type UnitSizeView } from "../api.ts";
+import { listUnitSizes, updateUnitSize, type UnitSizeView } from "#core/web/api.ts";
 
 /** The size table: what `small`, `medium` and `large` MEAN on this installation.
  *

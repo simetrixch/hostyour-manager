@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route } from "react-router";
-import { UnitSizes } from "./pages/UnitSizes.tsx";
+import { UnitSizes } from "#unit/web/pages/UnitSizes.tsx";
 import { NavRail } from "./components/NavRail.tsx";
 import { TabBar } from "./components/TabBar.tsx";
 import { LogoMark } from "./components/icons.tsx";
@@ -10,8 +10,8 @@ import { OperatorKeys } from "./pages/OperatorKeys.tsx";
 import { RunDetail } from "./pages/RunDetail.tsx";
 import { Branches } from "./pages/Branches.tsx";
 import { Mail } from "./pages/Mail.tsx";
-import { Settings } from "./pages/Settings.tsx";
-import { Dns } from "./pages/Dns.tsx";
+import { Settings } from "#unit/web/pages/Settings.tsx";
+import { Dns } from "#unit/web/pages/Dns.tsx";
 import { ResetWizard } from "./pages/ResetWizard.tsx";
 import { Consumers } from "./pages/Consumers.tsx";
 import { ConsumerOnboard } from "./pages/ConsumerOnboard.tsx";
