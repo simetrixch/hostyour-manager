@@ -7,13 +7,13 @@
 // triggered only once the build Application has rendered exactly that list. The Application stands
 // Synced at its old render already, so its sync alone proves nothing; what its last comparison
 // rendered does.
-import { errUpstream, errValidation } from "../../kernel/errors.ts";
-import type { StepCtx } from "../../executor/types.ts";
-import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
-import { MASTER_ARGO_NAMESPACE } from "../inventory/cluster-kube.ts";
+import { errUpstream, errValidation } from "#core/server/kernel/errors.ts";
+import type { StepCtx } from "#core/server/executor/types.ts";
+import type { ArgoAppStatus, ArgoAppStatusMap } from "#core/server/adapters/kube/port.ts";
+import { MASTER_ARGO_NAMESPACE } from "#core/server/domains/inventory/cluster-kube.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";
-import { syncedAt } from "./tenant-watch.ts";
-import type { OnboardPorts } from "./onboard.run.ts";
+import { syncedAt } from "./argo-app-status.ts";
+import type { BuildPorts } from "./build-chain.ts";
 
 const sorted = (builds: readonly string[]): string => [...builds].sort().join(",");
 
@@ -38,7 +38,7 @@ export function renderedBuilds(status: ArgoAppStatus | undefined): string[] | nu
  *  wait, or a second run inside the ApplicationSet's poll window, still waits for it. */
 export async function attestBuildsAgain(
   ctx: StepCtx,
-  ports: OnboardPorts,
+  ports: BuildPorts,
   unit: string,
   builds: readonly string[],
 ): Promise<void> {
@@ -62,8 +62,8 @@ export async function attestBuildsAgain(
 }
 
 async function writeAttestation(
-  ctx: StepCtx, ports: OnboardPorts, unit: string, builds: readonly string[],
-  entry: NonNullable<Awaited<ReturnType<OnboardPorts["registrations"]["readBuildRegistration"]>>>["entry"], attested: readonly string[],
+  ctx: StepCtx, ports: BuildPorts, unit: string, builds: readonly string[],
+  entry: NonNullable<Awaited<ReturnType<BuildPorts["registrations"]["readBuildRegistration"]>>>["entry"], attested: readonly string[],
 ): Promise<void> {
   // G16's rule, held here as at onboarding: a build name is one unit's. Two units attesting one name
   // push to one registry repository, and each release would move the other's pins.

@@ -47,7 +47,7 @@ import { resolveNextVersion } from "#unit/server/release-version.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
 import { recordBuildOnlyStep } from "#unit/server/build-registration.ts";
-import { attestBuildsAgain } from "./build-unit-attest.ts";
+import { attestBuildsAgain } from "#unit/server/build-unit-attest.ts";
 import { type RequiredImage, requiredImagesFrom } from "./ensure-images.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import { renderTenantArgoSync, tenantSyncUnits } from "#unit/server/build-rbac.ts";

@@ -65,6 +65,7 @@
     "plugins/unit/server/build-rbac.ts::hostyour-cloud": 2,
     "plugins/unit/server/build-rbac.ts::onboard": 1,
     "plugins/unit/server/build-rbac.ts::tenant": 21,
+    "plugins/unit/server/build-unit-attest.ts::onboarding": 2,
     "plugins/unit/server/build-webhook.ts::consumer": 21,
     "plugins/unit/server/build-webhook.ts::hostyour-cloud": 1,
     "plugins/unit/server/build-webhook.ts::onboard": 16,
