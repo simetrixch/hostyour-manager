@@ -319,6 +319,14 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, ownDomain, ownDomainRedirects: [...ownDomainRedirects] }, `own-domain(${guid}): ${hosts || "none"} ${trailer(runId)}`);
   }
 
+  /** Write the tenant's member entries whole, as resolved again off the product's manifest. The member
+   *  set stays; tenant-refresh-members refuses a plan that would change it. */
+  async setMembers(stage: Stage, guid: string, members: readonly TenantMemberRecord[], runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
+    return this.write(stage, guid, { ...current.entry, members: [...members] }, `refresh-members(${guid}): ${members.map((m) => m.name).join(", ")} ${trailer(runId)}`);
+  }
+
   /** Write the tenant's own apps bundle — the repository, the image it builds and the tag its last
    *  release built (shared/tenant.ts appsBundleFields), the three the fan-out mounts the tenant's
    *  bundle from. One field triple of one file, like the flips above; writing the same values

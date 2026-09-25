@@ -34,7 +34,7 @@ describe("CONSUMER_RUN_KINDS", () => {
 
 describe("TENANT_RUN_KINDS", () => {
   it("is exactly the tenant lifecycle kinds (create + add/remove-app + the apps repository + suspend/resume/offboard + purge + backup/restore/migrate + the administrator check)", () => {
-    expect([...TENANT_RUN_KINDS].sort()).toEqual(["tenant-add-app", "tenant-apps-repo", "tenant-apps-repo-purge", "tenant-backup", "tenant-check", "tenant-create", "tenant-migrate", "tenant-offboard", "tenant-purge", "tenant-remove-app", "tenant-restart-workloads", "tenant-restore", "tenant-resume", "tenant-set-own-domain", "tenant-set-routing", "tenant-set-size", "tenant-suspend"]);
+    expect([...TENANT_RUN_KINDS].sort()).toEqual(["tenant-add-app", "tenant-apps-repo", "tenant-apps-repo-purge", "tenant-backup", "tenant-check", "tenant-create", "tenant-migrate", "tenant-offboard", "tenant-purge", "tenant-refresh-members", "tenant-remove-app", "tenant-restart-workloads", "tenant-restore", "tenant-resume", "tenant-set-own-domain", "tenant-set-routing", "tenant-set-size", "tenant-suspend"]);
   });
 
   it("keeps check-tenants — it targets no tenant row, so only a kind filter surfaces it", () => {

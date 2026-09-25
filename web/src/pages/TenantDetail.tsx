@@ -4,7 +4,7 @@ import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
   getTenant, getTenantAppCatalog, addTenantApp, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
-  setTenantSize, setTenantRouting, setTenantOwnDomain,
+  setTenantSize, setTenantRouting, setTenantOwnDomain, refreshTenantMembers,
   backupTenant, restoreTenant, migrateTenant, listTenantTargets, listRuns,
   type TenantDetailView,
 } from "../api.ts";
@@ -293,6 +293,7 @@ export function TenantDetail() {
               answer and the run's wait could not end — the route refuses it too. */}
           {!unfinished && !t.suspended && <SetRoutingAction subdomain={t.subdomain} routing={t.routing} busy={busy} onRoute={(next) => void act(() => setTenantRouting(tenantId, next))} />}
           {!unfinished && !t.suspended && t.routing === "path" && <SetOwnDomainAction subdomain={t.subdomain} ownDomain={t.ownDomain} ownDomainRedirects={t.ownDomainRedirects} busy={busy} onSet={(domain, redirects) => void act(() => setTenantOwnDomain(tenantId, domain, redirects))} />}
+          {!unfinished && !t.suspended && <button type="button" className="btn" disabled={busy} onClick={() => void act(() => refreshTenantMembers(tenantId))}>Refresh members</button>}
           {!unfinished && (
             <button type="button" className="btn" disabled={busy} onClick={() => setBackupT(t)}>
               Back up

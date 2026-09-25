@@ -445,6 +445,9 @@ export const RUN_KIND = [
   // Set, switch or clear the ONE own domain of a standing tenant: its record onto the tenant's zone,
   // the recorded domain, and the previous domain's record gone once the tenant answers at the new host.
   "tenant-set-own-domain",
+  // Resolve every member of a standing tenant again off its product's manifest and write the entries:
+  // the one way a renamed chart reaches a tenant that already stands.
+  "tenant-refresh-members",
   // Change a declared secret of a STANDING consumer (#245): merge the values into its Vault entry,
   // delete the rendered Secrets so the operator's store writes them again, roll the workloads. The
   // onboarding's seed is create-only by design, so without this nothing could change a value at all,
@@ -500,7 +503,7 @@ export const RUN_FAMILY = {
     "mail-dns-publish", "dns-remove", "mail-dns-unpublish",
   ],
   consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-secrets", "consumer-backup", "consumer-restore", "consumer-migrate"],
-  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-apps-repo-purge", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
+  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-apps-repo-purge", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-refresh-members", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;
 
