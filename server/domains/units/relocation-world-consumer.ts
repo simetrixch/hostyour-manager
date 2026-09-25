@@ -197,7 +197,12 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
                     // restore onto an installation whose table has since changed must land the unit on
                     // what it ran with. No fallback for a dump without one: quota is part of the deploy
                     // group, so a stage registration missing it does not parse two lines above.
-                    quota: entry.quota! },
+                    quota: entry.quota!,
+                    // The extra public name and the mail sender's SMTP entry were attested at onboarding
+                    // and travel with the unit the same way. Dropped here, a restored sender would also
+                    // lose the stage's relay target, which follows the sender in this very commit.
+                    ...(entry.fqdn !== undefined ? { fqdn: entry.fqdn } : {}),
+                    ...(entry.smtpEntry !== undefined ? { smtpEntry: entry.smtpEntry } : {}) },
           runId: c.runId,
         });
         c.log("meta", `registration for ${entry.name} re-committed from the dump onto ${target.cluster}, quiesced — the target deploys closed until the data is back`);

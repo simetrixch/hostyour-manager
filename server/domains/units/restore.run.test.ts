@@ -1,3 +1,5 @@
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { SLAVE_FQDN, SLAVE_MARKING_YAML } from "../runs/cluster-maps.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "../../../shared/unit-size.ts";
 import { eq } from "drizzle-orm";
@@ -133,5 +135,28 @@ describe("restore (consumer)", () => {
     const row = db.db.select().from(apps).where(eq(apps.id, "app_1")).get();
     expect(row?.status).toBe("active");
     expect(row?.clusterId).toBe(TARGET.clusterId);
+  });
+
+  it("carries the attested fqdn and the SMTP entry of the dump into the re-committed registration", async () => {
+    seedClusters(db);
+    seedConsumerRow(db, "offboarded");
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    const smtpEntry = { service: "acme-mta", port: 2525 };
+    // The relay target follows the sender onto the target cluster's tailnet address, read off its map.
+    f.platformRepo.seed(f.platformRepo.booksBranch, clusterMapPath(TARGET.domain), SLAVE_MARKING_YAML.replace(`domain: ${SLAVE_FQDN}`, `domain: ${TARGET.domain}`).replace("clusterName: s1", `clusterName: ${TARGET.cluster}`).replace("apiHost: 100.64.0.11", "apiHost: 100.64.0.12"));
+    const dumped = serializePointer(ConsumerRegistrationSchema, {
+      name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false, removing: false,
+      chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services: ["mongodb"], size: "small", mongodb: "shared",
+      quota: seedQuota("small"), fqdn: "shop.customer.test", smtpEntry,
+    });
+    scriptDumpedRegistration(f.target.reader, CONSUMER, dumped);
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
+    await driveSteps(db, makeRestoreDef(ports).steps(params), params, []);
+    const restored = await ports.registrations.readRegistration("prod", CONSUMER);
+    expect(restored?.entry.fqdn).toBe("shop.customer.test");
+    expect(restored?.entry.smtpEntry).toEqual(smtpEntry);
+    expect(await ports.registrations.listSmtpSenders("prod")).toEqual([{ unit: CONSUMER, cluster: TARGET.cluster, entry: smtpEntry }]);
+    expect(f.platformRepo.read(f.platformRepo.booksBranch, "installation/values/postfix-prod.yaml")).toContain("RELAYHOST: \"[100.64.0.12]:2525\"");
   });
 });
