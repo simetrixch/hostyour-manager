@@ -111,7 +111,10 @@ describe("every root command this manager sends is raised with the password its 
     const diag = REMOTE_SCRIPTS.find((s) => s.symbol === "slaveDiagScript")?.text ?? "";
     expect(diag).not.toBe("");
     expect(diag).toContain("argocd credential registration");
-    expect(diag).toContain('labels["argocd\\.argoproj\\.io/secret-type"]'); // the label that registers either one
+    // kubectl's jsonpath takes a dotted label key only as dot notation with escaped dots; the bracket
+    // form is refused as an invalid array index before anything is read.
+    expect(diag).toContain("labels.argocd\\.argoproj\\.io/secret-type}"); // the label that registers either one
+    expect(diag).not.toContain('labels["');
     expect(diag).toContain(".spec.target.name"); // WHICH Secret it composes, so a miss is actionable
     expect(diag).toMatch(/argocd credential registration[\s\S]*conditions\[\?\(@\.type=="Ready"\)\]\.status/); // and whether it was written
   });

@@ -111,7 +111,7 @@ ${k} get externalsecrets.external-secrets.io -o jsonpath='{range .items[*]}{.met
 echo "-- secretstores: name | Ready | message"
 ${k} get secretstores.external-secrets.io -o jsonpath='{range .items[*]}{.metadata.name}{" | "}{.status.conditions[?(@.type=="Ready")].status}{" | "}{.status.conditions[?(@.type=="Ready")].message}{"\\n"}{end}' 2>&1 || true
 echo "-- argocd credential registration: externalsecret | target Secret | argocd.argoproj.io/secret-type | Ready"
-${k} get externalsecrets.external-secrets.io -o jsonpath='{range .items[*]}{.metadata.name}{" | "}{.spec.target.name}{" | "}{.spec.target.template.metadata.labels["argocd\\.argoproj\\.io/secret-type"]}{" | "}{.status.conditions[?(@.type=="Ready")].status}{"\\n"}{end}' 2>&1 || true
+${k} get externalsecrets.external-secrets.io -o jsonpath='{range .items[*]}{.metadata.name}{" | "}{.spec.target.name}{" | "}{.spec.target.template.metadata.labels.argocd\\.argoproj\\.io/secret-type}{" | "}{.status.conditions[?(@.type=="Ready")].status}{"\\n"}{end}' 2>&1 || true
 echo "-- appprojects (root-applications references 'default' — created by the instance's argocd-server on boot)"
 ${k} get appprojects.argoproj.io -o name 2>&1 || true
 echo "-- instance pods (manager/repo-server/redis must be Running for any comparison to succeed)"
