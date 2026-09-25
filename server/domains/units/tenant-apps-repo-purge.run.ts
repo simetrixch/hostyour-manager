@@ -23,7 +23,7 @@ import type { Registrations } from "#unit/server/registrations.ts";
 //
 // WHAT IS ORPHANED: a build registration with NO stage file beside it (a consumer's build.yaml stands
 // beside its stage files and is theirs), that NO tenant registration, at any stage, names as
-// `appsImage`, and that the catalog's `tenant.buildRepos` does NOT name (those are registered
+// `appsImage`, and that the deploy repository's `tenant.buildRepos` does NOT name (those are registered
 // build-only by the tenant onboarding and are the product's own build units — the first build of
 // this run kind listed them and its purge took three of the customer's repositories). All three are
 // asked at plan time and again in the removal itself: removeBuildRegistration refuses on its own
@@ -38,8 +38,8 @@ import type { Registrations } from "#unit/server/registrations.ts";
 export const TenantAppsRepoPurgeParams = z.object({ unit: z.string().min(1) });
 export type TenantAppsRepoPurgeParams = z.infer<typeof TenantAppsRepoPurgeParams>;
 
-/** Every build registration no stage file, no tenant registration and no catalog build unit accounts
- *  for. THROWS where a build.yaml does not read (listBuildRegistrations) or the catalog does not: a
+/** Every build registration no stage file, no tenant registration and no build unit of the deploy repository accounts
+ *  for. THROWS where a build.yaml does not read (listBuildRegistrations) or the deploy repository does not: a
  *  set that silently shrank would list an accounted-for unit as orphaned. */
 export async function scanOrphanBuilds(deps: {
   registrations: Pick<TenantRegistrations, "listTenantPointers">;
@@ -60,10 +60,10 @@ export async function scanOrphanBuilds(deps: {
   return orphans;
 }
 
-/** The scan over the ports a def or a route holds; a refusal where the catalog cannot be read. */
+/** The scan over the ports a def or a route holds; a refusal where the deploy repository cannot be read. */
 export function orphanBuildsScan(ports: Pick<TenantLifecyclePorts, "registrations" | "buildRegistrations" | "deployBuildUnits">): (signal?: AbortSignal) => Promise<OrphanBuildView[]> {
   return (signal) => {
-    if (!ports.buildRegistrations || !ports.deployBuildUnits) throw errValidation("the build registrations or the catalog's build units cannot be read on this manager — nothing is listed as orphaned, and nothing can be purged");
+    if (!ports.buildRegistrations || !ports.deployBuildUnits) throw errValidation("the build registrations or the deploy repository's build units cannot be read on this manager — nothing is listed as orphaned, and nothing can be purged");
     return scanOrphanBuilds({ registrations: ports.registrations, buildRegistrations: ports.buildRegistrations, deployBuildUnits: ports.deployBuildUnits, ...(signal ? { signal } : {}) });
   };
 }
@@ -115,17 +115,17 @@ export function makeTenantAppsRepoPurgeDef(ports: TenantLifecyclePorts): RunDefi
     mutating: true,
     plan: async (p, { db }) => {
       if (!ports.buildRegistrations) throw errValidation("no build registrations are wired on this manager — nothing can be purged");
-      // Refused at plan and again in the removal: a unit the catalog names, a tenant names, or one
+      // Refused at plan and again in the removal: a unit the deploy repository names, a tenant names, or one
       // standing at a stage, is not an orphan, and the operator is told which.
       const orphan = (await orphanBuildsScan(ports)()).find((o) => o.unit === p.unit);
-      if (!orphan) throw errValidation(`${p.unit} is not an orphaned build registration — the catalog's buildRepos names it, a tenant names it, a stage file stands beside it, or it is already gone`);
+      if (!orphan) throw errValidation(`${p.unit} is not an orphaned build registration — the deploy repository's buildRepos names it, a tenant names it, a stage file stands beside it, or it is already gone`);
       const master = resolveMasterCluster(db);
       const stepDefs = purgeSteps(ports, p);
       return {
         kind: "tenant-apps-repo-purge",
         targetKind: "cluster",
         targetId: master.clusterId,
-        summary: `Purge the orphaned build registration ${p.unit}: remove registrations/${p.unit}/build.yaml and build/${p.unit}/repo-pat. The repository ${orphan.repoURL} stands — nothing is deleted on GitHub. No tenant and no catalog build unit names it, and no stage file stands beside it.`,
+        summary: `Purge the orphaned build registration ${p.unit}: remove registrations/${p.unit}/build.yaml and build/${p.unit}/repo-pat. The repository ${orphan.repoURL} stands — nothing is deleted on GitHub. No tenant and no build unit of the deploy repository names it, and no stage file stands beside it.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: [...tenantLocks(ports.registrations), { resource: "git-branch", key: ports.buildRegistrations.branch }],

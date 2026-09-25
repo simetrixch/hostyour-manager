@@ -241,7 +241,7 @@ describe("create-tenant planStream — the build units and their owner's identit
     const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
-    expect(result.summary).toMatch(/example-apps:0\.9\.0.*"example-apps" is the catalogue's apps template \(tenant\.appsBundle\).*never built and never mounted/);
+    expect(result.summary).toMatch(/example-apps:0\.9\.0.*"example-apps" is the deploy repository's apps template \(tenant\.appsBundle\).*never built and never mounted/);
     expect(probe.probes).toEqual([]);
   });
   it("no image missing ⇒ no build unit and no secret; the refresh step stays, because the tenant's own bundle is built by the run", async () => {

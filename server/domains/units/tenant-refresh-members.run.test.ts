@@ -233,7 +233,7 @@ describe("tenant-refresh-members", () => {
     await expect(makeTenantRefreshMembersDef(ports(fewer)).planStream!({ tenantId: "tnt_1" }, planCtx())).rejects.toThrow(/not a refresh/);
   });
 
-  it("carries the catalog trunk into the books branch before it resolves anything", async () => {
+  it("carries the deploy trunk into the books branch before it resolves anything", async () => {
     seedTenant();
     const carried: string[] = [];
     await planned(ports(staleMembers(), { carried }));
@@ -323,7 +323,7 @@ describe("tenant-refresh-members", () => {
     expect(db.db.select({ r: tenants.lastRunId }).from(tenants).get()?.r).toBe("run_refresh");
   });
 
-  it("fails the plan when the catalog trunk cannot be carried: it never plans over a stale books branch", async () => {
+  it("fails the plan when the deploy trunk cannot be carried: it never plans over a stale books branch", async () => {
     seedTenant();
     const prt = ports(staleMembers(), { carry: async () => { throw new Error("push rejected"); } });
     await expect(makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx())).rejects.toThrow(/push rejected/);

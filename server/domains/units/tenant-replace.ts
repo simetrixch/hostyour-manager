@@ -146,7 +146,7 @@ export async function resolveTeardownTarget(
  *  plans for ONE subdomain can both freeze replaces=[] and be approved in turn, and the second would
  *  stand its fan-out beside the first on the one public FQDN `*.<subdomain>.<unitApex>`
  *  (provision-dns re-points the shared wildcard underneath the winner). This step re-resolves the
- *  same-subdomain tenants at EXECUTE time — the run holds the catalog branch lock, so the
+ *  same-subdomain tenants at EXECUTE time — the run holds the deploy repository branch lock, so the
  *  answer cannot move underneath it — and refuses any guid the approved plan did not name as a
  *  replace target. The run's OWN guid is excluded: on a resume its row and registration already
  *  carry the subdomain. Construction dereferences no param (the armed check builds steps({})). */

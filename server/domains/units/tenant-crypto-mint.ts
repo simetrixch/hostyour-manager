@@ -26,9 +26,9 @@
 import { generateRsaKeypair, mintSecretValue } from "#unit/server/secret-mint.ts";
 
 /** The properties of `<stage>/tenants/<guid>`, in the spelling every reader uses. Four are read out of
- *  the member's app Secret (catalog/charts/example-lib/templates/_secret-kit.tpl, the
+ *  the member's app Secret (the deploy repository's charts/example-lib/templates/_secret-kit.tpl, the
  *  `appSecretName` ExternalSecret) and the fifth by the tenant's jobs and engine
- *  (catalog/charts/example-jobs/templates/externalsecret-engine-api-key.yaml). A property missing
+ *  (the deploy repository's charts/example-jobs/templates/externalsecret-engine-api-key.yaml). A property missing
  *  here is a Secret key ESO cannot resolve, which stops the member's pods at boot — so the list is
  *  asserted against the mint rather than trusted. */
 export const TENANT_CRYPTO_PROPERTIES = [

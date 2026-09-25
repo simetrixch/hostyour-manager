@@ -18,7 +18,7 @@
 // `hostyour.cloud/workload`, `tenant-eso-<stage>` on `platform/tenant-managed`, `build-eso` on
 // `hostyour.cloud/build`), Calico admits the no-auth Redis by `platform/redis-consumer`
 // (hostyour-cloud/apps/redis/templates/networkpolicy.yaml), and the API server reads pod security off
-// `pod-security.kubernetes.io/*`. A member's chart lives in catalog and is the platform's own, so its
+// `pod-security.kubernetes.io/*`. A member's chart lives in the deploy repository and is the platform's own, so its
 // Ingress hosts and Service types are not fenced here — but its AppProject whitelists the
 // cluster-scoped Namespace kind exactly as a consumer's does, so a chart change that rendered a
 // Namespace with `hostyour.cloud/workload: "true"` would bind the strongest ESO role on the slave.
@@ -186,7 +186,7 @@ function serviceAccountValidation(input: { namespace: string; guid: string }): A
 
 /** Render ONE tenant member's ValidatingAdmissionPolicy + its Binding — the Namespace clauses of the
  *  consumer boundary with the tenant's own granted set, plus the ServiceAccount clause above. A
- *  member's chart is the platform's own (catalog), so its Ingress hosts and Service types are not
+ *  member's chart is the platform's own (the deploy repository), so its Ingress hosts and Service types are not
  *  fenced here; what IS fenced is the one cluster-scoped kind the member's AppProject whitelists —
  *  its Namespace objects may name only the member's own namespace and may carry nothing under the
  *  platform's label namespaces beyond the pairs the tenant ApplicationSets stamp — and the one

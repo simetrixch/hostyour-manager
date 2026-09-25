@@ -104,7 +104,7 @@ describe("readAppsManifest (the primitive: one apps repository, one credential)"
 describe("readAppCatalog (the manifest of the apps template, else the stand-in)", () => {
   const warns: string[] = [];
   const catalogOf = (repo: RepoReader, s = spec("acme-apps")) =>
-    readAppCatalog({ spec: s, catalog: { repo, workdir: "/w", credentialId: "deploy-read-pat" }, warn: (m) => warns.push(m) });
+    readAppCatalog({ spec: s, deployCheckout: { repo, workdir: "/w", credentialId: "deploy-read-pat" }, warn: (m) => warns.push(m) });
 
   it("reads apps.yaml off the template repository (tenant.appsRepo) at its default branch head, with the catalog's credential, and warns of nothing", async () => {
     warns.length = 0;

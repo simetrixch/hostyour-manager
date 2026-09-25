@@ -12,7 +12,7 @@ import { TenantAppsRepoPurgeParams } from "./tenant-apps-repo-purge.run.ts";
 // STANDING tenant gains one.
 export function registerTenantAppsRepoRoute(app: Hono<AppEnv>, deps: { executor: Executor; tenantEnabled: boolean }): void {
   app.post("/api/tenants/apps-repo", async (c) => {
-    if (!deps.tenantEnabled) throw errNotConfigured("tenant onboarding is not configured on this manager — the catalog and the GitHub App must be wired first");
+    if (!deps.tenantEnabled) throw errNotConfigured("tenant onboarding is not configured on this manager — the deploy repository and the GitHub App must be wired first");
     const parsed = TenantAppsRepoRequest.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) throw errValidation(`invalid tenant-apps-repo request: ${parsed.error.issues.map((i) => `${i.path.map(String).join(".")}: ${i.message}`).join("; ")}`);
     return c.json(await deps.executor.planStreamed("tenant-apps-repo", parsed.data), 201);

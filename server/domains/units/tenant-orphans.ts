@@ -8,7 +8,7 @@
 // orphan is not merely unremovable: it is INVISIBLE. create-tenant no longer MAKES orphans — its
 // record-provisional step writes the row before the first mutation — but three sources remain and this
 // scan is the only net for them: tenants created before that fix, a create-tenant that died before
-// record-provisional itself, and a pointer written into catalog by hand. tenant-purge is keyed on
+// record-provisional itself, and a pointer written into the deploy repository by hand. tenant-purge is keyed on
 // {guid, stage, clusterId} precisely so it needs no row — but the guid is MINTED by the plan, never
 // typed by an operator, so a purge is only usable once something hands the operator that guid. That is
 // what this module does, from the two sources that can still know it:
@@ -36,7 +36,7 @@
 // Boundary: domain layer — inventory reads + the TenantRegistrations + tenant-values' cluster resolution,
 // and the executor's own narrow run readers (read.ts) for the run facts, never the runs/steps tables
 // directly (the dep-cruiser rule only-executor-touches-runs-schema). No adapters, no IO beyond the db
-// reads and the registrations's git reads. The scan CLONES catalog, which is why its route is
+// reads and the registrations's git reads. The scan CLONES the deploy repository, which is why its route is
 // operator-triggered and fail-soft, never a page-load read.
 import { z } from "zod";
 import { and, eq, notInArray } from "drizzle-orm";
@@ -66,7 +66,7 @@ import { resolveClusterIdByName } from "../inventory/read.ts";
  *  orphan nobody is looking for. Broken / drifted pointers do not wedge the scan (they are skipped
  *  inside the registrations scan, scanTenantDir) and they do not vanish either — they come back in `skipped`,
  *  each with the guid its DIRECTORY is named by and the reason it could not be read. THROWS when
- *  catalog cannot be read at all — the route turns that into a visible, fail-soft "the scan itself
+ *  the deploy repository cannot be read at all — the route turns that into a visible, fail-soft "the scan itself
  *  failed", which must never be flattened into an empty result (that would read as "no orphans", the
  *  exact opposite of the truth). */
 export async function scanOrphanTenants(deps: { db: Db; registrations: TenantRegistrations; resolver?: ClusterKubeResolver }): Promise<Pick<OrphanScan, "orphans" | "skipped">> {

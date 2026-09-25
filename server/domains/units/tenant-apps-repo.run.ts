@@ -50,7 +50,7 @@ export const TenantAppsRepoParams = z.object({
 });
 export type TenantAppsRepoParams = z.infer<typeof TenantAppsRepoParams>;
 
-/** The catalog's tenant spec off this installation's books branch — where `appsOrg`, `appsBundle`
+/** The deploy repository's tenant spec off this installation's books branch — where `appsOrg`, `appsBundle`
  *  and `appsRepo` are stated (the same clone validateTenant makes). */
 export async function readTenantSpec(ports: TenantOnboardPorts, ctx: { signal?: AbortSignal }): Promise<TenantSpec | null> {
   const cloned = await ports.repo.cloneAtRef({ repoURL: ports.deployRepoUrl, ref: ports.registrations.branch, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}) });
@@ -145,7 +145,7 @@ export function makeTenantAppsRepoDef(ports: TenantOnboardPorts): RunDefinition<
         summary: `Create ${params.org}/${unit} from ${params.templateRepoURL} with ${chosen.length} app(s) (${chosen.join(", ")}), onboard it build-only on ${req.stage} and build its first image: ${stepDefs.length} steps.${params.registered ? ` The unit is already registered build-only; its release is re-run.` : ""}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [], // no host owned — the Manager acts master-locally
-        // The tenant registration rides the catalog's books branch, the unit's build registration
+        // The tenant registration rides the deploy repository's books branch, the unit's build registration
         // the platform repo's — one installation, one branch name in both, two locks by resource.
         locks: [...tenantLocks(ports.registrations), { resource: "git-branch", key: ports.registrations.branch }],
         warnings: [],

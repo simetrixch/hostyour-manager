@@ -24,9 +24,9 @@ import { memberAppProject, memberNamespace } from "./tenant-fanout.ts";
  *  member's Application can deploy into its own namespace and nowhere else, not even into a sibling
  *  member of the same tenant or the same member at another stage.
  *
- *  sourceRepos = catalog (where every tenant chart lives) PLUS the platform GitOps repo
+ *  sourceRepos = the deploy repository (where every tenant chart lives) PLUS the platform GitOps repo
  *  (hostyour-cloud): the generated member Application is multi-source — it pulls its chart from
- *  catalog but its `$values` chain from hostyour-cloud — so both must be allowed or the sync is
+ *  the deploy repository but its `$values` chain from hostyour-cloud — so both must be allowed or the sync is
  *  rejected. The appset TEMPLATE (not the registration) pins the hostyour-cloud paths.
  *
  *  Two deltas from the CONSUMER project clusters/units/reconciler renders: the ownership label, and

@@ -164,7 +164,7 @@ describe("validateTenant — the app catalog", () => {
     const crm = helm.requests.find((r) => r.releaseName === `${PROBE}-crm-1`);
     expect(crm?.valuesObject).not.toHaveProperty("databases");
     expect(filesOf(helm, "crm-1")).toEqual(["values.yaml", "values-prod.yaml"]);
-    expect(lines.some((l) => l.includes("charts/example-engine/values-crm.yaml is absent in the catalog checkout — not layered on crm"))).toBe(true);
+    expect(lines.some((l) => l.includes("charts/example-engine/values-crm.yaml is absent in the deploy repository checkout — not layered on crm"))).toBe(true);
     // The registration records what was rendered: the resolved list, and only the file that stands.
     const erpRecord = outcome.memberRecords.find((m) => m.name === "erp");
     expect(erpRecord?.sources[0]).toEqual({ chart: "charts/example-engine", valueFiles: ["values-erp.yaml"], values: { databases: { mongodb: { databases: ["core", "logs"] } } } });

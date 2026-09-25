@@ -83,7 +83,7 @@ export interface AttestedSmtpSenderReader {
 }
 
 /** Every subdomain a TENANT stands at, over every stage — TenantRegistrations.listTenantSubdomains over
- *  the catalog pointers. It is a second repo and therefore a dep of its own, not a method on
+ *  the pointers in the deploy repository. It is a second repo and therefore a dep of its own, not a method on
  *  the consumer registrations above. G23 holds the candidate unit name against it: the two spaces compose
  *  the same label under the same apex, and a tenant's session cookies are scoped to it (unit-dns.ts).
  *  Not optional: a reader that answered nothing would silently hand the gate a pass. */

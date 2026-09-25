@@ -1,7 +1,7 @@
 // The tenant APP CATALOG — what the create-tenant wizard offers and what gate T4 judges the chosen
 // apps and their selections against. The catalog is the apps manifest (shared/apps-manifest.ts) of
 // the APPS TEMPLATE: the repository `tenant.appsRepo` names, read at its default branch with the
-// catalog's own credential. Titles, descriptions and selections come from that file; the platform
+// deploy repository's own credential. Titles, descriptions and selections come from that file; the platform
 // carries no list of apps and no list of selections. The template is the repository a tenant's own
 // apps repository is copied from, never a unit: the platform does not build it and no tenant mounts
 // it, so nothing here reaches for a registration or a unit's credential. readAppsManifest is the
@@ -9,7 +9,7 @@
 // catalog when an app is added (api-tenant-app-catalog.ts): what the template names can be added,
 // and tenant-apps-repo carries the folder into the tenant's own repository (hostyour-manager#215).
 //
-// WHERE NO MANIFEST STANDS — the catalog declares no template, or the template carries no apps.yaml
+// WHERE NO MANIFEST STANDS — the deploy repository declares no template, or the template carries no apps.yaml
 // yet — the catalog is what it was before the manifest existed: the engine chart's
 // `values-<app>.yaml` overlays, one app per overlay, with the two seed selections the registration
 // names as fields (SEED_SELECTIONS). That stand-in is logged as one every time it is served, so an
@@ -95,39 +95,39 @@ export type AppCatalog = AppsManifest & { packageScopes: string[] };
 
 export interface ReadAppCatalogInput {
   spec: TenantSpec;
-  /** The catalog checkout already made (validateTenant's, or listTenantAppCatalog's) and the
+  /** The deploy repository checkout already made (validateTenant's, or listTenantAppCatalog's) and the
    *  credential it was cloned with: the stand-in lists its engine chart, and the template is cloned
    *  with the same credential. That credential reaches the template only where the installation's
-   *  catalog PAT was granted it; where it was not, the clone fails and the plan says so. */
-  catalog: { repo: RepoReader; workdir: string; credentialId?: string };
+   *  deploy repository PAT was granted it; where it was not, the clone fails and the plan says so. */
+  deployCheckout: { repo: RepoReader; workdir: string; credentialId?: string };
   /** Where a stand-in is said: the run's log, or pino. */
   warn: (msg: string) => void;
   signal?: AbortSignal;
 }
 
-/** The catalog for ONE catalog checkout: the apps manifest of the template the spec names, else the
+/** The catalog for ONE deploy repository checkout: the apps manifest of the template the spec names, else the
  *  overlay stand-in, each stand-in logged. THROWS on a clone that fails and on an apps.yaml that does
  *  not parse — the caller decides whether that is a preflight rejection (the gates) or a fail-soft
  *  fallback (the wizard route). */
 export async function readAppCatalog(input: ReadAppCatalogInput): Promise<AppCatalog> {
-  const { spec, catalog } = input;
+  const { spec, deployCheckout } = input;
   const standIn = async (why: string): Promise<AppCatalog> => {
     input.warn(`${why} — the app catalog is the ${spec.perApp.engine.chart}/values-<app>.yaml overlays, with the two seed selections and no titles`);
-    return { ...fallbackCatalog(await catalog.repo.listDir(catalog.workdir, spec.perApp.engine.chart)), packageScopes: [] };
+    return { ...fallbackCatalog(await deployCheckout.repo.listDir(deployCheckout.workdir, spec.perApp.engine.chart)), packageScopes: [] };
   };
   const template = tenantAppsTemplate(spec);
   if (template === null) return standIn(`${TENANT_MANIFEST_PATH} declares no tenant.appsBundle`);
   const read = await readAppsTemplate({
-    repo: catalog.repo,
+    repo: deployCheckout.repo,
     repoURL: template.repo,
-    ...(catalog.credentialId ? { credentialId: catalog.credentialId } : {}),
+    ...(deployCheckout.credentialId ? { credentialId: deployCheckout.credentialId } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   });
   return read.manifest ? { ...read.manifest, packageScopes: read.packageScopes } : standIn(`the apps template ${template.repo} carries no ${APPS_MANIFEST_PATH} at its default branch`);
 }
 
-/** What a single catalog fetch needs: the same catalog ref + read credential validateTenant clones
- *  with. That ref is this installation's books branch in the catalog, which is where its member
+/** What a single catalog fetch needs: the same deploy repository ref + read credential validateTenant clones
+ *  with. That ref is this installation's books branch in the deploy repository, which is where its member
  *  charts stand (tenant-registrations.ts, the `branch` getter), so the wizard offers the apps this
  *  installation can actually deploy and no others. */
 export interface ListAppCatalogDeps {
@@ -139,7 +139,7 @@ export interface ListAppCatalogDeps {
   signal?: AbortSignal;
 }
 
-/** Clone the catalog at ref (the SAME RepoReader validateTenant uses), read its fan-out manifest,
+/** Clone the deploy repository at ref (the SAME RepoReader validateTenant uses), read its fan-out manifest,
  *  and read the app catalog off it. THROWS on a clone/read failure — makeAppCatalogProvider turns
  *  that into the fail-soft fallback; the throwaway workdir is always disposed (finally). */
 export async function listTenantAppCatalog(deps: ListAppCatalogDeps): Promise<AppCatalog> {
@@ -156,7 +156,7 @@ export async function listTenantAppCatalog(deps: ListAppCatalogDeps): Promise<Ap
     if (!manifest.tenant) throw errValidation(`${TENANT_MANIFEST_PATH} declares no tenant fan-out — there is no apps repository to read the catalog from`);
     return readAppCatalog({
       spec: manifest.tenant,
-      catalog: { repo: deps.repo, workdir: cloned.workdir, ...(deps.credentialId ? { credentialId: deps.credentialId } : {}) },
+      deployCheckout: { repo: deps.repo, workdir: cloned.workdir, ...(deps.credentialId ? { credentialId: deps.credentialId } : {}) },
       warn: deps.warn,
       ...(deps.signal ? { signal: deps.signal } : {}),
     });

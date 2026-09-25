@@ -39,7 +39,7 @@ export type TenantLifecycleParams = z.infer<typeof TenantLifecycleParams>;
 export const RemoveAppParams = z.object({ tenantId: z.string().startsWith("tnt_"), app: appName });
 export type RemoveAppParams = z.infer<typeof RemoveAppParams>;
 
-// Every tenant run writes catalog's tenant registrations, which stand on THIS installation's
+// Every tenant run writes the deploy repository's tenant registrations, which stand on THIS installation's
 // books branch — a per-installation value, so the lock claim is computed from the registrations that does
 // the writing rather than stated as a constant. It is repo-qualified because the same branch NAME
 // exists in hostyour-cloud, where it carries the consumer registrations and the cluster maps: two
@@ -118,7 +118,7 @@ export const allPruned = (names: readonly string[]) => (m: ArgoAppStatusMap): bo
   names.every((n) => (m.get(n)?.health ?? "Missing") === "Missing");
 
 /** Sync predicate: EVERY expected name is present + Synced + Healthy (a member still Missing / OutOfSync
- *  fails the whole set). syncRevision is NOT checked — the appsets track a catalog BRANCH (not a
+ *  fails the whole set). syncRevision is NOT checked — the appsets track a deploy repository BRANCH (not a
  *  per-tenant pin) and member Applications are multi-source (revision unset), so a revision gate would
  *  never converge; the immutable pin is enforced at plan time, not the watch. */
 const allSynced = (names: readonly string[]) => (m: ArgoAppStatusMap): boolean =>

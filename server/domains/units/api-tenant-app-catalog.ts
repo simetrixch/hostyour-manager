@@ -12,7 +12,7 @@ import type { AppCatalogProvider } from "./app-catalog.ts";
 import { packagesReaderView } from "#unit/server/owners.ts";
 
 // The catalog of ONE tenant, apart from api.ts the way api-tenant-apps-repo.ts is: the apps the
-// catalog's TEMPLATE names (app-catalog.ts — what can be added to any tenant), each marked deployed
+// deploy repository's TEMPLATE names (app-catalog.ts — what can be added to any tenant), each marked deployed
 // where the tenant's registration names it in apps[]. The tenant page offers the undeployed ones to
 // tenant-add-app, which judges the choice against the same template catalog (T4) and carries the
 // app's folder into the tenant's own repository (tenant-apps-repo), so what the page offers and
@@ -39,7 +39,7 @@ export function registerTenantAppCatalogRoute(app: Hono<AppEnv>, deps: TenantApp
     if (!tenant) throw errNotFound(`tenant ${id}`);
     const none = (reason: string): Response => c.json({ apps: [], reason } satisfies TenantAppCatalogView);
     if (!registrations) return none("tenant onboarding is not configured on this manager — it needs DEPLOY_REPO and the platform repository (GITHUB_REPO, GITHUB_WRITE_PAT)");
-    if (!appCatalog) return none("this Manager reads no app catalog — the catalog's template is what an app is chosen from");
+    if (!appCatalog) return none("this Manager reads no app catalog — the deploy repository's template is what an app is chosen from");
     try {
       const current = await registrations.readTenant(tenant.stage, tenant.guid);
       if (!current) return none(`tenant ${tenant.guid} is not onboarded (no registration at ${tenant.stage})`);

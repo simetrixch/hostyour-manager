@@ -49,7 +49,7 @@ import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 // onboard.run.ts. Instead of pinning one consumer chart it fans a single registration out to one
 // SELF-CONTAINED member per trio service and per app: each with its own namespace
 // <guid>-<member>-<stage>, its own AppProject and its own Application. A tenant with an app mounts
-// its OWN apps bundle `<bundle>-<subdomain>`: this run creates that repository from the catalog's
+// its OWN apps bundle `<bundle>-<subdomain>`: this run creates that repository from the deploy repository's
 // template, writes the chosen apps into it and builds its first image (tenant-apps-steps.ts) after
 // the platform build units and before its own writes, and the registration carries the three
 // facts. The STAGE is the tenant's own, an input of the request, and it is the target cluster's
@@ -63,13 +63,13 @@ import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 //
 // mutating: true ⇒ guards.assertGuardsArmed requires steps()[0] === "attest-target". The
 // Manager acts master-locally, so the git/helm/kube clients ride in TenantOnboardPorts.
-// Two-repo wiring: registrations is the TenantRegistrations bound to catalog (a SECOND
+// Two-repo wiring: registrations is the TenantRegistrations bound to the deploy repository (a SECOND
 // PlatformRepo, distinct workRoot), never the consumer Registrations. v1 seeds NO secrets
 // (requiredSecrets=[]) — a tenant's charts pull from Vault via ExternalSecret.
 
 /** The Manager-side clients the tenant steps drive (master-local; no SSH). The same port
  *  set backs add-app.run.ts. registrations is the TenantRegistrations, sole writer of tenants/** on
- *  catalog; helm renders the trusted first-party charts manager-side (no sandbox). */
+ *  the deploy repository; helm renders the trusted first-party charts manager-side (no sandbox). */
 export interface TenantOnboardPorts {
   repo: RepoReader;
   helm: HelmRenderer;
@@ -79,12 +79,12 @@ export interface TenantOnboardPorts {
    *  slaves per POLICY). Replaces the single argo/cluster/projects clients. */
   resolver: ClusterKubeResolver;
   deployRepoUrl: string; // the platform constant every tenant's charts live in
-  /** The platform GitOps repo (hostyour-cloud). A member Application pulls its chart from catalog
+  /** The platform GitOps repo (hostyour-cloud). A member Application pulls its chart from the deploy repository
    *  and its `$values` chain from here, so the member's AppProject must allow both or ArgoCD rejects
    *  the sync. */
   platformRepoURL: string;
-  deployCredentialId?: string; // the manager's first-party catalog read credential
-  /** Brings the catalog's trunk into this installation's books branch (adapters/git/git.ts). The plan
+  deployCredentialId?: string; // the manager's first-party deploy repository read credential
+  /** Brings the deploy trunk into this installation's books branch (adapters/git/git.ts). The plan
    *  runs it FIRST, because the books branch is what it reads and what every member Application
    *  reads its chart at — without it a chart fix on the trunk reaches no tenant until the next
    *  Manager boot, the one other caller (boot/wire.ts). Absent where the Manager writes no books. */
@@ -118,7 +118,7 @@ export interface TenantOnboardPorts {
    *  (DNS is a mandatory part of the run kind), never a silent skip. */
   dns?: DnsProvider;
   /** The public apex (global.unitApex) of the target cluster, read off its values chain on the
-   *  platform repo for the TENANT's stage — the tenant family's own repo is catalog, so the apex
+   *  platform repo for the TENANT's stage — the tenant family's own repo is the deploy repository, so the apex
    *  arrives as a resolver. */
   resolveUnitApex: (domain: string, stage: Stage) => Promise<string>;
   /** The target cluster's values chain off its install branch, read ONCE per plan and folded two
@@ -167,7 +167,7 @@ export const CreateTenantParams = z.object({
   // The ArgoCD-registered slave NAME (resolveTenantCluster; e.g. "s1") — the pointer's `cluster`
   // field AND the AppProject destination `name:` pin, distinct from `domain` (the host zone).
   cluster: z.string().min(1),
-  // The catalog revision this run VALIDATED at — a run fact, not a registration field: the
+  // The deploy repository revision this run VALIDATED at — a run fact, not a registration field: the
   // frozen expectedApps/requiredImages below were computed from exactly this tree, so the run
   // record keeps the revision they are readable against.
   chartsRef: z.string().regex(/^[0-9a-f]{40}$/),
@@ -580,7 +580,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // create-tenant is planned by the streaming planner (fan-out validation), never plan().
       throw errInternal("create-tenant is planned via planStream (the streaming entrypoint), not plan()");
     },
-    // Streaming planner: resolve cluster -> mint+collision-check guid -> clone catalog -> render
+    // Streaming planner: resolve cluster -> mint+collision-check guid -> clone the deploy repository -> render
     // + T1..T4 the fan-out (validate-tenant.ts), streamed gate-by-gate. A pass freezes the augmented
     // params (incl expectedApps=tenantApplicationSet) + plan; a rejection freezes the full report
     //.
@@ -599,7 +599,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       const withApps = req.apps.length > 0;
       const refuse = (why: string, planJson: unknown) => ({ outcome: "rejected" as const, summary: `Tenant "${req.subdomain}" was rejected — ${why}`, planJson });
       if (withApps && !ports.githubApp) return refuse(NO_GITHUB_APP, { subdomain: req.subdomain, apps: req.apps.map((a) => a.name) });
-      // The tenant's apps unit, from the catalog's template: the refusals, then the four facts the
+      // The tenant's apps unit, from the deploy repository's template: the refusals, then the four facts the
       // apps-repo steps run on, frozen once. Resolved BEFORE the render, which mounts the bundle
       // under the unit's name (`<bundle>-<subdomain>`, tenant-apps-tree.ts).
       let appsUnit: CreateTenantParams["appsUnit"];
@@ -617,9 +617,9 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       if (ports.carryTrunkToBooksBranch) {
         try {
           await ports.carryTrunkToBooksBranch();
-          ctx.log(`catalog trunk carried into the books branch ${ports.registrations.branch}`);
+          ctx.log(`deploy trunk carried into the books branch ${ports.registrations.branch}`);
         } catch (err) {
-          ctx.log(`the catalog's trunk could not be carried into the books branch ${ports.registrations.branch} — planning over the branch as it stands: ${String(err)}`);
+          ctx.log(`the deploy trunk could not be carried into the books branch ${ports.registrations.branch} — planning over the branch as it stands: ${String(err)}`);
         }
       }
       const outcome = await validateTenant(

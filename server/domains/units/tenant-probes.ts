@@ -3,7 +3,7 @@
 // run() will meet what they measure.
 //
 // WHAT IS MEASURED. The target's deploy-state (attest-target re-asks it at run time, step 0 of a
-// mutating run stays a step); the catalog — readable with the manager's credential
+// mutating run stays a step); the deploy repository — readable with the manager's credential
 // (write-registration; the push is proven by the commit); the apps repository's owner — the one the App is
 // installed in — and the template the tree is copied from, reached by the App (create-repository);
 // every build unit's identity — a registered unit's stored credential reads the repository's hooks,
@@ -38,10 +38,10 @@ export async function probeTenantTarget(ports: TenantOnboardPorts, p: CreateTena
   return [check("target.deploy-state", title, "hard", "pass", `deploy-state generation ${state.generation}`)];
 }
 
-/** write-registration's probe: the catalog is readable with the manager's credential. Whether it is
+/** write-registration's probe: the deploy repository is readable with the manager's credential. Whether it is
  *  pushable is proven by the commit: the registrations' repository carries its own push identity. */
 export async function probeDeploy(ports: TenantOnboardPorts, p: CreateTenantParams): Promise<PreflightCheck[]> {
-  const title = `The catalog ${ports.deployRepoUrl}`;
+  const title = `The deploy repository ${ports.deployRepoUrl}`;
   const out: PreflightCheck[] = [];
   try {
     const guids = await ports.registrations.listTenantGuids(p.stage);

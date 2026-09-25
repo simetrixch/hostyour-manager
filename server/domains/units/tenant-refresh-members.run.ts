@@ -46,7 +46,7 @@ import { restoreVersionsCleanup, sameApprovals, stagePinsOf, watchVersionsStep, 
 // The plan says so.
 //
 // THE WAIT. The member Applications stand already and read Synced/Healthy before the write, and their
-// catalog revision moves with every commit on the books branch, so neither proves the new entries are
+// deploy repository revision moves with every commit on the books branch, so neither proves the new entries are
 // rendered. A member counts as synced once ArgoCD's last comparison rendered exactly its new entry:
 // each chart path in order, its value files and its values, and its namespace labels on the spec,
 // with nothing left that the previous entry carried and this one dropped.
@@ -59,7 +59,7 @@ export const TenantRefreshMembersParams = z.object({
   stage: z.enum(STAGE),
   clusterId: z.string().startsWith("cls_"),
   domain: z.string().min(1),
-  /** The catalog commit the members were resolved and the gates rendered at. */
+  /** The deploy repository commit the members were resolved and the gates rendered at. */
   chartsRef: z.string().regex(/^[0-9a-f]{40}$/),
   registryHost: z.string().min(1),
   /** The member entries the registration carried when this was planned; an abort writes them back. */
@@ -91,7 +91,7 @@ function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberR
 }
 
 /** Whether ArgoCD's last comparison of a member Application rendered exactly this member entry and
- *  none of what the previous one carried beyond it: its catalog sources carry the entry's charts in
+ *  none of what the previous one carried beyond it: its deploy repository sources carry the entry's charts in
  *  order; each carries the entry's value files in their order and no file the previous entry had and
  *  this one dropped, and the entry's values and no value key it dropped; the spec asks for the entry's
  *  namespace labels and none it dropped. The template's own value files and values around the entry's
@@ -266,9 +266,9 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       // The product's change reaches the books branch only when its trunk is carried there, and the
       // members are resolved off that branch: planned over a branch one product state behind, the run
       // would answer "nothing to refresh" right after the push it exists for.
-      if (!ports.carryTrunkToBooksBranch) throw errValidation("this manager carries no catalog trunk into the books branch, so the members cannot be resolved off the product's current manifest");
+      if (!ports.carryTrunkToBooksBranch) throw errValidation("this manager carries no deploy trunk into the books branch, so the members cannot be resolved off the product's current manifest");
       await ports.carryTrunkToBooksBranch();
-      ctx.log(`catalog trunk carried into the books branch ${ports.registrations.branch}`);
+      ctx.log(`deploy trunk carried into the books branch ${ports.registrations.branch}`);
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       const { apps, appsImage, appsImageTag, seedUsers, subdomain } = current.entry;

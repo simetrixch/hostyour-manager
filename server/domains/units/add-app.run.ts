@@ -55,7 +55,7 @@ export const AddAppParams = z.object({
   // The tenant's target-slave name, read off the LIVE registration at plan time (the registration is
   // the GitOps truth): apply-appproject pins the new member's project to it.
   cluster: z.string().min(1),
-  // The catalog revision this run VALIDATED at — a run fact, not a registration field: the
+  // The deploy repository revision this run VALIDATED at — a run fact, not a registration field: the
   // frozen expectedApps/requiredImages were computed from exactly this tree.
   chartsRef: z.string().regex(/^[0-9a-f]{40}$/),
   // The registry host the new app's images are pulled from and probed against — the tenant
@@ -88,7 +88,7 @@ export const AddAppParams = z.object({
   deployRepoUrl: z.string().min(1),
   // THE TENANT'S BUNDLE (hostyour-manager#213, #215): every app lives in the tenant's own
   // `<bundle>-<subdomain>` repository, so adding one carries the bundle along — created from the
-  // catalog's template where none stood, extended with this app's folder and entry where one does
+  // deploy repository's template where none stood, extended with this app's folder and entry where one does
   // (write-tree appends what the repository lacks and removes nothing) — built, and recorded on the
   // registration BEFORE the member is fanned out, the fan-out rendered again at the built tag
   // (refresh-images). The four steps of tenant-apps-repo, composed here.
@@ -353,7 +353,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       throw errInternal("add-app is planned via planStream (the streaming entrypoint), not plan()");
     },
     // The streaming planner: load the live tenant (row + registration) -> refuse a duplicate app ->
-    // read the tenant's own catalog off its bundle's repository -> clone catalog at the books branch
+    // read the tenant's own catalog off its bundle's repository -> clone the deploy repository at the books branch
     // -> render + T1..T4 the NEW app (subset) against that catalog, streamed gate-by-gate -> freeze
     // params (watch only the new app's Application). A rejection freezes the full report.
     planStream: async (rawParams, ctx) => {
@@ -367,7 +367,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       if (current.entry.apps.some((a) => a.name === req.app)) {
         throw errValidation(`app "${req.app}" already exists in tenant ${tc.guid}`);
       }
-      // Every app lives in the tenant's own bundle, and the catalog's TEMPLATE names what can be
+      // Every app lives in the tenant's own bundle, and the deploy repository's TEMPLATE names what can be
       // added (#213, #215): the app is judged against the template's catalog, and the bundle steps
       // carry its folder and entry into the tenant's repository — creating the repository where
       // none stood (a tenant onboarded as its platform alone), appending to it where one does. The
@@ -471,7 +471,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
         kind: "tenant-add-app",
         targetKind: "tenant",
         targetId: tc.tenantId,
-        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at catalog ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.`,
+        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at deploy repository ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),

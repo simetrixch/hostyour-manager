@@ -1,7 +1,7 @@
 // The tenant's OWN apps repository, as ONE implementation two run kinds share: `tenant-create` runs
 // these steps after the platform build units and before its own writes, `tenant-apps-repo` runs
 // them for a standing tenant. The repository `<org>/<bundle>-<subdomain>` is created through the
-// platform's GitHub App, its tree written from the catalog's apps template with the apps the tenant
+// platform's GitHub App, its tree written from the deploy repository's apps template with the apps the tenant
 // chose, and the unit onboarded Build-only with a `github-app` credential — one that stores no
 // token and mints a fresh installation token from the App at every open — building the first
 // image. The tag the release built lands in the runtime the caller hands in.
@@ -44,10 +44,10 @@ export const NO_GITHUB_APP = "this Manager holds no GitHub App identity: set GIT
 
 /** The four facts a plan resolves about the tenant's apps unit and both run kinds freeze. */
 export const TenantAppsUnitSchema = z.object({
-  // The owner the App is installed in — the catalog's `tenant.appsOrg` where it names one,
+  // The owner the App is installed in — the deploy repository's `tenant.appsOrg` where it names one,
   // held equal to the installation's at the plan. The repository is `<org>/<bundle>-<subdomain>`.
   org: z.string().min(1),
-  // The template: the catalog's `tenant.appsRepo` and `tenant.appsBundle` — the repository the tree
+  // The template: the deploy repository's `tenant.appsRepo` and `tenant.appsBundle` — the repository the tree
   // is copied from, and the entry of its manifest whose containerfile the tenant's own build takes.
   templateRepoURL: repoURL,
   templateBuild: z.string().regex(/^[a-z0-9-]+$/),
@@ -95,7 +95,7 @@ async function appCredentialId(ctx: StepCtx, runtime: TenantAppsRepoRuntime): Pr
 
 /** The template's two files these steps read: its apps.yaml (which apps it offers) and its manifest
  *  (how its bundle is built). Cloned the way the catalog reads it (app-catalog.ts readAppsManifest):
- *  at its default branch head, with the catalog's own credential — the template is no unit and has
+ *  at its default branch head, with the deploy repository's own credential — the template is no unit and has
  *  no credential of its own. */
 async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[]) => Promise<{ path: string; content: string }[]>; dispose: () => Promise<void> }> {
   const repo = ports.repo;
@@ -123,18 +123,18 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
 }
 
 /** THE PLAN'S HALF: the refusals, each a sentence the operator acts on, then the template read once
- *  for what it offers, then the four facts. The caller hands in the catalog's tenant spec as it read
- *  it (null where the catalog declares none) and has checked the App is wired. */
+ *  for what it offers, then the four facts. The caller hands in the deploy repository's tenant spec as it read
+ *  it (null where the deploy repository declares none) and has checked the App is wired. */
 export async function resolveTenantAppsUnit(
   ports: TenantOnboardPorts,
   input: { subdomain: string; chosen: readonly string[]; spec: TenantSpec | null; owners: OwnerIdentityReader; signal: AbortSignal; log: (line: string) => void },
 ): Promise<{ outcome: "resolved"; unit: TenantAppsUnit } | { outcome: "refused"; why: string }> {
   const refuse = (why: string) => ({ outcome: "refused" as const, why });
-  if (!input.spec) return refuse(`the catalog ${ports.deployRepoUrl} declares no tenant fan-out in ${TENANT_MANIFEST_PATH} on ${ports.registrations.branch}`);
+  if (!input.spec) return refuse(`the deploy repository ${ports.deployRepoUrl} declares no tenant fan-out in ${TENANT_MANIFEST_PATH} on ${ports.registrations.branch}`);
   const org = await requireGitHubApp(ports).installationOrg(input.signal);
-  if (input.spec.appsOrg !== undefined && input.spec.appsOrg !== org) return refuse(`the catalog's tenant.appsOrg is "${input.spec.appsOrg}" and the GitHub App is installed in "${org}" — the repository would be created where the App has no rights; install the App in ${input.spec.appsOrg} or correct the catalog`);
+  if (input.spec.appsOrg !== undefined && input.spec.appsOrg !== org) return refuse(`the deploy repository's tenant.appsOrg is "${input.spec.appsOrg}" and the GitHub App is installed in "${org}" — the repository would be created where the App has no rights; install the App in ${input.spec.appsOrg} or correct the deploy repository`);
   const template = tenantAppsTemplate(input.spec);
-  if (!template) return refuse(`the catalog declares no tenant.appsBundle and tenant.appsRepo in ${TENANT_MANIFEST_PATH} — the template a tenant's repository is created from`);
+  if (!template) return refuse(`the deploy repository declares no tenant.appsBundle and tenant.appsRepo in ${TENANT_MANIFEST_PATH} — the template a tenant's repository is created from`);
   const unit = tenantAppsUnit(template.name, input.subdomain);
   if (!consumerName.safeParse(unit).success) return refuse(`"${unit}" is not a unit name (lower-case letters, digits and hyphens, at most 40 characters) — choose a shorter subdomain`);
   input.log(`template ${template.repo} (${template.name}), owner ${org}, repository ${tenantAppsRepoURL(org, template.name, input.subdomain)}`);
@@ -174,14 +174,14 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
       probe: (ctx) => probeAppsRepository(ports, { org: p.org ?? "", templateRepoURL: p.templateRepoURL ?? "", bundle: p.templateBuild ?? "", subdomain: p.subdomain ?? "" }, ctx),
       run: async (ctx) => {
         const app = requireGitHubApp(ports);
-        const { created } = await app.createRepository({ org: p.org, name: unit, description: `The apps of tenant ${p.subdomain} (${p.guid}), created from the catalog's ${p.templateBuild}`, private: true, signal: ctx.signal });
+        const { created } = await app.createRepository({ org: p.org, name: unit, description: `The apps of tenant ${p.subdomain} (${p.guid}), created from the deploy repository's ${p.templateBuild}`, private: true, signal: ctx.signal });
         ctx.checkpoint({ repoURL: url, created });
         ctx.log("meta", created ? `repository ${url} created, private` : `repository ${url} already stands — left as it is, the tree below adds what it lacks`);
       },
     },
     {
       name: "write-tree",
-      title: `Write the tree of ${unit} from the catalog's ${p.templateBuild}`,
+      title: `Write the tree of ${unit} from the deploy repository's ${p.templateBuild}`,
       run: async (ctx) => {
         const writer = ports.onboard?.()?.ports.consumerRepo;
         if (!writer) throw errValidation(`${unit} needs the consumer repository writer to commit its tree, and the consumer onboarding is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
@@ -248,7 +248,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
         const ungated = await readUngatedOnboard(
           { repo: onboard.repo, log: (l) => ctx.log("meta", `${unit}: ${l}`), signal: ctx.signal },
           { repoURL: url, ref: DEFAULT_BRANCH_HEAD, consumerName: unit, repoCredentialId: credentialId },
-          { cluster: master.domain, admittedBy: [`apps repository of tenant ${p.guid}, created by this run from the catalog's ${p.templateBuild}; its manifest was written by this run and its image is mounted by a fan-out the tenant gates judge`] },
+          { cluster: master.domain, admittedBy: [`apps repository of tenant ${p.guid}, created by this run from the deploy repository's ${p.templateBuild}; its manifest was written by this run and its image is mounted by a fan-out the tenant gates judge`] },
         );
         const params: BuildOnlyParams = {
           form: "build-only", consumerName: unit, repoURL: url, repoCredentialId: credentialId, owner: p.owner,

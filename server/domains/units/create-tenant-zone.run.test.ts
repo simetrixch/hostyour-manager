@@ -187,7 +187,7 @@ describe("create-tenant plans the zone before the first write", () => {
     expect(result.params.report.gates.find((g) => g.id === "G27")?.evidence?.[0]?.value).toBe("A 157.90.201.150");
   });
 
-  it("carries the catalog trunk into the books branch BEFORE it reads it, and says so in the plan stream", async () => {
+  it("carries the deploy trunk into the books branch BEFORE it reads it, and says so in the plan stream", async () => {
     const dns = new FakeDnsProvider();
     seedClusters();
     const logs: string[] = [];
@@ -195,7 +195,7 @@ describe("create-tenant plans the zone before the first write", () => {
     const result = await makeCreateTenantDef(prt).planStream!(REQUEST, planCtx(logs));
     expect(result.outcome).toBe("planned");
     expect(logs[0]).toBe("carried");
-    expect(logs.findIndex((l) => l.startsWith("catalog trunk carried"))).toBeLessThan(logs.findIndex((l) => l.startsWith("G27")));
+    expect(logs.findIndex((l) => l.startsWith("deploy trunk carried"))).toBeLessThan(logs.findIndex((l) => l.startsWith("G27")));
   });
 
   it("a carry that fails is logged with its reason and the plan goes on over the branch as it stands", async () => {

@@ -20,7 +20,7 @@
 //
 // The NAMES here MUST match the tenant ApplicationSet in hostyour-cloud
 // (clusters/argocd/files/tenants-appset.yaml), which fans out over the `members` of each registration
-// registrations/<guid>/<stage>.yaml in catalog: one Application <guid>-<member>-<stage> into
+// registrations/<guid>/<stage>.yaml in the deploy repository: one Application <guid>-<member>-<stage> into
 // namespace <guid>-<member>-<stage>, carrying that member's sources. EVERY name carries the -<stage>
 // suffix, the stage being the one the registration path states.
 //
@@ -204,7 +204,7 @@ export function resolveFanout(spec: TenantSpec, apps: readonly AppRef[], stage: 
 }
 
 /** The render set of members ALREADY resolved — what the validator renders after it has held each
- *  source's value files against the catalog checkout, so the render and the registration carry the
+ *  source's value files against the deploy repository checkout, so the render and the registration carry the
  *  same file list. */
 export function fanoutOf(members: readonly TenantMemberRecord[], stage: Stage): FanoutMember[] {
   return members.flatMap((m) =>

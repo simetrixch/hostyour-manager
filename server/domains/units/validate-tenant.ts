@@ -1,5 +1,5 @@
 // The tenant (multi-app fan-out) validation core. The
-// tenant analogue of validate.ts: it clones catalog@ref Manager-side, parses the fan-out
+// tenant analogue of validate.ts: it clones the deploy repository at ref Manager-side, parses the fan-out
 // manifest, takes the app catalog — a standing tenant's own, handed in by add-app, or the
 // template's the apps repository declares, read here (app-catalog.ts) — resolves the fan-out
 // (the standing members + the guid × apps[] matrix) at a THROWAWAY probe guid, renders every member
@@ -47,14 +47,14 @@ import {
 } from "./gates/tenant-gates.ts";
 import type { GateResult } from "../../../shared/gates.ts";
 
-/** What identifies a tenant validation: the catalog pin to validate + the fan-out shape to render
- *  (the same apps/stage the registration would carry). repoURL is always the catalog repo (a
+/** What identifies a tenant validation: the deploy repository pin to validate + the fan-out shape to render
+ *  (the same apps/stage the registration would carry). repoURL is always the deploy repository (a
  *  deployment constant supplied by the caller); credentialId opens the manager's first-party read
  *  credential for it. probeGuid is a THROWAWAY guid the members are rendered at — the render output is
  *  discarded, so it never collides with a live tenant. */
 export interface ValidateTenantRequest {
-  repoURL: string; // the catalog repo URL (a platform constant, supplied by the caller)
-  ref: string; // the catalog branch/tag/sha to validate; resolved to the 40-char chartsRef pin
+  repoURL: string; // the deploy repository URL (a platform constant, supplied by the caller)
+  ref: string; // the deploy repository branch/tag/sha to validate; resolved to the 40-char chartsRef pin
   stage: Stage;
   /** The apps and the selections each chose — T4 holds both against the app catalog. */
   apps: AppChoice[];
@@ -77,7 +77,7 @@ export interface ValidateTenantRequest {
    *  (example-lib.image reads global.endpoints.registry.host, the auth host composes from
    *  global.unitApex) — a render without it fails at T2 before any gate can judge the chart. */
   clusterValueFiles: readonly ClusterValueFile[];
-  credentialId?: string; // the manager's first-party catalog read credential
+  credentialId?: string; // the manager's first-party deploy repository read credential
   /** The target cluster's FQDN, given by the one caller that will WRITE the tenant's wildcard
    *  `*.<subdomain>.<stage apex>` (create-tenant's plan). Present ⇒ gate G27 reads the zone under
    *  that wildcard against the installation's clusters before the run writes anything. Absent for
@@ -134,7 +134,7 @@ function mergeDeep(base: Record<string, unknown>, over: Record<string, unknown>)
 }
 
 /** Fold the cluster chain into ONE override object for the member renders. The chain files live in
- *  the platform repo while the member charts live in the cloned catalog workdir, so they
+ *  the platform repo while the member charts live in the cloned deploy repository workdir, so they
  *  cannot ride as -f files; folded in chain order and layered LAST (the helm port's valuesObject),
  *  the result reproduces the appsets' layering because the chain states only `global.*` keys and no
  *  member chart states any — the one relative position that could differ (a chart overriding a
@@ -177,7 +177,7 @@ async function layerExistingValueFiles(members: TenantMemberRecord[], deps: Vali
       const valueFiles: string[] = [];
       for (const file of s.valueFiles) {
         if ((await deps.repo.readFile(workdir, `${s.chart}/${file}`)) !== null) valueFiles.push(file);
-        else deps.log(`${s.chart}/${file} is absent in the catalog checkout — not layered on ${m.name} (the deploy skips a missing value file the same way)`);
+        else deps.log(`${s.chart}/${file} is absent in the deploy repository checkout — not layered on ${m.name} (the deploy skips a missing value file the same way)`);
       }
       sources.push({ ...s, valueFiles });
     }
@@ -186,7 +186,7 @@ async function layerExistingValueFiles(members: TenantMemberRecord[], deps: Vali
   return out;
 }
 
-/** Clone catalog@ref -> parse the fan-out manifest -> resolve + render the fan-out at the probe
+/** Clone the deploy repository at ref -> parse the fan-out manifest -> resolve + render the fan-out at the probe
  *  guid -> run T1..T4 -> compose. Throws only on a clone/access failure (the caller records it as a
  *  preflight rejection); a gate failure returns verdict "fail" with the full composed report so the
  *  operator sees every expected/found/reason. */
@@ -225,7 +225,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       // and for an app added to a standing one alike. A stand-in is said in the log.
       const catalog = await readAppCatalog({
         spec: t1.spec,
-        catalog: { repo: deps.repo, workdir: cloned.workdir, ...(req.credentialId ? { credentialId: req.credentialId } : {}) },
+        deployCheckout: { repo: deps.repo, workdir: cloned.workdir, ...(req.credentialId ? { credentialId: req.credentialId } : {}) },
         warn: deps.log,
         signal: deps.signal,
       });
@@ -325,7 +325,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       }
     }
 
-    // G9 pinned SHA — chartsRef pins an immutable 40-char catalog commit, never a moving branch,
+    // G9 pinned SHA — chartsRef pins an immutable 40-char deploy repository commit, never a moving branch,
     // so every generated member Application deploys exactly the package these gates judged.
     const pinnedSha = gatePinnedSha(cloned.resolvedSha);
     gates.push(pinnedSha);

@@ -1,7 +1,7 @@
 // The tenant (multi-app fan-out) gates + report assembler.
 // The tenant analogue of the consumer G-gates: unlike the consumer path — where an UNTRUSTED
 // chart is rendered inside the credential-free gate-runner sandbox — the tenant fan-out renders TRUSTED
-// first-party charts from catalog, so the Manager renders them ITSELF (adapters/helm) and
+// first-party charts from the deploy repository, so the Manager renders them ITSELF (adapters/helm) and
 // runs these T1..T4 gates over the RenderedDocs. Each gate authors its own expected/found/reason
 // (reason null IFF pass), carries a T-id that fits the widened /^[GT][0-9]{1,2}$/, and produces the
 // exact GateResult shape the consumer gates do — so composeTenantReport's report renders through the
@@ -85,14 +85,14 @@ function t1Reject(found: string, reason: string): TenantManifestOutcome {
   };
 }
 
-/** T1 — parse + validate catalog's deploy/platform.yaml into a ConsumerManifest that carries a
+/** T1 — parse + validate the deploy repository's deploy/platform.yaml into a ConsumerManifest that carries a
  *  tenant: fan-out block. The manifest bytes are UNTRUSTED input (a mis-committed deploy repo), so each
  *  step is guarded and fails closed. A manifest with NO tenant: block is not a fan-out repo — there is
  *  nothing to fan out — so it is rejected here even though it may be a schema-valid consumer manifest. */
 export function gateT1Manifest(rawManifest: string | null): TenantManifestOutcome {
   if (rawManifest === null) {
     return t1Reject(
-      `No ${TENANT_MANIFEST_PATH} was found in the catalog checkout.`,
+      `No ${TENANT_MANIFEST_PATH} was found in the deploy repository checkout.`,
       `${TENANT_MANIFEST_PATH} is the fan-out manifest and the entry point of the tenant contract; without it there is nothing to validate, so the plan is rejected.`,
     );
   }
@@ -144,7 +144,7 @@ export interface MemberRender {
 export function gateT2Render(renders: readonly MemberRender[]): GateResult {
   const expected =
     `every resolved fan-out render (the trio auth/jobs/report + per-app engine/front) renders cleanly ` +
-    `with helm template against the catalog charts.`;
+    `with helm template against the deploy repository charts.`;
   for (const r of renders) {
     if (!r.result.ok) {
       return {
@@ -448,7 +448,7 @@ export function gateT4Apps(input: AppsCheckInput): GateResult {
   };
 }
 
-/** G9 pinned SHA — the tenant's chartsRef pins an immutable catalog commit, never a moving
+/** G9 pinned SHA — the tenant's chartsRef pins an immutable deploy repository commit, never a moving
  *  branch: every member Application of the fan-out is generated at that revision, so a branch here
  *  would let the rendered package drift away from the one these gates judged. It keeps its G-id
  *  because the report card, the id grammar and the result shape are the same across both gate sets. */
@@ -471,7 +471,7 @@ export function gatePinnedSha(resolvedSha: string): GateResult {
 
 /** The metadata composeTenantReport folds around the gates to form the frozen report. */
 export interface TenantReportMeta {
-  resolvedSha: string; // == chartsRef (the catalog fan-out pin)
+  resolvedSha: string; // == chartsRef (the deploy repository fan-out pin)
   probeGuid: string; // the throwaway guid the members were rendered at
   appsValidated: string[]; // apps[] names whose per-app members were rendered
   resolvedMembers: string[]; // the resolved fan-out member identifiers

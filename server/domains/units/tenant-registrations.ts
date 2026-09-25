@@ -1,5 +1,5 @@
-// TenantRegistrations — the Manager's ONLY writer of the catalog
-// repo's registrations/**. The structural twin of the consumer registration Registrations (registrations.ts),
+// TenantRegistrations — the Manager's ONLY writer of the deploy
+// repository's registrations/**. The structural twin of the consumer registration Registrations (registrations.ts),
 // reusing the SAME laws through the shared primitives of registration-laws.ts (serializePointer / parseRegistration /
 // makeRegistrationGuard / trailer):
 //   - PATH GUARD: every write path matches registrations/<guid>/<stage>.yaml exactly — a traversal or
@@ -15,14 +15,14 @@
 // TenantRegistrationSchema is written on EVERY commit, which is what makes the read-modify-write ops
 // below safe: a field a writer does not re-emit is silently dropped from the file, and a dropped
 // cluster would mis-target a LIVE tenant's fan-out (prune+selfHeal cascade). The round-trip tests pin
-// that symmetry. The gate report is NOT written to catalog — it lives in the run record / DB
+// that symmetry. The gate report is NOT written to the deploy repository — it lives in the run record / DB
 // (the RunDetail gate card renders it from there).
 //
 // Suspend is a FIELD flip (the chart renders the off state), NOT a git-mv. removeTenant git-rm's the
 // tenant's file for that stage (offboard).
 //
 // Boundary: domain layer — imports shared/ (type + schema) and the git PlatformRepo port; the
-// concrete second repo bound to catalog (its workRoot + repo-qualified lock) is wired by the adapter.
+// concrete second repo bound to the deploy repository (its workRoot + repo-qualified lock) is wired by the adapter.
 import type { UnitQuota } from "#unit/shared/unit-size.ts";
 import { parse as parseYaml } from "yaml";
 import { guid as guidSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration } from "../../../shared/tenant.ts";
@@ -97,17 +97,17 @@ export function tenantRegistrationWrite(stage: Stage, guid: string, registration
 }
 
 export class TenantRegistrations {
-  /** `repo` is catalog, where the registrations live. */
+  /** `repo` is the deploy repository, where the registrations live. */
   constructor(private readonly repo: PlatformRepo) {}
 
   /** The branch every read and every commit below stands on — this installation's books in
-   *  catalog, resolved once when the repo port was built, and the same name hostyour-cloud's
+   *  the deploy repository, resolved once when the repo port was built, and the same name hostyour-cloud's
    *  books carry (one installation, one books branch, in both repositories). Exposed for the
    *  git-branch LOCK every tenant run claims — keyed on anything but the branch actually written, the
-   *  lock serializes nothing — and as THE REVISION OF THE CATALOG THIS INSTALLATION READS: the member
+   *  lock serializes nothing — and as THE REVISION OF THE DEPLOY REPOSITORY THIS INSTALLATION READS: the member
    *  charts stand here too, because every source of a member Application names one revision of the
-   *  catalog or ArgoCD's repo-server generates no manifest for it at all (hostyour-cloud
-   *  clusters/argocd/files/tenants-appset.yaml). A gate that rendered the catalog's trunk instead
+   *  deploy repository or ArgoCD's repo-server generates no manifest for it at all (hostyour-cloud
+   *  clusters/argocd/files/tenants-appset.yaml). A gate that rendered the deploy repository's trunk instead
    *  would approve a chart the cluster never reads. */
   get branch(): string {
     return this.repo.booksBranch;

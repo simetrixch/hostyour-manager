@@ -377,8 +377,8 @@ const TENANT_LIFECYCLE = [
 ] as const;
 
 /** The tenant routes' deps: the consumer set + the OPTIONAL app catalog provider. The provider
- *  clones the catalog and the apps repository it names to read the create-tenant wizard's apps; it
- *  is absent when tenant onboarding is not wired (no catalog access), in which case the catalog
+ *  clones the deploy repository and the apps repository it names to read the create-tenant wizard's apps; it
+ *  is absent when tenant onboarding is not wired (no deploy repository access), in which case the catalog
  *  route serves { apps: [] } and the wizard degrades — the SAME degrade-loud shape as the 501
  *  mutating routes. */
 export interface TenantApiDeps extends ConsumerApiDeps {
@@ -390,8 +390,8 @@ export interface TenantApiDeps extends ConsumerApiDeps {
   resolver?: ClusterKubeResolver;
   /** The ONE repo every tenant's charts live in (config.deployRepo.repoURL) — what a tenant has
    *  INSTEAD of a consumer's per-app repoUrl column, since a tenant's repo is a platform constant of
-   *  the one-time catalog registration (shared/tenant.ts TenantEntrySchema). The live read needs
-   *  it to ask the base Application which of its spec sources targets catalog, exactly as the
+   *  the one-time deploy repository registration (shared/tenant.ts TenantEntrySchema). The live read needs
+   *  it to ask the base Application which of its spec sources targets the deploy repository, exactly as the
    *  consumer read asks with apps.repoUrl. Wired TOGETHER with `resolver` — both come from
    *  config.deployRepo (wire-units buildTenantOnboarding), so they are present or absent
    *  together, and the live route degrades to SQL-only unless it has BOTH. */
@@ -401,13 +401,13 @@ export interface TenantApiDeps extends ConsumerApiDeps {
    *  uses. Absent when tenant onboarding is not wired ⇒ the invite route answers 501, like the other
    *  mutating routes. */
   activator?: Activator;
-  /** The catalog tenant pointer registrations — powers the operator-triggered ORPHAN SCAN
+  /** The tenant pointer registrations in the deploy repository — powers the operator-triggered ORPHAN SCAN
    *  (GET /api/tenants/orphans), which diffs the LIVE pointers against the inventory. The SAME
    *  TenantRegistrations the tenant runs commit through. Absent when tenant onboarding is not wired ⇒ the
    *  scan route answers { orphans: [], reason } instead of 501: it is a READ, and a read degrades. */
   registrations?: TenantRegistrations;
   /** The build half of the orphan scan (#241): every build registration no stage file, no tenant
-   *  and no catalog build unit accounts for (tenant-apps-repo-purge.run.ts orphanBuildsScan). Absent
+   *  and no build unit of the deploy repository accounts for (tenant-apps-repo-purge.run.ts orphanBuildsScan). Absent
    *  with the tenant family unwired; the scan then lists no builds. */
   orphanBuilds?: () => Promise<OrphanBuildView[]>;
   /** The public apex (global.unitApex) of a cluster, read off its values chain on the platform repo —
@@ -467,7 +467,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
       id: found.id, guid: found.guid, subdomain: found.subdomain, clusterId: found.clusterId,
       domain: found.domain, stage: found.stage, status: found.status, suspended: found.suspended,
     };
-    // BOTH deps or none: the resolver reaches the cluster + ArgoCD, and the catalog URL is what
+    // BOTH deps or none: the resolver reaches the cluster + ArgoCD, and the deploy repository URL is what
     // the pin is asked FOR (see TenantApiDeps). Without either there is no live answer to give, and a
     // half-answer here would mean pinning against the DB column — the very record-as-truth substitution this live read exists to avoid.
     if (!resolver || !deployRepoUrl) return c.json({ row, cluster: null, argo: null, drift: null, argocdUrl: null, reason: "onboarding-not-configured" } satisfies TenantLiveView);
@@ -520,7 +520,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
 
     let argo: LiveArgoView;
     let deployed: string | null = null;
-    // The registration's pin AS ARGOCD SEES IT (what the auth member's catalog source targets).
+    // The registration's pin AS ARGOCD SEES IT (what the auth member's deploy repository source targets).
     // Stays null until the argo read succeeds and that member exists; the DB row is only the fallback.
     let targeted: string | null = null;
     let argoSync: ArgoSync | null = null;
@@ -530,7 +530,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
       const rolled = rollupFanoutStatus(statuses);
       // The deployed-revision anchor: the AUTH member's synced revision. Every tenant has that member
       //, so the anchor is always nameable, and it carries the tenant's own chart from
-      // catalog — read via singleSourceRevision, which prefers the singular
+      // the deploy repository — read via singleSourceRevision, which prefers the singular
       // `status.sync.revision` and falls back to the sole entry of `status.sync.revisions[]` for a
       // source expressed inside a one-element `.spec.sources` array. A Missing member has neither ⇒ null.
       const authStatus = byName.get(authApp);
@@ -538,7 +538,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
       // The PIN, asked per repo — the same question the consumer route asks with apps.repoUrl, put to
       // the tenant's platform-constant repo instead. Asking (rather than taking source 0) is what keeps
       // this correct now that every member Application is multi-source: its chart comes from
-      // catalog and its `$values` chain from hostyour-cloud, so source 0 would answer about the
+      // the deploy repository and its `$values` chain from hostyour-cloud, so source 0 would answer about the
       // wrong repo, exactly the defect the consumer path already fixed.
       targeted = authStatus ? targetedRevisionFor(authStatus, deployRepoUrl) : null;
       // The verdict compares the ANCHOR: the auth member's own sync status, not the rollup — a member
@@ -581,12 +581,12 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   // by nobody (tenant-orphans.ts). Registered BEFORE /:id so the static path is not captured by the
   // param route, like app-catalog above.
   //
-  // EXPLICIT, never eager: this CLONES catalog and scans all three stages, so it must stay an
+  // EXPLICIT, never eager: this CLONES the deploy repository and scans all three stages, so it must stay an
   // operator-triggered action — firing it on every Tenants page load would clone the repo behind the
   // operator's back on a screen that otherwise reads pure SQL.
   //
   // FAIL-SOFT like the app-catalog route: a broken/drifted pointer does not wedge the scan, and an
-  // unreachable catalog answers 200 with an EMPTY list plus the failure text rather than an error
+  // unreachable deploy repository answers 200 with an EMPTY list plus the failure text rather than an error
   // status — the Tenants page must never break on a git hiccup. The `error` field is NOT cosmetic: a
   // silent empty list would read as "no orphans found", the exact opposite of the truth, so the caller
   // renders the failure instead of the (unknown) result. With no registrations (tenant onboarding unwired) it

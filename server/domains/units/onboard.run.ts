@@ -157,7 +157,7 @@ export type OnboardParams = z.infer<typeof OnboardParams>;
  *  onboarding to a slave reaches that slave while the master stays master-local. */
 export interface OnboardPorts extends BuildPorts {
   runner: GateRunner;
-  /** Every subdomain a TENANT stands at (TenantRegistrations over catalog — a second repo, hence a
+  /** Every subdomain a TENANT stands at (TenantRegistrations over the deploy repository — a second repo, hence a
    *  port of its own). G23 refuses a unit name that is one of them: the consumer would serve exactly
    *  the host that tenant's IdP scopes its session cookies to (unit-dns.ts). */
   tenantSubdomains: TenantSubdomainReader;

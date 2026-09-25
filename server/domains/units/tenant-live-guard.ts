@@ -54,7 +54,7 @@
 //     dead end the removal run kinds exist to end.
 // ABSENT is the only pointer state that counts as un-deployed, exactly as in the teardown's own remove
 // step: "unreadable" means a tenant.yaml DOES stand, and a body nobody can parse is no proof of removal.
-// Reading it costs one catalog fetch, and ONLY for a live row — the orphan path stays a pure DB
+// Reading it costs one deploy repository fetch, and ONLY for a live row — the orphan path stays a pure DB
 // read. Without a registrations the fact is unobtainable, so a live row is refused rather than assumed gone.
 //
 // Boundary: domain layer (onboarding) — one inventory read + the TenantRegistrations's own git read, no

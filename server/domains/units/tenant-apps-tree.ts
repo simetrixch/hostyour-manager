@@ -1,4 +1,4 @@
-// The tree of a tenant's own apps repository, composed from the catalog's apps bundle — the TEMPLATE
+// The tree of a tenant's own apps repository, composed from the deploy repository's apps bundle — the TEMPLATE
 // (hostyour-manager#177): every file of the template except the release kit, which the build-only
 // onboarding injects, and the app folders the tenant did not choose; a manifest of the tenant's own,
 // naming its unit and its one build; and an apps.yaml carrying the chosen entries as the template
@@ -15,7 +15,7 @@ import type { RepoReader } from "../../adapters/git/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { RELEASE_KIT_DIR, RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
 
-/** A tenant's apps unit: `<bundle>-<subdomain>` — the catalog's template name (tenant.appsBundle,
+/** A tenant's apps unit: `<bundle>-<subdomain>` — the deploy repository's template name (tenant.appsBundle,
  *  the product the bundle is an instance of) carrying the tenant's subdomain (hostyour-manager#216).
  *  The unit IS the repository name and the image name (the identity law: manifest name == repo name
  *  == unit, and a build name is a flat image name), so one composer answers all three. */
@@ -23,7 +23,7 @@ export function tenantAppsUnit(bundle: string, subdomain: string): string {
   return `${bundle}-${subdomain}`;
 }
 
-/** The repository the App creates in the owner the catalog names: `<org>/<bundle>-<subdomain>`. */
+/** The repository the App creates in the owner the deploy repository names: `<org>/<bundle>-<subdomain>`. */
 export function tenantAppsRepoURL(org: string, bundle: string, subdomain: string): string {
   return `https://github.com/${org}/${tenantAppsUnit(bundle, subdomain)}.git`;
 }

@@ -78,7 +78,7 @@ export function attestTargetStep(ports: LifecyclePorts, appId: string): Step {
 
 /** The ports a tenant lifecycle run drives: the TenantRegistrations (sole writer of tenants/**, NOT the
  *  consumer Registrations), the per-cluster kube resolver (which yields the projectWriter offboard
- *  needs to delete the isolation AppProject), plus the catalog repo URL the renderer pins
+ *  needs to delete the isolation AppProject), plus the deploy repository URL the renderer pins
  *  sourceRepos to. The only shape difference from LifecyclePorts is registrations + repoURL. */
 export interface TenantLifecyclePorts {
   registrations: TenantRegistrations;
@@ -97,7 +97,7 @@ export interface TenantLifecyclePorts {
    *  take back — the same shape the consumer offboard's grant delete has. */
   buildRbac?: BuildRbacWriter;
   /** The public apex (global.unitApex) of a cluster, read off its values chain on the platform repo
-   *  — the tenant registrations's own repo is catalog, so the apex arrives as a resolver, the same
+   *  — the tenant registrations's own repo is the deploy repository, so the apex arrives as a resolver, the same
    *  shape the build-plane FQDN arrives in. */
   resolveUnitApex: (domain: string, stage: Stage) => Promise<string>;
   /** Destroys the tenant's crypto entry `<stage>/tenants/<guid>` — the purge inverse of the seed
@@ -116,9 +116,9 @@ export interface TenantLifecyclePorts {
    *  wrote — its removal goes with the tenant's last app, and the orphan purge (#241) reads them to
    *  say which one nothing accounts for. Optional and said when absent. */
   buildRegistrations?: Pick<Registrations, "removeBuildRegistration" | "readBuildRegistration" | "readUnitStages" | "listBuildRegistrations" | "branch">;
-  /** The units the catalog's `tenant.buildRepos` names, read off its books branch — what accounts
+  /** The units the deploy repository's `tenant.buildRepos` names, read off its books branch — what accounts
    *  for a build-only registration beside a tenant's own apps bundle (#241: the first purge listed
-   *  the catalog's own build units as orphaned and took three of the customer's repositories). */
+   *  the deploy repository's own build units as orphaned and took three of the customer's repositories). */
   deployBuildUnits?: (signal?: AbortSignal) => Promise<string[]>;
 }
 

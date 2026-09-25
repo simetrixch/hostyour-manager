@@ -57,7 +57,7 @@ import type { DnsWriteOwnerKind, Stage } from "#core/shared/enums.ts";
 // label directly under a stage zone: the consumer serves `<label>.<stage apex>`, and the tenant's
 // members sit one level below `<subdomain>.<stage apex>`. That parent is not merely the tenant's wildcard root —
 // it is the Domain its IdP scopes every session cookie to (`example-auth.cookieDomain` in
-// catalog/charts/example-auth/templates/_helpers.tpl, delivered as AUTH_COOKIE_DOMAIN and set
+// the deploy repository's charts/example-auth/templates/_helpers.tpl, delivered as AUTH_COOKIE_DOMAIN and set
 // on the access and refresh cookies in example-auth/backend/src/auth/cookies.ts). A browser sends a
 // cookie to every host at or below its Domain, so a consumer labelled `<subdomain>` would stand on
 // the very host a tenant's cookies reach for. Both onboarding run kinds therefore hold their candidate

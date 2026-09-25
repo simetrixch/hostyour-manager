@@ -70,7 +70,7 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
       const { commit } = await ports.registrations.commitTenant({ stage: p.stage, guid: p.guid, registration, runId: ctx.runId });
       ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(and(eq(tenants.guid, p.guid), eq(tenants.stage, p.stage))).run();
       ctx.checkpoint({ commit, registration: `registrations/${p.guid}/${p.stage}.yaml` });
-      ctx.log("meta", `tenant registration committed to catalog (${commit}) — the ArgoCD on ${p.cluster} will now generate + sync the fan-out`);
+      ctx.log("meta", `tenant registration committed to the deploy repository (${commit}) — the ArgoCD on ${p.cluster} will now generate + sync the fan-out`);
     },
   };
 }

@@ -3,11 +3,11 @@
 //
 // A CONSUMER ONBOARDING BUILDS ITS IMAGES ITSELF: the wizard hands it a repository and a PAT, the
 // release kit is committed, the workflow dispatched, the build watched, the pins bumped. A tenant
-// onboarding gets the catalogue only, and ensure-images used to stop it at the first image the
+// onboarding gets the deploy repository only, and ensure-images used to stop it at the first image the
 // registry lacked — a hand step between the plan and the tenant. This module closes that gap:
 //
 //   1. resolveBuildUnits — the pure policy at plan time. Every required image the registry lacks is
-//      mapped to the repository the catalogue's `tenant.buildRepos` names for it and grouped per
+//      mapped to the repository the deploy repository's `tenant.buildRepos` names for it and grouped per
 //      repository into ONE build unit. A unit registered on the installation carries its stored
 //      credential; an unregistered one asks for a PAT at approve (requiredSecrets), once — the run
 //      registers it, and the next tenant finds it and asks for nothing.
@@ -156,7 +156,7 @@ export async function planBuildUnits(input: {
   if (template.length > 0) {
     return {
       outcome: "rejected",
-      summary: `Tenant "${input.subdomain}" was rejected — the rendered members pull ${template.map((m) => `${m.repo}:${m.tag}`).join(", ")}, and "${input.appsBundle}" is the catalogue's apps template (tenant.appsBundle): the template is copied from, never built and never mounted, so a member chart still lists it as a build and needs to mount the tenant's own bundle instead`,
+      summary: `Tenant "${input.subdomain}" was rejected — the rendered members pull ${template.map((m) => `${m.repo}:${m.tag}`).join(", ")}, and "${input.appsBundle}" is the deploy repository's apps template (tenant.appsBundle): the template is copied from, never built and never mounted, so a member chart still lists it as a build and needs to mount the tenant's own bundle instead`,
     };
   }
   const missing: RequiredImage[] = [];
@@ -168,7 +168,7 @@ export async function planBuildUnits(input: {
   if (unmapped.length > 0) {
     return {
       outcome: "rejected",
-      summary: `Tenant "${input.subdomain}" was rejected — ${unmapped.length} required image(s) are missing from ${input.registryHost} and the catalogue's tenant.buildRepos names no repository that builds them: ${unmapped.map((m) => `${m.repo}:${m.tag}`).join(", ")}`,
+      summary: `Tenant "${input.subdomain}" was rejected — ${unmapped.length} required image(s) are missing from ${input.registryHost} and the deploy repository's tenant.buildRepos names no repository that builds them: ${unmapped.map((m) => `${m.repo}:${m.tag}`).join(", ")}`,
     };
   }
   const deployable = units.filter((u) => u.form === "deployable");
