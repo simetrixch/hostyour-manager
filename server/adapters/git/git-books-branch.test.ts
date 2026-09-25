@@ -160,6 +160,34 @@ describe("GitPlatformRepo, the books branch", () => {
   );
 
   it(
+    "CARRIES a chart the trunk renamed, leaving the books branch's pin file where the branch wrote it",
+    async () => {
+      // A product renames a chart directory the books branch holds a pin file in. git's rename
+      // detection would move the pin along with the directory and stop on the move as a conflict,
+      // which no person could settle, because neither side wrote the file it names. The carry takes
+      // the trunk's new directory in and leaves the pin where the branch wrote it.
+      const { originDir, originURL, seed } = makeTrunkOnlyOrigin();
+      git(seed, "mv", "charts", "old-ui");
+      git(seed, "commit", "-qm", "the product keeps its chart in a directory");
+      git(seed, "push", "-q", "origin", "master");
+      const repo = makeRepo(originURL);
+      await repo.carryTrunkToBooksBranch();
+      await repo.withBranch(BOOKS, (books) =>
+        books.commit({ message: "release: pin prod [run_1]", write: [{ path: "old-ui/pins-prod.yaml", content: "tag: 1\n" }] }));
+      git(seed, "mv", "old-ui", "new-app");
+      git(seed, "commit", "-qm", "the product renames its chart");
+      git(seed, "push", "-q", "origin", "master");
+
+      await repo.carryTrunkToBooksBranch();
+      const files = git(originDir, "ls-tree", "-r", "--name-only", BOOKS).split("\n").filter(Boolean);
+      expect(files).toContain("old-ui/pins-prod.yaml");
+      expect(files.some((f) => f.startsWith("new-app/"))).toBe(true);
+      expect(files).not.toContain("new-app/pins-prod.yaml");
+    },
+    SLOW,
+  );
+
+  it(
     "REFUSES to carry the trunk into the books branch of a repository the deploy-branch program brings forward",
     async () => {
       // The same reason creation is refused there: that branch is the master cluster's stamped install

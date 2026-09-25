@@ -330,8 +330,12 @@ export class GitPlatformRepo implements PlatformRepo {
       // a refusal nobody can act on. They are read back out of the index instead. The conflicted
       // worktree is left as it is: the next turn on this branch hard-resets it (resetToOrigin), and
       // nothing reads the directory outside a turn.
+      // NO DIRECTORY RENAMES. The branch keeps its own files (a pin file) inside the trunk's chart
+      // directories; when the product renames such a directory, git's detection would move the file
+      // along and stop on the move as a conflict that neither side wrote. The file stays where the
+      // branch wrote it.
       try {
-        await this.run(dir, [...identity(this.deps), "merge", "-q", "--no-edit", TRUNK]);
+        await this.run(dir, [...identity(this.deps), "-c", "merge.directoryRenames=false", "merge", "-q", "--no-edit", TRUNK]);
       } catch (e) {
         const clashing = (await this.run(dir, ["diff", "--name-only", "--diff-filter=U"])).trim().split("\n").filter(Boolean);
         if (clashing.length === 0) throw e;
