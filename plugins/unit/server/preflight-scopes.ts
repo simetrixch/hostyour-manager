@@ -16,7 +16,7 @@
 // auth header (readTokenScopes), and its Buffer is zeroed after use — never logged.
 import type { Step } from "#core/server/executor/types.ts";
 import type { BuildPorts, BuildParams } from "./build-chain.ts";
-import { WebhookScopeError } from "#core/server/adapters/github-consumer/port.ts";
+import { WebhookScopeError } from "./adapters/github-consumer/port.ts";
 import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 import { REQUIRED_CONSUMER_PAT_SCOPES, missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";

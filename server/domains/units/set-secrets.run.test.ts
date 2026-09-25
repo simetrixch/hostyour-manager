@@ -7,7 +7,7 @@ import { FakeClusterReader, FakeMasterArgoReader, FakeMasterProjectWriter, FakeC
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
+import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
 import { seedCredentialRow } from "../../security/store.fixture.ts";
 
 // The one path that changes a declared secret of a standing consumer (#245): the manifest says which

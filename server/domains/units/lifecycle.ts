@@ -17,7 +17,7 @@ import type { TenantRegistrations } from "./tenant-registrations.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
-import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import type { ObjectStore } from "../../adapters/object-store/port.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 

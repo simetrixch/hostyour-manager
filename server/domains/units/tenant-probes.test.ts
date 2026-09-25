@@ -8,7 +8,7 @@ import { TenantRegistrations } from "./tenant-registrations.ts";
 import { probeTenantTarget, probeCatalog, probeAppsRepository, probeBuildUnit, probeTenantDns } from "./tenant-probes.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
-import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import { FakeClusterReader, FakeClusterKubeResolver, FakeMasterArgoReader, FakeMasterProjectWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";

@@ -1,6 +1,5 @@
-// The VaultSeeder port — the write-only Vault seed for a consumer's ceremony
-// secrets. Lives in adapters/ (not the domain) so the concrete impl can implement it without an
-// adapter->domain dependency; the onboarding domain re-exports it from vault-seeder.ts.
+// The VaultSeeder port — the write-only Vault seed for a unit's ceremony secrets. Lives with the
+// adapters so the concrete impl can implement it without an adapter->domain dependency.
 //
 // ONE Vault and ONE identity, so no input here names either. The platform runs a single Vault, on
 // the master: a slave's secrets live on it too, under the master's per-slave KV mount. Every write
@@ -30,7 +29,7 @@
 // cas=0 is deliberately a WRITE, not a read-then-write: read-before-write would need `read` on the
 // consumer tier and would forfeit the write-only property above. Vault decides existence
 // server-side; the seeder still never learns the stored value.
-import type { Stage } from "../../../shared/enums.ts";
+import type { Stage } from "#core/shared/enums.ts";
 
 export interface VaultSeedInput {
   stage: Stage;

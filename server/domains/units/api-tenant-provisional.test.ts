@@ -17,7 +17,7 @@ import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "./t
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
-import { FakeActivator } from "../../adapters/activation/testing/fake.ts";
+import { FakeActivator } from "#unit/server/adapters/activation/testing/fake.ts";
 import { BOOTSTRAP_TOKEN_KEY } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import { memberNamespace } from "./tenant-fanout.ts";

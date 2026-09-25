@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import type { Cleanup, RunDefinition, Step } from "../../executor/types.ts";
 import { MEMBER_ROUTING, type MemberRouting } from "../../../shared/enums.ts";
-import type { PublicProbe } from "../../adapters/http-probe/port.ts";
+import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";

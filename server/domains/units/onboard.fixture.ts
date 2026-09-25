@@ -11,12 +11,12 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeC
 import type { ExternalSecretRow } from "../../adapters/kube/port.ts";
 import { BUILD_TARGET_SECRETS } from "#unit/server/app-token-refresh.ts";
 import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
-import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
-import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput } from "./vault-seeder.ts";
+import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
 

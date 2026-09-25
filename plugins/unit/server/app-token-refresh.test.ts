@@ -6,7 +6,7 @@
 import { describe, it, expect } from "vitest";
 import type { Logger } from "#core/server/kernel/logger.ts";
 import type { CredentialStore } from "#core/server/security/store.ts";
-import type { BuildRepoPatSeedInput } from "#core/server/adapters/vault/seeder-port.ts";
+import type { BuildRepoPatSeedInput } from "./adapters/vault/seeder-port.ts";
 import { FakePlatformRepo } from "#core/server/adapters/git/testing/fake.ts";
 import { FakeClusterReader } from "#core/server/adapters/kube/testing/fake.ts";
 import { Registrations } from "./registrations.ts";

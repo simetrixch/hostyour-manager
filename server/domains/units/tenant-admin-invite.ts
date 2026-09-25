@@ -11,7 +11,7 @@
 // ONLY via the typed result field — never logged, never folded into a thrown message. Only a genuine
 // transport/HTTP failure throws, with the status + a bounded { error }-shape body (no credential).
 import { z } from "zod";
-import type { Activator } from "../../adapters/activation/port.ts";
+import type { Activator } from "#unit/server/adapters/activation/port.ts";
 import type { ConsumerActivationMail } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { extractActivateUrl, extractMail } from "#unit/server/activation-result.ts";

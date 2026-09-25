@@ -10,7 +10,7 @@ import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { VaultSeeder } from "./vault-seeder.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 
 // The RESUME-IDEMPOTENCY of mark-removing and remove-registration, and watch-removal's fail-fast, split
 // out of offboard.run.test.ts (that file is at its line budget). The crash case: the step's git commit

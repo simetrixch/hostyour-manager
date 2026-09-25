@@ -8,14 +8,14 @@ import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
-import { FakeActivator } from "../../adapters/activation/testing/fake.ts";
+import { FakeActivator } from "#unit/server/adapters/activation/testing/fake.ts";
 import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
 import type { ConsumerActivation } from "../../../shared/consumer.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
-import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome } from "./vault-seeder.ts";
+import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { OnboardPrefillRequest, readOnboardPrefill } from "./onboard-prefill.ts";
 import type { OwnerIdentityReader } from "#unit/server/repo-identity.ts";

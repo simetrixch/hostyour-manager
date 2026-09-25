@@ -9,7 +9,7 @@ import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
-import { FakeActivator } from "../../adapters/activation/testing/fake.ts";
+import { FakeActivator } from "#unit/server/adapters/activation/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";

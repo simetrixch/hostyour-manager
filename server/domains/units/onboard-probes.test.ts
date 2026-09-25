@@ -7,7 +7,7 @@ import { OnboardParams, type DeployableOnboardParams } from "./onboard.run.ts";
 import { probeIdentity, probePackages, probeWebhook } from "#unit/server/build-probes.ts";
 import { probeTarget, probeDns } from "./onboard-deploy-probes.ts";
 import { ports, SHA, emptyZone } from "./onboard.fixture.ts";
-import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { FakeClusterReader, FakeClusterKubeResolver, FakeMasterArgoReader, FakeMasterProjectWriter } from "../../adapters/kube/testing/fake.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";

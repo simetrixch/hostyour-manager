@@ -24,7 +24,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { TenantStatus } from "../../../shared/enums.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
-import type { VaultSeeder, VaultSeedOutcome, TenantCryptoDeleteInput } from "../../adapters/vault/seeder-port.ts";
+import type { VaultSeeder, VaultSeedOutcome, TenantCryptoDeleteInput } from "#unit/server/adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 
 

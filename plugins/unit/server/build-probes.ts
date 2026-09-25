@@ -18,7 +18,7 @@ import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
 import { readOwnerIdentity } from "./owners.ts";
 import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderMissing, patHookRefusal } from "./repo-identity.ts";
 import { missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
-import { WebhookScopeError, webhookTargetUrl } from "#core/server/adapters/github-consumer/port.ts";
+import { WebhookScopeError, webhookTargetUrl } from "./adapters/github-consumer/port.ts";
 
 export const preflightCheck = (id: string, title: string, severity: PreflightCheck["severity"], status: PreflightCheck["status"], detail: string, hint?: string): PreflightCheck =>
   ({ id, title, severity, status, detail, ...(hint ? { hint } : {}) });

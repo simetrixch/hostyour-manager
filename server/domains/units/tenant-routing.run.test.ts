@@ -6,7 +6,7 @@ import { makeTenantSetRoutingDef, type TenantSetRoutingPorts } from "./tenant-ro
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import { FakePublicProbe } from "../../adapters/http-probe/testing/fake.ts";
+import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { testMembers, TEST_QUOTA } from "./tenant-members.fixture.ts";
 import type { MemberRouting } from "../../../shared/enums.ts";

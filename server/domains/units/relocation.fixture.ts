@@ -14,7 +14,7 @@ import type { AppStatus, TenantStatus } from "../../../shared/enums.ts";
 import type { ConsumerService } from "../../../shared/consumer.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import { FakePublicProbe } from "../../adapters/http-probe/testing/fake.ts";
+import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter, FakeRepoCredentialWriter } from "../../adapters/kube/testing/fake.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";

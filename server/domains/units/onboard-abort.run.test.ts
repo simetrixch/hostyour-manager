@@ -16,17 +16,17 @@ import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter, FakeRepoCredentialWriter } from "../../adapters/kube/testing/fake.ts";
-import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import { FakeActivator } from "../../adapters/activation/testing/fake.ts";
+import { FakeActivator } from "#unit/server/adapters/activation/testing/fake.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
-import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput } from "./vault-seeder.ts";
+import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // ABORT-WITH-CLEANUP on a consumer onboard, driven through the REAL executor (planStreamed -> approve

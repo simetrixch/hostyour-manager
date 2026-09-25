@@ -28,7 +28,7 @@ import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture
 import { TEMPLATE_SPEC, TEMPLATE_MANIFEST, TENANT_URL, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { ports as onboardPorts, FakeBuildPlaneClusterReader } from "./onboard.fixture.ts";
 import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
-import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 

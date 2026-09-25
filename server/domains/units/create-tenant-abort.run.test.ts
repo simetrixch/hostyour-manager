@@ -24,14 +24,14 @@ import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fak
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
-import { FakeActivator } from "../../adapters/activation/testing/fake.ts";
+import { FakeActivator } from "#unit/server/adapters/activation/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import type { AppEnv } from "../../http/app-env.ts";
-import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { APP_OVERLAYS } from "./tenant-members.fixture.ts";

@@ -20,7 +20,7 @@ import { ports as onboardPorts, FakeBuildPlaneClusterReader, type FakeSeeder } f
 import { testMembers } from "./tenant-members.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
-import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
@@ -29,7 +29,7 @@ import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import type { Step, StepCtx, PlanStreamCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 
 let db: DbHandle;
 beforeEach(() => {

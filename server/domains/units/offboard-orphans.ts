@@ -38,7 +38,7 @@
 //     when build.yaml leaves the tree — another actor's object, on another actor's clock.
 //
 // WHAT CANNOT BE READ BACK, and why that is not a hole:
-//   - the Vault entries. The seeder is write-only by policy (adapters/vault/seeder-port.ts): it never
+//   - the Vault entries. The seeder is write-only by policy (plugins/unit/server/adapters/vault/seeder-port.ts): it never
 //     reads and never lists, so there is no read to make. Their deletes are fail-CLOSED instead, which
 //     is what stands in for the second look.
 //   - the build webhook and the release kit. Both are reached with the consumer's sealed clone

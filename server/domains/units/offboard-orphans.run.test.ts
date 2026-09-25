@@ -13,7 +13,7 @@ import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { VaultSeeder, VaultSeedOutcome } from "./vault-seeder.ts";
+import type { VaultSeeder, VaultSeedOutcome } from "#unit/server/adapters/vault/seeder-port.ts";
 
 // assert-no-orphans, the offboard's one measuring step. It reads back the TWO objects the Manager
 // still writes outside any chart — the ArgoCD repository Secret, whose value is a PAT, and the

@@ -22,7 +22,7 @@ import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { tenantRecordName } from "#unit/shared/unit-host.ts";
 import { readStandingHost } from "#unit/server/unit-dns.ts";
 import { tenantAppsRepoURL } from "./tenant-apps-tree.ts";
-import { webhookTargetUrl, WebhookScopeError } from "../../adapters/github-consumer/port.ts";
+import { webhookTargetUrl, WebhookScopeError } from "#unit/server/adapters/github-consumer/port.ts";
 
 const check = (id: string, title: string, severity: PreflightCheck["severity"], status: PreflightCheck["status"], detail: string, hint?: string): PreflightCheck =>
   ({ id, title, severity, status, detail, ...(hint ? { hint } : {}) });

@@ -7,7 +7,7 @@
 // so the steps themselves can never fork into per-kind code paths that drift.
 import type { Step, StepCtx } from "#core/server/executor/types.ts";
 import type { ClusterKubeResolver, JobResult, WorkloadStatus } from "#core/server/adapters/kube/port.ts";
-import type { PublicProbe } from "#core/server/adapters/http-probe/port.ts";
+import type { PublicProbe } from "./adapters/http-probe/port.ts";
 import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
 import type { Stage } from "#core/shared/enums.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";

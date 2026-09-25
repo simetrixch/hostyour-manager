@@ -7,7 +7,7 @@ import { consumerUnitProbes } from "./consumer-unit-probes.ts";
 import { tenantUnitProbes } from "./tenant-unit-probes.ts";
 import { ports as onboardPorts, emptyZone } from "./onboard.fixture.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
-import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";

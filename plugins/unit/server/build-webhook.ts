@@ -29,8 +29,8 @@
 // X-Hub-Signature-256 check — a silent no-build.
 import type { Step, StepCtx, Cleanup } from "#core/server/executor/types.ts";
 import type { BuildPorts, BuildParams } from "./build-chain.ts";
-import type { GitHubConsumer } from "#core/server/adapters/github-consumer/port.ts";
-import { WebhookScopeError, webhookTargetUrl } from "#core/server/adapters/github-consumer/port.ts";
+import type { GitHubConsumer } from "./adapters/github-consumer/port.ts";
+import { WebhookScopeError, webhookTargetUrl } from "./adapters/github-consumer/port.ts";
 import { probeWebhook } from "./build-probes.ts";
 import { unitStaysRegistered } from "./lifecycle.ts";
 import { parseGitHubOwnerRepo, splitGitHubRepoURL } from "./github-repo-url.ts";

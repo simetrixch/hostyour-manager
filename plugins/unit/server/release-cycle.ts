@@ -18,7 +18,7 @@
 // cancel is the only limit.
 import type { Step } from "#core/server/executor/types.ts";
 import type { BuildPorts, BuildParams } from "./build-chain.ts";
-import { WorkflowNotFoundError } from "#core/server/adapters/github-consumer/port.ts";
+import { WorkflowNotFoundError } from "./adapters/github-consumer/port.ts";
 import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 

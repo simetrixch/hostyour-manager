@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput } from "./seeder-port.ts";
-import { KV_MOUNT, VaultError } from "./port.ts";
+import { KV_MOUNT, VaultError } from "#core/server/adapters/vault/port.ts";
 
 // The concrete VaultSeeder: write-only KV-v2 seed of a consumer's ceremony
 // secrets. Flow: login -> PUT the single "app" entry -> revoke the token. Never reads/lists; the

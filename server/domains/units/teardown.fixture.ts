@@ -1,4 +1,4 @@
-import type { VaultSeeder, VaultSeedOutcome, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput, MongodbSecretDeleteInput } from "../../adapters/vault/seeder-port.ts";
+import type { VaultSeeder, VaultSeedOutcome, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput, MongodbSecretDeleteInput } from "#unit/server/adapters/vault/seeder-port.ts";
 
 /** The seeder a TEARDOWN test stands on — offboard, its scoped variant and purge alike: it records
  *  the four deletes those runs make and refuses every write, because a run that removes a unit has

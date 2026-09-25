@@ -9,7 +9,7 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE } from "../../../shared/release.ts";
 import { GateReportSchema } from "../../../shared/gates.ts";
 import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, SmtpEntrySchema, consumerArgoAppName, consumerNamespace, consumerHostLabel, hostLabel } from "../../../shared/consumer.ts";
-import type { Activator } from "../../adapters/activation/port.ts";
+import type { Activator } from "#unit/server/adapters/activation/port.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { activateStep } from "./onboard-activate.ts";
 import { preflightScopesStep } from "#unit/server/preflight-scopes.ts";

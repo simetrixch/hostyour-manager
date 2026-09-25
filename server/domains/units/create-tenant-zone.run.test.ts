@@ -22,7 +22,7 @@ import type { StepCtx, PlanStreamCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
-import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";

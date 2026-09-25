@@ -20,12 +20,12 @@ import type { ClusterKubeResolver, MasterKubeClients, RepoCredentialWriter } fro
 import { masterKubeInput } from "./master-kube.ts";
 import { TektonGateRunner } from "../adapters/gate-runner/gate-runner-tekton.ts";
 import { TektonBuildPlane } from "../adapters/build-plane/build-plane-tekton.ts";
-import { VaultSelfSeeder } from "../adapters/vault/vault-self-seeder.ts";
-import type { VaultSeeder } from "../adapters/vault/seeder-port.ts";
-import { HttpActivator } from "../adapters/activation/activation-http.ts";
-import type { Activator } from "../adapters/activation/port.ts";
-import { HttpGitHubConsumer } from "../adapters/github-consumer/github-consumer-http.ts";
-import type { GitHubConsumer } from "../adapters/github-consumer/port.ts";
+import { VaultSelfSeeder } from "#unit/server/adapters/vault/vault-self-seeder.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
+import { HttpActivator } from "#unit/server/adapters/activation/activation-http.ts";
+import type { Activator } from "#unit/server/adapters/activation/port.ts";
+import { HttpGitHubConsumer } from "#unit/server/adapters/github-consumer/github-consumer-http.ts";
+import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
 import type { GitHubApp } from "../adapters/github-app/port.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
@@ -40,7 +40,7 @@ import { makeSetSecretsDef, type SetSecretsPorts } from "../domains/units/set-se
 import type { LifecyclePorts } from "../domains/units/lifecycle.ts";
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import type { AppCatalogProvider } from "../domains/units/app-catalog.ts";
-import { HttpPublicProbe } from "../adapters/http-probe/http-probe.ts";
+import { HttpPublicProbe } from "#unit/server/adapters/http-probe/http-probe.ts";
 import type { RelocationPorts } from "#unit/server/relocation.ts";
 import type { ConsumerRelocationPorts } from "../domains/units/relocation-world-consumer.ts";
 import { makeBackupDef } from "../domains/units/backup.run.ts";

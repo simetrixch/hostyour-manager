@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Activator, ActivationRequest, ActivationResponse } from "../../adapters/activation/port.ts";
+import type { Activator, ActivationRequest, ActivationResponse } from "#unit/server/adapters/activation/port.ts";
 import { inviteOrResendTenantAdmin } from "./tenant-admin-invite.ts";
 
 // A two-endpoint Activator fake: the real orchestration calls invite-admin then (on 409) resend-admin-

@@ -31,7 +31,7 @@ import type { TenantRegistration } from "../../../shared/tenant.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
-import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // The tenant ORPHAN SURFACE over HTTP: the two discovery reads that make an

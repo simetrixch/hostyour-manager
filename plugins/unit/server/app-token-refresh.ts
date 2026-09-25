@@ -22,7 +22,7 @@
 // the App's one row, or the owner's repository PAT row; what the id opens to is the store's business.
 import type { Logger } from "#core/server/kernel/logger.ts";
 import type { CredentialStore, UseContext } from "#core/server/security/store.ts";
-import type { VaultSeeder } from "#core/server/adapters/vault/seeder-port.ts";
+import type { VaultSeeder } from "./adapters/vault/seeder-port.ts";
 import type { ClusterReader } from "#core/server/adapters/kube/port.ts";
 import type { Registrations } from "./registrations.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";

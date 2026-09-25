@@ -42,13 +42,13 @@ import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberApplication, memberNamespace, tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";
 import { tenantSelector } from "./tenant-lifecycle.run.ts";
 import type { AppCatalogProvider } from "./app-catalog.ts";
-import type { Activator } from "../../adapters/activation/port.ts";
+import type { Activator } from "#unit/server/adapters/activation/port.ts";
 import { TENANT_COLUMNS } from "./tenant-columns.ts";
 import { inviteOrResendTenantAdmin, BOOTSTRAP_TOKEN_KEY, InviteAdminRequest } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import { tenantMemberUrl } from "#unit/server/unit-dns.ts";
 import { resolveNextVersion } from "#unit/server/release-version.ts";
-import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
+import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
 // Consumer API. The onboard trigger and the lifecycle

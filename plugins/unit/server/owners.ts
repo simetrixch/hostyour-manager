@@ -5,7 +5,7 @@ import { errNotFound, errValidation } from "#core/server/kernel/errors.ts";
 import { fingerprintSecret } from "#core/server/security/fingerprint.ts";
 import type { CredentialStore } from "#core/server/security/store.ts";
 import type { GitHubApp } from "#core/server/adapters/github-app/port.ts";
-import type { GitHubConsumer } from "#core/server/adapters/github-consumer/port.ts";
+import type { GitHubConsumer } from "./adapters/github-consumer/port.ts";
 import type { OwnerIdentityView, OwnerCredentialView } from "#core/shared/api-types-owners.ts";
 import { missingConsumerPatScopes } from "./pat-scopes.ts";
 

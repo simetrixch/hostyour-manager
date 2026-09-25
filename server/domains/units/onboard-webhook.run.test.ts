@@ -7,7 +7,7 @@ import { seedClusterMaps, BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { buildPlaneFqdnFromMarkings } from "../inventory/cluster-marking.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";

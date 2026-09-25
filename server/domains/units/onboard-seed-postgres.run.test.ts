@@ -3,7 +3,7 @@ import { seedPostgresSuperuserStep } from "./onboard-seed-postgres.ts";
 import { DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { VaultSeedOutcome, PostgresSeedInput } from "./vault-seeder.ts";
+import type { VaultSeedOutcome, PostgresSeedInput } from "#unit/server/adapters/vault/seeder-port.ts";
 
 // Focused tests for the onboard `seed-postgres-superuser` step (impl: onboard-seed-postgres.ts). Kept
 // apart from onboard.run.test.ts so each file stays within the per-file line budget (the

@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
 import { watchDeploymentStep } from "./onboard-watch-deployment.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
-import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";

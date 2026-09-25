@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VaultSelfSeeder } from "./vault-self-seeder.ts";
-import { VaultError } from "./port.ts";
+import { VaultError } from "#core/server/adapters/vault/port.ts";
 import type { BuildRepoPatSeedInput, VaultSeedInput, AppSecretsDeleteInput, PostgresSeedInput, PostgresSecretDeleteInput, TenantCryptoSeedInput } from "./seeder-port.ts";
 
 interface Recorded {

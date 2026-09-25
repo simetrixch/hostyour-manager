@@ -14,7 +14,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
-import type { VaultSeeder } from "./vault-seeder.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // The declare-and-attest path of the manifest's extra FQDN at RUN level: planStream freezes the
