@@ -221,7 +221,7 @@ describe("singleSourceRevision (the deployed revision of an app tracking ONE rep
     const s: ArgoAppStatus = {
       syncRevision: null,
       targetRevision: null,
-      syncSources: [{ repoURL: "https://github.com/x/catalog.git", revision: sha }],
+      syncSources: [{ repoURL: "https://github.com/x/deploy.git", revision: sha }],
       sync: "Synced",
       health: "Healthy",
     };

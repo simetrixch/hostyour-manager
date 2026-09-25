@@ -18,7 +18,7 @@ describe("GitPlatformRepo, the books branch", () => {
   // The adapter refuses to be built on the trunk, so this is never "master".
   const BOOKS = "m1.example.com";
 
-  // carriesTrunkToBooksBranch defaults to the tenant catalog's shape (nothing else cuts that branch
+  // carriesTrunkToBooksBranch defaults to the deploy repository's shape (nothing else cuts that branch
   // and nothing else advances it); the tests that need the hostyour-cloud shape say so.
   function makeRepo(originURL: string, carriesTrunkToBooksBranch = true): GitPlatformRepo {
     return new GitPlatformRepo({ platformRepoURL: originURL, booksBranch: BOOKS, carriesTrunkToBooksBranch, workRoot: join(newRoot(), "work"), allowFileURLs: true });
@@ -27,7 +27,7 @@ describe("GitPlatformRepo, the books branch", () => {
   it(
     "CREATES the books branch from the trunk when the remote does not carry it yet, and only that one",
     async () => {
-      // The tenant catalog has no installer and no stamper: nothing but this adapter ever creates the
+      // The deploy repository has no installer and no stamper: nothing but this adapter ever creates the
       // branch its tenant registrations stand on. Without this, the first tenant registration of
       // every installation dies on a ref that is not there — and so does the ApplicationSet
       // generator that reads it.

@@ -7,7 +7,7 @@
 //  - GitPlatformRepo keeps one persistent worktree per branch under deps.workRoot: fetch +
 //    hard-reset to origin/<branch>, then commit + push with a bounded pull-rebase retry (with an
 //    opt-in exponential backoff — deps.pushBackoff — for the contended books branch in
-//    catalog). It is also the only place a books branch is CREATED and the only place the trunk is
+//    the deploy repository). It is also the only place a books branch is CREATED and the only place the trunk is
 //    CARRIED INTO one, and only for the repository that opted in
 //    (deps.carriesTrunkToBooksBranch). (The registrations path guard + write serializer live in the
 //    domain.)
@@ -131,7 +131,7 @@ export class GitRepoReader implements RepoReader {
 
 /** Bounded exponential-backoff schedule for commitPush's push-reject retry loop. The consumer
  *  platform repo omits this and keeps the ORIGINAL behavior (3 retries, NO wait between them). The
- *  tenant repo (the books branch in catalog) opts in: many lifecycle runs plus Tekton's own deploy-bump
+ *  tenant repo (the books branch in the deploy repository) opts in: many lifecycle runs plus Tekton's own deploy-bump
  *  commits contend on the ONE shared branch, so a re-fetch-and-rebase burst would thrash into a
  *  push-reject storm — spacing the retries with a growing, jittered wait turns the storm into
  *  ordered commits, capped by a retry budget after which the run fails loudly rather than spinning. */
@@ -182,7 +182,7 @@ export interface GitPlatformRepoDeps {
    *  product back under a name the cluster's own ArgoCD tracks, and the whole cluster would
    *  re-render from it. Its absence is an operator-visible fault, so it is raised.
    *
-   *  TRUE for catalog: nothing there cuts it and nothing there advances it. No installer, no
+   *  TRUE for the deploy repository: nothing there cuts it and nothing there advances it. No installer, no
    *  stamper, and the tenant ApplicationSet generators read it, so without this the first tenant
    *  registration would fail on a ref that never comes into being — and every member Application
    *  reads its CHART off this branch too (hostyour-cloud clusters/argocd/files/tenants-appset.yaml),
@@ -264,7 +264,7 @@ export class GitPlatformRepo implements PlatformRepo {
    * worktree, nothing derived: the branch simply starts where the product stands and everything the
    * Manager writes onto it afterwards is a normal commit.
    *
-   * This exists because in catalog NOTHING else creates it, which is exactly what
+   * This exists because in the deploy repository NOTHING else creates it, which is exactly what
    * `deps.carriesTrunkToBooksBranch` states — see it for why the same call on hostyour-cloud must
    * raise instead. It is narrow twice over: only the repository that opted in, and within it only
    * `deps.booksBranch`, is ever created.
@@ -273,7 +273,7 @@ export class GitPlatformRepo implements PlatformRepo {
    * master replacement — is not distinguishable here from a first tenant registration, and it is not
    * meant to be: the same name is used against hostyour-cloud, where creation is off, so the first
    * consumer registration, cluster-map read or reset raises on it by name. What a typo can leave
-   * behind in catalog is an unread branch, never a rewritten cluster.
+   * behind in the deploy repository is an unread branch, never a rewritten cluster.
    */
   private async createBooksBranch(dir: string, branch: string): Promise<void> {
     await this.fetchTrunk(dir);
@@ -448,7 +448,7 @@ export class GitPlatformRepo implements PlatformRepo {
         const msg = e instanceof Error ? e.message : String(e);
         const nonFastForward = /non-fast-forward|fetch first|\[rejected\]|failed to push/i.test(msg);
         if (attempt >= maxRetries || !nonFastForward) throw e;
-        // Bounded exponential backoff BEFORE the re-fetch/rebase: on a busy branch (catalog@
+        // Bounded exponential backoff BEFORE the re-fetch/rebase: on a busy branch (deploy@
         // master) it spreads contending writers apart so they don't re-collide in lock-step. Full
         // jitter (a random point in [0, backoff]) further de-synchronizes them. Default schedule is
         // 0ms (the consumer repo), so this is a no-op there and the original semantics are preserved.

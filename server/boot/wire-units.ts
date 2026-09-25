@@ -56,9 +56,9 @@ import type { UnitProbes } from "#unit/server/check-units.ts";
 //    BOTH the gate-runner config (ONBOARD_GATE_MANAGER_ADDR) and the platform repo (github) are
 //    configured — a partial config is a 501, never a half-wired feature. It takes the tenant
 //    registrations, so the name checks see the tenants' names too.
-//  - TENANT (multi-app) units, in wire-tenants.ts: a SECOND GitPlatformRepo bound to catalog + the
+//  - TENANT (multi-app) units, in wire-tenants.ts: a SECOND GitPlatformRepo bound to the deploy repository + the
 //    manager-side HelmRenderer (tenant charts are trusted first-party, validated manager-side —
-//    NO gate-runner). Goes live when the catalog, the platform repo, the unit apex and the
+//    NO gate-runner). Goes live when the deploy repository, the platform repo, the unit apex and the
 //    cluster value files are there. A tenant's own apps are built by the consumer's build chain,
 //    which reaches it at run time through `lateBuild` below.
 //
@@ -111,7 +111,7 @@ export interface UnitsWiring {
   tenantResolver?: ClusterKubeResolver;
   /** The ONE repo every tenant's charts live in, threaded to registerTenantRoutes beside
    *  tenantResolver: the live read asks the base Application which of its spec sources targets
-   *  catalog, the way the consumer read asks with the app row's own repoUrl. Undefined exactly
+   *  the deploy repository, the way the consumer read asks with the app row's own repoUrl. Undefined exactly
    *  when tenantResolver is — both come from config.deployRepo. */
   deployRepoUrl?: string;
   /** The tenant app catalog provider, threaded to registerTenantRoutes so GET
@@ -126,7 +126,7 @@ export interface UnitsWiring {
    *  registerTenantRoutes so the operator-driven POST /api/tenants/:id/invite-admin can call a
    *  tenant's own example-auth first-admin bootstrap. Present wherever the families are built. */
   activator?: Activator;
-  /** The TENANT family's catalog pointer registrations, threaded to registerTenantRoutes so the
+  /** The TENANT family's pointer registrations in the deploy repository, threaded to registerTenantRoutes so the
    *  operator-triggered orphan scan (GET /api/tenants/orphans) can diff the LIVE pointers against the
    *  inventory. The SAME TenantRegistrations the tenant runs commit through — one reader of tenants/**.
    *  Undefined when tenant onboarding is not configured; the scan route then degrades to an empty
@@ -134,11 +134,11 @@ export interface UnitsWiring {
   tenantRegistrations?: TenantRegistrations;
   /** The build half of the orphan scan (#241). Undefined when the tenant family is not configured. */
   orphanBuilds?: () => Promise<OrphanBuildView[]>;
-  /** Bring the catalog's books branch into being, and to the catalog's trunk, at boot. The tenant
+  /** Bring the deploy repository's books branch into being, and to its trunk, at boot. The tenant
    *  ApplicationSet's git generator reads that branch from the moment the installation is deployed,
    *  and every member Application reads its chart there too, so without this the ApplicationSet has
    *  no revision to resolve on a fresh installation and the charts never move afterwards. Undefined
-   *  when tenant onboarding is not configured; there is then no catalog to write into. */
+   *  when tenant onboarding is not configured; there is then no deploy repository to write into. */
   carryTrunkToBooksBranch?: () => Promise<void>;
   /** The CONSUMER family's registration registrations, threaded to registerConsumerRoutes so the
    *  operator-triggered DETECTED scan (GET /api/consumers/detected) can diff the
@@ -406,7 +406,7 @@ function buildConsumerOnboarding(
     repo,
     runner,
     registrations,
-    // G23's tenant-subdomain clause. The tenant family owns the catalog pointer registrations, so a
+    // G23's tenant-subdomain clause. The tenant family owns the pointer registrations in the deploy repository, so a
     // manager wired for consumers but not for tenants cannot answer the question — and answering
     // it with an empty set would pass the gate by omission, which is the one outcome that must not
     // happen for a name that hands over another party's sessions. Fail loud instead.

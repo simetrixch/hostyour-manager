@@ -1,5 +1,5 @@
 // The TENANT (multi-app) family of the unit composition, apart from wire-units.ts the way the
-// consumer family stands there: a SECOND GitPlatformRepo bound to catalog + the manager-side
+// consumer family stands there: a SECOND GitPlatformRepo bound to the deploy repository + the manager-side
 // HelmRenderer (tenant charts are trusted first-party, validated manager-side — NO gate-runner).
 // Goes live when DEPLOY_REPO and the platform repository are configured; it is NOT gated on the
 // consumer prerequisites, but a tenant's own apps are built by the consumer's build chain at run time
@@ -66,7 +66,7 @@ const TENANT_WATCH_TIMEOUT_MS = 15 * 60_000;
 const ROUTING_WAIT_MS = 30 * 60_000;
 const ROUTING_POLL_MS = 15_000;
 
-/** The credential id under which the tenant family's reader answers the catalog's configured read
+/** The credential id under which the tenant family's reader answers the deploy repository's configured read
  *  PAT — never a row of the store. Every other id the reader is handed is opened from the store. */
 const DEPLOY_READ_CREDENTIAL_ID = "deploy-read-pat";
 
@@ -81,7 +81,7 @@ export interface TenantFamily {
   /** The app-type catalog its wizard read route serves. Undefined when the family is not configured. */
   appCatalog?: AppCatalogProvider;
   /** The reader of one tenant's own catalog. Undefined without the family or without a GitHub App. */
-  /** The catalog URL its live read resolves the fan-out's pin against. Undefined when the family is
+  /** The deploy repository URL its live read resolves the fan-out's pin against. Undefined when the family is
    *  not configured. */
   deployRepoUrl?: string;
   /** The pointer registrations its orphan-scan read route diffs against the inventory. Undefined
@@ -89,15 +89,15 @@ export interface TenantFamily {
   tenantRegistrations?: TenantRegistrations;
   /** The build half of that scan (#241). Undefined when the family is not configured. */
   orphanBuilds?: () => Promise<OrphanBuildView[]>;
-  /** Bring the catalog's books branch into being and to the catalog's trunk, so the tenant
+  /** Bring the deploy repository's books branch into being and to its trunk, so the tenant
    *  ApplicationSet's git generator has a revision to resolve before the first tenant exists and the
    *  member charts on that revision are the current ones. It crosses as a closure because buildUnits
    *  is synchronous and the boot that awaits it is not. Undefined when the family is not configured —
-   *  there is then no catalog to write into. */
+   *  there is then no deploy repository to write into. */
   carryTrunkToBooksBranch?: () => Promise<void>;
 }
 
-// ---- Tenant (multi-app) onboarding: catalog + the manager-side HelmRenderer ----
+// ---- Tenant (multi-app) onboarding: the deploy repository + the manager-side HelmRenderer ----
 export function buildTenantOnboarding(
   config: Config,
   /** The credential store: the tenant family's reader opens a sealed credential from it — a
@@ -126,7 +126,7 @@ export function buildTenantOnboarding(
   /** The unit check's slot (plugins/unit/server/check-units.ts): the tenant family registers its own
    *  probes into it, beside the ones the other family registered. */
   unitProbes: UnitProbes[],
-  /** The platform's GitHub App — the identity the catalog is read and written with, and a tenant's
+  /** The platform's GitHub App — the identity the deploy repository is read and written with, and a tenant's
    *  own repository is created with. */
   githubApp: GitHubApp,
 ): TenantFamily {
@@ -142,20 +142,20 @@ export function buildTenantOnboarding(
   // deploy.identity says whether the App reaches the deploy repository.
   const openDeployToken = async (): Promise<Buffer> => Buffer.from(await githubApp.installationToken(), "utf8");
 
-  // The reader clones the catalog and the apps template under the catalog's own read credential,
+  // The reader clones the deploy repository and the apps template under the deploy repository's own read credential,
   // and a tenant's OWN repository under the credential its build registration names: the one id
   // names the configured token, every other id is opened from the store — a `github-app` id by
   // minting the App's token at the open.
   const repo = new GitRepoReader({ openCredential: (id) => (id === DEPLOY_READ_CREDENTIAL_ID ? openDeployToken() : store.open(id, { purpose: "tenant-apps-read" })) });
   // ONE INSTALLATION, ONE BOOKS BRANCH NAME, IN BOTH REPOSITORIES, so the name is taken off the
   // platform repo rather than resolved a second time here and the two can never disagree. In
-  // catalog it is the revision every member chart is read at — by the Manager below and by every
+  // the deploy repository it is the revision every member chart is read at — by the Manager below and by every
   // member Application (hostyour-cloud clusters/argocd/files/tenants-appset.yaml), which is one
   // revision because ArgoCD's repo-server generates nothing for an Application naming one
   // repository twice at two commits.
   const books = platformRepo.booksBranch;
   const helm = new HelmCliRenderer(); // trusted first-party charts render manager-side (no sandbox)
-  // A SECOND GitPlatformRepo, bound to catalog, with a DISTINCT workRoot: worktreeDir keys only
+  // A SECOND GitPlatformRepo, bound to the deploy repository, with a DISTINCT workRoot: worktreeDir keys only
   // on the branch, and the two repos' books branches carry the SAME name, so sharing the consumer
   // onboard-git root would put two repositories in one worktree. commitPush opts into a bounded
   // exponential backoff because many tenant lifecycle runs plus Tekton's own deploy-bump commits
@@ -163,16 +163,16 @@ export function buildTenantOnboarding(
   const deployRepo = new GitPlatformRepo({
     platformRepoURL: repoURL,
     booksBranch: books,
-    // catalog has no installer and no stamper, so this adapter is the only thing that can bring
+    // the deploy repository has no installer and no stamper, so this adapter is the only thing that can bring
     // the branch its tenant ApplicationSet generators read into being, and the only thing that can
-    // bring the catalog's trunk into it afterwards (adapters/git/git.ts).
+    // bring the deploy repository's trunk into it afterwards (adapters/git/git.ts).
     carriesTrunkToBooksBranch: true,
     workRoot: join(config.dataDir, "tenant-git"),
     credentialId: "deploy-write-pat",
     openCredential: openDeployToken,
     pushBackoff: { retries: 6, baseDelayMs: 250, maxDelayMs: 8_000 },
   });
-  // Bring the books branch into being, and to the catalog's trunk, at BOOT. Two reasons, and the
+  // Bring the books branch into being, and to the deploy repository's trunk, at BOOT. Two reasons, and the
   // act is one call (adapters/git/git.ts carryTrunkToBooksBranch).
   //
   // INTO BEING, rather than at the first tenant registration: the tenant ApplicationSet's git
@@ -184,10 +184,10 @@ export function buildTenantOnboarding(
   // installation teaches the reader to ignore the colour.
   //
   // TO THE TRUNK, because every member Application reads its CHART off this branch and not off the
-  // catalog's trunk — one repository at one revision, or ArgoCD's repo-server generates no manifest
+  // deploy repository's trunk — one repository at one revision, or ArgoCD's repo-server generates no manifest
   // at all. Nothing else in any repository merges the trunk into it, so without this call an
   // installation would run the member charts of the day its books branch was born, forever. THIS IS
-  // THE ONLY MOMENT AN INSTALLATION MOVES ONTO NEWER MEMBER CHARTS: a change on the catalog's trunk
+  // THE ONLY MOMENT AN INSTALLATION MOVES ONTO NEWER MEMBER CHARTS: a change on the deploy repository's trunk
   // reaches a tenant at the Manager's next boot and at no other time.
   const carryTrunkToBooksBranch = (): Promise<void> => deployRepo.carryTrunkToBooksBranch();
   const tenantRegistrations = new TenantRegistrations(deployRepo);
@@ -225,7 +225,7 @@ export function buildTenantOnboarding(
     resolver,
     deployRepoUrl: repoURL,
     // The platform GitOps repo — a member Application's `$values` chain comes from it, so the member's
-    // AppProject must allow it next to catalog.
+    // AppProject must allow it next to the deploy repository.
     platformRepoURL,
     deployCredentialId: DEPLOY_READ_CREDENTIAL_ID, // activates askpass on the validation clone
     carryTrunkToBooksBranch,
@@ -260,11 +260,11 @@ export function buildTenantOnboarding(
     githubApp,
   };
   // The create-tenant wizard's app catalog: the SAME reader + read credential validateTenant clones
-  // the catalog with, on the books branch, and the apps template (tenant.appsRepo) read with that
+  // the deploy repository with, on the books branch, and the apps template (tenant.appsRepo) read with that
   // same credential (app-catalog.ts), cached with a short TTL and fail-soft (a fetch error logs +
   // serves no apps or the stale set, so the wizard never blank-screens). The branch and not the
   // trunk, so the wizard offers what this installation can actually deploy: a chart that reached
-  // the catalog's trunk after the last carry is not on the branch the member Application would read
+  // the deploy repository's trunk after the last carry is not on the branch the member Application would read
   // it from.
   const appCatalog = makeAppCatalogProvider({
     repo,
@@ -295,7 +295,7 @@ export function buildTenantOnboarding(
     // same registrations the onboarding wrote; the repository stands (#241).
     githubApp,
     buildRegistrations: registrations,
-    // What accounts for a build-only registration beside a tenant's bundle: the catalog's own build
+    // What accounts for a build-only registration beside a tenant's bundle: the deploy repository's own build
     // units, read off its books branch at every scan (#241).
     deployBuildUnits: async (signal) => ((await readTenantSpec(onboardPorts, signal ? { signal } : {}))?.buildRepos ?? []).map((b) => unitNameFromRepoURL(b.repo)),
   };
@@ -331,9 +331,9 @@ export function buildTenantOnboarding(
     makeTenantSetApprovedTagDef(onboardPorts),
     // The tenant's sender domain: the product's manifest names the check, the public probe asks it.
     makeTenantSetSenderDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe }),
-    // The tenant's own apps repository, created from the catalog's apps bundle through the GitHub App
+    // The tenant's own apps repository, created from the deploy repository's apps bundle through the GitHub App
     // and onboarded build-only through the consumer family's chain (the same late-handed ports the
-    // build units ride) — the SAME port set, because it reads the catalog and the template the way
+    // build units ride) — the SAME port set, because it reads the deploy repository and the template the way
     // create-tenant does.
     makeTenantAppsRepoDef(onboardPorts),
     makeRemoveAppDef(lifecyclePorts),
@@ -362,7 +362,7 @@ export function buildTenantOnboarding(
   ].map((d) => d as unknown as AnyRunDefinition);
 
   // appCatalog + resolver + the repo URL + the registrations ride out so registerTenantRoutes can serve GET
-  // /api/tenants/app-catalog from the same catalog reader the runs validate through, resolve
+  // /api/tenants/app-catalog from the same deploy repository reader the runs validate through, resolve
   // per-cluster access AND the fan-out's pin for the per-tenant live reconciliation read
   // (GET /api/tenants/:id/live), and scan the LIVE tenant pointers for orphans (GET /api/tenants/orphans)
   // through the very registrations the runs commit pointers with — all the same instances (and the same one

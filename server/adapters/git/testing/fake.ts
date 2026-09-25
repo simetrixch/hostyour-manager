@@ -22,7 +22,7 @@ export interface FakeRepoReaderScript {
 export class FakeRepoReader implements RepoReader {
   readonly clones: { repoURL: string; ref: string; credentialId?: string }[] = [];
   /** A script per repository URL, for a test whose one reader clones several repositories (the
-   *  catalog, the apps template, a tenant's own repository); a URL scripted here is served from it,
+   *  the deploy repository, the apps template, a tenant's own repository); a URL scripted here is served from it,
    *  every other from the default script. */
   private readonly byURL = new Map<string, FakeRepoReaderScript>();
 

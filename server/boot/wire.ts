@@ -137,7 +137,7 @@ export async function wire(): Promise<Wired> {
   phase("database");
   // The credential store, the GitHub App identity, the master's kube access and the platform repo,
   // built the way every process of the product builds them (boot/core.ts). The App's client is held
-  // by more than the store: the tenant family reads and writes the catalog and creates a tenant's own
+  // by more than the store: the tenant family reads and writes the deploy repository and creates a tenant's own
   // repository with it, and the readiness checks below name the owner it is installed with.
   const core = buildCore(config, logger, db.db);
   const { store, githubApp, platformRepo } = core;
@@ -363,7 +363,7 @@ export async function wire(): Promise<Wired> {
       registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });
       registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });
       // Tenant (multi-app) onboarding routes — the SAME thin shape, gated on the tenant family's own
-      // flag (the catalog PAT). Registered right after the consumer routes; the read
+      // flag (DEPLOY_REPO). Registered right after the consumer routes; the read
       // path (tenant list/detail) stays live, the mutating triggers answer 501 until tenantEnabled.
       registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: units.tenantEnabled, ...(units.tenantResolver ? { resolver: units.tenantResolver } : {}), ...(units.deployRepoUrl ? { deployRepoUrl: units.deployRepoUrl } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.activator ? { activator: units.activator } : {}), ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.orphanBuilds ? { orphanBuilds: units.orphanBuilds } : {}), ...(units.resolveUnitApex ? { resolveUnitApex: units.resolveUnitApex } : {}) });
       // The tenant's own apps repository: the run that creates and builds it, gated like the tenant routes.

@@ -69,7 +69,7 @@ export interface BranchScope {
 export interface PlatformRepo {
   /** The branch THIS installation keeps its books on IN THIS REPOSITORY (shared/branches.ts): the
    *  cluster maps and consumer registrations in hostyour-cloud, the tenant registrations in
-   *  catalog. Resolved ONCE where the ports are built (boot/wire-units.ts) from the FQDN of
+   *  the deploy repository. Resolved ONCE where the ports are built (boot/wire-units.ts) from the FQDN of
    *  the cluster holding the master role, and bound to the instance rather than passed per call, so
    *  the branch a domain writes to and the branch this adapter may CREATE are the same one statement.
    *  Never `master`: the trunk carries the product, and a registration on it belongs to no

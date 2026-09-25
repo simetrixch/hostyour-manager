@@ -61,7 +61,7 @@ export function makeOrigin(): { originDir: string; originURL: string; seed: stri
   return { originDir, originURL: pathToFileURL(originDir).href, seed, sha: git(seed, "rev-parse", "HEAD").trim() };
 }
 
-/** A bare file:// origin carrying ONLY the trunk — the state the tenant catalog is in before any
+/** A bare file:// origin carrying ONLY the trunk — the state the deploy repository is in before any
  *  installation exists: one branch, `master`, with the product on it and no books anywhere. */
 export function makeTrunkOnlyOrigin(): { originDir: string; originURL: string; seed: string; trunkSha: string } {
   const root = newRoot();
@@ -77,7 +77,7 @@ export function makeTrunkOnlyOrigin(): { originDir: string; originURL: string; s
   return { originDir, originURL: pathToFileURL(originDir).href, seed, trunkSha: git(seed, "rev-parse", "HEAD").trim() };
 }
 
-/** One more commit on that origin's trunk — a chart the catalog gained after an installation's books
+/** One more commit on that origin's trunk — a chart the deploy repository gained after an installation's books
  *  branch was born. Returns the new trunk head. */
 export function advanceTrunk(seed: string, chart: string): string {
   writeFileSync(join(seed, "charts", `${chart}.yaml`), `name: ${chart}\n`);

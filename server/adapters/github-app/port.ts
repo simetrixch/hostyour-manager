@@ -35,7 +35,7 @@ export interface GitHubApp {
   identityFingerprint(): string;
   /** The owner this installation is bound to (GET /app/installations/{id} → account.login),
    *  read once and kept — an installation does not move between owners. What the readiness
-   *  row names, and what a plan holds the catalog's own `appsOrg` against. */
+   *  row names, and what a plan holds the deploy repository's own `appsOrg` against. */
   installationOrg(signal?: AbortSignal): Promise<string>;
   /** IDEMPOTENT create (POST /orgs/{org}/repos): {created:true} for a new repository, {created:false}
    *  when one of that name already stands — GitHub answers that with a 422 naming the field, and a

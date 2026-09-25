@@ -1,8 +1,8 @@
 // The Manager's HelmRenderer port — the tenant validation engine.
 // Unlike the consumer path, which renders UNTRUSTED charts inside the credential-free
 // gate-runner sandbox, the tenant fan-out charts are trusted first-party charts living in
-// catalog, so the Manager renders them itself: the concrete adapter (helm.ts) shells
-// `helm template` over a cloned catalog workdir, flattens List/aggregates the same way the
+// the deploy repository, so the Manager renders them itself: the concrete adapter (helm.ts) shells
+// `helm template` over a cloned deploy repository workdir, flattens List/aggregates the same way the
 // sandbox does (gate-runner/src/render-docs.ts parseRenderedDocs), and hands back the rendered docs
 // for the tenant gates (gateT2Render/gateT3Isolation) to inspect. The fake
 // (testing/fake.ts) scripts docs/errors for the domain tests.
@@ -31,7 +31,7 @@ export interface RenderedDoc {
  *  LAST as the highest-precedence override (helm has no inline-object flag that round-trips nested
  *  values cleanly). Paths travel as an argv array — never a shell string. */
 export interface HelmRenderRequest {
-  workdir: string; // the cloned catalog checkout the chart lives in (execFile cwd)
+  workdir: string; // the cloned deploy repository checkout the chart lives in (execFile cwd)
   chartPath: string; // chart dir, workdir-relative (e.g. "charts/example-auth")
   valueFiles: string[]; // -f layers, in precedence order (CHART-relative; the adapter joins onto chartPath)
   valuesObject?: Record<string, unknown>; // an extra highest-precedence override layer

@@ -1,6 +1,6 @@
 // The real HelmRenderer behind port.ts — the tenant validation engine.
 // Shells `helm template` via execFile (an argv array, NEVER a shell, so a chart path or release
-// name can never be interpreted by a shell) over a cloned catalog workdir, then flattens the
+// name can never be interpreted by a shell) over a cloned deploy repository workdir, then flattens the
 // multi-document YAML stream into RenderedDocs.
 //
 // The flatten mirrors the gate-runner's parseRenderedDocs (gate-runner/src/render-docs.ts),
@@ -103,7 +103,7 @@ export function parseHelmDocs(yamlStream: string): RenderedDoc[] {
 
 /** Build the `helm template` argv. valueFiles are CHART-relative (the ArgoCD Helm-source semantics:
  *  a source's valueFiles resolve against its `path`), so each is JOINED onto chartPath here — the
- *  execFile cwd is the REPO root (the cloned catalog workdir), and a bare `-f values.yaml`
+ *  execFile cwd is the REPO root (the cloned deploy repository workdir), and a bare `-f values.yaml`
  *  would resolve there and fail with helm's "open values.yaml: no such file or directory" for every
  *  fan-out member (confirmed live against the deployed manager: T1 pass, every render FAILED).
  *  `overrideFile` is the staged valuesObject temp file, layered LAST (highest precedence).
@@ -111,7 +111,7 @@ export function parseHelmDocs(yamlStream: string): RenderedDoc[] {
  *  with CRDs included (helm.skipCrds=false by default), but plain `helm template` omits crds/, so
  *  without it a chart's crds/ content (applied verbatim by helm) would deploy unvalidated.
  *  --dependency-update so a chart's DECLARED dependencies are resolved into the clone's own charts/
- *  before the render, which is what ArgoCD's repo-server does at deploy time. The tenant catalogue's
+ *  before the render, which is what ArgoCD's repo-server does at deploy time. The deploy repository's
  *  member charts depend on a sibling library chart as file://../<lib> and ignore the package and the
  *  lock on purpose, so a clean clone carries the library's source and never its package; plain
  *  `helm template` refuses such a chart outright ("found in Chart.yaml, but missing in charts/

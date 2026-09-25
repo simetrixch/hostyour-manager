@@ -70,7 +70,7 @@ describe("GitPlatformRepo", () => {
   const BOOKS = "m1.example.com";
 
   // The branch this adapter may create and carry the trunk into is its own subject, in
-  // git-books-branch.test.ts; here it is on, because that is the shape the tenant catalog is built in.
+  // git-books-branch.test.ts; here it is on, because that is the shape the deploy repository is built in.
   function makeRepo(originURL: string): GitPlatformRepo {
     return new GitPlatformRepo({ platformRepoURL: originURL, booksBranch: BOOKS, carriesTrunkToBooksBranch: true, workRoot: join(newRoot(), "work"), allowFileURLs: true });
   }

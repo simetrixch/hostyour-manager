@@ -126,9 +126,9 @@ export function singleSourceRevision(s: ArgoAppStatus): string | null {
  *
  *  WHY per-repo and never `sources[0]`. The generated consumer Application's
  *  source 0 is the GitOps repo pinned to the install BRANCH, so the Consumers card read a branch name
- *  where it wanted a SHA; and the tenant base Application's sole source is catalog, which the
+ *  where it wanted a SHA; and the tenant base Application's sole source is the deploy repository, which the
  *  tenant card matched by luck of ordering rather than by asking. Both now ASK, with the repo they
- *  already know (the consumer's apps.repoUrl, the tenant's platform-constant catalog URL), so a
+ *  already know (the consumer's apps.repoUrl, the tenant's platform-constant deploy repository URL), so a
  *  second source appearing on either can never silently change what the card calls "the pin". */
 export function targetedRevisionFor(s: ArgoAppStatus, repoURL: string): string | null {
   if (s.targetSources !== undefined) {
