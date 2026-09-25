@@ -294,6 +294,28 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
     expect(buildPlane.releaseWatches).toEqual([{ unit: "example-jobs", version: "0.1.0", channel: "stable" }]);
     expect(logs.some((l) => l.includes("build unit example-jobs done"))).toBe(true);
   });
+  it("attests a registered unit's builds again before its release, as its manifest declares them now", async () => {
+    seedClusters();
+    const buildPlane = new FakeBuildPlane();
+    buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-2", releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
+    const onboard = onboardPorts({
+      repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": JOBS_MANIFEST_YAML } }),
+      buildPlane,
+    });
+    // The unit stands registered with a build its manifest no longer declares (a renamed image).
+    await onboard.registrations.commitRegistration({
+      unit: { name: "example-jobs", repoURL: JOBS_REPO, owner: "team-acme", onboardedAt: "2026-01-01T00:00:00.000Z", suspended: false, quiesced: false },
+      builds: ["example-jobs-old"], runId: "run_old",
+    });
+    const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: true, form: "build-only" as const };
+    const logs: string[] = [];
+    await buildUnitStep(() => ({ ports: onboard }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit).run(ctx(params(), logs, []));
+    const standing = await onboard.registrations.readBuildRegistration("example-jobs");
+    expect(standing?.entry.builds).toEqual(["example-jobs"]);
+    expect(standing?.entry.onboardedAt).toBe("2026-01-01T00:00:00.000Z"); // the rest of the registration stands as it was
+    expect(logs.some((l) => l.includes("builds attested again"))).toBe(true);
+  });
+
   // The rule of #220 on the tenant path: a unit the App reaches is reached with the App's one row, one
   // it does not with its owner's repository PAT row, and one whose owner records nothing refuses.
   it("reaches a unit the App reaches with the App's row, one it does not with the owner's repository PAT row, and refuses one of an unrecorded owner", async () => {

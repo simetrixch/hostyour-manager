@@ -7,12 +7,15 @@ import { guid as guidSchema, TenantMemberRecordSchema, type TenantMemberRecord }
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
-import { RequiredImageSchema, requiredImagesFrom, ensureImagesStep } from "./ensure-images.ts";
+import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { assertDeployState, loadTenantCluster } from "./lifecycle.ts";
 import { tenantSyncUnits } from "./build-rbac.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
-import { provisionArgoSyncStep } from "./tenant-builds.ts";
+import { BuildUnitSchema, buildUnitStep, planBuildUnits, provisionArgoSyncStep, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
+import { probeBuildUnit } from "./tenant-probes.ts";
+import type { ProbeCtx } from "../../executor/probe.ts";
+import { readOwnerIdentity } from "./owners.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
@@ -28,8 +31,13 @@ import { isDeepStrictEqual } from "node:util";
 //
 // WHAT IT DOES NOT DO. It changes entries, never the member set: a member the manifest adds, drops or
 // renames is a new namespace, AppProject and Application, which is create-tenant's and add-app's work,
-// and the plan refuses it. It builds no image either: an image the new render pulls must already stand
-// in the registry, which ensure-images proves before anything is written.
+// and the plan refuses it.
+//
+// THE IMAGES. An image the new render pulls and the registry lacks is built first, the way create-tenant
+// and add-app build theirs: the product's tenant.buildRepos names the unit that builds it, the unit's
+// release is re-run (its builds attested again as its manifest declares them now) and pins the image on
+// the books branch, the fan-out is rendered again at those pins, and ensure-images proves every image
+// before anything is written.
 //
 // THE KNOWN GAP. From the carry of the product's change into the books branch until this run's write
 // has synced, a member whose chart moved does not answer: the registration still names the old chart.
@@ -59,6 +67,16 @@ export const TenantRefreshMembersParams = z.object({
   expectedApps: z.array(z.string().min(1)).min(1),
   requiredImages: z.array(RequiredImageSchema),
   syncUnits: z.array(z.string()),
+  /** What the image steps render the fan-out with again after a build: the tenant's own facts. */
+  subdomain: z.string().min(1),
+  owner: z.string().min(1),
+  apps: z.array(z.object({ name: z.string(), seedReference: z.boolean(), seedDemo: z.boolean(), selections: z.record(z.string(), z.boolean()) })),
+  seedUsers: z.boolean(),
+  /** The tenant's own apps bundle and the tag it stands at ("" where it has none). */
+  appsImage: z.string(),
+  appsImageTag: z.string(),
+  /** The units that build what the registry lacks, resolved at plan time (planBuildUnits). */
+  buildUnits: z.array(BuildUnitSchema).default([]),
 });
 export type TenantRefreshMembersParams = z.infer<typeof TenantRefreshMembersParams>;
 
@@ -139,6 +157,8 @@ async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefres
 }
 
 function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Step[] {
+  // The bundle stands built at its recorded tag: a render again after a unit's build mounts it there.
+  const runtime: TenantBuildRuntime = p.appsImage ? { appsImageTag: p.appsImageTag } : {};
   return [
     {
       name: "attest-target",
@@ -149,11 +169,21 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         ctx.log("meta", `target ${p.domain} attested for ${p.guid} at ${p.stage} — deploy-state generation ${state.generation}`);
       },
     },
-    // Every image the new render pulls stands in the registry before a single entry changes.
-    ensureImagesStep(ports, { registryHost: p.registryHost, requiredImages: p.requiredImages }),
+    // The units that build what the registry lacks, before anything of the tenant is written.
+    ...(p.buildUnits ?? []).map((unit) => ({
+      ...buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage }, unit),
+      probe: (ctx: ProbeCtx) => probeBuildUnit(() => ports.onboard?.(), ports, p, unit, ctx),
+    })),
+    // Every image the new render pulls stands in the registry before a single entry changes; after a
+    // build, the render is taken again at the pins the build wrote.
+    ...tenantImageSteps(ports, {
+      guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: p.apps, seedUsers: p.seedUsers,
+      registryHost: p.registryHost, requiredImages: p.requiredImages, buildUnits: p.buildUnits,
+      ...(p.appsImage ? { appsImage: p.appsImage } : {}),
+    }, runtime),
     // The grant names the units whose builds the new render pulls, so a release of theirs may sync
     // this tenant; the member Applications it names are the same as before.
-    provisionArgoSyncStep(ports, { guid: p.guid, clusterId: p.clusterId, expectedApps: p.expectedApps, syncUnits: p.syncUnits }, {}),
+    provisionArgoSyncStep(ports, { guid: p.guid, clusterId: p.clusterId, expectedApps: p.expectedApps, syncUnits: p.syncUnits }, runtime),
     {
       name: "write-members",
       title: "Write the resolved member entries into the registration",
@@ -271,6 +301,12 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       const changed = members.filter((m) => !sameMembers([m], previous.filter((b) => b.name === m.name)));
       if (changed.length === 0) throw errValidation(`every member entry of tenant ${tc.guid} already matches the product's manifest at ${outcome.resolvedSha.slice(0, 7)} — nothing to refresh`);
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
+      const planned = await planBuildUnits({
+        requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage: appsImage || undefined,
+        probe: ports.registryProbe, registration: ports.buildUnitRegistration ?? (async () => null), githubApp: ports.githubApp,
+        owners: (org) => readOwnerIdentity(ctx.db, org), stage: tc.stage, subdomain, signal: ctx.signal, log: ctx.log,
+      });
+      if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
       const params: TenantRefreshMembersParams = {
         tenantId: tc.tenantId,
         guid: tc.guid,
@@ -284,6 +320,8 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         expectedApps: members.map((m) => memberApplication(tc.guid, m.name, tc.stage)),
         requiredImages,
         syncUnits: tenantSyncUnits(requiredImages, await ports.attestedBuilds()),
+        subdomain, owner: tc.owner, apps, seedUsers, appsImage, appsImageTag: appsImageTag ?? "",
+        buildUnits: planned.builds.units,
       };
       const steps = tenantRefreshMembersSteps(ports, params);
       const plan: Plan = {
@@ -293,12 +331,13 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         summary:
           `Refresh the members of tenant ${tc.guid} on ${tc.domain} (${tc.stage}) from the product's manifest at ${outcome.resolvedSha.slice(0, 7)}: ` +
           `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` +
+          `${planned.builds.units.length ? `First the build unit(s) ${planned.builds.units.map((u) => `${u.unit} (${u.images.join(", ")})`).join("; ")} release their next version and pin it. ` : ""}` +
           `Every image the new render pulls must stand in the registry; then the entries are written and every member must sync. ` +
           `A member whose chart moved does not answer from the carry of the product's change into the books branch until its Application syncs here.`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
-        warnings: [],
+        warnings: planned.builds.warnings,
         requiredSecrets: [],
       };
       return { outcome: "planned", params, plan };

@@ -21,6 +21,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
+import { buildUnitStepName } from "./tenant-builds.ts";
 
 // tenant-refresh-members: the plan resolves the members again off the product's manifest and names
 // what changes, refuses a tenant with nothing to change or a changed member set, and the steps write
@@ -107,9 +108,9 @@ class SteppingArgo extends FakeMasterArgoReader {
 const IMAGE = `${REGISTRY_HOST}/example-app:1.0.0`;
 const DEPLOYMENT = { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "app", image: IMAGE }] } } } };
 
-function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; carried?: string[]; carry?: () => Promise<void> } = {}): TenantOnboardPorts {
+function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; carried?: string[]; carry?: () => Promise<void>; manifest?: string } = {}): TenantOnboardPorts {
   return withAppsTemplate({
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
+    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.manifest ?? MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment", { raw: DEPLOYMENT })] } }),
     registrations: new TenantRegistrations(platformRepo(members)),
     resolver: new FakeClusterKubeResolver({
@@ -212,14 +213,22 @@ describe("tenant-refresh-members", () => {
     await expect(makeTenantRefreshMembersDef(ports(staleMembers())).planStream!({ tenantId: "tnt_1" }, planCtx())).rejects.toThrow(/suspended/);
   });
 
-  it("fails at ensure-images, before any entry is written, when an image of the new render is not in the registry", async () => {
+  it("builds a missing image the product's buildRepos names ahead of ensure-images, and refuses one nobody builds", async () => {
     seedTenant();
-    const prt = ports(staleMembers(), { missing: ["example-app:1.0.0"] });
-    const p = await planned(prt);
-    expect(p.requiredImages.length).toBeGreaterThan(0);
-    const steps = makeTenantRefreshMembersDef(prt).steps(p);
-    const ensure = steps.find((s) => s.name === "ensure-images")!;
-    await expect(ensure.run(stepCtx(p, [], []))).rejects.toThrow(/example-app/);
+    const PLATFORM_REPO = "https://github.com/acme/example-platform.git";
+    const withRepos = ports(staleMembers(), { missing: ["example-app:1.0.0"], manifest: MANIFEST_YAML.replace("  members:", `  buildRepos:
+    - repo: ${PLATFORM_REPO}
+      builds: [example-app]
+  members:`) });
+    const p = await planned(withRepos);
+    expect(p.buildUnits).toEqual([{ unit: "example-platform", repoURL: PLATFORM_REPO, images: ["example-app"], registered: false }]);
+    const names = makeTenantRefreshMembersDef(withRepos).steps(p).map((s) => s.name);
+    expect(names.indexOf(buildUnitStepName("example-platform"))).toBe(1);
+    expect(names.indexOf(buildUnitStepName("example-platform"))).toBeLessThan(names.indexOf("ensure-images"));
+    expect(names.indexOf("ensure-images")).toBeLessThan(names.indexOf("write-members"));
+    const nobody = await makeTenantRefreshMembersDef(ports(staleMembers(), { missing: ["example-app:1.0.0"] })).planStream!({ tenantId: "tnt_1" }, planCtx());
+    expect(nobody.outcome).toBe("rejected");
+    if (nobody.outcome === "rejected") expect(nobody.summary).toMatch(/buildRepos names no repository.*example-app:1\.0\.0/);
   });
 
   it("does not take a member Synced + Healthy on its old entry for one that rendered the new entry", async () => {
