@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { execFile, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { RELEASE_KIT_FILES } from "./release-kit.ts";
@@ -135,7 +135,7 @@ function normalise(text: string, root: string): string {
  *  difference between two runs is which spelling performed it. `core.autocrlf false` keeps git's own
  *  normalisation warnings — a property of the developer's global configuration, not of these
  *  scripts — out of a comparison that is about what the two spellings print. */
-function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; origin?: boolean; dirty?: boolean }): Fixture {
+function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; workspace?: boolean; origin?: boolean; dirty?: boolean }): Fixture {
   const base = tempDir();
   const work = join(base, "work");
   mkdirSync(work);
@@ -152,6 +152,13 @@ function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; origin?: 
     writeFileSync(join(work, "deploy", "platform.yaml"), opts.manifest);
   }
   if (opts.packageJson) writeFileSync(join(work, "package.json"), '{\n  "name": "probe",\n  "version": "0.0.1"\n}\n');
+  if (opts.workspace) {
+    // Two packages beside the root: one that declares a version, one that declares none.
+    mkdirSync(join(work, "packages", "a"), { recursive: true });
+    mkdirSync(join(work, "packages", "b"), { recursive: true });
+    writeFileSync(join(work, "packages", "a", "package.json"), '{\n  "name": "a",\n  "version": "0.1.0",\n  "dependencies": { "x": "1.0.0" }\n}\n');
+    writeFileSync(join(work, "packages", "b", "package.json"), '{\n  "name": "b"\n}\n');
+  }
   git("add", "-A");
   git("commit", "-qm", "init", "--allow-empty");
   if (opts.origin) {
@@ -358,6 +365,22 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     ].join("\n"));
     // git's own push lines are on standard error, and they are the same on both sides too.
     expect(stderr).toContain("deploy/dev/1.2.3-stable-<ts14>");
+  });
+
+  it("stamps every package.json the repository tracks in the one release commit, identically", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, workspace: true, origin: true }), ["1.2.3", "stable", "dev"]);
+    const { stdout } = expectSameBytes(o);
+    expect(stdout.split("\n").slice(0, 3)).toEqual([
+      "release: packages/b/package.json declares no version - nothing to stamp",
+      "release: package.json declares 1.2.3",
+      "release: packages/a/package.json declares 1.2.3",
+    ]);
+    for (const f of [o.sh, o.ps1]) {
+      const shown = run("git", ["show", "--name-only", "--format=%s", "HEAD~0"], f.cwd).stdout;
+      expect(shown.split("\n").filter(Boolean)).toEqual([expect.stringMatching(/^release: 1\.2\.3-stable-\d{14}$/), "package.json", "packages/a/package.json"]);
+      expect(readFileSync(join(f.cwd, "packages", "a", "package.json"), "utf8")).toContain('"version": "1.2.3",\n  "dependencies": { "x": "1.0.0" }');
+      expect(readFileSync(join(f.cwd, "packages", "b", "package.json"), "utf8")).toBe('{\n  "name": "b"\n}\n');
+    }
   });
 
   // A RERUN FOR A VERSION THAT ALREADY STANDS ON ORIGIN, in its three shapes. A version names one

@@ -178,30 +178,39 @@ function Publish-BranchPin {
 # the tag, so a package.json still declaring an older number labels the artifact with a version
 # nobody released. The write happens BEFORE the tag is created: a tag placed first would point at
 # the commit that still carries the old number, and a release does not move a tag afterwards.
-# Only the FIRST "version" line is touched. That is the manifest's own; a version further down
-# belongs to a dependency and is not this release's to move.
-# A repository with no package.json, or one that declares no version, has nothing that could go
+# EVERY package.json the repository tracks is stamped, in the one commit: a workspace publishes its
+# packages at the numbers they declare, and a package left at an older number is skipped by a publish
+# that finds that number already published.
+# Only the FIRST "version" line of a file is touched. That is the manifest's own; a version further
+# down belongs to a dependency and is not this release's to move.
+# A repository with no package.json, or a file that declares no version, has nothing that could go
 # stale — that is said out loud and the release continues, because a unit written in another
 # language is the ordinary case for this script and not a broken one.
 function Set-ManifestVersion($Root, $Version, $Tag) {
-  $file = Join-Path $Root 'package.json'
-  if (-not (Test-Path -LiteralPath $file)) {
+  $manifests = @(git -C $Root ls-files -- 'package.json' '*/package.json')
+  if ($manifests.Count -eq 0) {
     Say 'this repository carries no package.json - no version manifest to stamp'
     return
   }
-  $text = [System.IO.File]::ReadAllText($file)
   $rx = [regex]'(?m)^(\s*)"version":\s*"[^"]*"'
-  if (-not $rx.IsMatch($text)) {
-    Say 'package.json declares no version - nothing to stamp'
-    return
+  $stamped = @()
+  foreach ($rel in $manifests) {
+    $file = Join-Path $Root $rel
+    $text = [System.IO.File]::ReadAllText($file)
+    if (-not $rx.IsMatch($text)) {
+      Say "$rel declares no version - nothing to stamp"
+      continue
+    }
+    $bumped = $rx.Replace($text, '$1"version": "' + $Version + '"', 1)
+    if ($bumped -eq $text) { continue }
+    [System.IO.File]::WriteAllText($file, $bumped)
+    git add -- $file
+    $stamped += $rel
   }
-  $bumped = $rx.Replace($text, '$1"version": "' + $Version + '"', 1)
-  if ($bumped -eq $text) { return }
-  [System.IO.File]::WriteAllText($file, $bumped)
-  git add -- $file
+  if ($stamped.Count -eq 0) { return }
   git commit --quiet -m "release: $Tag"
   if ($LASTEXITCODE -ne 0) { Die "the version bump to $Version could not be committed" }
-  Say "package.json declares $Version"
+  foreach ($rel in $stamped) { Say "$rel declares $Version" }
 }
 
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {

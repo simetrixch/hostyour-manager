@@ -78,26 +78,38 @@ die() { warn "$*"; exit 1; }
 # the tag, so a package.json still declaring an older number labels the artifact with a version
 # nobody released. The write happens BEFORE the tag is created: a tag placed first would point at
 # the commit that still carries the old number, and a release does not move a tag afterwards.
-# Only the FIRST "version" line is touched. That is the manifest's own; a version further down
-# belongs to a dependency and is not this release's to move.
-# A repository with no package.json, or one that declares no version, has nothing that could go
+# EVERY package.json the repository tracks is stamped, in the one commit: a workspace publishes its
+# packages at the numbers they declare, and a package left at an older number is skipped by a publish
+# that finds that number already published.
+# Only the FIRST "version" line of a file is touched. That is the manifest's own; a version further
+# down belongs to a dependency and is not this release's to move.
+# A repository with no package.json, or a file that declares no version, has nothing that could go
 # stale — that is said out loud and the release continues, because a unit written in another
 # language is the ordinary case here and not a broken one.
 stamp_manifest_version() {
-  file="$ROOT/package.json"
-  if [ ! -f "$file" ]; then
+  manifests=$(git -C "$ROOT" ls-files -- 'package.json' '*/package.json')
+  if [ -z "$manifests" ]; then
     say "this repository carries no package.json - no version manifest to stamp"
     return 0
   fi
-  if ! grep -qE '^[[:space:]]*"version":[[:space:]]*"' "$file"; then
-    say "package.json declares no version - nothing to stamp"
-    return 0
-  fi
-  sed -i '0,/^\([[:space:]]*\)"version":[[:space:]]*"[^"]*"/s//\1"version": "'"$VERSION"'"/' "$file"
-  git diff --quiet -- "$file" && return 0
-  git add -- "$file"
+  stamped=""
+  while IFS= read -r rel; do
+    file="$ROOT/$rel"
+    if ! grep -qE '^[[:space:]]*"version":[[:space:]]*"' "$file"; then
+      say "$rel declares no version - nothing to stamp"
+      continue
+    fi
+    sed -i '0,/^\([[:space:]]*\)"version":[[:space:]]*"[^"]*"/s//\1"version": "'"$VERSION"'"/' "$file"
+    git diff --quiet -- "$file" && continue
+    git add -- "$file"
+    stamped="$stamped$rel
+"
+  done <<EOF
+$manifests
+EOF
+  [ -z "$stamped" ] && return 0
   git commit --quiet -m "release: $TAG" || die "the version bump to $VERSION could not be committed"
-  say "package.json declares ${VERSION}"
+  printf '%s' "$stamped" | while IFS= read -r rel; do say "$rel declares ${VERSION}"; done
 }
 
 # Does this unit run on a cluster whose role is $1? A role names every PART the cluster carries —
