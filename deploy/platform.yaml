@@ -1,0 +1,3 @@
+name: probe-unit
+builds:
+  - name: probe
