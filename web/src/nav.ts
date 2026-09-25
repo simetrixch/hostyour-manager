@@ -16,12 +16,9 @@ export const NAV: readonly NavItem[] = [
   { path: "/servers", label: "Servers", icon: "servers" },
   { path: "/consumers", label: "Consumers", icon: "consumers" },
   { path: "/tenants", label: "Tenants", icon: "tenants" },
-  { path: "/sizes", label: "Sizes", icon: "sizes" },
   { path: "/branches", label: "Branches", icon: "branches" },
   { path: "/mail", label: "Mail", icon: "mail" },
-  { path: "/dns", label: "DNS", icon: "dns" },
   { path: "/reset", label: "Reset", icon: "reset" },
-  { path: "/settings", label: "Settings", icon: "settings" },
 ];
 
 /** A menu entry an active plugin brings, drawn with the plugin's own icon. */

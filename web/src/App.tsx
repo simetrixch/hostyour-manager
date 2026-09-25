@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route } from "react-router";
-import { UnitSizes } from "#unit/web/pages/UnitSizes.tsx";
 import { NavRail } from "./components/NavRail.tsx";
 import { TabBar } from "./components/TabBar.tsx";
 import { LogoMark } from "./components/icons.tsx";
@@ -10,8 +9,6 @@ import { OperatorKeys } from "./pages/OperatorKeys.tsx";
 import { RunDetail } from "./pages/RunDetail.tsx";
 import { Branches } from "./pages/Branches.tsx";
 import { Mail } from "./pages/Mail.tsx";
-import { Settings } from "#unit/web/pages/Settings.tsx";
-import { Dns } from "#unit/web/pages/Dns.tsx";
 import { ResetWizard } from "./pages/ResetWizard.tsx";
 import { Consumers } from "./pages/Consumers.tsx";
 import { ConsumerOnboard } from "./pages/ConsumerOnboard.tsx";
@@ -66,17 +63,14 @@ export function App() {
               <Route path="/servers/keys" element={<OperatorKeys />} />
               <Route path="/consumers" element={<Consumers />} />
               <Route path="/consumers/onboard" element={<ConsumerOnboard />} />
-              <Route path="/settings" element={<Settings />} />
               <Route path="/tenants" element={<Tenants />} />
               <Route path="/tenants/create" element={<TenantCreate />} />
               <Route path="/tenants/:id" element={<TenantDetail />} />
               {/* The global /runs list was removed; each section owns its runs. The
                   detail route stays — every plan-then-approve and "Last run →" navigates here. */}
               <Route path="/runs/:id" element={<RunDetail />} />
-              <Route path="/sizes" element={<UnitSizes />} />
               <Route path="/branches" element={<Branches />} />
               <Route path="/mail" element={<Mail />} />
-              <Route path="/dns" element={<Dns />} />
               <Route path="/reset" element={<ResetWizard />} />
               {pluginRoutes.map((r) => (
                 <Route key={r.path} path={r.path} element={r.element} />
