@@ -57,7 +57,8 @@ $ErrorActionPreference = 'Stop'
 # git's output is read, and this script's own is written, as UTF-8 — what the bash spelling reads and
 # writes — so a path with a non-ASCII byte is the same bytes on both sides.
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-# WHAT THIS SCRIPT PRINTS, AND WHO WRITES THE NEWLINE. Every printed line is ASCII and ends with the
+# WHAT THIS SCRIPT PRINTS, AND WHO WRITES THE NEWLINE. Every line it composes is ASCII, a path it names
+# is printed as UTF-8, and every line ends with the
 # one "`n" written here, because neither is the host's to choose. Write-Host and WriteLine end a line
 # with the HOST's ending, which on Windows is two bytes where the bash twin writes one; and
 # [Console]::Error.WriteLine writes in the console's CODE PAGE, which turned a printed em dash into a

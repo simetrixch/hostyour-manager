@@ -397,6 +397,8 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
       return f;
     }, ["1.2.3", "stable", "dev"]);
     const { stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(0);
+    expect(stdout).toContain("release: minted 1.2.3-stable-<ts14>\n");
     expect(stdout).not.toContain("declares");
     for (const f of [o.sh, o.ps1]) expect(run("git", ["log", "-1", "--format=%s"], f.cwd).stdout.trim()).toBe("at the version");
   });

@@ -61,7 +61,8 @@
 # ===========================================================================
 set -euo pipefail
 
-# WHAT THIS SCRIPT PRINTS, AND WHO WRITES THE NEWLINE. Every printed line is ASCII and ends with the
+# WHAT THIS SCRIPT PRINTS, AND WHO WRITES THE NEWLINE. Every line it composes is ASCII, a path it names
+# is printed as UTF-8, and every line ends with the
 # one \n written here, because neither is the host's to choose. A PowerShell host ends a line with
 # two bytes where a shell writes one, and [Console]::Error.WriteLine writes in the console's code
 # page, which turns a printed em dash into a different byte on a Windows console — so the twins
