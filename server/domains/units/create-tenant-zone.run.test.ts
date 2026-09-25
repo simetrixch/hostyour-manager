@@ -167,7 +167,7 @@ describe("create-tenant plans the zone before the first write", () => {
     seedClusters();
     dns.seed(WILDCARD, "CNAME", "s2.example"); // the old tenant's wildcard, provisioned at s2
     const prt = ports(dns);
-    await prt.registrations.commitTenant({ stage: "prod", guid: "e2e8ymj86dk8", runId: "run_old", registration: { cluster: "s2", subdomain: SUB, members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "" } });
+    await prt.registrations.commitTenant({ stage: "prod", guid: "e2e8ymj86dk8", runId: "run_old", registration: { cluster: "s2", subdomain: SUB, members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "" } });
     const result = await makeCreateTenantDef(prt).planStream!(REQUEST, planCtx([]));
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
@@ -215,7 +215,7 @@ describe("create-tenant plans the zone before the first write", () => {
     const prt = ports(dns);
     const p = CreateTenantParams.parse({
       guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: SHA, registryHost: "zot.m1.example",
-      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], owner: "team-acme", expectedApps: [], catalogRepoUrl: prt.catalogRepoUrl,
+      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, owner: "team-acme", expectedApps: [], catalogRepoUrl: prt.catalogRepoUrl,
       report: composeTenantReport({ resolvedSha: SHA, probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
     });
     const logs: string[] = [];

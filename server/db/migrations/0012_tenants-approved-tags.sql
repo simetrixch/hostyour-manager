@@ -1,0 +1,1 @@
+ALTER TABLE `tenants` ADD `approved_tags` text DEFAULT '{}' NOT NULL;

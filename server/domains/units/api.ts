@@ -27,6 +27,7 @@ import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.
 import { registerTenantRoutingRoutes } from "./api-tenant-routing.ts";
 import { registerTenantOwnDomainRoutes } from "./api-tenant-own-domain.ts";
 import { registerTenantRefreshMembersRoutes } from "./api-tenant-refresh-members.ts";
+import { registerTenantApprovedTagRoutes } from "./api-tenant-approved-tag.ts";
 import { scanClusterOrphanConsumers, scanDetectedConsumers } from "./consumer-detected.ts";
 // The channel ceiling is read from the ONE table in the platform repo, never restated here.
 import { readChannelStages, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
@@ -443,6 +444,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   registerTenantRoutingRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
   registerTenantOwnDomainRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
   registerTenantRefreshMembersRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
+  registerTenantApprovedTagRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
 
   // The tenant inventory: every onboarded tenant + which cluster it fans out on (JOIN clusters for
   // domain/stage). Always live — the read path never degrades on missing config.

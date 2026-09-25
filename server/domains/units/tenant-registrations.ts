@@ -327,6 +327,24 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, members: [...members] }, `refresh-members(${guid}): ${members.map((m) => m.name).join(", ")} ${trailer(runId)}`);
   }
 
+  /** The builds a chart's stage pin file names on the books branch (`<chart>/pins-<stage>.yaml`,
+   *  written by the release pipeline): what an approval for that chart may name. None where no
+   *  release of this installation has pinned the chart yet. */
+  async listPinnedBuilds(stage: Stage, chart: string): Promise<{ name: string; image: string }[]> {
+    const raw = await this.repo.withBranch(this.branch, (books) => books.readFile(`${chart}/pins-${stage}.yaml`));
+    if (raw === null) return [];
+    const builds = (parseYaml(raw) as { builds?: { name?: unknown; image?: unknown }[] } | null)?.builds ?? [];
+    return builds.flatMap((b) => (typeof b.name === "string" && typeof b.image === "string" ? [{ name: b.name, image: b.image }] : []));
+  }
+
+  /** Write the image tags approved for this tenant alone. One field of one file; writing what it
+   *  already carries commits nothing. tenant-set-approved-tag waits for the members around it. */
+  async setApprovedTags(stage: Stage, guid: string, approvedTags: Record<string, Record<string, string>>, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
+    return this.write(stage, guid, { ...current.entry, approvedTags }, `approved-tags(${guid}) ${trailer(runId)}`);
+  }
+
   /** Write the tenant's own apps bundle — the repository, the image it builds and the tag its last
    *  release built (shared/tenant.ts appsBundleFields), the three the fan-out mounts the tenant's
    *  bundle from. One field triple of one file, like the flips above; writing the same values

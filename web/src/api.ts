@@ -473,6 +473,8 @@ export interface TenantView {
   ownDomain: string;
   /** The hosts that redirect to the own domain; empty without one. */
   ownDomainRedirects: string[];
+  /** The image tags approved for this tenant alone: app -> build -> tag. */
+  approvedTags: Record<string, Record<string, string>>;
   seedUsers: boolean;
   suspended: boolean;
   owner: string | null;
@@ -643,6 +645,10 @@ export const migrateTenant = (tenantId: string, targetClusterId: string): Promis
  *  identity provider answers at its new address. */
 export const setTenantRouting = (tenantId: string, routing: MemberRouting): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/routing`, { routing });
+
+/** Plan tenant-set-approved-tag: run one app of one tenant at `tag` for `build` ("" follows the stage pin again). */
+export const setTenantApprovedTag = (tenantId: string, app: string, build: string, tag: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/approved-tags`, { app, build, tag });
 
 /** Plan tenant-refresh-members: every member entry resolved again off the product's manifest. */
 export const refreshTenantMembers = (tenantId: string): Promise<{ runId: string }> => post(`/api/tenants/${tenantId}/refresh-members`);

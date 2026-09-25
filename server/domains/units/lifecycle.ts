@@ -237,6 +237,8 @@ export interface TenantCluster {
   ownDomain: string;
   /** The hosts that redirect to the own domain; empty without one. */
   ownDomainRedirects: string[];
+  /** The image tags approved for this tenant alone, per app and build (shared/tenant.ts). */
+  approvedTags: Record<string, Record<string, string>>;
   /** The owner the tenant was onboarded under — what a bundle created later is onboarded under too. */
   owner: string;
 }
@@ -258,6 +260,7 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     routing: tenant.routing,
     ownDomain: tenant.ownDomain,
     ownDomainRedirects: tenant.ownDomainRedirects,
+    approvedTags: tenant.approvedTags,
     owner: tenant.owner ?? tenant.subdomain,
   };
 }

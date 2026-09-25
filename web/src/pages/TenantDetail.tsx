@@ -4,7 +4,7 @@ import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
   getTenant, getTenantAppCatalog, addTenantApp, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
-  setTenantSize, setTenantRouting, setTenantOwnDomain, refreshTenantMembers,
+  setTenantSize, setTenantRouting, setTenantOwnDomain, refreshTenantMembers, setTenantApprovedTag,
   backupTenant, restoreTenant, migrateTenant, listTenantTargets, listRuns,
   type TenantDetailView,
 } from "../api.ts";
@@ -16,6 +16,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { SetRoutingAction } from "../components/SetRoutingAction.tsx";
 import { SetOwnDomainAction } from "../components/SetOwnDomainAction.tsx";
+import { SetApprovedTagAction } from "../components/SetApprovedTagAction.tsx";
 import { TypeToConfirm } from "../components/TypeToConfirm.tsx";
 import { PurgeTenantDialog } from "../components/PurgeTenantDialog.tsx";
 import { RelocationTargetDialog } from "../components/RelocationTargetDialog.tsx";
@@ -294,6 +295,7 @@ export function TenantDetail() {
           {!unfinished && !t.suspended && <SetRoutingAction subdomain={t.subdomain} routing={t.routing} busy={busy} onRoute={(next) => void act(() => setTenantRouting(tenantId, next))} />}
           {!unfinished && !t.suspended && t.routing === "path" && <SetOwnDomainAction subdomain={t.subdomain} ownDomain={t.ownDomain} ownDomainRedirects={t.ownDomainRedirects} busy={busy} onSet={(domain, redirects) => void act(() => setTenantOwnDomain(tenantId, domain, redirects))} />}
           {!unfinished && !t.suspended && <button type="button" className="btn" disabled={busy} onClick={() => void act(() => refreshTenantMembers(tenantId))}>Refresh members</button>}
+          {!unfinished && !t.suspended && <SetApprovedTagAction subdomain={t.subdomain} approvedTags={t.approvedTags} busy={busy} onSet={(app, build, tag) => void act(() => setTenantApprovedTag(tenantId, app, build, tag))} />}
           {!unfinished && (
             <button type="button" className="btn" disabled={busy} onClick={() => setBackupT(t)}>
               Back up

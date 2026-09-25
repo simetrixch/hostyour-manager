@@ -36,6 +36,12 @@ export const appName = z.string().regex(/^[a-z][a-z0-9-]{0,28}[a-z0-9]$/);
  *  collision between the two kinds is exactly what has to be impossible. */
 export const memberName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/);
 
+/** A build's name, as a product's deploy/platform.yaml and tenant.buildRepos spell it. */
+export const buildName = z.string().regex(/^[a-z0-9-]+$/);
+
+/** An image tag the release pipeline pushes: the release tag and the commit, `<x.y.z>-<channel>-<ts14>-<sha7>`. */
+export const approvedImageTag = z.string().regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(alpha|beta|stable)-[0-9]{14}-[0-9a-f]{7}$/, "an image tag <x.y.z>-<channel>-<ts14>-<sha7>");
+
 /** ONE chart render of a member, RESOLVED — the chart, the extra value files and the values, with every
  *  `{app}` already substituted. Nothing here is composed by the platform: chart, file names and value
  *  keys all come out of the product's manifest. */
@@ -207,6 +213,12 @@ export const TenantRegistrationSchema = z
     // named by the operator in tenant-set-own-domain; empty where there is none and always empty
     // without an own domain. Defaulted to [] for every file written before the field existed.
     ownDomainRedirects: z.array(publicFqdn).default([]),
+    // The image tags approved for this tenant alone, per app and build: `<app> -> <build> -> <tag>`.
+    // The app key is the name every member chart receives as tenant.appName (the app for a per-app
+    // member, the member name for a standing one). A build with no approval follows the stage pin;
+    // an approval is cleared by removing its key, never by an empty value, which the charts refuse.
+    // Set only by tenant-set-approved-tag. Defaulted to {} for every file written before it existed.
+    approvedTags: z.record(memberName, z.record(buildName, approvedImageTag)).default({}),
     // The ceiling EVERY member namespace of this tenant is bounded by, resolved by the Manager from
     // its size table when it writes the registration and passed to hostyour-cloud/apps/unit-quota by the
     // tenant ApplicationSet. Per MEMBER and not per tenant, because a tenant owns one namespace per

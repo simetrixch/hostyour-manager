@@ -91,7 +91,7 @@ function seedTenantRow(status: TenantStatus): void {
 function registration(over: Partial<TenantRegistration> = {}): TenantRegistration {
   return {
     cluster: "s1", subdomain: SUB,
-    members: TEST_MEMBER_RECORDS, identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [],
+    members: TEST_MEMBER_RECORDS, identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {},
     apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     ...over,
