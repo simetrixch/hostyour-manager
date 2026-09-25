@@ -58,6 +58,12 @@ export function tenantMemberUrl(routing: MemberRouting, member: string, stage: S
   return routing === "path" ? `https://${ownDomain || zone}/${member}` : `https://${member}.${zone}`;
 }
 
+/** Every host a tenant answers at beside its zone: its own domain and the hosts that redirect to it;
+ *  none without an own domain. */
+export function tenantOwnHosts(ownDomain: string, ownDomainRedirects: readonly string[]): string[] {
+  return ownDomain === "" ? [] : [ownDomain, ...ownDomainRedirects];
+}
+
 /** The words no label and no subdomain may be: the stage words are the zones themselves, so a
  *  consumer labelled `dev` at prod would stand on the dev zone's apex. */
 export const RESERVED_HOST_LABELS: readonly string[] = STAGE;

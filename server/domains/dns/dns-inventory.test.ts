@@ -81,6 +81,17 @@ describe("readDnsInventory", () => {
     expect(view.rows.filter((r) => r.owner.kind === "tenant").map((r) => `${r.name} ${r.verdict}`)).toEqual(["gamma.example.net standing"]);
   });
 
+  it("lists an own domain's and its redirect hosts' records, each expected on the tenant's zone", async () => {
+    dns.seed("gamma.example.net", "CNAME", M1);
+    dns.seed("www.gamma.test", "CNAME", "gamma.example.net");
+    const view = await readDnsInventory(deps({ tenants: async (stage) => (stage === "prod" ? [{ subdomain: "gamma", routing: "path", ownDomain: "www.gamma.test", ownDomainRedirects: ["gamma.test"], cluster: "m1" }] : []) }));
+    expect(view.rows.filter((r) => r.owner.kind === "tenant").map((r) => `${r.name} ${r.expected} ${r.verdict}`)).toEqual([
+      `gamma.example.net ${M1} standing`,
+      "www.gamma.test gamma.example.net standing",
+      "gamma.test gamma.example.net absent",
+    ]);
+  });
+
   it("shows an address record standing where a unit's CNAME belongs as what it is — never as an absence", async () => {
     dns.seed("*.acme.example.net", "A", "157.90.201.150"); // what a gone installation left under the tenant's wildcard
     const view = await readDnsInventory(deps());

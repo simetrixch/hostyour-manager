@@ -1,3 +1,4 @@
+import { tenantOwnHosts } from "../../../shared/unit-host.ts";
 import { eq, and, notInArray } from "drizzle-orm";
 import type { RunDefinition, Step } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
@@ -129,8 +130,7 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         // The own domain's and its redirect hosts' records, where this installation wrote them; one in a
         // zone nobody here manages is the operator's to remove, which is decided before the book forgets
         // what it removes.
-        const ownHosts = tc.ownDomain === "" ? [] : [tc.ownDomain, ...tc.ownDomainRedirects];
-        const unbooked = ownHosts.filter((host) => !isTenantRecord(ctx.db, host, tc.guid));
+        const unbooked = tenantOwnHosts(tc.ownDomain, tc.ownDomainRedirects).filter((host) => !isTenantRecord(ctx.db, host, tc.guid));
         await removeTenantBookedRecords(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, except: [recordName] });
         for (const host of unbooked) ctx.log("meta", `the own host ${host} is not recorded as written here — remove its record at its provider`);
       },

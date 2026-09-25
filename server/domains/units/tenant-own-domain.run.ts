@@ -9,7 +9,8 @@ import { findDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { isTenantRecord, removeUnitDns, tenantMemberUrl, tenantZone } from "./unit-dns.ts";
+import { isTenantRecord, removeTenantBookedRecord, tenantMemberUrl, tenantZone } from "./unit-dns.ts";
+import { tenantOwnHosts as ownHosts } from "../../../shared/unit-host.ts";
 import { sleep } from "./onboard-release-cycle.ts";
 import type { TenantSetRoutingPorts } from "./tenant-routing.run.ts";
 
@@ -55,11 +56,6 @@ export const TenantSetOwnDomainParams = z
     if (new Set(p.ownDomainRedirects).size !== p.ownDomainRedirects.length) ctx.addIssue({ code: "custom", path: ["ownDomainRedirects"], message: "a redirect host is named twice" });
   });
 export type TenantSetOwnDomainParams = z.infer<typeof TenantSetOwnDomainParams>;
-
-/** Every host that carries a record for this tenant beside its zone: the own domain and its redirects. */
-function ownHosts(domain: string, redirects: readonly string[]): string[] {
-  return domain === "" ? [] : [domain, ...redirects];
-}
 
 /** The previous hosts this run takes the records of: those the new set no longer names. */
 function retiredHosts(p: TenantSetOwnDomainParams): string[] {
@@ -116,14 +112,13 @@ async function provisionOwnDomainRecord(ctx: StepCtx, ports: TenantSetOwnDomainP
   ctx.log("meta", `DNS record ${domain} → CNAME ${zone} ${created ? "created" : "updated"}`);
 }
 
-/** Remove `domain`'s record where this installation wrote it for this tenant (the book says so). A
- *  record in a zone nobody here manages is the operator's to remove, and the run says so. */
+/** Remove `domain`'s record where this installation wrote it for this tenant (the book says so), while
+ *  it still points where the book says. A record in a zone nobody here manages is the operator's to
+ *  remove, and the run says so. */
 async function removeOwnDomainRecord(ctx: StepCtx, ports: TenantSetOwnDomainPorts, tc: TenantCluster, domain: string): Promise<void> {
-  if (!isTenantRecord(ctx.db, domain, tc.guid)) {
+  if (!(await removeTenantBookedRecord(ctx, { dns: ports.dns, guid: tc.guid, recordName: domain }))) {
     ctx.log("meta", `${domain} is not recorded as tenant ${tc.guid}'s own record — if it points at the tenant, remove it at its provider`);
-    return;
   }
-  await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName: domain });
 }
 
 /** On abort: put the previous own domain and redirect hosts back on the registration and the row. */
@@ -199,9 +194,9 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         // The plan's facts, asked again: another run may have moved the tenant since it was planned.
         // A resume finds its own write already standing.
-        const standing = ownHosts(tc.ownDomain, tc.ownDomainRedirects);
-        if (!sameHosts(standing, ownHosts(p.previous, p.previousRedirects)) && !sameHosts(standing, ownHosts(p.ownDomain, p.ownDomainRedirects))) {
-          throw errValidation(`tenant ${tc.subdomain} has the own hosts ${standing.join(", ") || "none"} now, not those of when this run was planned — plan it again`);
+        const standsAt = (domain: string, redirects: readonly string[]): boolean => tc.ownDomain === domain && sameHosts(tc.ownDomainRedirects, redirects);
+        if (!standsAt(p.previous, p.previousRedirects) && !standsAt(p.ownDomain, p.ownDomainRedirects)) {
+          throw errValidation(`tenant ${tc.subdomain} has the own hosts ${ownHosts(tc.ownDomain, tc.ownDomainRedirects).join(", ") || "none"} now, not those of when this run was planned — plan it again`);
         }
         if (p.ownDomain !== "" && tc.routing !== "path") throw errValidation(`tenant ${tc.subdomain} is on ${tc.routing} routing now — an own domain needs path routing; plan it again`);
         ctx.registerCleanup(restoreOwnDomainCleanup(ports, p));
@@ -256,10 +251,6 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
           .from(tenants)
           .where(and(ne(tenants.id, params.tenantId), ne(tenants.ownDomain, ""), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
           .all();
-        // The own domain against every other own domain: equal, or one inside the other (a session cookie
-        // scoped to the outer host would reach the inner one).
-        const clash = others.find((o) => o.ownDomain === params.ownDomain || o.ownDomain.endsWith(`.${params.ownDomain}`) || params.ownDomain.endsWith(`.${o.ownDomain}`));
-        if (clash) throw errValidation(`${params.ownDomain} ${clash.ownDomain === params.ownDomain ? "is already" : "overlaps"} the own domain of tenant ${clash.subdomain} (${clash.ownDomain})`);
         const clusterNames = db.select({ domain: clusters.domain }).from(clusters).all().map((c) => c.domain);
         for (const host of ownHosts(params.ownDomain, params.ownDomainRedirects)) {
           if (host === apex || host.endsWith(`.${apex}`)) {
@@ -268,9 +259,12 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
           // A cluster's own name, or a name below it, is the installation's.
           const cluster = clusterNames.find((d) => host === d || host.endsWith(`.${d}`));
           if (cluster) throw errValidation(`${host} lies under the cluster name ${cluster} — an own domain and its redirect hosts are ones the customer brings`);
-          // One host carries one record, so it serves one tenant.
-          const taken = others.find((o) => ownHosts(o.ownDomain, o.ownDomainRedirects).includes(host));
-          if (taken) throw errValidation(`${host} is already a host of tenant ${taken.subdomain}`);
+          // One host carries one record, so it serves one tenant; and no host lies inside another tenant's
+          // (a session cookie scoped to the outer host would reach the inner one).
+          for (const o of others) {
+            const theirs = ownHosts(o.ownDomain, o.ownDomainRedirects).find((h) => h === host || h.endsWith(`.${host}`) || host.endsWith(`.${h}`));
+            if (theirs) throw errValidation(`${host} ${theirs === host ? "is already" : "overlaps"} a host of tenant ${o.subdomain} (${theirs})`);
+          }
         }
       }
       const newHost = params.ownDomain || zone;

@@ -31,7 +31,7 @@ import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
 import { DnsZoneUnknownError, type DnsProvider } from "../../adapters/dns/port.ts";
 import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts";
-import { consumerUnitHost, tenantRecordName, tenantZone } from "../../../shared/unit-host.ts";
+import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantZone } from "../../../shared/unit-host.ts";
 import type { MailDnsRecord, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
 import type { DnsInventoryView, DnsOwner, DnsRecordRow, DnsRowType } from "../../../shared/dns.ts";
 
@@ -119,7 +119,7 @@ async function unitRowsOf(
     // The own domain's and its redirect hosts' records point at the tenant's zone, not at the cluster.
     // Listed only where this installation's provider manages their zone: a record in a customer's zone
     // is not ours to show.
-    for (const host of ownDomain === "" ? [] : [ownDomain, ...ownDomainRedirects]) {
+    for (const host of tenantOwnHosts(ownDomain, ownDomainRedirects)) {
       try {
         rows.push(await unitRow(deps.dns, { kind: "tenant", name: subdomain, stage }, host, tenantZone(subdomain, stage, apex)));
       } catch (e) {

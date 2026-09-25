@@ -175,7 +175,37 @@ describe("tenant-set-own-domain through the Executor", () => {
       id: "tnt_2", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "beta", stage: "prod",
       members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: "beta.test", ownDomainRedirects: [BARE], suspended: false, status: "active",
     }).run();
-    await expect(plan(OWN, [BARE])).rejects.toThrow(/already a host of tenant beta/);
+    await expect(plan(OWN, [BARE])).rejects.toThrow(/overlaps a host of tenant beta/);
+    await expect(plan("www.other.test", [BARE])).rejects.toThrow(/already a host of tenant beta/);
+    await expect(plan("www.other.test", ["www.beta.test"])).rejects.toThrow(/overlaps a host of tenant beta \(beta.test\)/);
+    await expect(plan("www.other.test", ["app.s1.example"])).rejects.toThrow(/under the cluster name s1.example/);
+  });
+
+  it("REFUSES a request whose previous redirect hosts are not the tenant's any more", async () => {
+    const h = await make({ ownDomain: OWN, ownDomainRedirects: [BARE] });
+    await expect(h.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain: OWN, previous: OWN })).rejects.toThrow(/moved since/);
+    await expect(h.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain: OWN, previous: OWN, previousRedirects: [BARE] })).resolves.toBeDefined();
+  });
+
+  it("leaves a retired host's record standing once it points elsewhere: it is somebody else's now", async () => {
+    const h = await make({ ownDomain: OWN, ownDomainRedirects: [BARE], answers: [OWN] });
+    for (const host of [OWN, BARE]) recordDnsWrite(h.db.db, { name: host, type: "CNAME", content: ZONE, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_old" });
+    h.dns.seed(OWN, "CNAME", ZONE);
+    h.dns.seed(BARE, "CNAME", "shop.hoster.test");
+    const runId = await move(h, OWN, OWN, { previousRedirects: [BARE] });
+    expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
+    expect(h.dns.record(BARE, "CNAME")).toBe("shop.hoster.test");
+    expect(findDnsWrite(h.db.db, { name: BARE, type: "CNAME" })).toBeNull();
+  });
+
+  it("REFUSES the abort once a retired redirect host's record is gone", async () => {
+    const h = await make({ ownDomain: OWN, ownDomainRedirects: [BARE] });
+    h.dns.seed(OWN, "CNAME", ZONE);
+    h.dns.seed(BARE, "CNAME", ZONE);
+    const runId = await move(h, OWN, OWN, { previousRedirects: [BARE] });
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+    await h.dns.deleteRecord({ name: BARE, type: "CNAME" });
+    await expect(h.executor.abortWithCleanup(runId)).rejects.toThrow(/customer.test, a previous host's record, is gone/);
   });
 
   it("writes nothing into a zone nobody here manages, and still records the domain once it answers", async () => {
@@ -250,7 +280,7 @@ describe("tenant-set-own-domain through the Executor", () => {
     other("tnt_old", "oooooooooooo", OWN, "offboarded");
     await expect(h.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain: OWN, previous: "" })).resolves.toBeDefined();
     other("tnt_live", "llllllllllll", "customer.test", "active");
-    await expect(h.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain: OWN, previous: "" })).rejects.toThrow(/overlaps the own domain of tenant tnt_live/);
+    await expect(h.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain: OWN, previous: "" })).rejects.toThrow(/overlaps a host of tenant tnt_live/);
     await expect(h.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain: "app.s1.example", previous: "" })).rejects.toThrow(/under the cluster name s1.example/);
   });
 
@@ -278,6 +308,6 @@ describe("tenant-set-own-domain through the Executor", () => {
       id: "tnt_2", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "beta", stage: "prod",
       members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: OTHER, suspended: false, status: "active",
     }).run();
-    await expect(platform.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain: OTHER, previous: "" })).rejects.toThrow(/already the own domain of tenant beta/);
+    await expect(platform.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain: OTHER, previous: "" })).rejects.toThrow(/already a host of tenant beta/);
   });
 });
