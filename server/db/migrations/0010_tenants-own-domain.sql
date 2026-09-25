@@ -1,1 +1,0 @@
-ALTER TABLE `tenants` ADD `own_domain` text DEFAULT '' NOT NULL;

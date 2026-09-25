@@ -1,7 +1,0 @@
-{
-  "extends": "stylelint-config-standard",
-  "rules": {
-    "color-no-hex": true,
-    "selector-class-pattern": null
-  }
-}

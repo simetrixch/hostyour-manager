@@ -1,1 +1,0 @@
-ALTER TABLE `tenants` ADD `own_domain_redirects` text DEFAULT '[]' NOT NULL;
