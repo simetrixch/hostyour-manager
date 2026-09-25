@@ -235,6 +235,8 @@ export interface TenantCluster {
   routing: MemberRouting;
   /** The tenant's own domain, or "" where it is reached at its zone (shared/unit-host.ts). */
   ownDomain: string;
+  /** The hosts that redirect to the own domain; empty without one. */
+  ownDomainRedirects: string[];
   /** The owner the tenant was onboarded under — what a bundle created later is onboarded under too. */
   owner: string;
 }
@@ -255,6 +257,7 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     identityProvider: tenant.identityProvider,
     routing: tenant.routing,
     ownDomain: tenant.ownDomain,
+    ownDomainRedirects: tenant.ownDomainRedirects,
     owner: tenant.owner ?? tenant.subdomain,
   };
 }

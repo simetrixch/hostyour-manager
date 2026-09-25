@@ -219,6 +219,7 @@ export const tenants = sqliteTable("tenants", {
   // The tenant's own domain, or "" where it is reached at its zone — beside the routing for the same
   // reason: every path that addresses a member composes its host from it.
   ownDomain: text("own_domain").notNull().default(""),
+  ownDomainRedirects: text("own_domain_redirects", { mode: "json" }).$type<string[]>().notNull().default([]),
   // Whether the tenant's IdP boot-seeds initial accounts. Also a registration field (the registration
   // is what the charts read); recorded here as the platform's own trace of what was asked for.
   seedUsers: integer("seed_users", { mode: "boolean" }).notNull().default(false),

@@ -203,6 +203,10 @@ export const TenantRegistrationSchema = z
     // on a standing file only by tenant-set-own-domain, which also moves its DNS record. Defaulted to
     // "" for every file written before the field existed.
     ownDomain: z.union([z.literal(""), publicFqdn]).default(""),
+    // The hosts that answer with a redirect to the own domain (the other spelling of it, most often),
+    // named by the operator in tenant-set-own-domain; empty where there is none and always empty
+    // without an own domain. Defaulted to [] for every file written before the field existed.
+    ownDomainRedirects: z.array(publicFqdn).default([]),
     // The ceiling EVERY member namespace of this tenant is bounded by, resolved by the Manager from
     // its size table when it writes the registration and passed to hostyour-cloud/apps/unit-quota by the
     // tenant ApplicationSet. Per MEMBER and not per tenant, because a tenant owns one namespace per

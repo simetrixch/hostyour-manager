@@ -21,6 +21,7 @@ export const TENANT_COLUMNS = {
   // composes it from this beside the two above.
   routing: tenants.routing,
   ownDomain: tenants.ownDomain,
+  ownDomainRedirects: tenants.ownDomainRedirects,
   seedUsers: tenants.seedUsers,
   suspended: tenants.suspended,
   owner: tenants.owner,

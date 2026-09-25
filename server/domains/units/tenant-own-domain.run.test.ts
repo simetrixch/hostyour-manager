@@ -32,8 +32,10 @@ const CLUSTER = "s1.example";
 const ZONE = "acme.example.com";
 const OWN = "www.customer.test";
 const OTHER = "shop.customer.test";
+const BARE = "customer.test";
 const idpAt = (host: string): string => `https://${host}/auth/`;
 const OK = { reachable: true, status: 200, detail: "HTTP 200" };
+const REDIRECTS = { reachable: true, status: 307, detail: "HTTP 307" };
 
 const logger = createLogger(parseConfig({
   ...REQUIRED_ENV, PUBLIC_URL: "https://x.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s",
@@ -48,28 +50,32 @@ describe("tenant-set-own-domain through the Executor", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  async function make(opts: { routing?: MemberRouting; ownDomain?: string; answers?: string[]; unmanaged?: string[] } = {}) {
+  async function make(opts: { routing?: MemberRouting; ownDomain?: string; ownDomainRedirects?: string[]; answers?: string[]; redirecting?: string[]; unmanaged?: string[] } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "mgr-owndomain-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const routing = opts.routing ?? "path";
     const ownDomain = opts.ownDomain ?? "";
+    const ownDomainRedirects = opts.ownDomainRedirects ?? [];
     const reg = new TenantRegistrations(new FakePlatformRepo());
     const dns = new FakeDnsProvider();
     dns.unmanaged = opts.unmanaged ?? [];
     dns.seed(ZONE, "CNAME", CLUSTER);
-    const probe = new FakePublicProbe(Object.fromEntries((opts.answers ?? []).map((host) => [idpAt(host), OK])));
+    const probe = new FakePublicProbe(Object.fromEntries([
+      ...(opts.answers ?? []).map((host) => [idpAt(host), OK]),
+      ...(opts.redirecting ?? []).map((host) => [`https://${host}/`, REDIRECTS]),
+    ]));
     db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: CLUSTER, name: "s1", status: "active" }).run();
     db.db.insert(tenants).values({
       id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod",
-      members: ["auth", "jobs", "report"], identityProvider: "auth", routing, ownDomain, suspended: false, status: "active",
+      members: ["auth", "jobs", "report"], identityProvider: "auth", routing, ownDomain, ownDomainRedirects, suspended: false, status: "active",
     }).run();
     await reg.commitTenant({
       stage: "prod", guid: GUID, runId: "run_crt",
       registration: {
-        cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing, ownDomain,
+        cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing, ownDomain, ownDomainRedirects,
         seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
       },
     });
@@ -89,11 +95,13 @@ describe("tenant-set-own-domain through the Executor", () => {
     });
     const rowDomain = (): string | undefined => db.db.select({ d: tenants.ownDomain }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.d;
     const regDomain = async (): Promise<string | undefined> => (await reg.readTenant("prod", GUID))?.entry.ownDomain;
-    return { db, reg, dns, probe, executor, rowDomain, regDomain };
+    const rowRedirects = (): string[] | undefined => db.db.select({ r: tenants.ownDomainRedirects }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.r;
+    const regRedirects = async (): Promise<string[] | undefined> => (await reg.readTenant("prod", GUID))?.entry.ownDomainRedirects;
+    return { db, reg, dns, probe, executor, rowDomain, regDomain, rowRedirects, regRedirects };
   }
 
-  async function move(h: Awaited<ReturnType<typeof make>>, ownDomain: string, previous: string): Promise<string> {
-    const { runId } = await h.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain, previous });
+  async function move(h: Awaited<ReturnType<typeof make>>, ownDomain: string, previous: string, redirects: { ownDomainRedirects?: string[]; previousRedirects?: string[] } = {}): Promise<string> {
+    const { runId } = await h.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain, previous, ...redirects });
     await h.executor.approve(runId);
     await h.executor.settle(runId);
     return runId;
@@ -110,6 +118,64 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(h.probe.probed).toContain(idpAt(OWN));
     // The zone keeps its record: the charts answer it with a redirect to the domain.
     expect(h.dns.record(ZONE, "CNAME")).toBe(CLUSTER);
+  });
+
+  it("sets redirect hosts beside the domain: a record each, recorded, and a redirect awaited at each", async () => {
+    const h = await make({ answers: [OWN], redirecting: [BARE] });
+    const runId = await move(h, OWN, "", { ownDomainRedirects: [BARE] });
+    expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
+    expect(h.dns.record(BARE, "CNAME")).toBe(ZONE);
+    expect(findDnsWrite(h.db.db, { name: BARE, type: "CNAME" })?.owner).toEqual({ kind: "tenant", name: GUID, stage: "prod" });
+    expect(h.rowRedirects()).toEqual([BARE]);
+    expect(await h.regRedirects()).toEqual([BARE]);
+    expect(h.probe.probed).toContain(`https://${BARE}/`);
+  });
+
+  it("does not take a 2xx for a redirect host: it must answer the redirect itself", async () => {
+    const h = await make({ answers: [OWN, BARE] });
+    h.probe.set(`https://${BARE}/`, OK);
+    const runId = await move(h, OWN, "", { ownDomainRedirects: [BARE] });
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+  });
+
+  it("drops a redirect host: its record goes only after the kept hosts answer", async () => {
+    const h = await make({ ownDomain: OWN, ownDomainRedirects: [BARE], answers: [OWN] });
+    for (const host of [OWN, BARE]) {
+      h.dns.seed(host, "CNAME", ZONE);
+      recordDnsWrite(h.db.db, { name: host, type: "CNAME", content: ZONE, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_old" });
+    }
+    const runId = await move(h, OWN, OWN, { previousRedirects: [BARE] });
+    expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
+    expect(h.dns.record(BARE, "CNAME")).toBeUndefined();
+    expect(h.dns.record(OWN, "CNAME")).toBe(ZONE);
+    expect(h.rowRedirects()).toEqual([]);
+  });
+
+  it("an abort after a failed redirect wait removes the new redirect host's record and records the previous hosts again", async () => {
+    const h = await make({ answers: [OWN] });
+    const runId = await move(h, OWN, "", { ownDomainRedirects: [BARE] });
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+    expect(h.dns.record(BARE, "CNAME")).toBe(ZONE);
+    await h.executor.abortWithCleanup(runId);
+    await h.executor.settle(runId);
+    expect(h.dns.record(BARE, "CNAME")).toBeUndefined();
+    expect(h.dns.record(OWN, "CNAME")).toBeUndefined();
+    expect(h.rowRedirects()).toEqual([]);
+    expect(await h.regRedirects()).toEqual([]);
+  });
+
+  it("REFUSES redirect hosts without a domain, twice named, equal to the domain, in the platform's name space, or another tenant's", async () => {
+    const h = await make();
+    const plan = (ownDomain: string, ownDomainRedirects: string[]) => h.executor.plan("tenant-set-own-domain", { tenantId: "tnt_1", ownDomain, ownDomainRedirects, previous: "" });
+    await expect(plan("", [BARE])).rejects.toThrow(/need an own domain/);
+    await expect(plan(OWN, [BARE, BARE])).rejects.toThrow(/named twice/);
+    await expect(plan(OWN, [OWN])).rejects.toThrow(/redirect to itself/);
+    await expect(plan(OWN, ["www.example.com"])).rejects.toThrow(/platform's own name space/);
+    h.db.db.insert(tenants).values({
+      id: "tnt_2", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "beta", stage: "prod",
+      members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: "beta.test", ownDomainRedirects: [BARE], suspended: false, status: "active",
+    }).run();
+    await expect(plan(OWN, [BARE])).rejects.toThrow(/already a host of tenant beta/);
   });
 
   it("writes nothing into a zone nobody here manages, and still records the domain once it answers", async () => {

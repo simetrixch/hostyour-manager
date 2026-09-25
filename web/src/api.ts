@@ -471,6 +471,8 @@ export interface TenantView {
   routing: MemberRouting;
   /** The tenant's own domain, or "" where it is reached at its zone. */
   ownDomain: string;
+  /** The hosts that redirect to the own domain; empty without one. */
+  ownDomainRedirects: string[];
   seedUsers: boolean;
   suspended: boolean;
   owner: string | null;
@@ -642,8 +644,8 @@ export const migrateTenant = (tenantId: string, targetClusterId: string): Promis
 export const setTenantRouting = (tenantId: string, routing: MemberRouting): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/routing`, { routing });
 /** Plan setting, switching or clearing ("") the tenant's own domain. */
-export const setTenantOwnDomain = (tenantId: string, ownDomain: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { ownDomain });
+export const setTenantOwnDomain = (tenantId: string, ownDomain: string, ownDomainRedirects: string[]): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { ownDomain, ownDomainRedirects });
 
 /** The invite-mail delivery outcome — a zod-free mirror of the server's ConsumerActivationMail, kept
  *  out of the web bundle deliberately (same rule as api-types.ts). */

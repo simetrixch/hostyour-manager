@@ -292,7 +292,7 @@ export function TenantDetail() {
           {/* Not offered on a suspended tenant: it renders no ingress, so its new address could never
               answer and the run's wait could not end — the route refuses it too. */}
           {!unfinished && !t.suspended && <SetRoutingAction subdomain={t.subdomain} routing={t.routing} busy={busy} onRoute={(next) => void act(() => setTenantRouting(tenantId, next))} />}
-          {!unfinished && !t.suspended && t.routing === "path" && <SetOwnDomainAction subdomain={t.subdomain} ownDomain={t.ownDomain} busy={busy} onSet={(next) => void act(() => setTenantOwnDomain(tenantId, next))} />}
+          {!unfinished && !t.suspended && t.routing === "path" && <SetOwnDomainAction subdomain={t.subdomain} ownDomain={t.ownDomain} ownDomainRedirects={t.ownDomainRedirects} busy={busy} onSet={(domain, redirects) => void act(() => setTenantOwnDomain(tenantId, domain, redirects))} />}
           {!unfinished && (
             <button type="button" className="btn" disabled={busy} onClick={() => setBackupT(t)}>
               Back up

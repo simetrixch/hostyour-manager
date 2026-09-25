@@ -126,11 +126,13 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         const unitApex = await ports.resolveUnitApex(tc.domain, tc.stage);
         const recordName = tenantRecordName(tc.routing, tc.subdomain, tc.stage, unitApex);
         await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName });
-        // The own domain's record, where this installation wrote it; one in a zone nobody here manages
-        // is the operator's to remove, which is decided before the book forgets what it removes.
-        const ownDomainBooked = tc.ownDomain !== "" && isTenantRecord(ctx.db, tc.ownDomain, tc.guid);
+        // The own domain's and its redirect hosts' records, where this installation wrote them; one in a
+        // zone nobody here manages is the operator's to remove, which is decided before the book forgets
+        // what it removes.
+        const ownHosts = tc.ownDomain === "" ? [] : [tc.ownDomain, ...tc.ownDomainRedirects];
+        const unbooked = ownHosts.filter((host) => !isTenantRecord(ctx.db, host, tc.guid));
         await removeTenantBookedRecords(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, except: [recordName] });
-        if (tc.ownDomain !== "" && !ownDomainBooked) ctx.log("meta", `the own domain ${tc.ownDomain} is not recorded as written here — remove its record at its provider`);
+        for (const host of unbooked) ctx.log("meta", `the own host ${host} is not recorded as written here — remove its record at its provider`);
       },
     },
     {

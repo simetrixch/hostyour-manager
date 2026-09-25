@@ -43,7 +43,7 @@ afterEach(() => { db.sqlite.close(); });
 function entry(over: Partial<TenantRegistration> = {}): TenantRegistration {
   return {
     cluster: "s1", subdomain: SUB,
-    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]), identityProvider: "auth", routing: "host", ownDomain: "", apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
+    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     ...over,
   };

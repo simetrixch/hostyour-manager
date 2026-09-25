@@ -80,7 +80,7 @@ async function seedTenant(reg: TenantRegistrations, routing: MemberRouting, opts
   await reg.commitTenant({
     stage: "prod", guid: GUID, runId: "run_crt",
     registration: {
-      cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing, ownDomain: "",
+      cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing, ownDomain: "", ownDomainRedirects: [],
       seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     },
   });

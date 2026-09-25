@@ -91,7 +91,7 @@ async function seededRegistrations(): Promise<TenantRegistrations> {
   const registrations = new TenantRegistrations(new FakePlatformRepo());
   const registration: TenantRegistration = {
     cluster: "s1", subdomain: "acme",
-    members: testMembers(APPS), identityProvider: "auth", routing: "host", ownDomain: "", apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false, selections: {} })),
+    members: testMembers(APPS), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false, selections: {} })),
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
   };
   await registrations.commitTenant({ stage: "prod", guid: GUID, registration, runId: "run_onb" });
@@ -127,7 +127,7 @@ function createParams(over: Partial<CreateTenantParams> = {}): CreateTenantParam
   return CreateTenantParams.parse({
     guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example",
     members: testMembers(APPS),
-    identityProvider: "auth", routing: "host", ownDomain: "",
+    identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [],
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
     apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
     report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), catalogRepoUrl: DEPLOY_URL,

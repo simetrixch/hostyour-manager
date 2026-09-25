@@ -23,10 +23,12 @@ export function registerTenantOwnDomainRoutes(app: Hono<AppEnv>, deps: TenantOwn
     if (!tenantEnabled || !executor) throw errNotConfigured("tenant onboarding is not configured on this manager");
     const id = c.req.param("id");
     assertTenantProvisioned(loadTenantStatus(db, id), "setting its own domain");
-    const body = (await c.req.json().catch(() => ({}))) as { ownDomain?: unknown };
-    // The own domain the tenant has now: what an abort of the move records again.
-    const previous = db.select({ ownDomain: tenants.ownDomain }).from(tenants).where(eq(tenants.id, id)).get()?.ownDomain;
-    const parsed = TenantSetOwnDomainParams.safeParse({ tenantId: id, ownDomain: body.ownDomain, previous });
+    const body = (await c.req.json().catch(() => ({}))) as { ownDomain?: unknown; ownDomainRedirects?: unknown };
+    // The own hosts the tenant has now: what an abort of the move records again.
+    const now = db.select({ ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects }).from(tenants).where(eq(tenants.id, id)).get();
+    const parsed = TenantSetOwnDomainParams.safeParse({
+      tenantId: id, ownDomain: body.ownDomain, ownDomainRedirects: body.ownDomainRedirects, previous: now?.ownDomain, previousRedirects: now?.ownDomainRedirects,
+    });
     if (!parsed.success) throw errValidation(`invalid own-domain request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     return c.json(await executor.plan("tenant-set-own-domain", parsed.data), 201);
   });

@@ -54,7 +54,7 @@ describe("readDnsInventory", () => {
     db: db.db,
     dns,
     consumers: async (cluster, stage) => (stage === "prod" && cluster === M1.split(".")[0] ? [{ name: "post", host: "post" }] : []),
-    tenants: async (stage) => (stage === "prod" ? [{ subdomain: "acme", routing: "host", ownDomain: "", cluster: "m1" }, { subdomain: "beta", routing: "host", ownDomain: "", cluster: "s1" }] : []),
+    tenants: async (stage) => (stage === "prod" ? [{ subdomain: "acme", routing: "host", ownDomain: "", ownDomainRedirects: [], cluster: "m1" }, { subdomain: "beta", routing: "host", ownDomain: "", ownDomainRedirects: [], cluster: "s1" }] : []),
     unitApex: async () => "example.net",
     mail: async () => mailView(),
     ...over,
@@ -77,7 +77,7 @@ describe("readDnsInventory", () => {
 
   it("names a path-routed tenant's record by its zone, which the wildcard does not cover", async () => {
     dns.seed("gamma.example.net", "CNAME", M1);
-    const view = await readDnsInventory(deps({ tenants: async (stage) => (stage === "prod" ? [{ subdomain: "gamma", routing: "path", ownDomain: "", cluster: "m1" }] : []) }));
+    const view = await readDnsInventory(deps({ tenants: async (stage) => (stage === "prod" ? [{ subdomain: "gamma", routing: "path", ownDomain: "", ownDomainRedirects: [], cluster: "m1" }] : []) }));
     expect(view.rows.filter((r) => r.owner.kind === "tenant").map((r) => `${r.name} ${r.verdict}`)).toEqual(["gamma.example.net standing"]);
   });
 
