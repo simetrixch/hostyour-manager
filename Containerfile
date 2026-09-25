@@ -53,6 +53,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/web/dist ./web/dist
 COPY --from=build /app/server ./server
 COPY --from=build /app/shared ./shared
+COPY --from=build /app/plugins ./plugins
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/tsconfig.json ./tsconfig.json
 # The tenant validator's helm binary (on PATH; config.ts drives it via `helm template`).

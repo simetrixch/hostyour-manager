@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { seedQuota } from "./unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { consumerArgoAppName, consumerArgocdUrl, ConsumerManifestSchema, ConsumerRegistrationSchema, TenantSpecSchema, tenantAppsOrg, GITHUB_ACCOUNT_RE } from "./consumer.ts";
 
 describe("ConsumerManifestSchema appsBundle — a tenant's apps bundle declares itself", () => {

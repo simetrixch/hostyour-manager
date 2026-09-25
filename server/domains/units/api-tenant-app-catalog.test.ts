@@ -7,7 +7,7 @@ import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import type { AppCatalog } from "./app-catalog.ts";

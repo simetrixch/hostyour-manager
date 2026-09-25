@@ -29,7 +29,7 @@ import type { ChartPinMapping } from "../builds.ts";
 import { BUILD_NAMESPACE_SUFFIX } from "../build-rbac.ts";
 import { consumerUnitHost, standingHostRefusal, type StandingHost } from "../unit-dns.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
-import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, type UnitComposition, type UnitQuota, type UnitSize } from "../../../../shared/unit-size.ts";
+import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, type UnitComposition, type UnitQuota, type UnitSize } from "#unit/shared/unit-size.ts";
 
 /** One build name another unit has already attested in its `registrations/<unit>/build.yaml`. */
 export interface ForeignBuild {
@@ -84,7 +84,7 @@ export const PLATFORM_NAMESPACES: readonly string[] = [
  *  admission, before anything is written — because the platform composes further identities from
  *  the name: the namespace and the AppProject are `<name>-<stage>`, the build namespace is
  *  `<name>-build`; and the public host is composed from the LABEL, `<label>.<stage apex>`
- *  (shared/unit-host.ts), which is the manifest's `host` or the name. A name inside a space the
+ *  (plugins/unit/shared/unit-host.ts), which is the manifest's `host` or the name. A name inside a space the
  *  platform already owns therefore hands the unit an identity with another owner, and every writer
  *  downstream would obey the pin. Five reserved spaces for the name and two for the label, each with
  *  its owner:
@@ -436,7 +436,7 @@ export function composeReport(runner: GateReport, managerGates: GateResult[]): G
 
 /** G24 unit size (HARD). The one gate that reads the SIZE, which is the operator's answer and never
  *  the consumer's: there is deliberately no size field in ConsumerManifestSchema, because a customer
- *  choosing their own ceiling is not a ceiling (shared/unit-size.ts).
+ *  choosing their own ceiling is not a ceiling (plugins/unit/shared/unit-size.ts).
  *
  *  WHAT IT JUDGES: the composition the MANIFEST declares against the size the OPERATOR assigned. A
  *  consumer "needs units" when it brings database units of its own — `postgresql` among its

@@ -3,7 +3,7 @@
 // namespace reap and what it can prove, and the row settlement. The PLAN half is
 // tenant-purge.run.test.ts.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";

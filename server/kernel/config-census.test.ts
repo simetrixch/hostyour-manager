@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const CONFIG_FILE = "server/kernel/config.ts";
-const SOURCE_ROOTS = ["server", "shared", "web/src", "gate-runner/src"];
+const SOURCE_ROOTS = ["server", "shared", "web/src", "gate-runner/src", "plugins"];
 
 /** Every shipped .ts/.tsx file under the source roots — tests excluded. */
 function shippedSources(): { path: string; text: string }[] {

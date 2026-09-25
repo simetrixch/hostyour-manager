@@ -26,7 +26,7 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";

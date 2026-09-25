@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitHost, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, PLATFORM_NAMESPACES } from "./compose.ts";
-import { DEFAULT_UNIT_SIZE, seedQuota, UNIT_SIZE, type MongodbMode, type UnitSize } from "../../../../shared/unit-size.ts";
+import { DEFAULT_UNIT_SIZE, seedQuota, UNIT_SIZE, type MongodbMode, type UnitSize } from "#unit/shared/unit-size.ts";
 import { mapBuildsToChartPins } from "../builds.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
 import { hardGatesPass, type GateReport, type GateResult } from "../../../../shared/gates.ts";

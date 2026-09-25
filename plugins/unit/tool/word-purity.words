@@ -1,0 +1,33 @@
+# The words the unit plugin may not say (fitness/word-purity.test.mjs). One per line, matched whole
+# and without case. The occurrences standing on the day this list landed are in word-purity.known.json
+# beside it, which only shrinks: an entry leaves it by a change of the code, never by an edit of this
+# list.
+
+# The organisation, its customers and persons, and its sibling repositories.
+simetrix
+simetrixch
+digita
+digitacloud
+digitaplatform
+digita-deploy
+swissbookai
+kartalbas
+ahkutun
+hostyour-cloud
+hostyour-deploy
+
+# Another unit's subject: the families that stand on this plugin.
+tenant
+tenants
+consumer
+consumers
+onboard
+onboarding
+
+# What the platform rents or drives that this plugin does not.
+hetzner
+letsencrypt
+tekton
+helm
+kubeconform
+authentik

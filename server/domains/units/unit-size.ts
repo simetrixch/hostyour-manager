@@ -5,10 +5,10 @@ import { errNotFound } from "../../kernel/errors.ts";
 import {
   UNIT_SIZE, SIZE_COMPONENT, UNIT_SIZE_SEED, composeQuota,
   type UnitQuota, type UnitSize, type SizeComponent, type UnitComposition,
-} from "../../../shared/unit-size.ts";
+} from "#unit/shared/unit-size.ts";
 
 // The size table's two operations: fill it on a fresh database, and work out the ONE quota a unit
-// gets. What a size means, and where the seed figures come from, is stated once in shared/unit-size.ts.
+// gets. What a size means, and where the seed figures come from, is stated once in plugins/unit/shared/unit-size.ts.
 
 /** The whole table as the composer wants it — component -> size -> figures. Read once per resolve, so
  *  every part of one quota comes from the same moment; reading them one at a time would let an edit

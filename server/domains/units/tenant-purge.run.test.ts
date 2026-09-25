@@ -4,7 +4,7 @@
 // share this file's fixtures through the header both copies carry, and they were split along the
 // 400-line budget, not along a seam in the subject.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeTenantPurgeDef, type TenantPurgeParams, type TenantPurgeRequest } from "./tenant-purge.run.ts";

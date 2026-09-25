@@ -1,4 +1,4 @@
-import { STAGE, type MemberRouting, type Stage } from "./enums.ts";
+import { STAGE, type MemberRouting, type Stage } from "#core/shared/enums.ts";
 
 /** THE ONE PLACE A UNIT'S PUBLIC HOST IS COMPOSED (simetrixch/hostyour-cloud#208).
  *

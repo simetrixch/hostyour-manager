@@ -19,7 +19,7 @@ import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onb
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import { readOwnerIdentity } from "./owners.ts";
 import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderMissing, patHookRefusal } from "./repo-identity.ts";
-import { consumerUnitHost } from "../../../shared/unit-host.ts";
+import { consumerUnitHost } from "#unit/shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
 import { missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
 import { WebhookScopeError, webhookTargetUrl } from "../../adapters/github-consumer/port.ts";

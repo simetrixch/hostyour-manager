@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";

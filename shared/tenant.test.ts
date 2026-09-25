@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { seedQuota } from "../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import {
   TenantRegistrationSchema,
   TenantValidationReportSchema,
@@ -10,7 +10,7 @@ import {
   GUID_ALPHABET,
 } from "./tenant.ts";
 import { SEED_SELECTIONS, chosenSelections, appSelectionsToRequest } from "./app-selections.ts";
-import { RESERVED_HOST_LABELS } from "./unit-host.ts";
+import { RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
 import { ConsumerManifestSchema, tenantAppsTemplate } from "./consumer.ts";
 
 /** The members a tenant of the test product has: three standing services, then one per app carrying

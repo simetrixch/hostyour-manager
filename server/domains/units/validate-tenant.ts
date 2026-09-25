@@ -25,7 +25,7 @@ import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, type AppRef, type FanoutMember } from "./tenant-fanout.ts";
 import { readAppCatalog } from "./app-catalog.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
-import { stageApex, tenantRecordName, tenantZone } from "../../../shared/unit-host.ts";
+import { stageApex, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
 import { catalogPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import { gateUnitHost } from "./gates/compose.ts";
@@ -241,7 +241,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       // namespace. The target cluster's chain rides every render as the folded override, and OVER IT
       // the values the tenants ApplicationSet delivers to every member at deploy
       // (hostyour-cloud clusters/argocd/files/tenants-appset.yaml, valuesObject): the tenant's own
-      // facts and the zone it stands under, composed by the one host law (shared/unit-host.ts). The
+      // facts and the zone it stands under, composed by the one host law (plugins/unit/shared/unit-host.ts). The
       // charts switch their tenant mode on `tenant.guid` and require `tenant.zone` and
       // `global.stageApex` there, so a render without these proves a mode the cluster never deploys
       // (hostyour-manager#137). OVER ALL OF IT the source's own values, resolved off the product's

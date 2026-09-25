@@ -11,8 +11,8 @@ const ENTRY_POINTS = "^(server/index\\.ts|web/src/main\\.tsx|gate-runner/src/cli
 module.exports = {
   forbidden: [
     { name: "shared-is-pure", severity: "error",
-      comment: "shared/ is types only — it imports nothing from server/ or web/.",
-      from: { path: "^shared" }, to: { path: "^(server|web)" } },
+      comment: "shared/, the core's and each plugin's, is types only — it imports nothing from a server/ or a web/.",
+      from: { path: "^(shared|plugins/[^/]+/shared)/" }, to: { path: "^(server|web|plugins/[^/]+/(server|web))/" } },
 
     { name: "domains-no-crosstalk", severity: "error",
       comment: "Domains don't import each other (inventory is the shared read exception). Tests may compose across domains.",
@@ -38,7 +38,7 @@ module.exports = {
 
     { name: "routes-are-thin", severity: "error",
       comment: "Routes may depend on an adapter PORT (the abstraction, injected) but never on an adapter implementation.",
-      from: { path: "(routes|api)\\.ts$" }, to: { path: "^server/adapters", pathNot: "port\\.ts$" } },
+      from: { path: "(routes|api)\\.ts$" }, to: { path: "^(server|plugins/[^/]+/server)/adapters", pathNot: "port\\.ts$" } },
 
     { name: "executor-knows-no-domain", severity: "error",
       comment: "The executor is domain-agnostic. Tests may compose across layers.",
@@ -55,9 +55,9 @@ module.exports = {
       to: { path: "^server/(boot/|http/(?!app-env\\.ts$)|domains/(?!inventory/))|^web/src/(pages/|App\\.tsx$|main\\.tsx$)" } },
 
     { name: "plugins-no-crosstalk", severity: "error",
-      comment: "A plugin reaches another plugin only through that plugin's server/plugin.ts and server/config.ts — what it requires, never its internals.",
+      comment: "A plugin reaches no other plugin but unit, the base both families stand on, whose whole tree they may import. The families never reach each other.",
       from: { path: "^plugins/([^/]+)/" },
-      to: { path: "^plugins/(?!$1/)[^/]+/server/", pathNot: "^plugins/[^/]+/server/(plugin|config)\\.ts$" } },
+      to: { path: "^plugins/(?!$1/|unit/)[^/]+/" } },
 
     { name: "plugin-imports-are-subpath", severity: "error",
       comment: "A plugin names the core and another plugin by subpath import (#core/...), never by a relative path, so it reads the same here and in the repository that holds the plugins.",
@@ -78,8 +78,8 @@ module.exports = {
         "surface as the test that calls it.",
       from: { path: ENTRY_POINTS },
       to: {
-        path: "^(server|shared|web/src|gate-runner/src)",
-        pathNot: [ENTRY_POINTS, "\\.test\\.tsx?$", "\\.d\\.ts$", "^server/adapters/[^/]+/testing/", "\\.fixture\\.ts$", "\\.suite\\.ts$"],
+        path: "^(server|shared|web/src|gate-runner/src|plugins)",
+        pathNot: [ENTRY_POINTS, "\\.test\\.tsx?$", "\\.d\\.ts$", "^(server|plugins/[^/]+/server)/adapters/[^/]+/testing/", "\\.fixture\\.ts$", "\\.suite\\.ts$"],
         reachable: false,
       } },
   ],

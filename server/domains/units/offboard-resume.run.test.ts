@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";

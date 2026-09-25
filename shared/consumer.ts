@@ -4,9 +4,9 @@
 // authoritative contract; hostyour-cloud's tools/checks/consumer-contract.census.sh hashes them and
 // fails when this mirror drifts.
 import { z } from "zod";
-import { UnitQuotaSchema, UnitSizeSchema, MongodbModeSchema, type UnitQuota, type UnitSize, type MongodbMode } from "./unit-size.ts";
+import { UnitQuotaSchema, UnitSizeSchema, MongodbModeSchema, type UnitQuota, type UnitSize, type MongodbMode } from "#unit/shared/unit-size.ts";
 import { MEMBER_ROUTING, STAGE, type Stage } from "./enums.ts";
-import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "./unit-host.ts";
+import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
 
 /** WHERE a consumer repository keeps its manifest. One spelling, because two readers ask for it:
  *  the sandbox's structure gate, and the manager on the one path that does not dispatch a sandbox
@@ -24,7 +24,7 @@ export const GITHUB_ACCOUNT_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0
 export const consumerName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/);
 
 /** The unit's public host LABEL — one DNS label the unit stands on under its stage's zone,
- *  `<label>.<stage apex>` (shared/unit-host.ts). Not the name: `digita-auth` is the identity, `auth` is
+ *  `<label>.<stage apex>` (plugins/unit/shared/unit-host.ts). Not the name: `digita-auth` is the identity, `auth` is
  *  what a person types. A stage word is refused because the stage words ARE the zones. */
 export const hostLabel = z
   .string()

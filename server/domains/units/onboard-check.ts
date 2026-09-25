@@ -7,7 +7,7 @@ import { validateOnboard, type OnboardTarget } from "./validate.ts";
 import { standingHostFrom } from "./unit-dns.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { resolveUnitQuota } from "./unit-size.ts";
-import { DEFAULT_UNIT_SIZE } from "../../../shared/unit-size.ts";
+import { DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
 
 /** The ref cloned before the gates run — the remote's default branch head. The onboarding validates
  *  what the repo IS, not a pin: only the release cycle ever turns a commit into something deployable. */

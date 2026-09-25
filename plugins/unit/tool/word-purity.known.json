@@ -1,0 +1,22 @@
+{
+  "what": "Every occurrence of a word plugins/unit/tool/word-purity.words lists that stood in plugins/unit/ when the word check was written, as <file>::<word> and its count. The check refuses a count that grows and a key this record does not carry, and reports a count the tree no longer reaches. Written by node fitness/record-known.mjs --words.",
+  "occurrences": {
+    "plugins/unit/shared/unit-host.test.ts::consumer": 2,
+    "plugins/unit/shared/unit-host.test.ts::consumers": 1,
+    "plugins/unit/shared/unit-host.test.ts::digita": 7,
+    "plugins/unit/shared/unit-host.test.ts::digitacloud": 21,
+    "plugins/unit/shared/unit-host.test.ts::hostyour-cloud": 1,
+    "plugins/unit/shared/unit-host.test.ts::simetrix": 10,
+    "plugins/unit/shared/unit-host.test.ts::simetrixch": 1,
+    "plugins/unit/shared/unit-host.test.ts::tenant": 4,
+    "plugins/unit/shared/unit-host.test.ts::tenants": 1,
+    "plugins/unit/shared/unit-host.ts::consumer": 3,
+    "plugins/unit/shared/unit-host.ts::digitacloud": 1,
+    "plugins/unit/shared/unit-host.ts::hostyour-cloud": 2,
+    "plugins/unit/shared/unit-host.ts::simetrixch": 1,
+    "plugins/unit/shared/unit-host.ts::tenant": 7,
+    "plugins/unit/shared/unit-size.ts::consumer": 6,
+    "plugins/unit/shared/unit-size.ts::hostyour-cloud": 2,
+    "plugins/unit/shared/unit-size.ts::tenant": 4
+  }
+}

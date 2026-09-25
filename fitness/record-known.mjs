@@ -1,5 +1,6 @@
 // Write down what a ratchet lets stand TODAY: every hand-spelled copy of a shared/enums.ts set, or,
-// with --words, every occurrence of a word the core may not say (tool/word-purity.words).
+// with --words, every occurrence of a word a root may not say (tool/word-purity.words for the core,
+// plugins/<name>/tool/word-purity.words for each plugin), one record per root.
 //
 // This is the ratchet. The check each record feeds refuses what is NEW, and lets what is already
 // here stand until somebody removes it. A check that refused all of it on the day it was written
@@ -17,21 +18,23 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { KNOWN_COPIES, REGISTRY, REPOSITORY_ROOT, describeCopy, findCopies } from "./lib/enum-copies.mjs";
-import { KNOWN_WORDS, WORD_LIST, findOccurrences } from "./lib/word-purity.mjs";
+import { findOccurrences, roots } from "./lib/word-purity.mjs";
 
 if (process.argv.includes("--words")) {
-  const occurrences = findOccurrences();
-  const record = {
-    what:
-      `Every occurrence of a word ${WORD_LIST} lists that stood in the core when the word check was `
-      + "written, as <file>::<word> and its count. The check refuses a count that grows and a key this "
-      + "record does not carry, and reports a count the tree no longer reaches. Written by "
-      + "node fitness/record-known.mjs --words.",
-    occurrences: Object.fromEntries(occurrences),
-  };
-  writeFileSync(join(REPOSITORY_ROOT, KNOWN_WORDS), `${JSON.stringify(record, null, 2)}\n`, "utf8");
-  const total = [...occurrences.values()].reduce((a, b) => a + b, 0);
-  process.stdout.write(`${KNOWN_WORDS}: ${occurrences.size} file-and-word pair(s), ${total} occurrence(s) recorded.\n`);
+  for (const { root, list, known } of roots()) {
+    const occurrences = findOccurrences(REPOSITORY_ROOT, root);
+    const record = {
+      what:
+        `Every occurrence of a word ${list} lists that stood in ${root === "" ? "the core" : root} when the word check was `
+        + "written, as <file>::<word> and its count. The check refuses a count that grows and a key this "
+        + "record does not carry, and reports a count the tree no longer reaches. Written by "
+        + "node fitness/record-known.mjs --words.",
+      occurrences: Object.fromEntries(occurrences),
+    };
+    writeFileSync(join(REPOSITORY_ROOT, known), `${JSON.stringify(record, null, 2)}\n`, "utf8");
+    const total = [...occurrences.values()].reduce((a, b) => a + b, 0);
+    process.stdout.write(`${known}: ${occurrences.size} file-and-word pair(s), ${total} occurrence(s) recorded.\n`);
+  }
 } else {
   const found = findCopies();
   const record = {

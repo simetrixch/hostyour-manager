@@ -24,7 +24,7 @@ export default defineConfig({
       {
         test: {
           name: "in-process",
-          include: ["server/**/*.test.ts", "shared/**/*.test.ts", "gate-runner/**/*.test.ts", "web/**/*.test.ts"],
+          include: ["server/**/*.test.ts", "shared/**/*.test.ts", "gate-runner/**/*.test.ts", "web/**/*.test.ts", "plugins/**/*.test.ts"],
           exclude: ["**/*.ansiwise.test.ts", "**/node_modules/**"],
           environment: "node",
           setupFiles: ["./vitest.setup.ts"],

@@ -10,7 +10,7 @@ import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { isTenantRecord, removeTenantBookedRecord, tenantMemberUrl, tenantZone } from "./unit-dns.ts";
-import { tenantOwnHosts as ownHosts } from "../../../shared/unit-host.ts";
+import { tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
 import { sleep } from "./onboard-release-cycle.ts";
 import type { TenantSetRoutingPorts } from "./tenant-routing.run.ts";
 

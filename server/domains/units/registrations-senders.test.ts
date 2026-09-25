@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { Registrations } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";

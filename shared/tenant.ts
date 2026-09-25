@@ -5,14 +5,14 @@
 // expands to is server/domains/units/tenant-fanout.ts.
 //
 // Import boundary: shared/ is isomorphic (the web bundle imports it), so this file imports ONLY
-import { UnitQuotaSchema } from "./unit-size.ts";
+import { UnitQuotaSchema } from "#unit/shared/unit-size.ts";
 // other shared/ modules + zod — never node:crypto (guid MINTING lives server-side in
 // server/kernel/ids.ts) and never server/. The graph stays acyclic: enums <- consumer <- gates <-
 // tenant, and tenant is a pure leaf (it imports consumer/gates/enums; nothing imports it back).
 import { z } from "zod";
 import { GateResultSchema } from "./gates.ts";
 import { ConsumerManifestSchema, publicFqdn } from "./consumer.ts";
-import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "./unit-host.ts";
+import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
 import { SEED_SELECTIONS } from "./app-selections.ts";
 import { MEMBER_ROUTING } from "./enums.ts";
 
@@ -225,7 +225,7 @@ export const TenantRegistrationSchema = z
     // member: a tenant of four members with a `small` size gets four small ceilings, and one member
     // filling its own cannot take another member's room.
     //
-    // The FIGURES and not a size name, for the reason shared/unit-size.ts states: the table lives in
+    // The FIGURES and not a size name, for the reason plugins/unit/shared/unit-size.ts states: the table lives in
     // the Manager's database, which no cluster can read, so the registration carries what the unit
     // gets rather than a word to look up.
     quota: UnitQuotaSchema,

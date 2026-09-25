@@ -23,7 +23,7 @@
 //
 // Boundary: domain layer — imports shared/ (type + schema) and the git PlatformRepo port; the
 // concrete second repo bound to catalog (its workRoot + repo-qualified lock) is wired by the adapter.
-import type { UnitQuota } from "../../../shared/unit-size.ts";
+import type { UnitQuota } from "#unit/shared/unit-size.ts";
 import { parse as parseYaml } from "yaml";
 import { guid as guidSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration } from "../../../shared/tenant.ts";
 import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts";

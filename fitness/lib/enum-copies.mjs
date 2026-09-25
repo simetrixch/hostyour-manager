@@ -33,7 +33,7 @@ export const REGISTRY = "shared/enums.ts";
 export const KNOWN_COPIES = "fitness/known-copies.json";
 
 /** The trees that ship. Everything a shipped module can be written in is read. */
-const SEARCHED = ["server", "web/src", "gate-runner/src", "shared"];
+const SEARCHED = ["server", "web/src", "gate-runner/src", "shared", "plugins"];
 
 /** The test surface, which is outside the rule rather than exempt from it: a test names a set
  *  because it is asserting about that set, and a fake models what something else answers. Same four

@@ -31,7 +31,7 @@ import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
 import { DnsZoneUnknownError, type DnsProvider } from "../../adapters/dns/port.ts";
 import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts";
-import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantZone } from "../../../shared/unit-host.ts";
+import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
 import type { MailDnsRecord, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
 import type { DnsInventoryView, DnsOwner, DnsRecordRow, DnsRowType } from "../../../shared/dns.ts";
 
@@ -101,7 +101,7 @@ function mailRow(domain: string, row: MailDnsRow): DnsRecordRow {
 }
 
 /** The unit records of one cluster at one stage: every consumer's host and every tenant's record,
- *  composed by the one composer of each name (shared/unit-host.ts) and read at the provider. */
+ *  composed by the one composer of each name (plugins/unit/shared/unit-host.ts) and read at the provider. */
 async function unitRowsOf(
   deps: Required<Pick<DnsInventoryDeps, "dns" | "consumers" | "unitApex">>,
   cluster: { domain: string; name: string },

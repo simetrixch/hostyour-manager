@@ -19,7 +19,7 @@ import type { BuildUnit, TenantBuildDeps } from "./tenant-builds.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import { judgeRepoIdentity, patHookRefusal, resolveRepoCredentialId } from "./repo-identity.ts";
 import { readOwnerIdentity } from "./owners.ts";
-import { tenantRecordName } from "../../../shared/unit-host.ts";
+import { tenantRecordName } from "#unit/shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
 import { tenantAppsRepoURL } from "./tenant-apps-tree.ts";
 import { webhookTargetUrl, WebhookScopeError } from "../../adapters/github-consumer/port.ts";

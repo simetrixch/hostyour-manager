@@ -231,9 +231,9 @@ export interface TenantCluster {
   members: string[];
   identityProvider: string;
   /** How the tenant's members are addressed below its zone, as recorded on its row: what its DNS
-   *  record is named and where its IdP answers (shared/unit-host.ts). */
+   *  record is named and where its IdP answers (plugins/unit/shared/unit-host.ts). */
   routing: MemberRouting;
-  /** The tenant's own domain, or "" where it is reached at its zone (shared/unit-host.ts). */
+  /** The tenant's own domain, or "" where it is reached at its zone (plugins/unit/shared/unit-host.ts). */
   ownDomain: string;
   /** The hosts that redirect to the own domain; empty without one. */
   ownDomainRedirects: string[];

@@ -12,7 +12,7 @@ import { registerUnitSizeRoutes } from "./api-unit-sizes.ts";
 import { seedUnitSizes } from "./unit-size.ts";
 import { Registrations } from "./registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { seedQuota, UNIT_SIZE_SEED } from "../../../shared/unit-size.ts";
+import { seedQuota, UNIT_SIZE_SEED } from "#unit/shared/unit-size.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
 // The size table's API. Two things are asserted, and they are the two the screens rest on: a row is

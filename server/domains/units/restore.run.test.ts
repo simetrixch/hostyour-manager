@@ -1,7 +1,7 @@
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { SLAVE_FQDN, SLAVE_MARKING_YAML } from "../runs/cluster-maps.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { eq } from "drizzle-orm";
 import type { DbHandle } from "../../db/client.ts";
 import { apps, tenants, tenantApps } from "../../db/schema/inventory.ts";

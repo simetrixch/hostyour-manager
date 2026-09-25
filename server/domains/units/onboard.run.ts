@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { MongodbModeSchema } from "../../../shared/unit-size.ts";
-import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "../../../shared/unit-size.ts";
+import { MongodbModeSchema } from "#unit/shared/unit-size.ts";
+import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
 import { eq } from "drizzle-orm";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
@@ -131,7 +131,7 @@ export const DeployableOnboardParams = OnboardParamsBase.extend({
   cluster: z.string().min(1),
   namespace: z.string().min(1), // == consumerNamespace(consumerName, stage): <name>-<stage>
   // The cluster's public apex, read out of its own values chain at plan time (global.unitApex). The
-  // unit's ONE host is <host>.<stage apex> (shared/unit-host.ts) — the fence pins it and
+  // unit's ONE host is <host>.<stage apex> (plugins/unit/shared/unit-host.ts) — the fence pins it and
   // provision-dns creates exactly that record.
   unitApex: z.string().min(1),
   // The public host LABEL, frozen from the validated manifest at plan (`host`, or the name where it

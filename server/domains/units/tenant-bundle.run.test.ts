@@ -6,7 +6,7 @@
 // registration carries the three facts after one execute pass — or the empty pair for a tenant
 // without an app.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { seedUnitSizes } from "./unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";

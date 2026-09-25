@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "../../../shared/unit-size.ts";
+import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
 import { and, eq } from "drizzle-orm";
 import type { RunDefinition, Step, StepCtx, Plan } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";

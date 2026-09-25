@@ -17,10 +17,12 @@ import { RUN_KIND } from "../../../shared/enums.ts";
 // the wiring instead of the run kind list.
 
 const SERVER_DIR = fileURLToPath(new URL("../..", import.meta.url));
+const PLUGINS_DIR = fileURLToPath(new URL("../../../plugins", import.meta.url));
 
-/** Every `.ts` file under server/, minus tests and fixtures — the definitions live in two places
- *  (domains/runs/defs for the cluster run kinds, domains/units for the unit run kinds), and hard-coding
- *  those two directories is how a definition moved to a third would start reading as missing. */
+/** Every `.ts` file under server/ and plugins/, minus tests and fixtures — the definitions live in
+ *  several places (domains/runs/defs for the cluster run kinds, domains/units for the unit run kinds,
+ *  each plugin's own tree), and hard-coding those directories is how a definition moved to another
+ *  would start reading as missing. */
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -37,7 +39,7 @@ function sourceFiles(dir: string): string[] {
 function implementedKinds(): Set<string> {
   const found = new Set<string>();
   const members = new Set<string>(RUN_KIND);
-  for (const file of sourceFiles(SERVER_DIR)) {
+  for (const file of [...sourceFiles(SERVER_DIR), ...sourceFiles(PLUGINS_DIR)]) {
     for (const m of readFileSync(file, "utf8").matchAll(/\bkind:\s*"([a-z-]+)"/g)) {
       if (m[1] !== undefined && members.has(m[1])) found.add(m[1]);
     }

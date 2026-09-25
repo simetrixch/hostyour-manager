@@ -4,7 +4,7 @@
 import { dropCredentialRows } from "../../security/store.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { ConsumerManifestSchema } from "../../../shared/consumer.ts";
 import { parseAppsManifest } from "../../../shared/apps-manifest.ts";

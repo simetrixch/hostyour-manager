@@ -23,7 +23,7 @@
 import { ConsumerRegistrationSchema, type ConsumerRegistration, type ConsumerStageRegistration, type SmtpEntry } from "../../../shared/consumer.ts";
 import { clusterMapPath, type ClusterValueFile } from "../../../shared/cluster-values.ts";
 import { readClusterValueChain } from "../inventory/cluster-value-chain.ts";
-import type { UnitQuota } from "../../../shared/unit-size.ts";
+import type { UnitQuota } from "#unit/shared/unit-size.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 // The scan's skipped-registration shape is a WIRE shape: the detected-consumer scan
 // (consumer-detected.ts) hands these to the browser verbatim, so it is declared once in

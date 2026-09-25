@@ -8,7 +8,7 @@
 //   - a tenants ROW carries the standing names only, because an app's presence is its tenant_apps row
 //     and its status, and every reader unions the two.
 import type { TenantMemberRecord } from "../../../shared/tenant.ts";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 
 /** The standing members every tenant of the test product has. */
 export const STANDING_MEMBER_NAMES: string[] = ["auth", "jobs", "report"];

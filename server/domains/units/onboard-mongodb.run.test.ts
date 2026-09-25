@@ -14,7 +14,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
-import type { MongodbMode } from "../../../shared/unit-size.ts";
+import type { MongodbMode } from "#unit/shared/unit-size.ts";
 import type { MongodbSeedInput, VaultSeeder, VaultSeedOutcome } from "./vault-seeder.ts";
 import type { DeployableOnboardParams } from "./onboard.run.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";

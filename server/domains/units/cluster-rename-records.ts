@@ -10,7 +10,7 @@ import { apps, clusters, tenants } from "../../db/schema/inventory.ts";
 import { recordDnsWrite } from "../../db/dns-writes.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { APP_SETTLED_STATUS, TENANT_SETTLED_STATUS, type DnsWriteOwnerKind, type Stage } from "../../../shared/enums.ts";
-import { consumerUnitHost, tenantRecordName } from "../../../shared/unit-host.ts";
+import { consumerUnitHost, tenantRecordName } from "#unit/shared/unit-host.ts";
 
 export interface RepointUnitRecordsDeps {
   dns: DnsProvider | undefined;

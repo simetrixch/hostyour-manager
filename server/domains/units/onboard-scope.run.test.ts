@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { provisionDnsStep, deleteSmtpOpsGrantCleanup } from "./onboard-steps.ts";

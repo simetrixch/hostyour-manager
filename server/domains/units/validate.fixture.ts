@@ -2,7 +2,7 @@
 // runner's report, the registration reader over the other units' claims, and the deps around them.
 import { ConsumerManifestSchema, type ConsumerManifest } from "../../../shared/consumer.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import type { GateReport, GateResult } from "../../../shared/gates.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";

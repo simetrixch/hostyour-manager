@@ -5,7 +5,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import type { Db } from "../../db/client.ts";
 import { unitSizes } from "../../db/schema/inventory.ts";
 import { errValidation, errNotFound, errNotConfigured } from "../../kernel/errors.ts";
-import { UNIT_SIZE, SIZE_COMPONENT, type UnitSize, type SizeComponent } from "../../../shared/unit-size.ts";
+import { UNIT_SIZE, SIZE_COMPONENT, type UnitSize, type SizeComponent } from "#unit/shared/unit-size.ts";
 import { listUnitSizes, explainUnitQuota } from "./unit-size.ts";
 import { SetSizeParams, TenantSetSizeParams, TENANT_BRINGS, consumerComposition } from "./set-size.run.ts";
 import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";

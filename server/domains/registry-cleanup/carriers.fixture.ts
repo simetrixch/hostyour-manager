@@ -2,7 +2,7 @@
 // Two shapes, because the search reads two kinds of source: a GitOps repo it walks branch by branch
 // (hostyour-cloud, catalog) and a unit's own repo it clones once per stage at a delivery branch.
 import type { CarrierRepo } from "./search.ts";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import type { BranchScope, ClonedRepo, RepoReader } from "../../adapters/git/port.ts";
 
 /** A GitOps repo whose branches and files a test states outright. `seed` puts one file on one branch;

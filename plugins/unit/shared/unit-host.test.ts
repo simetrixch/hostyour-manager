@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { consumerUnitHost, HOST_LABEL_RE, RESERVED_HOST_LABELS, stageApex, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone } from "./unit-host.ts";
-import { ConsumerManifestSchema, consumerHostLabel, hostLabel } from "./consumer.ts";
+import { ConsumerManifestSchema, consumerHostLabel, hostLabel } from "#core/shared/consumer.ts";
 
 /** THE ONE composition of a unit's public host (simetrixch/hostyour-cloud#208): the stage is a
  *  zone and prod is the apex itself, for consumers and tenants alike. */

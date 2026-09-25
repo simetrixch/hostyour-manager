@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { RecordingTeardownSeeder } from "./teardown.fixture.ts";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";

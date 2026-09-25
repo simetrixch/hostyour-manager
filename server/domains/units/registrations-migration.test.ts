@@ -2,7 +2,7 @@
 // rewritten with it once, a file already in the schema's form yields no commit, a key the schema
 // does not know is dropped, and a file the schema refuses is named and left as it stands.
 import { describe, it, expect } from "vitest";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";

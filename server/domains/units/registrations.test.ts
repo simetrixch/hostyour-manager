@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { seedQuota, type UnitQuota } from "../../../shared/unit-size.ts";
+import { seedQuota, type UnitQuota } from "#unit/shared/unit-size.ts";
 import { z } from "zod";
 import { Registrations } from "./registrations.ts";
 import { serializePointer, parseRegistration, makeRegistrationGuard, trailer } from "./registration-laws.ts";

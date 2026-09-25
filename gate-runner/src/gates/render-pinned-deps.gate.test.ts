@@ -148,7 +148,7 @@ describe("renderArgs", () => {
 
 describe("deliveredValues", () => {
   // The two values the consumers ApplicationSet hands every unit as valuesObject, composed by the
-  // platform's host law (shared/unit-host.ts): prod stands directly under the unit apex, every other
+  // platform's host law (plugins/unit/shared/unit-host.ts): prod stands directly under the unit apex, every other
   // stage under its own zone — so the chart in the sandbox renders the host the deploy serves.
   it("composes a prod unit's host directly under the unit apex", () => {
     expect(parse(deliveredValues("auth", "prod", "digitacloud.app"))).toEqual({

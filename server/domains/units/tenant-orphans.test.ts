@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";

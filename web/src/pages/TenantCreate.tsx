@@ -1,8 +1,8 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import type { Stage } from "../../../shared/enums.ts";
-import { HOST_LABEL_RE } from "../../../shared/unit-host.ts";
-import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "../../../shared/unit-size.ts";
+import { HOST_LABEL_RE } from "#unit/shared/unit-host.ts";
+import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "#unit/shared/unit-size.ts";
 import { listTenantTargets, createTenant, type TenantTargetView } from "../api.ts";
 import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
 

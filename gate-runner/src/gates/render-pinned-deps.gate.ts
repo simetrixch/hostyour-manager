@@ -11,7 +11,7 @@ import { parse, stringify } from "yaml";
 import type { GateResult, ResolvedDependency } from "../../../shared/gates.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { CLUSTER_MAP_DIR, splitAtChartValues, type ClusterValueFile } from "../../../shared/cluster-values.ts";
-import { consumerUnitHost, stageApex } from "../../../shared/unit-host.ts";
+import { consumerUnitHost, stageApex } from "#unit/shared/unit-host.ts";
 import type { RenderedDoc } from "./gate.ts";
 import { fail, pass } from "./result.ts";
 import { run, ExecError } from "../exec.ts";
@@ -160,7 +160,7 @@ export function unitApexOf(chain: readonly ClusterValueFile[]): string | null {
  *  installation's unitApex. Every chart requires them since simetrixch/hostyour-cloud#208, so a
  *  render without them fails on the first Ingress, and a render with them composed HERE by any
  *  other rule than the platform's would approve a host the deploy never serves. The composition is
- *  therefore the one in shared/unit-host.ts, the same the DNS step and the activation use, and it
+ *  therefore the one in plugins/unit/shared/unit-host.ts, the same the DNS step and the activation use, and it
  *  reaches helm as a FILE layered last, where the ApplicationSet's valuesObject sits. */
 export function deliveredValues(hostLabel: string, env: Stage, unitApex: string): string {
   return stringify({ unitHost: consumerUnitHost(hostLabel, env, unitApex), global: { stageApex: stageApex(unitApex, env) } });

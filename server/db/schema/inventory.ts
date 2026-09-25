@@ -157,7 +157,7 @@ export const apps = sqliteTable("apps", {
   // while upsertAppRow looks the existing row up with `stage = ?` — which never matches a NULL. That
   // one writer would then insert a second row beside the first on every run.
   stage: text("stage", { enum: STAGE }).notNull(),
-  // The unit's public host LABEL, `<host>.<stage apex>` (shared/unit-host.ts) — the manifest's `host`
+  // The unit's public host LABEL, `<host>.<stage apex>` (plugins/unit/shared/unit-host.ts) — the manifest's `host`
   // attested at the onboarding, or the name where it declared none. NOT NULL for the same reason as
   // stage: the one INSERT carries it, and every reader that addresses the unit — the DNS record it
   // removes, the host it probes, the activation it calls — composes from this and never from the name.
@@ -265,7 +265,7 @@ export const tenantApps = sqliteTable("tenant_apps", {
 }, (t) => [uniqueIndex("tenant_apps_tenant_name_uq").on(t.tenantId, t.name)]);
 
 // The size table — the ONE place an installation says what `small`, `medium` and `large` mean. A row
-// per size, seeded from shared/unit-size.ts UNIT_SIZE_SEED when the database is created and EDITABLE
+// per size, seeded from plugins/unit/shared/unit-size.ts UNIT_SIZE_SEED when the database is created and EDITABLE
 // afterwards, because a size is what a unit is sold and that changes without a release.
 //
 // It is data and not a values file for a reason branch-classes.yaml states: a books path — what one

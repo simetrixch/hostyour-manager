@@ -4,7 +4,7 @@
 // registries over a fake platform repo, the DNS fake with both clusters' own A records, and the
 // public probe defaulting to "unreachable" (what a correctly quiesced unit answers).
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { servers, clusters, apps, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import type { StepCtx, Step } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";

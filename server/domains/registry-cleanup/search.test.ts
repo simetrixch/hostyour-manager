@@ -3,7 +3,7 @@ import { searchCarriers, type CarrierRepo, type SearchDeps } from "./search.ts";
 import { pinKey } from "../../../shared/pin.ts";
 import { FakeCarrierRepo, FakeUnitRepo, stageRegistration, buildRegistration, pinFile, PLATFORM_APPS_DIR, platformAppPinPath } from "./carriers.fixture.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { TEST_BUNDLE, testMembers } from "../units/tenant-members.fixture.ts";
 import { stringify as stringifyYaml } from "yaml";
 

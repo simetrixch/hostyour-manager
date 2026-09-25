@@ -9,7 +9,7 @@ import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
-import { seedQuota } from "../../../shared/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { testMembers, TEST_QUOTA } from "./tenant-members.fixture.ts";
 import type { LifecyclePorts, TenantLifecyclePorts } from "./lifecycle.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";

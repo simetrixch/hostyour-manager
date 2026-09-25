@@ -31,7 +31,7 @@ import type { DnsInventoryView, DnsRemoveInput, DnsWritesView } from "../../shar
 // AppProvenance is ONE list for both unit kinds, so ConsumerView and TenantView print the same word
 // for the same fact — a hand-written union here is what let the two cards disagree about it.
 import type { AppProvenance, MemberRouting, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
-import type { UnitSize } from "../../shared/unit-size.ts";
+import type { UnitSize } from "#unit/shared/unit-size.ts";
 
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
  *  e.g. the Reset wizard renders a DB-only form on NOT_CONFIGURED instead of a dead end. */

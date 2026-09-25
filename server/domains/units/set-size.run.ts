@@ -1,12 +1,12 @@
 import { z } from "zod";
 import type { RunDefinition, Step, LockClaim } from "../../executor/types.ts";
-import { UnitSizeSchema, type UnitSize } from "../../../shared/unit-size.ts";
+import { UnitSizeSchema, type UnitSize } from "#unit/shared/unit-size.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { attestTargetStep, loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { resolveUnitQuota } from "./unit-size.ts";
-import type { UnitComposition } from "../../../shared/unit-size.ts";
+import type { UnitComposition } from "#unit/shared/unit-size.ts";
 import type { Stage } from "../../../shared/enums.ts";
 
 /** A tenant brings no database of its own: its members claim the cluster's shared MongoDB replica set
