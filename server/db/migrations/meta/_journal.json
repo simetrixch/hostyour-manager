@@ -106,6 +106,13 @@
       "when": 1790454750691,
       "tag": "0014_tenants-sender-domain",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1790468256980,
+      "tag": "0015_deploy-repository-names",
+      "breakpoints": true
     }
   ]
 }

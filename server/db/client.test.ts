@@ -53,7 +53,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
@@ -76,6 +76,16 @@ describe("openDb — migration phase + append-only invariants", () => {
     cred.run("cred_pat_unit", "pat", "repository PAT (acme)", null, "sha256:unit");
     cred.run("cred_app_unit", "github-app", "github-app (post)", null, "sha256:app");
     standing.prepare("INSERT INTO unit_sizes (component, name, requests_cpu, requests_memory, limits_cpu, limits_memory, pods, persistent_volume_claims) VALUES ('base', 'small', '900m', '1Gi', '2', '2Gi', 10, 5)").run();
+    // The runs 0015 renames the deploy repository in: two that can still act, one succeeded (a record
+    // that keeps what it froze), one that never froze the key, and a lock without the prefix.
+    const run = standing.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?, 'noop', 'cluster', 'cl_1', ?, ?, ?, 'op_system')");
+    const frozenParams = JSON.stringify({ guid: "abcdefghjkmn", catalogRepoUrl: "https://github.com/acme/acme-deploy.git" });
+    const frozenPlan = JSON.stringify({ locks: [{ resource: "git-branch", key: "catalog@m1.example.com" }, { resource: "master-kube", key: "m" }], planHash: "h" });
+    run.run("run_planned", frozenParams, frozenPlan, "planned");
+    run.run("run_approved", frozenParams, frozenPlan, "approved");
+    run.run("run_done", frozenParams, frozenPlan, "succeeded");
+    run.run("run_other", JSON.stringify({ guid: "abcdefghjkmn" }), JSON.stringify({ locks: [] }), "planned");
+    standing.prepare("INSERT INTO run_locks (resource, key, run_id) VALUES ('git-branch', 'catalog@m1.example.com', 'run_approved'), ('git-branch', 'm1.example.com', 'run_approved')").run();
     standing.close();
     // Opened by the Manager: the migrator applies 0001 onward.
     const h = openDb(file);
@@ -96,6 +106,15 @@ describe("openDb — migration phase + append-only invariants", () => {
     expect(h.sqlite.prepare("SELECT id, approved_tags FROM tenants").all()).toEqual([{ id: "tnt_1", approved_tags: "{}" }]); // 0012: carried, none approved
     expect(h.sqlite.prepare("SELECT id, sender_domain FROM tenants").all()).toEqual([{ id: "tnt_1", sender_domain: "" }]); // 0014: carried, sends as the platform
     expect(h.sqlite.prepare("SELECT component, name, requests_cpu FROM unit_sizes").all()).toEqual([{ component: "base", name: "small", requests_cpu: "900m" }]); // 0013: carried, for the unit plugin to adopt
+    // 0015: the runs that can still act carry deployRepoUrl and deploy@<books>; the record and the rest do not move.
+    const runRows = h.sqlite.prepare("SELECT id, params_json, plan_json FROM runs ORDER BY id").all() as { id: string; params_json: string; plan_json: string }[];
+    expect(runRows.map((r) => [r.id, JSON.parse(r.params_json), (JSON.parse(r.plan_json) as { locks: { key: string }[] }).locks.map((l) => l.key)])).toEqual([
+      ["run_approved", { guid: "abcdefghjkmn", deployRepoUrl: "https://github.com/acme/acme-deploy.git" }, ["deploy@m1.example.com", "m"]],
+      ["run_done", { guid: "abcdefghjkmn", catalogRepoUrl: "https://github.com/acme/acme-deploy.git" }, ["catalog@m1.example.com", "m"]],
+      ["run_other", { guid: "abcdefghjkmn" }, []],
+      ["run_planned", { guid: "abcdefghjkmn", deployRepoUrl: "https://github.com/acme/acme-deploy.git" }, ["deploy@m1.example.com", "m"]],
+    ]);
+    expect(h.sqlite.prepare("SELECT key FROM run_locks ORDER BY key").all()).toEqual([{ key: "deploy@m1.example.com" }, { key: "m1.example.com" }]);
     // 0006 took the two unit rows (a unit has no row of its own); the server's four stay.
     expect(h.sqlite.prepare("SELECT id, subject_kind, subject_id, purpose FROM credentials ORDER BY id").all()).toEqual([
       { id: "cred_bearer", subject_kind: "server", subject_id: "srv_1", purpose: "cluster-bearer" },
