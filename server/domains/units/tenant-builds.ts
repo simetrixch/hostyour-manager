@@ -300,7 +300,7 @@ export function buildUnitStep(
       // the build-only shape. The fan-out that pulls these images was gated (T1..T4) at plan.
       const ungated = await readUngatedOnboard(
         { repo: ports.repo, log: (l) => ctx.log("meta", `${unit.unit}: ${l}`), signal: ctx.signal },
-        { repoURL: unit.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: unit.unit, repoCredentialId },
+        { repoURL: unit.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: unit.unit, repoCredentialId, ...(forTenant ? { chartIgnored: true } : {}) },
         {
           cluster: master.domain,
           admittedBy: [

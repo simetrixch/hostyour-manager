@@ -53,7 +53,7 @@ function ctx(logs: string[], checkpoint: { value?: unknown } = {}): StepCtx {
   };
 }
 
-async function standing() {
+async function standing(manifest = JOBS_MANIFEST_YAML) {
   db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", name: "m1", status: "active" }).run();
   const buildPlane = new FakeBuildPlane();
@@ -62,7 +62,7 @@ async function standing() {
     syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy",
     syncSources: [{ repoURL: "https://github.com/x/hostyour-cloud.git", revision: SHA, path: "clusters/inventories/consumer-build", valuesObject: { unit: { name: "example-jobs", buildsJson: JSON.stringify(["example-jobs"]) } } }],
   } as ArgoAppStatus]]) });
-  const onboard = onboardPorts({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": JOBS_MANIFEST_YAML } }), buildPlane, buildArgo });
+  const onboard = onboardPorts({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": manifest } }), buildPlane, buildArgo });
   await onboard.registrations.commitRegistration({
     unit: { name: "example-jobs", repoURL: JOBS_REPO, owner: "team-acme", onboardedAt: "2026-01-01T00:00:00.000Z", suspended: false, quiesced: false },
     builds: ["example-jobs"], runId: "run_old",
@@ -108,6 +108,15 @@ describe("buildUnitStep for one tenant", () => {
     expect(buildPlane.releaseWatches).toEqual([]);
     expect(approved).toEqual([]);
     expect(logs.some((l) => l.includes("nothing to build"))).toBe(true);
+  });
+
+  it("builds a unit whose manifest also deploys its own chart: a build for one tenant pins nothing either way", async () => {
+    const { buildPlane, approved, step } = await standing(`${JOBS_MANIFEST_YAML}chart:
+  path: deploy/chart
+`);
+    await step("0.1.0-stable-20260801000000-eeeeeee").run(ctx([]));
+    expect(buildPlane.releaseWatches).toHaveLength(1);
+    expect(approved).toEqual([{ tag: BUILT, builds: ["example-jobs"] }]);
   });
 
   it("builds on the chosen channel with target build, approves the built tag, and approves it again on a resume without a second build", async () => {

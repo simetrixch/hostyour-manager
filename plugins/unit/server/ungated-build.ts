@@ -29,7 +29,9 @@ const UNGATED_VERSION = "1";
  */
 export async function readUngatedOnboard(
   deps: { repo: RepoReader; log: (line: string) => void; signal: AbortSignal },
-  req: { repoURL: string; ref: string; consumerName: string; repoCredentialId?: string },
+  // chartIgnored: a build for one tenant (hostyour-manager#289) builds the unit's images and pins
+  // nothing, so a unit that also deploys its own chart is built the same way.
+  req: { repoURL: string; ref: string; consumerName: string; repoCredentialId?: string; chartIgnored?: boolean },
   about: { cluster: string; admittedBy: string[] },
 ): Promise<UngatedOnboard> {
   const cloned = await deps.repo.cloneAtRef({
@@ -57,7 +59,7 @@ export async function readUngatedOnboard(
     if (manifest.data.name !== req.consumerName) {
       throw errValidation(`${CONSUMER_MANIFEST_PATH} declares name "${manifest.data.name}" but the onboarding names "${req.consumerName}" — a unit's name is its identity and the two must be the same word`);
     }
-    if (manifest.data.chart !== undefined) {
+    if (manifest.data.chart !== undefined && !req.chartIgnored) {
       throw errValidation(`${CONSUMER_MANIFEST_PATH} declares a chart, so "${req.consumerName}" is a deployable unit — the ungated first-master path onboards a build-only unit, and nothing here renders a chart`);
     }
     const builds = manifest.data.builds.map((b) => b.name);

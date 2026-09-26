@@ -168,7 +168,7 @@
     "plugins/unit/server/seed-repo-pat.ts::tenant": 1,
     "plugins/unit/server/ungated-build.ts::consumer": 13,
     "plugins/unit/server/ungated-build.ts::onboarding": 2,
-    "plugins/unit/server/ungated-build.ts::tenant": 2,
+    "plugins/unit/server/ungated-build.ts::tenant": 3,
     "plugins/unit/server/unit-apex.ts::helm": 1,
     "plugins/unit/server/unit-dns.test.ts::consumer": 17,
     "plugins/unit/server/unit-dns.test.ts::onboard": 2,
