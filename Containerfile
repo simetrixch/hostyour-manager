@@ -21,7 +21,7 @@ COPY . .
 RUN npm run build:web
 
 # helm — the tenant validation engine shells `helm template` over a cloned
-# catalog workdir (server/adapters/helm/helm.ts). The release binary is statically linked (Go,
+# deploy repository workdir (server/adapters/helm/helm.ts). The release binary is statically linked (Go,
 # CGO_ENABLED=0), so it is fetched on alpine and runs unchanged on the Debian-slim runtime.
 FROM alpine:3.20 AS helm
 ARG HELM_VERSION=v3.16.4
