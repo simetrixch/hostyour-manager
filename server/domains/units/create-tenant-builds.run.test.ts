@@ -13,7 +13,7 @@ import { TenantRegistrations } from "./tenant-registrations.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { ports as onboardPorts } from "./onboard.fixture.ts";
-import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
+import { FakeRepoReader, FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
@@ -30,6 +30,7 @@ import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { RELEASE_KIT_PATHS } from "#unit/server/release-kit/release-kit.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
@@ -321,6 +322,14 @@ describe("buildUnitStep — the unit plugin's build-only chain, run for one unit
       expect(entry?.onboardedAt).toBe("2026-01-01T00:00:00.000Z");
       expect(buildPlane.releaseWatches).toHaveLength(1);
       expect(logs.some((l) => l.includes("builds attested again"))).toBe(true);
+    });
+    it("syncs the current release kit into the repository before its release, and commits nothing when it already carries it (#277)", async () => {
+      const { onboard, buildPlane, step } = await standing({ buildArgo: rendering(["example-jobs"]) });
+      const writer = onboard.consumerRepo as FakeRepoWriter;
+      await step.run(ctx(params(), [], [])); expect(writer.commits).toHaveLength(1);
+      expect((writer.commits[0]!.write ?? []).map((w) => w.path).sort()).toEqual([...RELEASE_KIT_PATHS].sort()); expect(buildPlane.releaseWatches).toHaveLength(1);
+      await step.run(ctx(params(), [], [])); // a second release: the repository already carries the kit
+      expect(writer.commits).toHaveLength(1);
     });
     it("does not trigger the release while the build Application still renders the old builds", async () => {
       const { buildPlane, step } = await standing({ buildArgo: rendering(["example-jobs-old"]) });

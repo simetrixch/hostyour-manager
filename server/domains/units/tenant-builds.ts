@@ -47,6 +47,7 @@ import { DEFAULT_BRANCH_HEAD } from "#unit/server/build-chain.ts";
 import { resolveNextVersion } from "#unit/server/release-version.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
+import { injectReleaseKitStep } from "#unit/server/inject-release-kit.ts";
 import { recordBuildOnlyStep } from "#unit/server/build-registration.ts";
 import { attestBuildsAgain } from "#unit/server/build-unit-attest.ts";
 import { type RequiredImage, requiredImagesFrom } from "./ensure-images.ts";
@@ -250,7 +251,8 @@ async function nextVersion(ctx: StepCtx, deps: TenantBuildDeps, unit: BuildUnit,
 /** ONE step per build unit, run before the tenant's own writes. Inside it the unit plugin's
  *  build-only chain runs step by step (registration, repo-pat seed, build namespace, release kit,
  *  webhook, release trigger, build watch, record) with parameters composed here; a unit already
- *  registered build-only skips the registration half and re-runs its release. */
+ *  registered build-only skips the registration half, gets the current release kit, and re-runs its
+ *  release. */
 export function buildUnitStep(
   deps: () => TenantBuildDeps | undefined,
   p: { guid: string; owner: string; stage: Stage },
@@ -305,8 +307,10 @@ export function buildUnitStep(
       // A registered unit's builds are attested again, and rendered, before its release (build-unit-attest.ts).
       if (unit.registered) await attestBuildsAgain(ctx, ports, unit.unit, ungated.builds);
       const release: ReleaseCycleRuntime = {};
+      // A registered unit gets the current release kit too, before its release: the kit is written by
+      // comparison, so a repository already on it commits nothing (#277).
       const chain: Step[] = unit.registered
-        ? [triggerReleaseStep(ports, params), watchReleaseBuildStep(ports, params, release), recordBuildOnlyStep(ports, params, release)]
+        ? [injectReleaseKitStep(ports, params), triggerReleaseStep(ports, params), watchReleaseBuildStep(ports, params, release), recordBuildOnlyStep(ports, params, release)]
         : buildOnlySteps(ports, params, release);
       for (const step of chain) {
         ctx.log("meta", `${unit.unit}: ${step.title}`);
