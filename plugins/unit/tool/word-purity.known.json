@@ -135,6 +135,8 @@
     "plugins/unit/server/release-kit/release-kit.ts::consumer": 8,
     "plugins/unit/server/release-kit/release-kit.ts::onboard": 3,
     "plugins/unit/server/release-kit/release-kit.ts::onboarding": 2,
+    "plugins/unit/server/release-kit/release-pin.test.ts::consumer": 5,
+    "plugins/unit/server/release-kit/release-pin.test.ts::hostyour-cloud": 1,
     "plugins/unit/server/release-kit/release-selection.test.ts::hostyour-cloud": 1,
     "plugins/unit/server/release-kit/release-twins.test.ts::consumer": 2,
     "plugins/unit/server/release-version.ts::consumer": 1,

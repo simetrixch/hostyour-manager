@@ -154,7 +154,8 @@ pin_branch() {
     git -C "$PLATFORM_REPO_DIR" fetch --quiet origin "$branch" \
       || die "the branch ${branch} of ${PLATFORM_REPO} could not be fetched - nothing further was pinned"
     git -C "$PLATFORM_REPO_DIR" reset --quiet --hard "origin/${branch}"
-    pinned="$(python3 "$PINNER" "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST")"
+    pinned="$(python3 "$PINNER" "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST")" \
+      || die "the pin of ${STAGE} could not be written: ${pinned} - the images are built and nothing was pinned"
     if [ -z "$pinned" ]; then
       say "${branch} carries no values-${STAGE}.yaml pin of ${NAME} - left as it stands"
       return 0
@@ -395,31 +396,83 @@ else
   git -C "$PLATFORM_REPO_DIR" fetch --quiet --prune origin \
     || die "the platform tree ${PLATFORM_REPO} could not be refreshed after the build - the images exist and nothing was pinned"
   # THE PIN GRAMMAR AND NOTHING ELSE: builds[]{name,image,tag}, in the values file of the stage
-  # this release is going to. Read and written by name rather than by line, so a file whose
-  # entries are ordered differently is still pinned and a file that carries none is left alone.
+  # this release is going to, and beside a build's tag what its pinValues name. Read and written by
+  # name rather than by line, so a file whose entries are ordered differently is still pinned and a
+  # file that carries none is left alone. The PowerShell twin is Write-StagePin; the two write the
+  # same bytes.
   cat > "$PINNER" <<'PIN'
 import glob, os, re, sys
+# ONE \n ENDS WHAT THIS PRINTS, as the PowerShell twin ends it. A Windows python ends a printed line
+# with \r\n, the shell's $(...) keeps the \r, and every path the answer names would then carry it.
+sys.stdout.reconfigure(newline=chr(10))
 tree, stage, image_tag, manifest = sys.argv[1:5]
-names = re.findall(r"^\s*-\s*name:\s*(\S+)", open(manifest, encoding="utf-8").read(), re.M)
+text = open(manifest, encoding="utf-8").read()
+names = re.findall(r"^\s*-\s*name:\s*(\S+)", text, re.M)
+# WHAT A BUILD PINS BESIDE ITS TAG: its pinValues, a block of `key: "value"` lines under the build,
+# each value double-quoted and without a backslash or a double quote in it. Anything else there is
+# refused before a file is touched: a value read wrong is a value written wrong.
+pins, build, top, block = {}, None, 0, None
+for number, line in enumerate(text.split(chr(10)), 1):
+    if line.strip() == "" or line.strip().startswith("#"):
+        continue
+    depth = len(line) - len(line.lstrip(" "))
+    if block is not None and depth > block:
+        pair = re.match(r'^ +([A-Za-z][A-Za-z0-9_-]*): *"([ !#-\[\]-~]*)"\s*(#.*)?$', line)
+        if not pair or pair.group(1) in ("name", "image", "tag"):
+            print('line %d is no key: "value" pair of the pinValues of %s' % (number, build))
+            sys.exit(3)
+        pins[build][pair.group(1)] = pair.group(2)
+        continue
+    block = None
+    item = re.match(r"^( *)-\s*name:\s*(\S+)", line)
+    if item:
+        build, top = item.group(2), len(item.group(1))
+        pins[build] = {}
+    elif build is not None and depth <= top:
+        build = None
+    elif build is not None and re.match(r"^ *pinValues:", line):
+        if not re.match(r"^ *pinValues:\s*(#.*)?$", line):
+            print('line %d writes the pinValues of %s on one line - write one key: "value" pair per line below it' % (number, build))
+            sys.exit(3)
+        block = depth
 touched = []
 for path in glob.glob(os.path.join(tree, "clusters", "inventories", "*", "values-%s.yaml" % stage)):
-    text = open(path, encoding="utf-8", newline="").read()
-    out, image, changed = [], None, False
-    for line in text.split(chr(10)):
-        m = re.match(r"^(\s*)image:\s*(\S+)\s*$", line)
+    lines = open(path, encoding="utf-8", newline="").read().split(chr(10))
+    image, changed, i = None, False, 0
+    while i < len(lines):
+        m = re.match(r"^(\s*)image:\s*(\S+)\s*$", lines[i])
         if m:
             image = m.group(2)
-        t = re.match(r"^(\s*)tag:\s*\S+\s*$", line)
+        t = re.match(r"^(\s*)tag:\s*\S+\s*$", lines[i])
         if t and image in names:
-            line = '%stag: "%s"' % (t.group(1), image_tag)
+            indent = t.group(1)
+            lines[i] = '%stag: "%s"' % (indent, image_tag)
+            # THE ENTRY is every line around the tag at its indentation or deeper, from below the item
+            # line above it to the first shallower line below it. A pin value replaces its key's line
+            # there, and stands right after the tag where the entry carries none.
+            inside = lambda n: lines[n].strip() == "" or len(lines[n]) - len(lines[n].lstrip(" ")) >= len(indent)
+            first, after = i, i + 1
+            while first > 0 and inside(first - 1):
+                first -= 1
+            for key, value in pins.get(image, {}).items():
+                end = i + 1
+                while end < len(lines) and inside(end):
+                    end += 1
+                pin = '%s%s: "%s"' % (indent, key, value)
+                own = [n for n in range(first, end) if re.match("^" + re.escape(indent + key) + r":(\s|$)", lines[n])]
+                if own:
+                    lines[own[0]] = pin
+                else:
+                    lines.insert(after, pin)
+                    after += 1
+            i = after - 1
             image, changed = None, True
-        out.append(line)
+        i += 1
     # WRITTEN ONLY WHERE A TAG MOVED. A file compared by its whole text is a file rewritten for a
     # trailing newline, and a commit that names files it did not change is one nobody can read.
-    new = chr(10).join(out)
     if changed:
         with open(path + ".writing", "w", encoding="utf-8", newline=chr(10)) as f:
-            f.write(new)
+            f.write(chr(10).join(lines))
         os.replace(path + ".writing", path)
         touched.append(os.path.relpath(path, tree).replace(os.sep, "/"))
 print(" ".join(touched))

@@ -32,6 +32,12 @@ platformRepo: simetrixch/hostyour-cloud
 builds:
   - name: manager                  # the in-cluster app
     containerfile: Containerfile   # repo root
+    # The plugins this image activates. The release writes them beside the manager's tag in every
+    # values-<stage>.yaml it pins, where the chart reads them as PLUGINS (hostyour-cloud#244), so an
+    # image and the plugins it names switch in one commit. They are server/plugins.ts compiledPlugins
+    # joined with "," (server/boot/compiled-plugins.test.ts holds the two together).
+    pinValues:
+      plugins: "unit"
   - name: gate-runner              # the onboarding-sandbox image, run as a Tekton task in-cluster
     containerfile: gate-runner/Containerfile
   # The client-tools image of the move / backup / restore job — mongodump,

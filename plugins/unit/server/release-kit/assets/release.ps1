@@ -77,16 +77,55 @@ function Note($m) { [Console]::Error.Write("$m`n") }
 function Die($m) { Warn $m; exit 1 }
 
 # THE PIN GRAMMAR AND NOTHING ELSE: builds[]{name,image,tag}, in the values file of the stage this
-# release is going to. Read and written by name rather than by line, so a file whose entries are
-# ordered differently is still pinned and a file that carries none is left alone. Answers the
-# tree-relative paths whose tag actually moved.
+# release is going to, and beside a build's tag what its pinValues name. Read and written by name
+# rather than by line, so a file whose entries are ordered differently is still pinned and a file
+# that carries none is left alone. Answers the tree-relative paths whose tag actually moved. The
+# bash twin is the python pinner in release.sh; the two write the same bytes, so every comparison
+# here is ordinal and case-sensitive, as python's are.
 function Write-StagePin {
   param(
     [Parameter(Mandatory = $true)][string]$Tree,
     [Parameter(Mandatory = $true)][string]$PinStage,
     [Parameter(Mandatory = $true)][string]$ImageTag,
-    [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$BuildNames
+    [Parameter(Mandatory = $true)][string]$Manifest
   )
+  $text = [System.IO.File]::ReadAllText($Manifest)
+  $names = @([regex]::Matches($text, '(?m)^\s*-\s*name:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value })
+  # WHAT A BUILD PINS BESIDE ITS TAG: its pinValues, a block of `key: "value"` lines under the build,
+  # each value double-quoted and without a backslash or a double quote in it. Anything else there is
+  # refused before a file is touched: a value read wrong is a value written wrong.
+  $pins = [System.Collections.Generic.Dictionary[string, System.Collections.Specialized.OrderedDictionary]]::new([StringComparer]::Ordinal)
+  $build = $null
+  $top = 0
+  $block = -1
+  $number = 0
+  foreach ($line in $text.Split([char]10)) {
+    $number++
+    if ($line.Trim() -eq '' -or $line.Trim().StartsWith('#', [StringComparison]::Ordinal)) { continue }
+    $depth = $line.Length - $line.TrimStart(' ').Length
+    if ($block -ge 0 -and $depth -gt $block) {
+      $pair = [regex]::Match($line, '^ +([A-Za-z][A-Za-z0-9_-]*): *"([ !#-\[\]-~]*)"\s*(#.*)?$')
+      if (-not $pair.Success -or @('name', 'image', 'tag') -ccontains $pair.Groups[1].Value) {
+        throw ('line {0} is no key: "value" pair of the pinValues of {1}' -f $number, $build)
+      }
+      $pins[$build][$pair.Groups[1].Value] = $pair.Groups[2].Value
+      continue
+    }
+    $block = -1
+    $item = [regex]::Match($line, '^( *)-\s*name:\s*(\S+)')
+    if ($item.Success) {
+      $build = $item.Groups[2].Value
+      $top = $item.Groups[1].Value.Length
+      $pins[$build] = [System.Collections.Specialized.OrderedDictionary]::new([StringComparer]::Ordinal)
+    } elseif ($null -ne $build -and $depth -le $top) {
+      $build = $null
+    } elseif ($null -ne $build -and $line -cmatch '^ *pinValues:') {
+      if ($line -cnotmatch '^ *pinValues:\s*(#.*)?$') {
+        throw ('line {0} writes the pinValues of {1} on one line - write one key: "value" pair per line below it' -f $number, $build)
+      }
+      $block = $depth
+    }
+  }
   $inventories = Join-Path $Tree 'clusters/inventories'
   if (-not (Test-Path -LiteralPath $inventories)) { return @() }
   $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -94,24 +133,44 @@ function Write-StagePin {
   foreach ($inventory in Get-ChildItem -LiteralPath $inventories -Directory) {
     $path = Join-Path $inventory.FullName "values-$PinStage.yaml"
     if (-not (Test-Path -LiteralPath $path)) { continue }
-    $out = [System.Collections.Generic.List[string]]::new()
+    $lines = [System.Collections.Generic.List[string]]::new([string[]][System.IO.File]::ReadAllText($path).Split([char]10))
     $image = $null
     $changed = $false
-    foreach ($line in [System.IO.File]::ReadAllText($path).Split([char]10)) {
-      $imageLine = [regex]::Match($line, '^(\s*)image:\s*(\S+)\s*$')
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+      $imageLine = [regex]::Match($lines[$i], '^(\s*)image:\s*(\S+)\s*$')
       if ($imageLine.Success) { $image = $imageLine.Groups[2].Value }
-      $tagLine = [regex]::Match($line, '^(\s*)tag:\s*\S+\s*$')
-      if ($tagLine.Success -and $BuildNames -contains $image) {
-        $line = '{0}tag: "{1}"' -f $tagLine.Groups[1].Value, $ImageTag
+      $tagLine = [regex]::Match($lines[$i], '^(\s*)tag:\s*\S+\s*$')
+      if ($tagLine.Success -and $names -ccontains $image) {
+        $indent = $tagLine.Groups[1].Value
+        $lines[$i] = '{0}tag: "{1}"' -f $indent, $ImageTag
+        # THE ENTRY is every line around the tag at its indentation or deeper, from below the item
+        # line above it to the first shallower line below it. A pin value replaces its key's line
+        # there, and stands right after the tag where the entry carries none.
+        $inside = { param($n) $lines[$n].Trim() -eq '' -or ($lines[$n].Length - $lines[$n].TrimStart(' ').Length) -ge $indent.Length }
+        $first = $i
+        while ($first -gt 0 -and (& $inside ($first - 1))) { $first-- }
+        $after = $i + 1
+        if ($pins.ContainsKey($image)) {
+          foreach ($key in $pins[$image].Keys) {
+            $end = $i + 1
+            while ($end -lt $lines.Count -and (& $inside $end)) { $end++ }
+            $pin = '{0}{1}: "{2}"' -f $indent, $key, $pins[$image][$key]
+            $own = -1
+            for ($n = $first; $n -lt $end; $n++) {
+              if ([regex]::IsMatch($lines[$n], '^' + [regex]::Escape($indent + $key) + ':(\s|$)')) { $own = $n; break }
+            }
+            if ($own -ge 0) { $lines[$own] = $pin } else { $lines.Insert($after, $pin); $after++ }
+          }
+        }
+        $i = $after - 1
         $image = $null
         $changed = $true
       }
-      $out.Add($line)
     }
     # WRITTEN ONLY WHERE A TAG MOVED. A file compared by its whole text is a file rewritten for a
     # trailing newline, and a commit that names files it did not change is one nobody can read.
     if ($changed) {
-      [System.IO.File]::WriteAllText($path, ($out -join "`n"), $utf8NoBom)
+      [System.IO.File]::WriteAllText($path, ($lines -join "`n"), $utf8NoBom)
       $touched += ([System.IO.Path]::GetRelativePath($Tree, $path) -replace '\\', '/')
     }
   }
@@ -154,7 +213,8 @@ function Publish-BranchPin {
     git -C $platformRepoDir fetch --quiet origin $Branch
     if ($LASTEXITCODE -ne 0) { Die "the branch $Branch of $platformRepo could not be fetched - nothing further was pinned" }
     git -C $platformRepoDir reset --quiet --hard "origin/$Branch"
-    $pinned = @(Write-StagePin -Tree $platformRepoDir -PinStage $Stage -ImageTag "$tag-$sha7" -BuildNames $buildNames)
+    try { $pinned = @(Write-StagePin -Tree $platformRepoDir -PinStage $Stage -ImageTag "$tag-$sha7" -Manifest $manifest) }
+    catch { Die "the pin of $Stage could not be written: $($_.Exception.Message) - the images are built and nothing was pinned" }
     if ($pinned.Count -eq 0) {
       Say "$Branch carries no values-$Stage.yaml pin of $name - left as it stands"
       return

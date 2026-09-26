@@ -1,5 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { ConsumerManifestSchema } from "../../shared/consumer.ts";
 import pino from "pino";
 import { ConfigError } from "../kernel/config.ts";
 import type { Core, Plugin } from "../plugin.ts";
@@ -108,6 +112,14 @@ describe("the plugins this product compiles", () => {
       "STORAGE_BOX_PASSWORD is set, but it belongs to unit, which PLUGINS does not name",
       "DBTOOLS_IMAGE is set, but it belongs to unit, which PLUGINS does not name",
     ]);
+  });
+
+  // The release writes the manager's pinValues beside its image tag, and the chart reads `plugins` as
+  // PLUGINS (hostyour-cloud#244): an image released with a list this build does not compile would
+  // boot refusing its PLUGINS, and one missing a plugin would run without it.
+  it("names in deploy/platform.yaml, as the manager's pinValues.plugins, every plugin this build compiles", () => {
+    const manifest = ConsumerManifestSchema.parse(parseYaml(readFileSync(fileURLToPath(new URL("../../deploy/platform.yaml", import.meta.url)), "utf8")));
+    expect(manifest.builds.find((b) => b.name === "manager")?.pinValues?.plugins).toBe(compiledPlugins.map((p) => p.name).join(","));
   });
 
   it("refuses a staging area named by fewer than its three keys", () => {
