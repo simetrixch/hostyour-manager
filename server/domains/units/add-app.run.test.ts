@@ -14,7 +14,7 @@ import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { TenantRegistrationSchema, type TenantValidationReport } from "../../../shared/tenant.ts";
-import type { StepCtx, PlanStreamCtx } from "../../executor/types.ts";
+import type { StepCtx, PlanStreamCtx, Cleanup } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
@@ -213,6 +213,28 @@ describe("add-app run definition", () => {
 
     expect(logs.some((l) => l.includes("appended to tenant"))).toBe(true);
     expect(logs.some((l) => l.includes("Synced + Healthy"))).toBe(true);
+  });
+
+  it("the new app starts on the newest available versions, fixed as its own; dropping it takes them away and leaves the others", async () => {
+    seedClusters();
+    const OLD = "0.1.11-stable-20260920120000-def5678";
+    const NEW = "0.1.12-stable-20260925120000-abc1234";
+    const repo = seededPlatformRepo();
+    repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", `builds:
+  - { name: example-engine, image: example-engine, tag: "${NEW}" }
+`);
+    const registrations = new TenantRegistrations(repo);
+    await registrations.setApprovedTags("prod", GUID, { erp: { "example-engine": OLD } }, "run_before");
+    const p = params();
+    const cleanups: Cleanup[] = [];
+    const c = ctx(p, "append-app", []);
+    await makeAddAppDef(ports({ registrations })).steps(p).find((s) => s.name === "append-app")!.run({ ...c, registerCleanup: (cl) => cleanups.push(cl) });
+    const both = { erp: { "example-engine": OLD }, crm: { "example-engine": NEW } };
+    expect((await registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual(both);
+    expect(db.db.select({ a: tenants.approvedTags }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.a).toEqual(both);
+    await cleanups[0]!.run(c);
+    expect((await registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual({ erp: { "example-engine": OLD } });
+    expect(db.db.select({ a: tenants.approvedTags }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.a).toEqual({ erp: { "example-engine": OLD } });
   });
 
   it("threads both seed tiers into the appended apps[] entry", async () => {

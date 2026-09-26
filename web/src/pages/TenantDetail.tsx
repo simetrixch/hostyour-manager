@@ -294,7 +294,7 @@ export function TenantDetail() {
               answer and the run's wait could not end — the route refuses it too. */}
           {!unfinished && !t.suspended && <SetRoutingAction subdomain={t.subdomain} routing={t.routing} busy={busy} onRoute={(next) => void act(() => setTenantRouting(tenantId, next))} />}
           {!unfinished && !t.suspended && <TenantDomainActions t={t} busy={busy} act={act} />}
-          {!unfinished && !t.suspended && <RefreshMembersAction stage={t.stage} busy={busy} onRefresh={(channel) => void act(() => refreshTenantMembers(tenantId, channel))} />}
+          {!unfinished && !t.suspended && <RefreshMembersAction busy={busy} onRefresh={() => void act(() => refreshTenantMembers(tenantId))} />}
           {!unfinished && !t.suspended && <SetApprovedTagAction subdomain={t.subdomain} approvedTags={t.approvedTags} busy={busy} onSet={(app, build, tag) => void act(() => setTenantApprovedTag(tenantId, app, build, tag))} />}
           {!unfinished && (
             <button type="button" className="btn" disabled={busy} onClick={() => setBackupT(t)}>

@@ -217,7 +217,9 @@ export const TenantRegistrationSchema = z
     // The app key is the name every member chart receives as tenant.appName (the app for a per-app
     // member, the member name for a standing one). A build with no approval follows the stage pin;
     // an approval is cleared by removing its key, never by an empty value, which the charts refuse.
-    // Set only by tenant-set-approved-tag. Defaulted to {} for every file written before it existed.
+    // create-tenant, add-app and the tenant's upgrade write the newest available version, the boot
+    // fixes a build a tenant does not hold yet at the version it runs, and tenant-set-approved-tag
+    // sets one. Defaulted to {} for every file written before it existed.
     approvedTags: z.record(memberName, z.record(buildName, approvedImageTag)).default({}),
     // The domain the tenant's mail is sent as, or "" where it is sent as the platform's own domain.
     // Every member receives it as tenant.senderDomain; the product's charts send as

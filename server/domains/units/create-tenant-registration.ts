@@ -6,6 +6,7 @@
 // first step git-rm's exactly this file). ONE file per tenant per stage; the gate report is NOT
 // written to git (it lives in the run record). Overwrite-idempotent on resume;
 // TenantRegistrationSchema.parse re-validates as a belt.
+import { and, eq } from "drizzle-orm";
 import type { Step } from "../../executor/types.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import type { TenantBuildRuntime } from "./tenant-builds.ts";
@@ -13,6 +14,8 @@ import { TenantRegistrationSchema, type TenantRegistration } from "../../../shar
 import { errValidation } from "../../kernel/errors.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { probeCatalog } from "./tenant-probes.ts";
+import { stagePinsOf } from "./tenant-versions.ts";
+import { tenants } from "../../db/schema/inventory.ts";
 
 /** The reset nonce a fresh tenant starts at, in its registration. Nothing acts on a change to it: no
  *  reconciler on this platform reads it, so nothing drops the tenant's databases and restarts its pods
@@ -34,6 +37,9 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
       if (p.appsImage && !appsImageTag) {
         throw errValidation(`the tag the apps bundle ${p.appsImage} was built at is not in this pass's memory — onboard-build-only reads it off the release; retry from that step, because the registration cannot name an image the engines cannot mount`);
       }
+      // The tenant starts on the newest available version of every build, fixed as its own: a later
+      // release moves the stage pin and leaves this tenant where it is (#296).
+      const approvedTags = await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), p.members);
       const registration: TenantRegistration = TenantRegistrationSchema.parse({
         cluster: p.cluster,
         subdomain: p.subdomain,
@@ -56,11 +62,13 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
           postgresql: false, mongodb: "shared",
         }),
         seedUsers: p.seedUsers,
+        approvedTags,
         resetNonce: INITIAL_RESET_NONCE,
         suspended: false,
         quiesced: false,
       });
       const { commit } = await ports.registrations.commitTenant({ stage: p.stage, guid: p.guid, registration, runId: ctx.runId });
+      ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(and(eq(tenants.guid, p.guid), eq(tenants.stage, p.stage))).run();
       ctx.checkpoint({ commit, registration: `registrations/${p.guid}/${p.stage}.yaml` });
       ctx.log("meta", `tenant registration committed to catalog (${commit}) — the ArgoCD on ${p.cluster} will now generate + sync the fan-out`);
     },

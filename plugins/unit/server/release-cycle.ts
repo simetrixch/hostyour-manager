@@ -73,8 +73,7 @@ export function triggerReleaseStep(ports: BuildPorts, p: BuildParams): Step {
               owner, repo, token,
               workflowFile: RELEASE_WORKFLOW_FILE,
               ref,
-              // `target` only where it is build: a kit older than #289 refuses an input it does not declare.
-              inputs: { version: p.version, channel: p.channel, stage: p.stage, ...(p.target === "build" ? { target: "build" } : {}) },
+              inputs: { version: p.version, channel: p.channel, stage: p.stage },
               signal: ctx.signal,
             });
             break;
@@ -129,7 +128,7 @@ export function watchReleaseBuildStep(ports: BuildPorts, p: BuildParams, runtime
       runtime.releaseTag = outcome.releaseTag;
       runtime.imageTag = outcome.imageTag;
       ctx.checkpoint({ pipelineRun: outcome.runName, releaseTag: outcome.releaseTag, ...(outcome.imageTag ? { imageTag: outcome.imageTag } : {}) });
-      ctx.log("meta", `release PipelineRun ${ns}/${outcome.runName} Succeeded — release ${outcome.releaseTag} is built, pushed and ${p.target === "build" ? "left unpinned" : "bumped"} for ${p.stage}${outcome.imageTag ? ` as image tag ${outcome.imageTag}` : ""}`);
+      ctx.log("meta", `release PipelineRun ${ns}/${outcome.runName} Succeeded — release ${outcome.releaseTag} is built, pushed and bumped for ${p.stage}${outcome.imageTag ? ` as image tag ${outcome.imageTag}` : ""}`);
     },
   };
 }

@@ -7,10 +7,7 @@
 .DESCRIPTION
   The three inputs are the version (x.y.z), the channel - the maturity CEILING of the release: alpha
   may reach dev only, beta dev and test, stable anywhere - and the stage this run puts the release
-  on. The channel is part of the release tag; the stage is not. An optional fourth input, the target
-  deploy (the default) or build, decides whether the stage's pin is written: build pushes
-  refs/tags/build/<stage>/<tag>, which the platform builds, scans and verifies without writing the
-  stage's pin or moving its delivery branch.
+  on. The channel is part of the release tag; the stage is not.
 
   It:
     1. Validates version, channel and stage.
@@ -25,7 +22,7 @@
        rebuilt: the same commit, the same image, one more stage. A VERSION NAMES ONE COMMIT: a rerun
        whose tag stands on origin on a commit other than HEAD is refused before any push, and the
        refusal names the next number to mint (#173).
-    6. Deletes and re-pushes the deploy ref refs/tags/<target>/<stage>/<tag>. The delivery branch
+    6. Deletes and re-pushes the deploy ref refs/tags/deploy/<stage>/<tag>. The delivery branch
        deploy/<stage> - the branch the unit's Application renders its chart off - is NOT moved here:
        the platform places it on the release commit plus its pins once every image exists
        (hostyour-manager#293). Pushing that ref is the
@@ -55,8 +52,7 @@
 param(
   [Parameter(Mandatory = $true, Position = 0)][string]$Version,
   [Parameter(Mandatory = $true, Position = 1)][ValidateSet('stable', 'beta', 'alpha')][string]$Channel,
-  [Parameter(Mandatory = $true, Position = 2)][ValidateSet('dev', 'test', 'prod')][string]$Stage,
-  [Parameter(Position = 3)][ValidateSet('deploy', 'build')][string]$Target = 'deploy'
+  [Parameter(Mandatory = $true, Position = 2)][ValidateSet('dev', 'test', 'prod')][string]$Stage
 )
 $ErrorActionPreference = 'Stop'
 # git's output is read, and this script's own is written, as UTF-8 — what the bash spelling reads and
@@ -317,10 +313,6 @@ if (Test-Path -LiteralPath $manifest) {
   $buildNames = @([regex]::Matches($manifestText, '(?m)^\s*-\s*name:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value })
 }
 if (-not $name) { Die "the manifest $manifest states no name - it is what the release line and any pin are written under" }
-# A unit that pins itself writes its pin from here, so a build that pins nothing has no meaning for it.
-if ($Target -ne 'deploy' -and $platformRepo) {
-  Die "the manifest declares platformRepo $platformRepo, so this unit writes its own pins - target build is for units the platform's build plane pins"
-}
 
 # ── The pin pre-flight ────────────────────────────────────────────────────────────────────────
 #
@@ -464,7 +456,7 @@ try {
   # of this release exists (hostyour-manager#293). Moved here, before the build, it let a cluster
   # render the release tree with its placeholder tags, and a build that failed left them standing.
 
-  $deployRef = "refs/tags/$Target/$Stage/$tag"
+  $deployRef = "refs/tags/deploy/$Stage/$tag"
   # Delete first (absent on a first deploy — that is the normal case, not an error), then push: the
   # push is what the platform's webhook reacts to.
   git push origin ":$deployRef" 2>$null | Out-Null
@@ -562,11 +554,7 @@ try {
     }
   }
 
-  if ($Target -eq 'build') {
-    Say "$name $tag (commit $sha7) is being built for $Stage - no pin is written, the build is for whoever records its tag"
-  } else {
-    Say "$name $tag (commit $sha7) is on its way to $Stage"
-  }
+  Say "$name $tag (commit $sha7) is on its way to $Stage"
   if ($buildNames.Count -gt 0) {
     Say 'the platform builds these image tags, or skips the build when they already exist:'
     foreach ($build in $buildNames) {

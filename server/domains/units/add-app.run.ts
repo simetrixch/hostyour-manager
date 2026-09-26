@@ -25,6 +25,7 @@ import { readTenantSpec, recordAppsRepoStep } from "./tenant-apps-repo.run.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { BuildUnitSchema, buildUnitStep, planBuildUnits, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { probeBuildUnit } from "./tenant-probes.ts";
+import { stagePinsOf } from "./tenant-versions.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
@@ -129,7 +130,8 @@ function revertAppendCleanup(ports: TenantOnboardPorts, p: AddAppParams): Cleanu
         ctx.log("meta", `app "${p.app}" is not in tenant ${p.guid}'s registration — nothing to drop`);
         return;
       }
-      const { commit } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "drop", app: p.app, runId: ctx.runId });
+      const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "drop", app: p.app, runId: ctx.runId });
+      ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
       ctx.log("meta", `app "${p.app}" dropped from tenant ${p.guid} (${commit}) — ArgoCD will now prune only this member's Application`);
     },
   };
@@ -277,10 +279,14 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
         const current = await ports.registrations.readTenant(p.stage, p.guid);
         if (!current) throw errNotFound(`tenant ${p.guid} is not onboarded (no registration) — cannot append an app`);
         if (current.entry.apps.some((a) => a.name === p.app)) {
+          ctx.db.update(tenants).set({ approvedTags: current.entry.approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
           ctx.log("meta", `app "${p.app}" already present in tenant ${p.guid} — append already committed, skipping`);
           return;
         }
-        const { commit } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, member: p.member, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, runId: ctx.runId });
+        // The app starts on the newest available version of every build, fixed as its own (#296).
+        const approved = (await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), [p.member]))[p.app] ?? {};
+        const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, member: p.member, approved, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, runId: ctx.runId });
+        ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit, app: p.app });
         ctx.log("meta", `app "${p.app}" appended to tenant ${p.guid} (${commit}) — the master ArgoCD will now generate the new Application`);
       },

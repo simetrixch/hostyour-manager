@@ -262,7 +262,8 @@ function removeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): S
           ctx.log("meta", `app "${app}" already dropped from tenant ${tc.guid} — skipping (resume)`);
           return;
         }
-        const { commit } = await ports.registrations.updateTenantApps(tc.stage, tc.guid, { op: "drop", app, runId: ctx.runId });
+        const { commit, approvedTags } = await ports.registrations.updateTenantApps(tc.stage, tc.guid, { op: "drop", app, runId: ctx.runId });
+        ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
         ctx.checkpoint({ commit });
         ctx.log("meta", `app "${app}" dropped from tenant ${tc.guid} on ${ports.registrations.branch} (${commit}) — ArgoCD will now prune only this member's Application`);
       },

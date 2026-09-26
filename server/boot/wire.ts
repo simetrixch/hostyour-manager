@@ -19,6 +19,7 @@ import { RunEventBus } from "../executor/bus.ts";
 import { Executor } from "../executor/executor.ts";
 import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-definitions.ts";
 import { repointUnitRecords } from "../domains/units/cluster-rename-records.ts";
+import { fixTenantVersions } from "../domains/units/tenant-versions.ts";
 import { buildUnits } from "./wire-units.ts";
 import { createSshSession } from "../adapters/ssh/ssh2-session.ts";
 import { HttpReleaseDownloads } from "../adapters/downloads/downloads.ts";
@@ -296,9 +297,11 @@ export async function wire(): Promise<Wired> {
   }
   // The registrations brought to this release's schema, behind the listener (Wired.migrateRegistrations).
   // Its verdict joins the checks above once it has run: /readyz reads that array live, so the row
-  // stands there from the moment the measurement exists and not before.
+  // stands there from the moment the measurement exists and not before. Then every tenant gets the
+  // versions it runs fixed as its own, on the registrations as migrated.
   const migrateRegistrationsLater = async (): Promise<void> => {
     checks.push(checkRegistrationsMigrated(await migrateRegistrations({ registrations, tenantRegistrations, version: config.version, logger })));
+    if (tenantRegistrations) await fixTenantVersions({ registrations: tenantRegistrations, db: db.db, version: config.version, logger });
   };
   const session = new SessionCodec(db.db, config);
   const loginTx = new LoginTxCodec(db.db);

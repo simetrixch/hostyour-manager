@@ -63,15 +63,30 @@ function staleMembers(): TenantMemberRecord[] {
   return testMembers(["erp"]).map((m) => (m.name === "erp" ? { ...m, sources: [m.sources[0]!, { chart: "charts/old-ui", valueFiles: [], values: {} }] } : m));
 }
 
-function platformRepo(members: TenantMemberRecord[]): FakePlatformRepo {
+function platformRepo(members: TenantMemberRecord[], files: Record<string, string> = {}): FakePlatformRepo {
   const repo = new FakePlatformRepo();
   const registration = TenantRegistrationSchema.parse({
-    cluster: "s1", subdomain: "acme", members, identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), ...TEST_BUNDLE,
+    cluster: "s1", subdomain: "acme", members, identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), approvedTags: HELD, ...TEST_BUNDLE,
   });
   const w = tenantRegistrationWrite("prod", GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
+  for (const [path, content] of Object.entries(files)) repo.seed(repo.booksBranch, path, content);
   return repo;
 }
+
+const OLD = "0.1.11-stable-20260920120000-def5678";
+const NEW = "0.1.12-stable-20260925120000-abc1234";
+/** The version the tenant holds before any upgrade. */
+const HELD = { erp: { "example-engine": OLD } };
+/** A release made NEW available: the stage pin of the engine and of the auth chart. */
+const RELEASED = {
+  "charts/example-engine/pins-prod.yaml": `builds:
+  - { name: example-engine, image: example-engine, tag: "${NEW}" }
+`,
+  "charts/example-auth/pins-prod.yaml": `builds:
+  - { name: example-auth, image: example-auth, tag: "${NEW}" }
+`,
+};
 
 const CATALOG = "https://github.com/acme/acme-catalog.git";
 /** The member entries the last plan resolved — what "the new entries" means to the fakes below. */
@@ -79,8 +94,8 @@ let resolved: TenantMemberRecord[] = [];
 
 /** Every member Application Synced + Healthy, its last comparison rendering `members` (by index,
  *  in the order the plan lists the Applications): the chart sources off the catalog, their value
- *  files and values, and the namespace labels on the spec. */
-function rendering(members: readonly TenantMemberRecord[]): Map<string, ArgoAppStatus> {
+ *  files and values, the tenant's versions, and the namespace labels on the spec. */
+function rendering(members: readonly TenantMemberRecord[], approved: Record<string, Record<string, string>> = HELD): Map<string, ArgoAppStatus> {
   return new Map(EXPECTED.map((name, i) => {
     const m = members[i]!;
     return [name, {
@@ -89,7 +104,7 @@ function rendering(members: readonly TenantMemberRecord[]): Map<string, ArgoAppS
       syncSources: [
         { repoURL: "https://github.com/simetrixch/hostyour-cloud.git", revision: SHA },
         { repoURL: CATALOG, revision: SHA },
-        ...m.sources.map((src) => ({ repoURL: CATALOG, revision: SHA, path: src.chart, valueFiles: ["values.yaml", ...src.valueFiles], valuesObject: { tenant: { guid: GUID }, ...src.values } })),
+        ...m.sources.map((src) => ({ repoURL: CATALOG, revision: SHA, path: src.chart, valueFiles: ["values.yaml", ...src.valueFiles], valuesObject: { tenant: { guid: GUID, approvedTags: approved }, ...src.values } })),
       ],
     } as ArgoAppStatus];
   }));
@@ -108,11 +123,11 @@ class SteppingArgo extends FakeMasterArgoReader {
 const IMAGE = `${REGISTRY_HOST}/example-app:1.0.0`;
 const DEPLOYMENT = { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "app", image: IMAGE }] } } } };
 
-function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; carried?: string[]; carry?: () => Promise<void>; manifest?: string } = {}): TenantOnboardPorts {
+function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; carried?: string[]; carry?: () => Promise<void>; manifest?: string; files?: Record<string, string> } = {}): TenantOnboardPorts {
   return withAppsTemplate({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.manifest ?? MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment", { raw: DEPLOYMENT })] } }),
-    registrations: new TenantRegistrations(platformRepo(members)),
+    registrations: new TenantRegistrations(platformRepo(members, over.files)),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } }),
       argoReader: new SteppingArgo(over.argo ?? [() => rendering(resolved)]),
@@ -189,6 +204,27 @@ describe("tenant-refresh-members", () => {
     const out = await makeTenantRefreshMembersDef(ports(resolved.members)).planStream!({ tenantId: "tnt_1" }, planCtx());
     if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
     expect(out.plan.summary).toMatch(/the tenant is current .* the run changes nothing/);
+  });
+
+  it("moves the tenant onto the newest available versions, waits until every member renders them, and an abort writes the previous ones back", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    const want = { erp: { "example-engine": NEW }, auth: { "example-auth": NEW } };
+    const prt = ports(resolved.members, { files: RELEASED, argo: [() => rendering(resolved.members), () => rendering(resolved.members, want)] });
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx());
+    if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
+    expect(out.plan.summary).toContain(`Versions: erp/example-engine ${OLD} → ${NEW}; auth/example-auth stage pin → ${NEW}. No other tenant changes.`);
+    const p = out.params;
+    const steps = makeTenantRefreshMembersDef(prt).steps(p);
+    const cleanups: Cleanup[] = [];
+    await steps.find((s) => s.name === "write-versions")!.run(stepCtx(p, cleanups, []));
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual(want);
+    expect(db.db.select({ a: tenants.approvedTags }).from(tenants).get()?.a).toEqual(want);
+    const watch = steps.find((s) => s.name === "watch-versions")!;
+    await expect(watch.run(stepCtx(p, [], []))).rejects.toThrow(/has not rendered their versions yet/);
+    await expect(watch.run(stepCtx(p, [], []))).resolves.toBeUndefined();
+    await cleanups[0]!.run(stepCtx(p, [], []));
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual({ erp: { "example-engine": OLD } });
   });
 
   it("REFUSES a manifest that changes the member set: that is a new namespace and Application", async () => {

@@ -230,7 +230,12 @@ describe("create-tenant run definition", () => {
 
   it("walking skeleton: a tenant with one app onboards green against the fakes", async () => {
     seedClusters();
-    const prt = ports();
+    const repo = new FakePlatformRepo();
+    const pinned = { erp: { "example-engine": "0.1.12-stable-20260925120000-abc1234" } };
+    repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", `builds:
+  - { name: example-engine, image: example-engine, tag: "${pinned.erp["example-engine"]}" }
+`);
+    const prt = ports({ registrations: new TenantRegistrations(repo) });
     const logs: string[] = [];
     await runAll(params(), prt, logs);
 
@@ -241,9 +246,11 @@ describe("create-tenant run definition", () => {
     expect(read?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]); // default-absent seed tiers fold back false through the full run
     expect(read?.entry.suspended).toBe(false);
     expect(read?.entry.cluster).toBe("s1");
+    expect(read?.entry.approvedTags).toEqual(pinned); // the newest available version, fixed as the tenant's own
 
     // record-inventory wrote the tenant row + one tenant_apps row
     const row = db.db.select().from(tenants).where(eq(tenants.guid, GUID)).get();
+    expect(row?.approvedTags).toEqual(pinned);
     expect(row?.provenance).toBe("manager"); // the word onboard writes for a consumer — one act, one word
     expect(row?.clusterId).toBe("cls_1");
     expect(row?.subdomain).toBe("acme");
