@@ -17,5 +17,5 @@
 // and travels bound to the repository port it belongs to (PlatformRepo.booksBranch).
 
 /** The trunk: the branch that carries the product and nothing installation-specific. The default
- *  branch of every repository of this platform, hostyour-cloud and catalog alike. */
+ *  branch of every repository of this platform, hostyour-cloud and the deploy repository alike. */
 export const PRODUCT_BRANCH = "master";

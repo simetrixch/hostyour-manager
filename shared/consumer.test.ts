@@ -86,7 +86,7 @@ describe("ConsumerManifestSchema deploy requirement (C1: chart | builds[] | tena
     },
   };
 
-  it("accepts a PURE tenant fan-out manifest — no chart, no builds, only a tenant: block (catalog's shape)", () => {
+  it("accepts a PURE tenant fan-out manifest — no chart, no builds, only a tenant: block (the deploy repository's shape)", () => {
     const r = ConsumerManifestSchema.safeParse({ ...meta, tenant: tenantBlock });
     expect(r.success).toBe(true);
   });
@@ -350,7 +350,7 @@ describe("TenantSpecSchema appsOrg (the owner a tenant's own repository is creat
     ...over,
   });
 
-  it("is optional — a catalog that names none parses, and the reader answers undefined", () => {
+  it("is optional — a deploy repository that names none parses, and the reader answers undefined", () => {
     const parsed = TenantSpecSchema.parse(spec());
     expect(parsed.appsOrg).toBeUndefined();
     expect(tenantAppsOrg(parsed)).toBeUndefined();

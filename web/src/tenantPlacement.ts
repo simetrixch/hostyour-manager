@@ -38,7 +38,7 @@ export interface TenantPlacement {
   stage: string;
   /** The cluster's public domain, read off the chosen cluster row. */
   domain: string;
-  /** The GitOps registration FILE in catalog, `registrations/<guid>/<stage>.yaml` — the exact
+  /** The GitOps registration FILE in the deploy repository, `registrations/<guid>/<stage>.yaml` — the exact
    *  path the tenant registrations writer writes and guards (server/domains/units/tenant-registrations.ts
    *  `registrationPath` + TENANT_REGISTRATION_GUARD). ONE file: the guid is the directory, the stage is
    *  the file name, and the body carries neither. */

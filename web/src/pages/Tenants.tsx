@@ -169,7 +169,7 @@ export function Tenants() {
   // The tenant whose first-admin invite/resend dialog is open (null = closed). Held at section level so
   // the one-time activation link the dialog shows survives independently of the row map.
   const [inviteFor, setInviteFor] = useState<TenantView | null>(null);
-  // The orphan scan. null = never run: the scan CLONES catalog server-side,
+  // The orphan scan. null = never run: the scan CLONES the deploy repository server-side,
   // so it is bound to an explicit operator action and must NEVER fire on page load. `scanning` drives the
   // in-flight feedback; `scanError` holds a failed REQUEST (the route itself answers a failed scan
   // fail-soft, inside the payload's `error`).
@@ -242,7 +242,7 @@ export function Tenants() {
         <div className="page__actions">
           {/* Find ORPHANS: tenants that exist in GitOps but have no inventory row, so they appear in no
               list above and no row-keyed action can reach them. The scan itself is read-only (the purge
-              it offers is not), and it is explicit because it clones catalog server-side. */}
+              it offers is not), and it is explicit because it clones the deploy repository server-side. */}
           <button type="button" className="btn" onClick={() => void runScan()} disabled={scanning}>
             {scanning ? "Scanning…" : "Scan for orphaned tenants"}
           </button>

@@ -598,7 +598,7 @@ export const listTenantTargets = (): Promise<TenantTargetView[]> => req<TenantTa
  *  "catalog unavailable" note and can still onboard a tenant with no apps. */
 export const listTenantAppCatalog = (): Promise<AppsManifest> => req<AppsManifest>("/api/tenants/app-catalog");
 export const getTenant = (id: string): Promise<TenantDetailView> => req<TenantDetailView>(`/api/tenants/${id}`);
-/** ONE tenant's catalog (GET /api/tenants/:id/app-catalog): the apps the catalog's template offers,
+/** ONE tenant's catalog (GET /api/tenants/:id/app-catalog): the apps the deploy repository's template offers,
  *  each marked deployed. The route degrades with `reason` or `error` (shared/apps-manifest.ts
  *  TenantAppCatalogView), and the tenant page renders whichever is set instead of "no apps". */
 export const getTenantAppCatalog = (id: string): Promise<TenantAppCatalogView> => req<TenantAppCatalogView>(`/api/tenants/${id}/app-catalog`);
@@ -612,7 +612,7 @@ export const removeTenantApp = (tenantId: string, app: string): Promise<{ runId:
 export const offboardTenant = (tenantId: string): Promise<{ runId: string }> => post(`/api/tenants/${tenantId}/offboard`);
 
 /** Scan the LIVE GitOps pointers for tenants the inventory does not know. EXPLICIT by design: this
- *  clones catalog server-side, so it is wired to an operator action and never to a page load.
+ *  clones the deploy repository server-side, so it is wired to an operator action and never to a page load.
  *  Fail-soft by contract — see OrphanScanView (shared/api-types.ts) for what `error`, `reason` and a
  *  non-empty `skipped` each mean, and why none of them may be rendered as "no orphans found". */
 export const scanTenantOrphans = (): Promise<OrphanScanView> => req<OrphanScanView>("/api/tenants/orphans");

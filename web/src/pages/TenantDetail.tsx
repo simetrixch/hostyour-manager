@@ -24,7 +24,7 @@ import { TenantStatusBadge, UnfinishedTenantNotice } from "../components/TenantS
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** Per-tenant detail. Renders the apps the catalog's template offers (read by
+/** Per-tenant detail. Renders the apps the deploy repository's template offers (read by
  *  GET /api/tenants/:id/app-catalog) folded with the inventory's per-app rows, each marked deployed
  *  or not (tenantAppRows.ts); the add-app control (TenantAddAppForm) offers the undeployed ones with
  *  their selections and fans ONE into the live tenant; and the tenant-wide lifecycle actions

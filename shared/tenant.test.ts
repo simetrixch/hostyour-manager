@@ -212,7 +212,7 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
     expect(TenantRegistrationSchema.parse(registration({ resetNonce: "7" })).resetNonce).toBe("7");
   });
 
-  it("has NO repoURL / repoCredentialId (repo is always catalog)", () => {
+  it("has NO repoURL / repoCredentialId (repo is always the deploy repository)", () => {
     const parsed = TenantRegistrationSchema.parse(registration()) as Record<string, unknown>;
     expect("repoURL" in parsed).toBe(false);
     expect("repoCredentialId" in parsed).toBe(false);

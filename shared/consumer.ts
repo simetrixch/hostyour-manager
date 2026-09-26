@@ -73,7 +73,7 @@ export const SmtpEntrySchema = z.object({
 export type SmtpEntry = z.infer<typeof SmtpEntrySchema>;
 
 /** The manifest `tenant:` fan-out block — declared by a build-only fan-out repo
- *  (catalog) so the manager renders/validates the whole tenant package instead of one
+ *  (the deploy repository) so the manager renders/validates the whole tenant package instead of one
  *  chart. Kept INLINE here (never in shared/tenant.ts) because ConsumerManifestSchema references it
  *  and gates.ts already imports consumer.ts: defining it in tenant.ts would close the cycle
  *  consumer -> tenant -> gates -> consumer. The acyclic order stays enums <- consumer <- gates <-
@@ -128,7 +128,7 @@ export const TenantMemberSchema = TenantSourceSchema.extend({
   namespaceLabels: z.record(z.string(), z.string()).optional(),
 });
 
-/** An https clone URL ending in `.git` — the shape every repository the tenant catalog names has. */
+/** An https clone URL ending in `.git` — the shape every repository the deploy repository names has. */
 const gitRepoURL = z.string().regex(/^https:\/\/[^ ]+\.git$/);
 
 export const TenantSpecSchema = z.object({
@@ -156,14 +156,14 @@ export const TenantSpecSchema = z.object({
     repo: gitRepoURL,
     builds: z.array(z.string().regex(/^[a-z0-9-]+$/)).min(1),
   })).default([]),
-  /** THE GITHUB OWNER A TENANT'S OWN REPOSITORY IS CREATED IN, stated by the catalog because
-   *  the catalog is the customer's: the platform's GitHub App is installed in exactly one
-   *  owner (adapters/github-app installationOrg), and a plan whose catalog names another is
+  /** THE GITHUB OWNER A TENANT'S OWN REPOSITORY IS CREATED IN, stated by the deploy repository because
+   *  the deploy repository is the customer's: the platform's GitHub App is installed in exactly one
+   *  owner (adapters/github-app installationOrg), and a plan whose deploy repository names another is
    *  refused rather than creating a repository where the App has no rights. GitHub's own grammar for
    *  an account name: letters, digits and single hyphens between them, at most 39 characters. */
   appsOrg: z.string().regex(GITHUB_ACCOUNT_RE, "appsOrg must be a GitHub owner name: letters, digits and single hyphens, at most 39 characters").optional(),
   /** THE APPS TEMPLATE: the name and the repository of the apps bundle a tenant's own apps
-   *  repository is COPIED from. `appsRepo` is read with the catalog's own credential; its `apps.yaml`
+   *  repository is COPIED from. `appsRepo` is read with the deploy repository's own credential; its `apps.yaml`
    *  is the app catalog the wizard offers and T4 judges (shared/apps-manifest.ts). The template is
    *  NEVER a unit: the platform never builds it and no tenant mounts it, so a `buildRepos` entry
    *  that builds `appsBundle` is refused. Both absent ⇒ the catalog is the engine chart's
@@ -218,16 +218,16 @@ export const TenantSpecSchema = z.object({
 });
 export type TenantSpec = z.infer<typeof TenantSpecSchema>;
 
-/** The apps template of a catalog — the bundle's name and the repository it is copied from — or
- *  null where the catalog declares none. The catalog reader (server/domains/units/app-catalog.ts)
+/** The apps template of a deploy repository — the bundle's name and the repository it is copied from — or
+ *  null where the deploy repository declares none. The catalog reader (server/domains/units/app-catalog.ts)
  *  resolves the template through it; the plan holds the rendered images against the name alone
  *  (server/domains/units/tenant-builds.ts planBuildUnits). */
 export function tenantAppsTemplate(spec: Pick<TenantSpec, "appsBundle" | "appsRepo">): { name: string; repo: string } | null {
   return spec.appsBundle !== undefined && spec.appsRepo !== undefined ? { name: spec.appsBundle, repo: spec.appsRepo } : null;
 }
 
-/** The owner the tenant repositories of this catalog are created in, or undefined where the
- *  catalog states none — the ONE reader of `appsOrg`, so a run kind and a gate ask the same question
+/** The owner the tenant repositories of this deploy repository are created in, or undefined where the
+ *  deploy repository states none — the ONE reader of `appsOrg`, so a run kind and a gate ask the same question
  *  the same way. Nothing reads it yet: the run kind that creates a tenant repository is the first. */
 export function tenantAppsOrg(spec: Pick<TenantSpec, "appsOrg">): string | undefined {
   return spec.appsOrg;
@@ -249,7 +249,7 @@ export function unitNameFromRepoURL(repoURL: string): string {
  *                            its JWKS cannot drift apart).
  *    deploy-git-credentials — DERIVED (not random) from the consumer's OWN repo PAT: the
  *                            https://oauth2:<pat>@github.com git-credentials line a consumer that writes
- *                            to a GitOps repo (e.g. example-plane -> catalog) reuses its ONE PAT
+ *                            to a GitOps repo (e.g. example-plane -> the deploy repository) reuses its ONE PAT
  *                            for, so the operator is never asked for a second deploy credential.
  *  Every minted value is verified (length / key size / PEM shape / private↔public match) before it is
  *  written. Exported so the onboard Run's frozen params carry the SAME shape (onboard.run.ts
@@ -336,7 +336,7 @@ export const ConsumerManifestSchema = z.object({
   owner: z.string().min(1),
   envs: z.array(z.enum(STAGE)).min(1),
   // v1.3: chart is OPTIONAL — present = self-contained (the repo carries its own deploy); absent =
-  // build-only (the deploy is central, in catalog). Presence is the sole shape discriminator.
+  // build-only (the deploy is central, in the deploy repository). Presence is the sole shape discriminator.
   chart: z.object({ path: z.string().min(1) }).optional(),
   services: z.array(ConsumerServiceSchema).default([]),
   // The LITERAL Mongo database name(s) the consumer's provisioned ServiceClaim creates. Declared
@@ -402,7 +402,7 @@ export const ConsumerManifestSchema = z.object({
     )
     .default([]),
   secrets: z.array(ConsumerSecretSpecSchema).default([]),
-  // v1.3 fan-out — a build-only fan-out repo (catalog) declares the tenant package it
+  // v1.3 fan-out — a build-only fan-out repo (the deploy repository) declares the tenant package it
   // deploys per-tenant. OPTIONAL so zod does NOT strip the block: omitting the field would
   // silently drop the fan-out (the exact example-plane failure mode this design fixes). There is
   // no tenant `kind` — chart-presence + this block are the shape discriminators.
@@ -416,7 +416,7 @@ export const ConsumerManifestSchema = z.object({
   // tenantAppsManifest) and read by the release pipeline's bump, which pins the image on those
   // registrations (class d) and accepts a release no registration names yet, because the run
   // creating the tenant reads the tag off that release's PipelineRun (hostyour-cloud#225). The same
-  // word as the catalog's `tenant.appsBundle`, which names the TEMPLATE's build; here it names one of
+  // word as the deploy repository's `tenant.appsBundle`, which names the TEMPLATE's build; here it names one of
   // this manifest's own builds[]. Build-only by nature: refused beside `chart` or `tenant`.
   appsBundle: z.string().regex(/^[a-z0-9-]+$/).optional(),
 })
@@ -430,7 +430,7 @@ export const ConsumerManifestSchema = z.object({
       }
     }
     // C1 — a manifest must deploy: a chart (self-contained), a non-empty builds[], OR a tenant: fan-out
-    // block (a pure fan-out repo like catalog carries neither chart nor builds — the tenant block
+    // block (a pure fan-out repo like the deploy repository carries neither chart nor builds — the tenant block
     // IS its deploy). A file with none of the three is inert.
     if (!m.chart && m.builds.length === 0 && !m.tenant) {
       ctx.addIssue({ code: "custom", path: ["chart"], message: "a manifest must declare a chart, a non-empty builds[], or a tenant: fan-out block — this one declares none" });

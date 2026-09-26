@@ -33,7 +33,7 @@ describe("tenantPlacement", () => {
 
   // The registration path must be the shape the tenant registry actually writes and guards
   // (server/domains/units/tenant-registrations.ts `registrationPath` + TENANT_REGISTRATION_GUARD:
-  // registrations/<guid>/<stage>.yaml). A read-out the operator cannot check against catalog is
+  // registrations/<guid>/<stage>.yaml). A read-out the operator cannot check against the deploy repository is
   // worse than none, because it reads as a fact.
   it("names the registration file in the shape the tenant registry writes", () => {
     const p = tenantPlacement("prod", "cl_s1", targets);

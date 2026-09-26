@@ -471,7 +471,7 @@ export const RUN_KIND = [
   "consumer-backup", "consumer-restore", "consumer-migrate",
   "tenant-backup", "tenant-restore", "tenant-migrate",
   "tenant-create", "tenant-add-app", "tenant-remove-app",       // tenant (multi-app) onboarding
-  // The tenant's OWN apps repository: created in the customer's owner from the catalog's
+  // The tenant's OWN apps repository: created in the customer's owner from the deploy repository's
   // apps bundle with the chosen apps, registered build-only and built once — before create-tenant
   // mounts the image it produces. A run kind of its own because it acts on GitHub and the build
   // plane and never on the tenant's cluster, and because a standing tenant gains an app through it

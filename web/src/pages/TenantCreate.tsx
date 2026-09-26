@@ -8,12 +8,12 @@ import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts"
 
 /** Onboard-tenant wizard — the tenant analogue of
  *  ConsumerOnboard. Unlike a consumer it does NOT point at an external repo: a tenant's charts
- *  always live in the fixed catalog repo, so the operator only declares WHAT to fan out —
+ *  always live in the fixed deploy repository, so the operator only declares WHAT to fan out —
  *  a subdomain, an owner, the target cluster (any active one, whose stage the tenant takes), the
  *  size and the first administrator's mailbox. THE PLATFORM ALONE (hostyour-manager#211): the
  *  standing members auth, jobs and report, always those three and no app. Apps are added
  *  afterwards from the tenant's page, where the first one creates the tenant's own repository
- *  `<org>/<bundle>-<subdomain>` from the catalog's template, copies the app in, builds and deploys it
+ *  `<org>/<bundle>-<subdomain>` from the deploy repository's template, copies the app in, builds and deploys it
  *  (tenant-apps-repo, tenant-add-app). There is NO secret field (v1 seeds no secrets; charts pull
  *  from Vault via ExternalSecret) and no user seed: the first administrator comes by invitation.
  *  Submit hands off to the Run screen, where the T1..T4 fan-out gates stream gate-by-gate and the
@@ -79,7 +79,7 @@ export function TenantCreate() {
       <p className="callout">
         A tenant fans one registration out to one self-contained member per service — auth, jobs and report, the
         platform every tenant has — each with its own namespace <code>&lt;guid&gt;-&lt;member&gt;-&lt;stage&gt;</code> and its
-        own AppProject, all rendered from the fixed catalog repo. Apps are added afterwards from the tenant&apos;s page: the
+        own AppProject, all rendered from the fixed deploy repository. Apps are added afterwards from the tenant&apos;s page: the
         first one creates the tenant&apos;s own repository <code>&lt;subdomain&gt;-apps</code> from the catalog and builds it.
         The Manager renders and validates the entire fan-out (T1..T4) before anything is deployed; you approve on the next
         screen.
@@ -133,7 +133,7 @@ export function TenantCreate() {
           </label>
 
           {/* The placement read-out that makes the two fields above checkable instead of merely stated:
-              the two identities they decide — the GitOps registration file in catalog and the member
+              the two identities they decide — the GitOps registration file in the deploy repository and the member
               namespaces on the cluster. The guid is the one thing not yet known — the plan mints it — so
               it shows as the <guid> placeholder with a line saying so, rather than an example an operator
               could copy somewhere and act on. */}
@@ -144,7 +144,7 @@ export function TenantCreate() {
                 Stage <code>{placement.stage}</code> on <code>{placement.domain}</code>.
               </span>
               <span className="field__hint">
-                GitOps registration <code>{placement.registrationPath}</code> in catalog ·{" "}
+                GitOps registration <code>{placement.registrationPath}</code> in the deploy repository ·{" "}
                 {placement.namespaces.length} namespaces on the cluster, one per member:{" "}
                 <code>{placement.namespaces.join(", ")}</code>. Each is also the name of that member&apos;s AppProject.
               </span>

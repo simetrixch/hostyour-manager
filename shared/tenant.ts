@@ -1,6 +1,6 @@
 // shared/tenant.ts — the tenant (multi-app package) REGISTRATION contract, the structural mirror of
 // consumer.ts:ConsumerRegistrationSchema. A tenant is a "meta consumer": its repo is always
-// catalog, its registration fans out to one ArgoCD Application per MEMBER (the trio
+// the deploy repository, its registration fans out to one ArgoCD Application per MEMBER (the trio
 // auth/jobs/report plus one per app), and its "chart" is a package. The fan-out this registration
 // expands to is server/domains/units/tenant-fanout.ts.
 //
@@ -153,8 +153,8 @@ export function refineAppsBundle(e: AppsBundleFields, ctx: z.RefinementCtx): voi
  *  The guid is the DIRECTORY and the stage is the FILE NAME, so neither appears in the body: the path
  *  is the identity, and a body field mirroring it would be a second writer of the same datum.
  *  Structural mirror of ConsumerRegistrationSchema, but repoURL/repoCredentialId are DELIBERATELY
- *  ABSENT: a tenant's repo is always catalog and the credential is the manager's first-party
- *  write credential, both constants of the one-time catalog registration.
+ *  ABSENT: a tenant's repo is always the deploy repository and the credential is the manager's first-party
+ *  write credential, both constants of the one-time deploy repository registration.
  *
  *  `seedUsers`, `resetNonce`, `suspended`, `quiesced`, `appsImage` and `appsImageTag` are MANDATORY
  *  with a default and are written explicitly on every commit, so a chart may read them BARE under
@@ -315,7 +315,7 @@ export function tenantArgocdUrl(masterFqdn: string | null, argoNamespace: string
  *  card with zero UI fork), but its top-level metadata is fan-out-shaped: chartsRef (THE pin),
  *  probeGuid (the throwaway guid the fan-out was rendered at), appsValidated[] and resolvedMembers[]
  *  replace the consumer report's single chartPath. manifest carries the parsed
- *  catalog ConsumerManifest for audit (null when T1 could not parse it). */
+ *  deploy repository's ConsumerManifest for audit (null when T1 could not parse it). */
 export const TenantValidationReportSchema = z.object({
   resolvedSha: z.string().regex(/^[0-9a-f]{40}$/),
   chartsRef: z.string().regex(/^[0-9a-f]{40}$/), // == resolvedSha (the fan-out pin)

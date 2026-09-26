@@ -730,7 +730,7 @@ export type OrphanBuildView = { unit: string; repoURL: string };
 
 /** GET /api/tenants/orphans — the scan plus the route's FAIL-SOFT envelope, which is the same honesty
  *  rule applied per SCAN that `skipped` applies per pointer: `error` set means the scan itself could not
- *  read catalog, so `orphans: []` means NOTHING and the UI must render the error, never "no orphans
+ *  read the deploy repository, so `orphans: []` means NOTHING and the UI must render the error, never "no orphans
  *  found"; `reason` set means tenant onboarding is not wired at all, so there was nothing to scan with. */
 export interface OrphanScanView extends OrphanScan {
   error?: string;

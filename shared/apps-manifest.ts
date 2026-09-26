@@ -1,7 +1,7 @@
 // apps.yaml — the manifest at the root of an apps repository: one entry per app folder, with the
 // title and the description a person reads and the SELECTIONS the wizard offers for it. The
 // platform knows an app through this file and through nothing else: no chart overlay per app, no
-// list in the Manager, no field in the wizard that names a selection. The catalog's apps bundle
+// list in the Manager, no field in the wizard that names a selection. The deploy repository's apps bundle
 // carries one today; a tenant's own apps repository carries one of its own (hostyour-manager#174).
 //
 // Import boundary: shared/ is isomorphic. The web reads the TYPES here; the parser is the server's.
@@ -28,7 +28,7 @@ export type AppSelection = z.infer<typeof AppSelectionSchema>;
 
 /** ONE app of the bundle. `name` is the folder and the member name the tenant deploys it as, so it
  *  carries the app-name grammar of the registration. `databases` is the list of databases the app
- *  opens, which the engine's ServiceClaim grants; the catalog manifest says WHERE it goes through
+ *  opens, which the engine's ServiceClaim grants; the deploy repository's manifest says WHERE it goes through
  *  the `{databases}` token (tenant-fanout.ts), and an entry without one leaves that to the chart's
  *  own value files. */
 export const AppEntrySchema = z.object({

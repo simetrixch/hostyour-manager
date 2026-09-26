@@ -46,7 +46,7 @@ export interface PinHit {
 export interface GlobPinHit extends PinHit {
   branch: string;
   chart: string;
-  /** null for the tenant catalog's values.yaml, the one pin file that names no stage. */
+  /** null for the deploy repository's values.yaml, the one pin file that names no stage. */
   stage: Stage | null;
 }
 
@@ -71,7 +71,7 @@ export function stagePinFile(stage: Stage): string {
  *  `values-<stage>.yaml` convention is a second place the convention can be got wrong. */
 export interface PinFile {
   file: string;
-  /** null where the file states no stage — the tenant catalog's values.yaml, the product default a
+  /** null where the file states no stage — the deploy repository's values.yaml, the product default a
    *  fresh installation renders whatever stage it is at. */
   stage: Stage | null;
 }
@@ -81,7 +81,7 @@ export function stagePinFiles(): PinFile[] {
   return STAGE.map((stage) => ({ file: stagePinFile(stage), stage }));
 }
 
-/** A tenant catalog chart pins in TWO files, and both are live.
+/** A deploy repository chart pins in TWO files, and both are live.
  *
  *  `values.yaml` is the product default on the trunk: the version an installation renders until it
  *  has built one of its own, byte-identical for every installation. `pins-<stage>.yaml` stands on
@@ -90,7 +90,7 @@ export function stagePinFiles(): PinFile[] {
  *
  *  Both are floor: the default is what a fresh installation deploys, the per-stage file what a
  *  running one does, and retention may delete neither. */
-/** The catalogue's per-installation pin for one stage, `charts/<chart>/pins-<stage>.yaml` on the
+/** The deploy repository's per-installation pin for one stage, `charts/<chart>/pins-<stage>.yaml` on the
  *  books branch — what the release pipeline writes and the tenants ApplicationSet layers over the
  *  chart at deploy. */
 export function deployPinFile(stage: Stage): string {

@@ -15,7 +15,7 @@
 //     values-<stage>.yaml                           the chart's own
 //     $values/clusters/active/<fqdn>.yaml
 //
-// The tenants ApplicationSet lists the same three `$values` entries around its own catalog files,
+// The tenants ApplicationSet lists the same three `$values` entries around its own deploy repository files,
 // and so does the ApplicationSet that carries the platform's own inventory apps. So one chain serves
 // every unit this Manager gates, and the chart's own files always sit BETWEEN the platform pair and
 // the cluster's own map — which is why the order below is not a flat list but a split one.

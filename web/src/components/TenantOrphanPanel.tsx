@@ -50,7 +50,7 @@ function OrphanRows({ orphans, onPurge }: { orphans: OrphanTenantView[]; onPurge
 }
 
 /** The build registrations nothing accounts for (#241): no tenant names one as its apps bundle, the
- *  catalog's buildRepos does not name it and no stage file stands beside it, so no run of a tenant
+ *  deploy repository's buildRepos does not name it and no stage file stands beside it, so no run of a tenant
  *  will ever take it away. The one action is the purge — the registration and the Vault entry; the
  *  repository on GitHub stands. The plan refuses a unit that is accounted for after all. */
 function OrphanBuildRows({ builds, onPurge }: { builds: OrphanBuildView[]; onPurge: (unit: string) => void }) {
@@ -61,7 +61,7 @@ function OrphanBuildRows({ builds, onPurge }: { builds: OrphanBuildView[]; onPur
           <div className="row">
             <span className="badge badge--degraded">build</span>
             <span className="row__title mono">{b.unit}</span>
-            <span className="row__meta">registrations/{b.unit}/build.yaml · {b.repoURL} · named by no tenant and no catalog build unit, at no stage</span>
+            <span className="row__meta">registrations/{b.unit}/build.yaml · {b.repoURL} · named by no tenant and no build unit of the deploy repository, at no stage</span>
             <span className="row__end">
               <button type="button" className="btn btn--danger" onClick={() => onPurge(b.unit)}>
                 Purge…
@@ -135,7 +135,7 @@ export function TenantOrphanPanel(props: {
           {scan.builds.length > 0 && (
             <>
               <p role="alert" className="alert alert--warn">
-                {scan.builds.length} build registration(s) nothing accounts for: no tenant names them as its apps bundle, the catalog&rsquo;s
+                {scan.builds.length} build registration(s) nothing accounts for: no tenant names them as its apps bundle, the deploy repository&rsquo;s
                 buildRepos does not name them and no stage file stands beside them. Each is presented by the App-token refresh every tick and
                 keeps its Vault entry until purged. A purge removes the registration and the Vault entry; the repository on GitHub stands.
               </p>
@@ -148,7 +148,7 @@ export function TenantOrphanPanel(props: {
             <>
               <p role="alert" className="alert alert--warn">
                 {scan.skipped.length} tenant pointer(s) could not be read, so they are neither confirmed nor ruled out as orphans. Fix the
-                file in catalog (or purge the tenant once it reads again) — a purge cannot be aimed at a pointer whose target cluster is
+                file in the deploy repository (or purge the tenant once it reads again) — a purge cannot be aimed at a pointer whose target cluster is
                 unknown.
               </p>
               <ul className="rows">
