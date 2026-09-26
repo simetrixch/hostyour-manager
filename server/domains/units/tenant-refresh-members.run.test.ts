@@ -183,10 +183,12 @@ describe("tenant-refresh-members", () => {
     expect(erp?.sources[1]?.chart).toBe("charts/old-ui");
   });
 
-  it("REFUSES a tenant whose entries already match the manifest: nothing is committed", async () => {
+  it("plans a tenant whose entries already match the manifest as current: nothing to do is no error", async () => {
     seedTenant();
     const resolved = await planned(ports(staleMembers()));
-    await expect(makeTenantRefreshMembersDef(ports(resolved.members)).planStream!({ tenantId: "tnt_1" }, planCtx())).rejects.toThrow(/nothing to refresh/);
+    const out = await makeTenantRefreshMembersDef(ports(resolved.members)).planStream!({ tenantId: "tnt_1" }, planCtx());
+    if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
+    expect(out.plan.summary).toMatch(/the tenant is current .* the run changes nothing/);
   });
 
   it("REFUSES a manifest that changes the member set: that is a new namespace and Application", async () => {

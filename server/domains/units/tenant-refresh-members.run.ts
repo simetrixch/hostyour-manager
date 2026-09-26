@@ -322,7 +322,8 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         })
         : { units: [], skipped: [] };
       for (const s of newest.skipped) ctx.log(`not built for this tenant — ${s}`);
-      if (changed.length === 0 && newest.units.length === 0) throw errValidation(`every member entry of tenant ${tc.guid} already matches the product's manifest at ${outcome.resolvedSha.slice(0, 7)}${req.channel ? ", and no unit of the product builds anything its members pin" : ""} — nothing to refresh`);
+      // Nothing to do is a result, not an error: the run passes through every step and changes nothing.
+      const isCurrent = changed.length === 0 && newest.units.length === 0;
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
       const planned = await planBuildUnits({
         requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage: appsImage || undefined,
@@ -356,6 +357,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         targetId: tc.tenantId,
         summary:
           `Refresh the members of tenant ${tc.guid} on ${tc.domain} (${tc.stage}) from the product's manifest at ${outcome.resolvedSha.slice(0, 7)}: ` +
+          `${isCurrent ? "the tenant is current — every member entry matches the product's manifest and no unit builds anything its members pin, so the run changes nothing. " : ""}` +
           `${changed.length ? `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` : "the member entries are unchanged. "}` +
           `${newest.units.length ? `Build the newest ${newest.units.map((u) => `${u.unit} (${u.images.join(", ")}, running ${u.runningTag || "no tag"})`).join("; ")} at its default branch head on ${req.channel}, for this tenant alone — no stage pin moves and no other tenant changes; a unit whose head the tenant already runs builds nothing. ` : ""}` +
           `${planned.builds.units.length ? `First the build unit(s) ${planned.builds.units.map((u) => `${u.unit} (${u.images.join(", ")})`).join("; ")} release their next version and pin it. ` : ""}` +

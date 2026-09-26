@@ -1792,7 +1792,7 @@
     "server/domains/units/tenant-refresh-members.run.test.ts::registration": 4,
     "server/domains/units/tenant-refresh-members.run.test.ts::registrations": 9,
     "server/domains/units/tenant-refresh-members.run.test.ts::simetrixch": 2,
-    "server/domains/units/tenant-refresh-members.run.test.ts::tenant": 21,
+    "server/domains/units/tenant-refresh-members.run.test.ts::tenant": 22,
     "server/domains/units/tenant-refresh-members.run.test.ts::tenants": 5,
     "server/domains/units/tenant-refresh-members.run.test.ts::unit": 6,
     "server/domains/units/tenant-refresh-members.run.ts::helm": 2,
