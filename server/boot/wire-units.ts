@@ -4,7 +4,7 @@ import type { Logger } from "../kernel/logger.ts";
 import type { CredentialStore } from "../security/store.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
 import { GitRepoReader, GitRepoWriter } from "../adapters/git/git.ts";
-import type { PlatformRepo, RepoReader } from "../adapters/git/port.ts";
+import type { PlatformRepo, RepoReader, RepoWriter } from "../adapters/git/port.ts";
 import { KubeBuildRbacWriter } from "../adapters/kube/kube-rbac.ts";
 import { KubeRepoCredentialWriter } from "../adapters/kube/kube-repo-credential.ts";
 import { CloudflareR2 } from "../adapters/object-store/cloudflare-r2.ts";
@@ -146,6 +146,10 @@ export interface UnitsWiring {
    *  SAME Registrations the consumer runs commit through. Undefined when consumer onboarding is not
    *  configured; the scan route then degrades to an empty result with a reason. */
   registrations?: Registrations;
+  /** The consumer-repo writer the onboarding commits the release kit with, threaded to the boot's
+   *  sync of the kit into every registered unit's repository. Undefined when consumer onboarding is
+   *  not configured. */
+  consumerRepo?: RepoWriter;
   /** The CONSUMER family's repository reader, threaded to registerConsumerRoutes so the wizard's
    *  prefill (POST /api/consumers/prefill) reads a consumer repository's version before any run
    *  exists — the SAME GitRepoReader the onboard run clones with. Undefined when consumer
@@ -279,6 +283,7 @@ export function buildUnits(
     ...(consumer.resolver ? { resolver: consumer.resolver } : {}),
     ...(consumer.onboardPorts?.repoCredential ? { repoCredential: consumer.onboardPorts.repoCredential } : {}),
     ...(consumer.registrations ? { registrations: consumer.registrations } : {}),
+    ...(consumer.onboardPorts?.consumerRepo ? { consumerRepo: consumer.onboardPorts.consumerRepo } : {}),
     ...(consumer.repoReader ? { repoReader: consumer.repoReader } : {}),
     ...(consumer.github ? { github: consumer.github } : {}),
     ...(consumer.platformGitHub ? { platformGitHub: consumer.platformGitHub } : {}),

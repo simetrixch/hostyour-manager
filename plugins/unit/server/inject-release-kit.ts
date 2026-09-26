@@ -16,11 +16,76 @@
 //
 // The offboard/purge removal (removeReleaseKit) is FAIL-SOFT (like removeConsumerWebhook): a failure
 // to git-rm the release-kit NEVER blocks teardown — every failure path logs a warning and returns.
+//
+// A unit released by hand with its own release.sh runs the kit that stands in its repository, so the
+// boot writes the current kit into every registered unit's repository too (syncReleaseKits).
 import type { Step, StepCtx } from "#core/server/executor/types.ts";
 import type { BuildPorts, BuildParams } from "./build-chain.ts";
 import type { RepoWriter } from "#core/server/adapters/git/port.ts";
+import type { Logger } from "#core/server/kernel/logger.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
+import type { Registrations } from "./registrations.ts";
 import { RELEASE_KIT_DIR, RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "./release-kit/release-kit.ts";
+
+/** The current kit into one repository's default branch, by comparison: a file whose copy differs is
+ *  written, a file under the kit's own directory that the current set no longer carries is removed in
+ *  the same commit, and a repository already on the current kit commits nothing. */
+export async function syncReleaseKit(
+  writer: RepoWriter,
+  input: { repoURL: string; credentialId: string; message: string; signal?: AbortSignal },
+): Promise<{ branch: string; commit?: string; changed: boolean; written: string[]; replaced: string[]; removed: string[] }> {
+  const signal = input.signal ? { signal: input.signal } : {};
+  const session = await writer.open({ repoURL: input.repoURL, credentialId: input.credentialId, ...signal });
+  try {
+    const toWrite: { path: string; content: string }[] = [];
+    const replaced: string[] = [];
+    for (const f of RELEASE_KIT_FILES) {
+      const existing = await writer.readFile(session.workdir, f.path);
+      if (existing === f.content) continue;
+      toWrite.push({ path: f.path, content: f.content });
+      if (existing !== null) replaced.push(f.path);
+    }
+    const current = new Set(RELEASE_KIT_PATHS);
+    const removed = (await writer.listDir(session.workdir, RELEASE_KIT_DIR))
+      .map((entry) => `${RELEASE_KIT_DIR}/${entry}`)
+      .filter((path) => !current.has(path));
+    const written = toWrite.map((w) => w.path);
+    if (toWrite.length === 0 && removed.length === 0) return { branch: session.branch, changed: false, written, replaced, removed };
+    const { commit, changed } = await writer.commitPush({ workdir: session.workdir, branch: session.branch, credentialId: input.credentialId, message: input.message, write: toWrite, remove: removed, ...signal });
+    return { branch: session.branch, commit, changed, written, replaced, removed };
+  } finally {
+    await writer.dispose(session.workdir);
+  }
+}
+
+/** At boot: the current kit into the repository of every registered unit, so a release made there by
+ *  hand runs the kit this Manager ships. NEVER rejects: boot starts it unawaited behind the listener,
+ *  and a unit that fails is logged by name while the others go on. */
+export async function syncReleaseKits(deps: {
+  registrations: Pick<Registrations, "listBuildRegistrations">;
+  writer: RepoWriter;
+  /** The credential id a unit's repository is written with (repo-identity.ts resolveRepoCredentialId). */
+  credentialFor: (repoURL: string) => Promise<string>;
+  version: string;
+  logger: Logger;
+}): Promise<void> {
+  const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+  let units: Awaited<ReturnType<Registrations["listBuildRegistrations"]>>;
+  try {
+    units = await deps.registrations.listBuildRegistrations();
+  } catch (err) {
+    deps.logger.error({ err: message(err) }, "the release kit was synced into no repository: the registered units could not be read");
+    return;
+  }
+  for (const { unit, entry } of units) {
+    try {
+      const synced = await syncReleaseKit(deps.writer, { repoURL: entry.repoURL, credentialId: await deps.credentialFor(entry.repoURL), message: `chore(release-kit): sync platform release tooling [boot ${deps.version}]` });
+      if (synced.changed) deps.logger.info({ unit, repoURL: entry.repoURL, branch: synced.branch, commit: synced.commit, written: synced.written, removed: synced.removed }, "release kit synced into the unit's repository");
+    } catch (err) {
+      deps.logger.error({ unit, repoURL: entry.repoURL, err: message(err) }, "the release kit could not be synced into this unit's repository — a release made there by hand runs the kit that stands");
+    }
+  }
+}
 
 /** The onboard `inject-release-kit` step: commit the release-kit (release/ scripts + the release
  *  workflow) into the consumer repo's default branch, replacing whatever kit stood there. Fails LOUD
@@ -37,44 +102,16 @@ export function injectReleaseKitStep(ports: BuildPorts, p: BuildParams): Step {
       if (!ports.consumerRepo) {
         throw errValidation(`onboard "${p.consumerName}" requires the consumer-repo git writer but none is wired on this manager — refusing to onboard a consumer whose repo cannot mint a release (no release kit → no release build)`);
       }
-      const session = await ports.consumerRepo.open({ repoURL: p.repoURL, credentialId: p.repoCredentialId, signal: ctx.signal });
-      try {
-        // Write BY COMPARISON: only a file whose repo copy differs from the current asset bytes is
-        // staged, so a repo already on the current kit commits nothing.
-        const toWrite: { path: string; content: string }[] = [];
-        for (const f of RELEASE_KIT_FILES) {
-          const existing = await ports.consumerRepo.readFile(session.workdir, f.path);
-          if (existing === f.content) continue;
-          toWrite.push({ path: f.path, content: f.content });
-          if (existing !== null) ctx.log("meta", `release-kit: ${f.path} differs from the current kit — replacing it (the kit is platform-owned; the trigger below runs exactly these bytes)`);
-        }
-        // The stale-file delete, derived from the SAME source as the write side: every entry under
-        // the kit's own directory that the current asset set no longer carries was written by an
-        // older kit and goes in the same commit.
-        const current = new Set(RELEASE_KIT_PATHS);
-        const toRemove = (await ports.consumerRepo.listDir(session.workdir, RELEASE_KIT_DIR))
-          .map((entry) => `${RELEASE_KIT_DIR}/${entry}`)
-          .filter((path) => !current.has(path));
-        if (toWrite.length === 0 && toRemove.length === 0) {
-          ctx.log("meta", `release-kit: all ${RELEASE_KIT_PATHS.length} files in ${p.repoURL} on ${session.branch} already carry the current kit — nothing to commit`);
-          return;
-        }
-        const { commit, changed } = await ports.consumerRepo.commitPush({
-          workdir: session.workdir,
-          branch: session.branch,
-          credentialId: p.repoCredentialId,
-          message: `chore(release-kit): sync platform release tooling [${ctx.runId}]`,
-          write: toWrite,
-          remove: toRemove,
-          signal: ctx.signal,
-        });
-        ctx.checkpoint({ releaseKit: toWrite.map((w) => w.path), removed: toRemove, branch: session.branch, commit, changed });
-        ctx.log("meta", changed
-          ? `release-kit: synced ${p.repoURL} on ${session.branch} (${commit}) — wrote ${toWrite.length} file(s)${toWrite.length ? ` (${toWrite.map((w) => w.path).join(", ")})` : ""}${toRemove.length ? `, removed ${toRemove.length} stale file(s) (${toRemove.join(", ")})` : ""}`
-          : `release-kit: nothing changed in ${p.repoURL} on ${session.branch} — already up to date`);
-      } finally {
-        await ports.consumerRepo.dispose(session.workdir);
+      const synced = await syncReleaseKit(ports.consumerRepo, { repoURL: p.repoURL, credentialId: p.repoCredentialId, message: `chore(release-kit): sync platform release tooling [${ctx.runId}]`, signal: ctx.signal });
+      for (const path of synced.replaced) ctx.log("meta", `release-kit: ${path} differs from the current kit — replacing it (the kit is platform-owned; the trigger below runs exactly these bytes)`);
+      if (synced.written.length === 0 && synced.removed.length === 0) {
+        ctx.log("meta", `release-kit: all ${RELEASE_KIT_PATHS.length} files in ${p.repoURL} on ${synced.branch} already carry the current kit — nothing to commit`);
+        return;
       }
+      ctx.checkpoint({ releaseKit: synced.written, removed: synced.removed, branch: synced.branch, commit: synced.commit, changed: synced.changed });
+      ctx.log("meta", synced.changed
+        ? `release-kit: synced ${p.repoURL} on ${synced.branch} (${synced.commit}) — wrote ${synced.written.length} file(s)${synced.written.length ? ` (${synced.written.join(", ")})` : ""}${synced.removed.length ? `, removed ${synced.removed.length} stale file(s) (${synced.removed.join(", ")})` : ""}`
+        : `release-kit: nothing changed in ${p.repoURL} on ${synced.branch} — already up to date`);
     },
   };
 }

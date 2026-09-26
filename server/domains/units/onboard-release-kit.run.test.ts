@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { injectReleaseKitStep, removeReleaseKit } from "#unit/server/inject-release-kit.ts";
+import { injectReleaseKitStep, removeReleaseKit, syncReleaseKits } from "#unit/server/inject-release-kit.ts";
 import { DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "#unit/server/release-kit/release-kit.ts";
 import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
@@ -199,5 +199,29 @@ describe("removeReleaseKit (shared offboard/purge teardown)", () => {
     await removeReleaseKit(ctx(orphanLogs), { consumerRepo, consumerName: "acme", repoURL: null, repoCredentialId: null });
     expect(consumerRepo.opened).toEqual([]); // never opened — nothing to remove
     expect(orphanLogs.some((l) => l.includes("release-kit removal skipped") && l.includes("no inventory row"))).toBe(true);
+  });
+});
+
+describe("syncReleaseKits at boot (a unit released by hand runs the kit that stands in its repository)", () => {
+  it("writes the current kit where it differs, commits nothing where it stands, and goes on past a unit it cannot reach", async () => {
+    const OLD = "https://github.com/x/old-kit.git";
+    const CURRENT = "https://github.com/x/current.git";
+    const LOST = "https://github.com/x/lost.git";
+    const writer = new FakeRepoWriter();
+    writer.seed(OLD, "release/release.sh", "#!/usr/bin/env bash\n# an older kit\n");
+    writer.seed(OLD, "release/stale.sh", "#!/usr/bin/env bash\n");
+    for (const f of RELEASE_KIT_FILES) writer.seed(CURRENT, f.path, f.content);
+    const registered = [OLD, LOST, CURRENT].map((repoURL) => ({ unit: repoURL.split("/").pop()!.replace(".git", ""), entry: { repoURL } }));
+    const failed: string[] = [];
+    const logger = { info: () => undefined, error: (o: { unit?: string }) => failed.push(o.unit ?? "") } as unknown as Logger;
+    await syncReleaseKits({
+      registrations: { listBuildRegistrations: async () => registered } as never, writer, version: "0.8.0", logger,
+      credentialFor: async (repoURL) => { if (repoURL === LOST) throw new Error("no identity"); return "cred_x"; },
+    });
+    expect(writer.commits.map((c) => c.repoURL)).toEqual([OLD]);
+    expect(writer.commits[0]!.message).toBe("chore(release-kit): sync platform release tooling [boot 0.8.0]");
+    expect(writer.commits[0]!.remove).toEqual(["release/stale.sh"]);
+    for (const f of RELEASE_KIT_FILES) expect(writer.filesFor(OLD)[f.path]).toBe(f.content);
+    expect(failed).toEqual(["lost"]);
   });
 });

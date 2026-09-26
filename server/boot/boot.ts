@@ -58,6 +58,9 @@ export async function boot(): Promise<void> {
   // token repository Secret off every live unit the App reaches (repo-credential-sweep.ts).
   void wired.refreshAppTokens();
   scheduleAppTokenRefresh(wired.refreshAppTokens, logger);
+  // The release kit this Manager ships, into every registered unit's repository where it differs:
+  // once, behind the listener — a unit released by hand runs the kit that stands in its repository.
+  void wired.syncReleaseKits();
 
   const shutdown = (signal: string): void => {
     logger.info({ signal }, "shutting down");

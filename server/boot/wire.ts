@@ -50,6 +50,8 @@ import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-c
 import { ensureAppIdentityRow } from "../security/app-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { refreshAppTokens } from "#unit/server/app-token-refresh.ts";
+import { syncReleaseKits } from "#unit/server/inject-release-kit.ts";
+import { resolveRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { sweepRepoCredentials } from "../domains/units/repo-credential-sweep.ts";
 import { migrateRegistrations } from "#unit/server/registrations-migration.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
@@ -83,6 +85,11 @@ export interface Wired {
    *  and then every 45 minutes. Never rejects — every failure is logged per unit. A no-op where the
    *  consumer family is not wired: there are then no build registrations. */
   refreshAppTokens: () => Promise<void>;
+  /** The current release kit written into the repository of every registered unit, where it differs
+   *  (plugins/unit/server/inject-release-kit.ts syncReleaseKits): a unit released by hand runs the kit
+   *  this Manager ships. boot.ts runs it once behind the listening server; the kit changes only with
+   *  a release, and a release boots the Manager. Never rejects — every failure is logged per unit. */
+  syncReleaseKits: () => Promise<void>;
   /** Every standing registration on both books brought to the schema this release ships
    *  (plugins/unit/server/registrations-migration.ts): a file the schema now defaults a key of is
    *  rewritten with it, one commit per books per boot. boot.ts runs it once, behind the listening
@@ -261,7 +268,7 @@ export async function wire(): Promise<Wired> {
   // The deletion after each rewrite reaches the build namespaces over the master-local cluster
   // reader: they stand on this cluster whatever cluster a unit targets. The same tick takes a token
   // repository Secret off every live unit the App reaches (repo-credential-sweep.ts).
-  const { resolver: unitResolver, repoCredential } = units;
+  const { resolver: unitResolver, repoCredential, consumerRepo } = units;
   const refreshAppTokensLater = registrations && unit
     ? async (): Promise<void> => {
         try {
@@ -391,6 +398,12 @@ export async function wire(): Promise<Wired> {
     checks,
     carryCatalogTrunk,
     refreshAppTokens: refreshAppTokensLater,
+    syncReleaseKits: registrations && consumerRepo
+      ? () => syncReleaseKits({
+        registrations, writer: consumerRepo, version: config.version, logger,
+        credentialFor: (repoURL) => resolveRepoCredentialId({ repoURL, githubApp, owners: (org) => readOwnerIdentity(db.db, org), store }),
+      })
+      : async (): Promise<void> => undefined,
     migrateRegistrations: migrateRegistrationsLater,
   };
 }
