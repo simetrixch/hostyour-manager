@@ -85,7 +85,7 @@ export type ManifestReadPorts = Pick<SetSecretsPorts, "github" | "store" | "gith
  *  owner's identity, never the params frozen at onboarding: a key added since then is exactly what
  *  this run kind exists to carry. Refuses in the owner's words where no identity reads the
  *  repository or the manifest does not parse. */
-async function readDeclaredSecrets(ports: ManifestReadPorts, owners: OwnerIdentityReader, repoURL: string, signal?: AbortSignal): Promise<{ outcome: "read"; secrets: ConsumerSecretSpec[] } | { outcome: "refused"; why: string }> {
+async function readDeclaredSecrets(ports: ManifestReadPorts, owners: OwnerIdentityReader, repoURL: string, signal?: AbortSignal): Promise<{ outcome: "read"; secrets: ConsumerSecretSpec[]; dkimKey?: string } | { outcome: "refused"; why: string }> {
   const { owner, repo } = parseGitHubOwnerRepo(repoURL);
   const judged = await judgeRepoIdentity({ repoURL, ...(ports.githubApp ? { githubApp: ports.githubApp as RepoIdentityApp } : {}), owners, ...(signal ? { signal } : {}) });
   if ("refused" in judged) return { outcome: "refused", why: judged.refused };
@@ -94,7 +94,8 @@ async function readDeclaredSecrets(ports: ManifestReadPorts, owners: OwnerIdenti
   if (text === null) return { outcome: "refused", why: `${repoURL} carries no ${CONSUMER_MANIFEST_PATH}` };
   const parsed = ConsumerManifestSchema.safeParse(parseYaml(text));
   if (!parsed.success) return { outcome: "refused", why: `${CONSUMER_MANIFEST_PATH} of ${repoURL} failed its schema: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}` };
-  return { outcome: "read", secrets: parsed.data.secrets };
+  const dkimKey = parsed.data.smtpEntry?.dkimKey;
+  return { outcome: "read", secrets: parsed.data.secrets, ...(dkimKey ? { dkimKey } : {}) };
 }
 
 /** The repository the consumer was onboarded from — the row's own field, the one this run reads the
@@ -117,13 +118,16 @@ export async function readSecretOffer(ports: ManifestReadPorts, db: Db, appId: s
 
 /** Why the generate keys a request names cannot be minted by this run, or null where they can: a
  *  name the manifest declares as no generate key, a key derived from the repository PAT (this run
- *  holds none), and half of a keypair, whose other half would then no longer match it. */
-function refuseMint(names: readonly string[], declared: readonly ConsumerSecretSpec[]): string | null {
+ *  holds none), half of a keypair, whose other half would then no longer match it, and the SMTP
+ *  entry's DKIM key, whose public half the Manager publishes in DNS from the row the onboarding wrote:
+ *  a new private key would sign mail the published record no longer verifies. */
+function refuseMint(names: readonly string[], declared: readonly ConsumerSecretSpec[], dkimKey?: string): string | null {
   const generate = declared.filter((s) => s.generate);
   const unknown = names.filter((n) => !generate.some((s) => s.key === n));
   if (unknown.length > 0) return `it declares no generate key ${unknown.join(", ")} — the keys it mints are ${generate.map((s) => s.key).join(", ") || "none"}`;
   const derived = generate.filter((s) => names.includes(s.key) && s.generate === "deploy-git-credentials");
   if (derived.length > 0) return `${derived.map((s) => s.key).join(", ")} is derived from the repository PAT the onboarding sealed, and this run derives nothing`;
+  if (dkimKey !== undefined && names.includes(dkimKey)) return `${dkimKey} is the DKIM key of its SMTP entry, and its public half stands in DNS as the onboarding published it — minting it again would sign mail that record no longer verifies`;
   for (const pub of generate.filter((s) => s.generate === "rsa2048-public")) {
     if (pub.pairWith && names.includes(pub.key) !== names.includes(pub.pairWith)) return `${pub.pairWith} and ${pub.key} are one keypair: mint both or neither`;
   }
@@ -233,7 +237,7 @@ export function makeSetSecretsDef(ports: SetSecretsPorts): RunDefinition<SetSecr
       if (read.outcome === "refused") {
         return { outcome: "rejected", summary: `The secrets of "${ac.name}" cannot be changed — ${read.why}`, planJson: { consumerName: ac.name } };
       }
-      const refused = refuseMint(req.mint, read.secrets);
+      const refused = refuseMint(req.mint, read.secrets, read.dkimKey);
       if (refused) {
         return { outcome: "rejected", summary: `"${ac.name}" cannot mint what this request names — ${refused}`, planJson: { consumerName: ac.name } };
       }

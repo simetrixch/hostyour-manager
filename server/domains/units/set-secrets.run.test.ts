@@ -175,7 +175,7 @@ describe("consumer-set-secrets", () => {
       expect((await plan(undefined, onlyGenerate)).outcome).toBe("rejected"); // no operator key and no mint: nothing to change
     });
 
-    it("refuses a name that is no generate key, a key derived from the repository PAT, and half of a keypair", async () => {
+    it("refuses a name that is no generate key, a key derived from the repository PAT, half of a keypair, and the DKIM key", async () => {
       const refusal = async (mint: string[], manifest = MANIFEST): Promise<string> => {
         const out = await plan(mint, manifest);
         return out.outcome === "rejected" ? out.summary : "planned";
@@ -185,6 +185,16 @@ describe("consumer-set-secrets", () => {
       expect(await refusal(["DEPLOY_GIT_CREDENTIALS"], more)).toMatch(/derived from the repository PAT/);
       expect(await refusal(["SIGN_KEY"], more)).toMatch(/SIGN_KEY and SIGN_KEY_PUBLIC are one keypair: mint both or neither/);
       expect(await refusal(["SIGN_KEY", "SIGN_KEY_PUBLIC"], more)).toBe("planned");
+      // The SMTP entry's DKIM key: its public half stands in DNS from the onboarding's row.
+      const mail = `${MANIFEST}  - key: MAIL_DKIM_PRIVATE_KEY
+    generate: rsa2048
+smtpEntry:
+  service: acme-mta
+  port: 2525
+  dkimKey: MAIL_DKIM_PRIVATE_KEY
+`;
+      expect(await refusal(["MAIL_DKIM_PRIVATE_KEY"], mail)).toMatch(/MAIL_DKIM_PRIVATE_KEY is the DKIM key of its SMTP entry/);
+      expect(await refusal(["DKIM_KEY_ENCRYPTION_KEY"], mail)).toBe("planned");
     });
   });
 
