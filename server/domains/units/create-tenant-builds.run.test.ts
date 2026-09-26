@@ -274,7 +274,7 @@ describe("create-tenant planStream — the build units and their owner's identit
   });
 });
 
-describe("buildUnitStep — the consumer's build-only chain, run for one unit inside the tenant run", () => {
+describe("buildUnitStep — the unit plugin's build-only chain, run for one unit inside the tenant run", () => {
   it("reaches the unit with the owner's repository PAT row, resolves version and channel, registers the unit and watches its release", async () => {
     seedClusters();
     const buildPlane = new FakeBuildPlane();

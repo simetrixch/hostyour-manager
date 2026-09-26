@@ -1,5 +1,5 @@
-// The tenant onboarding builds the images its fan-out lacks — the consumer onboarding's own release
-// cycle, run per build repository from inside the tenant run (hostyour-manager#165).
+// The tenant onboarding builds the images its fan-out lacks — the unit plugin's release cycle, run
+// per build repository from inside the tenant run (hostyour-manager#165).
 //
 // A CONSUMER ONBOARDING BUILDS ITS IMAGES ITSELF: the wizard hands it a repository and a PAT, the
 // release kit is committed, the workflow dispatched, the build watched, the pins bumped. A tenant
@@ -14,10 +14,10 @@
 //   2. buildUnitStep — the run-time step per unit, BEFORE the tenant's own writes: the credential
 //      (stored, or sealed from the approve-time PAT), the next version off the repository's release
 //      tags, the channel that reaches the tenant's stage, the repository read the way the ungated
-//      first-master path reads a build-only unit, and then the build-only chain of the consumer
-//      onboarding, step by step, inside this step. Its registration and webhook are the unit's own
-//      and stay when the tenant is gone; their cleanups ride this run, so an aborted tenant leaves no
-//      half unit behind.
+//      first-master path reads a build-only unit, and then the unit plugin's build-only chain
+//      (plugins/unit/server/build-chain.ts), step by step, inside this step. Its registration and
+//      webhook are the unit's own and stay when the tenant is gone; their cleanups ride this run, so
+//      an aborted tenant leaves no half unit behind.
 //   3. refreshImagesStep — after the builds the fan-out is rendered again against the books branch,
 //      where every bump wrote its `pins-<stage>.yaml`, and with the tag the tenant's own apps bundle
 //      was just built at (tenant-apps-steps.ts), so ensure-images probes the tags the cluster will
@@ -27,8 +27,9 @@
 // the apps-repo steps with the App's token, so its image is left out of the probe and no PAT is
 // asked for it.
 //
-// Boundary: a domain module — it depends on the consumer onboarding's step factories and ports (the
-// one place the release cycle is written), never on an adapter implementation.
+// Boundary: a domain module — it depends on the unit plugin's build-only chain and release cycle (the
+// one place the release cycle is written) and on the build ports the consumer family's wiring hands
+// it late (wire-units.ts `lateBuild`), never on an adapter implementation.
 import { z } from "zod";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { Stage } from "../../../shared/enums.ts";
@@ -246,7 +247,7 @@ async function nextVersion(ctx: StepCtx, deps: TenantBuildDeps, unit: BuildUnit,
   }
 }
 
-/** ONE step per build unit, run before the tenant's own writes. Inside it the consumer onboarding's
+/** ONE step per build unit, run before the tenant's own writes. Inside it the unit plugin's
  *  build-only chain runs step by step (registration, repo-pat seed, build namespace, release kit,
  *  webhook, release trigger, build watch, record) with parameters composed here; a unit already
  *  registered build-only skips the registration half and re-runs its release. */
