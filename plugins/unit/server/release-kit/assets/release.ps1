@@ -8,9 +8,9 @@
   The three inputs are the version (x.y.z), the channel - the maturity CEILING of the release: alpha
   may reach dev only, beta dev and test, stable anywhere - and the stage this run puts the release
   on. The channel is part of the release tag; the stage is not. An optional fourth input, the target
-  deploy (the default) or build, decides whether the stage's pin is written: build leaves the
-  delivery branch where it is and pushes refs/tags/build/<stage>/<tag>, which the platform builds,
-  scans and verifies without writing the stage's pin.
+  deploy (the default) or build, decides whether the stage's pin is written: build pushes
+  refs/tags/build/<stage>/<tag>, which the platform builds, scans and verifies without writing the
+  stage's pin or moving its delivery branch.
 
   It:
     1. Validates version, channel and stage.
@@ -25,9 +25,10 @@
        rebuilt: the same commit, the same image, one more stage. A VERSION NAMES ONE COMMIT: a rerun
        whose tag stands on origin on a commit other than HEAD is refused before any push, and the
        refusal names the next number to mint (#173).
-    6. Places the delivery branch deploy/<stage> on the release commit - the branch the unit's
-       Application renders its chart off - and then deletes and re-pushes the deploy ref
-       refs/tags/deploy/<stage>/<tag>. Pushing that ref is the
+    6. Deletes and re-pushes the deploy ref refs/tags/<target>/<stage>/<tag>. The delivery branch
+       deploy/<stage> - the branch the unit's Application renders its chart off - is NOT moved here:
+       the platform places it on the release commit plus its pins once every image exists
+       (hostyour-manager#293). Pushing that ref is the
        ONLY build trigger. It is deleted first because pushing a ref that already stands changes
        nothing and fires no webhook, so a repeat of the same (release, stage) would do nothing at
        all. The deletion fires a webhook too; the platform's trigger drops it.
@@ -415,9 +416,9 @@ try {
 
   # A VERSION NAMES ONE COMMIT. A tag that survived the residue rule and names a commit other than
   # HEAD is on origin, and origin's tag is the release: what stands at HEAD is a different tree, and
-  # the version cannot name both. Reusing the tag would push its commit to the delivery branch from
+  # the version cannot name both. Reusing the tag would push its commit as the deploy ref from
   # a checkout standing elsewhere - a push the organisation's pre-push hook refuses as "not what is
-  # checked out", after the tag was reused and in words about the delivery branch. So the refusal
+  # checked out", after the tag was reused and in words about the deploy ref. So the refusal
   # is here, before any push, and it names the next number: a commit that failed its own push is
   # not repaired under its number but succeeded by the next one (#173). The next number is the
   # patch plus one. This script reads no other repository, so where one sequence spans several, the
@@ -458,29 +459,10 @@ try {
   $sha = (git rev-list -n 1 $tag).Trim()
   $sha7 = $sha.Substring(0, 7)
 
-  # ── The delivery branch, placed at the release commit ─────────────────────────
-  #
-  # WHAT THE CLUSTER READS. The unit's Application follows deploy/<stage> of this repository, not a
-  # tag: the chart is rendered off that branch and the release pipeline's bump writes the image tags
-  # into its values there. So the branch has to exist before the deploy ref below starts a build, and
-  # it has to stand on THIS release's tree - a pin written onto an older tree names images built from
-  # a chart nobody released.
-  #
-  # MOVED AND NOT MERGED. The platform owns this branch. Every release places it on the release
-  # commit; the bump's pin commits then sit on top of it and are replaced by the next release the
-  # same way. Nothing a person pushes there survives a release, which is the point: what the cluster
-  # runs is what was released.
-  #
-  # A BUILD PINS NOTHING, so the cluster must not read its tree either: target build leaves the branch
-  # where the last deploy put it.
-  if ($Target -eq 'deploy') {
-    $deliveryBranch = "refs/heads/deploy/$Stage"
-    git push --force origin "${sha}:$deliveryBranch"
-    if ($LASTEXITCODE -ne 0) {
-      Die "the delivery branch deploy/$Stage could not be placed at $sha7, so the build would have nothing to render"
-    }
-    Say "deploy/$Stage stands at $sha7"
-  }
+  # THE DELIVERY BRANCH IS NOT MOVED HERE. The unit's Application follows deploy/<stage>, and the
+  # platform's release pipeline places it on the release commit plus the pin commit once every image
+  # of this release exists (hostyour-manager#293). Moved here, before the build, it let a cluster
+  # render the release tree with its placeholder tags, and a build that failed left them standing.
 
   $deployRef = "refs/tags/$Target/$Stage/$tag"
   # Delete first (absent on a first deploy — that is the normal case, not an error), then push: the

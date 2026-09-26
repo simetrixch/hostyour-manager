@@ -359,7 +359,6 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     expect(stdout).toBe([
       "release: package.json declares 1.2.3",
       "release: minted 1.2.3-stable-<ts14>",
-      "release: deploy/dev stands at <sha7>",
       "release: the manifest <root>/work/deploy/platform.yaml names no platformRepo, so nothing is pinned from here - the deploy ref above is what the platform reacts to",
       "release: probe-unit 1.2.3-stable-<ts14> (commit <sha7>) is on its way to dev",
       "release: the platform builds these image tags, or skips the build when they already exist:",
@@ -404,7 +403,7 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   });
 
   // A RERUN FOR A VERSION THAT ALREADY STANDS ON ORIGIN, in its three shapes. A version names one
-  // commit (#173): the tag on HEAD is reused and the delivery ref moves; the tag on another commit is
+  // commit (#173): the tag on HEAD is reused and its deploy ref pushed again; the tag on another commit is
   // refused before any push and the refusal names the next number; a tag that never reached origin is
   // residue and is cut again. Each is performed by both spellings and read back off origin.
 
@@ -444,17 +443,17 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     }
   });
 
-  it("reuses a tag that stands on origin on HEAD and moves the delivery ref — a further stage, or a retry", RUNS, async () => {
+  it("reuses a tag that stands on origin on HEAD and pushes its deploy ref for a further stage, moving no branch (#293)", RUNS, async () => {
     const o = await bothSpellings(() => releasedRepo({ moved: false }), ["1.2.3", "stable", "test"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
     expect(stdout).toContain("release: reusing the existing release 1.2.3-stable-<ts14> - one release per version+channel, so putting it on test rebuilds nothing\n");
-    expect(stdout).toContain("release: deploy/test stands at <sha7>\n");
+    expect(stdout).not.toContain("stands at <sha7>");
     expect(stdout).not.toContain("minted");
     for (const f of [o.sh, o.ps1]) {
       const [tag] = releaseTags(f);
       expect(releaseTags(f)).toHaveLength(1);
-      expect(originRefs(f)).toContain(`${head(f)}\trefs/heads/deploy/test\n`);
+      expect(originRefs(f)).not.toContain("refs/heads/deploy/");
       expect(originRefs(f)).toContain(`refs/tags/deploy/test/${tag}\n`);
     }
   });
@@ -472,7 +471,8 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
       expect(tags).toHaveLength(1);
       expect(tags[0]).not.toBe("1.2.3-stable-20200101000000");
       expect(originRefs(f)).toContain(`refs/tags/${tags[0]}\n`);
-      expect(originRefs(f)).toContain(`${head(f)}\trefs/heads/deploy/dev\n`);
+      expect(originRefs(f)).toContain(`refs/tags/deploy/dev/${tags[0]}\n`);
+      expect(originRefs(f)).not.toContain("refs/heads/deploy/");
     }
   });
 
@@ -486,7 +486,8 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     for (const f of [o.sh, o.ps1]) {
       expect(releaseTags(f)).toEqual(["1.2.3-stable-20200101000000"]);
       expect(originRefs(f)).toContain("refs/tags/1.2.3-stable-20200101000000\n");
-      expect(originRefs(f)).toContain(`${head(f)}\trefs/heads/deploy/dev\n`);
+      expect(originRefs(f)).toContain("refs/tags/deploy/dev/1.2.3-stable-20200101000000\n");
+      expect(originRefs(f)).not.toContain("refs/heads/deploy/");
     }
   });
 

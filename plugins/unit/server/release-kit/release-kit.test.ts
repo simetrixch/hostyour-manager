@@ -77,12 +77,12 @@ describe("release-kit embedded assets", () => {
 
   it("refuses a rerun whose tag stands on origin on another commit, naming the next number (#173)", () => {
     // A version names one commit. The sentence is the same in both spellings, and it stands BEFORE
-    // the delivery-branch push in each, so the pre-push hook's "not what is checked out" is never
+    // the deploy-ref push in each, so the pre-push hook's "not what is checked out" is never
     // what a release answers with. The run itself is asserted in release-twins.test.ts.
     const byPath = Object.fromEntries(RELEASE_KIT_FILES.map((f) => [f.path, f.content]));
     for (const [script, refusal, push] of [
-      [byPath["release/release.sh"]!, 'so ${VERSION} is burnt: release ${NEXT} instead. Nothing was pushed."', 'git push --force origin "${SHA}:${DELIVERY_BRANCH}"'],
-      [byPath["release/release.ps1"]!, 'so $Version is burnt: release $next instead. Nothing was pushed."', 'git push --force origin "${sha}:$deliveryBranch"'],
+      [byPath["release/release.sh"]!, 'so ${VERSION} is burnt: release ${NEXT} instead. Nothing was pushed."', 'git push origin "${SHA}:${DEPLOY_REF}"'],
+      [byPath["release/release.ps1"]!, 'so $Version is burnt: release $next instead. Nothing was pushed."', 'git push origin "${sha}:$deployRef"'],
     ] as const) {
       const at = script.indexOf(refusal);
       expect(at).toBeGreaterThan(-1);
