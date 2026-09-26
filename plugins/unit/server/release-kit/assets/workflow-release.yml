@@ -40,6 +40,14 @@ on:
           - dev
           - test
           - prod
+      target:
+        description: "deploy puts the release on the stage; build only builds it for the stage and writes no pin (the Manager's per-tenant build)"
+        required: false
+        type: choice
+        default: deploy
+        options:
+          - deploy
+          - build
 
 permissions:
   contents: write
@@ -59,4 +67,4 @@ jobs:
           git config user.email "218061504+example-release[bot]@users.noreply.github.com"
 
       - name: Mint the release tag and push the deploy ref
-        run: bash release/release.sh "${{ inputs.version }}" "${{ inputs.channel }}" "${{ inputs.stage }}"
+        run: bash release/release.sh "${{ inputs.version }}" "${{ inputs.channel }}" "${{ inputs.stage }}" "${{ inputs.target || 'deploy' }}"

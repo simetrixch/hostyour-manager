@@ -658,7 +658,7 @@ export const setTenantApprovedTag = (tenantId: string, app: string, build: strin
   post<{ runId: string }>(`/api/tenants/${tenantId}/approved-tags`, { app, build, tag });
 
 /** Plan tenant-refresh-members: every member entry resolved again off the product's manifest. */
-export const refreshTenantMembers = (tenantId: string): Promise<{ runId: string }> => post(`/api/tenants/${tenantId}/refresh-members`);
+export const refreshTenantMembers = (tenantId: string, channel: string): Promise<{ runId: string }> => post(`/api/tenants/${tenantId}/refresh-members`, { channel });
 
 /** Plan setting, switching or clearing ("") the tenant's own domain. */
 /** Plan tenant-set-own-domain for a domain typed without www: the tenant is served at www.<domain>,

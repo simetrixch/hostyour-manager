@@ -60,6 +60,9 @@ export const BuildParamsBase = z.object({
   // registrations/<name>/<stage>.yaml, the namespace <name>-<stage>, the host, the Vault path
   // <stage>/consumer/<name>/… and the deploy ref the triggered release pushes all follow it.
   stage: z.enum(STAGE),
+  // deploy (absent) puts the release on `stage` and the pipeline writes the stage's pin; build only
+  // builds it for `stage` and writes no pin — a tenant's own version (hostyour-manager#289).
+  target: z.enum(["deploy", "build"]).optional(),
   // The default-branch head the gates checked at plan time. Display/audit only — there is no pin:
   // the check step re-runs the gates at the CURRENT head, and the release cycle builds whatever
   // the minted tag points at.

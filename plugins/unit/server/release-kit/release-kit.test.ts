@@ -56,12 +56,12 @@ describe("release-kit embedded assets", () => {
     const byPath = Object.fromEntries(RELEASE_KIT_FILES.map((f) => [f.path, f.content]));
 
     const sh = byPath["release/release.sh"]!;
-    expect(sh).toContain('DEPLOY_REF="refs/tags/deploy/${STAGE}/${TAG}"');
+    expect(sh).toContain('DEPLOY_REF="refs/tags/${TARGET}/${STAGE}/${TAG}"');
     expect(sh).toContain('git push origin ":${DEPLOY_REF}"');
     expect(sh).toContain('git push origin "${SHA}:${DEPLOY_REF}"');
 
     const ps1 = byPath["release/release.ps1"]!;
-    expect(ps1).toContain('$deployRef = "refs/tags/deploy/$Stage/$tag"');
+    expect(ps1).toContain('$deployRef = "refs/tags/$Target/$Stage/$tag"');
     expect(ps1).toContain('git push origin ":$deployRef"');
     expect(ps1).toContain('git push origin "${sha}:$deployRef"');
   });

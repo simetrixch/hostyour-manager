@@ -330,11 +330,11 @@ export class TenantRegistrations {
   /** The builds a chart's stage pin file names on the books branch (`<chart>/pins-<stage>.yaml`,
    *  written by the release pipeline): what an approval for that chart may name. None where no
    *  release of this installation has pinned the chart yet. */
-  async listPinnedBuilds(stage: Stage, chart: string): Promise<{ name: string; image: string }[]> {
+  async listPinnedBuilds(stage: Stage, chart: string): Promise<{ name: string; image: string; tag: string }[]> {
     const raw = await this.repo.withBranch(this.branch, (books) => books.readFile(`${chart}/pins-${stage}.yaml`));
     if (raw === null) return [];
-    const builds = (parseYaml(raw) as { builds?: { name?: unknown; image?: unknown }[] } | null)?.builds ?? [];
-    return builds.flatMap((b) => (typeof b.name === "string" && typeof b.image === "string" ? [{ name: b.name, image: b.image }] : []));
+    const builds = (parseYaml(raw) as { builds?: { name?: unknown; image?: unknown; tag?: unknown }[] } | null)?.builds ?? [];
+    return builds.flatMap((b) => (typeof b.name === "string" && typeof b.image === "string" ? [{ name: b.name, image: b.image, tag: typeof b.tag === "string" ? b.tag : "" }] : []));
   }
 
   /** Write the image tags approved for this tenant alone. One field of one file; writing what it

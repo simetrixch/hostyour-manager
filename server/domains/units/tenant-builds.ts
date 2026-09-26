@@ -248,6 +248,16 @@ async function nextVersion(ctx: StepCtx, deps: TenantBuildDeps, unit: BuildUnit,
   }
 }
 
+/** A build for ONE tenant (hostyour-manager#289): released on `channel` with target build, so the
+ *  pipeline writes no stage pin, skipped where the tenant already runs the unit's default branch head
+ *  (`runningTag` ends in its sha7), and handed to `approve`, which records the built tag for the
+ *  tenant's apps. */
+export interface BuildForTenant {
+  channel: ReleaseChannel;
+  runningTag: string;
+  approve: (ctx: StepCtx, imageTag: string, builds: readonly string[]) => Promise<void>;
+}
+
 /** ONE step per build unit, run before the tenant's own writes. Inside it the unit plugin's
  *  build-only chain runs step by step (registration, repo-pat seed, build namespace, release kit,
  *  webhook, release trigger, build watch, record) with parameters composed here; a unit already
@@ -257,6 +267,7 @@ export function buildUnitStep(
   deps: () => TenantBuildDeps | undefined,
   p: { guid: string; owner: string; stage: Stage },
   unit: BuildUnit,
+  forTenant?: BuildForTenant,
 ): Step {
   return {
     name: buildUnitStepName(unit.unit),
@@ -267,10 +278,17 @@ export function buildUnitStep(
         throw errValidation(`tenant ${p.guid} needs the build unit "${unit.unit}" (${unit.repoURL}) onboarded, and the consumer onboarding is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
       }
       const { ports } = d;
+      // A build for one tenant that already ran records its tag: a resume approves it again and
+      // builds nothing twice.
+      const built = forTenant ? ctx.readCheckpoint<{ builtTag?: string; builds?: string[] }>() : undefined;
+      if (forTenant && built?.builtTag && built.builds) {
+        await forTenant.approve(ctx, built.builtTag, built.builds);
+        return;
+      }
       const repoCredentialId = await unitCredentialId(ctx, d, unit);
       const master = resolveMasterCluster(ctx.db);
       const version = await nextVersion(ctx, d, unit, repoCredentialId);
-      const channel = channelReaching(await ports.channelStages(), p.stage);
+      const channel = forTenant?.channel ?? channelReaching(await ports.channelStages(), p.stage);
       ctx.log(
         "meta",
         `build unit ${unit.unit} (${unit.repoURL}) builds ${unit.images.join(", ")} — ` +
@@ -290,8 +308,13 @@ export function buildUnitStep(
           ],
         },
       );
+      if (forTenant && forTenant.runningTag.endsWith(`-${ungated.resolvedSha.slice(0, 7)}`)) {
+        ctx.log("meta", `${unit.unit}: tenant ${p.guid} already runs ${forTenant.runningTag}, built from its default branch head ${ungated.resolvedSha.slice(0, 7)} — nothing to build`);
+        return;
+      }
       const params: BuildOnlyParams = {
         form: "build-only",
+        ...(forTenant ? { target: "build" as const } : {}),
         consumerName: unit.unit,
         repoURL: unit.repoURL,
         repoCredentialId,
@@ -315,6 +338,12 @@ export function buildUnitStep(
       for (const step of chain) {
         ctx.log("meta", `${unit.unit}: ${step.title}`);
         await step.run(ctx);
+      }
+      if (forTenant) {
+        if (!release.imageTag) throw errValidation(`the build of ${unit.unit} for tenant ${p.guid} succeeded and reported no image tag — nothing can be approved for the tenant; read the release run's image-tag result`);
+        ctx.checkpoint({ builtTag: release.imageTag, builds: ungated.builds });
+        await forTenant.approve(ctx, release.imageTag, ungated.builds);
+        return;
       }
       ctx.log("meta", `build unit ${unit.unit} done — ${unit.images.join(", ")} built and pinned for ${p.stage} on the books branch`);
     },

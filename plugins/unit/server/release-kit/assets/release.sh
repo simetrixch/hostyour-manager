@@ -5,7 +5,7 @@
 # (same folder). The two are held byte-for-byte equivalent in behaviour.
 #
 # USAGE (run from the repo root)
-#   ./release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod>
+#   ./release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod> [deploy|build]
 #
 # THE THREE INPUTS
 #   version  — x.y.z, no leading zeros.
@@ -14,6 +14,11 @@
 #              release tag; the stage is NOT.
 #   stage    — WHERE this run puts the release. One release, one image, any
 #              number of stages.
+#   target   — optional, `deploy` (the default) or `build`. `build` builds the
+#              images for the stage and pins NOTHING: the delivery branch stays
+#              where it is and the ref pushed is refs/tags/build/<stage>/<tag>,
+#              which the platform builds, scans and verifies without writing the
+#              stage's pin. The Manager uses it to build one tenant's version.
 #
 # WHAT IT DOES
 #   1. Validates version, channel and stage.
@@ -180,13 +185,15 @@ pin_branch() {
 VERSION="${1:-}"
 CHANNEL="${2:-}"
 STAGE="${3:-}"
+TARGET="${4:-deploy}"
 
 [ -n "$VERSION" ] && [ -n "$CHANNEL" ] && [ -n "$STAGE" ] \
-  || die "usage: release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod>"
+  || die "usage: release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod> [deploy|build]"
 [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
   || die "version must be x.y.z with no leading zeros (got '$VERSION')"
 case "$CHANNEL" in stable|beta|alpha) ;; *) die "channel must be stable|beta|alpha (got '$CHANNEL')" ;; esac
 case "$STAGE" in dev|test|prod) ;; *) die "stage must be dev|test|prod (got '$STAGE')" ;; esac
+case "$TARGET" in deploy|build) ;; *) die "target must be deploy|build (got '$TARGET')" ;; esac
 
 # The courtesy ceiling check. It WARNS and continues on purpose — see the header.
 case "$CHANNEL" in
@@ -214,6 +221,8 @@ manifest_value() { sed -nE "s/^$1:[[:space:]]*([^[:space:]]+).*\$/\\1/p" "$MANIF
 NAME="$(manifest_value name || true)"
 [ -n "$NAME" ] || die "the manifest ${MANIFEST} states no name - it is what the release line and any pin are written under"
 PLATFORM_REPO="$(manifest_value platformRepo || true)"
+# A unit that pins itself writes its pin from here, so a build that pins nothing has no meaning for it.
+[ "$TARGET" = "deploy" ] || [ -z "$PLATFORM_REPO" ]   || die "the manifest declares platformRepo ${PLATFORM_REPO}, so this unit writes its own pins - target build is for units the platform's build plane pins"
 
 # ── The pin pre-flight ────────────────────────────────────────────────────────────────────────
 #
@@ -341,11 +350,16 @@ SHA7="${SHA:0:7}"
 # commit; the bump's pin commits then sit on top of it and are replaced by the next release the same
 # way. Nothing a person pushes there survives a release, which is the point: what the cluster runs
 # is what was released.
-DELIVERY_BRANCH="refs/heads/deploy/${STAGE}"
-git push --force origin "${SHA}:${DELIVERY_BRANCH}"   || die "the delivery branch deploy/${STAGE} could not be placed at ${SHA7}, so the build would have nothing to render"
-say "deploy/${STAGE} stands at ${SHA7}"
+#
+# A BUILD PINS NOTHING, so the cluster must not read its tree either: target build leaves the branch
+# where the last deploy put it.
+if [ "$TARGET" = "deploy" ]; then
+  DELIVERY_BRANCH="refs/heads/deploy/${STAGE}"
+  git push --force origin "${SHA}:${DELIVERY_BRANCH}"   || die "the delivery branch deploy/${STAGE} could not be placed at ${SHA7}, so the build would have nothing to render"
+  say "deploy/${STAGE} stands at ${SHA7}"
+fi
 
-DEPLOY_REF="refs/tags/deploy/${STAGE}/${TAG}"
+DEPLOY_REF="refs/tags/${TARGET}/${STAGE}/${TAG}"
 # Delete first (absent on a first deploy — that is the normal case, not an error), then push: the
 # push is what the platform's webhook reacts to.
 git push origin ":${DEPLOY_REF}" >/dev/null 2>&1 || true
@@ -513,7 +527,11 @@ PIN
     || die "no branch of ${PLATFORM_REPO} carries a values-${STAGE}.yaml pin of ${NAME} - the images are built and no cluster reads them, so this release reaches nothing"
 fi
 
-say "${NAME} ${TAG} (commit ${SHA7}) is on its way to ${STAGE}"
+if [ "$TARGET" = "build" ]; then
+  say "${NAME} ${TAG} (commit ${SHA7}) is being built for ${STAGE} - no pin is written, the build is for whoever records its tag"
+else
+  say "${NAME} ${TAG} (commit ${SHA7}) is on its way to ${STAGE}"
+fi
 # Read with sed and not grep: under `set -o pipefail` a manifest that declares no builds — a
 # chart-only or fan-out unit — would make the pipeline's exit status 1 and end a release that had
 # already succeeded. `sed -n ... p` answers nothing and exits 0.

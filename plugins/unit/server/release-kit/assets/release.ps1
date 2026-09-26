@@ -7,7 +7,10 @@
 .DESCRIPTION
   The three inputs are the version (x.y.z), the channel - the maturity CEILING of the release: alpha
   may reach dev only, beta dev and test, stable anywhere - and the stage this run puts the release
-  on. The channel is part of the release tag; the stage is not.
+  on. The channel is part of the release tag; the stage is not. An optional fourth input, the target
+  deploy (the default) or build, decides whether the stage's pin is written: build leaves the
+  delivery branch where it is and pushes refs/tags/build/<stage>/<tag>, which the platform builds,
+  scans and verifies without writing the stage's pin.
 
   It:
     1. Validates version, channel and stage.
@@ -51,7 +54,8 @@
 param(
   [Parameter(Mandatory = $true, Position = 0)][string]$Version,
   [Parameter(Mandatory = $true, Position = 1)][ValidateSet('stable', 'beta', 'alpha')][string]$Channel,
-  [Parameter(Mandatory = $true, Position = 2)][ValidateSet('dev', 'test', 'prod')][string]$Stage
+  [Parameter(Mandatory = $true, Position = 2)][ValidateSet('dev', 'test', 'prod')][string]$Stage,
+  [Parameter(Position = 3)][ValidateSet('deploy', 'build')][string]$Target = 'deploy'
 )
 $ErrorActionPreference = 'Stop'
 # git's output is read, and this script's own is written, as UTF-8 — what the bash spelling reads and
@@ -312,6 +316,10 @@ if (Test-Path -LiteralPath $manifest) {
   $buildNames = @([regex]::Matches($manifestText, '(?m)^\s*-\s*name:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value })
 }
 if (-not $name) { Die "the manifest $manifest states no name - it is what the release line and any pin are written under" }
+# A unit that pins itself writes its pin from here, so a build that pins nothing has no meaning for it.
+if ($Target -ne 'deploy' -and $platformRepo) {
+  Die "the manifest declares platformRepo $platformRepo, so this unit writes its own pins - target build is for units the platform's build plane pins"
+}
 
 # ── The pin pre-flight ────────────────────────────────────────────────────────────────────────
 #
@@ -462,14 +470,19 @@ try {
   # commit; the bump's pin commits then sit on top of it and are replaced by the next release the
   # same way. Nothing a person pushes there survives a release, which is the point: what the cluster
   # runs is what was released.
-  $deliveryBranch = "refs/heads/deploy/$Stage"
-  git push --force origin "${sha}:$deliveryBranch"
-  if ($LASTEXITCODE -ne 0) {
-    Die "the delivery branch deploy/$Stage could not be placed at $sha7, so the build would have nothing to render"
+  #
+  # A BUILD PINS NOTHING, so the cluster must not read its tree either: target build leaves the branch
+  # where the last deploy put it.
+  if ($Target -eq 'deploy') {
+    $deliveryBranch = "refs/heads/deploy/$Stage"
+    git push --force origin "${sha}:$deliveryBranch"
+    if ($LASTEXITCODE -ne 0) {
+      Die "the delivery branch deploy/$Stage could not be placed at $sha7, so the build would have nothing to render"
+    }
+    Say "deploy/$Stage stands at $sha7"
   }
-  Say "deploy/$Stage stands at $sha7"
 
-  $deployRef = "refs/tags/deploy/$Stage/$tag"
+  $deployRef = "refs/tags/$Target/$Stage/$tag"
   # Delete first (absent on a first deploy — that is the normal case, not an error), then push: the
   # push is what the platform's webhook reacts to.
   git push origin ":$deployRef" 2>$null | Out-Null
@@ -567,7 +580,11 @@ try {
     }
   }
 
-  Say "$name $tag (commit $sha7) is on its way to $Stage"
+  if ($Target -eq 'build') {
+    Say "$name $tag (commit $sha7) is being built for $Stage - no pin is written, the build is for whoever records its tag"
+  } else {
+    Say "$name $tag (commit $sha7) is on its way to $Stage"
+  }
   if ($buildNames.Count -gt 0) {
     Say 'the platform builds these image tags, or skips the build when they already exist:'
     foreach ($build in $buildNames) {

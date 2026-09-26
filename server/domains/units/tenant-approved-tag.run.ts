@@ -46,7 +46,7 @@ function approvalOf(tags: Record<string, Record<string, string>>, app: string, b
 
 /** The approvals with `app.build` set to `tag`, or removed where `tag` is "". An app left with no
  *  build loses its key too, so a cleared approval leaves nothing behind. */
-function withApproval(tags: Record<string, Record<string, string>>, app: string, build: string, tag: string): Record<string, Record<string, string>> {
+export function withApproval(tags: Record<string, Record<string, string>>, app: string, build: string, tag: string): Record<string, Record<string, string>> {
   const next: Record<string, Record<string, string>> = Object.fromEntries(Object.entries(tags).map(([a, b]) => [a, { ...b }]));
   const builds = next[app] ?? {};
   if (tag === "") delete builds[build];
@@ -57,7 +57,7 @@ function withApproval(tags: Record<string, Record<string, string>>, app: string,
 }
 
 /** Whether a member Application's last comparison renders `tag` for app and build (absent for ""). */
-function rendersApproval(status: ArgoAppStatus | undefined, deployRepoUrl: string, app: string, build: string, tag: string): boolean {
+export function rendersApproval(status: ArgoAppStatus | undefined, deployRepoUrl: string, app: string, build: string, tag: string): boolean {
   const charts = (status?.syncSources ?? []).filter((src) => src.repoURL === deployRepoUrl && src.path);
   if (charts.length === 0) return false;
   return charts.every((src) => {

@@ -21,6 +21,8 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { isDeepStrictEqual } from "node:util";
+import { RELEASE_CHANNEL } from "../../../shared/release.ts";
+import { NewestUnitSchema, newestBuildSteps, planNewestUnits, restoreApprovalsCleanup, watchApprovedStep } from "./tenant-newest-builds.ts";
 
 // `tenant-refresh-members` — resolve every member of a STANDING tenant again from the product's
 // manifest and write the entries into its registration.
@@ -78,10 +80,15 @@ export const TenantRefreshMembersParams = z.object({
   appsImageTag: z.string(),
   /** The units that build what the registry lacks, resolved at plan time (planBuildUnits). */
   buildUnits: z.array(BuildUnitSchema).default([]),
+  /** The channel the operator chose for this tenant's newest builds; absent, none is built (#289). */
+  channel: z.enum(RELEASE_CHANNEL).optional(),
+  /** The units built at their default branch head for this tenant alone, and the approvals before. */
+  newest: z.array(NewestUnitSchema).default([]),
+  previousApproved: z.record(z.string(), z.record(z.string(), z.string())).default({}),
 });
 export type TenantRefreshMembersParams = z.infer<typeof TenantRefreshMembersParams>;
 
-export const TenantRefreshMembersRequest = z.object({ tenantId: z.string().startsWith("tnt_") });
+export const TenantRefreshMembersRequest = z.object({ tenantId: z.string().startsWith("tnt_"), channel: z.enum(RELEASE_CHANNEL).optional() });
 
 function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberRecord[]): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -170,6 +177,8 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         ctx.log("meta", `target ${p.domain} attested for ${p.guid} at ${p.stage} — deploy-state generation ${state.generation}`);
       },
     },
+    // The newest build of each unit, for this tenant alone, recorded as its approvals (#289).
+    ...newestBuildSteps(ports, p),
     // The units that build what the registry lacks, before anything of the tenant is written.
     ...(p.buildUnits ?? []).map((unit) => ({
       ...buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage }, unit),
@@ -222,6 +231,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy, each rendering its new entry`);
       },
     },
+    ...(p.channel && p.newest.length > 0 ? [watchApprovedStep(ports, p)] : []),
   ];
 }
 
@@ -300,7 +310,19 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         );
       }
       const changed = members.filter((m) => !sameMembers([m], previous.filter((b) => b.name === m.name)));
-      if (changed.length === 0) throw errValidation(`every member entry of tenant ${tc.guid} already matches the product's manifest at ${outcome.resolvedSha.slice(0, 7)} — nothing to refresh`);
+      // The newest builds: the channel must reach the tenant's stage, the release scripts' ceiling.
+      if (req.channel) {
+        const reaches = (await ports.onboard?.()?.ports.channelStages())?.[req.channel] ?? [];
+        if (!reaches.includes(tc.stage)) throw errValidation(`channel ${req.channel} reaches ${reaches.join(", ") || "no stage"}, not ${tc.stage} where tenant ${tc.subdomain} stands — choose a channel whose ceiling includes ${tc.stage}`);
+      }
+      const newest = req.channel
+        ? await planNewestUnits({
+          buildRepos: outcome.spec?.buildRepos ?? [], members, approved: current.entry.approvedTags,
+          pinned: (chart) => ports.registrations.listPinnedBuilds(tc.stage, chart), registration: ports.buildUnitRegistration ?? (async () => null),
+        })
+        : { units: [], skipped: [] };
+      for (const s of newest.skipped) ctx.log(`not built for this tenant — ${s}`);
+      if (changed.length === 0 && newest.units.length === 0) throw errValidation(`every member entry of tenant ${tc.guid} already matches the product's manifest at ${outcome.resolvedSha.slice(0, 7)}${req.channel ? ", and no unit of the product builds anything its members pin" : ""} — nothing to refresh`);
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
       const planned = await planBuildUnits({
         requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage: appsImage || undefined,
@@ -323,6 +345,9 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         syncUnits: tenantSyncUnits(requiredImages, await ports.attestedBuilds()),
         subdomain, owner: tc.owner, apps, seedUsers, appsImage, appsImageTag: appsImageTag ?? "",
         buildUnits: planned.builds.units,
+        ...(req.channel ? { channel: req.channel } : {}),
+        newest: newest.units,
+        previousApproved: current.entry.approvedTags,
       };
       const steps = tenantRefreshMembersSteps(ports, params);
       const plan: Plan = {
@@ -331,7 +356,8 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         targetId: tc.tenantId,
         summary:
           `Refresh the members of tenant ${tc.guid} on ${tc.domain} (${tc.stage}) from the product's manifest at ${outcome.resolvedSha.slice(0, 7)}: ` +
-          `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` +
+          `${changed.length ? `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` : "the member entries are unchanged. "}` +
+          `${newest.units.length ? `Build the newest ${newest.units.map((u) => `${u.unit} (${u.images.join(", ")}, running ${u.runningTag || "no tag"})`).join("; ")} at its default branch head on ${req.channel}, for this tenant alone — no stage pin moves and no other tenant changes; a unit whose head the tenant already runs builds nothing. ` : ""}` +
           `${planned.builds.units.length ? `First the build unit(s) ${planned.builds.units.map((u) => `${u.unit} (${u.images.join(", ")})`).join("; ")} release their next version and pin it. ` : ""}` +
           `Every image the new render pulls must stand in the registry; then the entries are written and every member must sync. ` +
           `A member whose chart moved does not answer from the carry of the product's change into the books branch until its Application syncs here.`,
@@ -345,7 +371,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       return { outcome: "planned", params, plan };
     },
     steps: (params) => tenantRefreshMembersSteps(ports, params),
-    cleanups: (params) => [restoreMembersCleanup(ports, params)],
+    cleanups: (params) => [restoreMembersCleanup(ports, params), ...(params.channel && params.newest.length > 0 ? [restoreApprovalsCleanup(ports, params)] : [])],
     assertAbortable: (params) => assertRefreshAbortable(ports, params),
   };
 }

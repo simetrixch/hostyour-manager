@@ -430,6 +430,20 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     }
   });
 
+  it("target build pushes build/<stage>/<tag>, leaves the delivery branch alone, and says no pin is written, identically", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true }), ["1.2.3", "stable", "prod", "build"]);
+    const { stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(0);
+    expect(stdout).not.toContain("stands at");
+    expect(stdout).toContain("release: probe-unit 1.2.3-stable-<ts14> (commit <sha7>) is being built for prod - no pin is written, the build is for whoever records its tag\n");
+    for (const f of [o.sh, o.ps1]) {
+      const [tag] = releaseTags(f);
+      expect(originRefs(f)).toContain(`refs/tags/build/prod/${tag}\n`);
+      expect(originRefs(f)).not.toContain("refs/heads/deploy/");
+      expect(originRefs(f)).not.toContain("refs/tags/deploy/");
+    }
+  });
+
   it("reuses a tag that stands on origin on HEAD and moves the delivery ref — a further stage, or a retry", RUNS, async () => {
     const o = await bothSpellings(() => releasedRepo({ moved: false }), ["1.2.3", "stable", "test"]);
     const { stdout } = expectSameBytes(o);

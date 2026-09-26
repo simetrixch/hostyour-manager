@@ -20,6 +20,7 @@ export function registerTenantRefreshMembersRoutes(app: Hono<AppEnv>, deps: Tena
     if (!tenantEnabled || !executor) throw errNotConfigured("tenant onboarding is not configured on this manager");
     const tenantId = c.req.param("id");
     assertTenantProvisioned(loadTenantStatus(db, tenantId), "refreshing its members");
-    return c.json(await executor.planStreamed("tenant-refresh-members", { tenantId }), 201);
+    const body = (await c.req.json().catch(() => ({}))) as { channel?: unknown };
+    return c.json(await executor.planStreamed("tenant-refresh-members", { tenantId, ...(typeof body.channel === "string" ? { channel: body.channel } : {}) }), 201);
   });
 }
