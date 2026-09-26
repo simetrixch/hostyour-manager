@@ -75,6 +75,19 @@ describe("manager DB reset (db/reset.ts)", () => {
     expect((db.sqlite.pragma("foreign_key_check") as unknown[]).length).toBe(0);
   });
 
+  // The size table is what an installation sells, edited in service: the unit plugin keeps it through
+  // a reset (plugins/unit/server/plugin.ts `keep`), because the boot seed would refill it with the
+  // shipped figures and every later registration would carry those instead.
+  it("keeps the unit sizes an operator edited, and the unit plugin's ledger", () => {
+    const db = make();
+    seedClusters(db);
+    db.sqlite.prepare("INSERT INTO unit_sizes (component, name, requests_cpu, requests_memory, limits_cpu, limits_memory, pods, persistent_volume_claims) VALUES ('base', 'small', '900m', '1Gi', '2', '2Gi', 10, 5)").run();
+
+    wipeManagerDb(db.sqlite, compiledPlugins);
+    expect(db.sqlite.prepare("SELECT component, name, requests_cpu FROM unit_sizes").all()).toEqual([{ component: "base", name: "small", requests_cpu: "900m" }]);
+    expect(rowCount(db, "__drizzle_migrations_unit")).toBeGreaterThanOrEqual(1);
+  });
+
   it("wipes a cluster that carries a tenant (tenants RESTRICTs clusters)", () => {
     const db = make();
     seedClusters(db);

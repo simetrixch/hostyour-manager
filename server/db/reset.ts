@@ -42,7 +42,8 @@ const WIPE_ORDER = [
 //   __drizzle_migrations — the migrator's own ledger. Emptied, the next openDb replays the baseline
 //     against tables that already exist and the Manager stops booting.
 // Every compiled plugin adds its own: the tables its `keep` names, and its ledger
-// `__drizzle_migrations_<name>`, emptied as the core's would be (keptTables below).
+// `__drizzle_migrations_<name>`, kept for the core ledger's reason: emptied, the next openDb replays
+// that plugin's migrations against tables that already exist (keptTables below).
 // These lists, WIPE_ORDER and every compiled plugin's tables together must name EVERY table in the
 // database. reset.test.ts checks them against sqlite_master, so a table a later migration adds falls
 // into none and goes red instead of quietly surviving every wipe.
