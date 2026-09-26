@@ -14,7 +14,9 @@ import type { CredentialStore } from "../../security/store.ts";
 import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
 import { judgeRepoIdentity, resolveRepoIdentity, type OwnerIdentityReader, type RepoIdentityApp } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
+import { buildConsumerSecretData } from "#unit/server/secret-mint.ts";
 import { ConsumerManifestSchema, CONSUMER_MANIFEST_PATH } from "../../../shared/consumer.ts";
+import type { ConsumerSecretOfferView } from "../../../shared/api-types-onboard.ts";
 
 // "consumer-set-secrets" — change a declared secret of a STANDING consumer (hostyour-manager#245).
 //
@@ -44,12 +46,21 @@ import { ConsumerManifestSchema, CONSUMER_MANIFEST_PATH } from "../../../shared/
 // EVERY KEY IS OPTIONAL at approve: a blank one is not sent, so it keeps its stored value. A run
 // that sends nothing is refused at the write rather than patching an empty document.
 //
+// A `generate` KEY IS MINTED ONLY WHERE IT IS NAMED (#285). The Manager cannot ask Vault which keys
+// the entry holds, so it cannot tell a key the manifest gained from one the onboarding minted; minting
+// every generate key would rotate the ones something already reads. The request names the keys to
+// mint (the Secrets dialog's ticks, none by default), the plan warns that each one rotates a value
+// the entry may hold, and the onboarding's own mint (secret-mint.ts) writes them in the same patch.
+//
 // mutating: true ⇒ attest-target is step 0 (guards.assertGuardsArmed).
 
 export const SetSecretsParams = z.object({
   appId: z.string().startsWith("app_"),
-  /** The declared keys this run offers, frozen from the manifest read at plan time. */
-  keys: z.array(ConsumerSecretSpecSchema.shape.key).min(1),
+  /** The declared keys the operator answers, frozen from the manifest read at plan time. */
+  keys: z.array(ConsumerSecretSpecSchema.shape.key),
+  /** The generate keys the request named, each frozen with its declared kind: what the plan showed
+   *  is what is minted, whatever the manifest says by the time the run is approved. */
+  mint: z.array(ConsumerSecretSpecSchema).default([]),
 });
 export type SetSecretsParams = z.infer<typeof SetSecretsParams>;
 
@@ -67,11 +78,14 @@ export interface SetSecretsPorts extends LifecyclePorts {
   store: Pick<CredentialStore, "open" | "list">;
 }
 
+/** What reads a consumer's manifest: the GitHub client and the owner's identity it reads with. */
+export type ManifestReadPorts = Pick<SetSecretsPorts, "github" | "store" | "githubApp">;
+
 /** WHAT THE REPOSITORY DECLARES NOW — the manifest at the default branch's head, read through the
  *  owner's identity, never the params frozen at onboarding: a key added since then is exactly what
  *  this run kind exists to carry. Refuses in the owner's words where no identity reads the
  *  repository or the manifest does not parse. */
-async function readDeclaredSecrets(ports: SetSecretsPorts, owners: OwnerIdentityReader, repoURL: string, signal?: AbortSignal): Promise<{ outcome: "read"; secrets: ConsumerSecretSpec[] } | { outcome: "refused"; why: string }> {
+async function readDeclaredSecrets(ports: ManifestReadPorts, owners: OwnerIdentityReader, repoURL: string, signal?: AbortSignal): Promise<{ outcome: "read"; secrets: ConsumerSecretSpec[] } | { outcome: "refused"; why: string }> {
   const { owner, repo } = parseGitHubOwnerRepo(repoURL);
   const judged = await judgeRepoIdentity({ repoURL, ...(ports.githubApp ? { githubApp: ports.githubApp as RepoIdentityApp } : {}), owners, ...(signal ? { signal } : {}) });
   if ("refused" in judged) return { outcome: "refused", why: judged.refused };
@@ -89,6 +103,31 @@ function repoUrlOf(db: Db, appId: string): string {
   const row = db.select({ repoUrl: apps.repoUrl }).from(apps).where(eq(apps.id, appId)).get();
   if (!row?.repoUrl) throw errValidation(`app ${appId} records no repository URL — nothing says which manifest declares its secrets`);
   return row.repoUrl;
+}
+
+/** What the Secrets dialog offers for one consumer, read off its manifest as the plan reads it. */
+export async function readSecretOffer(ports: ManifestReadPorts, db: Db, appId: string, signal?: AbortSignal): Promise<ConsumerSecretOfferView> {
+  const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(db, org), repoUrlOf(db, appId), signal);
+  if (read.outcome === "refused") throw errValidation(read.why);
+  return {
+    operatorKeys: operatorKeys(read.secrets).map((s) => ({ key: s.key, ...(s.description ? { description: s.description } : {}) })),
+    generateKeys: read.secrets.flatMap((s) => (s.generate ? [{ key: s.key, kind: s.generate }] : [])),
+  };
+}
+
+/** Why the generate keys a request names cannot be minted by this run, or null where they can: a
+ *  name the manifest declares as no generate key, a key derived from the repository PAT (this run
+ *  holds none), and half of a keypair, whose other half would then no longer match it. */
+function refuseMint(names: readonly string[], declared: readonly ConsumerSecretSpec[]): string | null {
+  const generate = declared.filter((s) => s.generate);
+  const unknown = names.filter((n) => !generate.some((s) => s.key === n));
+  if (unknown.length > 0) return `it declares no generate key ${unknown.join(", ")} — the keys it mints are ${generate.map((s) => s.key).join(", ") || "none"}`;
+  const derived = generate.filter((s) => names.includes(s.key) && s.generate === "deploy-git-credentials");
+  if (derived.length > 0) return `${derived.map((s) => s.key).join(", ")} is derived from the repository PAT the onboarding sealed, and this run derives nothing`;
+  for (const pub of generate.filter((s) => s.generate === "rsa2048-public")) {
+    if (pub.pairWith && names.includes(pub.key) !== names.includes(pub.pairWith)) return `${pub.pairWith} and ${pub.key} are one keypair: mint both or neither`;
+  }
+  return null;
 }
 
 function setSecretsSteps(ports: SetSecretsPorts, p: SetSecretsParams): Step[] {
@@ -115,12 +154,16 @@ function setSecretsSteps(ports: SetSecretsPorts, p: SetSecretsParams): Step[] {
           const value = ctx.secrets.get(`${CONSUMER_SECRET_PREFIX}${key}`)?.toString("utf8");
           if (value !== undefined && value !== "") data[key] = value;
         }
+        // The named generate keys, minted and verified by the onboarding's own mint, ride the same
+        // patch. Their names are logged below; their values never are.
+        const minted = p.mint.length > 0 ? buildConsumerSecretData(p.mint, () => undefined).data : {};
+        Object.assign(data, minted);
         const keys = Object.keys(data);
-        if (keys.length === 0) throw errValidation("no value was supplied — every box was left empty, so there is nothing to change");
+        if (keys.length === 0) throw errValidation("no value was supplied — every box was left empty and no key is minted, so there is nothing to change");
         const ac = loadAppCluster(ctx.db, p.appId);
         await ports.seeder.patchApp({ stage: ac.stage, consumerName: ac.name, data });
         ctx.checkpoint({ keys });
-        ctx.log("meta", `${keys.length} secret(s) of ${ac.name} merged into ${ac.stage}/consumer/${ac.name}/app: ${keys.join(", ")} — every other value of the entry is untouched and was not read`);
+        ctx.log("meta", `${keys.length} secret(s) of ${ac.name} merged into ${ac.stage}/consumer/${ac.name}/app: ${keys.join(", ")}${p.mint.length > 0 ? ` (minted new: ${Object.keys(minted).join(", ")})` : ""} — every other value of the entry is untouched and was not read`);
       },
     },
     {
@@ -183,31 +226,41 @@ export function makeSetSecretsDef(ports: SetSecretsPorts): RunDefinition<SetSecr
     // Streaming planner: the manifest of the STANDING consumer is read first, because which keys
     // exist is its answer and may have grown since the onboarding.
     planStream: async (rawParams, ctx: PlanStreamCtx): Promise<PlanStreamResult<SetSecretsParams>> => {
-      const req = z.object({ appId: z.string().startsWith("app_") }).parse(rawParams);
+      const req = z.object({ appId: z.string().startsWith("app_"), mint: z.array(z.string()).default([]) }).parse(rawParams);
       const ac = loadAppCluster(ctx.db, req.appId);
       const repoURL = repoUrlOf(ctx.db, req.appId);
       const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(ctx.db, org), repoURL, ctx.signal);
       if (read.outcome === "refused") {
         return { outcome: "rejected", summary: `The secrets of "${ac.name}" cannot be changed — ${read.why}`, planJson: { consumerName: ac.name } };
       }
-      const offered = operatorKeys(read.secrets);
-      if (offered.length === 0) {
-        return { outcome: "rejected", summary: `"${ac.name}" declares no secret its operator supplies — there is nothing to change`, planJson: { consumerName: ac.name } };
+      const refused = refuseMint(req.mint, read.secrets);
+      if (refused) {
+        return { outcome: "rejected", summary: `"${ac.name}" cannot mint what this request names — ${refused}`, planJson: { consumerName: ac.name } };
       }
-      const params: SetSecretsParams = { appId: req.appId, keys: offered.map((s) => s.key) };
+      const offered = operatorKeys(read.secrets);
+      const mint = read.secrets.filter((s) => s.generate && req.mint.includes(s.key));
+      if (offered.length === 0 && mint.length === 0) {
+        return { outcome: "rejected", summary: `"${ac.name}" declares no secret its operator supplies, and this request mints none — there is nothing to change`, planJson: { consumerName: ac.name } };
+      }
+      const params: SetSecretsParams = { appId: req.appId, keys: offered.map((s) => s.key), mint };
+      const entry = `${ac.stage}/consumer/${ac.name}/app`;
       const stepDefs = setSecretsSteps(ports, params);
       const plan: Plan = {
         kind: "consumer-set-secrets",
         targetKind: "app",
         targetId: req.appId,
         summary:
-          `Change the secrets of consumer "${ac.name}" on ${ac.domain} (${ac.stage}): every value you fill is merged into ${ac.stage}/consumer/${ac.name}/app, ` +
+          `Change the secrets of consumer "${ac.name}" on ${ac.domain} (${ac.stage}): every value you fill is merged into ${entry}, ` +
           `the rendered Secrets are deleted so they are written again from Vault, and the workloads are rolled so their pods read the new values. ` +
-          `A box left empty keeps its stored value, and every value you do not name stays unread. ${offered.length} declared key(s): ${offered.map((s) => s.key).join(", ")}.`,
+          `A box left empty keeps its stored value, and every value you do not name stays unread. ${offered.length} declared key(s): ${offered.map((s) => s.key).join(", ") || "none"}.` +
+          (mint.length > 0 ? ` Minted new and merged in the same write: ${mint.map((s) => `${s.key} (${s.generate})`).join(", ")}.` : ""),
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: [{ resource: "master-kube", key: "m" }],
-        warnings: [],
+        // The Manager cannot ask Vault whether the entry already holds a key, so every mint is named
+        // as the rotation it may be.
+        warnings: mint.map((s) =>
+          `${s.key} (${s.generate}) is minted new. Where ${entry} already holds ${s.key}, this rotates it, and whatever reads the old value breaks until it is updated — another consumer that holds it, or a DNS record that carries its public half.`),
         requiredSecrets: [],
         // Every key is OPTIONAL: filling one is changing it, leaving it is keeping it.
         optionalSecrets: offered.map((s) => `${CONSUMER_SECRET_PREFIX}${s.key}`),

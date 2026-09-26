@@ -42,9 +42,10 @@ export function ConsumerActions(props: {
         </button>
       )}
       {/* The onboarding seeds a consumer's secrets ONCE (create-only), so this is the one path that
-          changes one afterwards, or supplies a key the manifest gained since (#245). It plans the
-          run; the Run screen's approve card is where the values are typed, each with what its
-          manifest says it is — filling one changes it, leaving it keeps it. */}
+          changes one afterwards, or supplies a key the manifest gained since (#245). It opens the
+          Secrets dialog, where a generate key is ticked to be minted (#285); the Run screen's approve
+          card is where the values are typed, each with what its manifest says it is — filling one
+          changes it, leaving it keeps it. */}
       {standing && (
         <button type="button" className="btn" onClick={props.onSetSecrets}>
           Secrets…

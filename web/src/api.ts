@@ -16,7 +16,7 @@ import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, Plugi
 import type { ServerReachView } from "../../shared/api-types-reach.ts";
 // The onboard wizard's two read views: the channel table (served literally from the platform repo's
 // clusters/platform/values-common.yaml) and what the prefill answers, identity included.
-import type { ChannelStagesView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
+import type { ChannelStagesView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
 import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
@@ -391,11 +391,15 @@ export const updateUnitSize = (component: string, name: string, size: Omit<UnitS
   put<{ size: UnitSizeView }>(`/api/unit/sizes/${component}/${name}`, size as unknown as Record<string, unknown>);
 /** Put a consumer on a size — and, when it is the size it already has, onto that size's CURRENT
  *  figures. This is the only path by which a table edit reaches something already deployed. */
+/** What the Secrets dialog offers (#285): the keys filled at approve, and the generate keys to tick. */
+export const getConsumerSecretOffer = (appId: string): Promise<ConsumerSecretOfferView> =>
+  req<ConsumerSecretOfferView>(`/api/consumers/${appId}/secrets`);
 /** Change a standing consumer's declared secrets (#245). Plans through the streaming planner — the
  *  repository's manifest is read while the run sits in `planning` — and returns a { runId } whose
- *  approve card offers every declared key, each optional: what you fill is what changes. */
-export const setConsumerSecrets = (appId: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/consumers/${appId}/secrets`);
+ *  approve card offers every declared key, each optional: what you fill is what changes. `mint`
+ *  names the generate keys minted new in the same write (#285). */
+export const setConsumerSecrets = (appId: string, mint: string[]): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/consumers/${appId}/secrets`, { mint });
 export const setConsumerSize = (appId: string, size: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/consumers/${appId}/size`, { size });
 /** Backup: close access, dump every store into the Storage Box folder, verify it, reopen — the

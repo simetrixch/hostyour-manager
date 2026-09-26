@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
-import { makeSetSecretsDef, operatorKeys, type SetSecretsPorts } from "./set-secrets.run.ts";
+import { makeSetSecretsDef, operatorKeys, readSecretOffer, type SetSecretsPorts } from "./set-secrets.run.ts";
 import { FakeSeeder } from "./onboard.fixture.ts";
 import { FakeClusterReader, FakeMasterArgoReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
@@ -34,6 +34,10 @@ secrets:
   - key: S3_SESSION_TOKEN
     description: added to the manifest after the onboarding
     required: false
+  - key: DKIM_KEY_ENCRYPTION_KEY
+    description: a generate key added to the manifest after the onboarding
+    required: true
+    generate: hex32
 `;
 
 let db: DbHandle;
@@ -108,7 +112,7 @@ describe("consumer-set-secrets", () => {
     cluster.setExternalSecrets("swissbookai-prod", [{ name: "swissbookai-es", ready: true, reason: "SecretSynced", targetSecret: "swissbookai-app", refreshTime: "" }]);
     const p = ports({ seeder, resolver: new FakeClusterKubeResolver({ clusterReader: cluster, argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" }) });
     const logs: string[] = [];
-    await runAll(makeSetSecretsDef(p).steps({ appId: "app_1", keys: ["SMTP_URL", "S3_SESSION_TOKEN"] }), { "consumer-secret:SMTP_URL": "smtp://a:b@c:587", "consumer-secret:S3_SESSION_TOKEN": "" }, logs);
+    await runAll(makeSetSecretsDef(p).steps({ appId: "app_1", keys: ["SMTP_URL", "S3_SESSION_TOKEN"], mint: [] }), { "consumer-secret:SMTP_URL": "smtp://a:b@c:587", "consumer-secret:S3_SESSION_TOKEN": "" }, logs);
     // The blank box is not an answer: it keeps its stored value, so it is not in the patch.
     expect(seeder.patchedApps).toEqual([{ stage: "prod", consumerName: "swissbookai", data: { SMTP_URL: "smtp://a:b@c:587" } }]);
     expect(cluster.secretWrites).toEqual([{ op: "delete", namespace: "swissbookai-prod", name: "swissbookai-app" }]);
@@ -119,16 +123,76 @@ describe("consumer-set-secrets", () => {
 
   it("refuses a run in which every box was left empty, rather than patching an empty document", async () => {
     const seeder = new FakeSeeder();
-    const steps = makeSetSecretsDef(ports({ seeder })).steps({ appId: "app_1", keys: ["SMTP_URL"] });
+    const steps = makeSetSecretsDef(ports({ seeder })).steps({ appId: "app_1", keys: ["SMTP_URL"], mint: [] });
     await expect(steps[1]!.run(ctx("write-secrets", {}, []))).rejects.toThrow(/every box was left empty/);
     expect(seeder.patchedApps).toEqual([]);
+  });
+
+  it("offers the Secrets dialog the keys the operator fills and, apart, the generate keys with their kinds", async () => {
+    expect(await readSecretOffer(ports(), db.db, "app_1")).toEqual({
+      operatorKeys: [{ key: "SMTP_URL", description: expect.stringMatching(/^SMTP URL/) }, { key: "S3_SESSION_TOKEN", description: "added to the manifest after the onboarding" }],
+      generateKeys: [{ key: "JWT_ACCESS_SECRET", kind: "hex32" }, { key: "DKIM_KEY_ENCRYPTION_KEY", kind: "hex32" }],
+    });
+  });
+
+  describe("minting a generate key (#285)", () => {
+    const plan = (mint: string[] | undefined, manifest = MANIFEST) =>
+      makeSetSecretsDef(ports({}, manifest)).planStream!({ appId: "app_1", ...(mint ? { mint } : {}) }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
+
+    it("mints only the key the request names, in the one patch, and warns that it rotates a value the entry may hold", async () => {
+      const planned = await plan(["DKIM_KEY_ENCRYPTION_KEY"]);
+      if (planned.outcome !== "planned") throw new Error(`refused: ${planned.summary}`);
+      expect(planned.params.mint.map((s) => s.key)).toEqual(["DKIM_KEY_ENCRYPTION_KEY"]);
+      expect(planned.plan.warnings).toEqual([expect.stringMatching(/^DKIM_KEY_ENCRYPTION_KEY \(hex32\) is minted new\. Where prod\/consumer\/swissbookai\/app already holds DKIM_KEY_ENCRYPTION_KEY, this rotates it/)]);
+      const seeder = new FakeSeeder();
+      const logs: string[] = [];
+      await makeSetSecretsDef(ports({ seeder })).steps(planned.params)[1]!.run(ctx("write-secrets", { "consumer-secret:SMTP_URL": "smtp://a:b@c:587" }, logs));
+      const data = seeder.patchedApps[0]!.data;
+      expect(Object.keys(data)).toEqual(["SMTP_URL", "DKIM_KEY_ENCRYPTION_KEY"]); // JWT_ACCESS_SECRET is not touched
+      expect(data["DKIM_KEY_ENCRYPTION_KEY"]).toMatch(/^[0-9a-f]{64}$/);
+      expect(logs.some((l) => l.includes("minted new: DKIM_KEY_ENCRYPTION_KEY"))).toBe(true);
+      expect(logs.some((l) => l.includes(data["DKIM_KEY_ENCRYPTION_KEY"]!))).toBe(false); // nothing minted is logged
+    });
+
+    it("mints no generate key where the request names none", async () => {
+      const planned = await plan(undefined);
+      if (planned.outcome !== "planned") throw new Error(`refused: ${planned.summary}`);
+      expect(planned.params.mint).toEqual([]);
+      expect(planned.plan.warnings).toEqual([]);
+      const seeder = new FakeSeeder();
+      await makeSetSecretsDef(ports({ seeder })).steps(planned.params)[1]!.run(ctx("write-secrets", { "consumer-secret:SMTP_URL": "smtp://a:b@c:587" }, []));
+      expect(seeder.patchedApps.map((w) => Object.keys(w.data))).toEqual([["SMTP_URL"]]);
+    });
+
+    it("plans a request that only mints, for a manifest whose every key is minted too", async () => {
+      const onlyGenerate = MANIFEST.replace(/ {2}- key: SMTP_URL[\s\S]*?(?= {2}- key: DKIM)/, "");
+      const planned = await plan(["DKIM_KEY_ENCRYPTION_KEY"], onlyGenerate);
+      if (planned.outcome !== "planned") throw new Error(`refused: ${planned.summary}`);
+      expect(planned.params.keys).toEqual([]);
+      const seeder = new FakeSeeder();
+      await makeSetSecretsDef(ports({ seeder })).steps(planned.params)[1]!.run(ctx("write-secrets", {}, []));
+      expect(seeder.patchedApps.map((w) => Object.keys(w.data))).toEqual([["DKIM_KEY_ENCRYPTION_KEY"]]);
+      expect((await plan(undefined, onlyGenerate)).outcome).toBe("rejected"); // no operator key and no mint: nothing to change
+    });
+
+    it("refuses a name that is no generate key, a key derived from the repository PAT, and half of a keypair", async () => {
+      const refusal = async (mint: string[], manifest = MANIFEST): Promise<string> => {
+        const out = await plan(mint, manifest);
+        return out.outcome === "rejected" ? out.summary : "planned";
+      };
+      expect(await refusal(["SMTP_URL", "NOPE"])).toMatch(/declares no generate key SMTP_URL, NOPE — the keys it mints are JWT_ACCESS_SECRET, DKIM_KEY_ENCRYPTION_KEY$/);
+      const more = `${MANIFEST}  - key: DEPLOY_GIT_CREDENTIALS\n    generate: deploy-git-credentials\n  - key: SIGN_KEY\n    generate: rsa2048\n  - key: SIGN_KEY_PUBLIC\n    generate: rsa2048-public\n    pairWith: SIGN_KEY\n`;
+      expect(await refusal(["DEPLOY_GIT_CREDENTIALS"], more)).toMatch(/derived from the repository PAT/);
+      expect(await refusal(["SIGN_KEY"], more)).toMatch(/SIGN_KEY and SIGN_KEY_PUBLIC are one keypair: mint both or neither/);
+      expect(await refusal(["SIGN_KEY", "SIGN_KEY_PUBLIC"], more)).toBe("planned");
+    });
   });
 
   it("says it plainly where the namespace renders no ExternalSecret — the new value then reaches no pod", async () => {
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
     const p = ports({ resolver: new FakeClusterKubeResolver({ clusterReader: cluster, argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" }) });
     const logs: string[] = [];
-    await makeSetSecretsDef(p).steps({ appId: "app_1", keys: ["SMTP_URL"] })[2]!.run(ctx("refetch-secrets", {}, logs));
+    await makeSetSecretsDef(p).steps({ appId: "app_1", keys: ["SMTP_URL"], mint: [] })[2]!.run(ctx("refetch-secrets", {}, logs));
     expect(logs.some((l) => l.includes("holds no ExternalSecret"))).toBe(true);
   });
 });

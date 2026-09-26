@@ -359,7 +359,7 @@ export async function wire(): Promise<Wired> {
       // The tenant's own apps repository: the run that creates and builds it, gated like the tenant routes.
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
       // The secrets of a standing consumer (#245) — gated like the other consumer triggers.
-      registerConsumerSecretsRoute(a, { executor, onboardingEnabled: units.enabled });
+      registerConsumerSecretsRoute(a, { executor, onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), githubApp });
       // One tenant's own catalog, read through the same closure tenant-add-app judges against.
       registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
       registerResetRoutes(a, {

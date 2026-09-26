@@ -3,6 +3,16 @@
 import type { Stage } from "./enums.ts";
 import type { ReleaseChannel } from "./release.ts";
 import type { PackagesReaderView } from "./apps-manifest.ts";
+import type { ConsumerSecretSpec } from "./consumer.ts";
+
+/** GET /api/consumers/:appId/secrets — what the Secrets dialog of a standing consumer offers, read
+ *  off its manifest as the set-secrets plan reads it: the keys its operator answers, filled at
+ *  approve, and the keys the Manager mints, each with its declared kind, minted only where the
+ *  dialog ticks it. Names, sentences and kinds only; no value is read or shown. */
+export interface ConsumerSecretOfferView {
+  operatorKeys: { key: string; description?: string }[];
+  generateKeys: { key: string; kind: NonNullable<ConsumerSecretSpec["generate"]> }[];
+}
 
 /** A credential of an owner the wizard asks for where the measurement demands it: recorded
  *  (fingerprint and date) or not. */

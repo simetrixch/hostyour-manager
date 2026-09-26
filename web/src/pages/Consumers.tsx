@@ -14,6 +14,7 @@ import { TypeToConfirm } from "../components/TypeToConfirm.tsx";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { ConsumerLifecycleDialog, type LifecycleAction } from "../components/ConsumerLifecycleDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
+import { ConsumerSecretsDialog } from "../components/ConsumerSecretsDialog.tsx";
 import { ConsumerActions } from "../components/ConsumerActions.tsx";
 import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
 import { DetectedConsumerPanel, type PurgeTarget } from "../components/DetectedConsumerPanel.tsx";
@@ -84,6 +85,8 @@ export function Consumers() {
   // The size dialog's target (null = closed). Its own state and not part of `lifecycle`, because it
   // asks a QUESTION (which size) where those only confirm.
   const [sizeFor, setSizeFor] = useState<ConsumerView | null>(null);
+  // The Secrets dialog's target: it asks which generate keys to mint before the run is planned.
+  const [secretsFor, setSecretsFor] = useState<ConsumerView | null>(null);
   // The relocation dialogs: "Back up" is a plain confirm (no target — the folder is named
   // after the unit); "Move…"/"Restore…" pick a target cluster. Confirming only PLANS the run.
   const [backupFor, setBackupFor] = useState<ConsumerView | null>(null);
@@ -312,7 +315,7 @@ export function Consumers() {
                   consumer={c}
                   onLifecycle={(action) => setLifecycle({ c, action })}
                   onSetSize={() => setSizeFor(c)}
-                  onSetSecrets={() => void act(setConsumerSecrets, c.id)}
+                  onSetSecrets={() => setSecretsFor(c)}
                   onBackup={() => setBackupFor(c)}
                   onMove={() => setRelocFor({ c, kind: "move" })}
                   onOffboard={() => setConfirmTarget(c)}
@@ -405,6 +408,15 @@ export function Consumers() {
             setRelocFor(null);
             void act((id) => (kind === "move" ? migrateConsumer(id, targetClusterId) : restoreConsumer(id, targetClusterId)), c.id);
           }}
+        />
+      )}
+
+      {secretsFor && (
+        <ConsumerSecretsDialog
+          name={secretsFor.name}
+          appId={secretsFor.id}
+          onCancel={() => setSecretsFor(null)}
+          onConfirm={(mint) => { const c = secretsFor; setSecretsFor(null); void act((id) => setConsumerSecrets(id, mint), c.id); }}
         />
       )}
 
