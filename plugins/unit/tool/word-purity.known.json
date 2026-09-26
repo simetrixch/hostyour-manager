@@ -195,7 +195,7 @@
     "plugins/unit/shared/unit-host.ts::digitacloud": 1,
     "plugins/unit/shared/unit-host.ts::hostyour-cloud": 2,
     "plugins/unit/shared/unit-host.ts::simetrixch": 1,
-    "plugins/unit/shared/unit-host.ts::tenant": 7,
+    "plugins/unit/shared/unit-host.ts::tenant": 11,
     "plugins/unit/shared/unit-size.ts::consumer": 6,
     "plugins/unit/shared/unit-size.ts::hostyour-cloud": 2,
     "plugins/unit/shared/unit-size.ts::tenant": 4,

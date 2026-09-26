@@ -658,8 +658,10 @@ export const setTenantApprovedTag = (tenantId: string, app: string, build: strin
 export const refreshTenantMembers = (tenantId: string): Promise<{ runId: string }> => post(`/api/tenants/${tenantId}/refresh-members`);
 
 /** Plan setting, switching or clearing ("") the tenant's own domain. */
-export const setTenantOwnDomain = (tenantId: string, ownDomain: string, ownDomainRedirects: string[]): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { ownDomain, ownDomainRedirects });
+/** Plan tenant-set-own-domain for a domain typed without www: the tenant is served at www.<domain>,
+ *  and <domain> redirects there ("" returns it to its zone). */
+export const setTenantOwnDomain = (tenantId: string, domain: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { domain });
 
 /** The invite-mail delivery outcome — a zod-free mirror of the server's ConsumerActivationMail, kept
  *  out of the web bundle deliberately (same rule as api-types.ts). */
