@@ -30,7 +30,7 @@ function tenantParsed(): Record<string, unknown> {
   return {
     cluster: "s1", subdomain: "simetrix",
     apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
-    members: testMembers(["erp"]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {},
+    members: testMembers(["erp"]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "",
     quota: seedQuota("small"), seedUsers: false, resetNonce: "1", suspended: false, quiesced: false,
   };
 }
@@ -100,6 +100,15 @@ describe("TenantRegistrations.migrateToSchema", () => {
     repo.seed(repo.booksBranch, TENANT_PATH, tenantFile({}, ["approvedTags"]));
     const outcome = await reg.migrateToSchema(MARKER);
     expect(outcome.rewritten).toEqual([{ path: TENANT_PATH, fields: ["+approvedTags"] }]);
+    expect(repo.read(repo.booksBranch, TENANT_PATH)).toBe(tenantFile());
+  });
+
+  it("rewrites a registration written before the sender domain existed with none: its mail stays the platform's", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new TenantRegistrations(repo);
+    repo.seed(repo.booksBranch, TENANT_PATH, tenantFile({}, ["senderDomain"]));
+    const outcome = await reg.migrateToSchema(MARKER);
+    expect(outcome.rewritten).toEqual([{ path: TENANT_PATH, fields: ["+senderDomain"] }]);
     expect(repo.read(repo.booksBranch, TENANT_PATH)).toBe(tenantFile());
   });
 

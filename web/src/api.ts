@@ -482,6 +482,8 @@ export interface TenantView {
   ownDomainRedirects: string[];
   /** The image tags approved for this tenant alone: app -> build -> tag. */
   approvedTags: Record<string, Record<string, string>>;
+  /** The domain the tenant's mail is sent as, or "" for the platform's own. */
+  senderDomain: string;
   seedUsers: boolean;
   suspended: boolean;
   owner: string | null;
@@ -652,6 +654,10 @@ export const migrateTenant = (tenantId: string, targetClusterId: string): Promis
  *  identity provider answers at its new address. */
 export const setTenantRouting = (tenantId: string, routing: MemberRouting): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/routing`, { routing });
+
+/** Plan tenant-set-sender-domain: send the tenant's mail as `domain` ("" as the platform's own). */
+export const setTenantSenderDomain = (tenantId: string, domain: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/sender-domain`, { senderDomain: domain });
 
 /** Plan tenant-set-approved-tag: run one app of one tenant at `tag` for `build` ("" follows the stage pin again). */
 export const setTenantApprovedTag = (tenantId: string, app: string, build: string, tag: string): Promise<{ runId: string }> =>

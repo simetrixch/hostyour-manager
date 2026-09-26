@@ -345,6 +345,14 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, approvedTags }, `approved-tags(${guid}) ${trailer(runId)}`);
   }
 
+  /** Write the domain the tenant's mail is sent as ("" for the platform's own). One field of one file;
+   *  writing what it already carries commits nothing. tenant-set-sender-domain waits for the members. */
+  async setSenderDomain(stage: Stage, guid: string, senderDomain: string, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
+    return this.write(stage, guid, { ...current.entry, senderDomain }, `sender-domain(${guid}) ${senderDomain || "platform"} ${trailer(runId)}`);
+  }
+
   /** Write the tenant's own apps bundle — the repository, the image it builds and the tag its last
    *  release built (shared/tenant.ts appsBundleFields), the three the fan-out mounts the tenant's
    *  bundle from. One field triple of one file, like the flips above; writing the same values

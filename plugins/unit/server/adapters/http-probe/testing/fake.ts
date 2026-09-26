@@ -12,7 +12,7 @@ export class FakePublicProbe implements PublicProbe {
     this.scripted = { ...this.scripted, [url]: result };
   }
 
-  async probe(url: string, _opts: { signal?: AbortSignal }): Promise<ProbeResult> {
+  async probe(url: string, _opts: { signal?: AbortSignal; readBody?: boolean }): Promise<ProbeResult> {
     this.probed.push(url);
     return this.scripted[url] ?? { reachable: false, status: 404, detail: "HTTP 404" };
   }

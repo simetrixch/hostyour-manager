@@ -25,11 +25,8 @@ import { AdoptConsumerParams } from "./adopt-consumer.run.ts";
 import { RestoreParams, TenantRestoreParams } from "./restore.run.ts";
 import { MigrateParams, TenantMigrateParams } from "./migrate.run.ts";
 import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";
-import { registerTenantRoutingRoutes } from "./api-tenant-routing.ts";
-import { registerTenantOwnDomainRoutes } from "./api-tenant-own-domain.ts";
+import { registerTenantActionRoutes } from "./api-tenant-actions.ts";
 import { registerConsumerDomainRoutes } from "./api-consumer-domain.ts";
-import { registerTenantRefreshMembersRoutes } from "./api-tenant-refresh-members.ts";
-import { registerTenantApprovedTagRoutes } from "./api-tenant-approved-tag.ts";
 import { scanClusterOrphanConsumers, scanDetectedConsumers } from "./consumer-detected.ts";
 // The channel ceiling is read from the ONE table in the platform repo, never restated here.
 import { readChannelStages, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
@@ -444,10 +441,7 @@ function rollupFanoutStatus(statuses: readonly ArgoAppStatus[]): { sync: ArgoSyn
 export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): void {
   const { executor, db, onboardingEnabled, appCatalog, resolver, catalogRepoUrl, activator, registrations, orphanBuilds, resolveUnitApex } = deps;
   // The routing move — a route file of its own, the way the resize is.
-  registerTenantRoutingRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
-  registerTenantOwnDomainRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
-  registerTenantRefreshMembersRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
-  registerTenantApprovedTagRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
+  registerTenantActionRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
 
   // The tenant inventory: every onboarded tenant + which cluster it fans out on (JOIN clusters for
   // domain/stage). Always live — the read path never degrades on missing config.

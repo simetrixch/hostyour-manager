@@ -146,6 +146,8 @@ export interface TenantCluster {
   ownDomainRedirects: string[];
   /** The image tags approved for this tenant alone, per app and build (shared/tenant.ts). */
   approvedTags: Record<string, Record<string, string>>;
+  /** The domain the tenant's mail is sent as, or "" for the platform's own (shared/tenant.ts). */
+  senderDomain: string;
   /** The owner the tenant was onboarded under — what a bundle created later is onboarded under too. */
   owner: string;
 }
@@ -168,6 +170,7 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     ownDomain: tenant.ownDomain,
     ownDomainRedirects: tenant.ownDomainRedirects,
     approvedTags: tenant.approvedTags,
+    senderDomain: tenant.senderDomain,
     owner: tenant.owner ?? tenant.subdomain,
   };
 }

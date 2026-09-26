@@ -74,9 +74,10 @@ describe("openDb over the migration trees of the compiled plugins", () => {
 
 // THE PRODUCT'S OWN TREES over the database the release before the unit plugin leaves behind: the
 // core's migrations up to 0012, and a row in EVERY table (the lesson of #229: an empty table hides what
-// SQLite refuses). Boot then applies the core's 0013, which changes nothing, and the unit plugin's
-// first migration, which adopts unit_sizes; twice, and neither pass may change a row or the shape of
-// the file, while both ledgers stand.
+// SQLite refuses). Boot then applies the core's later migrations and the unit plugin's first one, which
+// adopts unit_sizes; twice. The file must end exactly as the core's migrations alone would leave it:
+// the plugin's adoption changes no row and no shape, and a pass after the first changes nothing,
+// while both ledgers stand.
 const PREVIOUS_HEAD = "0012_tenants-approved-tags";
 const ROW_IN_EVERY_TABLE = [
   "INSERT INTO servers (id, name, host, ssh_user) VALUES ('srv_1', 's1', '10.0.0.1', 'm1')",
@@ -128,8 +129,14 @@ describe("openDb over the trees of the plugins this product compiles", () => {
     for (const insert of ROW_IN_EVERY_TABLE) standing.prepare(insert).run();
     const empty = Object.entries(rows(standing)).filter(([, r]) => r.length === 0).map(([tb]) => tb);
     expect(empty, `tables the proof seeds no row in: ${empty.join(", ")}`).toEqual([]);
-    const before = { rows: rows(standing), shape: shape(standing) };
     standing.close();
+    // What the core's own migrations alone make of that file: the plugin's trees may add nothing to it.
+    const coreOnlyFile = join(dir, "core-only.db");
+    copyFileSync(file, coreOnlyFile);
+    const coreOnly = new Database(coreOnlyFile);
+    migrate(drizzle(coreOnly), { migrationsFolder: CORE_MIGRATIONS });
+    const before = { rows: rows(coreOnly), shape: shape(coreOnly) };
+    coreOnly.close();
 
     const trees = inDependencyOrder(compiledPlugins);
     expect(trees.map((tr) => tr.name)).toContain("unit");

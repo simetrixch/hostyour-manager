@@ -14,8 +14,10 @@ export interface ProbeResult {
   /** The HTTP status answered, or null where no response came (refused, DNS, timeout). */
   status: number | null;
   detail: string;
+  /** The response body as text, where the caller asked for it (readBody); absent otherwise. */
+  body?: string;
 }
 
 export interface PublicProbe {
-  probe(url: string, opts: { signal?: AbortSignal }): Promise<ProbeResult>;
+  probe(url: string, opts: { signal?: AbortSignal; readBody?: boolean }): Promise<ProbeResult>;
 }

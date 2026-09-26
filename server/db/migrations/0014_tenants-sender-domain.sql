@@ -1,0 +1,1 @@
+ALTER TABLE `tenants` ADD `sender_domain` text DEFAULT '' NOT NULL;

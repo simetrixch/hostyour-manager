@@ -221,6 +221,7 @@ export const tenants = sqliteTable("tenants", {
   ownDomain: text("own_domain").notNull().default(""),
   ownDomainRedirects: text("own_domain_redirects", { mode: "json" }).$type<string[]>().notNull().default([]),
   approvedTags: text("approved_tags", { mode: "json" }).$type<Record<string, Record<string, string>>>().notNull().default({}),
+  senderDomain: text("sender_domain").notNull().default(""),
   // Whether the tenant's IdP boot-seeds initial accounts. Also a registration field (the registration
   // is what the charts read); recorded here as the platform's own trace of what was asked for.
   seedUsers: integer("seed_users", { mode: "boolean" }).notNull().default(false),

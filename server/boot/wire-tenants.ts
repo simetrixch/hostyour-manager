@@ -41,6 +41,7 @@ import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/unit
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-members.run.ts";
 import { makeTenantSetApprovedTagDef } from "../domains/units/tenant-approved-tag.run.ts";
+import { makeTenantSetSenderDomainDef } from "../domains/units/tenant-sender-domain.run.ts";
 import { makeTenantAppsRepoDef } from "../domains/units/tenant-apps-repo.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
@@ -328,6 +329,8 @@ export function buildTenantOnboarding(
     makeTenantRefreshMembersDef(onboardPorts),
     // A version approved per tenant and app: it reads the stage pins and the registry the same way.
     makeTenantSetApprovedTagDef(onboardPorts),
+    // The tenant's sender domain: the product's manifest names the check, the public probe asks it.
+    makeTenantSetSenderDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe }),
     // The tenant's own apps repository, created from the catalog's apps bundle through the GitHub App
     // and onboarded build-only through the consumer family's chain (the same late-handed ports the
     // build units ride) — the SAME port set, because it reads the catalog and the template the way

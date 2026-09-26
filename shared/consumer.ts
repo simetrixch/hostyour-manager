@@ -170,6 +170,11 @@ export const TenantSpecSchema = z.object({
    *  `values-<app>.yaml` overlays, as before the manifest existed (server/domains/units/app-catalog.ts). */
   appsBundle: z.string().regex(/^[a-z0-9-]+$/).optional(),
   appsRepo: gitRepoURL.optional(),
+  // Where the Manager asks whether mail from a domain is signed before it sets a tenant's sender
+  // domain: an https URL template with the placeholders {stageApex} and {domain}. The product
+  // answers 200 {"domain", "signing": true|false} or 404 for a domain it does not know. Absent, no
+  // tenant of this product gets a sender domain of its own.
+  senderDomainCheck: z.string().regex(/^https:\/\/\S*\{domain\}\S*$/, "an https URL template that contains {domain}").optional(),
   /** HOW THE PRODUCT ADDRESSES ITS MEMBERS below the zone (MEMBER_ROUTING, shared/enums.ts): `host`, a
    *  host of their own each, or `path`, every member under a path of the zone itself. The product
    *  says it because its charts are what route; the platform follows it with the DNS record and every

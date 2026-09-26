@@ -14,7 +14,7 @@ export function verdictOf(status: number): ProbeResult {
 export class HttpPublicProbe implements PublicProbe {
   constructor(private readonly opts: { timeoutMs?: number } = {}) {}
 
-  async probe(url: string, opts: { signal?: AbortSignal }): Promise<ProbeResult> {
+  async probe(url: string, opts: { signal?: AbortSignal; readBody?: boolean }): Promise<ProbeResult> {
     const timeoutMs = this.opts.timeoutMs ?? 15_000;
     const timer = new AbortController();
     const t = setTimeout(() => timer.abort(new Error(`probe timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -25,7 +25,8 @@ export class HttpPublicProbe implements PublicProbe {
     }
     try {
       const res = await fetch(url, { method: "GET", signal: timer.signal, redirect: "manual" });
-      // Drain the body so the socket is released; the verdict needs only the status.
+      // Read the body where the caller asked for it; otherwise drain it so the socket is released.
+      if (opts.readBody) return { ...verdictOf(res.status), body: await res.text() };
       await res.arrayBuffer().catch(() => undefined);
       return verdictOf(res.status);
     } catch (e) {

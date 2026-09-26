@@ -219,6 +219,12 @@ export const TenantRegistrationSchema = z
     // an approval is cleared by removing its key, never by an empty value, which the charts refuse.
     // Set only by tenant-set-approved-tag. Defaulted to {} for every file written before it existed.
     approvedTags: z.record(memberName, z.record(buildName, approvedImageTag)).default({}),
+    // The domain the tenant's mail is sent as, or "" where it is sent as the platform's own domain.
+    // Every member receives it as tenant.senderDomain; the product's charts send as
+    // no-reply@<senderDomain> where it is set. Set only by tenant-set-sender-domain, after the
+    // product's sender-domain check answered that mail from it is signed. Defaulted to "" for every
+    // file written before the field existed.
+    senderDomain: z.union([z.literal(""), publicFqdn]).default(""),
     // The ceiling EVERY member namespace of this tenant is bounded by, resolved by the Manager from
     // its size table when it writes the registration and passed to hostyour-cloud/apps/unit-quota by the
     // tenant ApplicationSet. Per MEMBER and not per tenant, because a tenant owns one namespace per

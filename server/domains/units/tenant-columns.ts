@@ -23,6 +23,7 @@ export const TENANT_COLUMNS = {
   ownDomain: tenants.ownDomain,
   ownDomainRedirects: tenants.ownDomainRedirects,
   approvedTags: tenants.approvedTags,
+  senderDomain: tenants.senderDomain,
   seedUsers: tenants.seedUsers,
   suspended: tenants.suspended,
   owner: tenants.owner,
