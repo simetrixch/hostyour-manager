@@ -6,11 +6,12 @@ import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { approvedImageTag, buildName, memberName } from "../../../shared/tenant.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
-import { assertDeployState, loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
+import { loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
+import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
+import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 
 // `tenant-set-approved-tag` — approve, change or clear the image tag ONE app of ONE tenant runs for
