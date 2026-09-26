@@ -48,7 +48,8 @@ export async function boot(): Promise<void> {
   // this release's schema, once per boot and never on a timer — a schema changes only with a release,
   // and a release boots the Manager. After the carry rather than beside it only so the log reads in
   // order; the carry brings charts and rewrites no registration.
-  void wired.carryDeployTrunk().then(wired.migrateRegistrations);
+  // The cluster maps follow, once per boot too: their two deploy repository keys under this release's names.
+  void wired.carryDeployTrunk().then(wired.migrateRegistrations).then(wired.migrateClusterMaps);
   // ... and again every ten minutes, so a change on the deploy trunk reaches a standing tenant
   // without a boot or a plan (#169).
   scheduleDeployCarry(wired.carryDeployTrunk, logger);

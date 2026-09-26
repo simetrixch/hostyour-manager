@@ -54,6 +54,7 @@ import { syncReleaseKits } from "#unit/server/inject-release-kit.ts";
 import { resolveRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { sweepRepoCredentials } from "../domains/units/repo-credential-sweep.ts";
 import { migrateRegistrations } from "#unit/server/registrations-migration.ts";
+import { renameDeployRepoKeys } from "../domains/inventory/cluster-marking.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
 import type { AppEnv } from "../http/app-env.ts";
@@ -97,6 +98,11 @@ export interface Wired {
    *  only with a release, and a release boots the Manager. Never rejects: every failure is logged,
    *  and the outcome becomes the `registrations.schema` self-check row on /readyz. */
   migrateRegistrations: () => Promise<void>;
+  /** The deploy repository's two keys brought to their names of this release in every cluster map
+   *  (domains/inventory/cluster-marking.ts renameDeployRepoKeys). boot.ts runs it once, behind the
+   *  listening server. Never rejects: a failure is logged, and the next boot tries again. A no-op
+   *  where no platform repository is configured. */
+  migrateClusterMaps: () => Promise<void>;
 }
 
 /** The carry as boot runs it: LOG AND CONTINUE on failure — a deploy repository that is unreachable at
@@ -310,6 +316,15 @@ export async function wire(): Promise<Wired> {
     checks.push(checkRegistrationsMigrated(await migrateRegistrations({ registrations, tenantRegistrations, version: config.version, logger })));
     if (tenantRegistrations) await fixTenantVersions({ registrations: tenantRegistrations, db: db.db, version: config.version, logger });
   };
+  const migrateClusterMapsLater = async (): Promise<void> => {
+    if (!platformRepo) return;
+    try {
+      const { renamed, commit } = await renameDeployRepoKeys(platformRepo, config.version);
+      if (commit) logger.info({ renamed, commit }, "the deploy repository's keys in the cluster maps renamed to deployUrl and deployRepo");
+    } catch (err) {
+      logger.error({ err: String(err) }, "the cluster maps could not be brought to the deploy repository's key names deployUrl and deployRepo — a map that still carries catalogUrl is not read by a chart that reads deployUrl, until a boot succeeds");
+    }
+  };
   const session = new SessionCodec(db.db, config);
   const loginTx = new LoginTxCodec(db.db);
   const oidc = createOidcAdapter(config, logger);
@@ -405,5 +420,6 @@ export async function wire(): Promise<Wired> {
       })
       : async (): Promise<void> => undefined,
     migrateRegistrations: migrateRegistrationsLater,
+    migrateClusterMaps: migrateClusterMapsLater,
   };
 }
