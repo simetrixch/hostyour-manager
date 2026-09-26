@@ -129,7 +129,7 @@ function tenantSetApprovedTagSteps(ports: TenantOnboardPorts, p: TenantSetApprov
         const until = (byName: ArgoAppStatusMap): boolean => syncedAt([app])(byName) && rendersApproval(byName.get(app), ports.catalogRepoUrl, p.app, p.build, p.tag);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
         const byName = await argoReader.watchApplicationSet(argoNamespace, [app], until, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, labelSelector: `platform/tenant=${tc.guid}` });
-        if (!syncedAt([app])(byName)) throw errValidation(describeUnsynced([app], byName));
+        if (!syncedAt([app])(byName)) throw errValidation(`tenant ${tc.guid} fan-out did not converge — ${describeUnsynced([app], byName)}`);
         if (!until(byName)) throw errValidation(`${app} is Synced + Healthy but ArgoCD has not rendered ${p.tag || "the cleared approval"} for ${p.build} yet — retry this step once the ApplicationSet has regenerated it`);
         ctx.log("meta", `${app} runs ${p.build} at ${p.tag || "its stage pin"}`);
       },

@@ -11,7 +11,7 @@ import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
 import { getRun } from "../../executor/read.ts";
-import type { AnyRunDefinition } from "../../executor/types.ts";
+import type { AnyRunDefinition, StepCtx } from "../../executor/types.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { makeTenantSetApprovedTagDef } from "./tenant-approved-tag.run.ts";
@@ -41,11 +41,11 @@ const logger = createLogger(parseConfig({
   MANAGER_VERSION: "test", DATA_DIR: "/data", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv));
 
-/** The erp member Synced + Healthy, every deploy-repo chart rendering `approved` as tenant.approvedTags. */
-function rendering(approved: Approvals): ArgoAppStatus {
+/** The erp member at `sync` and Healthy, every deploy-repo chart rendering `approved` as tenant.approvedTags. */
+function rendering(approved: Approvals, sync: ArgoAppStatus["sync"] = "Synced"): ArgoAppStatus {
   const chart = (path: string) => ({ repoURL: DEPLOY_REPO, revision: "abc", path, valuesObject: { tenant: { approvedTags: approved } } });
   return {
-    sync: "Synced", health: "Healthy", syncRevision: null, targetRevision: null,
+    sync, health: "Healthy", syncRevision: null, targetRevision: null,
     syncSources: [chart("charts/example-engine"), chart("charts/example-ui")],
   };
 }
@@ -58,7 +58,7 @@ describe("tenant-set-approved-tag through the Executor", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  async function make(opts: { approvedTags?: Approvals; renders?: Approvals; missing?: string[]; suspended?: boolean } = {}) {
+  async function make(opts: { approvedTags?: Approvals; renders?: Approvals; sync?: ArgoAppStatus["sync"]; missing?: string[]; suspended?: boolean } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "mgr-approvedtag-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
@@ -81,7 +81,7 @@ describe("tenant-set-approved-tag through the Executor", () => {
       },
     });
     const registryProbe = new FakeRegistryProbe({ missing: opts.missing ?? [] });
-    const argoReader = new FakeMasterArgoReader({ statuses: new Map([[MEMBER_APP, rendering(opts.renders ?? approvedTags)]]) });
+    const argoReader = new FakeMasterArgoReader({ statuses: new Map([[MEMBER_APP, rendering(opts.renders ?? approvedTags, opts.sync)]]) });
     const def = makeTenantSetApprovedTagDef({
       registrations: reg,
       resolver: new FakeClusterKubeResolver({
@@ -98,7 +98,7 @@ describe("tenant-set-approved-tag through the Executor", () => {
     });
     const rowTags = () => db.db.select({ t: tenants.approvedTags }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.t;
     const regTags = async () => (await reg.readTenant("prod", GUID))?.entry.approvedTags;
-    return { db, executor, registryProbe, rowTags, regTags };
+    return { db, def, executor, registryProbe, rowTags, regTags };
   }
 
   const params = (tag: string, previous = "", over: Record<string, string> = {}) => ({ tenantId: "tnt_1", app: "erp", build: BUILD, tag, previous, ...over });
@@ -137,6 +137,13 @@ describe("tenant-set-approved-tag through the Executor", () => {
     expect(getRun(h.db.db, runId)?.status).toBe("cancelled");
     expect(h.rowTags()).toEqual({ erp: { [BUILD]: OLD } });
     expect(await h.regTags()).toEqual({ erp: { [BUILD]: OLD } });
+  });
+
+  it("names the tenant whose member did not converge, as the other tenant runs do", async () => {
+    const h = await make({ sync: "OutOfSync" });
+    const watch = h.def.steps(params(TAG)).find((s) => s.name === "watch-member")!;
+    const ctx = { db: h.db.db, signal: new AbortController().signal, log: () => undefined } as unknown as StepCtx;
+    await expect(watch.run(ctx)).rejects.toThrow(new RegExp(`^tenant ${GUID} fan-out did not converge — .*${MEMBER_APP}`));
   });
 
   it("refuses what it cannot run", async () => {
