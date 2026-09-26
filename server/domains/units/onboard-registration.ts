@@ -57,9 +57,6 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
             postgresql: p.services.includes("postgresql"),
             mongodb: p.mongodb,
           }),
-          // the ATTEST of the manifest's declared extra FQDN (G19-checked, plan-frozen): from this
-          // commit on, the platform serves the name — the admission policy and the chart read it here
-          ...(p.fqdn !== undefined ? { fqdn: p.fqdn } : {}),
           // the ATTEST of the manifest's SMTP entry (G29-checked, plan-frozen): from this commit on
           // the unit is its stage's mail sender
           ...(p.smtpEntry !== undefined ? { smtpEntry: p.smtpEntry } : {}),

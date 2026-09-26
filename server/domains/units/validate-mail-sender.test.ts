@@ -15,7 +15,7 @@ describe("G29 mail sender — one stage, one unit carrying an SMTP entry", () =>
     validateOnboard(req(), on, deps(
       new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } }),
       new FakeGateRunner({ report: report(g1Pass, "pass", manifest) }),
-      { registrations: new FakeAttestedBuilds([], [], senders) },
+      { registrations: new FakeAttestedBuilds([], senders) },
     ));
 
   it("passes the first sender of a stage, and a re-onboard of the sender itself", async () => {

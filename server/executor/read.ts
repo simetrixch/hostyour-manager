@@ -1,8 +1,8 @@
-import { eq, gt, and, desc, isNull } from "drizzle-orm";
+import { eq, gt, and, desc, inArray, isNull } from "drizzle-orm";
 import type { PreflightCheck } from "../../shared/preflight.ts";
 import type { Db } from "../db/client.ts";
 import { runs, steps, events } from "../db/schema/runs.ts";
-import type { StepStatus } from "../../shared/enums.ts";
+import type { RunStatus, StepStatus } from "../../shared/enums.ts";
 import type { RunView, RunEventView } from "../../shared/api-types.ts";
 
 // The sanctioned read path for runs/steps/events. Routes read runs
@@ -86,6 +86,17 @@ export function getRunParams(db: Db, id: string): { kind: string; params: Record
  *  both end with no tenants row, and only the step rows tell them apart. */
 export function getRunStepStatus(db: Db, runId: string, stepName: string): StepStatus | undefined {
   return db.select({ status: steps.status }).from(steps).where(and(eq(steps.runId, runId), eq(steps.name, stepName))).get()?.status;
+}
+
+/** A run on ONE target that has started and not settled — approved, running, or failed (a failed
+ *  run is retried or aborted, never left as it stands) — or undefined. The narrow read a run kind
+ *  refuses its target with while another run is changing it. A deleted run has let its target go. */
+export function findActiveRunOn(db: Db, target: { kind: string; id: string }): { id: string; kind: string; status: RunStatus } | undefined {
+  return db
+    .select({ id: runs.id, kind: runs.kind, status: runs.status })
+    .from(runs)
+    .where(and(eq(runs.targetKind, target.kind), eq(runs.targetId, target.id), inArray(runs.status, ["approved", "running", "failed"]), isNull(runs.deletedAt)))
+    .get();
 }
 
 export function readEvents(db: Db, runId: string, afterSeq = -1): RunEventView[] {

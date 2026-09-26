@@ -24,7 +24,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 // consumer on the cluster's shared replica set needs neither; one that brings its own needs both,
 // before its first pod starts — the mongo image creates the root user at first init and never again.
 //
-// A dedicated file per step concern, the onboard-activate/onboard-fqdn pattern, so
+// A dedicated file per step concern, the onboard-activate pattern, so
 // onboard.run.test.ts stays within the file-size doctrine.
 
 const SHA = "a".repeat(40);

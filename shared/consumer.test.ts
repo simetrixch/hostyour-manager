@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { seedQuota } from "#unit/shared/unit-size.ts";
-import { consumerArgoAppName, consumerArgocdUrl, ConsumerManifestSchema, ConsumerRegistrationSchema, TenantSpecSchema, tenantAppsOrg, GITHUB_ACCOUNT_RE } from "./consumer.ts";
+import { consumerArgoAppName, consumerArgocdUrl, ConsumerManifestSchema, ConsumerRegistrationSchema, TenantSpecSchema, tenantAppsOrg, GITHUB_ACCOUNT_RE, CONSUMER_DOMAIN_ROUTE } from "./consumer.ts";
 
 describe("ConsumerManifestSchema appsBundle — a tenant's apps bundle declares itself", () => {
   const buildOnly = {
@@ -119,31 +119,14 @@ describe("ConsumerManifestSchema databases (DB-name contract, sibling of service
   });
 });
 
-describe("ConsumerManifestSchema fqdn (the declared extra public FQDN)", () => {
-  const base = {
-    apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, name: "acme", owner: "team-acme",
-    envs: ["prod"], chart: { path: "deploy/chart" },
-  } as const;
-
-  it("accepts a lowercase multi-label FQDN and stays undefined when absent (backward-compatible)", () => {
-    const declared = ConsumerManifestSchema.safeParse({ ...base, fqdn: "shop.example.org" });
-    expect(declared.success).toBe(true);
-    if (declared.success) expect(declared.data.fqdn).toBe("shop.example.org");
-    const absent = ConsumerManifestSchema.safeParse(base);
-    expect(absent.success).toBe(true);
-    if (absent.success) expect(absent.data.fqdn).toBeUndefined();
-  });
-
-  it("rejects a bare label, uppercase, and CEL-hostile characters — the grammar is what keeps the value safe to inline into the admission policy", () => {
-    for (const fqdn of ["shop", "Shop.example.org", "shop.example.org'", "shop_x.example.org"]) {
-      expect(ConsumerManifestSchema.safeParse({ ...base, fqdn }).success).toBe(false);
-    }
-  });
-
-  it("rejects fqdn on a manifest without a chart — a build-only or fan-out unit has no Ingress of its own to serve it", () => {
-    const r = ConsumerManifestSchema.safeParse({ ...base, chart: undefined, builds: [{ name: "acme-api", containerfile: "Containerfile" }], fqdn: "shop.example.org" });
+describe("ConsumerManifestSchema fqdn (no longer a manifest field)", () => {
+  it("refuses a manifest that still declares one, and the refusal names the route that sets it", () => {
+    const r = ConsumerManifestSchema.safeParse({
+      apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared", name: "acme", owner: "team-acme",
+      envs: ["prod"], chart: { path: "deploy/chart" }, fqdn: "shop.example.org",
+    });
     expect(r.success).toBe(false);
-    expect(r.error?.issues.some((i) => i.path.join(".") === "fqdn")).toBe(true);
+    expect(r.error?.issues.find((i) => i.path.join(".") === "fqdn")?.message).toContain(CONSUMER_DOMAIN_ROUTE);
   });
 });
 

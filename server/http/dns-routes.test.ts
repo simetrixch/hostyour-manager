@@ -49,7 +49,7 @@ describe("GET /api/dns", () => {
       registerAuth: () => undefined,
       registerProtected: (a) => registerDnsRoutes(a, {
         db: db.db, ...(withDns ? { dns } : {}),
-        consumers: async (_domain, stage) => (stage === "prod" ? [{ name: "post", host: "post" }] : []),
+        consumers: async (_domain, stage) => (stage === "prod" ? [{ name: "post", host: "post", fqdn: "" }] : []),
         tenants: async () => [],
         unitApex: async () => "example.net",
       }),

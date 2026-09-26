@@ -15,7 +15,7 @@ import { singleSourceRevision, targetedRevisionFor, type ClusterKubeResolver, ty
 import { tenantArgocdUrl } from "../../../shared/tenant.ts";
 // The live reconciliation comparison — the per-kind EXPECTED records and the consumer live probe in
 // live-recon.ts, and driftOf, the one deployment question every card asks, in the unit plugin.
-import { probeConsumerLive, readUnitHost, smokeTenant } from "./live-recon.ts";
+import { probeConsumerLive, readConsumerAddresses, smokeTenant } from "./live-recon.ts";
 import { driftOf } from "#unit/server/live-drift.ts";
 import { getRunParams } from "../../executor/read.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
@@ -27,6 +27,7 @@ import { MigrateParams, TenantMigrateParams } from "./migrate.run.ts";
 import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";
 import { registerTenantRoutingRoutes } from "./api-tenant-routing.ts";
 import { registerTenantOwnDomainRoutes } from "./api-tenant-own-domain.ts";
+import { registerConsumerDomainRoutes } from "./api-consumer-domain.ts";
 import { registerTenantRefreshMembersRoutes } from "./api-tenant-refresh-members.ts";
 import { registerTenantApprovedTagRoutes } from "./api-tenant-approved-tag.ts";
 import { scanClusterOrphanConsumers, scanDetectedConsumers } from "./consumer-detected.ts";
@@ -130,6 +131,7 @@ function targetClusters(db: Db): Array<{ id: string; domain: string; stage: Stag
 
 export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardApiDeps): void {
   const { executor, db, store, onboardingEnabled, resolver, registrations, platformRepo, github, platformGitHub, githubApp } = deps;
+  registerConsumerDomainRoutes(app, { db, executor, onboardingEnabled, ...(registrations ? { registrations } : {}) });
 
   // The consumer inventory: every onboarded app, its own stage, and which cluster it runs on
   // (apps.clusterId -> clusters.domain). provenance "manager" marks a consumer this Manager onboarded
@@ -248,12 +250,12 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     // facts so the response is a self-contained FACT-vs-TRACE payload (repoUrl stays server-side only:
     // it is which repo the two revisions are resolved FOR, not something the card shows).
     const { repoUrl, ...row } = found;
-    if (!resolver) return c.json({ row, unitHost: null, cluster: null, argo: null, drift: null, argocdUrl: null, reason: "onboarding-not-configured" } satisfies ConsumerLiveView);
-    const [probe, unitHost] = await Promise.all([
+    if (!resolver) return c.json({ row, unitHost: null, fqdn: null, cluster: null, argo: null, drift: null, argocdUrl: null, reason: "onboarding-not-configured" } satisfies ConsumerLiveView);
+    const [probe, addresses] = await Promise.all([
       probeConsumerLive(db, resolver, { clusterId: row.clusterId, name: row.name, stage: row.stage, repoUrl }),
-      readUnitHost(registrations, row.host, row.domain, row.stage),
+      readConsumerAddresses(registrations, row),
     ]);
-    return c.json({ row, unitHost, ...probe } satisfies ConsumerLiveView);
+    return c.json({ row, ...addresses, ...probe } satisfies ConsumerLiveView);
   });
 
   app.get("/api/consumers/targets", (c) => c.json(targetClusters(db)));

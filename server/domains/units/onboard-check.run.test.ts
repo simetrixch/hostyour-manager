@@ -16,13 +16,12 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
 // The check step's DRIFT BELT (onboard-check.ts): the gates re-run at the current default-branch
-// head, and the facts the approval froze — builds, databases, services, fqdn, secret specs,
+// head, and the facts the approval froze — builds, databases, services, secret specs,
 // activation — must still be what the head declares, or the run would commit facts nobody approved:
 // the registration fields, the create-only Vault seed (cas=0, permanent), and the endpoint the
 // seed-minted bootstrap token is sent to. Each case here approves ONE set of facts and scripts the
-// runner to answer with a moved manifest. The fqdn leg's test lives with its feature
-// (onboard-fqdn.run.test.ts); this file follows the same dedicated-sibling pattern so
-// onboard.run.test.ts stays within the file-size doctrine.
+// runner to answer with a moved manifest. A dedicated sibling, so onboard.run.test.ts stays within
+// the file-size doctrine.
 
 const SHA = "a".repeat(40);
 

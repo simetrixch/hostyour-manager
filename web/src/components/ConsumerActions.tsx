@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { ConsumerView } from "../api.ts";
 import type { LifecycleAction } from "./ConsumerLifecycleDialog.tsx";
+import { SetConsumerDomainAction } from "./SetConsumerDomainAction.tsx";
 
 /** WHAT AN OPERATOR MAY DO TO ONE CONSUMER, and under which status each act is offered. Its own
  *  component because the page owns the state and the hand-off, and this owns the gating: every
@@ -15,6 +16,7 @@ export function ConsumerActions(props: {
   onLifecycle: (action: LifecycleAction) => void;
   onSetSize: () => void;
   onSetSecrets: () => void;
+  onSetDomain: (fqdn: string) => void;
   onBackup: () => void;
   onMove: () => void;
   onOffboard: () => void;
@@ -51,6 +53,8 @@ export function ConsumerActions(props: {
           Secrets…
         </button>
       )}
+      {/* Only on a RUNNING consumer: a suspended one's ingress is down, so a new domain could never answer. */}
+      {c.status === "active" && <SetConsumerDomainAction name={c.name} stage={c.stage} onSet={props.onSetDomain} />}
       {/* Only on a RUNNING consumer: a suspended one renders no pod, so there is nothing holding a
           stale value and nothing to roll. */}
       {c.status === "active" && (

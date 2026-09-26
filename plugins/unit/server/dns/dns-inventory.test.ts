@@ -53,7 +53,7 @@ describe("readDnsInventory", () => {
   const deps = (over: Partial<DnsInventoryDeps> = {}): DnsInventoryDeps => ({
     db: db.db,
     dns,
-    consumers: async (cluster, stage) => (stage === "prod" && cluster === M1.split(".")[0] ? [{ name: "post", host: "post" }] : []),
+    consumers: async (cluster, stage) => (stage === "prod" && cluster === M1.split(".")[0] ? [{ name: "post", host: "post", fqdn: "" }] : []),
     tenants: async (stage) => (stage === "prod" ? [{ subdomain: "acme", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, cluster: "m1" }, { subdomain: "beta", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, cluster: "s1" }] : []),
     unitApex: async () => "example.net",
     mail: async () => mailView(),

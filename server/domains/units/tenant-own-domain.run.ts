@@ -9,7 +9,7 @@ import { findDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { isTenantRecord, removeTenantBookedRecord, tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
+import { isTenantRecord, removeBookedRecord, tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
 import { tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
 import { sleep } from "#unit/server/release-cycle.ts";
 import type { TenantSetRoutingPorts } from "./tenant-routing.run.ts";
@@ -116,7 +116,7 @@ async function provisionOwnDomainRecord(ctx: StepCtx, ports: TenantSetOwnDomainP
  *  it still points where the book says. A record in a zone nobody here manages is the operator's to
  *  remove, and the run says so. */
 async function removeOwnDomainRecord(ctx: StepCtx, ports: TenantSetOwnDomainPorts, tc: TenantCluster, domain: string): Promise<void> {
-  if (!(await removeTenantBookedRecord(ctx, { dns: ports.dns, guid: tc.guid, recordName: domain }))) {
+  if (!(await removeBookedRecord(ctx, { dns: ports.dns, owner: { kind: "tenant", name: tc.guid }, recordName: domain }))) {
     ctx.log("meta", `${domain} is not recorded as tenant ${tc.guid}'s own record — if it points at the tenant, remove it at its provider`);
   }
 }

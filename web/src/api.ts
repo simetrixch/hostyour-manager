@@ -400,6 +400,9 @@ export const getConsumerSecretOffer = (appId: string): Promise<ConsumerSecretOff
  *  names the generate keys minted new in the same write (#285). */
 export const setConsumerSecrets = (appId: string, mint: string[]): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/consumers/${appId}/secrets`, { mint });
+/** Plan consumer-set-domain: the domain the consumer answers at, at its stage ("" clears it). */
+export const setConsumerDomain = (name: string, stage: string, fqdn: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/consumers/${name}/stages/${stage}/fqdn`, { fqdn });
 export const setConsumerSize = (appId: string, size: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/consumers/${appId}/size`, { size });
 /** Backup: close access, dump every store into the Storage Box folder, verify it, reopen — the

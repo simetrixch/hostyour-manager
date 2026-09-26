@@ -8,7 +8,7 @@ import type { RunKind } from "../../shared/enums.ts";
 
 describe("CONSUMER_RUN_KINDS", () => {
   it("is exactly the consumer lifecycle kinds (incl. purge — force-offboard by name — adopt-consumer — row reconstruction from the registration — restart-workloads and the relocation run kinds backup/restore/migrate)", () => {
-    expect([...CONSUMER_RUN_KINDS].sort()).toEqual(["consumer-adopt", "consumer-backup", "consumer-migrate", "consumer-offboard", "consumer-onboard", "consumer-purge", "consumer-restart-workloads", "consumer-restore", "consumer-resume", "consumer-set-secrets", "consumer-set-size", "consumer-suspend"]);
+    expect([...CONSUMER_RUN_KINDS].sort()).toEqual(["consumer-adopt", "consumer-backup", "consumer-migrate", "consumer-offboard", "consumer-onboard", "consumer-purge", "consumer-restart-workloads", "consumer-restore", "consumer-resume", "consumer-set-domain", "consumer-set-secrets", "consumer-set-size", "consumer-suspend"]);
   });
 
   it("keeps onboard — the run that targets a cluster, not the app (would vanish under a targetId filter)", () => {

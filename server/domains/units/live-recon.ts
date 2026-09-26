@@ -11,7 +11,7 @@ import { MASTER_ROLES, type Stage, type ArgoSync } from "../../../shared/enums.t
 import type { LiveArgoView, ConsumerLiveProbeView } from "../../../shared/api-types.ts";
 import { syncedRevisionFor, targetedRevisionFor, type ClusterKubeResolver, type ClusterReader, type SmokeResult } from "../../adapters/kube/port.ts";
 import { consumerArgoAppName, consumerArgocdUrl, consumerNamespace } from "../../../shared/consumer.ts";
-import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
+import type { Registrations } from "#unit/server/registrations.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 import { driftOf } from "#unit/server/live-drift.ts";
@@ -115,19 +115,20 @@ export async function probeConsumerLive(
  *  serve, and install.sh defaults the apex to the cluster FQDN minus its first label, so the two
  *  differ on every cluster that is not itself the apex.
  *
+ *  Beside it `fqdn`: the domain the consumer answers at, at its stage, off its stage registration —
+ *  "" where it carries none.
+ *
  *  Fail-SOFT, unlike the offboard orphan scan which makes the same read and must fail closed: this
- *  answers a card, so an unreadable chain yields null and the card shows no address at all. A composed
- *  guess would be a link to a name nothing serves. */
-export async function readUnitHost(
-  registrations: { readClusterValueFiles(domain: string, stage: Stage): Promise<readonly ClusterValueFile[]> } | undefined,
-  host: string,
-  domain: string,
-  stage: Stage,
-): Promise<string | null> {
-  if (!registrations) return null;
-  try {
-    return consumerUnitHost(host, stage, unitApexFromChain(await registrations.readClusterValueFiles(domain, stage)));
-  } catch {
-    return null;
-  }
+ *  answers a card, so an unreadable chain or registration yields null for its half and the card shows
+ *  no address there. A composed guess would be a link to a name nothing serves. */
+export async function readConsumerAddresses(
+  registrations: Pick<Registrations, "readClusterValueFiles" | "readRegistration"> | undefined,
+  row: { name: string; host: string; domain: string; stage: Stage },
+): Promise<{ unitHost: string | null; fqdn: string | null }> {
+  if (!registrations) return { unitHost: null, fqdn: null };
+  const [unitHost, fqdn] = await Promise.all([
+    registrations.readClusterValueFiles(row.domain, row.stage).then((chain) => consumerUnitHost(row.host, row.stage, unitApexFromChain(chain))).catch(() => null),
+    registrations.readRegistration(row.stage, row.name).then((reg) => (reg === null ? null : reg.entry.fqdn ?? "")).catch(() => null),
+  ]);
+  return { unitHost, fqdn };
 }

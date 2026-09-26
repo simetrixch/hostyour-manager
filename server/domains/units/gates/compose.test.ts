@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, PLATFORM_NAMESPACES } from "./compose.ts";
+import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, PLATFORM_NAMESPACES } from "./compose.ts";
 import { gateUnitHost } from "#unit/server/unit-host-gate.ts";
 import { DEFAULT_UNIT_SIZE, seedQuota, UNIT_SIZE, type MongodbMode, type UnitSize } from "#unit/shared/unit-size.ts";
 import { mapBuildsToChartPins } from "../builds.ts";
@@ -215,81 +215,6 @@ describe("G18 build declaration (hard, two halves)", () => {
     const g = gateBuildDeclaration({ declaredBuilds: ["manager", "gate-runner"], chart: null });
     expect(g.status).toBe("pass");
     expect(g.found).toContain("build-only — no chart to check");
-  });
-});
-
-describe("G19 fqdn grant (hard)", () => {
-  const foreign = [{ unit: "unit-a", stage: "prod" as const, fqdn: "shop.example.org" }];
-
-  it("passes — and says so — when no fqdn is declared", () => {
-    const g = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: null, unitApex: null, clusterDomain: null, foreignFqdns: [] });
-    expect(g.status).toBe("pass");
-    expect(g.severity).toBe("hard");
-    expect(g.found).toContain("no fqdn declared");
-    expect(g.reason).toBeNull();
-  });
-
-  it("names the unit's platform host under its STAGE ZONE — <label>.<stage apex>, and prod is the apex itself", () => {
-    for (const [stage, host] of [["dev", "auth.dev.units.example.com"], ["test", "auth.test.units.example.com"], ["prod", "auth.units.example.com"]] as const) {
-      const g = gateFqdnGrant({ stage, unitName: "acme", hostLabel: "auth", fqdn: null, unitApex: "units.example.com", clusterDomain: null, foreignFqdns: [] });
-      expect(g.found).toContain(host);
-      expect(g.expected).toContain(host);
-    }
-  });
-
-  it("passes a declared fqdn nobody serves: outside the apex, attested by no other unit", () => {
-    const g = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: "app.acme.example.org", unitApex: "units.example.com", clusterDomain: "m1.example.com", foreignFqdns: foreign });
-    expect(g.status).toBe("pass");
-    expect(g.found).toContain("app.acme.example.org");
-  });
-
-  it("fails naming the unit AND the stage file that already attest the fqdn", () => {
-    const g = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: "shop.example.org", unitApex: "units.example.com", clusterDomain: null, foreignFqdns: foreign });
-    expect(g.status).toBe("fail");
-    expect(g.found).toContain("unit-a");
-    expect(g.found).toContain("registrations/unit-a/prod.yaml");
-    expect(g.reason).not.toBeNull();
-  });
-
-  it("fails anything under (or equal to) the cluster's unitApex — those names are the platform's own composition", () => {
-    for (const fqdn of ["other.units.example.com", "units.example.com"]) {
-      const g = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn, unitApex: "units.example.com", clusterDomain: null, foreignFqdns: [] });
-      expect(g.status).toBe("fail");
-      expect(g.found).toContain("units.example.com");
-    }
-    // A SUFFIX that is not a label boundary is a different domain, not a sub-name of the apex.
-    expect(gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: "not-units.example.com", unitApex: "units.example.com", clusterDomain: null, foreignFqdns: [] }).status).toBe("pass");
-  });
-
-  it("fails anything under (or equal to) the cluster's own FQDN — the platform's infrastructure hostnames live there and have no registration", () => {
-    // The case the unitApex clause cannot see: an apex that is NOT a parent of the cluster FQDN.
-    for (const fqdn of ["vault.m1.internal.example", "m1.internal.example"]) {
-      const g = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn, unitApex: "customers.example", clusterDomain: "m1.internal.example", foreignFqdns: [] });
-      expect(g.status).toBe("fail");
-      expect(g.found).toContain("m1.internal.example");
-    }
-    // The label boundary again: a name merely ENDING in the FQDN's text is a different domain.
-    expect(gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: "not-m1.internal.example", unitApex: "customers.example", clusterDomain: "m1.internal.example", foreignFqdns: [] }).status).toBe("pass");
-  });
-
-  it("fails THIS unit's fqdn when its own OTHER stage already attests it — one FQDN cannot serve two stages", () => {
-    const g = gateFqdnGrant({
-      stage: "prod",
-      unitName: "acme",
-      hostLabel: "acme",
-      fqdn: "shop.example.org",
-      unitApex: "units.example.com",
-      clusterDomain: null,
-      foreignFqdns: [{ unit: "acme", stage: "dev", fqdn: "shop.example.org" }],
-    });
-    expect(g.status).toBe("fail");
-    expect(g.found).toContain("this unit");
-    expect(g.found).toContain("registrations/acme/dev.yaml");
-  });
-
-  it("fails the whole set of gates — it is a HARD gate", () => {
-    const g19 = gateFqdnGrant({ stage: "prod", unitName: "acme", hostLabel: "acme", fqdn: "shop.example.org", unitApex: null, clusterDomain: null, foreignFqdns: foreign });
-    expect(composeReport(runnerReport(), [gateRepoAccess({ ok: true, detail: "ok" }), g19]).verdict).toBe("fail");
   });
 });
 

@@ -26,30 +26,13 @@ import { consumerHostLabel, type SmtpEntry } from "../../../shared/consumer.ts";
 import { gateMailSender } from "./gates/mail-sender.ts";
 import { errInternal, errUpstream } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
-import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
+import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild } from "./gates/compose.ts";
 import { gateUnitHost } from "#unit/server/unit-host-gate.ts";
 import { consumerUnitHost, type StandingHostReader } from "#unit/server/unit-dns.ts";
 import { gateReleaseWorkflow } from "./gates/release-workflow.ts";
 import { RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
 import type { UnitComposition, UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { mapBuildsToChartPins, type ChartPinMapping } from "./builds.ts";
-import { unitApexFromChain } from "#unit/server/unit-apex.ts";
-
-/** The cluster's OWN FQDN (`global.domain`, stamped when the install branch is generated) off the values chain, read like
- *  unitApexFromChain — LAST file that states it wins. It anchors G19's infrastructure clause: the
- *  platform's own hostnames (vault.<fqdn>, argo.<fqdn>, build.<fqdn>, zot.<fqdn>) are composed
- *  under it and have no registration, so the attested-fqdn set cannot see them. Null when the chain
- *  states none — then there is no cluster FQDN to hold a declared name against, and the gate's
- *  other clauses still stand. */
-function clusterDomainFromChain(files: readonly ClusterValueFile[]): string | null {
-  let found: string | null = null;
-  for (const file of files) {
-    const parsed: unknown = parseYaml(file.content);
-    const domain = (parsed as { global?: { domain?: unknown } } | null)?.global?.domain;
-    if (typeof domain === "string" && domain.length > 0) found = domain;
-  }
-  return found;
-}
 
 /** What the operator submits from the wizard (the immutable identity of an onboard). */
 export interface OnboardRequest {
@@ -86,13 +69,9 @@ export interface AttestedBuildReader {
   listAttestedBuildNames(exceptUnit: string): Promise<ForeignBuild[]>;
 }
 
-/** Reads every attested extra FQDN except the candidate's own registration at the stage being
- *  onboarded (a re-onboard must not collide with itself). Registrations implements it over every
- *  `registrations/<unit>/<stage>.yaml` on the registration branch; G19 holds the candidate's
- *  declared fqdn against the result — the same unit's OTHER stages included, because the
- *  stage-less manifest fqdn would otherwise be attested at two stages. */
-export interface AttestedFqdnReader {
-  listAttestedFqdns(except: { unit: string; stage: Stage }): Promise<ForeignFqdn[]>;
+/** Reads the host labels the other units stand on. Registrations implements it over every
+ *  `registrations/<unit>/<stage>.yaml` on the registration branch. */
+export interface AttestedHostLabelReader {
   /** The host label every OTHER unit stands on at [stage] — G23's one-zone-one-name-space input. */
   listAttestedHostLabels(stage: Stage, except: { unit: string }): Promise<{ unit: string; host: string }[]>;
 }
@@ -113,9 +92,9 @@ export type TenantSubdomainReader = () => Promise<string[]>;
 export interface ValidateDeps {
   repo: RepoReader;
   runner: GateRunner;
-  /** The registration reader the uniqueness gates (G16 builds, G19 fqdn) are held against. Not
+  /** The registration reader the uniqueness gates (G16 builds, G23 host labels, G29 senders) are held against. Not
    *  optional: a gate that cannot read the other units' claims would have nothing to check. */
-  registrations: AttestedBuildReader & AttestedFqdnReader & AttestedSmtpSenderReader;
+  registrations: AttestedBuildReader & AttestedHostLabelReader & AttestedSmtpSenderReader;
   /** The tenant subdomains G23's host clause is held against (see TenantSubdomainReader). */
   tenantSubdomains: TenantSubdomainReader;
   /** Gate-line sink -> events rows (append-only). Called once per gate as it lands. */
@@ -239,8 +218,8 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
     // relied on it. This line is that trace.
     deps.log(sandboxProvenance(runnerReport.sandbox));
 
-    // Read unconditionally: the unit's platform host is composed from its name whether or not the
-    // manifest declares an extra fqdn, so the tenant-subdomain clause of G23 always has an object.
+    // The unit's platform host is composed from its name, so the tenant-subdomain clause of G23 always
+    // has an object.
     const tenantSubdomains = await deps.tenantSubdomains();
 
     // The three gates whose subject the Manager holds itself: the clone it just made, the name the
@@ -296,20 +275,10 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
 
     const foreignBuilds = await deps.registrations.listAttestedBuildNames(req.consumerName);
 
-    // G19's inputs exist only where a fqdn is declared: the attested set is read then (a stage file
-    // that fails its schema throws loud there, and only there), and the two structural anchors come
-    // off the target's values chain — empty for a build-only target, whose manifest cannot carry a
-    // fqdn anyway. The chain read excludes only the candidate's own registration at THIS stage, so
-    // its other stages' attestations count as taken.
-    const declaredFqdn = manifest.fqdn ?? null;
-    const unitApex = declaredFqdn !== null && target.clusterValueFiles.length > 0 ? unitApexFromChain(target.clusterValueFiles) : null;
-    const clusterDomain = declaredFqdn !== null ? clusterDomainFromChain(target.clusterValueFiles) : null;
-    const foreignFqdns = declaredFqdn !== null ? await deps.registrations.listAttestedFqdns({ unit: req.consumerName, stage: target.stage }) : [];
 
     managerGates.push(
       gateBuildNameUniqueness({ unitName: req.consumerName, buildNames: declaredBuilds, foreignBuilds }),
       gateBuildDeclaration({ declaredBuilds, chart }),
-      gateFqdnGrant({ unitName: req.consumerName, hostLabel, stage: target.stage, fqdn: declaredFqdn, unitApex, clusterDomain, foreignFqdns }),
       gateUnitSize({ unitName: req.consumerName, size: req.size, brings, quota: brings ? deps.resolveQuota(req.size, brings) : null }),
     );
     // G27 reads the ZONE, not a registration — the one obstacle the gates above cannot see. Only where

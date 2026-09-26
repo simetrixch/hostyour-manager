@@ -42,11 +42,15 @@ export type ConsumerService = (typeof CONSUMER_SERVICE)[number];
  *  ConsumerRegistrationSchema.chartPath rule; reused by the tenant: fan-out block below. */
 const chartPath = z.string().regex(/^[^/].*$/);
 
-/** A public FQDN: two or more lowercase DNS-1123 labels. Shared by the manifest's declared `fqdn`
- *  and the registration's attested one, so the two ends of the grant validate identically. The
- *  character set (lowercase alphanumerics, `-`, `.`) is also what keeps the value safe to inline
+/** A public FQDN: two or more lowercase DNS-1123 labels. The grammar of every domain a unit is given
+ *  beside or instead of its platform address — a consumer's `fqdn` at a stage, a tenant's own domain.
+ *  The character set (lowercase alphanumerics, `-`, `.`) is also what keeps the value safe to inline
  *  into the admission policy's CEL string literals. */
 export const publicFqdn = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/);
+
+/** The route that sets, switches or clears a consumer's domain at one stage (consumer-set-domain) —
+ *  the one way a domain reaches a consumer. The refusal of a manifest that still declares one names it. */
+export const CONSUMER_DOMAIN_ROUTE = "/api/consumers/:name/stages/:stage/fqdn";
 
 /** A unit's SMTP submission entry: the ClusterIP Service of the MTA the unit brings, and the port it
  *  takes submissions on. Declared in the manifest and ATTESTED into the stage registration by the
@@ -366,13 +370,10 @@ export const ConsumerManifestSchema = z.object({
   // sets. That is why no size field stands beside it: a unit has ONE size, and a second size field is
   // a second answer to a question already answered.
   mongodb: MongodbModeSchema.default("shared"),
-  // The OPTIONAL extra public FQDN the consumer serves under IN ADDITION to `<label>.<stage apex>`
-  // — never instead: one Ingress, two spec.rules entries, told apart by the Host header. Declaring is
-  // not granting: the onboard run kind ATTESTS the value into the stage registration (the builds[]
-  // declare-and-attest shape), and the admission policy admits only the ATTESTED value, so a
-  // manifest naming a foreign FQDN gets nothing. The platform never verifies domain control and
-  // creates no DNS record for it — the customer points their DNS here, or the name does not resolve.
-  fqdn: publicFqdn.optional(),
+  // NOT a manifest field: the domain a consumer answers at beside its platform host is set per stage
+  // in the Manager, the domain's one writer, so it switches without a commit in the repository. A
+  // manifest that still declares one is refused, and the refusal names the route that sets it.
+  fqdn: z.never({ error: `fqdn is no longer declared in ${CONSUMER_MANIFEST_PATH}: the domain a consumer answers at is set per stage in the Manager, POST ${CONSUMER_DOMAIN_ROUTE} (the consumer page's Domain action). Remove fqdn from ${CONSUMER_MANIFEST_PATH}` }).optional(),
   // The OPTIONAL SMTP submission entry of the MTA this unit brings (SmtpEntrySchema above). Declaring
   // it makes the unit its stage's mail sender, attested at onboarding, and one per stage (G29).
   smtpEntry: SmtpEntrySchema.optional(),
@@ -451,12 +452,6 @@ export const ConsumerManifestSchema = z.object({
     // chart, so a self-contained chart alongside a tenant: block is a contradiction.
     if (m.tenant && m.chart) {
       ctx.addIssue({ code: "custom", path: ["tenant"], message: "a manifest that declares a tenant: fan-out block must not also declare its own chart — the fan-out repo deploys others, never itself as one chart" });
-    }
-    // The extra FQDN rides the unit's own Ingress, so only a manifest WITH a chart can serve it — a
-    // build-only or fan-out manifest deploys no Ingress of its own to carry the second rule, and a
-    // declared name that could never serve would sit unread forever.
-    if (m.fqdn !== undefined && !m.chart) {
-      ctx.addIssue({ code: "custom", path: ["fqdn"], message: "fqdn requires a chart — only a self-contained (deployable) unit has an Ingress of its own to serve a second FQDN" });
     }
     // The entry names a Service of the unit's own chart, so only a unit that deploys one can declare it.
     if (m.smtpEntry !== undefined && !m.chart) {
@@ -626,11 +621,13 @@ export const ConsumerRegistrationSchema = z
     // reads the manifest for it again. Part of the deploy group: a stage registration always carries
     // it, because the Application it generates always serves a host.
     host: hostLabel.optional(),
-    // The ATTESTED extra public FQDN — the onboard run kind copies the manifest's `fqdn` here AFTER
-    // refusing a name the platform already serves. The admission policy and the consumer chart read
-    // THIS value, never the manifest, which is what makes declaring different from being granted.
-    // OPTIONAL even in the stage form (most units serve only `<label>.<stage apex>`), so it stands
-    // OUTSIDE the deploy group's stands-or-falls rule; never in build.yaml (checked below).
+    // The domain the consumer answers at, at THIS stage, beside `<label>.<stage apex>`. Written by the
+    // Manager's consumer-set-domain alone, after it refused a name the installation or another unit
+    // answers at; an onboarding of a standing stage keeps it, and a restore carries the dumped one.
+    // hostyour-cloud's units ApplicationSet hands it to the unit's admission policy, which admits it
+    // beside the platform host. OPTIONAL even in the stage form (most units serve only their platform
+    // host), so it stands OUTSIDE the deploy group's stands-or-falls rule; never in build.yaml (checked
+    // below).
     fqdn: publicFqdn.optional(),
     // The ATTESTED SMTP submission entry — the onboard run kind copies the manifest's `smtpEntry`
     // here after G29 held the stage to one sender. hostyour-cloud renders the entry and the relay's

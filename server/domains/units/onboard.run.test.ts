@@ -214,7 +214,7 @@ describe("onboard run definition", () => {
   });
 
   // The check step's drift belt (builds/secrets/activation moved since approval) is covered in its
-  // dedicated sibling, onboard-check.run.test.ts; the fqdn leg in onboard-fqdn.run.test.ts.
+  // dedicated sibling, onboard-check.run.test.ts.
 
   // The row's status on a re-onboard (#199): an "offboarded" row — what an offboard or a rolled-back
   // onboarding leaves — is a new intent and reads "provisioning" again; "active" is kept, because a

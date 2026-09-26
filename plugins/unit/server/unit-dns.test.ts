@@ -6,7 +6,7 @@ import { FakeDnsProvider } from "#core/server/adapters/dns/testing/fake.ts";
 import type { StepCtx } from "#core/server/executor/types.ts";
 import type { CredentialStore } from "#core/server/security/store.ts";
 import type { Logger } from "#core/server/kernel/logger.ts";
-import { isTenantRecord, provisionUnitDns, removeTenantBookedRecords, removeUnitDns } from "./unit-dns.ts";
+import { isTenantRecord, provisionUnitDns, removeBookedRecords, removeUnitDns } from "./unit-dns.ts";
 
 // The unit's ONE record and the book of DNS writes beside it: provisionUnitDns writes a CNAME onto the
 // target cluster's name and enters what it changed — inserted where nothing stood, updated where
@@ -125,8 +125,8 @@ describe("isTenantRecord — what a tenant's purge may remove", () => {
   });
 });
 
-describe("removeTenantBookedRecords — the records a tenant's offboard and purge take along", () => {
-  it("removes a record booked to the tenant at this stage while it points where the book says, and nothing else", async () => {
+describe("removeBookedRecords — the records a unit's offboard and purge take along", () => {
+  it("removes a record booked to the unit at this stage while it points where the book says, and nothing else", async () => {
     const dns = new FakeDnsProvider();
     const book = (name: string, content: string, stage: "prod" | "dev"): void =>
       recordDnsWrite(db.db, { name, type: "CNAME", content, act: "inserted", owner: { kind: "tenant", name: "zsjs023ctne0", stage }, runId: "run_t" });
@@ -136,10 +136,14 @@ describe("removeTenantBookedRecords — the records a tenant's offboard and purg
     book("moved.customer.test", "acme.example.com", "prod");
     dns.seed("acme.dev.example.com", "CNAME", CLUSTER);
     book("acme.dev.example.com", CLUSTER, "dev");
-    await removeTenantBookedRecords(ctx([]), { dns, guid: "zsjs023ctne0", stage: "prod", except: [] });
+    // The same name under another kind of unit is that unit's, whatever it points at.
+    dns.seed("shop.customer.test", "CNAME", "zsjs023ctne0.example.com");
+    recordDnsWrite(db.db, { name: "shop.customer.test", type: "CNAME", content: "zsjs023ctne0.example.com", act: "inserted", owner: { kind: "consumer", name: "zsjs023ctne0", stage: "prod" }, runId: "run_c" });
+    await removeBookedRecords(ctx([]), { dns, owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, except: [] });
     expect(dns.record("www.customer.test", "CNAME")).toBeUndefined();
     expect(dns.record("moved.customer.test", "CNAME")).toBe("shop.elsewhere.test");
     expect(dns.record("acme.dev.example.com", "CNAME")).toBe(CLUSTER);
+    expect(dns.record("shop.customer.test", "CNAME")).toBe("zsjs023ctne0.example.com");
   });
 });
 

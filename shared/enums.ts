@@ -438,6 +438,10 @@ export const RUN_KIND = [
   // not a no-op but the re-apply — which is why the run kind is named for the act (set a size) and not for
   // a change (resize), and why editing the table alone moves nothing.
   "consumer-set-size", "tenant-set-size",
+  // Set, switch or clear the domain ONE consumer answers at, at ONE stage, beside its platform host:
+  // its record onto the platform host, the domain on the stage registration, and the previous
+  // domain's record gone once the consumer answers at the new one.
+  "consumer-set-domain",
   // Move standing members onto the routing their product declares (MEMBER_ROUTING): the record the new
   // routing needs, the recorded routing, a wait until the identity provider answers at the new address,
   // and the old record gone. The one way from the routing chosen at creation to the other.
@@ -505,7 +509,7 @@ export const RUN_FAMILY = {
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
     "mail-dns-publish", "dns-remove", "mail-dns-unpublish",
   ],
-  consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-secrets", "consumer-backup", "consumer-restore", "consumer-migrate"],
+  consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-backup", "consumer-restore", "consumer-migrate"],
   tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-apps-repo-purge", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-refresh-members", "tenant-set-approved-tag", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;

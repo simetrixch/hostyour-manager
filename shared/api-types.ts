@@ -588,6 +588,9 @@ export interface ConsumerLiveView extends ConsumerLiveProbeView {
    *  chain could not be read; the card then shows no address rather than a name that resolves
    *  nowhere. */
   unitHost: string | null;
+  /** The domain the consumer answers at beside `unitHost`, off its stage registration: "" where it has
+   *  none, null where the registration could not be read — the card then offers no domain action. */
+  fqdn: string | null;
   /** Source (1): the SQL row — what the Manager BELIEVES, echoed beside the live facts so the
    *  payload is self-contained. The private repoUrl is deliberately NOT part of it: it is read
    *  server-side to resolve the drift comparison per repo, and never leaves the server. */

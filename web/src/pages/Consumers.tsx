@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router";
 import type { DetectedConsumerView, DetectedScanView, RunView } from "../../../shared/api-types.ts";
 import {
   listConsumers, getConsumerLive, offboardConsumer, purgeConsumer, setConsumerSecrets,
-  scanDetectedConsumers, adoptConsumer, backupConsumer, restoreConsumer, migrateConsumer, listRuns, setConsumerSize,
+  scanDetectedConsumers, adoptConsumer, backupConsumer, restoreConsumer, migrateConsumer, listRuns, setConsumerSize, setConsumerDomain,
   type ConsumerView, type PurgeInput,
 } from "../api.ts";
 import { CONSUMER_RUN_KINDS } from "../runKinds.ts";
@@ -316,6 +316,7 @@ export function Consumers() {
                   onLifecycle={(action) => setLifecycle({ c, action })}
                   onSetSize={() => setSizeFor(c)}
                   onSetSecrets={() => setSecretsFor(c)}
+                  onSetDomain={(fqdn) => void act(() => setConsumerDomain(c.name, c.stage, fqdn), c.id)}
                   onBackup={() => setBackupFor(c)}
                   onMove={() => setRelocFor({ c, kind: "move" })}
                   onOffboard={() => setConfirmTarget(c)}

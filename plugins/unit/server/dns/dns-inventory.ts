@@ -42,10 +42,10 @@ export interface DnsInventoryDeps {
   /** The provider every unit row is read at. Absent on a manager with no DNS token — the unit rows
    *  are then not listed at all, because a row without a reading would state a verdict nobody took. */
   dns?: DnsProvider;
-  /** Every consumer registered at one stage on one cluster, with the host LABEL it stands on (the
-   *  registration's `host`, never the name). */
-  /** The consumers registered on a cluster, named by the cluster's name, at one stage. */
-  consumers?: (cluster: string, stage: Stage) => Promise<{ name: string; host: string }[]>;
+  /** Every unit registered with a deploy group at one stage on one cluster, named by the cluster's
+   *  name: the host LABEL it stands on (the registration's `host`, never the name) and the domain it
+   *  answers at beside it ("" where it has none). */
+  consumers?: (cluster: string, stage: Stage) => Promise<{ name: string; host: string; fqdn: string }[]>;
   /** Every tenant registered at one stage, with its subdomain, the routing its record is named by
    *  (the wildcard or the zone) and the short name of the cluster it stands on. */
   tenants?: (stage: Stage) => Promise<{ subdomain: string; routing: MemberRouting; ownDomain: string; ownDomainRedirects: string[]; cluster: string }[]>;
@@ -100,6 +100,17 @@ function mailRow(domain: string, row: MailDnsRow): DnsRecordRow {
   };
 }
 
+/** The row `read` answers, or none where the name lies in a zone this installation's provider does
+ *  not manage: a record in somebody else's zone is not this installation's to show. */
+async function managedRow(read: () => Promise<DnsRecordRow>): Promise<DnsRecordRow[]> {
+  try {
+    return [await read()];
+  } catch (e) {
+    if (e instanceof DnsZoneUnknownError) return [];
+    throw e;
+  }
+}
+
 /** The unit records of one cluster at one stage: every consumer's host and every tenant's record,
  *  composed by the one composer of each name (plugins/unit/shared/unit-host.ts) and read at the provider. */
 async function unitRowsOf(
@@ -112,7 +123,12 @@ async function unitRowsOf(
   const apex = await deps.unitApex(domain, stage);
   const rows: DnsRecordRow[] = [];
   for (const consumer of await deps.consumers(cluster.name, stage)) {
-    rows.push(await unitRow(deps.dns, { kind: "consumer", name: consumer.name, stage }, consumerUnitHost(consumer.host, stage, apex), domain));
+    const owner = { kind: "consumer" as const, name: consumer.name, stage };
+    const host = consumerUnitHost(consumer.host, stage, apex);
+    rows.push(await unitRow(deps.dns, owner, host, domain));
+    // Its domain's record points at its host, not at the cluster; listed only where this
+    // installation's provider manages the domain's zone.
+    if (consumer.fqdn !== "") rows.push(...(await managedRow(() => unitRow(deps.dns, owner, consumer.fqdn, host))));
   }
   for (const { subdomain, routing, ownDomain, ownDomainRedirects } of tenants.filter((t) => t.cluster === cluster.name)) {
     rows.push(await unitRow(deps.dns, { kind: "tenant", name: subdomain, stage }, tenantRecordName(routing, subdomain, stage, apex), domain));
@@ -120,11 +136,7 @@ async function unitRowsOf(
     // Listed only where this installation's provider manages their zone: a record in a customer's zone
     // is not ours to show.
     for (const host of tenantOwnHosts(ownDomain, ownDomainRedirects)) {
-      try {
-        rows.push(await unitRow(deps.dns, { kind: "tenant", name: subdomain, stage }, host, tenantZone(subdomain, stage, apex)));
-      } catch (e) {
-        if (!(e instanceof DnsZoneUnknownError)) throw e;
-      }
+      rows.push(...(await managedRow(() => unitRow(deps.dns, { kind: "tenant", name: subdomain, stage }, host, tenantZone(subdomain, stage, apex)))));
     }
   }
   return rows;

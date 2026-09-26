@@ -6,7 +6,7 @@ import { seedQuota } from "#unit/shared/unit-size.ts";
 import type { GateReport, GateResult } from "../../../shared/gates.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";
-import type { OnboardTarget, OnboardRequest, ValidateDeps, AttestedBuildReader, AttestedFqdnReader, AttestedSmtpSenderReader } from "./validate.ts";
+import type { OnboardTarget, OnboardRequest, ValidateDeps, AttestedBuildReader, AttestedHostLabelReader, AttestedSmtpSenderReader } from "./validate.ts";
 
 export const SHA = "a".repeat(40);
 export const RELEASE = "1.4.0-stable-20260719120000";
@@ -43,13 +43,11 @@ export function report(gate: GateResult, verdict: "pass" | "fail", manifest: Con
 export const g1Pass: GateResult = { id: "G1", title: "manifest present", severity: "hard", status: "pass", expected: "deploy/platform.yaml validates", found: "parsed", reason: null, detail: "ok" };
 export const g1Fail: GateResult = { id: "G1", title: "manifest present", severity: "hard", status: "fail", expected: "deploy/platform.yaml validates", found: "missing", reason: "no manifest; the plan is rejected", detail: "missing" };
 
-/** In-memory registration reader — the build names and fqdns OTHER units have registered. */
-export class FakeAttestedBuilds implements AttestedBuildReader, AttestedFqdnReader, AttestedSmtpSenderReader {
+/** In-memory registration reader — the build names, host labels and senders OTHER units have registered. */
+export class FakeAttestedBuilds implements AttestedBuildReader, AttestedHostLabelReader, AttestedSmtpSenderReader {
   readonly asked: string[] = [];
-  readonly askedFqdns: string[] = [];
   constructor(
     private readonly attested: { unit: string; build: string }[] = [],
-    private readonly fqdns: { unit: string; stage: "dev" | "test" | "prod"; fqdn: string }[] = [],
     private readonly senders: { unit: string; cluster: string; entry: { service: string; port: number } }[] = [],
   ) {}
   async listSmtpSenders(_stage: "dev" | "test" | "prod"): Promise<{ unit: string; cluster: string; entry: { service: string; port: number } }[]> {
@@ -58,10 +56,6 @@ export class FakeAttestedBuilds implements AttestedBuildReader, AttestedFqdnRead
   async listAttestedBuildNames(exceptUnit: string): Promise<{ unit: string; build: string }[]> {
     this.asked.push(exceptUnit);
     return this.attested.filter((a) => a.unit !== exceptUnit);
-  }
-  async listAttestedFqdns(except: { unit: string; stage: "dev" | "test" | "prod" }): Promise<{ unit: string; stage: "dev" | "test" | "prod"; fqdn: string }[]> {
-    this.askedFqdns.push(`${except.unit}@${except.stage}`);
-    return this.fqdns.filter((a) => !(a.unit === except.unit && a.stage === except.stage));
   }
   /** The labels other units stand on — every attested unit on its own name here, which is what a
    *  registration without `host` means. */
@@ -77,7 +71,7 @@ export function deps(repo: RepoReader, runner: GateRunner, over: Partial<Validat
 }
 
 /** A manifest that declares `builds`, with a chart unless `chart` is false. */
-export function manifestWith(builds: string[], chart = true, fqdn?: string): ConsumerManifest {
+export function manifestWith(builds: string[], chart = true): ConsumerManifest {
   return ConsumerManifestSchema.parse({
     apiVersion: "hostyour.cloud/v1",
     kind: "ConsumerManifest", mongodb: "shared" as const,
@@ -86,11 +80,10 @@ export function manifestWith(builds: string[], chart = true, fqdn?: string): Con
     envs: ["dev"],
     ...(chart ? { chart: { path: "deploy/chart" } } : {}),
     builds: builds.map((name) => ({ name, containerfile: `${name}/Containerfile` })),
-    ...(fqdn !== undefined ? { fqdn } : {}),
   });
 }
 
-/** A values chain that states the unitApex — what G19 holds a declared fqdn's suffix against. */
+/** A values chain that states the unitApex — what G27 composes the unit's host under. */
 export const APEX_CHAIN = [
   { path: "clusters/platform/values-common.yaml", content: "global:\n  timezone: Europe/Amsterdam\n" },
   { path: "clusters/platform/values-dev.yaml", content: "global:\n  env: dev\n" },

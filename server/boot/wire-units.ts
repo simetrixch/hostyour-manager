@@ -32,6 +32,7 @@ import { makeAdoptConsumerDef } from "../domains/units/adopt-consumer.run.ts";
 import { makeSuspendDef, makeResumeDef } from "../domains/units/suspend-resume.run.ts";
 import { makeRestartWorkloadsDef } from "../domains/units/restart-workloads.run.ts";
 import { makeSetSizeDef } from "../domains/units/set-size.run.ts";
+import { makeConsumerSetDomainDef } from "../domains/units/consumer-domain.run.ts";
 import { makeSetSecretsDef, type SetSecretsPorts } from "../domains/units/set-secrets.run.ts";
 import type { LifecyclePorts } from "../domains/units/lifecycle.ts";
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
@@ -84,6 +85,11 @@ const DEPLOY_REF_VISIBLE_MS = 5 * 60_000; // the bump's push becomes visible in 
 // The build-plane release run (clone + install + buildah + bump + sync) gets the cold-build ceiling —
 // the same order the tenant ensure-images budget uses, for the same reason.
 const RELEASE_BUILD_APPEAR_MS = 5 * 60_000; // the webhook fires the PipelineRun in seconds; five minutes is generous
+// How long a consumer's domain switch waits for the new domain to answer, and how often it asks: the
+// domain reaches the consumer through an ArgoCD sync and its certificate through an HTTP-01
+// challenge, which take minutes.
+const DOMAIN_WAIT_MS = 30 * 60_000;
+const DOMAIN_POLL_MS = 15_000;
 export interface UnitsWiring {
   defs: AnyRunDefinition[];
   /** Consumer onboarding routes go live (gate-runner + platform repo both configured). */
@@ -495,6 +501,9 @@ function buildConsumerOnboarding(
     // set-size writes the size table's CURRENT figures into the unit's registration — the only path
     // by which a table edit reaches something already deployed.
     makeSetSizeDef(lifecyclePorts),
+    // The domain the consumer answers at beside its platform host, per stage: its record, the stage
+    // registration, and the wait with the public probe the relocation run kinds read a unit with.
+    makeConsumerSetDomainDef({ ...lifecyclePorts, ...(dns ? { dns } : {}), probe: relocation.probe, domainWaitMs: DOMAIN_WAIT_MS, domainPollMs: DOMAIN_POLL_MS }),
     // The one path that changes a declared secret of a standing consumer (#245): the onboarding's
     // seed is create-only, so nothing else can. It reads the consumer's manifest through the owner's
     // identity, which is why it takes the GitHub client and the credential store beside the seeder.

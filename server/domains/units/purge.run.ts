@@ -19,7 +19,7 @@ import { removeConsumerWebhook } from "#unit/server/build-webhook.ts";
 import { unitRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
-import { removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
+import { removeBookedRecords, removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { removeReleaseKit } from "#unit/server/inject-release-kit.ts";
@@ -359,7 +359,10 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         // where that still does, and the name where neither — a true orphan of an onboarding that
         // died before write-registration provisioned no record under any other label.
         const label = findAppRow(ctx.db, t)?.host ?? (await ports.registrations.readRegistration(t.stage, t.name))?.entry.host ?? t.name;
-        await removeUnitDns(ctx, { dns: ports.dns, unit: t.name, recordName: consumerUnitHost(label, t.stage, unitApex) });
+        const recordName = consumerUnitHost(label, t.stage, unitApex);
+        await removeUnitDns(ctx, { dns: ports.dns, unit: t.name, recordName });
+        // Its domain's record, where consumer-set-domain wrote it here.
+        await removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "consumer", name: t.name, stage: t.stage }, except: [recordName] });
       },
     },
     {

@@ -17,7 +17,7 @@ import { removeConsumerWebhook } from "#unit/server/build-webhook.ts";
 import { unitRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
-import { removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
+import { removeBookedRecords, removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { removeReleaseKit } from "#unit/server/inject-release-kit.ts";
@@ -259,7 +259,10 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
         // values chain, the same read provision-dns's plan made.
         const ac = loadAppCluster(ctx.db, appId);
         const unitApex = unitApexFromChain(await ports.registrations.readClusterValueFiles(ac.domain, ac.stage));
-        await removeUnitDns(ctx, { dns: ports.dns, unit: ac.name, recordName: consumerUnitHost(ac.host, ac.stage, unitApex) });
+        const recordName = consumerUnitHost(ac.host, ac.stage, unitApex);
+        await removeUnitDns(ctx, { dns: ports.dns, unit: ac.name, recordName });
+        // Its domain's record, where consumer-set-domain wrote it here.
+        await removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "consumer", name: ac.name, stage: ac.stage }, except: [recordName] });
       },
     },
     {

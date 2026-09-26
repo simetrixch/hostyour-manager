@@ -196,38 +196,50 @@ export async function provisionUnitDns(
   }
 }
 
+/** The unit a record of the book of DNS writes belongs to: its kind, its name (a consumer's name, a
+ *  tenant's guid) and, where given, the stage it stands at. */
+export interface BookedOwner {
+  kind: DnsWriteOwnerKind;
+  name: string;
+  stage?: Stage;
+}
+
+const bookedFor = (booked: { kind: string; name: string; stage?: Stage }, owner: BookedOwner): boolean =>
+  booked.kind === owner.kind && booked.name === owner.name && (owner.stage === undefined || booked.stage === owner.stage);
+
+/** Whether the book of DNS writes names `owner` as the writer of the CNAME `recordName`. */
+export function isBookedFor(db: Db, recordName: string, owner: BookedOwner): boolean {
+  const booked = findDnsWrite(db, { name: recordName, type: "CNAME" });
+  return booked !== null && bookedFor(booked.owner, owner);
+}
+
 /** Whether a record a tenant's purge may name is the tenant's own. A wildcard is: only a tenant ever
  *  writes one. A plain name is a host another unit may hold, so it is the tenant's only where the book
  *  of DNS writes names the tenant as its owner. */
 export function isTenantRecord(db: Db, recordName: string, guid: string): boolean {
-  if (recordName.startsWith("*.")) return true;
-  const booked = findDnsWrite(db, { name: recordName, type: "CNAME" });
-  return booked?.owner.kind === "tenant" && booked.owner.name === guid;
+  return recordName.startsWith("*.") || isBookedFor(db, recordName, { kind: "tenant", name: guid });
 }
 
-/** Remove ONE CNAME the book of DNS writes names as this tenant's, only while it still carries the
+/** Remove ONE CNAME the book of DNS writes names as `owner`'s, only while it still carries the
  *  content the book recorded: one re-pointed elsewhere since is somebody else's now, and stays. Answers
- *  false where the book does not name the record this tenant's, and removes nothing then. */
-export async function removeTenantBookedRecord(ctx: StepCtx, opts: { dns: DnsProvider | undefined; guid: string; recordName: string }): Promise<boolean> {
+ *  false where the book does not name the record `owner`'s, and removes nothing then. */
+export async function removeBookedRecord(ctx: StepCtx, opts: { dns: DnsProvider | undefined; owner: BookedOwner; recordName: string }): Promise<boolean> {
   const w = findDnsWrite(ctx.db, { name: opts.recordName, type: "CNAME" });
-  if (w?.owner.kind !== "tenant" || w.owner.name !== opts.guid) return false;
-  const dns = requireDns(opts.dns, opts.guid, "remove");
+  if (w === null || !bookedFor(w.owner, opts.owner)) return false;
+  const dns = requireDns(opts.dns, opts.owner.name, "remove");
   const { deleted } = await dns.deleteRecord({ name: w.name, type: "CNAME", content: w.content, signal: ctx.signal });
   forgetDnsWrite(ctx.db, { name: w.name, type: "CNAME" });
-  ctx.log("meta", deleted > 0 ? `DNS record ${w.name} → ${w.content} removed` : `DNS record ${w.name} no longer points at ${w.content} — left standing, it is not this tenant's any more`);
+  ctx.log("meta", deleted > 0 ? `DNS record ${w.name} → ${w.content} removed` : `DNS record ${w.name} no longer points at ${w.content} — left standing, it is not this ${opts.owner.kind}'s any more`);
   return true;
 }
 
-/** Remove every other CNAME the book of DNS writes names as this tenant's at this stage — its own
- *  domain's record where this installation wrote it (tenant-set-own-domain) — beside the record its
- *  routing names, which the caller removes itself. Offboard and purge. A record is deleted only while it
- *  still carries the content the book recorded: one re-pointed elsewhere since is somebody else's now,
- *  and stays. */
-export async function removeTenantBookedRecords(ctx: StepCtx, opts: { dns: DnsProvider | undefined; guid: string; stage: Stage; except: readonly string[] }): Promise<void> {
-  const booked = listDnsWrites(ctx.db).filter(
-    (w) => w.type === "CNAME" && w.owner.kind === "tenant" && w.owner.name === opts.guid && w.owner.stage === opts.stage && !opts.except.includes(w.name),
-  );
-  for (const w of booked) await removeTenantBookedRecord(ctx, { dns: opts.dns, guid: opts.guid, recordName: w.name });
+/** Remove every other CNAME the book of DNS writes names as `owner`'s at its stage — its own
+ *  domain's record where this installation wrote it — beside the records the caller removes itself
+ *  (`except`). Offboard and purge. A record is deleted only while it still carries the content the
+ *  book recorded: one re-pointed elsewhere since is somebody else's now, and stays. */
+export async function removeBookedRecords(ctx: StepCtx, opts: { dns: DnsProvider | undefined; owner: BookedOwner & { stage: Stage }; except: readonly string[] }): Promise<void> {
+  const booked = listDnsWrites(ctx.db).filter((w) => w.type === "CNAME" && bookedFor(w.owner, opts.owner) && !opts.except.includes(w.name));
+  for (const w of booked) await removeBookedRecord(ctx, { dns: opts.dns, owner: opts.owner, recordName: w.name });
 }
 
 /** Remove the unit's ONE record (offboard + both purge run kinds). Fail-closed on the API, absent=ok:

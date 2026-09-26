@@ -10,7 +10,7 @@ import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } 
 import { clearRelocationHold } from "#unit/server/lifecycle.ts";
 import { TenantLifecycleParams, tenantLocks, tenantTeardownMembers, allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
 import { deleteTenantArgoSync, deleteTenantMembers, describeTenantMemberDeletes } from "./tenant-teardown.ts";
-import { isTenantRecord, removeTenantBookedRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { isTenantRecord, removeBookedRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 
 // tenant-offboard — the tenant analogue of the consumer
@@ -132,7 +132,7 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         // zone nobody here manages is the operator's to remove, which is decided before the book forgets
         // what it removes.
         const unbooked = tenantOwnHosts(tc.ownDomain, tc.ownDomainRedirects).filter((host) => !isTenantRecord(ctx.db, host, tc.guid));
-        await removeTenantBookedRecords(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, except: [recordName] });
+        await removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "tenant", name: tc.guid, stage: tc.stage }, except: [recordName] });
         for (const host of unbooked) ctx.log("meta", `the own host ${host} is not recorded as written here — remove its record at its provider`);
       },
     },

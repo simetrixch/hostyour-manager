@@ -43,7 +43,7 @@ import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type V
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { assertChannelReaches } from "../inventory/channel-stages.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
-import { consumerUnitHost, standingHostFrom } from "#unit/server/unit-dns.ts";
+import { standingHostFrom } from "#unit/server/unit-dns.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";
 import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 
@@ -122,11 +122,6 @@ export const DeployableOnboardParams = BuildParamsBase.extend({
   // planned. Defaulted rather than optional: an unattended path must land on the frugal preset, never
   // the generous one.
   size: UnitSizeSchema.default(DEFAULT_UNIT_SIZE),
-  // The manifest's declared extra public FQDN, frozen at plan AFTER G19 proved the platform serves
-  // no such name yet. write-registration copies it into the stage registration — the ATTEST — and
-  // apply-admission-policy admits it beside `<label>.<stage apex>`. Absent ⇒ the unit serves only its
-  // platform address.
-  fqdn: z.string().optional(),
   // The manifest's declared SMTP entry, frozen at plan AFTER G29 held the stage to one mail sender.
   // write-registration copies it into the stage registration — the attest the relay's forward and
   // the Mail page read.
@@ -556,8 +551,6 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         size: req.size,
         secretSpecs,
         ...(outcome.report.manifest?.activation ? { activation: outcome.report.manifest.activation } : {}),
-        // The G19-checked declared fqdn — approving this plan is the operator's grant of it.
-        ...(outcome.report.manifest?.fqdn ? { fqdn: outcome.report.manifest.fqdn } : {}),
         // The G29-checked SMTP entry — approving this plan makes the unit its stage's mail sender.
         ...(outcome.report.manifest?.smtpEntry ? { smtpEntry: outcome.report.manifest.smtpEntry } : {}),
       };
@@ -567,11 +560,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         targetKind: "cluster",
         targetId: r.clusterId,
         summary:
-          `Onboard consumer "${req.consumerName}" to ${r.target.domain} (${r.target.stage}), version ${req.version} on channel ${req.channel}: ${stepDefs.length} steps — register, provision, inject the release kit, trigger the cycle once and watch the deployment it produces.` +
-          // The grant is the operator's act, so the plan being approved names it — and names what the
-          // grant IS: the admission policy admits the name; serving it stays the unit's own chart's
-          // work (a second Ingress rule plus a tls entry of its own).
-          (outcome.report.manifest?.fqdn ? ` The manifest declares the extra FQDN ${outcome.report.manifest.fqdn} — approving attests it, so the unit MAY serve it beside ${consumerUnitHost(params.host, req.stage, unitApex)}; its chart must carry the extra Ingress rule and its own tls entry, or the name stays unserved.` : ""),
+          `Onboard consumer "${req.consumerName}" to ${r.target.domain} (${r.target.stage}), version ${req.version} on channel ${req.channel}: ${stepDefs.length} steps — register, provision, inject the release kit, trigger the cycle once and watch the deployment it produces.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [], // no host owned — the Manager acts master-locally
         locks: [

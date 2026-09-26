@@ -180,7 +180,7 @@ export async function wire(): Promise<Wired> {
     mail: () => readMailDns(mailDns),
     ...(dns ? { dns } : {}),
     ...(registrations
-      ? { consumers: async (cluster: string, stage: Stage) => (await registrations.listConsumerRegistrations(cluster, stage)).registrations.map((r) => ({ name: r.name, host: r.entry.host })) }
+      ? { consumers: async (cluster: string, stage: Stage) => (await registrations.listConsumerRegistrations(cluster, stage)).registrations.map((r) => ({ name: r.name, host: r.entry.host, fqdn: r.entry.fqdn ?? "" })) }
       : {}),
     ...(tenantRegistrations ? { tenants: async (stage: Stage) => (await tenantRegistrations.listTenantPointers(stage)).pointers } : {}),
     ...(units.resolveUnitApex ? { unitApex: units.resolveUnitApex } : {}),

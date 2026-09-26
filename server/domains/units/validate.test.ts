@@ -12,7 +12,7 @@ import { SHA, req, target, report, g1Pass, g1Fail, FakeAttestedBuilds, deps, man
 /** The gates a passing onboarding is judged by: the sandbox's, then these from the Manager. The
  *  fixtures below emit the sandbox side as one G1, so the assertions on the composed report check
  *  the manager side against this tail. */
-const MANAGER_GATES = ["G17", "G23", "G28", "G16", "G18", "G19", "G24"];
+const MANAGER_GATES = ["G17", "G23", "G28", "G16", "G18", "G24"];
 
 describe("validateOnboard", () => {
   it("pass: streams every gate, dispatches the gate-run, and emits the three manager gates", async () => {
@@ -115,46 +115,6 @@ describe("validateOnboard", () => {
     expect(outcome.builds).toBeNull();
   });
 
-  it("G19 passes without touching the registrations when the manifest declares no fqdn", async () => {
-    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
-    const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"])) });
-    const attested = new FakeAttestedBuilds([], [{ unit: "unit-a", stage: "prod", fqdn: "shop.example.org" }]);
-    const outcome = await validateOnboard(req(), target(), deps(repo, runner, { registrations: attested }));
-    const g19 = outcome.report.gates.find((g) => g.id === "G19");
-    expect(g19?.status).toBe("pass");
-    expect(g19?.found).toContain("no fqdn declared");
-    expect(attested.askedFqdns).toEqual([]); // nothing declared, nothing read
-    expect(outcome.verdict).toBe("pass");
-  });
-
-  it("G19 hard-fails a declared fqdn another unit has attested, naming that unit's registration file", async () => {
-    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
-    const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"], true, "shop.example.org")) });
-    const attested = new FakeAttestedBuilds([], [{ unit: "unit-a", stage: "prod", fqdn: "shop.example.org" }]);
-    const outcome = await validateOnboard(req(), target({ clusterValueFiles: APEX_CHAIN }), deps(repo, runner, { registrations: attested }));
-    expect(attested.askedFqdns).toEqual(["acme@dev"]); // only the candidate's own registration AT THIS STAGE is excluded
-    const g19 = outcome.report.gates.find((g) => g.id === "G19");
-    expect(g19?.status).toBe("fail");
-    expect(g19?.found).toContain("registrations/unit-a/prod.yaml");
-    expect(outcome.verdict).toBe("fail");
-    expect(outcome.builds).toBeNull();
-  });
-
-  it("G19 hard-fails a declared fqdn under the target cluster's unitApex, and passes one outside it", async () => {
-    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
-    const under = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"], true, "other.units.example.com")) });
-    const refused = await validateOnboard(req(), target({ clusterValueFiles: APEX_CHAIN }), deps(repo, under));
-    const g19 = refused.report.gates.find((g) => g.id === "G19");
-    expect(g19?.status).toBe("fail");
-    expect(g19?.found).toContain("units.example.com");
-    expect(refused.verdict).toBe("fail");
-
-    const outside = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"], true, "shop.example.org")) });
-    const granted = await validateOnboard(req(), target({ clusterValueFiles: APEX_CHAIN }), deps(repo, outside));
-    expect(granted.report.gates.find((g) => g.id === "G19")?.status).toBe("pass");
-    expect(granted.verdict).toBe("pass");
-  });
-
   it("G23 hard-fails a consumer named into another unit's build namespace — the AppProject would be pinned there", async () => {
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
     const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"])) });
@@ -236,7 +196,6 @@ describe("validateOnboard", () => {
       const attested = new FakeAttestedBuilds([{ unit: "unit-a", build: "shared-api" }]);
       await validateOnboard(req(), target(), deps(repo, runner, { registrations: attested }));
       expect(attested.asked).toEqual([]);
-      expect(attested.askedFqdns).toEqual([]);
     });
 
     // THE ACCOUNTING CHECK, and it is what keeps MANIFEST_FED_GATE_IDS from going stale. Every

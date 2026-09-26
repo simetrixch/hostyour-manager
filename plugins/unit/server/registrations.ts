@@ -20,7 +20,7 @@
 // the relay target the relay of a stage loads. It follows the stage's mail sender — the one unit whose
 // SMTP entry is attested there (G29) — in the very commit that changes the sender's registration
 // (relayTarget below), so the relay and the books never disagree about where the stage's mail goes.
-import { ConsumerRegistrationSchema, type ConsumerRegistration, type ConsumerStageRegistration, type SmtpEntry } from "#core/shared/consumer.ts";
+import { ConsumerRegistrationSchema, publicFqdn, type ConsumerRegistration, type ConsumerStageRegistration, type SmtpEntry } from "#core/shared/consumer.ts";
 import { clusterMapPath, type ClusterValueFile } from "#core/shared/cluster-values.ts";
 import { readClusterValueChain } from "#core/server/domains/inventory/cluster-value-chain.ts";
 import type { UnitQuota } from "../shared/unit-size.ts";
@@ -89,9 +89,11 @@ export interface RegistrationCommit {
   unit: Pick<ConsumerRegistration, "name" | "repoURL" | "owner" | "onboardedAt" | "suspended" | "quiesced">;
   /** The ATTESTED build names of the unit — build.yaml's own field. Empty ⇒ the unit builds nothing. */
   builds: string[];
-  /** The deploy group of ONE stage, plus the OPTIONAL attested fqdn — the manifest's declared extra
-   *  FQDN, copied here by the onboard run kind after G19 refused every name the platform already serves.
-   *  Absent ⇒ a build-only unit: build.yaml is written, no stage file. */
+  /** The deploy group of ONE stage, plus the OPTIONAL domain the unit answers at beside its platform
+   *  host at that stage — which only a restore names, carrying the dumped registration's. Absent, the
+   *  domain the standing stage file carries is kept: setFqdn below is its writer, and a second
+   *  registration of a standing stage does not take it away. Absent deploy ⇒ a build-only unit:
+   *  build.yaml is written, no stage file. */
   deploy?: { stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; channelPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string; smtpEntry?: SmtpEntry };
 }
 
@@ -178,16 +180,14 @@ export class Registrations {
     });
   }
 
-  /** Every extra FQDN ATTESTED on the registration branch EXCEPT the one at `except` (the candidate
-   *  unit's own registration at the stage being onboarded — a re-onboard must not collide with
-   *  itself), read from every `registrations/<unit>/<stage>.yaml` — the set gate G19 holds a
-   *  candidate unit's declared fqdn against. The SAME unit's OTHER stages stay IN the set: the
-   *  manifest's fqdn is stage-less while the attestation is per stage, so without them a multi-env
-   *  unit would attest one FQDN at two stages and both clusters' policies would admit it.
+  /** Every domain a unit answers at on the registration branch — each `registrations/<unit>/<stage>.yaml`
+   *  `fqdn` — EXCEPT the one at `except`. The set a domain about to be given to a unit is held against,
+   *  and a restore's dumped domain: one domain carries one record, so it serves one unit at one stage,
+   *  and the SAME unit's OTHER stages stay IN the set.
    *
    *  THROWS on a stage file that does not read or does not validate, naming the file — the
    *  listAttestedBuildNames rationale: skipping an unreadable file would silently shrink the set the
-   *  uniqueness check runs against, and the gate would grant a name that is in fact taken. */
+   *  uniqueness check runs against, and a name that is in fact taken would be given a second time. */
   async listAttestedFqdns(except?: { unit: string; stage: Stage }): Promise<{ unit: string; stage: Stage; fqdn: string }[]> {
     return this.repo.withBranch(this.branch, async (books) => {
     const attested: { unit: string; stage: Stage; fqdn: string }[] = [];
@@ -201,7 +201,7 @@ export class Registrations {
         try {
           entry = ConsumerRegistrationSchema.parse(parseRegistration(raw));
         } catch (e) {
-          throw errValidation(`${path} is not a readable stage registration, so the fqdn uniqueness check cannot be trusted: ${e instanceof Error ? e.message : String(e)}`);
+          throw errValidation(`${path} is not a readable stage registration, so the domain uniqueness check cannot be trusted: ${e instanceof Error ? e.message : String(e)}`);
         }
         if (entry.fqdn !== undefined) attested.push({ unit, stage, fqdn: entry.fqdn });
       }
@@ -327,8 +327,15 @@ export class Registrations {
     const write: { path: string; content: string }[] = [
       { path: guard(buildPath(unit.name)), content: serializePointer(ConsumerRegistrationSchema, { ...unit, removing: false, builds }) },
     ];
-    let message = `register(${unit.name}): build ${builds.length ? builds.join(", ") : "none"} ${trailer(runId)}`;
-    if (deploy) {
+    if (!deploy) {
+      const message = `register(${unit.name}): build ${builds.length ? builds.join(", ") : "none"} ${trailer(runId)}`;
+      return this.repo.withBranch(this.branch, (books) => books.commit({ message, write }));
+    }
+    return this.repo.withBranch(this.branch, async (books) => {
+      // The domain the standing stage file carries, read in the turn this commit runs in: its `fqdn`
+      // key alone, because a file the schema refuses for another field is what this commit writes over.
+      const standing = await books.readFile(stagePath(deploy.stage, unit.name));
+      const fqdn = deploy.fqdn ?? (standing === null ? undefined : publicFqdn.safeParse(parseRegistration(standing).fqdn).data);
       write.push({
         path: guard(stagePath(deploy.stage, unit.name)),
         content: serializePointer(ConsumerRegistrationSchema, {
@@ -344,16 +351,12 @@ export class Registrations {
           size: deploy.size,
           mongodb: deploy.mongodb,
           quota: deploy.quota,
-          ...(deploy.fqdn !== undefined ? { fqdn: deploy.fqdn } : {}),
+          ...(fqdn !== undefined ? { fqdn } : {}),
           ...(deploy.smtpEntry !== undefined ? { smtpEntry: deploy.smtpEntry } : {}),
         }),
       });
-      message = `register(${unit.name}): ${deploy.stage} on ${deploy.cluster} ${trailer(runId)}`;
-    }
-    return this.repo.withBranch(this.branch, async (books) => {
-      if (!deploy) return books.commit({ message, write });
       const relay = await this.relayTarget(books, deploy.stage, unit.name, deploy);
-      return books.commit({ message, write: [...write, ...relay.write], remove: relay.remove });
+      return books.commit({ message: `register(${unit.name}): ${deploy.stage} on ${deploy.cluster} ${trailer(runId)}`, write: [...write, ...relay.write], remove: relay.remove });
     });
   }
 
@@ -393,6 +396,13 @@ export class Registrations {
    *  naming the unit. */
   async setQuota(stage: Stage, name: string, quota: UnitQuota, runId: string): Promise<{ commit: string }> {
     return this.flip(stage, name, { quota }, `size(${name}) ${trailer(runId)}`);
+  }
+
+  /** Write the stage registration's `fqdn` — the domain the unit answers at beside its platform host
+   *  ("" takes it off). A FIELD write like the flips above, and the domain's one writer once the stage
+   *  stands. Writing the domain the file already carries commits nothing. */
+  async setFqdn(stage: Stage, name: string, fqdn: string, runId: string): Promise<{ commit: string }> {
+    return this.flip(stage, name, { fqdn: fqdn === "" ? undefined : fqdn }, `domain(${name}): ${stage} ${fqdn || "none"} ${trailer(runId)}`);
   }
 
   /** Repoint the stage registration's `cluster` field — the WHOLE move, as far as GitOps is
@@ -530,7 +540,7 @@ export class Registrations {
    *  Both files move in ONE commit, from ONE read of the tree. Two commits would leave a window where
    *  the stage says paused and the build still runs, and a second fetch could decide against a tree
    *  other than the one it writes to. */
-  private async flip(stage: Stage, name: string, patch: { suspended?: boolean; quiesced?: boolean; removing?: boolean; leaving?: string | undefined; quota?: UnitQuota }, message: string): Promise<{ commit: string }> {
+  private async flip(stage: Stage, name: string, patch: { suspended?: boolean; quiesced?: boolean; removing?: boolean; leaving?: string | undefined; quota?: UnitQuota; fqdn?: string | undefined }, message: string): Promise<{ commit: string }> {
     return this.repo.withBranch(this.branch, async (books) => {
       const raw = await books.readFile(stagePath(stage, name));
       if (raw === null) throw errValidation(`consumer "${name}" is not registered at ${stage}`);

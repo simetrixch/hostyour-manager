@@ -14,7 +14,7 @@ import { DEFAULT_BRANCH_HEAD } from "#unit/server/build-chain.ts";
  *  mutates is the repo that was checked, not a plan-time snapshot. There is no pin to hold it to:
  *  the head may legitimately move between approve and execute, and the release cycle builds whatever
  *  the minted tag points at. What must NOT move are the facts the approval froze and the later steps
- *  commit — the build names (build.yaml), the databases, services and fqdn (the stage registration),
+ *  commit — the build names (build.yaml), the databases and services (the stage registration),
  *  the secret specs (the create-only Vault seed) and the activation (the call the minted bootstrap
  *  token is sent to) — so a drift in those rejects the run instead of committing facts nobody
  *  approved. */
@@ -60,9 +60,6 @@ export function checkStep(ports: OnboardPorts, p: OnboardParams): Step {
         const m = outcome.report.manifest;
         if (JSON.stringify(m?.databases ?? []) !== JSON.stringify(p.databases)) drift.push("databases changed since approval");
         if (JSON.stringify(m?.services ?? []) !== JSON.stringify(p.services)) drift.push("services changed since approval");
-        // The fqdn the approval attests must be the fqdn the manifest declares NOW — a swap here
-        // would commit a grant nobody saw in the plan.
-        if ((m?.fqdn ?? null) !== (p.fqdn ?? null)) drift.push("fqdn changed since approval");
         // seed-secrets writes ONE create-only Vault entry (cas=0) from the frozen specs — permanent,
         // since a re-run never rotates or extends it. A secrets block that moved since approval would
         // otherwise seed a key set the chart at the current head no longer matches, and the missing

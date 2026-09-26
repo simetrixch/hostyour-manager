@@ -9,7 +9,7 @@
 // Every gate here is HARD: there is no severity switch, and no gate that runs can end in anything
 // but a pass or a fail of the whole onboarding.
 //
-// FIVE OF THEM DO NOT ALWAYS RUN, and that is the one conditional path. G16/G18/G19/G24/G27
+// FOUR OF THEM DO NOT ALWAYS RUN, and that is the one conditional path. G16/G18/G24/G27
 // (MANIFEST_FED_GATE_IDS) read the manifest the sandbox parsed; a report that carries none leaves
 // them with no input, and a gate given no input can only report an empty declaration — which reads
 // exactly like a repository that declares nothing. They are not run at all then, and gateManifestInput
@@ -27,7 +27,6 @@ import { STAGE, type Stage } from "../../../../shared/enums.ts";
 import { consumerNamespace } from "../../../../shared/consumer.ts";
 import type { ChartPinMapping } from "../builds.ts";
 import { BUILD_NAMESPACE_SUFFIX } from "#unit/server/build-rbac.ts";
-import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 import { capGateText } from "#unit/server/unit-host-gate.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
 import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, type UnitComposition, type UnitQuota, type UnitSize } from "#unit/shared/unit-size.ts";
@@ -36,13 +35,6 @@ import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, type UnitComposition, type UnitQuot
 export interface ForeignBuild {
   unit: string;
   build: string;
-}
-
-/** One extra FQDN another unit has already attested in a `registrations/<unit>/<stage>.yaml`. */
-export interface ForeignFqdn {
-  unit: string;
-  stage: Stage;
-  fqdn: string;
 }
 
 /** The namespaces the PLATFORM itself stands in on a cluster, so no unit's namespace may be one —
@@ -274,85 +266,6 @@ export function gateBuildDeclaration(input: {
   };
 }
 
-/** G19 FQDN grant (HARD). A manifest may DECLARE one extra public FQDN (`fqdn`); the onboard run kind
- *  ATTESTS it into the stage registration, and only the attested value ever reaches the admission
- *  policy and the chart. What this gate refuses is a name the platform ALREADY SERVES:
- *
- *    - an attested fqdn of any other unit, or of THIS unit at another stage — two Ingress objects
- *      claiming one FQDN leave the ingress controller to route by arbitrary order, and even across
- *      clusters the one DNS record can point at only one of them, so a second attestation would
- *      raffle the first grant's traffic;
- *    - anything under (or equal to) the target cluster's own unitApex — those names are the
- *      platform's composition `<label>.<stage apex>`, so a declared one could sit on another
- *      unit's address, on a stage zone or on the apex itself, without that unit ever attesting
- *      anything;
- *    - anything under (or equal to) the target cluster's own FQDN — the platform's infrastructure
- *      hostnames (vault.<fqdn>, argo.<fqdn>, build.<fqdn>, zot.<fqdn>) are composed there and have
- *      no registration, so the foreign-fqdn set cannot see them; where the unitApex is not a parent
- *      of the cluster FQDN, only this clause stands between a consumer and the shared ingress
- *      serving its paths under a platform service's address.
- *
- *  Whether the name RESOLVES here is deliberately not asked: the customer's DNS is the customer's
- *  business — a name pointed elsewhere is simply unreachable, and its own tls entry keeps the
- *  failure away from the unit's platform certificate. `unitApex`/`clusterDomain` are null exactly
- *  when no fqdn is declared (nothing to hold them against), so the structural clauses have an
- *  object only when the name does. */
-export function gateFqdnGrant(input: {
-  unitName: string;
-  /** The label the unit stands on — the platform host in the messages is composed from it. */
-  hostLabel: string;
-  stage: Stage;
-  fqdn: string | null;
-  unitApex: string | null;
-  clusterDomain: string | null;
-  foreignFqdns: readonly ForeignFqdn[];
-}): GateResult {
-  const platformHost = input.unitApex !== null ? consumerUnitHost(input.hostLabel, input.stage, input.unitApex) : `${input.hostLabel}.<stage apex>`;
-  const expected = `the fqdn "${input.unitName}" declares (if it declares one) is served by nothing on this platform yet — no stage registration attests it (another unit's or this unit's other stage), and it lies under neither the target cluster's unitApex nor the cluster's own FQDN; the unit's platform host ${platformHost} is granted either way`;
-  if (input.fqdn === null) {
-    return {
-      id: "G19",
-      title: "fqdn grant",
-      severity: "hard",
-      status: "pass",
-      expected,
-      found: `no fqdn declared — the unit serves only its platform address ${platformHost}`,
-      reason: null,
-      detail: "no fqdn declared",
-    };
-  }
-  const collisions: string[] = [];
-  if (input.unitApex !== null && (input.fqdn === input.unitApex || input.fqdn.endsWith(`.${input.unitApex}`))) {
-    collisions.push(`"${input.fqdn}" lies under the cluster's unitApex "${input.unitApex}" — every name there is the platform's own composition <label>.<stage apex>, and the stage zones stand there too`);
-  }
-  if (input.clusterDomain !== null && (input.fqdn === input.clusterDomain || input.fqdn.endsWith(`.${input.clusterDomain}`))) {
-    collisions.push(`"${input.fqdn}" lies under the cluster's own FQDN "${input.clusterDomain}" — the platform's infrastructure hostnames (vault., argo., build., zot.) are composed there`);
-  }
-  for (const f of input.foreignFqdns) {
-    if (f.fqdn === input.fqdn) {
-      collisions.push(
-        f.unit === input.unitName
-          ? `"${input.fqdn}" is already attested by this unit at ${f.stage} (registrations/${f.unit}/${f.stage}.yaml) — one FQDN cannot serve two stages, its one DNS record points at one of them`
-          : `"${input.fqdn}" is already attested by unit "${f.unit}" at ${f.stage} (registrations/${f.unit}/${f.stage}.yaml)`,
-      );
-    }
-  }
-  const ok = collisions.length === 0;
-  return {
-    id: "G19",
-    title: "fqdn grant",
-    severity: "hard",
-    status: ok ? "pass" : "fail",
-    expected,
-    found: ok
-      ? `fqdn "${input.fqdn}" declared beside the platform host ${platformHost} — checked against ${input.foreignFqdns.length} attested fqdn(s), the cluster's unitApex and the cluster's own FQDN, no collision`
-      : capGateText(collisions.join("; ")),
-    reason: ok ? null : "an FQDN the platform already serves cannot be attested twice — the ingress controller would resolve the conflict by arbitrary order; re-run the onboard after the name is free or the manifest names another",
-    detail: ok ? `fqdn "${input.fqdn}" is free to attest` : "fqdn already served by this platform",
-    evidence: ok ? [] : [{ source: "manager" as const, name: input.fqdn, value: collisions[0]!.slice(0, 256) }],
-  };
-}
-
 /** The manager-side gates whose only subject is what the MANIFEST declares. The sandbox parses that
  *  manifest (G1) and the report carries it; when the report carries none, these four have no input
  *  and do not run — gateManifestInput below is the row that says so and names them.
@@ -360,7 +273,7 @@ export function gateFqdnGrant(input: {
  *  Held as ONE list because two readers need the same answer: the refusal row, which names what did
  *  not run, and compose.test.ts, which holds this list against the gates a full run actually emits
  *  so a gate added here later cannot go unnamed. */
-export const MANIFEST_FED_GATE_IDS: readonly string[] = ["G16", "G18", "G19", "G24", "G27"];
+export const MANIFEST_FED_GATE_IDS: readonly string[] = ["G16", "G18", "G24", "G27"];
 
 /** G26 manifest input (HARD). What the manager-side gates are given, judged before they judge
  *  anything. MANIFEST_FED_GATE_IDS read the manifest the sandbox parsed; when the report carries
