@@ -19,6 +19,26 @@ describe("ConsumerManifestSchema appsBundle — a tenant's apps bundle declares 
   });
 });
 
+describe("ConsumerManifestSchema builds[].pinValues — what a release writes beside a build's tag", () => {
+  const withPins = (pinValues: unknown) => ({
+    apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", name: "acme", owner: "acme", envs: ["prod"],
+    builds: [{ name: "acme-api", containerfile: "Containerfile", pinValues }],
+  });
+  const why = (m: unknown) => ConsumerManifestSchema.safeParse(m).error?.issues.map((i) => i.message).join("; ") ?? "";
+  it("keeps a flat map of strings, and a build without one parses as before", () => {
+    expect(ConsumerManifestSchema.parse(withPins({ plugins: "unit,consumer", "log-level": "info" })).builds[0]!.pinValues).toEqual({ plugins: "unit,consumer", "log-level": "info" });
+    expect(ConsumerManifestSchema.parse(withPins(undefined)).builds[0]!.pinValues).toBeUndefined();
+  });
+  it("refuses a nested map, a value that is no string, one of the pin's own keys and a value the double quotes would escape", () => {
+    expect(why(withPins({ plugins: { unit: true } }))).not.toBe("");
+    expect(why(withPins({ replicas: 2 }))).not.toBe("");
+    expect(why(withPins({ tag: "1.0.0" }))).toMatch(/pinValues key "tag" of build acme-api .* none of name, image, tag/);
+    expect(why(withPins({ "2x": "a" }))).toMatch(/pinValues key "2x"/);
+    expect(why(withPins({ plugins: 'say "hi"' }))).toMatch(/pinValues plugins of build acme-api must be printable ASCII without a double quote or a backslash/);
+    expect(why(withPins({ plugins: "a\\b" }))).toMatch(/without a double quote or a backslash/);
+  });
+});
+
 describe("ConsumerManifestSchema activation block", () => {
   const base = {
     apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, name: "acme", owner: "team-acme",

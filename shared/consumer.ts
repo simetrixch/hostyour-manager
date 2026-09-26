@@ -308,6 +308,13 @@ export const ConsumerActivationMailSchema = z.object({
 });
 export type ConsumerActivationMail = z.infer<typeof ConsumerActivationMailSchema>;
 
+/** A builds[].pinValues key: a plain word a values file carries under a build's entry. */
+const PIN_VALUE_KEY = /^[A-Za-z][A-Za-z0-9_-]*$/;
+/** The keys of a pin entry itself, builds[]{name,image,tag}, which no pin value may take over. */
+const PIN_OWN_KEYS = ["name", "image", "tag"];
+/** A builds[].pinValues value: printable ASCII without a double quote or a backslash. */
+const PIN_VALUE = /^[ !#-[\]-~]*$/;
+
 /** deploy/platform.yaml — what a consumer declares (contract v1.3). */
 export const ConsumerManifestSchema = z.object({
   apiVersion: z.literal("hostyour.cloud/v1"),
@@ -379,6 +386,12 @@ export const ConsumerManifestSchema = z.object({
         // are root-relative), so it defaults to "." — NOT the containerfile's own
         // directory. A consumer with a self-contained subdir build sets it here.
         context: z.string().min(1).optional(),
+        // What a release writes beside this build's tag in every values-<stage>.yaml it pins: a
+        // flat map of keys to strings (hostyour-cloud#244). Only the release kit's own pin writes
+        // them (release/release.sh, release.ps1), which runs where the manifest names the platform
+        // tree it pins; the platform's build plane writes the tag alone. The kit reads them as a
+        // block of `key: "value"` lines and refuses any other spelling.
+        pinValues: z.record(z.string(), z.string()).optional(),
       }),
     )
     .default([]),
@@ -421,6 +434,19 @@ export const ConsumerManifestSchema = z.object({
     if (new Set(names).size !== names.length) {
       ctx.addIssue({ code: "custom", path: ["builds"], message: "builds[].name must be unique within the manifest" });
     }
+    // A pin value lands in the build's entry of a values file as `<key>: "<value>"`, exactly as it
+    // stands: so its key is a plain word and none of the pin's own keys, and its value carries no
+    // character the double quotes would have to escape.
+    m.builds.forEach((b, i) => {
+      for (const [key, value] of Object.entries(b.pinValues ?? {})) {
+        if (!PIN_VALUE_KEY.test(key) || PIN_OWN_KEYS.includes(key)) {
+          ctx.addIssue({ code: "custom", path: ["builds", i, "pinValues", key], message: `pinValues key "${key}" of build ${b.name} must be a word of letters, digits, _ and -, and none of ${PIN_OWN_KEYS.join(", ")}: those are the pin's own keys` });
+        }
+        if (!PIN_VALUE.test(value)) {
+          ctx.addIssue({ code: "custom", path: ["builds", i, "pinValues", key], message: `pinValues ${key} of build ${b.name} must be printable ASCII without a double quote or a backslash, because the release writes it between double quotes as it stands` });
+        }
+      }
+    });
     // C4 — a fan-out repo (tenant: present) deploys OTHER units; it never deploys itself as one
     // chart, so a self-contained chart alongside a tenant: block is a contradiction.
     if (m.tenant && m.chart) {
