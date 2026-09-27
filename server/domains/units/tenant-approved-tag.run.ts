@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import type { Cleanup, RunDefinition, Step } from "../../executor/types.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
-import { approvedImageTag, buildName, memberName } from "../../../shared/tenant.ts";
+import { approvedImageTag, buildName, isOlderRelease, memberName } from "../../../shared/tenant.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
@@ -165,6 +165,11 @@ export function makeTenantSetApprovedTagDef(ports: TenantOnboardPorts): RunDefin
         const exists = await ports.registryProbe.imageExists({ registryHost, repo: pin.image, tag: params.tag }, {});
         if (!exists) throw errValidation(`${registryHost}/${pin.image}:${params.tag} is not in the registry — only a version this installation has built can be approved`);
       }
+      // What the member runs now and what it runs afterwards, the stage pin standing in for no approval:
+      // a move to an older release is a downgrade, allowed on purpose and said where it is approved.
+      const runs = standing || pin.tag;
+      const next = params.tag || pin.tag;
+      const downgrade = isOlderRelease(next, runs);
       const steps = tenantSetApprovedTagSteps(ports, params);
       return {
         kind: "tenant-set-approved-tag",
@@ -173,11 +178,12 @@ export function makeTenantSetApprovedTagDef(ports: TenantOnboardPorts): RunDefin
         summary:
           `Run ${params.app}/${params.build} of tenant ${tc.guid} (${tc.domain}, ${tc.stage}) at ${params.tag || "its stage pin"}` +
           `${params.previous ? `, instead of the approved ${params.previous}` : ", instead of its stage pin"}: record it on the registration and the row, ` +
-          `then wait until the member ${params.app} is Synced + Healthy rendering it.`,
+          `then wait until the member ${params.app} is Synced + Healthy rendering it.` +
+          `${downgrade ? ` Downgrade: ${next} is older than ${runs}, which runs now.` : ""}`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
-        warnings: [],
+        warnings: downgrade ? [`downgrade: ${params.app}/${params.build} ${runs} → ${next} is older than what runs now`] : [],
         requiredSecrets: [],
       };
     },

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import type { RunDefinition, Step, Cleanup, Plan } from "../../executor/types.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { STAGE } from "../../../shared/enums.ts";
-import { guid as guidSchema, TenantMemberRecordSchema, type TenantMemberRecord } from "../../../shared/tenant.ts";
+import { guid as guidSchema, isOlderRelease, TenantMemberRecordSchema, type TenantMemberRecord } from "../../../shared/tenant.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
@@ -233,10 +233,20 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
 
 /** What one member's entry changes: its chart paths, or else its value files and values, or else its
  *  namespace labels. */
-/** Every build whose version the upgrade moves, `member/build old → new`. */
-function describeVersions(before: Record<string, Record<string, string>>, after: Record<string, Record<string, string>>): string {
-  return Object.entries(after).flatMap(([m, builds]) => Object.entries(builds).filter(([b, t]) => before[m]?.[b] !== t)
-    .map(([b, t]) => `${m}/${b} ${before[m]?.[b] ?? "stage pin"} → ${t}`)).join("; ");
+/** Every build whose version the upgrade moves, `member/build old → new`, and apart from them every
+ *  one it moves back: the stage pin can stand behind the version held (2026-09-27, #297), and
+ *  a downgrade stays possible, so it is said rather than refused. */
+function versionMoves(before: Record<string, Record<string, string>>, after: Record<string, Record<string, string>>): { forward: string[]; back: string[] } {
+  const forward: string[] = [];
+  const back: string[] = [];
+  for (const [m, builds] of Object.entries(after)) {
+    for (const [b, t] of Object.entries(builds)) {
+      const held = before[m]?.[b];
+      if (held === t) continue;
+      (held !== undefined && isOlderRelease(t, held) ? back : forward).push(`${m}/${b} ${held ?? "stage pin"} → ${t}`);
+    }
+  }
+  return { forward, back };
 }
 
 function describeChange(before: TenantMemberRecord, after: TenantMemberRecord): string {
@@ -315,6 +325,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       // The newest AVAILABLE version of every build the members render: the stage pin, which a release
       // moves and no tenant renders (#296). write-versions reads it again when it runs.
       const approved = withNewestPins(current.entry.approvedTags, await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(tc.stage, chart), members));
+      const moves = versionMoves(current.entry.approvedTags, approved);
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
       const planned = await planBuildUnits({
         requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage: appsImage || undefined,
@@ -350,15 +361,20 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `Upgrade tenant ${tc.guid} on ${tc.domain} (${tc.stage}) to the product's manifest at ${outcome.resolvedSha.slice(0, 7)} and the newest available versions: ` +
           `${isCurrent ? "the tenant is current — every member entry matches the product's manifest and it runs the newest available versions, so the run changes nothing. " : ""}` +
           `${changed.length ? `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` : "the member entries are unchanged. "}` +
-          `${sameApprovals(approved, current.entry.approvedTags) ? "" : `Versions: ${describeVersions(current.entry.approvedTags, approved)}. No other tenant changes. `}` +
+          `${moves.forward.length ? `Versions: ${moves.forward.join("; ")}. ` : ""}` +
+          `${moves.back.length ? `Downgrade: ${moves.back.join("; ")}, older than what runs now. ` : ""}` +
+          `${moves.forward.length || moves.back.length ? "No other tenant changes. " : ""}` +
           `${planned.builds.units.length ? `First the build unit(s) ${planned.builds.units.map((u) => `${u.unit} (${u.images.join(", ")})`).join("; ")} release their next version and pin it. ` : ""}` +
           `Every image the new render pulls must stand in the registry; then the entries are written and every member must sync. ` +
           `A member whose chart moved does not answer from the carry of the product's change into the books branch until its Application syncs here.`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
-        warnings: planned.builds.units.map((u) =>
-          `build unit ${u.unit} builds ${u.images.join(", ")}: ${u.registered ? "registered, so its builds are attested again as its manifest declares them now and its release is re-run; the attestation stays after an abort, and a tenant still pulling a build it drops stays on that build's last pin" : "not registered, so it is onboarded build-only"} — its next version is pinned for ${tc.stage} on the books branch`),
+        warnings: [
+          ...moves.back.map((d) => `downgrade: ${d} is older than what runs now — the stage pin stands behind the version held, and the run moves it back`),
+          ...planned.builds.units.map((u) =>
+            `build unit ${u.unit} builds ${u.images.join(", ")}: ${u.registered ? "registered, so its builds are attested again as its manifest declares them now and its release is re-run; the attestation stays after an abort, and a tenant still pulling a build it drops stays on that build's last pin" : "not registered, so it is onboarded build-only"} — its next version is pinned for ${tc.stage} on the books branch`),
+        ],
         requiredSecrets: [],
       };
       return { outcome: "planned", params, plan };

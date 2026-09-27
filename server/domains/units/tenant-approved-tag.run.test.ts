@@ -119,6 +119,21 @@ describe("tenant-set-approved-tag through the Executor", () => {
     expect(await h.regTags()).toEqual({ erp: { [BUILD]: TAG } });
   });
 
+  it("says a downgrade where it is approved: a tag older than the one the member runs (#297)", async () => {
+    const back = await make({ approvedTags: { erp: { [BUILD]: TAG } } });
+    const { plan } = await back.executor.plan(back.def.kind, params(OLD, TAG));
+    expect(plan.summary).toContain(`Downgrade: ${OLD} is older than ${TAG}, which runs now.`);
+    expect(plan.warnings).toEqual([`downgrade: erp/${BUILD} ${TAG} → ${OLD} is older than what runs now`]);
+    // THE INNOCENT NEIGHBOUR: a newer tag is no downgrade, and neither is the first approval above the stage pin.
+    const forward = await make({ approvedTags: { erp: { [BUILD]: OLD } } });
+    const up = (await forward.executor.plan(forward.def.kind, params(TAG, OLD))).plan;
+    expect(up.summary).not.toContain("Downgrade");
+    expect(up.warnings).toEqual([]);
+    const none = await make();
+    const first = (await none.executor.plan(none.def.kind, params(TAG))).plan;
+    expect(first.warnings).toEqual([]);
+  });
+
   it("clears an approval by removing its key, the app's key with it", async () => {
     const h = await make({ approvedTags: { erp: { [BUILD]: OLD } }, renders: {} });
     const runId = await approve(h, "", OLD);

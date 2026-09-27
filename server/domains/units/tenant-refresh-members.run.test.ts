@@ -227,6 +227,25 @@ describe("tenant-refresh-members", () => {
     expect((await prt.registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual({ erp: { "example-engine": OLD } });
   });
 
+  it("says so where the Upgrade moves a build back: the stage pin stands behind the version that runs (2026-09-27, #297)", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    // 2026-09-27: the version that ran was built outside the release line, and the stage pin still named an older one.
+    const BEHIND = "0.1.10-stable-20260915120000-0a1b2c3";
+    const behind = {
+      "charts/example-engine/pins-prod.yaml": `builds:
+  - { name: example-engine, image: example-engine, tag: "${BEHIND}" }
+`,
+      "charts/example-auth/pins-prod.yaml": RELEASED["charts/example-auth/pins-prod.yaml"],
+    };
+    const out = await makeTenantRefreshMembersDef(ports(resolved.members, { files: behind })).planStream!({ tenantId: "tnt_1" }, planCtx());
+    if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
+    expect(out.plan.summary).toContain(`Versions: auth/example-auth stage pin → ${NEW}. Downgrade: erp/example-engine ${OLD} → ${BEHIND}, older than what runs now. `);
+    expect(out.plan.warnings).toEqual([`downgrade: erp/example-engine ${OLD} → ${BEHIND} is older than what runs now — the stage pin stands behind the version held, and the run moves it back`]);
+    // The downgrade stays possible: the run writes what the plan says.
+    expect(out.params.previousApproved).toEqual(HELD);
+  });
+
   it("REFUSES a manifest that changes the member set: that is a new namespace and Application", async () => {
     seedTenant();
     const fewer = staleMembers().filter((m) => m.name !== "report");

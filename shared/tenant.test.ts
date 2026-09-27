@@ -8,6 +8,7 @@ import {
   memberName,
   subdomain,
   GUID_ALPHABET,
+  isOlderRelease,
 } from "./tenant.ts";
 import { SEED_SELECTIONS, chosenSelections, appSelectionsToRequest } from "./app-selections.ts";
 import { RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
@@ -365,5 +366,20 @@ describe("TenantValidationReportSchema — the fan-out report envelope", () => {
       reportHash: "abc",
     };
     expect(TenantValidationReportSchema.safeParse(report).success).toBe(true);
+  });
+});
+
+describe("isOlderRelease — the order of two approved image tags (#297)", () => {
+  const V14 = "0.1.14-stable-20260926190105-b123778";
+  const V13 = "0.1.13-stable-20260926092815-8d15d29";
+  it("orders releases by the second each was minted at, whatever their x.y.z says", () => {
+    expect(isOlderRelease(V13, V14)).toBe(true);
+    expect(isOlderRelease(V14, V13)).toBe(false);
+    expect(isOlderRelease(V14, V14)).toBe(false);
+    expect(isOlderRelease("0.1.99-stable-20260101000000-aaaaaaa", V13)).toBe(true);
+  });
+  it("takes a tag outside the grammar for no release: it is older than nothing", () => {
+    expect(isOlderRelease("", V14)).toBe(false);
+    expect(isOlderRelease(V13, "")).toBe(false);
   });
 });

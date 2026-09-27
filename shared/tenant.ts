@@ -42,6 +42,14 @@ export const buildName = z.string().regex(/^[a-z0-9-]+$/);
 /** An image tag the release pipeline pushes: the release tag and the commit, `<x.y.z>-<channel>-<ts14>-<sha7>`. */
 export const approvedImageTag = z.string().regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(alpha|beta|stable)-[0-9]{14}-[0-9a-f]{7}$/, "an image tag <x.y.z>-<channel>-<ts14>-<sha7>");
 
+/** Whether `next` is an older release than `held`, by the UTC second each was minted at: the ts14 of
+ *  an approved image tag orders releases whatever their x.y.z says. A tag outside that grammar (the
+ *  placeholder of a build no release has built) is no release, so it is older than nothing. */
+export function isOlderRelease(next: string, held: string): boolean {
+  if (!approvedImageTag.safeParse(next).success || !approvedImageTag.safeParse(held).success) return false;
+  return next.split("-")[2]! < held.split("-")[2]!;
+}
+
 /** ONE chart render of a member, RESOLVED — the chart, the extra value files and the values, with every
  *  `{app}` already substituted. Nothing here is composed by the platform: chart, file names and value
  *  keys all come out of the product's manifest. */
