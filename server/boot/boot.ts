@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { wire } from "./wire.ts";
 import { scheduleDeployCarry } from "./carry-deploy-schedule.ts";
 import { scheduleAppTokenRefresh } from "./refresh-app-tokens-schedule.ts";
+import { scheduleRegistryReap } from "./registry-reap-schedule.ts";
 
 /**
  * Ordered boot. LAW 0: boots with the whole world down — the only hard
@@ -62,6 +63,10 @@ export async function boot(): Promise<void> {
   // The release kit this Manager ships, into every registered unit's repository where it differs:
   // once, behind the listener — a unit released by hand runs the kit that stands in its repository.
   void wired.syncReleaseKits();
+  // The registry reaper, once a day at the configured hour (UTC), on this server's own database and
+  // credentials; unconfigured, it does not run and the boot says so.
+  if (wired.reapRegistry && config.registryReaper) scheduleRegistryReap(wired.reapRegistry, logger, config.registryReaper.hourUtc);
+  else logger.info({}, "registry reaper not configured (REGISTRY_REAPER_HOUR, REGISTRY_HOST, REGISTRY_REAPER_DRY_RUN) — the central registry is not pruned");
 
   const shutdown = (signal: string): void => {
     logger.info({ signal }, "shutting down");

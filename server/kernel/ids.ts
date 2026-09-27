@@ -21,11 +21,6 @@ import { GUID_ALPHABET } from "../../shared/tenant.ts";
  * handed, so an operator typing ORDER BY id, a caller sorting rows it already holds, or an export
  * cannot reach it. The id is what TRAVELS, which is why the order is put into it.
  *
- * The one job that opens a second handle on the manager's SQLite file is jobs/registry-reaper.ts:79
- * — it builds a CredentialStore, which writes `credential.used` audit rows. It reaches a DIFFERENT
- * file only because that job runs with an emptyDir DATA_DIR (config.ts dbFile = DATA_DIR/manager.db),
- * which is a property of the deployment and not something this repository holds.
- *
  * These ids are ROW ids and never a capability: nothing authenticates by holding one. Every secret
  * this platform mints is drawn from node:crypto randomBytes instead (security/store.ts,
  * domains/access/session.ts, plugins/unit/server/secret-mint.ts), so a monotonic id gives a guesser

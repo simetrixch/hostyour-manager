@@ -51,6 +51,9 @@ import { ensureAppIdentityRow } from "../security/app-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { refreshAppTokens } from "#unit/server/app-token-refresh.ts";
 import { syncReleaseKits } from "#unit/server/inject-release-kit.ts";
+import { reapRegistry } from "./registry-reap.ts";
+import { tenantHeldPins } from "../domains/units/tenant-pins.ts";
+import { booksBranch } from "../domains/inventory/read.ts";
 import { resolveRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { sweepRepoCredentials } from "../domains/units/repo-credential-sweep.ts";
 import { migrateRegistrations } from "#unit/server/registrations-migration.ts";
@@ -91,6 +94,11 @@ export interface Wired {
    *  this Manager ships. boot.ts runs it once behind the listening server; the kit changes only with
    *  a release, and a release boots the Manager. Never rejects — every failure is logged per unit. */
   syncReleaseKits: () => Promise<void>;
+  /** One prune of the central registry (server/boot/registry-reap.ts), on this server's database,
+   *  credential store and GitHub App; its floor holds every carrier's pins, every plugin's, and every
+   *  image a tenant holds. boot.ts schedules it daily at REGISTRY_REAPER_HOUR. Undefined where the
+   *  reaper is not configured. Never rejects. */
+  reapRegistry: (() => Promise<void>) | undefined;
   /** Every standing registration on both books brought to the schema this release ships
    *  (plugins/unit/server/registrations-migration.ts): a file the schema now defaults a key of is
    *  rewritten with it, one commit per books per boot. boot.ts runs it once, behind the listening
@@ -399,6 +407,21 @@ export async function wire(): Promise<Wired> {
     },
   });
   phase("http app");
+  const reaper = config.registryReaper;
+  const reaperCloud = config.github;
+  const [deployOwner, deployRepoName] = (config.deployRepo?.repoURL ?? "").replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "").split("/");
+  const reaperBooks = booksBranch(db.db, config.master?.fqdn);
+  const reaperTenants = tenantRegistrations;
+  const reapRegistryLater = reaper && reaperCloud && deployOwner && deployRepoName && reaperBooks && reaperTenants
+    ? () => reapRegistry({
+      db: db.db, store, githubApp, logger, cloud: reaperCloud, deploy: { owner: deployOwner, repo: deployRepoName }, books: reaperBooks,
+      dataDir: config.dataDir, registryHost: reaper.registryHost, dryRun: reaper.dryRun,
+      pins: async (signal) => [
+        ...(await Promise.all(active.map((p) => p.wiring.pinHits?.(signal) ?? Promise.resolve([])))).flat(),
+        ...(await tenantHeldPins(reaperTenants)),
+      ],
+    })
+    : undefined;
   return {
     config,
     logger,
@@ -421,5 +444,6 @@ export async function wire(): Promise<Wired> {
       : async (): Promise<void> => undefined,
     migrateRegistrations: migrateRegistrationsLater,
     migrateClusterMaps: migrateClusterMapsLater,
+    reapRegistry: reapRegistryLater,
   };
 }

@@ -10,10 +10,9 @@ import { makeClusterKubeResolver } from "../domains/inventory/cluster-kube.ts";
 import { HttpGitHubApp } from "../adapters/github-app/github-app-http.ts";
 import { buildPlatformRepo } from "./platform-repo.ts";
 
-/** What every process of the product builds the same way over its opened database, and hands each
- *  plugin it activates: the credential store, the platform's GitHub App identity, the master's kube
- *  access with the one resolver over it, and the platform repo. Built by the server (wire.ts) and
- *  by the registry reaper (jobs/registry-reaper.ts). */
+/** What the server builds over its opened database, and hands each plugin it activates: the
+ *  credential store, the platform's GitHub App identity, the master's kube access with the one
+ *  resolver over it, and the platform repo. Built by wire.ts. */
 export function buildCore(config: Config, logger: Logger, db: Db): Omit<Core, "plugins"> {
   // THE PLATFORM'S GITHUB APP IDENTITY — one client, one token cache: the credential store mints a
   // `github-app` credential through it at every open, and the readiness checks name the owner it is

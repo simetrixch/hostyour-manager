@@ -49,7 +49,7 @@ import type { BranchScope, RepoReader } from "../../adapters/git/port.ts";
 
 /** A GitOps repo the search reads across ALL of its branches (hostyour-cloud, the deploy repository). Narrower
  *  than the adapters it is composed from: the search only ever reads, and the adapters it is composed
- *  from are built with branch creation OFF (jobs/registry-reaper.ts) so that stays true of the
+ *  from are built with branch creation OFF (boot/registry-reap.ts) so that stays true of the
  *  concrete instances too — a floor built over a branch the reaper minted itself would be empty, and
  *  an empty floor calls every live image unreferenced. */
 export interface CarrierRepo {

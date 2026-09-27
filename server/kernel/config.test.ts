@@ -361,3 +361,17 @@ describe("the metrics query address (METRICS_QUERY_URL)", () => {
     }
   });
 });
+
+describe("the registry reaper's settings", () => {
+  const reaperEnv = { ...validEnv, GITHUB_REPO: "acme/cloud", GITHUB_WRITE_PAT: "pat", DEPLOY_REPO: "acme/deploy", MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "op", MASTER_STAGE: "prod" } as NodeJS.ProcessEnv;
+  it("runs the reaper with all three set, and not at all with none", () => {
+    expect(parseConfig({ ...reaperEnv, REGISTRY_REAPER_HOUR: "3", REGISTRY_HOST: "zot.m1.example.com", REGISTRY_REAPER_DRY_RUN: "false" }).registryReaper)
+      .toEqual({ hourUtc: 3, registryHost: "zot.m1.example.com", dryRun: false });
+    expect(parseConfig(reaperEnv).registryReaper).toBeUndefined();
+  });
+
+  it("refuses one without the others, and a reaper without the carriers its floor is read from", () => {
+    expect(() => parseConfig({ ...reaperEnv, REGISTRY_REAPER_HOUR: "3" })).toThrow(/must be set together/);
+    expect(() => parseConfig({ ...validEnv, REGISTRY_REAPER_HOUR: "3", REGISTRY_HOST: "zot.m1.example.com", REGISTRY_REAPER_DRY_RUN: "true" })).toThrow(/needs GITHUB_REPO, DEPLOY_REPO and MASTER_FQDN/);
+  });
+});

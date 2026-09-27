@@ -41,6 +41,9 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  *  second caller had to name the same file, and a path known in two places is one that can be
  *  changed in one. */
 export const REGISTRY_PULL_DOCKERCONFIG_PATH = "/etc/manager/registry-pull/.dockerconfigjson";
+/** Where the registry reaper's PUSH credential dockerconfigjson is mounted. The push-user holds delete
+ *  rights; a reaper given the pull credential fails closed on its first DELETE (403). */
+export const REGISTRY_PUSH_DOCKERCONFIG_PATH = "/etc/manager/registry-push/.dockerconfigjson";
 
 /** The mounted pull document, narrowed to ONE registry address and encoded the way a container
  *  runtime is configured with it: base64 of `{"auths":{"<host>":{…}}}`.

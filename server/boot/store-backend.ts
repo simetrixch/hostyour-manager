@@ -4,8 +4,7 @@ import { VaultKvClient } from "../adapters/vault/vault-kv.ts";
 import { loadOrCreateDataKey } from "../kernel/datakey.ts";
 
 /** Which backend the credential store keeps its values in, decided from the configuration, in ONE
- *  place because both processes this repository runs decide it — the server (boot/wire.ts) and the
- *  registry reaper (jobs/registry-reaper.ts), which reads the same sealed credentials.
+ *  place: the server (boot/wire.ts), whose registry reaper reads the same sealed credentials.
  *
  *  ONE OF THE TWO, NEVER NEITHER, and that is the property this function exists to make checkable
  *  rather than to leave spelled twice. `CredentialStore` records `keystore.mode` from what it is

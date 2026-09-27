@@ -277,6 +277,12 @@ const EnvSchema = z.object({
   METRICS_QUERY_URL: z.string().min(1).url()
     .regex(/^https?:\/\//, "METRICS_QUERY_URL must be an http:// or https:// address — the probe dials it with an HTTP GET")
     .optional(),
+  // THE REGISTRY REAPER, which prunes the central registry from inside this server once a day: the
+  // hour (UTC) it runs at, the registry it prunes, and whether it only logs its plan ("true") or
+  // deletes ("false"). All three or none; none, and the reaper does not run.
+  REGISTRY_REAPER_HOUR: z.coerce.number().int().min(0).max(23).optional(),
+  REGISTRY_HOST: z.string().min(1).optional(),
+  REGISTRY_REAPER_DRY_RUN: z.enum(["true", "false"]).optional(),
 }).refine((e) => !e.VAULT_ADDR || Boolean(e.VAULT_K8S_AUTH_MOUNT), {
   message: "VAULT_K8S_AUTH_MOUNT is required when VAULT_ADDR is set (the auth mount is named after the cluster, kubernetes-<cluster>)",
   path: ["VAULT_K8S_AUTH_MOUNT"],
@@ -292,6 +298,12 @@ const EnvSchema = z.object({
 }).refine((e) => Boolean(e.CLOUDFLARE_R2_API_TOKEN) === Boolean(e.CLOUDFLARE_R2_ACCOUNT_ID), {
   message: "CLOUDFLARE_R2_API_TOKEN and CLOUDFLARE_R2_ACCOUNT_ID must be set together (a token addresses nothing without the account it manages, and an account nothing can be created in)",
   path: ["CLOUDFLARE_R2_API_TOKEN"],
+}).refine((e) => new Set([e.REGISTRY_REAPER_HOUR !== undefined, Boolean(e.REGISTRY_HOST), Boolean(e.REGISTRY_REAPER_DRY_RUN)]).size === 1, {
+  message: "REGISTRY_REAPER_HOUR, REGISTRY_HOST and REGISTRY_REAPER_DRY_RUN must be set together (the registry reaper runs with all three, or not at all)",
+  path: ["REGISTRY_REAPER_HOUR"],
+}).refine((e) => e.REGISTRY_REAPER_HOUR === undefined || Boolean(e.GITHUB_REPO && e.DEPLOY_REPO && e.MASTER_FQDN), {
+  message: "the registry reaper needs GITHUB_REPO, DEPLOY_REPO and MASTER_FQDN: its floor is every pin in hostyour-cloud and in the deploy repository on the books branch, and without one of them it would delete what that carrier pins",
+  path: ["REGISTRY_REAPER_HOUR"],
 });
 
 export interface Config {
@@ -376,6 +388,13 @@ export interface Config {
    *  answer 501. */
   deployRepo?: {
     repoURL: string;
+  };
+  /** Present ⇒ the registry reaper runs inside this server once a day, at `hourUtc`:00 UTC, against
+   *  the central registry `registryHost`; it deletes only where `dryRun` is false. */
+  registryReaper?: {
+    hourUtc: number;
+    registryHost: string;
+    dryRun: boolean;
   };
   /** The consumer build webhook. `subdomain` is the image-builder
    *  EventListener ingress label (default "build") the onboard step points the hook at
@@ -536,6 +555,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     // identity. The repoURL is built the same way the consumer platform URL is (https, never with
     // embedded credentials).
     ...(e.DEPLOY_REPO ? { deployRepo: { repoURL: `https://github.com/${e.DEPLOY_REPO}.git` } } : {}),
+    // The three are guaranteed together by the schema refine above.
+    ...(e.REGISTRY_REAPER_HOUR !== undefined && e.REGISTRY_HOST && e.REGISTRY_REAPER_DRY_RUN
+      ? { registryReaper: { hourUtc: e.REGISTRY_REAPER_HOUR, registryHost: e.REGISTRY_HOST, dryRun: e.REGISTRY_REAPER_DRY_RUN === "true" } }
+      : {}),
     // Always present: the subdomain always has its "build" default; only the HMAC secret is optional
     // (absent ⇒ the onboard setup-webhook step fails loud, never a silent no-build).
     webhook: {
