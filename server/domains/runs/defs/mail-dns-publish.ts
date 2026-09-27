@@ -12,7 +12,7 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, typ
 
 // mail-dns-publish: publish the mail DNS of ONE sender domain of this installation — its SPF, its
 // DKIM key, its DMARC policy — by running the
-// catalogue's `publish-mail-dns` program on the master, the way deploy-slave and redeploy run the
+// programs checkout's `publish-mail-dns` program on the master, the way deploy-slave and redeploy run the
 // machine's own programs. The Manager writes no mail record itself: the program is the ONE writer of
 // these records (its SPF merge keeps what another service published and refuses a domain that already
 // carries two v=spf1 records), and a second writer of the same records would drift from it.
@@ -233,7 +233,7 @@ export function makeMailDnsPublishDef(ports: MailDnsPublishPorts): RunDefinition
         targetId: params.serverId,
         summary:
           `Publish the mail DNS of ${params.senderDomain} (${role}) through the DNS provider, from the master "${server.name}" ` +
-          `(${cluster.domain}, ${cluster.stage}): the catalogue's ${MAIL_DNS_PROGRAM} program merges the address mail leaves from into the ` +
+          `(${cluster.domain}, ${cluster.stage}): the programs checkout's ${MAIL_DNS_PROGRAM} program merges the address mail leaves from into the ` +
           `domain's SPF (one v=spf1 record, everything already in it kept), publishes the DKIM key it is signed with, and sets ` +
           `DMARC ${params.dmarcPolicy} with reports to ${params.dmarcMailbox} — proved dry, then run, on the master's own record. ` +
           `The password you enter raises the program's root commands and is stored nowhere.`,

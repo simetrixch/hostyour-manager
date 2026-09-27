@@ -14,7 +14,7 @@
 import { z } from "zod";
 
 /** One declared answer of a program (`GET /programs/{name}`.answers[]) — what the manager reads
- *  to know WHICH answers to compose, so the answer list lives in the machine's own catalogue and
+ *  to know WHICH answers to compose, so the answer list lives in the machine's own programs checkout and
  *  never as a copy here. */
 export const AnsiwiseAnswerSpec = z.object({
   name: z.string(),

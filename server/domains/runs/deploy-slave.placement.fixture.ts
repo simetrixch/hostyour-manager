@@ -1,7 +1,7 @@
 import { DownloadFailed, type ReleaseDownloads } from "../../adapters/downloads/port.ts";
 import type { HostsScript } from "./deploy-slave.fixture.ts";
 import { ANSIWISE_REST_TOOL, ANSIWISE_SESSION_PROGRAM, PATH_HOME } from "./defs/place-ansiwise.ts";
-import { CATALOG_CHECKOUT } from "./defs/machine-state.ts";
+import { PROGRAMS_CHECKOUT } from "./defs/machine-state.ts";
 
 // THE SCRIPTED MACHINE'S BOOTSTRAP HALF: what it answers when it is asked which release each of its
 // two executables is, what a file transfer does to it, and what it says to a program of the serving
@@ -135,8 +135,8 @@ export function answerPlacementCommand(
     return { out: "", code: 0 };
   }
 
-  const catalogue = answerCatalogueCommand(f, words);
-  if (catalogue !== undefined) return catalogue;
+  const programs = answerProgramsCommand(f, words);
+  if (programs !== undefined) return programs;
 
   // THE SERVING BINARY HAS ONE PROGRAM, and this is where a manager that invokes a second one is
   // caught. The real binary answers every other word with this sentence and exits 64
@@ -153,48 +153,48 @@ export function answerPlacementCommand(
   return undefined;
 }
 
-/** The catalogue checkout, answered the way a machine holds one rather than by a marker: `test -d`
+/** The programs checkout checkout, answered the way a machine holds one rather than by a marker: `test -d`
  *  decides whether there is one at all, `symbolic-ref` names the branch it stands on, `rev-parse`
  *  reads the head it is ACTUALLY on, and `reset --hard` MOVES that head to what origin carries. So a
  *  caller that fetched and never stood the tree on what it fetched is answered by a machine whose
  *  head did not move, and a caller that skipped the fetch is answered by the exit code the fetch was
  *  scripted with.
  *
- *  Undefined for every command that is not about the catalogue, so the table above goes on. */
-function answerCatalogueCommand(f: HostsScript, words: string[]): { out: string; code: number } | undefined {
+ *  Undefined for every command that is not about the programs checkout, so the table above goes on. */
+function answerProgramsCommand(f: HostsScript, words: string[]): { out: string; code: number } | undefined {
   // A LEADING `env NAME=value` IS READ PAST, so a command given an environment is still matched on
   // the command itself: a table that looked at the first word alone would see `env` and answer
   // nothing about git.
   const bare = words[0] === "env" ? words.slice(1).filter((w) => !w.includes("=")) : words;
   const [head, ...rest] = bare;
   // A CLONE MAKES THE MACHINE ONE. What the caller does next is what it does to a machine that
-  // carries a catalogue, so the script starts carrying one from here.
-  if (head === "git" && rest[0] === "clone" && rest.at(-1) === CATALOG_CHECKOUT) {
-    if (f.catalogueBranch !== undefined) return { out: `fatal: destination path '${CATALOG_CHECKOUT}' already exists`, code: 128 };
-    if (f.catalogueCloneExit !== 0) return { out: "fatal: repository not found", code: f.catalogueCloneExit };
-    f.catalogueBranch = f.catalogueClonesOnto;
-    f.catalogueHead = f.catalogueRemoteHead;
+  // carries a programs checkout, so the script starts carrying one from here.
+  if (head === "git" && rest[0] === "clone" && rest.at(-1) === PROGRAMS_CHECKOUT) {
+    if (f.programsBranch !== undefined) return { out: `fatal: destination path '${PROGRAMS_CHECKOUT}' already exists`, code: 128 };
+    if (f.programsCloneExit !== 0) return { out: "fatal: repository not found", code: f.programsCloneExit };
+    f.programsBranch = f.programsClonesOnto;
+    f.programsHead = f.programsRemoteHead;
     return { out: "", code: 0 };
   }
-  if (head === "test" && rest[0] === "-d" && rest[1] === `${CATALOG_CHECKOUT}/.git`) {
-    return { out: "", code: f.catalogueBranch === undefined ? 1 : 0 };
+  if (head === "test" && rest[0] === "-d" && rest[1] === `${PROGRAMS_CHECKOUT}/.git`) {
+    return { out: "", code: f.programsBranch === undefined ? 1 : 0 };
   }
-  if (head !== "git" || rest[0] !== "-C" || rest[1] !== CATALOG_CHECKOUT) return undefined;
+  if (head !== "git" || rest[0] !== "-C" || rest[1] !== PROGRAMS_CHECKOUT) return undefined;
   const argv = rest.slice(2);
-  // A machine with no catalogue answers every one of these the way git does in a directory that is
+  // A machine with no programs checkout answers every one of these the way git does in a directory that is
   // not a repository: it refuses, with the exit code it uses for a fatal.
-  if (f.catalogueBranch === undefined) return { out: "fatal: not a git repository", code: 128 };
-  if (argv[0] === "symbolic-ref") return { out: f.catalogueBranch, code: 0 };
-  if (argv[0] === "rev-parse") return { out: f.catalogueHead, code: 0 };
+  if (f.programsBranch === undefined) return { out: "fatal: not a git repository", code: 128 };
+  if (argv[0] === "symbolic-ref") return { out: f.programsBranch, code: 0 };
+  if (argv[0] === "rev-parse") return { out: f.programsHead, code: 0 };
   if (argv[0] === "fetch") {
-    return argv[1] === "origin" && argv[2] === f.catalogueBranch
-      ? { out: "", code: f.catalogueFetchExit }
+    return argv[1] === "origin" && argv[2] === f.programsBranch
+      ? { out: "", code: f.programsFetchExit }
       : { out: `fatal: couldn't find remote ref ${argv[2] ?? ""}`, code: 128 };
   }
   if (argv[0] === "reset" && argv[1] === "--hard") {
-    if (argv[2] !== `origin/${f.catalogueBranch}`) return { out: `fatal: ambiguous argument '${argv[2] ?? ""}'`, code: 128 };
-    f.catalogueHead = f.catalogueRemoteHead;
-    return { out: `HEAD is now at ${f.catalogueHead}`, code: 0 };
+    if (argv[2] !== `origin/${f.programsBranch}`) return { out: `fatal: ambiguous argument '${argv[2] ?? ""}'`, code: 128 };
+    f.programsHead = f.programsRemoteHead;
+    return { out: `HEAD is now at ${f.programsHead}`, code: 0 };
   }
   return undefined;
 }

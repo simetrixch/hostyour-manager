@@ -29,7 +29,7 @@
 //                elsewhere names that other cluster here.
 //   release      the platform release tag this cluster stands on, in the one release grammar
 //                (shared/release.ts). Nothing in this process reads or writes it: it is written
-//                outside this manager and read by the catalogue's branch regeneration program.
+//                outside this manager and read by the programs checkout's branch regeneration program.
 //                Declared and validated here so a map rewrite carries it instead of deleting it.
 //   master       the managing master's FQDN. Present exactly for a cluster carrying the slave part.
 //   apiHost      the address the master's IN-CLUSTER components dial the slave's kube-apiserver
@@ -39,7 +39,7 @@
 //                never which network carries it. Four components read the address this field feeds:
 //                the master's per-slave ArgoCD instance, Vault on every ESO login, the shared
 //                dashboard's kubeconfig, and this process's per-slave kube client, which writes.
-//                A master's map carries apiHost alone: its own tailnet address, which the catalogue's
+//                A master's map carries apiHost alone: its own tailnet address, which the programs checkout's
 //                tailnet-record-address records and the fence of a mail sender's SMTP entry admits
 //                (hostyour-cloud#242). The slaves ApplicationSet selects on role, so it stays out.
 //   unit-apex    the public apex units (consumers and tenants) serve under, <name>.<unit-apex>.
@@ -104,7 +104,7 @@ const ClusterMarkingFileSchema = z.object({
   // Optional because maps predating the key are still valid markings; every map the deployment
   // programs write (cluster-map.tpl) and every slave map mark-slave writes carries it.
   booksCluster: z.string().min(1).optional(),
-  // Carried, never read or written by this process — the catalogue's branch regeneration program
+  // Carried, never read or written by this process — the programs checkout's branch regeneration program
   // reads it. Checked against the release grammar rather than accepted as free text: the field IS a
   // pin, and a value the grammar does not recognise names no state anything can be regenerated from.
   release: z.string().regex(RELEASE_TAG_RE, "must be a release tag <x.y.z>-<channel>-<ts14>").optional(),
@@ -144,7 +144,7 @@ const ClusterMarkingFileSchema = z.object({
     // time of nothing. Optional because the maps that predate the key are still valid markings.
     timeSources: z.array(z.string().min(1)).min(1).optional(),
     // The registry's two accounts BY NAME, as the map template writes them. Optional because
-    // the maps that predate the key are still valid markings, and because the catalogue
+    // the maps that predate the key are still valid markings, and because the programs checkout
     // declares a default for each — a map that states neither leaves that default standing.
     registryPullUser: z.string().min(1).optional(),
     registryPushUser: z.string().min(1).optional(),
@@ -190,7 +190,7 @@ export interface ClusterMarking {
   /** The FQDN of the cluster that builds this one's images (own fqdn when buildPlane). */
   buildPlaneFqdn: string;
   /** The platform release tag the cluster stands on. Carried, never read or written here — it is
-   *  written outside this manager and read by the catalogue's branch regeneration program. */
+   *  written outside this manager and read by the programs checkout's branch regeneration program. */
   release?: string;
   master?: string;
   apiHost?: string;
@@ -219,7 +219,7 @@ export interface ClusterMarking {
    *  machine-layer programs of a machine that joins later, the way the three above are. */
   timeSources?: string[];
   /** The registry's two accounts, by name. Handed to the machine-layer programs of a machine
-   *  that joins later, because the catalogue declares a DEFAULT for each: a run that is not
+   *  that joins later, because the programs checkout declares a DEFAULT for each: a run that is not
    *  told them writes the default into the installation's own credentials file and over the
    *  operator's answer, and the registry the first release pulls from then rejects the
    *  account the build presents (hostyour-manager#128). */

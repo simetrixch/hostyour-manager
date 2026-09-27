@@ -215,7 +215,7 @@ const EnvSchema = z.object({
   // Cloudflare accepts; "default" is the unrestricted one and what an installation that never
   // answered gets, so a map written before this key existed still resolves to the same buckets.
   CLOUDFLARE_R2_JURISDICTION: z.enum(["default", "eu", "fedramp"]).default("default"),
-  // WHERE THE DEPLOYMENT PROGRAMS COME FROM — the repository cloned to /srv/ansiwise-catalog on a
+  // WHERE THE DEPLOYMENT PROGRAMS COME FROM — the repository cloned to /srv/ansiwise-programs on a
   // machine that carries none, and the tree the serving binary reads every program and its
   // ansiwise.yaml out of. It is `owner/name`, and the URL is composed the same way every other
   // repository's is (https, never with embedded credentials).
@@ -231,7 +231,7 @@ const EnvSchema = z.object({
   DEPLOY_PROGRAMS_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'DEPLOY_PROGRAMS_REPO must be "owner/repo"'),
   // The machine-side deployment programs. The redeploy master arm drives deploy-cluster /
   // deploy-platform-services through the serving binary's SESSION door on the target machine; this is the
-  // command that starts that surface over the run's SSH session — and so names WHICH catalogue
+  // command that starts that surface over the run's SSH session — and so names WHICH programs checkout
   // checkout the service reads its programs from, which is the installation's decision, never an
   // assumption. It is `ansiwise-rest serve` and not `ansiwise-rest serve`: `serve` is a program of the
   // SERVING binary, and the deployment tool answers "no program is called serve". Absent ⇒ the
@@ -430,7 +430,7 @@ export interface Config {
     jurisdiction: "default" | "eu" | "fedramp";
   };
   /** The deployment programs repository as a URL git can clone (DEPLOY_PROGRAMS_REPO) — what a
-   *  machine's /srv/ansiwise-catalog is made from when it carries none. Always present: the
+   *  machine's /srv/ansiwise-programs is made from when it carries none. Always present: the
    *  repository is the product's own and the setting defaults to it, and it carries no credential
    *  because the repository is public. */
   deployProgramsRepoUrl: string;

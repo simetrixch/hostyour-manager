@@ -235,7 +235,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // SATISFIED when the credential is simply absent: it warns, writes no mirror, and the cluster
       // then pulls every image from the rate-limited public path with nothing anywhere saying so.
       // So the value not being there is a refusal on this side, before deploy-cluster is asked to
-      // do anything — the same shape as the answer being composed and the machine's own catalogue
+      // do anything — the same shape as the answer being composed and the machine's own programs checkout
       // declaring no such answer, which composeAnswers would otherwise drop in silence.
       const h = await deployWorld(serve(), { withoutCarriedValues: true });
 
@@ -303,10 +303,10 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // fresh first contact meets exactly the machine the run started from.
       expect(h.hosts.passwordLogin).toBe("yes");
       expect(h.hosts.authorizedKeys).toEqual([IMAGE_KEY_LINE]);
-      // And nothing this platform wrote is left: no catalogue, and neither executable answers
+      // And nothing this platform wrote is left: no programs checkout, and neither executable answers
       // `--version` any more (deploy-slave.placement.fixture.ts deletes the file the send names, so
       // this is read off what the machine holds rather than off a command it was given).
-      expect(h.hosts.catalogueBranch).toBeUndefined();
+      expect(h.hosts.programsBranch).toBeUndefined();
       expect(h.hosts.files.filter((f) => f.host === "10.1.1.11" && f.path.includes("ansiwise"))).toEqual([]);
       // THE MASTER KEEPS WHAT THE RUN BROUGHT IT. The engine placed on the master before the mint
       // (#133) is the master's own machine layer at the pin, not a per-slave state, and an abort
@@ -396,7 +396,9 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // The machine layer and the handshake re-ran, each dry-proven; the join did not, on either
       // machine's records.
       const all = await observer().runs();
-      expectProven(serve(), h.db, r.runId, all, ["deploy-host", "deploy-cluster", "deploy-platform-services", "emit-cluster-credentials", "register-slave"]);
+      expectProven(serve(), h.db, r.runId, all, [
+        "deploy-host", "deploy-cluster", "deploy-platform-services", "move-programs-checkout", "emit-cluster-credentials", "register-slave",
+      ]);
       expectAbsent(h.db, r.runId, all, ["tailnet-mint-join-key", "tailnet-rejoin"]);
 
       // AND WHAT DECIDED THE SECOND OF THOSE, because it is a MEASUREMENT here and not a step left

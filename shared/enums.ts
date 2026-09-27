@@ -562,7 +562,7 @@ export const LOCK_RESOURCE = ["server", "git-branch", "master-kube",
 export type LockResource = (typeof LOCK_RESOURCE)[number];
 
 /** What receivers do with mail that fails DMARC alignment — the `p=` of the DMARC record the
- *  catalogue's publish-mail-dns writes. Start at none (reports without enforcement) and tighten once
+ *  programs checkout's publish-mail-dns writes. Start at none (reports without enforcement) and tighten once
  *  the reports show only the installation's own mail. */
 export const DMARC_POLICY = ["none", "quarantine", "reject"] as const;
 export type DmarcPolicy = (typeof DMARC_POLICY)[number];

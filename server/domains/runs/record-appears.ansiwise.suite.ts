@@ -10,7 +10,7 @@ import {
 // about it.
 //
 // A 202 says the run is GOING, not that its record exists: the child is detached, and everything it
-// does before its first header — parsing the catalogue, MEASURING the program's answer conditions
+// does before its first header — parsing the programs checkout, MEASURING the program's answer conditions
 // against the machine over real shell and HTTP calls, spawning `git rev-parse`, listing the run root
 // for the gate — happens after the door has answered. Nothing serialises two runs, and on a master
 // there is always a second one, because hostyour-vault-unseal.timer asks the secret store whether it

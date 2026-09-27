@@ -87,7 +87,7 @@ async function readClusterCredentials(ctx: StepCtx, session: SshSession, signal:
 
 /** `create-mgmt`: emit the slave's management credentials on the slave, carry them over the
  *  sessions this run already holds, and register the slave on the master — both acts programs of
- *  the machine's own catalogue, each proven by a dry run the machine's gate then admits the real
+ *  the machine's own programs checkout, each proven by a dry run the machine's gate then admits the real
  *  run against. ONE step, the rejoin step's shape and for the same reason: the credentials file is
  *  deleted the moment it is read, so a step that inherited the values from an earlier one could
  *  never be retried on its own — a retry emits again (the emit re-reads the same long-lived token

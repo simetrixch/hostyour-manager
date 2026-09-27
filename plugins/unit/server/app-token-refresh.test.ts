@@ -88,7 +88,7 @@ async function registrations(): Promise<Registrations> {
   return reg;
 }
 
-// THE DEPLOY REPOSITORY'S BUMP ENTRY (#197): the App's token is written to build/catalog/repo-pat on
+// THE DEPLOY REPOSITORY'S BUMP ENTRY (#197): the App's token is written to build/deploy/repo-pat on
 // every tick and bump-git-https is deleted in EVERY build namespace, because every unit's release
 // pushes the deploy repository's books branch with that one entry — the App is the deploy
 // repository's one identity (hostyour-cloud#237).

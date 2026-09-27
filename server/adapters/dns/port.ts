@@ -11,7 +11,7 @@
 // TXT rides the same three calls because the mail records of a sender domain (SPF, DKIM, DMARC) are
 // records of this installation too: the DNS inventory reads them and `dns-remove` and
 // `mail-dns-unpublish` take them back (plugins/unit/server/dns/dns-inventory.ts). Publishing them stays
-// the catalogue's publish-mail-dns program — one writer, as mail-dns-publish's header states — so
+// the programs checkout's publish-mail-dns program — one writer, as mail-dns-publish's header states — so
 // what enters through here for a TXT name is the READING and the REMOVAL, never a second writer of
 // the published content.
 

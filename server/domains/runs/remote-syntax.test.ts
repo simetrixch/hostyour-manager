@@ -337,8 +337,8 @@ describe("the second census: no word this manager composes names a program the e
   it.each([
     ["the version reading, whose word is an option", [`${PATH_HOME}${ANSIWISE_REST_TOOL}`, "--version"]],
     ["the raised copy, whose next word is a path", ["sudo", "-S", "install", "-m", EXECUTABLE_MODE.toString(8), `${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`, `${PATH_HOME}${ANSIWISE_REST_TOOL}`]],
-    ["the serve command an installation configures", ["cd", "/srv/ansiwise-catalog", "&&", `${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`, ANSIWISE_SESSION_PROGRAM, "--programs", "ansiwise/programs"]],
-    ["the deployment tool, whose programs are the machine's catalogue and not this repository's to know", [ANSIWISE_TOOL, "deploy-cluster", "--mode", "test"]],
+    ["the serve command an installation configures", ["cd", "/srv/ansiwise-programs", "&&", `${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`, ANSIWISE_SESSION_PROGRAM, "--programs", "ansiwise/programs"]],
+    ["the deployment tool, whose programs are the machine's programs checkout and not this repository's to know", [ANSIWISE_TOOL, "deploy-cluster", "--mode", "test"]],
   ])("reads past %s", (_what, words) => {
     expect(findUnknownProgram(words)).toBeUndefined();
   });

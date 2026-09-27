@@ -3,7 +3,7 @@ import { ANSIWISE_RUN_ROOT, MANAGER_HANDS_OVER } from "./machine-state.ts";
 
 // `place-ansiwise` — the BOOTSTRAP, and the whole of what this repository does to a machine with its
 // own hands. Everything a machine is afterwards given is given by a PROGRAM: a named row in the
-// installation's catalogue, resolved against the registry the binary was compiled with, measured in
+// installation's programs checkout, resolved against the registry the binary was compiled with, measured in
 // `test`, shown in `dry` and only then run. This module exists because that apparatus needs an
 // executable to exist before it can measure anything at all, and a machine at its first installation
 // carries none.
@@ -50,9 +50,9 @@ import { ANSIWISE_RUN_ROOT, MANAGER_HANDS_OVER } from "./machine-state.ts";
 //   the PACKAGES   `deploy-host`'s `install_packages` row installs git, openssl, curl, jq and
 //                  apache2-utils. The bootstrap needs none of them now: the manager fetches the
 //                  bytes and SFTP carries them.
-//   the CHECKOUTS  `/srv/ansiwise-catalog` is `git_clone`'s (hostyour-deploy
+//   the CHECKOUTS  `/srv/ansiwise-programs` is `git_clone`'s (hostyour-deploy
 //                  ansiwise/programs/), and where a machine carries none the placement step makes
-//                  it itself (machine-catalogue.ts) — a clone with nothing standing in front of it,
+//                  it itself (machine-programs.ts) — a clone with nothing standing in front of it,
 //                  because the deployment programs are a public repository.
 //
 //                  `/srv/hostyour-cloud` is `deploy-host`'s own `git_clone` row. That row takes the
@@ -101,9 +101,9 @@ export const ANSIWISE_EXECUTABLES = [ANSIWISE_TOOL, ANSIWISE_REST_TOOL] as const
  *  BUILD rather than of a machine.
  *
  *  ONE ENTRY, AND THE OTHER BINARY'S ABSENCE IS THE STATEMENT. `ansiwise-rest` decides a word before
- *  it opens a configuration or a catalogue, so what it serves is settled where it is compiled.
- *  `ansiwise` resolves a word against the CATALOGUE STANDING ON THE MACHINE (ansiwise-cli
- *  bin/ansiwise.dart, `catalogue.byName` → `no program is called "<word>"`, listing what that
+ *  it opens a configuration or a programs checkout, so what it serves is settled where it is compiled.
+ *  `ansiwise` resolves a word against the PROGRAMS CHECKOUT STANDING ON THE MACHINE (ansiwise-cli
+ *  bin/ansiwise.dart, `programs checkout.byName` → `no program is called "<word>"`, listing what that
  *  machine carries), so no set written here could ever be true of it and none is written. A binary
  *  this record does not carry is one no word can be held against — a fact about where the answer
  *  lives, and not an exemption from the rule.
@@ -483,7 +483,7 @@ function describeExecutables(version: string): string {
  *  statement this module wrote and this module reads back, so it says what the placement INTENDED
  *  and never what the file is. Both binaries answer their release tag on
  *  one line and nothing else on it (ansiwise-cli lib/installation.dart `answeredVersion`), and it is
- *  answered before a program is looked for, so it works on a machine carrying no catalogue at all. */
+ *  answered before a program is looked for, so it works on a machine carrying no programs checkout at all. */
 async function readVersions(
   machine: PlacementMachine,
   where: string,

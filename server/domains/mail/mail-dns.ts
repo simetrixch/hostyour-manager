@@ -9,7 +9,7 @@ import type { PublicDns } from "../../adapters/dns/public-dns.ts";
 import { resolveClusterMarking } from "../inventory/cluster-marking.ts";
 
 // The mail DNS of the installation, MEASURED: what receivers find at public DNS, held against what the
-// master's map and address say they must find. Read-only — the writer is the catalogue's
+// master's map and address say they must find. Read-only — the writer is the programs checkout's
 // publish-mail-dns program, run by mail-dns-publish; this page is what tells the operator whether to
 // run it, and what only the hosting provider can set (the reverse DNS).
 //

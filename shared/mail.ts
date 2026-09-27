@@ -5,7 +5,7 @@
 import type { DmarcPolicy, Stage } from "./enums.ts";
 
 /** POST /api/runs {kind: "mail-dns-publish"} — the mail DNS of ONE of the two sender domains (the
- *  master's map names both), published from the master by the catalogue's publish-mail-dns program.
+ *  master's map names both), published from the master by the programs checkout's publish-mail-dns program.
  *  The two DMARC values are the operator's; the egress address is read off the master's own A record. */
 export interface MailDnsPublishInput {
   serverId: string;

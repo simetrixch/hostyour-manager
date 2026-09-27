@@ -15,7 +15,7 @@ import {
 // nothing can say which of them the manager should open a wire to.
 //
 // The join is where this is cleared, because the join is the act that makes the standing node dead:
-// the catalogue's join programs discard the machine's node key as their first step.
+// the programs checkout's join programs discard the machine's node key as their first step.
 
 const OWNER = PARAMS.domain.split(".")[0]!;
 const STAGE = PARAMS.stage as Stage;

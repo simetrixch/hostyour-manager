@@ -40,11 +40,11 @@ export const PREFLIGHT_CATALOG: Record<string, CatalogEntry> = {
   "net.egress": { title: "Outbound internet", severity: "hard", hint: "The installer needs egress for the repo, snaps, and Let's Encrypt." },
   "snapd.present": { title: "snapd installed", severity: "soft", hint: "apt install snapd (provision can install it)." },
   // HARD, because the machine has to carry git BEFORE anything installs it. place-ansiwise clones
-  // the catalogue with plain `git` (defs/machine-catalogue.ts) and it stands one step in front of
+  // the programs checkout with plain `git` (defs/machine-programs.ts) and it stands one step in front of
   // deploy-host, which is the program whose install_packages row puts git on a machine. So the
   // deployment cannot bootstrap its own clone tool, and a box without it dies at the placement with
   // "git: command not found" rather than here, where the sentence names the fix.
-  "git.present": { title: "git installed", severity: "hard", hint: "apt install git — the catalogue is cloned with plain git one step before the program that would install it." },
+  "git.present": { title: "git installed", severity: "hard", hint: "apt install git — the programs checkout is cloned with plain git one step before the program that would install it." },
   "time.sync": { title: "Clock synchronized", severity: "soft", hint: "Enable NTP: timedatectl set-ntp true (TLS/LE dislike clock skew)." },
   // deploy-slave extra (the master's Vault must answer from the slave —
   // the per-slave KV mount lives there and slave-ESO authenticates against it.
@@ -109,12 +109,12 @@ export function portCheck(reading: PortReading): PreflightCheck {
 }
 
 // ---- deploy-slave HARD policy (the slave must reach the master's Vault) --------------------
-// Additive: the parsed checks stand as the catalogue grades them; only the slave-preflight step maps
+// Additive: the parsed checks stand as the programs checkout grades them; only the slave-preflight step maps
 // them through this policy.
 
 /** Preflight checks whose WARN outcome is fatal on a SLAVE deploy: Traefik must own
  *  80/443 (`ingress` addon) and MicroK8s arrives via snap, so "port already served" /
- *  "snapd missing" — mere warnings as the catalogue grades them — mean the box cannot be deployed. */
+ *  "snapd missing" — mere warnings as the programs checkout grades them — mean the box cannot be deployed. */
 export const SLAVE_FAIL_ON_WARN: ReadonlySet<string> = new Set(["port.80", "port.443", "snapd.present"]);
 
 /** The two ingress ports, whose served-ness a REDEPLOY reads the other way round: a live slave's
@@ -124,7 +124,7 @@ export const SLAVE_FAIL_ON_WARN: ReadonlySet<string> = new Set(["port.80", "port
 const INGRESS_PORTS: ReadonlySet<string> = new Set(["port.80", "port.443"]);
 
 /** The deploy-slave severity re-map (shared/preflight.ts: soft checks are "re-evaluated
- *  as hard by the deploy preflight") — a box that passes the catalogue's own grading may still
+ *  as hard by the deploy preflight") — a box that passes the programs checkout's own grading may still
  *  be un-deployable. Every check becomes `hard` (any FAIL now blocks), and the
  *  SLAVE_FAIL_ON_WARN warns are promoted to fails. Pure over the parsed checks.
  *
@@ -277,7 +277,7 @@ export function formatNicsLine(parsed: ParsedPreflight): string {
 //
 // WHAT THIS SCRIPT DOES NOT MEASURE, and it is deliberate: the machine's Ubuntu release, its
 // processor count, its memory and its free disk. deploy-host refuses a machine on all four, on the
-// machine itself, out of the catalogue (hostyour-deploy ansiwise/programs/deploy-host.yaml —
+// machine itself, out of the programs checkout (hostyour-deploy ansiwise/programs/deploy-host.yaml —
 // require_pinned_ubuntu, require_machine_size, require_free_disk). Two readings of one fact are two
 // floors to keep in step, and the program's is the one an operator can read off the machine's own
 // record.

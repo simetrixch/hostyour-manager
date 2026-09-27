@@ -33,7 +33,7 @@ export interface DeploySlavePorts {
    *  with — the ONE thing about the checkout a bare machine cannot read off itself, because the
    *  checkout is what the row establishes.
    *
-   *  IT IS THIS INSTALLATION'S FACT AND NOT THE CATALOGUE'S. A repository written into a program
+   *  IT IS THIS INSTALLATION'S FACT AND NOT THE PROGRAMS CHECKOUT'S. A repository written into a program
    *  file would be one installation's shipped to every installation (hostyour-deploy
    *  ansiwise/programs/deploy-host.yaml says so in its own header), and the manager already holds
    *  it: GITHUB_REPO and GITHUB_OWNER are what its own platform repo is built from.

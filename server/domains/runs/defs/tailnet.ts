@@ -5,7 +5,7 @@ import { tailnetPlan, tailnetSteps, type TailnetPorts } from "./tailnet.kit.ts";
 // The three tailnet repair run kinds and the reading beside them. Each is a run like every other: a
 // plan, an approval, steps and a log — and each reaches its host on the PUBLIC address, because an
 // act that takes a host off the private network, or puts it back, cannot travel over that network.
-// Each act is a PROGRAM of the machine's own catalogue (hostyour-deploy ansiwise/programs/), driven
+// Each act is a PROGRAM of the machine's own programs checkout (hostyour-deploy ansiwise/programs/), driven
 // over the machine's `ansiwise-rest serve` surface; the shared steps and the plan live in
 // tailnet.kit.ts, and what stands here is the one thing that must be written out per run kind, its
 // own `kind` literal (the source census in run-definitions-census.test.ts reads exactly that field).

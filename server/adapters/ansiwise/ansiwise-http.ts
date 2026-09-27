@@ -81,7 +81,7 @@ export class AnsiwiseClient {
   }
 
   /** `GET /programs/{name}` — one program with its declared answers, which is where the manager
-   *  learns WHICH answers to compose instead of carrying a copy of the catalogue. */
+   *  learns WHICH answers to compose instead of carrying a copy of the programs checkout. */
   async program(name: string, opts: AnsiwiseCallOptions = {}): Promise<AnsiwiseProgram> {
     return AnsiwiseProgram.parse(await this.#json("GET", `/programs/${encodeURIComponent(name)}`, undefined, opts));
   }

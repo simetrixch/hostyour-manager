@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // The REMOTE surface of the deploy-slave Run: the few shell scripts and kubectl commands the
 // steps still ship to the two hosts, plus the contracts they parse back. Everything that BUILDS
-// the slave is a deployment PROGRAM of the machine's own catalogue (hostyour-deploy
+// the slave is a deployment PROGRAM of the machine's own programs checkout (hostyour-deploy
 // ansiwise/programs/) driven over `ansiwise-rest serve` — what stands here is only what the manager
 // does around those programs: the DNS probe, the credentials-file handover, the two gates that read
 // the SLAVE's own cluster, and the master-side diagnostic bundle. What is NOT here any more is

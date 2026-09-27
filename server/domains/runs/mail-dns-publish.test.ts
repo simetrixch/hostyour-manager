@@ -12,7 +12,7 @@ import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import type { MailEgress } from "../../../shared/mail.ts";
 import { bookedProgramStep, makeMailDnsPublishDef, mailDnsAnswers, readPublishedRecords, senderRoleOf, type MailDnsPublishParams, type MailDnsPublishPorts } from "./defs/mail-dns-publish.ts";
 
-// mail-dns-publish runs the catalogue's publish-mail-dns on the master for ONE of the two sender
+// mail-dns-publish runs the programs checkout's publish-mail-dns on the master for ONE of the two sender
 // domains the master's map names. What these tests hold: the plan stands only on a master and only
 // for one of those two names, the program is answered with the Mail page's reading of where the
 // stage's mail leaves (never typed) and, for the platform domain, the key the stage's sender signs it
@@ -132,7 +132,7 @@ describe("what publish-mail-dns is answered with", () => {
   });
 });
 
-/** What the catalogue's program leaves in the zone, played by a step that writes the fake provider
+/** What the programs checkout's program leaves in the zone, played by a step that writes the fake provider
  *  the way publish-mail-dns writes Cloudflare: the SPF merged at the apex beside whatever TXT stands
  *  there, the key under the selector, the policy under _dmarc. It checkpoints, so the test can see
  *  the decoration keep its checkpoint apart from the program's. */

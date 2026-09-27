@@ -68,7 +68,7 @@ export function serializePointer<T extends object>(schema: z.ZodType<T>, entry: 
  *  `registrations/hostyour-manager/build.yaml` was once rendered onto the branch from a template of
  *  the deployment programs, in a commented dialect the flat reader failed on at its first comment
  *  line — which is where the asymmetry above comes from and why it stays. That template is gone and
- *  no program renders a registration any more: the catalogue's `onboard-manager` asks this Manager
+ *  no program renders a registration any more: the programs checkout's `onboard-manager` asks this Manager
  *  to onboard its own unit over the route every other consumer takes, so the file arrives in
  *  serializePointer's own dialect, and `deploy-branch` — the one program that writes an install
  *  branch — names no registrations path, down to the directory list its commit row carries. Nothing

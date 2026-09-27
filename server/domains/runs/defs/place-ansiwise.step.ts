@@ -9,7 +9,7 @@ import {
   type PlacementMachine, type BootstrapVerdict,
 } from "./place-ansiwise.ts";
 import type { ReleaseDownloads } from "../../../adapters/downloads/port.ts";
-import { refreshCatalogue } from "./machine-catalogue.ts";
+import { refreshPrograms } from "./machine-programs.ts";
 
 // The manager's half of the BOOTSTRAP: the step deploy-slave, redeploy and cluster-deploy-master
 // each run, and the resolution only a manager can do. The bootstrap itself (place-ansiwise.ts) takes
@@ -65,8 +65,8 @@ function requireDownloads(ports: AnsiwisePorts): ReleaseDownloads {
  *  WHAT THIS STEP DOES NOT PLACE is written out in place-ansiwise.ts, with what does place each of
  *  them: the packages are deploy-host's `install_packages` row, and the platform tree is that same
  *  program's `git_clone` row, whose credential — where a repository ever needs one — is a value only
- *  such a row may hold. The CATALOGUE is this step's, both to make and to bring forward
- *  (machine-catalogue.ts): the deployment programs are a public repository, so making one asks
+ *  such a row may hold. The PROGRAMS CHECKOUT is this step's, both to make and to bring forward
+ *  (machine-programs.ts): the deployment programs are a public repository, so making one asks
  *  nothing of this step that bringing one forward does not.
  *
  *  A machine at its FIRST installation stands in no server row, so it cannot start THIS step. Keeping
@@ -75,7 +75,7 @@ function requireDownloads(ports: AnsiwisePorts): ReleaseDownloads {
 export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): Step {
   return {
     name: "place-ansiwise",
-    title: "Place the engine at the pinned version, and bring the catalogue it is judged by with it",
+    title: "Place the engine at the pinned version, and bring the programs checkout it is judged by with it",
     run: (ctx) => placeOn(ctx, ports, loadServer(ctx.db, target.serverId)),
   };
 }
@@ -83,7 +83,7 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
 /** The same act on the MASTER, from a run whose own target is another machine: the slave deploy and
  *  the rejoin mint a credential on the master through the master's own `ansiwise-rest`, and until
  *  #133 that surface was whatever engine the master had carried since its installation — nothing
- *  but a redeploy of the master ever moved it, while the catalogue every program is read out of is
+ *  but a redeploy of the master ever moved it, while the programs checkout every program is read out of is
  *  always master. A row that names a step the master's engine does not carry was refused in the run
  *  that needed it. The master is loaded at RUN time, as the mint loads it, and reached over the
  *  session the plan declares for it (`ctx.ssh(master.id)`, the aux target); the act is the
@@ -91,7 +91,7 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
 export function placeAnsiwiseOnMasterStep(ports: DeploySlavePorts & AnsiwisePorts, opts: { host?: string } = {}): Step {
   return {
     name: "place-ansiwise-master",
-    title: "Place the engine on the master at the pinned version, and bring its catalogue with it",
+    title: "Place the engine on the master at the pinned version, and bring its programs checkout with it",
     run: async (ctx) => {
       const master = loadMaster(ctx.db);
       // A host that carries the master part IS the master: the placement on the host, one step
@@ -124,25 +124,25 @@ async function placeOn(
     account: server.sshUser,
     elevationPassword: requireElevationPassword(ctx),
   });
-  // AND THE CATALOGUE THE ENGINE IS JUDGED BY, in the same step and before any program. The
+  // AND THE PROGRAMS CHECKOUT THE ENGINE IS JUDGED BY, in the same step and before any program. The
   // machine's cluster program asserts the placed engine against the version stamped into the
-  // catalogue ON THE MACHINE, and the catalogue is refreshed by a row of a program that is
-  // itself read out of the catalogue — so without this a pin move reaches an installed machine
-  // one program after the row that asserts it. A machine carrying no catalogue is untouched,
+  // programs checkout ON THE MACHINE, and the programs checkout is refreshed by a row of a program that is
+  // itself read out of the programs checkout — so without this a pin move reaches an installed machine
+  // one program after the row that asserts it. A machine carrying no programs checkout is untouched,
   // which is what keeps the birth of a machine out of this: the row cannot go into the first
   // program a machine runs, because it needs an answer the client's first-master flow does not
   // send, and nothing here asks a program for anything.
-  const catalogue = await refreshCatalogue(
+  const programs = await refreshPrograms(
     await placementMachine(ctx, server.name, sessionId),
-    ports.catalogueOrigin === undefined
+    ports.programsOrigin === undefined
       ? undefined
       : {
-          ...ports.catalogueOrigin,
+          ...ports.programsOrigin,
           account: server.sshUser,
           elevationPassword: requireElevationPassword(ctx),
         },
   );
-  ctx.checkpoint({ ...verdict, ...handed, catalogue });
+  ctx.checkpoint({ ...verdict, ...handed, programs });
 }
 
 /** The bootstrap's manager half: the pin and the address resolved out of this installation, and the

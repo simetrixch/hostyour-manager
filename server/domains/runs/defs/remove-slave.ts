@@ -240,9 +240,9 @@ function retireRowsStep(serverId: string): Step {
 export function removeSlaveSteps(serverId: string, ports: RemoveSlavePorts): Step[] {
   return [
     attestTargetStep(serverId),
-    // THE CATALOGUE THE REMOVAL IS READ OUT OF, brought to the head of its branch first, as every
+    // THE PROGRAMS CHECKOUT THE REMOVAL IS READ OUT OF, brought to the head of its branch first, as every
     // other run that drives a program on the master brings it: the remove program is asked the
-    // slave's name, and a catalogue from before that question would refuse the answer.
+    // slave's name, and a programs checkout from before that question would refuse the answer.
     placeAnsiwiseOnMasterStep(ports),
     removePlaneStep(serverId, ports),
     machineSideStep(leaveHostCleanup(ANSIWISE_ELEVATION_SECRET)),

@@ -37,7 +37,7 @@ import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
 
 // "cluster-deploy-slave" — the Run that gives a server the SLAVE PART, over the deployment PROGRAMS
-// of the machine's own catalogue (hostyour-deploy ansiwise/programs/), each driven over
+// of the machine's own programs checkout (hostyour-deploy ansiwise/programs/), each driven over
 // `ansiwise-rest serve` and proven by a dry run the machine's gate then admits the real run against.
 //
 // ONE ARM, over TWO HOSTS: the MASTER marks the slave in its books and takes its registration
@@ -57,7 +57,7 @@ import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
 // run sends and, on a machine holding no key of this manager's, opens the first login too.
 //
 // Before the first of those programs, place-ansiwise puts the binary they are driven through, the
-// catalogue they are read from and the platform checkout they act on onto the slave: a bare machine
+// programs checkout they are read from and the platform checkout they act on onto the slave: a bare machine
 // carries none of them, and every program step would otherwise open a conversation with a command
 // that is not there.
 //
@@ -338,7 +338,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
       title: "Preflight the slave (hard policy)",
       run: async (ctx) => {
         // The machine's checks under the SLAVE-HARD policy: every severity becomes hard, and the
-        // two ingress ports and a missing snapd — which the catalogue grades soft, because a box
+        // two ingress ports and a missing snapd — which the programs checkout grades soft, because a box
         // carrying either is still a box — are promoted to failures, since a slave needs Traefik to
         // own 80/443 and MicroK8s arrives as a snap (preflight.ts SLAVE_FAIL_ON_WARN).
         //
@@ -559,10 +559,10 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         ctx.checkpoint({ branch: domain, apiHost, changed });
       },
     },
-    // The binary every program act below is spoken to through, the catalogue those programs are read
+    // The binary every program act below is spoken to through, the programs checkout those programs are read
     // from, and the platform checkout they act on. It stands FIRST among the machine-side acts
     // because none of them can run without all three: `ansiwise-rest serve` is a binary reading a
-    // catalogue, and a machine at its first installation carries none of them. Idempotent by
+    // programs checkout, and a machine at its first installation carries none of them. Idempotent by
     // measurement, which is what lets a redeploy run the same step against a machine that carries them.
     //
     // leave-host is armed HERE, before the first thing this platform writes on the machine, and it
@@ -600,6 +600,9 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // deploy-platform-services also declares elevation_password — the ENGINE fills that one from the
     // password the POST carries beside the answers; sending it as an answer is refused.
     ansiwiseProgramStep(target, "deploy-platform-services", ports, { extra: machineAnswers }),
+    // A redeploy carries a slave still standing with the programs checkout at its old path across; a
+    // slave deployed now is given the new path and would find nothing to do.
+    ...(redeploying ? [ansiwiseProgramStep(target, "move-programs-checkout", ports, { extra: machineAnswers })] : []),
     // THE JOIN, and WHICH join is the one thing this guard still decides. A deployment joins the
     // machine outright: mint on the master, carry the credential over the session, spend it in ONE
     // program run on the slave (the tailnet kit's own step, because a first join is the same act —
@@ -613,7 +616,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // THE MASTER'S ENGINE FIRST, because the join below mints on the master through the master's
     // own `ansiwise-rest`, and the master's engine moves only when a run moves it (#133): every
     // slave deployed after a release of the engine would otherwise ask the master's OLD binary to
-    // run a catalogue row the new one was released for. Idempotent by measurement; on a current
+    // run a programs checkout row the new one was released for. Idempotent by measurement; on a current
     // master it is two readings.
     placeAnsiwiseOnMasterStep(ports),
     ...(redeploying

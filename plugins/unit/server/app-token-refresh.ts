@@ -38,10 +38,9 @@ import { appReachesRepoURL } from "./repo-identity.ts";
 export const BUILD_TARGET_SECRETS = ["build-git-https", "bump-git-https", "build-npmrc"] as const;
 
 /** The entry the release pipeline's bump pushes the deploy repository's books branch with
- *  (hostyour-cloud consumer-build externalsecret-bump.yaml reads secret/build/catalog/repo-pat, the
- *  path the build policies on the machine grant): the seeder addresses it as the "unit" named
- *  catalog, which is exactly its path. */
-export const DEPLOY_BUMP_UNIT = "catalog";
+ *  (hostyour-cloud consumer-build externalsecret-bump.yaml reads secret/build/deploy/repo-pat): the
+ *  seeder addresses it as the "unit" named deploy, which is exactly its path. */
+export const DEPLOY_BUMP_UNIT = "deploy";
 
 export interface AppTokenRefreshDeps {
   store: Pick<CredentialStore, "list" | "open">;

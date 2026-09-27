@@ -42,7 +42,7 @@ const DEFS: Record<TailnetKind, RunDefinition<TailnetParams>> = {
 };
 
 /** The one manager-side step each run kind has between the shared attest and the shared read: the
- *  program step for the two single-host run kinds (named run-<program>, after the CATALOGUE program
+ *  program step for the two single-host run kinds (named run-<program>, after the PROGRAMS CHECKOUT program
  *  the kit maps the kind to), and the mint-carry-rejoin choreography for the third. The READ has
  *  none, and that absence is the run kind: attest the box, read it, stop. */
 const MIDDLE_STEP: Record<TailnetKind, string | null> = {

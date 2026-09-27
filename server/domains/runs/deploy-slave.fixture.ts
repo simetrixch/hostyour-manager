@@ -63,11 +63,11 @@ export const logger = createLogger(
 export const SLAVE_ID = "srv_slave1";
 export const MASTER_ID = "srv_master1";
 export const PARAMS = { serverId: SLAVE_ID, stage: FIXTURE_STAGE, domain: SLAVE_FQDN };
-/** The deployment programs this manager clones a machine's catalogue from, and the auth of its own
+/** The deployment programs this manager clones a machine's programs checkout from, and the auth of its own
  *  pull document. The pull auth is a secret: every case that reads the run's surface asserts it is
  *  nowhere in it, which is only a statement if it is a recognisable string. The origin is not one —
  *  the repository it names is public. */
-export const CATALOGUE_ORIGIN_URL = "https://github.com/acme/acme-deploy.git";
+export const PROGRAMS_ORIGIN_URL = "https://github.com/acme/acme-deploy.git";
 export const PULL_AUTH = "cHVsbGVyOnB1bGwtcGFzc3dvcmQ=";
 
 /** The document the manager's own mounted pull configuration is narrowed to for ONE registry
@@ -113,8 +113,10 @@ export const STEP_NAMES = [
  *  live slave they read a key that is installed, a login that works and doors that are already shut,
  *  and each says so; and a redeploy owes the card a reading of the membership as much as a
  *  deployment does. What a redeploy holds back is their compensations, which
- *  redeploy.ansiwise.test.ts asserts off the run's own checkpoints. */
-export const REDEPLOY_STEP_NAMES = STEP_NAMES.map((n) => n === "rejoin" ? "join-if-absent" : n);
+ *  redeploy.ansiwise.test.ts asserts off the run's own checkpoints. What it adds is the move of the
+ *  programs checkout off its old path, which a first installation never needs. */
+export const REDEPLOY_STEP_NAMES = STEP_NAMES.flatMap((n) =>
+  n === "rejoin" ? ["join-if-absent"] : n === "run-deploy-platform-services" ? [n, "run-move-programs-checkout"] : [n]);
 
 // The public half of the key `install-key` puts on the machine — deploy-host's operator_public_key answer is read
 // off the newest ssh_key credential's stored public line.
@@ -163,7 +165,7 @@ export const EMIT_CREDS_JSON = JSON.stringify(
   null, 2,
 );
 
-// A healthy slave preflight: the catalogue's checks + the slave musts (80/443 free, snapd present).
+// A healthy slave preflight: the programs checkout's checks + the slave musts (80/443 free, snapd present).
 export const HEALTHY_SLAVE_PREFLIGHT = [
   "CHECK os.arch PASS x86_64",
   "CHECK port.22 PASS sshd listening",
@@ -238,28 +240,28 @@ export interface HostsScript extends FirstContactScript {
   // by a file transfer and read back by asking the file — so a second run of a step measures what
   // the first one left, and a double-run assertion is about idempotence rather than about a value
   // the test changed in between.
-  /** The catalogue checkout at /srv/ansiwise-catalog, as the machine holds it. `catalogueBranch`
-   *  undefined is a machine that carries NO catalogue — `test -d` answers no and nothing else about
-   *  the checkout is asked. `catalogueRemoteHead` is what origin/<branch> stands on, so a reset
+  /** The programs checkout checkout at /srv/ansiwise-programs, as the machine holds it. `programsBranch`
+   *  undefined is a machine that carries NO programs checkout — `test -d` answers no and nothing else about
+   *  the checkout is asked. `programsRemoteHead` is what origin/<branch> stands on, so a reset
    *  MOVES the head to it and the reading after the reset answers the moved value: a caller that
    *  fetched and did not stand the tree on what it fetched is answered by a machine that did not
-   *  move. The DEFAULT is a machine that carries a catalogue one commit behind its origin, because
+   *  move. The DEFAULT is a machine that carries a programs checkout one commit behind its origin, because
    *  that is every machine these suites drive programs on.
    *
-   *  A machine with no catalogue answers no program at all, so this is deliberately not the default:
+   *  A machine with no programs checkout answers no program at all, so this is deliberately not the default:
    *  it is the shape a bare machine has, and it is asserted by the test that is about a bare one. */
-  catalogueBranch: string | undefined;
+  programsBranch: string | undefined;
   /** The branch a clone leaves the checkout standing on — the remote's own head, which is why this
-   *  manager names none: which branch a catalogue is read from belongs to the installation. */
-  catalogueClonesOnto: string;
+   *  manager names none: which branch a programs checkout is read from belongs to the installation. */
+  programsClonesOnto: string;
   /** What a clone exits with. Non-zero is a machine with no route to the repository, or an address
    *  that names none — the repository itself is public, so there is no credential to be wrong. */
-  catalogueCloneExit: number;
-  catalogueHead: string;
-  catalogueRemoteHead: string;
-  /** What `git fetch origin <branch>` answers in the catalogue — non-zero is a machine whose own
+  programsCloneExit: number;
+  programsHead: string;
+  programsRemoteHead: string;
+  /** What `git fetch origin <branch>` answers in the programs checkout — non-zero is a machine whose own
    *  read credential no longer opens its origin, or a tree git refuses as somebody else's. */
-  catalogueFetchExit: number;
+  programsFetchExit: number;
   /** One-shot exec fault injections: the FIRST exec whose command contains `match` REJECTS
    *  with Error(`message`) and the entry is consumed — e.g. a transport-level
    *  "(SSH) Channel open failure" mid-verify (the MaxSessions incident). */
@@ -317,12 +319,12 @@ export function scriptedHosts(overrides: Partial<HostsScript> = {}): HostsScript
     ].join(String.fromCharCode(10)),
     hostAddressesExit: 0,
     // A slave as deploy-slave meets it: adopted, and carrying neither executable yet.
-    catalogueBranch: "main",
-    catalogueClonesOnto: "main",
-    catalogueCloneExit: 0,
-    catalogueHead: "aaa1111",
-    catalogueRemoteHead: "bbb2222",
-    catalogueFetchExit: 0,
+    programsBranch: "main",
+    programsClonesOnto: "main",
+    programsCloneExit: 0,
+    programsHead: "aaa1111",
+    programsRemoteHead: "bbb2222",
+    programsFetchExit: 0,
     execFaults: [],
     leftBehind: [],
     openConversation: (command) => Promise.reject(new Error(`no conversation scripted for "${command}"`)),
@@ -399,7 +401,7 @@ export function hostsFactory(f: HostsScript): SshFactory {
       if (command === HOST_ADDRESS_COMMAND) return { code: f.hostAddressesExit, stdoutTail: f.hostAddressesOut, stderrTail: "" };
       // ---- leaving the machine. The whole script is raised and run in one send, so what the
       // fixture models is the STATE it leaves behind and the report the compensation reads off it:
-      // the catalogue is gone (a machine carrying none is what `catalogueBranch: undefined` is), and
+      // the programs checkout is gone (a machine carrying none is what `programsBranch: undefined` is), and
       // every line the step counts is printed. `leftBehind` is the machine that will not give
       // something up — its lines are what turn a leave into a failure naming what stayed.
       if (command.includes("bash /tmp/dc-leave-host-")) {
@@ -407,7 +409,7 @@ export function hostsFactory(f: HostsScript): SshFactory {
           emit(f.leftBehind.map((what) => `KEPT ${what}`).join("\n"));
           return done(1);
         }
-        f.catalogueBranch = undefined;
+        f.programsBranch = undefined;
         emit("LEAVE clean");
         return done();
       }
@@ -484,7 +486,7 @@ export const ANSIWISE_DOWNLOAD_URL = "https://downloads.example.invalid/ansiwise
 /** WHICH repository the scripted installation reads its programs from — a second repository beside
  *  the platform one, which is the whole point: the platform checkout is the material the programs
  *  act on and carries no ansiwise/ tree. */
-export const ANSIWISE_CATALOG_URL = "https://github.com/acme/acme-deploy.git";
+export const ANSIWISE_PROGRAMS_URL = "https://github.com/acme/acme-deploy.git";
 
 const handles: DbHandle[] = [];
 const dirs: string[] = [];
@@ -535,13 +537,13 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
     // A WINDOW A TEST CAN WATCH CLOSE. A deployment gives a fresh slave two minutes to
     // push its first series; a test that waited them would be a test nobody runs.
     metricsFirstSeriesMs: 20,
-    // WHAT THIS MANAGER HOLDS FOR A MACHINE THAT KEEPS NO BOOKS: the address it clones a catalogue
+    // WHAT THIS MANAGER HOLDS FOR A MACHINE THAT KEEPS NO BOOKS: the address it clones a programs checkout
     // from, and its own pull document narrowed to one address. Both are the composition root's
     // (wire.ts). `withoutCarriedValues` is the manager that holds neither, whose whole point is that
     // the deploy-cluster step refuses by name rather than letting the machine install a cluster with
     // no mirror and pull from the public registry with nothing saying so.
     ...(opts.withoutCarriedValues ? {} : {
-      catalogueOrigin: { repoURL: CATALOGUE_ORIGIN_URL },
+      programsOrigin: { repoURL: PROGRAMS_ORIGIN_URL },
       pullConfiguration: async (registryHost: string) => pullDocumentFor(registryHost),
     }),
   };

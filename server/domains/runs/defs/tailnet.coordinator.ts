@@ -11,8 +11,8 @@ import type { Stage } from "../../../../shared/enums.ts";
 // declares the address a machine was given, and the join, which has to clear what an earlier life of
 // the same machine left behind.
 
-/** The coordinator, addressed exactly as the catalogue addresses it — a copy of the `headscale:`
- *  argv in the catalogue's tailnet-mint-join-key program. The two are one spelling on purpose: a
+/** The coordinator, addressed exactly as the programs checkout addresses it — a copy of the `headscale:`
+ *  argv in the programs checkout's tailnet-mint-join-key program. The two are one spelling on purpose: a
  *  manager that reached the coordinator its own way would keep working while the program that mints
  *  against it had already broken.
  *
@@ -75,7 +75,7 @@ export async function coordinatorNodesOf(
   if (read.code !== 0) {
     throw errValidation(
       `the coordinator's node list could not be read on the master (exit ${read.code}) — the reading runs ` +
-      `\`${command}\`, the same invocation the catalogue's mint program uses, so a master whose coordinator cannot ` +
+      `\`${command}\`, the same invocation the programs checkout's mint program uses, so a master whose coordinator cannot ` +
       "be addressed that way is what to fix",
     );
   }
@@ -103,7 +103,7 @@ export async function coordinatorNodesOf(
  *  WHY A JOIN CLEARS THEM FIRST. A machine's registration lives in the coordinator's own database on
  *  the master, so it survives anything done to the machine — a restore puts back a disk that has
  *  forgotten its node key while the coordinator still lists the node it belonged to. The join this
- *  runs before begins by DISCARDING that key (the catalogue's join programs log out first), so the
+ *  runs before begins by DISCARDING that key (the programs checkout's join programs log out first), so the
  *  node standing for the machine is about to be dead either way; what is left of it is a second node
  *  under one name, and nothing downstream may choose between two.
  *

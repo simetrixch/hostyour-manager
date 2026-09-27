@@ -9,7 +9,7 @@ import { AnsiwiseRefused, type AnsiwiseEvent, type AnsiwiseRunRecord } from "../
 import type { Stage } from "../../../../shared/enums.ts";
 import { MACHINE_PASSWORD_SECRET } from "../../../../shared/approve.ts";
 import { loadServer, loadMaster, masterFqdnOf, masterStageOf, sleepUnlessAborted, type SlaveTarget } from "./deploy-slave.kit.ts";
-import { CATALOG_CHECKOUT, CATALOG_PROGRAMS } from "./machine-state.ts";
+import { PROGRAMS_CHECKOUT, PROGRAM_FILES } from "./machine-state.ts";
 import { findUnknownProgram } from "./place-ansiwise.ts";
 
 // Driving one ansiwise PROGRAM on a machine, through the machine's own REST surface — the step
@@ -49,7 +49,7 @@ export const ANSIWISE_PROGRAM_TIMEOUT_MS = 45 * 60_000;
  *
  *  IT IS THREE MINUTES, AND TEN SECONDS IS NOT ENOUGH. Everything a run does between being accepted
  *  and writing its header happens in the detached child, not in the door that answered: the
- *  catalogue is parsed off disk, the program's answer conditions are MEASURED AGAINST THE MACHINE
+ *  programs checkout is parsed off disk, the program's answer conditions are MEASURED AGAINST THE MACHINE
  *  through real shell and HTTP calls, `git rev-parse HEAD` is spawned, and the gate lists the run
  *  root and parses every record in it. Nothing serialises concurrent runs, and on a master there is
  *  always a second one: hostyour-vault-unseal.timer asks the secret store whether it is sealed
@@ -74,7 +74,7 @@ export const RECORD_APPEARS_POLL_MS = 250;
  *  surface over one session's own standard input and output, standing on no address and demanding no
  *  token because sshd authenticated the caller before the process existed (ansiwise-cli
  *  bin/ansiwise_rest.dart `sessionProgram`). The deployment tool answers `no program is called
- *  serve`, because it runs programs of a catalogue and `serve` is not one. */
+ *  serve`, because it runs programs of a programs checkout and `serve` is not one. */
 export interface AnsiwisePorts {
   ansiwiseServeCommand?: string;
   /** WHERE a machine's two executables are fetched from, with `<name>` standing for which of the
@@ -82,9 +82,9 @@ export interface AnsiwisePorts {
    *  release surface an installation takes them from is its own decision; WHICH version is placed
    *  never is, and neither is which pair of names an engine is made of. */
   ansiwiseDownloadUrl?: string;
-  /** WHERE A CATALOGUE COMES FROM for a machine that has none.
+  /** WHERE A PROGRAMS CHECKOUT COMES FROM for a machine that has none.
    *
-   *  A SLAVE IS BORN WITHOUT ONE. The installer clones the catalogue onto a first master; nothing
+   *  A SLAVE IS BORN WITHOUT ONE. The installer clones the programs checkout onto a first master; nothing
    *  does it for a slave, and every program is read out of that checkout — so the machine's own
    *  surface cannot even start, and what an operator saw was the serving binary's `cd` failing and
    *  the socket hanging up. This manager holds the address already (kernel/config.ts
@@ -96,7 +96,7 @@ export interface AnsiwisePorts {
    *
    *  Absent is a manager that was BUILT without one — boot/wire.ts states it unconditionally, so no
    *  setting an operator left blank produces this. The placing step then says so and touches no tree. */
-  catalogueOrigin?: { repoURL: string };
+  programsOrigin?: { repoURL: string };
   /** THE INSTALLATION'S PULL CONFIGURATION FOR ONE REGISTRY ADDRESS, as the encoded document a
    *  container runtime is configured with — base64 of `{"auths":{"<host>":{…}}}`.
    *
@@ -124,10 +124,10 @@ export function requireServeCommand(ports: AnsiwisePorts): string {
   if (!ports.ansiwiseServeCommand) {
     throw errNotConfigured(
       "ANSIWISE_SERVE_COMMAND is not configured — this step reaches the machine's deployment programs through the " +
-      "serving binary's SESSION door on the machine, and which command starts it (and so which catalogue checkout it " +
+      "serving binary's SESSION door on the machine, and which command starts it (and so which programs checkout checkout it " +
       "reads) is the installation's decision. It is a program of `ansiwise-rest` and not of `ansiwise`, which answers " +
       "`no program is called serve`. Set ANSIWISE_SERVE_COMMAND to the command that serves the surface on the session's " +
-      `stdio, e.g. \`cd ${CATALOG_CHECKOUT} && ~/ansiwise-rest serve --programs ${CATALOG_PROGRAMS}\``,
+      `stdio, e.g. \`cd ${PROGRAMS_CHECKOUT} && ~/ansiwise-rest serve --programs ${PROGRAM_FILES}\``,
     );
   }
   if (/(^|\s)--(role|fqdn|stage)(\s|=)/.test(ports.ansiwiseServeCommand)) {
@@ -348,8 +348,8 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
         if (missing.length > 0) {
           throw errValidation(
             `${program} on this machine was not given ${missing.join(", ")}, and this run may not act without it. ` +
-            "Either the machine's catalogue declares no answer of that name — read `GET /programs/" + program +
-            "` on the machine and compare it with the catalogue this installation pins — or this manager composed " +
+            "Either the machine's programs checkout declares no answer of that name — read `GET /programs/" + program +
+            "` on the machine and compare it with the programs checkout this installation pins — or this manager composed " +
             "none. Nothing was acted on",
           );
         }
@@ -392,7 +392,7 @@ export function ansiwiseProgramStep(target: SlaveTarget, program: string, ports:
  *  where the manager keeps facts an operator must never re-type), then — for every answer the
  *  PROGRAM DECLARES beyond those — what the operator supplied at approve
  *  (`activation-input:<answer>`). The declaration is read off the machine (`GET
- *  /programs/{name}`), so which answers exist is the catalogue's to say; an answer nobody
+ *  /programs/{name}`), so which answers exist is the programs checkout's to say; an answer nobody
  *  supplied is OMITTED, and the machine's own validation refuses it by name or fills its
  *  declared default — this step never re-implements either.
  *
@@ -420,7 +420,7 @@ export async function composeAnswers(
       // domain, so the programs that name the slave's resources are told it and never work it out
       // of the FQDN (cluster-marking.ts header).
       case "slave_cluster_name": return resolved().name;
-      // The row's role, as the catalogue's programs allow it on their role answers.
+      // The row's role, as the programs checkout's programs allow it on their role answers.
       case "role": return server.role;
       case "operator_user": return server.sshUser;
       default: return undefined;

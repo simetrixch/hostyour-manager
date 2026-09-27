@@ -61,7 +61,7 @@ describe("serveIdentity — the three facts a serve cannot default", () => {
 
 describe("requireServeCommand — whose statement the role is", () => {
   it("takes the configured command as it stands", () => {
-    const cmd = "cd /srv/ansiwise-catalog && ~/ansiwise-rest serve --programs /srv/ansiwise-catalog/ansiwise/programs";
+    const cmd = "cd /srv/ansiwise-programs && ~/ansiwise-rest serve --programs /srv/ansiwise-programs/ansiwise/programs";
     expect(requireServeCommand({ ansiwiseServeCommand: cmd })).toBe(cmd);
   });
 

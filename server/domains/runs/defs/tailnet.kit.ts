@@ -20,7 +20,7 @@ import {
 
 // The shared half of the four tailnet run kinds (defs/tailnet.ts): the steps they are composed
 // of and the one plan builder they all state their targets in. The ACTS themselves are the tailnet
-// PROGRAMS of the machine's own catalogue (hostyour-deploy ansiwise/programs/), each driven over the
+// PROGRAMS of the machine's own programs checkout (hostyour-deploy ansiwise/programs/), each driven over the
 // machine's `ansiwise-rest serve` surface and proven by a dry run the machine's gate then admits the
 // real run against — nothing here ships a script to a host any more. The fourth kind performs no act
 // at all: it reads the host and writes the reading down.
@@ -40,7 +40,7 @@ import {
  *  is read off. */
 export interface TailnetPorts extends DeploySlavePorts, AnsiwisePorts {}
 
-/** The two programs a rejoin drives, by the catalogue's own names: the mint on the master, then the
+/** The two programs a rejoin drives, by the programs checkout's own names: the mint on the master, then the
  *  join on the target — the SAME join for every host, whatever part it carries.
  *
  *  IT ENDS BY STAMPING THE FRESH ADDRESS INTO THE MACHINE'S OWN SERVING CERTIFICATE, and that has
@@ -76,7 +76,7 @@ const MODE: Record<TailnetKind, TailnetMode> = {
   "cluster-tailnet-read": "read",
 };
 
-/** The catalogue program each single-host run kind drives, by the catalogue's OWN name. The run kind
+/** The programs checkout program each single-host run kind drives, by the programs checkout's OWN name. The run kind
  *  carries its family (`cluster-`) and the program does not, so the two spellings are stated here
  *  rather than derived: a program name is the machine's, and this manager does not get to rename it.
  *  A rejoin has no entry — it drives two programs and composes them itself — and neither has the
@@ -445,7 +445,7 @@ export function tailnetSteps(kind: TailnetKind, serverId: string, ports: Tailnet
   // same step, which is why the reading it writes is the same fact whichever kind took it.
   if (kind === "cluster-tailnet-read") return [attestTargetStep(serverId), readMembershipStep(serverId)];
   // THE ENGINE IS BROUGHT TO THE PIN BEFORE ANY PROGRAM IS JUDGED BY IT — on the host, and on the
-  // master where the rejoin mints there — because the catalogue those programs are read out of is
+  // master where the rejoin mints there — because the programs checkout those programs are read out of is
   // always master and the engine on an installed machine moves only when a run moves it (#133). Both
   // placements are idempotent by measurement, so a current machine costs two readings each.
   if (kind === "cluster-tailnet-rejoin") {
@@ -457,7 +457,7 @@ export function tailnetSteps(kind: TailnetKind, serverId: string, ports: Tailnet
       readMembershipStep(serverId),
     ];
   }
-  // One catalogue program each, declaring no answers, so the generic program step fits whole.
+  // One programs checkout program each, declaring no answers, so the generic program step fits whole.
   return [
     attestTargetStep(serverId),
     placeAnsiwiseStep(target, ports),

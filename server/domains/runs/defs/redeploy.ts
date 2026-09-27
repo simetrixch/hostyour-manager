@@ -57,7 +57,7 @@ import {
 //                     is neither logged out nor handed a fresh address (deploy-slave.ts, the join;
 //                     tailnet.kit.ts joinIfAbsentStep for what the reading decides).
 //   master, master+   first contact, then the machine layer as the deployment PROGRAMS deliver it,
-//     slave           plus the ArgoCD follow. The engine and the catalogue are placed first, then
+//     slave           plus the ArgoCD follow. The engine and the programs checkout are placed first, then
 //                     deploy-host makes the box workable, deploy-cluster rebuilds the node below
 //                     GitOps and deploy-platform-services raises what hands the cluster to the
 //                     reconciler; the three programs run on the machine's own `ansiwise-rest serve`
@@ -82,7 +82,7 @@ import {
 // that says either should change.
 //
 // THE PLACEMENT IS WHY A MASTER COULD NOT BE BROUGHT FORWARD AT ALL. `placeAnsiwiseStep` had ONE call
-// site, in the slave install, so every engine, catalogue and machine-layer program an installed master
+// site, in the slave install, so every engine, programs checkout and machine-layer program an installed master
 // carried was whatever hostyour-cloud lifecycle/install-machine left there at its first installation,
 // and no run moved any of them again. That is not an ageing problem: `cluster-deploy-slave` drives programs ON THE MASTER
 // through the master's own ansiwise-rest, so a slave deploy already depends on a master's machine
@@ -107,7 +107,7 @@ export interface RedeployPorts extends DeploySlavePorts, AnsiwisePorts {
 }
 
 /** The programs the master arm runs after deploy-host, in the order the machine layer stands on them:
- *  the cluster below GitOps first, then what hands it over. The names are the catalogue's own
+ *  the cluster below GitOps first, then what hands it over. The names are the programs checkout's own
  *  (hostyour-deploy ansiwise/programs/); each step reads the program's declared answers off the
  *  machine, so nothing about their INSIDES is repeated here.
  *
@@ -115,7 +115,9 @@ export interface RedeployPorts extends DeploySlavePorts, AnsiwisePorts {
  *  is owed comes from elsewhere — this installation's setting, the cluster row and a sealed
  *  credential (hostAnswers in deploy-slave.ts) — while these two are owed the INSTALLATION's own
  *  answers, and those stand written in its cluster map. */
-const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-platform-services"] as const;
+// move-programs-checkout comes last: a machine still standing with the programs checkout at its old
+// path is carried across, and every other machine finds nothing to do.
+const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-platform-services", "move-programs-checkout"] as const;
 
 function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
   const target = activeClusterTarget(params.serverId);
@@ -152,7 +154,7 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
     // engine, the placement and the follow through the step-kit's `elevation`.
     removeSudoersStep(firstContact),
     // FIRST among the machine-side acts, and for the reason it is first in the slave install: the
-    // three programs below are read from a catalogue and spoken to through a binary, and this is
+    // three programs below are read from a programs checkout and spoken to through a binary, and this is
     // what puts both at what clusters/platform/versions.yaml pins. A master whose engine drifted off
     // that pin is the state this run kind exists to end.
     placeAnsiwiseStep(target, ports),

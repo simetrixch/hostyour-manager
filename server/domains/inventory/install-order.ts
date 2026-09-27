@@ -37,7 +37,7 @@ export const INSTALL_ORDER_BRANCH = PRODUCT_BRANCH;
 export const INSTALL_ORDER_ROLE = "master";
 
 /** The slice of the declaration this reader takes: the ordered program names of one role. Everything
- *  else in the file — the engine path, the catalogue paths, every `needs` list — is ignored here,
+ *  else in the file — the engine path, the programs checkout paths, every `needs` list — is ignored here,
  *  because nothing in this repository acts on it. */
 const InstallOrderFile = z.object({
   sequence: z.record(z.string(), z.array(z.object({ program: z.string().min(1) })).min(1)),

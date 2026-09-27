@@ -57,7 +57,7 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // machine layer of a cluster that is already live.
   register(runDefinitions, makeDeploySlaveDef(ports));
   register(runDefinitions, makeRedeployDef(ports));
-  // The mail DNS of one sender domain, published by running the catalogue's publish-mail-dns on the
+  // The mail DNS of one sender domain, published by running the programs checkout's publish-mail-dns on the
   // master — a master-side act like redeploy's master arm, so it takes the same ports.
   register(runDefinitions, makeMailDnsPublishDef(ports));
   // The two run kinds that take a record BACK out of the zone: one record the DNS inventory names
@@ -74,7 +74,7 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   register(runDefinitions, makeRenameSlaveDef(ports));
   // The tailnet run kinds, on a host that is already deployed: leave the private network, come
   // back with the credential the host holds, or be logged out and joined again with one the master
-  // mints. Every act is a program of the machine's own catalogue driven over `ansiwise-rest serve`, so
+  // mints. Every act is a program of the machine's own programs checkout driven over `ansiwise-rest serve`, so
   // they take the serve command, and a rejoin additionally reads the coordinator's address off the
   // platform repo — both fail loud in the step when unconfigured, like redeploy's. The READ drives no
   // program and needs neither: it asks the host's client what it is doing and writes the answer down,

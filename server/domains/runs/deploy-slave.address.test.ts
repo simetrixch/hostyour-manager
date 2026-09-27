@@ -67,7 +67,7 @@ describe("the address the coordinator gave this machine", () => {
     // The master answers on m1.example.com in this harness, the slave on 10.1.1.11.
     const asked = h.hosts.log.filter((l) => l.command.includes("headscale"));
     expect(asked.map((l) => l.host)).toEqual(["m1.example.com"]);
-    // The coordinator is addressed the way the catalogue addresses it, at the MASTER's stage.
+    // The coordinator is addressed the way the programs checkout addresses it, at the MASTER's stage.
     expect(asked[0]?.command).toContain("deploy/headscale-prod-app");
     expect(asked[0]?.command).toContain("nodes list -o json");
     expect(said.join(" ")).toContain("100.64.0.7");

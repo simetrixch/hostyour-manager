@@ -239,9 +239,9 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
 
   // The whole refusal, end to end, in the shape the field produced it: a machine already serving
   // ingress through a DNAT — nothing listening on 80, and a connection to its own address accepted.
-  // The catalogue grades that a WARN and this step refuses it, and it is the machine a second installation
+  // The programs checkout grades that a WARN and this step refuses it, and it is the machine a second installation
   // must not be laid over.
-  it("slave-preflight blocks on the HARD policy: port 80 served with no listener (a mere WARN in the catalogue)", async () => {
+  it("slave-preflight blocks on the HARD policy: port 80 served with no listener (a mere WARN in the programs checkout)", async () => {
     const hosts = scriptedHosts({
       preflightOut: HEALTHY_SLAVE_PREFLIGHT.replace("PORT 80 listener=no connect=no", "PORT 80 listener=no connect=203.0.113.7"),
     });
@@ -504,7 +504,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(await newestCredId(ctx, { serverId: SLAVE_ID, purpose: "cluster-bearer", label })).toBe(id);
   });
 
-  it("hardenPreflightForSlave: every check hard; 80/443/snapd warns promoted to fails; the catalogue's own view untouched", () => {
+  it("hardenPreflightForSlave: every check hard; 80/443/snapd warns promoted to fails; the programs checkout's own view untouched", () => {
     const parsed = parsePreflightOutput([
       "CHECK os.arch PASS x86_64",
       "CHECK port.22 WARN nothing listening on :22",
@@ -522,10 +522,10 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(byId.get("port.443")?.hint).toBeDefined();
     expect(byId.get("snapd.present")?.status).toBe("fail"); // promoted (MicroK8s is a snap)
     expect(byId.get("port.22")?.status).toBe("warn"); // NOT in the promotion set
-    expect(byId.get("time.sync")?.status).toBe("fail"); // a soft fail in the catalogue ⇒ blocks here
+    expect(byId.get("time.sync")?.status).toBe("fail"); // a soft fail in the programs checkout ⇒ blocks here
     expect(byId.get("os.arch")?.status).toBe("pass");
     expect(hasHardFailure({ checkedAt: 0, checks: hard })).toBe(true);
-    // pure: the input (the checks as the catalogue graded them) keeps its soft severities
+    // pure: the input (the checks as the programs checkout graded them) keeps its soft severities
     expect(parsed.find((c) => c.id === "port.22")?.severity).toBe("soft");
   });
 

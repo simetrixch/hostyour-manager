@@ -116,7 +116,7 @@ echo "${CLEAN}"
  * outside that registry — root owns them because a raised run executes them — and they reach the
  * machine as words of a command line rather than as a script, so they leave it the same way.
  *
- * Registered by `place-ansiwise`, the step that puts the executables and brings the catalogue. It
+ * Registered by `place-ansiwise`, the step that puts the executables and brings the programs checkout. It
  * stands before the first deployment program, so a run that died anywhere in the machine layer has
  * this armed.
  */

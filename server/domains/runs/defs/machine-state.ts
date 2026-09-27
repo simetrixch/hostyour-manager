@@ -2,7 +2,7 @@
 // repository follows it:
 //
 //   Everything this platform puts on a machine belongs to the account the manager reaches it as —
-//   the checkouts under /srv, the catalogue, /var/lib/ansiwise, and anything added later. Root may
+//   the checkouts under /srv, the programs checkout, /var/lib/ansiwise, and anything added later. Root may
 //   still write everything and loses nothing.
 //
 // WHY IT IS A SENTENCE AND NOT FOUR FIXES. The installation programs run raised, so everything they
@@ -41,7 +41,7 @@
 //   construction and it is not state.
 //
 // EVERY PATH BELOW IS THE MACHINE'S OWN and none of it is this repository's to choose: each one is
-// named on a row of a program in the installation's catalogue, or is where a binary's own default
+// named on a row of a program in the installation's programs checkout, or is where a binary's own default
 // puts it. What this module does is state them ONCE, so the manager, the scripts it uploads and the
 // check that holds the rule read one list instead of four.
 
@@ -58,28 +58,28 @@ export const PLATFORM_STATE_ROOTS = ["/srv/", "/var/lib/"] as const;
 export const PLATFORM_CHECKOUT = "/srv/hostyour-cloud";
 
 
-/** WHERE the catalogue stands on the machine: the checkout the serving binary reads its programs and
+/** WHERE the programs checkout stands on the machine: the checkout the serving binary reads its programs and
  *  its `ansiwise.yaml` from. The machine's own path and not this module's invention — the
- *  `git_clone` row of `deploy-platform-services`, the LAST deployment program, brings the catalogue
+ *  `git_clone` row of `deploy-platform-services`, the LAST deployment program, brings the programs checkout
  *  forward at exactly this path, and the session the manager opens is given `--programs` out of it.
- *  A machine that carries none is given one before any program runs at all, by `refreshCatalogue`
- *  (defs/machine-catalogue.ts) or, on a first master, by hostyour-cloud's own installer. */
-export const CATALOG_CHECKOUT = "/srv/ansiwise-catalog";
+ *  A machine that carries none is given one before any program runs at all, by `refreshPrograms`
+ *  (defs/machine-programs.ts) or, on a first master, by hostyour-cloud's own installer. */
+export const PROGRAMS_CHECKOUT = "/srv/ansiwise-programs";
 
 /** The program files inside that checkout — what `--programs` has to name, because the option's own
- *  default (`programs`, beside the working directory) is not where a catalogue keeps them. */
-export const CATALOG_PROGRAMS = `${CATALOG_CHECKOUT}/ansiwise/programs`;
+ *  default (`programs`, beside the working directory) is not where a programs checkout keeps them. */
+export const PROGRAM_FILES = `${PROGRAMS_CHECKOUT}/ansiwise/programs`;
 
 /** The file naming which plugins the installation turns on, inside the same checkout. It has to be
  *  named because the option's default is `ansiwise.yaml` RELATIVE to the directory the process runs
- *  in, and nothing this manager starts runs in the catalogue. */
-export const CATALOG_CONFIG = `${CATALOG_CHECKOUT}/ansiwise.yaml`;
+ *  in, and nothing this manager starts runs in the programs checkout. */
+export const PROGRAMS_CONFIG = `${PROGRAMS_CHECKOUT}/ansiwise.yaml`;
 
 /** The one snap this platform installs on a machine: the cluster distribution, put there by the
- *  `install_snap` row of `deploy-cluster` in the installation's catalogue. It is not a path, so
+ *  `install_snap` row of `deploy-cluster` in the installation's programs checkout. It is not a path, so
  *  nothing below reads it, and it stands here for the reason every path here does — a machine
  *  leaving this platform has to be told what to take off, and the name it is published under is a
- *  fact of the catalogue rather than of this repository. */
+ *  fact of the programs checkout rather than of this repository. */
 export const PLATFORM_SNAP = "microk8s";
 
 /** Where the engine keeps every run's record on a machine, and the directory above it.
@@ -100,7 +100,7 @@ export type MachineStateOwner = "operator" | "root";
 
 /** Who makes a path's owner right. `bootstrap` is this manager's own placement step, and it is used
  *  only where the program that would do it cannot run until the path is already right; `elsewhere`
- *  is a row of a program in the installation's catalogue, named in the entry's own sentence. */
+ *  is a row of a program in the installation's programs checkout, named in the entry's own sentence. */
 export type MachineStateHandover = "bootstrap" | "elsewhere";
 
 export interface MachineStateEntry {
@@ -138,13 +138,13 @@ export const MACHINE_STATE: readonly MachineStateEntry[] = [
       "the child dies before its first step — which is why the handover cannot wait for a program",
   },
   {
-    path: CATALOG_CHECKOUT,
+    path: PROGRAMS_CHECKOUT,
     owner: "operator",
     handover: "elsewhere",
     what:
-      "the catalogue the serving binary reads its programs and its plugin list out of, brought " +
+      "the programs checkout the serving binary reads its programs and its plugin list out of, brought " +
       "forward by the `git_clone` row of deploy-platform-services and put there in the first place " +
-      "by this manager's own refreshCatalogue",
+      "by this manager's own refreshPrograms",
   },
   {
     path: PLATFORM_CHECKOUT,

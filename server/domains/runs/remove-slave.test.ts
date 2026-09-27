@@ -52,7 +52,7 @@ describe("cluster-remove-slave", () => {
     // THE THREE MACHINE-SIDE NAMES ARE THE ABORT'S OWN, and in the abort's order: the master-side
     // removal while the coordinator still knows the node, then the machine stripped, then the
     // password door back on, then the key line off LAST because it is the route the two before it
-    // travel. The map and the rows follow what has already happened. The catalogue on the master is
+    // travel. The map and the rows follow what has already happened. The programs checkout on the master is
     // brought forward before the removal, which is read out of it and asks the slave's name.
     expect(removeSlaveSteps(SLAVE_ID, { }).map((s) => s.name))
       .toEqual([

@@ -32,7 +32,7 @@ const MAX_RATE_LIMIT_RETRIES = 3;
  *  as quoted 255-character chunks and returns it that way — outer quotes, and `" "` where it
  *  split — so a DKIM key compared raw never equals the text that was published, and a content read
  *  here would never equal the same record read at a public resolver. Every TXT content this
- *  adapter answers or compares goes through this first (the catalogue's cloudflare plugin reads
+ *  adapter answers or compares goes through this first (the programs checkout's cloudflare plugin reads
  *  the same records the same way, ansiwise-cloudflare/lib/src/steps/cloudflare_api.dart). */
 export function txtText(raw: string): string {
   let value = raw;

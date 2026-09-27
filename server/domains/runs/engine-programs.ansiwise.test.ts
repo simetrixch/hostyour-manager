@@ -16,7 +16,7 @@ import { ENGINE_PROGRAMS, ANSIWISE_REST_TOOL, ANSIWISE_TOOL } from "./defs/place
 //
 // SO IT IS ASKED, AND ASKED OF THE ARTEFACT. Refused a word it does not carry, `ansiwise-rest` names
 // its own set on the line `it serves: …` and exits 64 (ansiwise-cli bin/ansiwise_rest.dart) — before
-// it opens a configuration or a catalogue, which is what makes this answerable on a bare temporary
+// it opens a configuration or a programs checkout, which is what makes this answerable on a bare temporary
 // directory. The binary comes from the sibling checkout's build output, found by the same walk every
 // real-serve suite uses (adapters/ansiwise/testing/serve-fixture.ts).
 //
@@ -72,9 +72,9 @@ describe.skipIf(bin === undefined)("the engine's program set, read off the binar
     ).toEqual(ENGINE_PROGRAMS.get(ANSIWISE_REST_TOOL));
   });
 
-  it("the deployment tool carries no such set, because its programs are the machine's catalogue", () => {
+  it("the deployment tool carries no such set, because its programs are the machine's programs checkout", () => {
     // Asked the same word on a directory with no installation, it answers about the CONFIGURATION and
-    // not about a word — the program set is resolved against the catalogue that would have been
+    // not about a word — the program set is resolved against the programs checkout that would have been
     // opened. That is why ENGINE_PROGRAMS holds no entry for it, and this is the measurement behind
     // that absence rather than a sentence asserting it.
     const { said } = askBinary(binaries.tool, ANSIWISE_TOOL, [NOT_A_PROGRAM]);

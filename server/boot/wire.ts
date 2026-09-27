@@ -220,12 +220,12 @@ export async function wire(): Promise<Wired> {
     ...(config.github ? { platformOrigin: `${config.github.owner}/${config.github.repo}` } : {}),
     ...(config.ansiwiseServeCommand ? { ansiwiseServeCommand: config.ansiwiseServeCommand } : {}),
     ...(config.ansiwiseDownloadUrl ? { ansiwiseDownloadUrl: config.ansiwiseDownloadUrl } : {}),
-    // WHERE a machine's catalogue is cloned from when it carries none (DEPLOY_PROGRAMS_REPO). The
+    // WHERE a machine's programs checkout is cloned from when it carries none (DEPLOY_PROGRAMS_REPO). The
     // machine cannot read this off itself for the same reason it cannot read the platform origin
     // above: the checkout it would be read from is the one this clone establishes. Unconditional
     // and carrying no credential — the setting defaults to the product's own repository and that
     // repository is public, so there is no pair to be half-configured.
-    catalogueOrigin: { repoURL: config.deployProgramsRepoUrl },
+    programsOrigin: { repoURL: config.deployProgramsRepoUrl },
     ...(dns ? { dns } : {}),
     mailEgress: (stage: Stage, masterDomain: string) => readMailEgress(mailDns, stage, masterDomain),
     // What a slave's rename repoints: every unit record naming its old FQDN, read off the unit rows of

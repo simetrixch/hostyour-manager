@@ -1,7 +1,7 @@
 // What RECEIVERS of the installation's mail look up: the public DNS, read through public resolvers
 // rather than the machine's own — a record the master resolves through its cluster DNS and nobody
 // else can is exactly the case the Mail page exists to show. Read-only; the writer of these records
-// is the catalogue's publish-mail-dns program (mail-dns-publish), never this manager.
+// is the programs checkout's publish-mail-dns program (mail-dns-publish), never this manager.
 //
 // Over HTTPS, never UDP 53: the apps machines let no UDP 53 out towards public resolvers (measured
 // on apps3, hostyour-manager#150), a hardened environment blocks arbitrary outbound DNS as a matter
