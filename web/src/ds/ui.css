@@ -676,6 +676,12 @@
   box-shadow: var(--shadow-1);
 }
 
+/* A dialog whose body carries a table (the Versions dialog's four columns) takes the width a table
+   needs; 30rem folds its columns into one another. */
+.dialog--wide {
+  max-width: 52rem;
+}
+
 .dialog__title {
   font-size: var(--fs-4);
 }

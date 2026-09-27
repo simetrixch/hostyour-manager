@@ -11,6 +11,10 @@ export function ConfirmDialog(props: {
   onConfirm: () => void;
   onCancel: () => void;
   destructive?: boolean;
+  /** The confirm button is disabled while there is nothing to confirm yet. */
+  confirmDisabled?: boolean;
+  /** For a body that carries a table: the panel takes the width the table needs. */
+  wide?: boolean;
   children: ReactNode; // the copy the operator must read before confirming
 }): ReactNode {
   const titleId = useId();
@@ -29,7 +33,7 @@ export function ConfirmDialog(props: {
 
   return (
     <div className="dialog-backdrop" onClick={props.onCancel}>
-      <div className="dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
+      <div className={props.wide ? "dialog dialog--wide" : "dialog"} role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
         <h3 id={titleId} className="dialog__title">
           {props.title}
         </h3>
@@ -38,7 +42,7 @@ export function ConfirmDialog(props: {
           <button type="button" className="btn" ref={cancelRef} onClick={props.onCancel}>
             Cancel
           </button>
-          <button type="button" className={`btn ${props.destructive ? "btn--destructive" : "btn--primary"}`} onClick={props.onConfirm}>
+          <button type="button" className={`btn ${props.destructive ? "btn--destructive" : "btn--primary"}`} disabled={props.confirmDisabled === true} onClick={props.onConfirm}>
             {props.confirmLabel}
           </button>
         </div>
