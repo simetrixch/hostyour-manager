@@ -88,7 +88,7 @@ async function registrations(): Promise<Registrations> {
   return reg;
 }
 
-// THE DEPLOY REPOSITORY'S BUMP ENTRY (#197): the App's token is written to build/deploy/repo-pat on
+// THE DEPLOY REPOSITORY'S BUMP ENTRY (#197): the App's token is written to build/catalog/repo-pat on
 // every tick and bump-git-https is deleted in EVERY build namespace, because every unit's release
 // pushes the deploy repository's books branch with that one entry — the App is the deploy
 // repository's one identity (hostyour-cloud#237).
@@ -104,7 +104,7 @@ describe("refreshAppTokens — the deploy repository bump credential from the Ap
     githubApp.token = "ghs_deploy_now";
     const r = await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, deployRepo: deployRepoOf("acme"), githubApp });
     expect(r.refreshed).toEqual(["acme-apps", "shop", "beta-apps", DEPLOY_BUMP_UNIT]);
-    expect(written.at(-1)).toEqual({ consumerName: "deploy", pat: "ghs_deploy_now", packages: "" }); // the bump entry installs nothing
+    expect(written.at(-1)).toEqual({ consumerName: DEPLOY_BUMP_UNIT, pat: "ghs_deploy_now", packages: "" }); // the bump entry installs nothing
     const bumpDeletes = kube.secretWrites.filter((w) => w.name === "bump-git-https").map((w) => w.namespace);
     expect(bumpDeletes.slice(-3)).toEqual(["acme-apps-build", "shop-build", "beta-apps-build"]);
     expect(errors).toEqual([]);
@@ -117,7 +117,7 @@ describe("refreshAppTokens — the deploy repository bump credential from the Ap
     const githubApp = app();
     const unreached = await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube: new FakeClusterReader(), logger, deployRepo: deployRepoOf("other-org"), githubApp });
     expect(unreached.failed).toEqual([DEPLOY_BUMP_UNIT]);
-    expect(written.some((w) => w.consumerName === "deploy")).toBe(false);
+    expect(written.some((w) => w.consumerName === DEPLOY_BUMP_UNIT)).toBe(false);
     expect(errors.at(-1)).toContain("does not reach the deploy repository");
   });
 });
@@ -163,7 +163,7 @@ describe("refreshAppTokens", () => {
     const r = await refreshAppTokens({ store, owners, registrations: reg, seeder, kube: new FakeClusterReader(), logger, deployRepo: { repoURL: "https://github.com/acme/deploy.git" }, githubApp });
     expect(r.failed).toEqual(["gone"]);
     expect(r.refreshed).toEqual(["acme-apps", "shop", "beta-apps", DEPLOY_BUMP_UNIT]);
-    expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "shop", "beta-apps", "deploy"]);
+    expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "shop", "beta-apps", DEPLOY_BUMP_UNIT]);
     expect(opened).not.toContain("cred_gone");
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('"unit":"gone"');
