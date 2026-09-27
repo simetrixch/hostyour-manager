@@ -10,7 +10,7 @@ import { DEPLOY_URL, GUID, HELD, HeldImagesGoneArgo, MANIFEST_YAML, NEW, OLD, OL
 // tenant-refresh-members: the plan resolves the members again off the product's manifest and names
 // what changes, refuses a tenant with nothing to change or a changed member set, and the steps write
 // the entries and wait for the sync; an abort writes the previous entries back.
-// The helpers they stand on are in tenant-refresh-members.fixture.ts.
+// Their helpers are in the fixture module of the same name.
 
 useMemoryDb();
 
@@ -71,7 +71,7 @@ describe("tenant-refresh-members", () => {
   it("moves a tenant whose held images are gone onto the versions chosen: the versions are written before any wait", async () => {
     seedTenant();
     const resolved = await planned(ports(staleMembers()));
-    const prt = ports(resolved.members, { files: RELEASED, argoReader: (registrations) => new HeldImagesGoneArgo(registrations, resolved.members) });
+    const prt = ports(resolved.members, { files: RELEASED, argoReader: (tenantRegistrations) => new HeldImagesGoneArgo(tenantRegistrations, resolved.members) });
     const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEW } }, planCtx());
     if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
     const p = out.params;

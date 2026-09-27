@@ -22,7 +22,7 @@ import { testMembers, APP_OVERLAYS, TEST_BUNDLE, TEST_CHANNEL_STAGES } from "./t
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 
-// The tenant, books branch, ports and step contexts every tenant-refresh-members test stands on.
+// The books branch, ports and step contexts every test of the refresh-members run stands on.
 
 export const SHA = "a".repeat(40);
 export const GUID = "zsjs023ctne0";
@@ -133,9 +133,9 @@ class SteppingArgo extends FakeMasterArgoReader {
 /** The member Applications of a tenant whose held images are gone from the registry: Degraded while
  *  the registration holds HELD, Synced + Healthy rendering `members` and the versions once it holds others. */
 export class HeldImagesGoneArgo extends FakeMasterArgoReader {
-  constructor(private readonly registrations: TenantRegistrations, private readonly members: readonly TenantMemberRecord[]) { super(); }
+  constructor(private readonly tenantRegistrations: TenantRegistrations, private readonly members: readonly TenantMemberRecord[]) { super(); }
   override async watchApplicationSet(): Promise<ArgoAppStatusMap> {
-    const approved = (await this.registrations.readTenant("prod", GUID))!.entry.approvedTags;
+    const approved = (await this.tenantRegistrations.readTenant("prod", GUID))!.entry.approvedTags;
     const held = JSON.stringify(approved) === JSON.stringify(HELD);
     return new Map([...rendering(this.members, approved)].map(([name, s]) => [name, held ? { ...s, health: "Degraded" } : s]));
   }
@@ -144,15 +144,15 @@ export class HeldImagesGoneArgo extends FakeMasterArgoReader {
 const IMAGE = `${REGISTRY_HOST}/example-app:1.0.0`;
 const DEPLOYMENT = { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "app", image: IMAGE }] } } } };
 
-export function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; argoReader?: (registrations: TenantRegistrations) => FakeMasterArgoReader; carried?: string[]; carry?: () => Promise<void>; manifest?: string; files?: Record<string, string>; earlier?: Record<string, string> } = {}): TenantOnboardPorts {
-  const registrations = new TenantRegistrations(platformRepo(members, over.files, over.earlier));
+export function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; argoReader?: (tenantRegistrations: TenantRegistrations) => FakeMasterArgoReader; carried?: string[]; carry?: () => Promise<void>; manifest?: string; files?: Record<string, string>; earlier?: Record<string, string> } = {}): TenantOnboardPorts {
+  const tenantRegistrations = new TenantRegistrations(platformRepo(members, over.files, over.earlier));
   return withAppsTemplate({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.manifest ?? MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment", { raw: DEPLOYMENT })] } }),
-    registrations,
+    registrations: tenantRegistrations,
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } }),
-      argoReader: over.argoReader?.(registrations) ?? new SteppingArgo(over.argo ?? [() => rendering(resolved)]),
+      argoReader: over.argoReader?.(tenantRegistrations) ?? new SteppingArgo(over.argo ?? [() => rendering(resolved)]),
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
