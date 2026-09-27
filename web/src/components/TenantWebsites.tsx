@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from "react";
 import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/apps-manifest.ts";
-import { websiteAppName } from "../../../shared/tenant.ts";
+import { appName, websiteAppName } from "../../../shared/tenant.ts";
 import { websiteFolder } from "../tenantAppRows.ts";
 import { addTenantWebsite, setTenantWebsiteDomain } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 
-/** The Websites section of the tenant page (#308): every website of the tenant with its address and
+/** The Websites section of the tenant page: every website of the tenant with its address and
  *  its site, the form that adds one, and the dialog that moves one to another domain. A website is
  *  typed without `www.`: it is served at `www.<domain>`, `<domain>` redirects there, and it is named
  *  by the domain it is added with. Every action only PLANS its run and hands off to the Run screen. */
@@ -15,6 +16,7 @@ export function TenantWebsites(props: {
   busy: boolean;
   act: (fn: () => Promise<{ runId: string }>) => Promise<void>;
   onRemove: (app: string) => void;
+  onRecordPackagesReader: (owner: string, token: string) => Promise<void>;
 }) {
   const { tenantId, catalog, busy, act } = props;
   const folder = catalog ? websiteFolder(catalog.apps) : null;
@@ -25,6 +27,12 @@ export function TenantWebsites(props: {
   const [next, setNext] = useState("");
   const typed = domain.trim().toLowerCase();
   const nextTyped = next.trim().toLowerCase();
+  // The name a website gets from its domain must be an app name; a domain that gives none is said here.
+  const named = typed ? websiteAppName(typed) : "";
+  const unnamed = named !== "" && !appName.safeParse(named).success;
+  // The bundle installs private packages with the owner's reader, asked where none is recorded yet.
+  const reader = catalog?.packagesReader;
+  const readerMissing = reader !== undefined && reader.recorded === null;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (folder && typed && site) void act(() => addTenantWebsite(tenantId, { domain: typed, site, folder: folder.name }));
@@ -59,6 +67,7 @@ export function TenantWebsites(props: {
           ))}
         </ul>
       )}
+      {folder && readerMissing && <OwnerCredentialStep owner={reader.owner} need={{ kind: "packages-reader", scopes: reader.scopes }} onRecord={props.onRecordPackagesReader} subject="The bundle" />}
       {folder && (
         <form className="field" onSubmit={submit}>
           <label className="field__label" htmlFor="tenant-add-website">
@@ -66,8 +75,13 @@ export function TenantWebsites(props: {
           </label>
           <span className="field__hint">
             The domain without www: the site is served at www.{typed || "<domain>"}, and {typed || "<domain>"} redirects there.
-            {typed ? ` The website is named ${websiteAppName(typed)}.` : ""}
+            {named && !unnamed ? ` The website is named ${named}.` : ""}
           </span>
+          {unnamed && (
+            <span className="field__hint" role="alert">
+              {typed} gives the name {named}, which is no app name: it must start with a letter and have at most 30 characters.
+            </span>
+          )}
           <input id="tenant-add-website" className="input" placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} disabled={busy} />
           <select className="input" value={site} onChange={(e) => setSite(e.target.value)} disabled={busy} aria-label="Site">
             <option value="" disabled>
@@ -80,7 +94,7 @@ export function TenantWebsites(props: {
             ))}
           </select>
           <div className="actions">
-            <button type="submit" className="btn btn--primary" disabled={busy || !typed || !site}>
+            <button type="submit" className="btn btn--primary" disabled={busy || !typed || !site || unnamed || readerMissing}>
               Add website
             </button>
           </div>
@@ -99,7 +113,7 @@ export function TenantWebsites(props: {
             <input className="input" value={next} onChange={(e) => setNext(e.target.value)} />
           </label>
           <p>
-            The website keeps its name {moving.name}. The records of www.{moving.domain} and {moving.domain} go once it answers at the new hosts.
+            The website keeps its name {moving.name}. From the moment the new domain is recorded, it answers only there; the records of www.{moving.domain} and {moving.domain} go once it answers at the new hosts.
           </p>
         </ConfirmDialog>
       )}

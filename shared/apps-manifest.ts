@@ -92,7 +92,7 @@ export interface TenantWebsiteView {
  *  api-types.ts, which stands at the file-size budget. */
 export interface TenantAppCatalogView {
   apps: TenantCatalogAppView[];
-  /** The tenant's websites, off its registration: each app that names a domain (#308). Absent where
+  /** The tenant's websites, off its registration: each app that names a domain. Absent where
    *  the tenant has none. */
   websites?: TenantWebsiteView[];
   /** Present where the template's `.npmrc` routes scopes to GitHub Packages: the owner whose reader

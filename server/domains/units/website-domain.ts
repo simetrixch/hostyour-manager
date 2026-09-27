@@ -1,4 +1,4 @@
-// A website's own domain, as the runs that add, move and remove a website handle it (hostyour-manager#308).
+// A website's own domain, as the runs that add, move and remove a website handle it.
 //
 // A website of a tenant answers at `www.<domain>`, and `<domain>` redirects there, the way the tenant's
 // own domain does (ownDomainHosts). Each host gets a CNAME onto the tenant's zone, written and booked
@@ -10,6 +10,8 @@ import { loadTenantCluster } from "./lifecycle.ts";
 import { ownDomainHosts, tenantOwnHosts } from "#unit/shared/unit-host.ts";
 import { provisionOwnDomainRecord, removeOwnDomainRecord, waitForAnswer, type AnswerWaitPorts, type RecordPorts } from "./own-domain-records.ts";
 import type { TenantLifecyclePorts } from "./lifecycle.ts";
+import type { TenantRegistrations } from "./tenant-registrations.ts";
+import { STAGE } from "../../../shared/enums.ts";
 
 /** What the website steps read: the DNS provider, the zone's apex, and the probe with its wait. */
 export type WebsiteDomainPorts = RecordPorts & Pick<TenantLifecyclePorts, "resolveUnitApex"> & AnswerWaitPorts;
@@ -25,6 +27,26 @@ export function websiteHosts(domain: string): string[] {
 export function websiteRecordHosts(domain: string, tenant: { ownDomain: string; ownDomainRedirects: readonly string[] }): string[] {
   const held = new Set(tenantOwnHosts(tenant.ownDomain, tenant.ownDomainRedirects));
   return websiteHosts(domain).filter((h) => !held.has(h));
+}
+
+/** Every host a website of this tenant answers at, off its registration: what a move of the tenant's own
+ *  domain must leave standing. */
+export async function tenantWebsiteHosts(registrations: Pick<TenantRegistrations, "readTenant">, tenant: { stage: Parameters<TenantRegistrations["readTenant"]>[0]; guid: string }): Promise<Set<string>> {
+  const read = await registrations.readTenant(tenant.stage, tenant.guid);
+  return new Set((read?.entry.apps ?? []).flatMap((a) => (a.domain ? websiteHosts(a.domain) : [])));
+}
+
+/** Every host a website of ANOTHER tenant answers at, at every stage, off the registrations: a domain is
+ *  one name in DNS whatever stage its tenant stands at, so it serves one website. */
+export async function otherTenantsWebsiteHosts(registrations: Pick<TenantRegistrations, "listTenantPointers">, guid: string): Promise<{ host: string; subdomain: string }[]> {
+  const hosts: { host: string; subdomain: string }[] = [];
+  for (const stage of STAGE) {
+    for (const t of (await registrations.listTenantPointers(stage)).pointers) {
+      if (t.guid === guid) continue;
+      for (const a of t.apps) if (a.domain) hosts.push(...websiteHosts(a.domain).map((host) => ({ host, subdomain: t.subdomain })));
+    }
+  }
+  return hosts;
 }
 
 /** On abort: remove the records of `hosts`, where this installation wrote them for the tenant. */
@@ -60,12 +82,12 @@ export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId:
 /** Wait until the website answers at `https://www.<domain>/`, and `https://<domain>/` redirects. The
  *  probe does not follow a redirect, so the site's own root may answer with one too (a language
  *  redirect), and anything below 400 is an answer. */
-export async function waitForWebsite(ctx: Parameters<typeof waitForAnswer>[0], ports: WebsiteDomainPorts, domain: string): Promise<void> {
+export async function waitForWebsite(ctx: Parameters<typeof waitForAnswer>[0], ports: WebsiteDomainPorts, domain: string, next: string): Promise<void> {
   const [site, ...redirects] = websiteHosts(domain);
-  const seen = await waitForAnswer(ctx, ports, `https://${site}/`, "an answer below 400", (s) => s >= 200 && s < 400);
+  const seen = await waitForAnswer(ctx, ports, `https://${site}/`, "an answer below 400", (s) => s >= 200 && s < 400, next);
   ctx.log("meta", `https://${site}/ answers (${seen})`);
   for (const host of redirects) {
-    const redirect = await waitForAnswer(ctx, ports, `https://${host}/`, "a redirect", (s) => s >= 300 && s < 400);
+    const redirect = await waitForAnswer(ctx, ports, `https://${host}/`, "a redirect", (s) => s >= 300 && s < 400, next);
     ctx.log("meta", `https://${host}/ redirects (${redirect})`);
   }
 }

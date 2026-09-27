@@ -252,40 +252,28 @@ function removeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): S
   return [
     attestTenantTargetStep(ports, tenantId),
     {
-      name: "remove-website-records",
-      title: "Remove the DNS records of a website's hosts",
-      run: async (ctx) => {
-        // Read before the drop, while the registration still names the website's domain; a resume after
-        // the drop finds no entry, and the records went on the first pass (#308).
-        const tc = loadTenantCluster(ctx.db, tenantId);
-        const current = await ports.registrations.readTenant(tc.stage, tc.guid);
-        const domain = current?.entry.apps.find((a) => a.name === app)?.domain;
-        if (current === null || domain === undefined) {
-          ctx.log("meta", `app "${app}" names no domain of its own — no website record to remove`);
-          return;
-        }
-        const hosts = websiteRecordHosts(domain, current.entry);
-        if (hosts.length === 0) ctx.log("meta", `website "${app}" is served at the tenant's own domain, whose records tenant-set-own-domain holds`);
-        for (const host of hosts) await removeOwnDomainRecord(ctx, ports, tc, host);
-      },
-    },
-    {
       name: "remove-app-pointer",
-      title: "Drop the app from the tenant registration (GitOps un-deploy)",
+      title: "Drop the app from the tenant registration (GitOps un-deploy), and a website's DNS records",
       run: async (ctx) => {
         // updateTenantApps drops ONLY this app from the guid × apps[] matrix; every sibling member
         // stays. A drop of an app that is not present is refused (VALIDATION) by the registrations — so on a resume
         // (the drop already committed before the crash) skip instead of throwing, mirroring add-app.
         const tc = loadTenantCluster(ctx.db, tenantId);
         const current = await ports.registrations.readTenant(tc.stage, tc.guid);
+        // A website's hosts are read before the drop, while the registration still names its domain, and
+        // held in the checkpoint, so a resume after the drop still removes their records.
+        const domain = current?.entry.apps.find((a) => a.name === app)?.domain;
+        const websiteHosts = ctx.readCheckpoint<{ websiteHosts?: string[] }>()?.websiteHosts ?? (current && domain ? websiteRecordHosts(domain, current.entry) : []);
         if (current && !current.entry.apps.some((a) => a.name === app)) {
           ctx.log("meta", `app "${app}" already dropped from tenant ${tc.guid} — skipping (resume)`);
-          return;
+        } else {
+          ctx.checkpoint({ websiteHosts });
+          const { commit, approvedTags } = await ports.registrations.updateTenantApps(tc.stage, tc.guid, { op: "drop", app, runId: ctx.runId });
+          ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
+          ctx.checkpoint({ commit, websiteHosts });
+          ctx.log("meta", `app "${app}" dropped from tenant ${tc.guid} on ${ports.registrations.branch} (${commit}) — ArgoCD will now prune only this member's Application`);
         }
-        const { commit, approvedTags } = await ports.registrations.updateTenantApps(tc.stage, tc.guid, { op: "drop", app, runId: ctx.runId });
-        ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
-        ctx.checkpoint({ commit });
-        ctx.log("meta", `app "${app}" dropped from tenant ${tc.guid} on ${ports.registrations.branch} (${commit}) — ArgoCD will now prune only this member's Application`);
+        for (const host of websiteHosts) await removeOwnDomainRecord(ctx, ports, tc, host);
       },
     },
     {
@@ -392,7 +380,7 @@ export function makeRemoveAppDef(ports: TenantLifecyclePorts): RunDefinition<Rem
         kind: "tenant-remove-app",
         targetKind: "tenant",
         targetId: params.tenantId,
-        summary: `Remove app "${params.app}" from tenant ${tc.guid} on ${tc.domain} (${tc.stage}): drop it from the registration, wait for ArgoCD to prune only that member's Application, mark it offboarded. Every sibling member + the row are kept.`,
+        summary: `Remove app "${params.app}" from tenant ${tc.guid} on ${tc.domain} (${tc.stage}): drop it from the registration (a website's DNS records go with it), wait for ArgoCD to prune only that member's Application, mark it offboarded. Every sibling member + the row are kept.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),

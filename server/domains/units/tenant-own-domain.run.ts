@@ -11,6 +11,10 @@ import { tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
 import { tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
 import type { TenantSetRoutingPorts } from "./tenant-routing.run.ts";
 import { customerHostProblem, provisionOwnDomainRecord, removeOwnDomainRecord, waitForAnswer } from "./own-domain-records.ts";
+import { otherTenantsWebsiteHosts, tenantWebsiteHosts } from "./website-domain.ts";
+
+/** What a failed wait tells the operator to do next. */
+const OWN_DOMAIN_NEXT = "The previous hosts still stand: retry this step once they are, or abort the run to record the previous own domain again.";
 
 // `tenant-set-own-domain` — set, switch or clear the ONE own domain of a standing tenant.
 //
@@ -94,7 +98,7 @@ function removeNewRecordCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwnD
     title: `Remove the DNS records of ${ownHosts(p.ownDomain, p.ownDomainRedirects).join(", ") || "no domain"}, where the tenant does not use them`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
-      const used = new Set(ownHosts(tc.ownDomain, tc.ownDomainRedirects));
+      const used = new Set([...ownHosts(tc.ownDomain, tc.ownDomainRedirects), ...(await tenantWebsiteHosts(ports.registrations, tc))]);
       for (const host of ownHosts(p.ownDomain, p.ownDomainRedirects)) {
         if (!used.has(host)) await removeOwnDomainRecord(ctx, ports, tc, host);
       }
@@ -146,14 +150,19 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
         const url = `${tenantMemberUrl("path", tc.identityProvider, tc.stage, tc.subdomain, apex, p.ownDomain)}/`;
-        const seen = await waitForAnswer(ctx, ports, url, "a 2xx", (s) => s >= 200 && s < 300);
+        const seen = await waitForAnswer(ctx, ports, url, "a 2xx", (s) => s >= 200 && s < 300, OWN_DOMAIN_NEXT);
         ctx.log("meta", `${url} answers (${seen}) — the tenant is served at ${tenantHost(tc, apex, p.ownDomain)}`);
         // The probe does not follow a redirect, so a redirect host answers with the 3xx itself.
         for (const host of p.ownDomainRedirects) {
-          const redirect = await waitForAnswer(ctx, ports, `https://${host}/`, "a redirect", (s) => s >= 300 && s < 400);
+          const redirect = await waitForAnswer(ctx, ports, `https://${host}/`, "a redirect", (s) => s >= 300 && s < 400, OWN_DOMAIN_NEXT);
           ctx.log("meta", `https://${host}/ redirects (${redirect})`);
         }
-        for (const host of retiredHosts(p)) await removeOwnDomainRecord(ctx, ports, tc, host);
+        // A host a website of the tenant still answers at stays: its records are the website's now.
+        const websites = await tenantWebsiteHosts(ports.registrations, tc);
+        for (const host of retiredHosts(p)) {
+          if (websites.has(host)) ctx.log("meta", `${host} stays: a website of tenant ${tc.guid} answers there`);
+          else await removeOwnDomainRecord(ctx, ports, tc, host);
+        }
       },
     },
   ];
@@ -176,8 +185,9 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       if (params.ownDomain !== "" && tc.routing !== "path") throw errValidation(`tenant ${tc.subdomain} is on ${tc.routing} routing — an own domain serves every member under a path of it, so move the tenant to path routing first`);
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       const zone = tenantZone(tc.subdomain, tc.stage, apex);
+      const websites = await otherTenantsWebsiteHosts(ports.registrations, tc.guid);
       for (const host of ownHosts(params.ownDomain, params.ownDomainRedirects)) {
-        const problem = customerHostProblem(db, params.tenantId, host, apex);
+        const problem = customerHostProblem(db, params.tenantId, host, apex, websites);
         if (problem !== null) throw errValidation(problem);
       }
       const newHost = params.ownDomain || zone;

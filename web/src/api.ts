@@ -677,14 +677,14 @@ export const setTenantVersions = (tenantId: string, versions: Record<string, str
 /** Plan setting, switching or clearing ("") the tenant's own domain. */
 /** Plan tenant-set-own-domain for a domain typed without www: the tenant is served at www.<domain>,
  *  and <domain> redirects there ("" returns it to its zone). */
-/** Plan add-app for a website (#308): named by its domain, running the bundle's website folder. */
+export const setTenantOwnDomain = (tenantId: string, domain: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { domain });
+/** Plan add-app for a website: named by its domain, running the bundle's website folder. */
 export const addTenantWebsite = (tenantId: string, website: { domain: string; site: string; folder: string }): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/apps`, { app: websiteAppName(website.domain), ...website });
 /** Plan tenant-set-website-domain: the website moves to another domain and keeps its name. */
 export const setTenantWebsiteDomain = (tenantId: string, app: string, domain: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/websites/${encodeURIComponent(app)}/domain`, { domain });
-export const setTenantOwnDomain = (tenantId: string, domain: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { domain });
 
 /** The invite-mail delivery outcome — a zod-free mirror of the server's ConsumerActivationMail, kept
  *  out of the web bundle deliberately (same rule as api-types.ts). */

@@ -32,7 +32,7 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { customerHostProblem } from "./own-domain-records.ts";
-import { provisionWebsiteRecordsStep, waitForWebsite, websiteHosts, websiteRecordHosts, type WebsiteDomainPorts } from "./website-domain.ts";
+import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, type WebsiteDomainPorts } from "./website-domain.ts";
 
 // The "tenant-add-app" Run. The subset sibling of
 // create-tenant: it fans ONE new app into a LIVE tenant. It shares create-tenant's streaming-plan
@@ -101,12 +101,17 @@ export const AddAppParams = z.object({
   subdomain: z.string().default(""),
   owner: z.string().default(""),
   seedUsers: z.boolean().default(false),
-  // A website's folder, site and domain (#308), written into its apps[] entry.
+  // A website's folder, site and domain, written into its apps[] entry.
   website: z.object({ folder: appName, site: siteId, domain: publicFqdn }).optional(),
   // The website's hosts whose records this run writes: none where the tenant's own domain holds them.
   websiteRecordHosts: z.array(publicFqdn).default([]),
 });
 export type AddAppParams = z.infer<typeof AddAppParams>;
+
+/** Why a tenant on another routing than `path` takes no website: a website's hosts point at the tenant's
+ *  zone, and only path routing gives the zone itself a record (host routing records only its wildcard). */
+export const WEBSITE_NEEDS_PATH = (subdomain: string, routing: string): string =>
+  `tenant ${subdomain} is on ${routing} routing — a website's hosts point at the tenant's zone, which has a record of its own only under path routing; move the tenant to path routing first`;
 
 /** What add-app reads beyond the onboarding ports: the probe and its wait, for a website's hosts. */
 export type AddAppPorts = TenantOnboardPorts & Pick<WebsiteDomainPorts, "probe" | "routingWaitMs" | "routingPollMs">;
@@ -331,7 +336,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
         ctx.log("meta", `app "${p.app}" Application(s) are Synced + Healthy at ${p.chartsRef.slice(0, 7)}`);
       },
     },
-    // A website's hosts: their records, then the wait until it answers there (#308).
+    // A website's hosts: their records, then the wait until it answers there.
     ...websiteSteps(ports, p),
     {
       name: "smoke",
@@ -384,7 +389,7 @@ function websiteSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
   if (!website) return [];
   return [
     provisionWebsiteRecordsStep(ports, p.tenantId, p.websiteRecordHosts),
-    { name: "wait-website", title: `Wait until the website answers at www.${website.domain}`, run: (ctx) => waitForWebsite(ctx, ports, website.domain) },
+    { name: "wait-website", title: `Wait until the website answers at www.${website.domain}`, run: (ctx) => waitForWebsite(ctx, ports, website.domain, "The website's member stands: retry this step once its records and certificate are in place, or remove the website.") },
   ];
 }
 
@@ -413,11 +418,13 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       }
       const website = req.folder !== undefined && req.site !== undefined && req.domain !== undefined ? { folder: req.folder, site: req.site, domain: req.domain } : undefined;
       if (website) {
+        if (tc.routing !== "path") throw errValidation(WEBSITE_NEEDS_PATH(tc.subdomain, tc.routing));
         const serving = current.entry.apps.find((a) => a.domain === website.domain);
         if (serving) throw errValidation(`${website.domain} is already the domain of website "${serving.name}" in tenant ${tc.guid}`);
         const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
+        const websites = await otherTenantsWebsiteHosts(ports.registrations, tc.guid);
         for (const host of websiteHosts(website.domain)) {
-          const problem = customerHostProblem(ctx.db, tc.tenantId, host, apex);
+          const problem = customerHostProblem(ctx.db, tc.tenantId, host, apex, websites);
           if (problem !== null) throw errValidation(problem);
         }
       }
@@ -537,7 +544,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       return { outcome: "planned", params, plan };
     },
     steps: (params) => addAppSteps(ports, params),
-    cleanups: (params) => [revertAppendCleanup(ports, params)],
+    cleanups: (params) => [revertAppendCleanup(ports, params), removeWebsiteRecordsCleanup(ports, params.tenantId, params.websiteRecordHosts)],
     // The rollback's precondition: the drop above is destructive by cascade (the member's databases go
     // with its ServiceClaim), so it must never fire for a run whose NEW member has meanwhile gone live.
     assertAbortable: (params, deps) => assertAddAppAbortable(ports, params, deps.db),

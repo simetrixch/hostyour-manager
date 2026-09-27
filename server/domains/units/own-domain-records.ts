@@ -29,7 +29,7 @@ export interface AnswerWaitPorts {
  *  space or under a cluster's name, or it is, or overlaps, a host of another live tenant (one host
  *  carries one record, so it serves one tenant, and a session cookie scoped to an outer host would
  *  reach the inner one). An offboarded or purged tenant's hosts are free again. */
-export function customerHostProblem(db: Db, tenantId: string, host: string, apex: string): string | null {
+export function customerHostProblem(db: Db, tenantId: string, host: string, apex: string, websites: readonly { host: string; subdomain: string }[] = []): string | null {
   if (host === apex || host.endsWith(`.${apex}`)) return `${host} lies in the platform's own name space (${apex}) — a customer's domain is one the customer brings`;
   const cluster = db.select({ domain: clusters.domain }).from(clusters).all().map((c) => c.domain).find((d) => host === d || host.endsWith(`.${d}`));
   if (cluster) return `${host} lies under the cluster name ${cluster} — a customer's domain is one the customer brings`;
@@ -42,6 +42,8 @@ export function customerHostProblem(db: Db, tenantId: string, host: string, apex
     const theirs = ownHosts(o.ownDomain, o.ownDomainRedirects).find((h) => h === host || h.endsWith(`.${host}`) || host.endsWith(`.${h}`));
     if (theirs) return `${host} ${theirs === host ? "is already" : "overlaps"} a host of tenant ${o.subdomain} (${theirs})`;
   }
+  const website = websites.find((w) => w.host === host || w.host.endsWith(`.${host}`) || host.endsWith(`.${w.host}`));
+  if (website) return `${host} ${website.host === host ? "is already" : "overlaps"} a website host of tenant ${website.subdomain} (${website.host})`;
   return null;
 }
 
@@ -93,7 +95,7 @@ export async function removeOwnDomainRecord(ctx: StepCtx, ports: RecordPorts, tc
 }
 
 /** Ask `url` until `accepts` takes its status, or fail at the deadline naming what was waited for. */
-export async function waitForAnswer(ctx: StepCtx, ports: AnswerWaitPorts, url: string, wanted: string, accepts: (status: number) => boolean): Promise<string> {
+export async function waitForAnswer(ctx: StepCtx, ports: AnswerWaitPorts, url: string, wanted: string, accepts: (status: number) => boolean, next: string): Promise<string> {
   const deadline = Date.now() + ports.routingWaitMs;
   for (;;) {
     const seen = await ports.probe.probe(url, { signal: ctx.signal });
@@ -102,8 +104,7 @@ export async function waitForAnswer(ctx: StepCtx, ports: AnswerWaitPorts, url: s
     if (Date.now() >= deadline) {
       throw errValidation(
         `${url} did not answer with ${wanted} within ${Math.round(ports.routingWaitMs / 60_000)} minutes (last: ${seen.detail}) — ` +
-        `its record, its certificate or the product's charts are not in place yet. The previous hosts still stand: ` +
-        `retry this step once they are, or abort the run to record the previous own domain again.`,
+        `its record, its certificate or the product's charts are not in place yet. ${next}`,
       );
     }
     ctx.log("meta", `${url} does not answer with ${wanted} yet (${seen.detail}); asking again in ${Math.round(ports.routingPollMs / 1000)}s`);

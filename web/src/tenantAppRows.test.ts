@@ -28,6 +28,11 @@ describe("tenantAppRows", () => {
 });
 
 describe("undeployedApps", () => {
+  it("keeps a deployed app named after the website folder, which is no website of its own", () => {
+    const web = { ...entry("web", true), sites: ["main"] };
+    expect(tenantAppRows([entry("erp", true), web], [row("erp"), row("web")], []).map((r) => r.name)).toEqual(["erp", "web"]);
+  });
+
   it("leaves the website folder and the websites to the Websites section", () => {
     const web = { ...entry("web", false), sites: ["main"] };
     const rows = tenantAppRows([entry("erp", true), web], [row("erp"), row("example-ch")], [{ name: "example-ch" }]);

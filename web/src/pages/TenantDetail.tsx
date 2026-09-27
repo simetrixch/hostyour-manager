@@ -259,7 +259,7 @@ export function TenantDetail() {
 
       {!settled && !unfinished && <TenantAddAppForm catalog={catalog} busy={busy} onAdd={addApp} onRecordPackagesReader={recordPackagesReader} />}
 
-      {!settled && !unfinished && <TenantWebsites tenantId={tenantId} catalog={catalog} busy={busy} act={act} onRemove={setRemoveApp} />}
+      {!settled && !unfinished && <TenantWebsites tenantId={tenantId} catalog={catalog} busy={busy} act={act} onRemove={setRemoveApp} onRecordPackagesReader={recordPackagesReader} />}
 
       {!settled && (
         <div className="actionbar">

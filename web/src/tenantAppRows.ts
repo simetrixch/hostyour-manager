@@ -34,7 +34,7 @@ export function tenantAppRows<R extends TenantAppRowInput>(catalog: readonly Ten
   const site = new Set(websites.map((w) => w.name));
   const byName = new Map(rows.map((r) => [r.name, r]));
   const listed = apps.map((entry) => ({ name: entry.name, entry, row: byName.get(entry.name) ?? null, deployed: entry.deployed }));
-  const named = new Set(catalog.map((e) => e.name));
+  const named = new Set(apps.map((e) => e.name));
   const rest = rows.filter((r) => !named.has(r.name) && !site.has(r.name)).map((row) => ({ name: row.name, entry: null, row, deployed: true }));
   return [...listed, ...rest];
 }

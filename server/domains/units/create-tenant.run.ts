@@ -242,7 +242,9 @@ export const CreateTenantRequest = z.object({
   subdomain: subdomainSchema,
   owner: z.string().min(1),
   // Per-app seed tiers — each selected app's Reference + Demo checkboxes. Absent ⇒ both false.
-  apps: z.array(TenantAppSchema).default([]),
+  // A website is added to a standing tenant (tenant-add-app), which names it, points its hosts at
+  // the zone and waits for it; an entry that carries a folder, a site or a domain is refused here.
+  apps: z.array(TenantAppSchema).default([]).refine((apps) => apps.every((a) => a.folder === undefined && a.site === undefined && a.domain === undefined), { message: "a website is added to a standing tenant with Add website, never when the tenant is created" }),
   seedUsers: z.boolean().default(false),
   // The tenant's size — the ceiling each of its member namespaces gets. From the OPERATOR creating
   // the tenant, the same way the consumer form takes it from the operator onboarding the unit.

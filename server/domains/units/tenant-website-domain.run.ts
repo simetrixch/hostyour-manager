@@ -10,11 +10,11 @@ import { attestTenantTargetStep, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { customerHostProblem, removeOwnDomainRecord } from "./own-domain-records.ts";
-import { provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts } from "./website-domain.ts";
+import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts } from "./website-domain.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
-import type { AddAppPorts } from "./add-app.run.ts";
+import { WEBSITE_NEEDS_PATH, type AddAppPorts } from "./add-app.run.ts";
 
-// `tenant-set-website-domain` — move one website of a standing tenant to another domain (#308).
+// `tenant-set-website-domain` — move one website of a standing tenant to another domain.
 //
 // A website's domain is baked into its member entry (the chart serves `site.domain`), so the plan
 // resolves the member again with the new domain through the same validation add-app renders with, and
@@ -52,6 +52,12 @@ function restoreWebsiteDomainCleanup(ports: AddAppPorts, p: TenantSetWebsiteDoma
     title: `Record website ${p.app} at ${p.previous} again`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
+      // Only while the website stands where this run put it: a later run's move or a removal is that run's.
+      const standing = (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.apps.find((a) => a.name === p.app)?.domain;
+      if (standing !== p.domain) {
+        ctx.log("meta", `website ${p.app} stands at ${standing ?? "nothing"} now, not at ${p.domain} where this run put it — left as it is`);
+        return;
+      }
       const { commit } = await ports.registrations.setWebsiteDomain(tc.stage, tc.guid, p.app, p.previous, p.previousMember, ctx.runId);
       ctx.log("meta", `website ${p.app} back at ${p.previous} (${commit})`);
     },
@@ -83,7 +89,7 @@ function websiteDomainSteps(ports: AddAppPorts, p: TenantSetWebsiteDomainParams)
       name: "retire-previous-website-domain",
       title: "Wait until the website answers at its new hosts, then remove the previous hosts' records",
       run: async (ctx) => {
-        await waitForWebsite(ctx, ports, p.domain);
+        await waitForWebsite(ctx, ports, p.domain, `The previous hosts' records still stand: retry this step once the new ones answer, or abort the run to put the website back at ${p.previous}.`);
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         for (const host of p.retiredHosts) await removeOwnDomainRecord(ctx, ports, tc, host);
       },
@@ -112,9 +118,11 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       if (req.domain === entry.domain) throw errValidation(`website ${req.app} is already served at ${req.domain}`);
       const serving = current.entry.apps.find((a) => a.name !== req.app && a.domain === req.domain);
       if (serving) throw errValidation(`${req.domain} is already the domain of website "${serving.name}" in tenant ${tc.guid}`);
+      if (tc.routing !== "path") throw errValidation(WEBSITE_NEEDS_PATH(tc.subdomain, tc.routing));
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
+      const websites = await otherTenantsWebsiteHosts(ports.registrations, tc.guid);
       for (const host of websiteHosts(req.domain)) {
-        const problem = customerHostProblem(ctx.db, tc.tenantId, host, apex);
+        const problem = customerHostProblem(ctx.db, tc.tenantId, host, apex, websites);
         if (problem !== null) throw errValidation(problem);
       }
       const previousMember = current.entry.members.find((m) => m.name === req.app);
@@ -160,6 +168,7 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
             `${recordHosts.length ? `point ${recordHosts.join(", ")} at the tenant's zone, ` : ""}record the domain and the member resolved with it, ` +
             `wait until https://www.${req.domain}/ answers and https://${req.domain}/ redirects` +
             `${retiredHosts.length ? `, then remove the records of ${retiredHosts.join(", ")}` : ""}. The website keeps its name ${req.app}. ` +
+            `From the moment the new domain is recorded, the website answers only there. ` +
             `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto the tenant's zone) BEFORE approving.`,
           steps: steps.map((s) => ({ name: s.name, title: s.title })),
           targets: [],

@@ -305,11 +305,11 @@ describe("remove-app run", () => {
     expect((await reg.readTenant("prod", GUID))?.entry.appsImage).toBe("");
   });
 
-  it("plans with the six steps + tenant-remove-app kind", async () => {
+  it("plans with the five steps + tenant-remove-app kind", async () => {
     seedTenant({ apps: ["erp", "web"] });
     const plan = await makeRemoveAppDef(ports(new TenantRegistrations(new FakePlatformRepo()))).plan({ tenantId: "tnt_1", app: "web" }, { db: db.db });
     expect(plan.kind).toBe("tenant-remove-app");
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-website-records", "remove-app-pointer", "watch-prune", "remove-apps-registration", "record-app-removed"]);
+    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-app-pointer", "watch-prune", "remove-apps-registration", "record-app-removed"]);
   });
 });
 

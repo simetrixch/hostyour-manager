@@ -1,4 +1,4 @@
-// A website's move to another domain (#308): POST /api/tenants/:id/websites/:app/domain plans
+// A website's move to another domain: POST /api/tenants/:id/websites/:app/domain plans
 // tenant-set-website-domain (tenant-website-domain.run.ts) with the body's one domain, typed without
 // `www.`. The run's planner resolves the website's member again at that domain and holds every rule;
 // the route only shapes the request. Approve via the Runs API.
