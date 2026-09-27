@@ -117,7 +117,9 @@ stamp_manifest_version() {
     grep -qE '"private"[[:space:]]*:[[:space:]]*true' "$file" && declared="$VERSION"
     DECLARED="$declared" perl -0pi -e 's/^([ \t]*)"version":[ \t]*"[^"]*"/$1"version": "$ENV{DECLARED}"/m' "$file"
     git diff --quiet -- "$file" && continue
-    git add -- "$file"
+    # --force: the file is tracked (ls-files listed it), and git refuses to add a tracked file that
+    # stands in a directory a .gitignore names, as packages/storage/ under a `storage/` rule.
+    git add --force -- "$file"
     stamped="$stamped$declared $rel
 "
   done <<EOF

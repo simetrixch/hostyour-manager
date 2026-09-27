@@ -286,7 +286,9 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
     $bumped = $rx.Replace($text, '$1"version": "' + $declared + '"', 1)
     if ($bumped -eq $text) { continue }
     [System.IO.File]::WriteAllText($file, $bumped, [System.Text.UTF8Encoding]::new($hasBom))
-    git add -- $file
+    # --force: the file is tracked (ls-files listed it), and git refuses to add a tracked file that
+    # stands in a directory a .gitignore names, as packages/storage/ under a `storage/` rule.
+    git add --force -- $file
     $stamped += "$declared $rel"
   }
   if ($stamped.Count -eq 0) { return }
