@@ -67,12 +67,13 @@ export async function listWorkdirDir(workdir: string, relPath: string): Promise<
 }
 
 // Every content a workdir-relative file has had along the checked-out branch's first-parent line,
-// newest first: one per commit that wrote it, none for one that deleted it, [] where it was never
-// written. `--first-parent` keeps to the branch's own line: a merge that carried another branch in
-// counts where it changed the file, that branch's own commits do not. Same lexical guard as the readers
-// above; the contents come from git's object store, not from the worktree.
+// newest first: one per commit that added or changed it, [] where it was never written. `--first-parent`
+// keeps to the branch's own line: a merge that carried another branch in counts where it changed the
+// file, that branch's own commits do not. `AM` and not the exclusion form `d`: on the git of the Manager
+// image (2.39) `--diff-filter=d` answers no commit at all. Same lexical guard as the readers above; the
+// contents come from git's object store, not from the worktree.
 export async function readWorkdirFileHistory(workdir: string, relPath: string): Promise<string[]> {
   safePath(workdir, relPath);
-  const shas = (await runGit(["log", "--first-parent", "--diff-filter=d", "--format=%H", "--", relPath], { cwd: workdir })).split("\n").filter(Boolean);
+  const shas = (await runGit(["log", "--first-parent", "--diff-filter=AM", "--format=%H", "--", relPath], { cwd: workdir })).split("\n").filter(Boolean);
   return Promise.all(shas.map((sha) => runGit(["show", `${sha}:${relPath}`], { cwd: workdir })));
 }
