@@ -100,7 +100,7 @@ describe("tenant-set-sender-domain through the Executor", () => {
         clusterReader: new FakeClusterReader({ deployState: { domain: CLUSTER, stage: "prod", writtenAt: "x", generation: 1 } }),
         argoReader: new FakeMasterArgoReader({ statuses: rendering(opts.renders ?? senderDomain) }), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
       }),
-      catalogRepoUrl: DEPLOY_REPO, argoWatchTimeoutMs: 1000, probe,
+      deployRepoUrl: DEPLOY_REPO, argoWatchTimeoutMs: 1000, probe,
       resolveClusterValueFiles: async () => [{ path: "clusters/s1.yaml", content: "global:\n  unitApex: example.com\n" }],
     } as unknown as TenantSetSenderDomainPorts);
     const executor = new Executor({

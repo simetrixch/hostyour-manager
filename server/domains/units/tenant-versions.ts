@@ -133,7 +133,7 @@ export function watchVersionsStep(ports: TenantOnboardPorts, p: TenantVersionsPa
       const approved = current.entry.approvedTags;
       const apps = p.members.map((m) => memberApplication(p.guid, m.name, p.stage));
       const renders = (byName: ArgoAppStatusMap): boolean => p.members.every((m, i) =>
-        Object.entries(approved[m.name] ?? {}).every(([build, tag]) => rendersApproval(byName.get(apps[i]!), ports.catalogRepoUrl, m.name, build, tag)));
+        Object.entries(approved[m.name] ?? {}).every(([build, tag]) => rendersApproval(byName.get(apps[i]!), ports.deployRepoUrl, m.name, build, tag)));
       const until = (byName: ArgoAppStatusMap): boolean => syncedAt(apps)(byName) && renders(byName);
       const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
       const byName = await argoReader.watchApplicationSet(argoNamespace, apps, until, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, labelSelector: `platform/tenant=${p.guid}` });

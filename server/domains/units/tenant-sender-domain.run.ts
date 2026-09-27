@@ -127,7 +127,7 @@ function tenantSetSenderDomainSteps(ports: TenantSetSenderDomainPorts, p: Tenant
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const apps = tc.members.map((m) => memberApplication(tc.guid, m, tc.stage));
-        const renders = (byName: ArgoAppStatusMap): boolean => apps.every((a) => rendersSenderDomain(byName.get(a), ports.catalogRepoUrl, p.senderDomain));
+        const renders = (byName: ArgoAppStatusMap): boolean => apps.every((a) => rendersSenderDomain(byName.get(a), ports.deployRepoUrl, p.senderDomain));
         const until = (byName: ArgoAppStatusMap): boolean => syncedAt(apps)(byName) && renders(byName);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
         const byName = await argoReader.watchApplicationSet(argoNamespace, apps, until, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, labelSelector: `platform/tenant=${tc.guid}` });
