@@ -11,18 +11,18 @@ import { BOTH, MANIFEST, RUNS, bothSpellings, expectSameBytes, fixtureRepo, remo
 afterAll(removeTempDirs);
 
 describe.skipIf(!BOTH)("both release-kit assets, stamping package.json", () => {
-  it("stamps a published package in npm's strict form and a private one with the release version as it is: 0.3.0 beside 0.3.000", RUNS, async () => {
+  it("stamps every package.json in the strict form, a private one too: 0.3.0 for the release 0.3.000", RUNS, async () => {
     const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, privateRoot: true, workspace: true, origin: true }), ["0.3.000", "stable", "dev"]);
     const { stdout } = expectSameBytes(o);
     expect(stdout.split("\n").slice(0, 5)).toEqual([
       "release: packages/b/package.json declares no version - nothing to stamp",
-      "release: package.json declares 0.3.000",
+      "release: package.json declares 0.3.0",
       "release: packages/a/package.json declares 0.3.0",
       "release: packages/ü/package.json declares 0.3.0",
       "release: minted 0.3.000-stable-<ts14>",
     ]);
     for (const f of [o.sh, o.ps1]) {
-      expect(readFileSync(join(f.cwd, "package.json"), "utf8")).toContain('"version": "0.3.000"');
+      expect(readFileSync(join(f.cwd, "package.json"), "utf8")).toContain('"version": "0.3.0"');
       expect(readFileSync(join(f.cwd, "packages", "a", "package.json"), "utf8")).toContain('"version": "0.3.0",');
     }
   });

@@ -96,9 +96,10 @@ die() { warn "$*"; exit 1; }
 # A repository with no package.json, or a file that declares no version, has nothing that could go
 # stale — that is said out loud and the release continues, because a unit written in another
 # language is the ordinary case here and not a broken one.
-# A PACKAGE NPM PUBLISHES carries the version in npm's strict form: npm refuses a leading zero, so
-# 0.3.000 is written 0.3.0 and 0.3.001 is written 0.3.1. A package marked "private": true is never
-# published and carries the release version as it is.
+# EVERY package.json carries the version in the package manager's strict form: npm refuses to
+# publish a version with a leading zero, and pnpm matches no workspace:* dependency to a package
+# that declares one (pnpm deploy fails on it), so 0.3.000 is written 0.3.0 and 0.3.001 is written
+# 0.3.1. The tag and the images keep the release version as it is.
 stamp_manifest_version() {
   PACKAGE_VERSION="${VERSION%.*}.$((10#${VERSION##*.}))"
   manifests=$(git -c core.quotePath=false -C "$ROOT" ls-files -- 'package.json' '*/package.json')
@@ -114,7 +115,6 @@ stamp_manifest_version() {
       continue
     fi
     declared="$PACKAGE_VERSION"
-    grep -qE '"private"[[:space:]]*:[[:space:]]*true' "$file" && declared="$VERSION"
     DECLARED="$declared" perl -0pi -e 's/^([ \t]*)"version":[ \t]*"[^"]*"/$1"version": "$ENV{DECLARED}"/m' "$file"
     git diff --quiet -- "$file" && continue
     # --force: the file is tracked (ls-files listed it), and git refuses to add a tracked file that

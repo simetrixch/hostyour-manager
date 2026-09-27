@@ -260,12 +260,12 @@ function Publish-BranchPin {
 # A repository with no package.json, or a file that declares no version, has nothing that could go
 # stale — that is said out loud and the release continues, because a unit written in another
 # language is the ordinary case for this script and not a broken one.
-# A PACKAGE NPM PUBLISHES carries the version in npm's strict form: npm refuses a leading zero, so
-# 0.3.000 is written 0.3.0 and 0.3.001 is written 0.3.1. A package marked "private": true is never
-# published and carries the release version as it is.
+# EVERY package.json carries the version in the package manager's strict form: npm refuses to
+# publish a version with a leading zero, and pnpm matches no workspace:* dependency to a package
+# that declares one (pnpm deploy fails on it), so 0.3.000 is written 0.3.0 and 0.3.001 is written
+# 0.3.1. The tag and the images keep the release version as it is.
 function Set-ManifestVersion($Root, $Version, $Tag) {
   $packageVersion = $Version -replace '\.0*(\d+)$', '.$1'
-  $private = [regex]'"private"\s*:\s*true'
   $manifests = @(git -c core.quotePath=false -C $Root ls-files -- 'package.json' '*/package.json')
   if ($manifests.Count -eq 0) {
     Say 'this repository carries no package.json - no version manifest to stamp'
@@ -282,7 +282,7 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
       Say "$rel declares no version - nothing to stamp"
       continue
     }
-    $declared = if ($private.IsMatch($text)) { $Version } else { $packageVersion }
+    $declared = $packageVersion
     $bumped = $rx.Replace($text, '$1"version": "' + $declared + '"', 1)
     if ($bumped -eq $text) { continue }
     [System.IO.File]::WriteAllText($file, $bumped, [System.Text.UTF8Encoding]::new($hasBom))
