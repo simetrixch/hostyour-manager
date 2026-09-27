@@ -16,6 +16,7 @@ export function ConsumerActions(props: {
   onLifecycle: (action: LifecycleAction) => void;
   onSetSize: () => void;
   onSetSecrets: () => void;
+  onSetRelease: () => void;
   onSetDomain: (fqdn: string) => void;
   onBackup: () => void;
   onMove: () => void;
@@ -51,6 +52,13 @@ export function ConsumerActions(props: {
       {standing && (
         <button type="button" className="btn" onClick={props.onSetSecrets}>
           Secrets…
+        </button>
+      )}
+      {/* Only while it runs: the run waits until the Application is Synced on the release, and a
+          suspended app renders none. A release minted before the one that runs is a downgrade (#299). */}
+      {c.status === "active" && (
+        <button type="button" className="btn" onClick={props.onSetRelease}>
+          Release…
         </button>
       )}
       {/* Only on a RUNNING consumer: a suspended one's ingress is down, so a new domain could never answer. */}

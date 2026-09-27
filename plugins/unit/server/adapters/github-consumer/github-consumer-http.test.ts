@@ -305,15 +305,15 @@ describe("github-consumer adapter — the release workflow (dispatch)", () => {
 });
 
 describe("github-consumer adapter — listReleaseTags", () => {
-  it("walks every page of /tags and returns the names", async () => {
-    const page1 = Array.from({ length: 100 }, (_, i) => ({ name: `0.1.${i}-stable-20260901000000` }));
+  it("walks every page of /tags and returns each tag with the commit it names", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({ name: `0.1.${i}-stable-20260901000000`, commit: { sha: `${i}`.padStart(40, "a") } }));
     const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({
       "GET /repos/x/acme/tags?per_page=100&page=1": { status: 200, body: page1 },
-      "GET /repos/x/acme/tags?per_page=100&page=2": { status: 200, body: [{ name: "v2" }] },
+      "GET /repos/x/acme/tags?per_page=100&page=2": { status: 200, body: [{ name: "v2", commit: { sha: "b".repeat(40) } }] },
     }) });
-    const names = await client.listReleaseTags({ owner: "x", repo: "acme", token: "tkn" });
-    expect(names).toHaveLength(101);
-    expect(names.at(-1)).toBe("v2");
+    const tags = await client.listReleaseTags({ owner: "x", repo: "acme", token: "tkn" });
+    expect(tags).toHaveLength(101);
+    expect(tags.at(-1)).toEqual({ name: "v2", commit: "b".repeat(40) });
   });
 
   it("throws GitHubConsumerError with GitHub's own message on a non-2xx", async () => {
@@ -321,6 +321,17 @@ describe("github-consumer adapter — listReleaseTags", () => {
       "GET /repos/x/acme/tags?per_page=100&page=1": { status: 403, body: { message: "Resource not accessible" } },
     }) });
     await expect(client.listReleaseTags({ owner: "x", repo: "acme", token: "tkn" })).rejects.toThrow(/403: Resource not accessible/);
+  });
+});
+
+describe("readBranchCommit (#299)", () => {
+  it("reads a branch whose name carries a slash, with its parents, and answers null for one that does not exist", async () => {
+    const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({
+      "GET /repos/x/acme/commits/heads/deploy/prod": { status: 200, body: { sha: "c".repeat(40), parents: [{ sha: "d".repeat(40) }] } },
+      "GET /repos/x/acme/commits/heads/deploy/dev": { status: 404, body: { message: "No commit found for SHA: heads/deploy/dev" } },
+    }) });
+    expect(await client.readBranchCommit({ owner: "x", repo: "acme", branch: "deploy/prod", token: "tkn" })).toEqual({ sha: "c".repeat(40), parents: ["d".repeat(40)] });
+    expect(await client.readBranchCommit({ owner: "x", repo: "acme", branch: "deploy/dev", token: "tkn" })).toBeNull();
   });
 });
 

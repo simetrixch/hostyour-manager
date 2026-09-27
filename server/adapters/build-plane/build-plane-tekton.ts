@@ -125,19 +125,11 @@ export class TektonBuildPlane implements BuildPlane {
     // the ownership label and the release-tag param's `<version>-<channel>-` prefix (the ts14 half
     // of the tag is minted repo-side and the manager never computes it). The deadline bounds the
     // APPEARANCE only: once the run exists, it is followed to its end without a clock.
-    const ns = `${query.unit}-build`;
-    const selector = `image-builder.io/consumer=${query.unit}`;
-    const prefix = `${query.version}-${query.channel}-`;
     const appearBy = Date.now() + opts.appearMs;
     for (;;) {
-      let runs: ListedPipelineRun[];
-      try {
-        runs = await this.cluster.listPipelineRuns(selector, ns);
-      } catch (e) {
-        throw upstream(`could not list PipelineRuns in ${ns} for the ${prefix}* release: ${e instanceof Error ? e.message : String(e)}`);
-      }
+      const { ns, runs } = await this.releaseRuns(query);
       const match = runs
-        .filter((r) => (r.params["release-tag"] ?? "").startsWith(prefix))
+        .filter((r) => !query.standing?.includes(r.name))
         .sort((a, b) => a.creationTimestamp.localeCompare(b.creationTimestamp))
         .at(-1);
       if (match) {
@@ -155,6 +147,25 @@ export class TektonBuildPlane implements BuildPlane {
       await sleep(this.pollMs, opts.signal);
       if (opts.signal?.aborted) return null;
     }
+  }
+
+  async listReleaseRuns(query: ReleaseRunQuery): Promise<string[]> {
+    return (await this.releaseRuns(query)).runs.map((r) => r.name);
+  }
+
+  /** The runs of the queried release in its own build namespace: the release tag's
+   *  `<version>-<channel>-` prefix, and the stage where the query names one. */
+  private async releaseRuns(query: ReleaseRunQuery): Promise<{ ns: string; runs: ListedPipelineRun[] }> {
+    const ns = `${query.unit}-build`;
+    const selector = `image-builder.io/consumer=${query.unit}`;
+    const prefix = `${query.version}-${query.channel}-`;
+    let runs: ListedPipelineRun[];
+    try {
+      runs = await this.cluster.listPipelineRuns(selector, ns);
+    } catch (e) {
+      throw upstream(`could not list PipelineRuns in ${ns} for the ${prefix}* release: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return { ns, runs: runs.filter((r) => (r.params["release-tag"] ?? "").startsWith(prefix) && (query.stage === undefined || r.params["stage"] === query.stage)) };
   }
 
 }

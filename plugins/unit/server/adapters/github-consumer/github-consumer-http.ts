@@ -5,7 +5,7 @@
 // github.ts one is platform-repo/single-token scoped and has no hook or workflow methods.
 import type {
   GitHubConsumer, EnsureHookInput, EnsureHookResult, DeleteHookInput, DeleteHookResult, TokenScopes,
-  DispatchWorkflowInput, TokenAccess,
+  DispatchWorkflowInput, TokenAccess, RepositoryTag, BranchCommit,
 } from "./port.ts";
 import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener, REPO_PERMISSIONS, type OrgTokenReading } from "./port.ts";
 
@@ -227,17 +227,27 @@ export class HttpGitHubConsumer implements GitHubConsumer {
     return res.text();
   }
 
-  async listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string[]> {
+  async listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<RepositoryTag[]> {
     const base = this.repoPath(input.owner, input.repo);
-    const names: string[] = [];
+    const tags: RepositoryTag[] = [];
     for (let page = 1; ; page += 1) {
       const path = `${base}/tags?per_page=100&page=${page}`;
       const res = await this.send(input.token, path, input.signal ? { signal: input.signal } : undefined);
       if (!res.ok) throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
-      const body = (await res.json()) as Array<{ name?: string }>;
-      for (const t of body) if (typeof t.name === "string") names.push(t.name);
-      if (body.length < 100) return names;
+      const body = (await res.json()) as Array<{ name?: string; commit?: { sha?: string } }>;
+      for (const t of body) if (typeof t.name === "string" && typeof t.commit?.sha === "string") tags.push({ name: t.name, commit: t.commit.sha });
+      if (body.length < 100) return tags;
     }
+  }
+
+  async readBranchCommit(input: { owner: string; repo: string; branch: string; token: string; signal?: AbortSignal }): Promise<BranchCommit | null> {
+    const path = `${this.repoPath(input.owner, input.repo)}/commits/heads/${input.branch.split("/").map(encodeURIComponent).join("/")}`;
+    const res = await this.send(input.token, path, input.signal ? { signal: input.signal } : undefined);
+    if (res.status === 404 || res.status === 422) return null;
+    if (!res.ok) throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
+    const body = (await res.json()) as { sha?: string; parents?: Array<{ sha?: string }> };
+    if (typeof body.sha !== "string") throw new GitHubConsumerError(`GitHub GET ${path} answered no commit sha`, res.status);
+    return { sha: body.sha, parents: (body.parents ?? []).flatMap((p) => (typeof p.sha === "string" ? [p.sha] : [])) };
   }
 
   async dispatchWorkflow(input: DispatchWorkflowInput): Promise<void> {

@@ -34,6 +34,7 @@ import { makeRestartWorkloadsDef } from "../domains/units/restart-workloads.run.
 import { makeSetSizeDef } from "../domains/units/set-size.run.ts";
 import { makeConsumerSetDomainDef } from "../domains/units/consumer-domain.run.ts";
 import { makeSetSecretsDef, type SetSecretsPorts } from "../domains/units/set-secrets.run.ts";
+import { makeSetReleaseDef, type SetReleasePorts } from "../domains/units/set-release.run.ts";
 import type { LifecyclePorts } from "../domains/units/lifecycle.ts";
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import type { AppCatalogProvider } from "../domains/units/app-catalog.ts";
@@ -513,6 +514,9 @@ function buildConsumerOnboarding(
     // seed is create-only, so nothing else can. It reads the consumer's manifest through the owner's
     // identity, which is why it takes the GitHub client and the credential store beside the seeder.
     makeSetSecretsDef({ ...lifecyclePorts, seeder, github, store } satisfies SetSecretsPorts),
+    // A release that stands, put on its stage again (#299), through the release cycle's own ports: the
+    // dispatch and the build watch every release runs.
+    makeSetReleaseDef({ ...lifecyclePorts, build: onboardPorts, github, store } satisfies SetReleasePorts),
     // backup / restore / migrate — ONE relocation mechanism over the Storage Box. The
     // provisioning writers ride along because a move re-arms the unit's isolation on the target,
     // and the DNS provider because a move is a content update of the unit's one record.

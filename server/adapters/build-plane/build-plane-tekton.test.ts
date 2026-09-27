@@ -34,6 +34,9 @@ function cfg(over: Partial<TektonBuildPlaneConfig> = {}): TektonBuildPlaneConfig
   return { pollMs: 1, ...over };
 }
 
+/** The release most scenarios watch: acme's 1.0.0 on the stable channel. */
+const RELEASE_100 = { unit: "acme", version: "1.0.0", channel: "stable" };
+
 describe("TektonBuildPlane", () => {
   it("awaitReleaseRun matches by the ownership label + the release-tag prefix in the UNIT's own namespace and reads the FULL tag off the run", async () => {
     const c = new FakeCluster({
@@ -45,7 +48,7 @@ describe("TektonBuildPlane", () => {
       outcomes: [{ succeeded: true }],
     });
     const plane = new TektonBuildPlane(cfg(), c);
-    const out = await plane.awaitReleaseRun({ unit: "acme", version: "1.0.0", channel: "stable" }, { appearMs: 100 });
+    const out = await plane.awaitReleaseRun(RELEASE_100, { appearMs: 100 });
     expect(out).toEqual({ runName: "acme-release-7", releaseTag: "1.0.0-stable-20260728100000", succeeded: true });
     expect(c.rec.listSelectors.at(-1)).toBe("image-builder.io/consumer=acme");
     expect(c.rec.listNamespaces.at(-1)).toBe("acme-build"); // the per-unit namespace, never image-builder
@@ -62,6 +65,32 @@ describe("TektonBuildPlane", () => {
   it("awaitReleaseRun returns null when no matching run APPEARS inside the budget (the caller decides)", async () => {
     const c = new FakeCluster({ runs: [] });
     const plane = new TektonBuildPlane(cfg(), c);
-    await expect(plane.awaitReleaseRun({ unit: "acme", version: "1.0.0", channel: "stable" }, { appearMs: 5 })).resolves.toBeNull();
+    await expect(plane.awaitReleaseRun(RELEASE_100, { appearMs: 5 })).resolves.toBeNull();
+  });
+
+  // A RELEASE PUT ON A STAGE AGAIN (#299) fires a run with the release tag of the run that put it there
+  // first. The watch is handed the runs that stood before the trigger and the stage, and takes neither
+  // the old run nor a run of the same release on another stage.
+  const again = (): ListedPipelineRun[] => [
+    { name: "acme-release-7", creationTimestamp: "2026-07-28T10:00:10Z", params: { "release-tag": "1.0.0-stable-20260728100000", stage: "prod" } },
+    { name: "acme-release-9", creationTimestamp: "2026-07-29T10:00:10Z", params: { "release-tag": "1.0.0-stable-20260728100000", stage: "test" } },
+  ];
+
+  it("lists the runs of a release on one stage — what a trigger hands the watch as standing", async () => {
+    const plane = new TektonBuildPlane(cfg(), new FakeCluster({ runs: again() }));
+    expect(await plane.listReleaseRuns({ ...RELEASE_100, stage: "prod" })).toEqual(["acme-release-7"]);
+    expect(await plane.listReleaseRuns(RELEASE_100)).toEqual(["acme-release-7", "acme-release-9"]);
+  });
+
+  it("PLANTED DEFECT: takes no run that stood before the trigger, and none of another stage, however finished it is", async () => {
+    const plane = new TektonBuildPlane(cfg(), new FakeCluster({ runs: again(), outcomes: [{ succeeded: true }] }));
+    await expect(plane.awaitReleaseRun({ ...RELEASE_100, stage: "prod", standing: ["acme-release-7"] }, { appearMs: 5 })).resolves.toBeNull();
+  });
+
+  it("THE INNOCENT NEIGHBOUR: takes the run the trigger fired on that stage once it appears", async () => {
+    const fired = { name: "acme-release-12", creationTimestamp: "2026-07-30T10:00:10Z", params: { "release-tag": "1.0.0-stable-20260728100000", stage: "prod" } };
+    const plane = new TektonBuildPlane(cfg(), new FakeCluster({ runs: [...again(), fired], outcomes: [{ succeeded: true }] }));
+    expect(await plane.awaitReleaseRun({ ...RELEASE_100, stage: "prod", standing: ["acme-release-7"] }, { appearMs: 100 }))
+      .toEqual({ runName: "acme-release-12", releaseTag: "1.0.0-stable-20260728100000", succeeded: true });
   });
 });

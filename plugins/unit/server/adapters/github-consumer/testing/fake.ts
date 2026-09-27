@@ -6,7 +6,7 @@
 // contract the HTTP client answers.
 import type {
   GitHubConsumer, EnsureHookInput, EnsureHookResult, DeleteHookInput, DeleteHookResult, TokenScopes,
-  DispatchWorkflowInput, OrgTokenReading, TokenAccess, RepoPermission,
+  DispatchWorkflowInput, OrgTokenReading, TokenAccess, RepoPermission, RepositoryTag, BranchCommit,
 } from "../port.ts";
 import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener } from "../port.ts";
 
@@ -90,8 +90,10 @@ export class FakeGitHubConsumer implements GitHubConsumer {
    *  surface-GitHub's-own-message path. */
   dispatchRefusal: { status: number; message: string } | null = null;
 
-  /** owner/repo -> the tag names listReleaseTags answers; unseeded repos answer none. */
-  private readonly tags = new Map<string, string[]>();
+  /** owner/repo -> the tags listReleaseTags answers; unseeded repos answer none. */
+  private readonly tags = new Map<string, RepositoryTag[]>();
+  /** owner/repo/branch -> the commit readBranchCommit answers; an unseeded branch answers null. */
+  private readonly branches = new Map<string, BranchCommit>();
   /** owner/repo/path -> the text readFile answers; an unseeded path answers null (no such file). */
   private readonly files = new Map<string, string>();
 
@@ -107,8 +109,17 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   /** The token each tag listing was made with — the identity the read ran under. */
   readonly tokensSeen: string[] = [];
 
-  seedTags(owner: string, repo: string, names: readonly string[]): void {
-    this.tags.set(this.key(owner, repo), [...names]);
+  /** A tag seeded by its name alone names no commit a test cares about. */
+  seedTags(owner: string, repo: string, tags: readonly (string | RepositoryTag)[]): void {
+    this.tags.set(this.key(owner, repo), tags.map((t) => (typeof t === "string" ? { name: t, commit: "" } : t)));
+  }
+
+  seedBranch(owner: string, repo: string, branch: string, commit: BranchCommit): void {
+    this.branches.set(`${this.key(owner, repo)}/${branch}`, commit);
+  }
+
+  async readBranchCommit(input: { owner: string; repo: string; branch: string; token: string; signal?: AbortSignal }): Promise<BranchCommit | null> {
+    return this.branches.get(`${this.key(input.owner, input.repo)}/${input.branch}`) ?? null;
   }
 
   async hookStandsAt(input: { owner: string; repo: string; token: string; targetUrl: string }): Promise<boolean> {
@@ -123,7 +134,7 @@ export class FakeGitHubConsumer implements GitHubConsumer {
     return readers.includes(input.token) ? "readable" : "unreadable";
   }
 
-  async listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string[]> {
+  async listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<RepositoryTag[]> {
     this.tagReads.push({ owner: input.owner, repo: input.repo });
     this.tokensSeen.push(input.token);
     return [...(this.tags.get(this.key(input.owner, input.repo)) ?? [])];

@@ -48,7 +48,7 @@ export async function resolveNextVersion(
   }
   const tags: string[] = [];
   for (const r of repos.values()) {
-    tags.push(...(await deps.github.listReleaseTags({ owner: r.owner, repo: r.repo, token: input.token, ...(input.signal ? { signal: input.signal } : {}) })));
+    tags.push(...(await deps.github.listReleaseTags({ owner: r.owner, repo: r.repo, token: input.token, ...(input.signal ? { signal: input.signal } : {}) })).map((t) => t.name));
   }
   return { version: nextReleaseVersion(tags), readFrom: [...repos.values()].map((r) => `${r.owner}/${r.repo}`) };
 }

@@ -10,7 +10,7 @@
 // the bump wrote (never computing it) and holds the Application to the bump commit, fail-fast on a
 // terminally failed sync operation.
 import { describe, it, expect } from "vitest";
-import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
+import { putReleaseStep, triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
 import { watchDeploymentStep } from "./onboard-watch-deployment.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
@@ -91,6 +91,54 @@ describe("trigger-release", () => {
     const github = new FakeGitHubConsumer();
     github.dispatchRefusal = { status: 403, message: "Resource not accessible by personal access token" };
     await expect(triggerReleaseStep(portsWith({ github }), params()).run(ctx([]))).rejects.toThrow(/403: Resource not accessible/);
+  });
+});
+
+describe("put-release (#299)", () => {
+  const STOOD = { runName: "acme-release-7", releaseTag: MINTED_TAG, succeeded: true, stage: "prod" };
+  const FIRED = { runName: "acme-release-12", releaseTag: MINTED_TAG, succeeded: true, stage: "prod" };
+
+  /** The build plane as the step meets it: `stood` stands before the dispatch, and `fired` — the run
+   *  the dispatch fires — appears once the step has read the runs that stood. */
+  function planeFiring(stood: (typeof STOOD)[], fired?: typeof FIRED): FakeBuildPlane {
+    const plane = new FakeBuildPlane();
+    for (const r of stood) plane.seedReleaseRun("acme", r);
+    const list = plane.listReleaseRuns.bind(plane);
+    plane.listReleaseRuns = async (q) => {
+      const names = await list(q);
+      if (fired) plane.seedReleaseRun("acme", fired);
+      return names;
+    };
+    return plane;
+  }
+
+  it("dispatches the release workflow with existing=true and takes the run it fires, not the one that put the release there before", async () => {
+    const github = new FakeGitHubConsumer();
+    github.defaultBranch = "master";
+    const buildPlane = planeFiring([STOOD], FIRED);
+    const runtime: ReleaseCycleRuntime = {};
+    const logs: string[] = [];
+    await putReleaseStep(portsWith({ github, buildPlane }), params(), runtime).run(ctx(logs));
+    expect(github.dispatches).toEqual([
+      expect.objectContaining({ ref: "master", inputs: { version: "1.0.0", channel: "stable", stage: "prod", existing: "true" } }),
+    ]);
+    expect(buildPlane.releaseWatches).toEqual([expect.objectContaining({ stage: "prod", standing: ["acme-release-7"] })]);
+    expect(runtime.releaseTag).toBe(MINTED_TAG);
+    expect(logs.some((l) => l.includes("acme-build/acme-release-12 Succeeded") && l.includes("stands on prod again"))).toBe(true);
+  });
+
+  it("PLANTED DEFECT: finding only the run that stood before the dispatch fails, rather than reporting a release that never ran", async () => {
+    await expect(putReleaseStep(portsWith({ buildPlane: planeFiring([STOOD]) }), params(), {}).run(ctx([])))
+      .rejects.toThrow(/no release PipelineRun for 1\.0\.0-stable-\* appeared/);
+  });
+
+  it("a resume after the dispatch waits for the same run and dispatches no second one", async () => {
+    const github = new FakeGitHubConsumer();
+    const buildPlane = planeFiring([STOOD, FIRED]);
+    const resumed = { ...ctx([]), readCheckpoint: () => ({ standing: ["acme-release-7"], dispatched: true }) } as unknown as StepCtx;
+    await putReleaseStep(portsWith({ github, buildPlane }), params(), {}).run(resumed);
+    expect(github.dispatches).toEqual([]);
+    expect(buildPlane.releaseWatches.at(-1)).toEqual(expect.objectContaining({ standing: ["acme-release-7"] }));
   });
 });
 

@@ -16,7 +16,7 @@ import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, Plugi
 import type { ServerReachView } from "../../shared/api-types-reach.ts";
 // The onboard wizard's two read views: the channel table (served literally from the platform repo's
 // clusters/platform/values-common.yaml) and what the prefill answers, identity included.
-import type { ChannelStagesView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
+import type { ChannelStagesView, ConsumerReleaseOfferView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
 import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
@@ -400,6 +400,13 @@ export const getConsumerSecretOffer = (appId: string): Promise<ConsumerSecretOff
  *  names the generate keys minted new in the same write (#285). */
 export const setConsumerSecrets = (appId: string, mint: string[]): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/consumers/${appId}/secrets`, { mint });
+/** The releases of an app's repository its release dialog offers (#299). */
+export const getConsumerReleaseOffer = (appId: string): Promise<ConsumerReleaseOfferView> =>
+  req<ConsumerReleaseOfferView>(`/api/consumers/${appId}/releases`);
+/** Put a release that stands on the app's stage again (#299), planned through the streaming
+ *  planner; returns the { runId } of the planned run. */
+export const setConsumerRelease = (appId: string, tag: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/consumers/${appId}/release`, { tag });
 /** Plan consumer-set-domain: the domain the consumer answers at, at its stage ("" clears it). */
 export const setConsumerDomain = (name: string, stage: string, fqdn: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/consumers/${name}/stages/${stage}/fqdn`, { fqdn });

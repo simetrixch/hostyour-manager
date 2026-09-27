@@ -116,6 +116,18 @@ export interface TokenScopes {
   scopes: string[];
 }
 
+/** One tag of a repository and the commit it names. */
+export interface RepositoryTag {
+  name: string;
+  commit: string;
+}
+
+/** The commit a branch stands on, and the commits it was made on top of. */
+export interface BranchCommit {
+  sha: string;
+  parents: string[];
+}
+
 export interface DispatchWorkflowInput {
   owner: string;
   repo: string;
@@ -183,10 +195,14 @@ export interface GitHubConsumer {
    *  to know whether the owner's packages reader is needed (#237), before any clone exists. */
   readFile(input: { owner: string; repo: string; path: string; token: string; signal?: AbortSignal }): Promise<string | null>;
 
-  /** Every tag name of the repository (paginated), for the next-version read (shared/release.ts
-   *  nextReleaseVersion): the caller keeps the ones in the release grammar. A non-2xx is an error —
-   *  the repository was cloneable a moment ago, so a refusal here is a right the token lacks. */
-  listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string[]>;
+  /** Every tag of the repository with the commit it names (paginated): the next-version read keeps
+   *  the names in the release grammar (shared/release.ts nextReleaseVersion), and putting a release
+   *  on a stage again reads which release a commit is. A non-2xx is an error — the repository was
+   *  cloneable a moment ago, so a refusal here is a right the token lacks. */
+  listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<RepositoryTag[]>;
+  /** The commit a branch stands on and its parents (GET .../commits/heads/<branch>, which takes a
+   *  branch name with slashes), or null where the repository has no such branch. */
+  readBranchCommit(input: { owner: string; repo: string; branch: string; token: string; signal?: AbortSignal }): Promise<BranchCommit | null>;
   /** Fire the release workflow once (POST .../actions/workflows/<file>/dispatches — HTTP 204, no
    *  body). Throws WorkflowNotFoundError on a 404: a workflow committed moments ago is not indexed
    *  yet, and the trigger step RETRIES exactly that case. A 422 (the workflow refuses the inputs —

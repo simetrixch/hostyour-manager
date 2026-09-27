@@ -8,10 +8,11 @@ export class FakeBuildPlane implements BuildPlane {
   readonly releaseWatches: ReleaseRunQuery[] = [];
   /** The release runs "on the cluster", keyed by unit — what awaitReleaseRun matches against.
    *  Seed via seedReleaseRun; leave empty to model a webhook that never fired (the watch times out). */
-  private readonly releaseRuns = new Map<string, ReleaseRunOutcome[]>();
+  private readonly releaseRuns = new Map<string, (ReleaseRunOutcome & { stage?: string })[]>();
 
-  /** Seed the release PipelineRun the EventListener would have created in `<unit>-build`. */
-  seedReleaseRun(unit: string, run: ReleaseRunOutcome): void {
+  /** Seed the release PipelineRun the EventListener would have created in `<unit>-build`, put on
+   *  `run.stage` where one is named. */
+  seedReleaseRun(unit: string, run: ReleaseRunOutcome & { stage?: string }): void {
     const list = this.releaseRuns.get(unit) ?? [];
     list.push(run);
     this.releaseRuns.set(unit, list);
@@ -19,8 +20,18 @@ export class FakeBuildPlane implements BuildPlane {
 
   async awaitReleaseRun(query: ReleaseRunQuery): Promise<ReleaseRunOutcome | null> {
     this.releaseWatches.push(query);
+    const match = this.matching(query).filter((r) => !query.standing?.includes(r.runName)).at(-1);
+    if (!match) return null; // no seeded run models the watch that times out
+    const { stage: _stage, ...outcome } = match;
+    return outcome;
+  }
+
+  async listReleaseRuns(query: ReleaseRunQuery): Promise<string[]> {
+    return this.matching(query).map((r) => r.runName);
+  }
+
+  private matching(query: ReleaseRunQuery): (ReleaseRunOutcome & { stage?: string })[] {
     const prefix = `${query.version}-${query.channel}-`;
-    const match = (this.releaseRuns.get(query.unit) ?? []).filter((r) => r.releaseTag.startsWith(prefix)).at(-1);
-    return match ?? null; // no seeded run models the watch that times out
+    return (this.releaseRuns.get(query.unit) ?? []).filter((r) => r.releaseTag.startsWith(prefix) && (query.stage === undefined || r.stage === undefined || r.stage === query.stage));
   }
 }

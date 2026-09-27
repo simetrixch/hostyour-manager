@@ -17,6 +17,13 @@ export interface ReleaseRunQuery {
   unit: string;
   version: string;
   channel: string;
+  /** The stage the run puts the release on, its `stage` param: the same release put on another stage
+   *  is a run of its own. Absent matches every stage. */
+  stage?: string;
+  /** The runs that stood before the release was triggered, by name. A release put on a stage again
+   *  fires a run with the same release tag as the one that put it there first, and taking that
+   *  finished run for the new one would report a release that never ran. */
+  standing?: readonly string[];
 }
 
 /** The observed end of a release run: which PipelineRun it was, the FULL release tag its param
@@ -38,4 +45,7 @@ export interface BuildPlane {
    *  none has appeared within appearMs (the caller decides that is a failure) — and then until it
    *  settles, however long that takes; null also when the signal aborts. */
   awaitReleaseRun(query: ReleaseRunQuery, opts: { appearMs: number; signal?: AbortSignal }): Promise<ReleaseRunOutcome | null>;
+  /** The names of the release runs matching the query that stand now — what a trigger records as
+   *  `standing` before it fires a run the watch must tell apart from them. */
+  listReleaseRuns(query: ReleaseRunQuery): Promise<string[]>;
 }

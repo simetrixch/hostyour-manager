@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { DetectedConsumerView, DetectedScanView, RunView } from "../../../shared/api-types.ts";
 import {
-  listConsumers, getConsumerLive, offboardConsumer, purgeConsumer, setConsumerSecrets,
+  listConsumers, getConsumerLive, offboardConsumer, purgeConsumer, setConsumerSecrets, setConsumerRelease,
   scanDetectedConsumers, adoptConsumer, backupConsumer, restoreConsumer, migrateConsumer, listRuns, setConsumerSize, setConsumerDomain,
   type ConsumerView, type PurgeInput,
 } from "../api.ts";
@@ -15,6 +15,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { ConsumerLifecycleDialog, type LifecycleAction } from "../components/ConsumerLifecycleDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { ConsumerSecretsDialog } from "../components/ConsumerSecretsDialog.tsx";
+import { ConsumerReleaseDialog } from "../components/ConsumerReleaseDialog.tsx";
 import { ConsumerActions } from "../components/ConsumerActions.tsx";
 import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
 import { DetectedConsumerPanel, type PurgeTarget } from "../components/DetectedConsumerPanel.tsx";
@@ -87,6 +88,7 @@ export function Consumers() {
   const [sizeFor, setSizeFor] = useState<ConsumerView | null>(null);
   // The Secrets dialog's target: it asks which generate keys to mint before the run is planned.
   const [secretsFor, setSecretsFor] = useState<ConsumerView | null>(null);
+  const [releaseFor, setReleaseFor] = useState<ConsumerView | null>(null);
   // The relocation dialogs: "Back up" is a plain confirm (no target — the folder is named
   // after the unit); "Move…"/"Restore…" pick a target cluster. Confirming only PLANS the run.
   const [backupFor, setBackupFor] = useState<ConsumerView | null>(null);
@@ -316,6 +318,7 @@ export function Consumers() {
                   onLifecycle={(action) => setLifecycle({ c, action })}
                   onSetSize={() => setSizeFor(c)}
                   onSetSecrets={() => setSecretsFor(c)}
+                  onSetRelease={() => setReleaseFor(c)}
                   onSetDomain={(fqdn) => void act(() => setConsumerDomain(c.name, c.stage, fqdn), c.id)}
                   onBackup={() => setBackupFor(c)}
                   onMove={() => setRelocFor({ c, kind: "move" })}
@@ -418,6 +421,15 @@ export function Consumers() {
           appId={secretsFor.id}
           onCancel={() => setSecretsFor(null)}
           onConfirm={(mint) => { const c = secretsFor; setSecretsFor(null); void act((id) => setConsumerSecrets(id, mint), c.id); }}
+        />
+      )}
+
+      {releaseFor && (
+        <ConsumerReleaseDialog
+          name={releaseFor.name}
+          appId={releaseFor.id}
+          onCancel={() => setReleaseFor(null)}
+          onConfirm={(tag) => { const c = releaseFor; setReleaseFor(null); void act((id) => setConsumerRelease(id, tag), c.id); }}
         />
       )}
 

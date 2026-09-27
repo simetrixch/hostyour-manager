@@ -46,6 +46,7 @@ import { registerSetSizeRoutes } from "../domains/units/api-set-size.ts";
 import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerConsumerSecretsRoute } from "../domains/units/api-consumer-secrets.ts";
+import { registerConsumerReleaseRoute } from "../domains/units/api-consumer-release.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
 import { ensureAppIdentityRow } from "../security/app-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
@@ -392,7 +393,9 @@ export async function wire(): Promise<Wired> {
       // The tenant's own apps repository: the run that creates and builds it, gated like the tenant routes.
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
       // The secrets of a standing consumer (#245) — gated like the other consumer triggers.
-      registerConsumerSecretsRoute(a, { executor, onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), githubApp });
+      const repositoryRoutes = { executor, onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), githubApp };
+      registerConsumerSecretsRoute(a, repositoryRoutes);
+      registerConsumerReleaseRoute(a, repositoryRoutes);
       // One tenant's own catalog, read through the same closure tenant-add-app judges against.
       registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
       registerResetRoutes(a, {

@@ -91,7 +91,7 @@ export async function syncReleaseKits(deps: {
  *  workflow) into the consumer repo's default branch, replacing whatever kit stood there. Fails LOUD
  *  on any missing prerequisite (an unwired writer) or a failed push — no release tooling, the
  *  consumer cannot cut a release, so this must never be a silent skip (setup-webhook precedent). */
-export function injectReleaseKitStep(ports: BuildPorts, p: BuildParams): Step {
+export function injectReleaseKitStep(ports: BuildPorts, p: Pick<BuildParams, "consumerName" | "repoURL" | "repoCredentialId">): Step {
   return {
     name: "inject-release-kit",
     title: "Commit the release kit into the consumer repo (release/ + workflow)",
