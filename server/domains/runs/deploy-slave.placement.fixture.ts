@@ -153,7 +153,7 @@ export function answerPlacementCommand(
   return undefined;
 }
 
-/** The programs checkout checkout, answered the way a machine holds one rather than by a marker: `test -d`
+/** The programs checkout, answered the way a machine holds one rather than by a marker: `test -d`
  *  decides whether there is one at all, `symbolic-ref` names the branch it stands on, `rev-parse`
  *  reads the head it is ACTUALLY on, and `reset --hard` MOVES that head to what origin carries. So a
  *  caller that fetched and never stood the tree on what it fetched is answered by a machine whose

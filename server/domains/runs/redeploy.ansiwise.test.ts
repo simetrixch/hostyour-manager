@@ -98,7 +98,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
       const programs = await client.programs();
       expect(programs.map((p) => p.name).sort()).toEqual([
         "deploy-cluster", "deploy-host", "deploy-platform-services",
-        "emit-cluster-credentials", "move-programs-checkout", "register-slave",
+        "emit-cluster-credentials", "register-slave",
         "remove-slave", "tailnet-disconnect", "tailnet-mint-join-key",
         "tailnet-reconnect", "tailnet-rejoin",
       ]);
@@ -149,7 +149,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   // ================================ redeploy (master arm), end to end ================================
 
-  it("plan: the master arm composes attest, first contact, the placement, the four machine programs and the argocd follow, and asks for the password and nothing else", async () => {
+  it("plan: the master arm composes attest, first contact, the placement, the three machine programs and the argocd follow, and asks for the password and nothing else", async () => {
     const h = await liveMaster(serve);
     const { plan } = await h.executor.plan("cluster-redeploy", { serverId: MASTER_ID });
     // place-ansiwise and run-deploy-host stand here because a master could otherwise receive NO
@@ -163,8 +163,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(plan.steps.map((s) => s.name)).toEqual([
       "attest-target",
       "prove-elevation", "generate-key", "install-key", "verify-key-login", "enable-ntp", "remove-sudoers",
-      "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services", "run-move-programs-checkout",
-      "argocd-follow",
+      "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services", "argocd-follow",
     ]);
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     // AND NOT ONE ANSWER BESIDE IT. The six the machine-layer programs declare past the inventory —
@@ -174,7 +173,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(plan.requiredInputs).toBeUndefined();
   });
 
-  it("INNOCENT CASE: the whole master arm runs green — all four programs proven dry, then run, on the machine's own records; no pin moves", { timeout: 180_000 }, async () => {
+  it("INNOCENT CASE: the whole master arm runs green — all three programs proven dry, then run, on the machine's own records; no pin moves", { timeout: 180_000 }, async () => {
     const h = await liveMaster(serve);
 
     const runId = await settled(h, "cluster-redeploy", { serverId: MASTER_ID }, elevationOnly());
@@ -190,13 +189,13 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // The conversation went over the machine's serve surface, and the follow read ArgoCD through the
     // kube port instead of over that session: no `kubectl` reaches this machine at all any more.
     const onMaster = h.hosts.log.filter((l) => l.host === "m1.example.com").map((l) => l.command);
-    expect(onMaster.filter(isServe)).toHaveLength(4); // one conversation per program step
+    expect(onMaster.filter(isServe)).toHaveLength(3); // one conversation per program step
     expect(onMaster.filter((c) => c.includes("kubectl"))).toEqual([]);
     expect(h.argo.listed).toContain("argocd");
 
     // The machine's OWN records: dry + run per program, every one green. This is the record an
     // operator on the machine reads — the manager reported nothing the machine does not stand behind.
-    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-host", "deploy-cluster", "deploy-platform-services", "move-programs-checkout"]);
+    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-host", "deploy-cluster", "deploy-platform-services"]);
 
     // The step's checkpoint carries both machine runs green — what a re-entry would skip on.
     const checkpoint = stepColumn(h.db, runId, "run-deploy-cluster", "checkpoint_json") ?? "";
@@ -244,7 +243,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
     // AND THE RUN CARRIED ON INTO THE MACHINE LAYER over the key it had just put back: all three
     // programs proven dry, then run, on the machine's own records.
-    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-host", "deploy-cluster", "deploy-platform-services", "move-programs-checkout"]);
+    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-host", "deploy-cluster", "deploy-platform-services"]);
   });
 
   it("a master that still holds the key is written to by none of the added steps, and the run does what it did before", { timeout: 180_000 }, async () => {
@@ -277,7 +276,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     expect(h.hosts.log.filter((l) => l.command.includes("timedatectl set-ntp"))).toEqual([]);
 
     // And the machine layer ran exactly as it does without any of them.
-    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-host", "deploy-cluster", "deploy-platform-services", "move-programs-checkout"]);
+    expectProven(serve, h.db, runId, await observer.runs(), ["deploy-host", "deploy-cluster", "deploy-platform-services"]);
   });
 
   it("raises what it still raises with the password the RUN carries, on standard input — on a machine that grants no passwordless route at all", { timeout: 180_000 }, async () => {
@@ -450,7 +449,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
 
   // ================================ the tailnet run kinds, end to end ================================
 
-  // The run kind carries its family and the programs checkout program does not, so the pair is stated here —
+  // The run kind carries its family and the program does not, so the pair is stated here —
   // the same two spellings tailnet.kit.ts's PROGRAM map holds apart.
   for (const { kind, program } of [
     { kind: "cluster-tailnet-disconnect", program: "tailnet-disconnect" },

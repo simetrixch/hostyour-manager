@@ -124,7 +124,7 @@ export function requireServeCommand(ports: AnsiwisePorts): string {
   if (!ports.ansiwiseServeCommand) {
     throw errNotConfigured(
       "ANSIWISE_SERVE_COMMAND is not configured — this step reaches the machine's deployment programs through the " +
-      "serving binary's SESSION door on the machine, and which command starts it (and so which programs checkout checkout it " +
+      "serving binary's SESSION door on the machine, and which command starts it (and so which programs checkout it " +
       "reads) is the installation's decision. It is a program of `ansiwise-rest` and not of `ansiwise`, which answers " +
       "`no program is called serve`. Set ANSIWISE_SERVE_COMMAND to the command that serves the surface on the session's " +
       `stdio, e.g. \`cd ${PROGRAMS_CHECKOUT} && ~/ansiwise-rest serve --programs ${PROGRAM_FILES}\``,

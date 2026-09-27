@@ -396,9 +396,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // The machine layer and the handshake re-ran, each dry-proven; the join did not, on either
       // machine's records.
       const all = await observer().runs();
-      expectProven(serve(), h.db, r.runId, all, [
-        "deploy-host", "deploy-cluster", "deploy-platform-services", "move-programs-checkout", "emit-cluster-credentials", "register-slave",
-      ]);
+      expectProven(serve(), h.db, r.runId, all, ["deploy-host", "deploy-cluster", "deploy-platform-services", "emit-cluster-credentials", "register-slave"]);
       expectAbsent(h.db, r.runId, all, ["tailnet-mint-join-key", "tailnet-rejoin"]);
 
       // AND WHAT DECIDED THE SECOND OF THOSE, because it is a MEASUREMENT here and not a step left

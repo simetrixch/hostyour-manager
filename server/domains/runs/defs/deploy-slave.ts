@@ -600,9 +600,6 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // deploy-platform-services also declares elevation_password — the ENGINE fills that one from the
     // password the POST carries beside the answers; sending it as an answer is refused.
     ansiwiseProgramStep(target, "deploy-platform-services", ports, { extra: machineAnswers }),
-    // A redeploy carries a slave still standing with the programs checkout at its old path across; a
-    // slave deployed now is given the new path and would find nothing to do.
-    ...(redeploying ? [ansiwiseProgramStep(target, "move-programs-checkout", ports, { extra: machineAnswers })] : []),
     // THE JOIN, and WHICH join is the one thing this guard still decides. A deployment joins the
     // machine outright: mint on the master, carry the credential over the session, spend it in ONE
     // program run on the slave (the tailnet kit's own step, because a first join is the same act —
@@ -616,7 +613,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // THE MASTER'S ENGINE FIRST, because the join below mints on the master through the master's
     // own `ansiwise-rest`, and the master's engine moves only when a run moves it (#133): every
     // slave deployed after a release of the engine would otherwise ask the master's OLD binary to
-    // run a programs checkout row the new one was released for. Idempotent by measurement; on a current
+    // run a program row the new one was released for. Idempotent by measurement; on a current
     // master it is two readings.
     placeAnsiwiseOnMasterStep(ports),
     ...(redeploying

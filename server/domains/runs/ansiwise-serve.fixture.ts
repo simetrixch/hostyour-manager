@@ -140,13 +140,6 @@ export function fixturePrograms(): Record<string, string> {
       { answer: "role", pattern: "^(master|slave)$" },
       { answer: "books_fqdn", pattern: "^m1\\.example\\.com$" },
     ]),
-    // Both redeploy arms run it after deploy-platform-services, with the answers that program takes.
-    "move-programs-checkout": programYaml("move-programs-checkout", [
-      { answer: "fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
-      { answer: "stage", pattern: "^prod$" },
-      { answer: "role", pattern: "^(master|slave)$" },
-      { answer: "books_fqdn", pattern: "^m1\\.example\\.com$" },
-    ]),
     // The deploy-slave family. NO BRANCH PROGRAM IS AMONG THEM: a pure slave has no install branch,
     // so nothing here cuts one. The machine handshake takes ONE address spelling on both sides
     // (emit and register), and register additionally the credentials file's values as answers.

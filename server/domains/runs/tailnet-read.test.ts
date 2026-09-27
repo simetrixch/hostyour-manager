@@ -60,7 +60,7 @@ describe("cluster-tailnet-read — the reading that performs no repair", () => {
     const sent = h.hosts.log.map((l) => l.command);
     expect(sent.some((c) => c === "cat /etc/machine-id")).toBe(true);
     expect(sent.some((c) => c.includes("dc-tailnet-probe-"))).toBe(true);
-    // No program surface is opened, so no programs checkout program can have run: not the disconnect, not
+    // No program surface is opened, so no program can have run: not the disconnect, not
     // the reconnect, and not the rejoin's mint. The probe script is uploaded and run; the rest of
     // what reaches the machine is the attest read.
     expect(sent.filter((c) => c.includes("ansiwise-rest"))).toEqual([]);
@@ -69,7 +69,7 @@ describe("cluster-tailnet-read — the reading that performs no repair", () => {
 
   it("COUNTER-PROBE: a REPAIR on the same manager cannot even start, which is what the read is not", async () => {
     // The counter-probe for the assertion above. This harness is told no ANSIWISE_SERVE_COMMAND, so
-    // any run kind that drives a programs checkout program fails at that step by name — while the read, on
+    // any run kind that drives a program fails at that step by name — while the read, on
     // the same harness and the same host, succeeds. The difference is the program, not the wiring.
     const h = await world();
     const runId = await settle(h, "cluster-tailnet-reconnect");

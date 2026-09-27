@@ -76,7 +76,7 @@ const MODE: Record<TailnetKind, TailnetMode> = {
   "cluster-tailnet-read": "read",
 };
 
-/** The programs checkout program each single-host run kind drives, by the programs checkout's OWN name. The run kind
+/** The program each single-host run kind drives, by the programs checkout's OWN name. The run kind
  *  carries its family (`cluster-`) and the program does not, so the two spellings are stated here
  *  rather than derived: a program name is the machine's, and this manager does not get to rename it.
  *  A rejoin has no entry — it drives two programs and composes them itself — and neither has the
@@ -457,7 +457,7 @@ export function tailnetSteps(kind: TailnetKind, serverId: string, ports: Tailnet
       readMembershipStep(serverId),
     ];
   }
-  // One programs checkout program each, declaring no answers, so the generic program step fits whole.
+  // One program each, declaring no answers, so the generic program step fits whole.
   return [
     attestTargetStep(serverId),
     placeAnsiwiseStep(target, ports),

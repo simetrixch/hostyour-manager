@@ -113,10 +113,8 @@ export const STEP_NAMES = [
  *  live slave they read a key that is installed, a login that works and doors that are already shut,
  *  and each says so; and a redeploy owes the card a reading of the membership as much as a
  *  deployment does. What a redeploy holds back is their compensations, which
- *  redeploy.ansiwise.test.ts asserts off the run's own checkpoints. What it adds is the move of the
- *  programs checkout off its old path, which a first installation never needs. */
-export const REDEPLOY_STEP_NAMES = STEP_NAMES.flatMap((n) =>
-  n === "rejoin" ? ["join-if-absent"] : n === "run-deploy-platform-services" ? [n, "run-move-programs-checkout"] : [n]);
+ *  redeploy.ansiwise.test.ts asserts off the run's own checkpoints. */
+export const REDEPLOY_STEP_NAMES = STEP_NAMES.map((n) => n === "rejoin" ? "join-if-absent" : n);
 
 // The public half of the key `install-key` puts on the machine — deploy-host's operator_public_key answer is read
 // off the newest ssh_key credential's stored public line.
@@ -240,7 +238,7 @@ export interface HostsScript extends FirstContactScript {
   // by a file transfer and read back by asking the file — so a second run of a step measures what
   // the first one left, and a double-run assertion is about idempotence rather than about a value
   // the test changed in between.
-  /** The programs checkout checkout at /srv/ansiwise-programs, as the machine holds it. `programsBranch`
+  /** The programs checkout at /srv/ansiwise-programs, as the machine holds it. `programsBranch`
    *  undefined is a machine that carries NO programs checkout — `test -d` answers no and nothing else about
    *  the checkout is asked. `programsRemoteHead` is what origin/<branch> stands on, so a reset
    *  MOVES the head to it and the reading after the reset answers the moved value: a caller that

@@ -115,9 +115,7 @@ export interface RedeployPorts extends DeploySlavePorts, AnsiwisePorts {
  *  is owed comes from elsewhere — this installation's setting, the cluster row and a sealed
  *  credential (hostAnswers in deploy-slave.ts) — while these two are owed the INSTALLATION's own
  *  answers, and those stand written in its cluster map. */
-// move-programs-checkout comes last: a machine still standing with the programs checkout at its old
-// path is carried across, and every other machine finds nothing to do.
-const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-platform-services", "move-programs-checkout"] as const;
+const MASTER_ARM_PROGRAMS = ["deploy-cluster", "deploy-platform-services"] as const;
 
 function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
   const target = activeClusterTarget(params.serverId);
