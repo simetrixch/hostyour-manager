@@ -135,7 +135,7 @@ function normalise(text: string, root: string): string {
  *  difference between two runs is which spelling performed it. `core.autocrlf false` keeps git's own
  *  normalisation warnings — a property of the developer's global configuration, not of these
  *  scripts — out of a comparison that is about what the two spellings print. */
-function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; workspace?: boolean; origin?: boolean; dirty?: boolean }): Fixture {
+function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; privateRoot?: boolean; workspace?: boolean; origin?: boolean; dirty?: boolean }): Fixture {
   const base = tempDir();
   const work = join(base, "work");
   mkdirSync(work);
@@ -151,7 +151,7 @@ function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; workspace
     mkdirSync(join(work, "deploy"));
     writeFileSync(join(work, "deploy", "platform.yaml"), opts.manifest);
   }
-  if (opts.packageJson) writeFileSync(join(work, "package.json"), '{\n  "name": "probe",\n  "version": "0.0.1"\n}\n');
+  if (opts.packageJson) writeFileSync(join(work, "package.json"), `{\n  "name": "probe",${opts.privateRoot ? '\n  "private": true,' : ""}\n  "version": "0.0.1"\n}\n`);
   if (opts.workspace) {
     // Two packages beside the root: one that declares a version, one that declares none.
     mkdirSync(join(work, "packages", "a"), { recursive: true });
@@ -367,6 +367,22 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     ].join("\n"));
     // git's own push lines are on standard error, and they are the same on both sides too.
     expect(stderr).toContain("deploy/dev/1.2.3-stable-<ts14>");
+  });
+
+  it("stamps a published package in npm's strict form and a private one with the release version as it is: 0.3.0 beside 0.3.000", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, privateRoot: true, workspace: true, origin: true }), ["0.3.000", "stable", "dev"]);
+    const { stdout } = expectSameBytes(o);
+    expect(stdout.split("\n").slice(0, 5)).toEqual([
+      "release: packages/b/package.json declares no version - nothing to stamp",
+      "release: package.json declares 0.3.000",
+      "release: packages/a/package.json declares 0.3.0",
+      "release: packages/ü/package.json declares 0.3.0",
+      "release: minted 0.3.000-stable-<ts14>",
+    ]);
+    for (const f of [o.sh, o.ps1]) {
+      expect(readFileSync(join(f.cwd, "package.json"), "utf8")).toContain('"version": "0.3.000"');
+      expect(readFileSync(join(f.cwd, "packages", "a", "package.json"), "utf8")).toContain('"version": "0.3.0",');
+    }
   });
 
   it("stamps every package.json the repository tracks in the one release commit, identically", RUNS, async () => {

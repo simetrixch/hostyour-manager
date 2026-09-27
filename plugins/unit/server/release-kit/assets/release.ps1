@@ -260,7 +260,12 @@ function Publish-BranchPin {
 # A repository with no package.json, or a file that declares no version, has nothing that could go
 # stale — that is said out loud and the release continues, because a unit written in another
 # language is the ordinary case for this script and not a broken one.
+# A PACKAGE NPM PUBLISHES carries the version in npm's strict form: npm refuses a leading zero, so
+# 0.3.000 is written 0.3.0 and 0.3.001 is written 0.3.1. A package marked "private": true is never
+# published and carries the release version as it is.
 function Set-ManifestVersion($Root, $Version, $Tag) {
+  $packageVersion = $Version -replace '\.0*(\d+)$', '.$1'
+  $private = [regex]'"private"\s*:\s*true'
   $manifests = @(git -c core.quotePath=false -C $Root ls-files -- 'package.json' '*/package.json')
   if ($manifests.Count -eq 0) {
     Say 'this repository carries no package.json - no version manifest to stamp'
@@ -277,16 +282,20 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
       Say "$rel declares no version - nothing to stamp"
       continue
     }
-    $bumped = $rx.Replace($text, '$1"version": "' + $Version + '"', 1)
+    $declared = if ($private.IsMatch($text)) { $Version } else { $packageVersion }
+    $bumped = $rx.Replace($text, '$1"version": "' + $declared + '"', 1)
     if ($bumped -eq $text) { continue }
     [System.IO.File]::WriteAllText($file, $bumped, [System.Text.UTF8Encoding]::new($hasBom))
     git add -- $file
-    $stamped += $rel
+    $stamped += "$declared $rel"
   }
   if ($stamped.Count -eq 0) { return }
   git commit --quiet -m "release: $Tag"
   if ($LASTEXITCODE -ne 0) { Die "the version bump to $Version could not be committed" }
-  foreach ($rel in $stamped) { Say "$rel declares $Version" }
+  foreach ($line in $stamped) {
+    $declared, $rel = $line -split ' ', 2
+    Say "$rel declares $declared"
+  }
 }
 
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.([0-9]{3}|0|[1-9][0-9]*)$') {

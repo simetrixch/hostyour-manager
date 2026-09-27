@@ -96,7 +96,11 @@ die() { warn "$*"; exit 1; }
 # A repository with no package.json, or a file that declares no version, has nothing that could go
 # stale — that is said out loud and the release continues, because a unit written in another
 # language is the ordinary case here and not a broken one.
+# A PACKAGE NPM PUBLISHES carries the version in npm's strict form: npm refuses a leading zero, so
+# 0.3.000 is written 0.3.0 and 0.3.001 is written 0.3.1. A package marked "private": true is never
+# published and carries the release version as it is.
 stamp_manifest_version() {
+  PACKAGE_VERSION="${VERSION%.*}.$((10#${VERSION##*.}))"
   manifests=$(git -c core.quotePath=false -C "$ROOT" ls-files -- 'package.json' '*/package.json')
   if [ -z "$manifests" ]; then
     say "this repository carries no package.json - no version manifest to stamp"
@@ -109,17 +113,19 @@ stamp_manifest_version() {
       say "$rel declares no version - nothing to stamp"
       continue
     fi
-    VERSION="$VERSION" perl -0pi -e 's/^([ \t]*)"version":[ \t]*"[^"]*"/$1"version": "$ENV{VERSION}"/m' "$file"
+    declared="$PACKAGE_VERSION"
+    grep -qE '"private"[[:space:]]*:[[:space:]]*true' "$file" && declared="$VERSION"
+    DECLARED="$declared" perl -0pi -e 's/^([ \t]*)"version":[ \t]*"[^"]*"/$1"version": "$ENV{DECLARED}"/m' "$file"
     git diff --quiet -- "$file" && continue
     git add -- "$file"
-    stamped="$stamped$rel
+    stamped="$stamped$declared $rel
 "
   done <<EOF
 $manifests
 EOF
   [ -z "$stamped" ] && return 0
   git commit --quiet -m "release: $TAG" || die "the version bump to $VERSION could not be committed"
-  printf '%s' "$stamped" | while IFS= read -r rel; do say "$rel declares ${VERSION}"; done
+  printf '%s' "$stamped" | while IFS=' ' read -r declared rel; do say "$rel declares ${declared}"; done
 }
 
 # Does this unit run on a cluster whose role is $1? A role names every PART the cluster carries —
