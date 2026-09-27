@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tenantAppRows, undeployedApps } from "./tenantAppRows.ts";
+import { tenantAppRows, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
 import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 
 // The tenant page's Apps list: the bundle's apps folded with the inventory's rows. Pure, so it is
@@ -28,6 +28,14 @@ describe("tenantAppRows", () => {
 });
 
 describe("undeployedApps", () => {
+  it("leaves the website folder and the websites to the Websites section", () => {
+    const web = { ...entry("web", false), sites: ["main"] };
+    const rows = tenantAppRows([entry("erp", true), web], [row("erp"), row("example-ch")], [{ name: "example-ch" }]);
+    expect(rows.map((r) => r.name)).toEqual(["erp"]);
+    expect(undeployedApps([entry("crm", false), web]).map((a) => a.name)).toEqual(["crm"]);
+    expect(websiteFolder([entry("erp", true), web])?.name).toBe("web");
+  });
+
   it("offers only the bundle's undeployed apps, in catalog order", () => {
     expect(undeployedApps([entry("erp", true), entry("crm", false), entry("web", false)]).map((a) => a.name)).toEqual(["crm", "web"]);
   });

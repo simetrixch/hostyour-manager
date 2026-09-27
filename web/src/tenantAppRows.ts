@@ -28,15 +28,24 @@ export interface TenantAppRow<R extends TenantAppRowInput> {
   deployed: boolean;
 }
 
-export function tenantAppRows<R extends TenantAppRowInput>(catalog: readonly TenantCatalogAppView[], rows: readonly R[]): TenantAppRow<R>[] {
+export function tenantAppRows<R extends TenantAppRowInput>(catalog: readonly TenantCatalogAppView[], rows: readonly R[], websites: readonly { name: string }[] = []): TenantAppRow<R>[] {
+  // A website folder and the websites it runs are the Websites section's (TenantWebsites), not apps.
+  const apps = catalog.filter((e) => e.sites === undefined);
+  const site = new Set(websites.map((w) => w.name));
   const byName = new Map(rows.map((r) => [r.name, r]));
-  const listed = catalog.map((entry) => ({ name: entry.name, entry, row: byName.get(entry.name) ?? null, deployed: entry.deployed }));
+  const listed = apps.map((entry) => ({ name: entry.name, entry, row: byName.get(entry.name) ?? null, deployed: entry.deployed }));
   const named = new Set(catalog.map((e) => e.name));
-  const rest = rows.filter((r) => !named.has(r.name)).map((row) => ({ name: row.name, entry: null, row, deployed: true }));
+  const rest = rows.filter((r) => !named.has(r.name) && !site.has(r.name)).map((row) => ({ name: row.name, entry: null, row, deployed: true }));
   return [...listed, ...rest];
 }
 
-/** The apps the add-app control offers: the bundle's undeployed ones, in catalog order. */
+/** The apps the add-app control offers: the bundle's undeployed ones, in catalog order, no website
+ *  folder among them. */
 export function undeployedApps(catalog: readonly TenantCatalogAppView[]): TenantCatalogAppView[] {
-  return catalog.filter((a) => !a.deployed);
+  return catalog.filter((a) => !a.deployed && a.sites === undefined);
+}
+
+/** The bundle's website folder, the one entry that lists sites, or null where it has none. */
+export function websiteFolder(catalog: readonly TenantCatalogAppView[]): TenantCatalogAppView | null {
+  return catalog.find((a) => a.sites !== undefined) ?? null;
 }

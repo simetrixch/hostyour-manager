@@ -15,6 +15,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { SetRoutingAction } from "../components/SetRoutingAction.tsx";
 import { TenantDomainActions } from "../components/TenantDomainActions.tsx";
+import { TenantWebsites } from "../components/TenantWebsites.tsx";
 import { TenantVersionsAction } from "../components/TenantVersionsAction.tsx";
 import { TypeToConfirm } from "../components/TypeToConfirm.tsx";
 import { PurgeTenantDialog } from "../components/PurgeTenantDialog.tsx";
@@ -221,7 +222,7 @@ export function TenantDetail() {
       {/* The bundle's apps lead, deployed or not; an inventory row the bundle no longer names follows.
           While the catalog is unreadable the list is the inventory alone, and the control below says why. */}
       {(() => {
-        const rows = tenantAppRows(catalog?.apps ?? [], t.apps);
+        const rows = tenantAppRows(catalog?.apps ?? [], t.apps, catalog?.websites);
         return rows.length === 0 ? (
           <div className="empty">
             <p>No apps yet — this tenant runs only its standing members.</p>
@@ -257,6 +258,8 @@ export function TenantDetail() {
       })()}
 
       {!settled && !unfinished && <TenantAddAppForm catalog={catalog} busy={busy} onAdd={addApp} onRecordPackagesReader={recordPackagesReader} />}
+
+      {!settled && !unfinished && <TenantWebsites tenantId={tenantId} catalog={catalog} busy={busy} act={act} onRemove={setRemoveApp} />}
 
       {!settled && (
         <div className="actionbar">

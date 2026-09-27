@@ -77,6 +77,13 @@ export interface TenantCatalogAppView extends AppEntry {
   deployed: boolean;
 }
 
+/** One website of a tenant: its app name, the site it serves, and the domain it is served at. */
+export interface TenantWebsiteView {
+  name: string;
+  site: string;
+  domain: string;
+}
+
 /** GET /api/tenants/:id/app-catalog — a READ, and it degrades the way the orphan scan does: `apps`
  *  alone is the answer only while neither field below is set. `reason` names why there is no catalog
  *  to read BY DESIGN (tenant onboarding not wired, no catalog reader, a tenant not onboarded);
@@ -85,6 +92,9 @@ export interface TenantCatalogAppView extends AppEntry {
  *  api-types.ts, which stands at the file-size budget. */
 export interface TenantAppCatalogView {
   apps: TenantCatalogAppView[];
+  /** The tenant's websites, off its registration: each app that names a domain (#308). Absent where
+   *  the tenant has none. */
+  websites?: TenantWebsiteView[];
   /** Present where the template's `.npmrc` routes scopes to GitHub Packages: the owner whose reader
    *  the bundle's build installs them with, and whether one is recorded. The add-app form asks for
    *  the token while `recorded` is null — the FIRST tenant onboarding asks, none after (#233). */
