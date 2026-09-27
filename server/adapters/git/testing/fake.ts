@@ -90,6 +90,8 @@ export class FakePlatformRepo implements PlatformRepo {
   readonly booksBranch: string;
   // "branch\0path" -> content
   private readonly store = new Map<string, string>();
+  // "branch\0path" -> every content written, newest first: each seed and each commit is one write.
+  private readonly history = new Map<string, string[]>();
   private seq = 0;
 
   constructor(opts: { booksBranch?: string } = {}) {
@@ -99,6 +101,7 @@ export class FakePlatformRepo implements PlatformRepo {
   /** Seed a file that already exists on a branch (e.g. a prior committed report). */
   seed(branch: string, path: string, content: string): void {
     this.store.set(`${branch}\0${path}`, content);
+    this.history.set(`${branch}\0${path}`, [content, ...(this.history.get(`${branch}\0${path}`) ?? [])]);
   }
 
   /** ONE cluster's map, invented the first time something READS it off the books branch.
@@ -195,8 +198,9 @@ export class FakePlatformRepo implements PlatformRepo {
         }
         return [...names];
       },
+      readFileHistory: async (relPath) => [...(this.history.get(`${branch}\0${relPath}`) ?? [])],
       commit: async (input) => {
-        for (const w of input.write ?? []) this.store.set(`${branch}\0${w.path}`, w.content);
+        for (const w of input.write ?? []) this.seed(branch, w.path, w.content);
         for (const p of input.remove ?? []) this.store.delete(`${branch}\0${p}`);
         this.commits.push({ ...input, branch });
         return { commit: `commit_${++this.seq}` };

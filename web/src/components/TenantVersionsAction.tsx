@@ -19,6 +19,7 @@ export function TenantVersionsAction(props: { tenantId: string; subdomain: strin
           read={getTenantVersions}
           onCancel={() => setOpen(false)}
           onConfirm={(versions) => { setOpen(false); props.onSet(versions); }}
+          plansUnchanged
         >
           <p>
             This <strong>plans</strong> a run and opens it. Every app of this tenant that uses a part moves with it, no other

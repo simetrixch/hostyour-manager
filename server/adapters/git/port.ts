@@ -56,6 +56,9 @@ export interface BranchScope {
    *  tenant subdomain scan (create-tenant idempotent-by-subdomain) enumerates the registrations/*
    *  guid dirs from it. */
   listDir(relPath: string): Promise<string[]>;
+  /** Every content `relPath` has had on this branch, newest first: one per commit on the branch's own
+   *  line that wrote it, none for one that deleted it; [] where it was never written. */
+  readFileHistory(relPath: string): Promise<string[]>;
   /** Serialize the writes, commit, and push with rebase-retry; returns the new commit SHA. */
   commit(input: CommitInput): Promise<{ commit: string }>;
   /** Mint an ANNOTATED tag at the worktree's current HEAD and push it. MINT-ONCE: a tag the remote

@@ -46,8 +46,8 @@ import {
 //
 // THE VERSIONS. The request names a version per part (tenant-versions.ts), the Versions dialog's choice;
 // a part it does not name keeps what it runs. The plan refuses a version the registry lacks for any image
-// of the part, one on a channel the stage does not take, and one newer than the stage pin. A version
-// older than what runs is a downgrade, allowed on purpose and said in the plan.
+// of the part, one on a channel the stage does not take, and one no release made available at the stage.
+// A version older than what runs is a downgrade, allowed on purpose and said in the plan.
 //
 // THE KNOWN GAP. From the carry of the product's change into the books branch until this run's write
 // has synced, a member whose chart moved does not answer: the registration still names the old chart.
@@ -97,7 +97,7 @@ export type TenantRefreshMembersParams = z.infer<typeof TenantRefreshMembersPara
 export const TenantRefreshMembersRequest = z.object({
   tenantId: z.string().startsWith("tnt_"),
   /** The version chosen per part, `<part> -> <image tag>`; a part not named keeps what it runs. */
-  versions: z.record(z.string().min(1), z.string().min(1)).default({}),
+  versions: z.record(z.string().min(1), approvedImageTag).default({}),
 });
 
 function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberRecord[]): boolean {
@@ -161,6 +161,8 @@ function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMember
  *  tenant serves from them, and writing the previous entries back would put it on charts the product
  *  no longer carries. A retry of the failed step is the way on. */
 async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Promise<void> {
+  // A run that changes no entry writes the same entries back on an abort, and only its versions go back.
+  if (sameMembers(p.previous, p.members)) return;
   const current = await ports.registrations.readTenant(p.stage, p.guid);
   if (!current || !sameMembers(current.entry.members, p.members)) return;
   const until = renderedAt(p, p.members, ports.deployRepoUrl);
@@ -239,14 +241,12 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy, each rendering its new entry`);
       },
     },
-    // The newest available versions, as the tenant's own (#296): written after the entries, awaited last.
+    // The chosen versions, as the tenant's own: written after the entries, awaited last.
     writeVersionsStep(ports, p),
     watchVersionsStep(ports, p),
   ];
 }
 
-/** What one member's entry changes: its chart paths, or else its value files and values, or else its
- *  namespace labels. */
 /** Every part whose version the run moves, `part old → new`, and apart from them every one it moves
  *  back: a downgrade is chosen on purpose, so it is said rather than refused. */
 function versionMoves(parts: readonly TenantVersionPart[], after: Approvals): { forward: string[]; back: string[] } {
@@ -257,12 +257,14 @@ function versionMoves(parts: readonly TenantVersionPart[], after: Approvals): { 
     const next = [...new Set(Object.values(after).flatMap((held) => Object.entries(held).filter(([b]) => builds.has(b)).map(([, t]) => t)))];
     if (next.length === part.running.length && next.every((t) => part.running.includes(t))) continue;
     const newest = part.running[0];
-    const line = `${part.name} ${part.running.join(" / ") || "stage pin"} → ${next.join(" / ")}`;
+    const line = `${part.name} ${part.running.join(" / ")} → ${next.join(" / ")}`;
     (newest !== undefined && next.some((t) => isOlderRelease(t, newest)) ? back : forward).push(line);
   }
   return { forward, back };
 }
 
+/** What one member's entry changes: its chart paths, or else its value files and values, or else its
+ *  namespace labels. */
 function describeChange(before: TenantMemberRecord, after: TenantMemberRecord): string {
   const charts = (m: TenantMemberRecord): string => m.sources.map((s) => s.chart).join(" + ");
   if (charts(before) !== charts(after)) return `${after.name} (${charts(before)} → ${charts(after)})`;
@@ -354,6 +356,9 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       // A build the tenant does not hold yet starts at its stage pin; write-versions reads the pins again when it runs.
       const approved = withChosenVersions(current.entry.approvedTags, await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(tc.stage, chart), members), chosenVersions);
       const moves = versionMoves(parts, approved);
+      // A build the tenant held no version of renders its stage pin; recording it changes nothing that runs.
+      const recorded = Object.entries(approved).flatMap(([m, builds]) =>
+        Object.entries(builds).filter(([b]) => current.entry.approvedTags[m]?.[b] === undefined && chosenVersions[b] === undefined).map(([b, t]) => `${m}/${b} ${t}`));
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
       const planned = await planBuildUnits({
         requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage: appsImage || undefined,
@@ -392,6 +397,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `${changed.length ? `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` : "the member entries are unchanged. "}` +
           `${moves.forward.length ? `Versions: ${moves.forward.join("; ")}. ` : ""}` +
           `${moves.back.length ? `Downgrade: ${moves.back.join("; ")}, older than what runs now. ` : ""}` +
+          `${recorded.length ? `Recorded as the tenant's own at the stage pin it renders now: ${recorded.join("; ")}. ` : ""}` +
           `${moves.forward.length || moves.back.length ? "No other tenant changes. " : ""}` +
           `${planned.builds.units.length ? `First the build unit(s) ${planned.builds.units.map((u) => `${u.unit} (${u.images.join(", ")})`).join("; ")} release their next version and pin it. ` : ""}` +
           `Every image the new render pulls must stand in the registry; then the entries are written and every member must sync. ` +

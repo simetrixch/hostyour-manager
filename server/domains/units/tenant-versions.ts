@@ -41,6 +41,8 @@ export interface PinnedBuild {
   /** The repository of its image in the registry. */
   image: string;
   pin: string;
+  /** Every tag the stage pin has named for it, newest first: what releases made available at the stage. */
+  released: string[];
 }
 
 /** One part of a tenant: the builds one unit releases together, and the versions its members run of
@@ -61,16 +63,16 @@ export async function tenantVersionParts(
   approved: Approvals,
 ): Promise<TenantVersionPart[]> {
   const unitOf = new Map((await ports.attestedBuilds()).map((a) => [a.build, a.unit]));
-  const pinsOf = new Map<string, Promise<{ name: string; image: string; tag: string }[]>>();
+  const pinsOf = new Map<string, Promise<{ name: string; image: string; tag: string; released: string[] }[]>>();
   const parts = new Map<string, { builds: Map<string, PinnedBuild>; running: Set<string> }>();
   for (const m of members) {
     for (const { chart } of m.sources) {
-      if (!pinsOf.has(chart)) pinsOf.set(chart, ports.registrations.listPinnedBuilds(stage, chart));
+      if (!pinsOf.has(chart)) pinsOf.set(chart, ports.registrations.listPinHistory(stage, chart));
       for (const b of await pinsOf.get(chart)!) {
         if (!approvedImageTag.safeParse(b.tag).success) continue;
         const name = unitOf.get(b.name) ?? b.name;
         const part = parts.get(name) ?? { builds: new Map<string, PinnedBuild>(), running: new Set<string>() };
-        part.builds.set(b.name, { name: b.name, image: b.image, pin: b.tag });
+        part.builds.set(b.name, { name: b.name, image: b.image, pin: b.tag, released: b.released });
         part.running.add(approved[m.name]?.[b.name] ?? b.tag);
         parts.set(name, part);
       }
@@ -83,14 +85,15 @@ export async function tenantVersionParts(
 
 /** Why a tenant at `stage` cannot be put on `tag` for `part`, or null where it can: the tag must be an
  *  image tag, on a channel the stage takes (global.channelStages, which the release pipeline enforces
- *  where it pins), and no newer than the part's stage pin, the newest version a release has made
- *  available at this stage. */
+ *  where it pins), and one the stage pin of every build of the part has named. A release makes a version
+ *  available at a stage by pinning it there (#296), and one put back on the stage moves the pin back
+ *  without taking the newer one away, so the pins' history is the answer and the pin alone is not. */
 export function versionRefusal(tag: string, part: TenantVersionPart, channels: ChannelStages, stage: Stage): string | null {
   if (!approvedImageTag.safeParse(tag).success) return `${tag} is not an image tag <x.y.z>-<channel>-<ts14>-<sha7>`;
   const reaches = channels[channelOf(tag)] ?? [];
   if (!reaches.includes(stage)) return `the ${channelOf(tag)} channel reaches ${reaches.join(", ") || "no stage"} (global.channelStages), not ${stage}`;
-  const available = part.builds.map((b) => b.pin).sort(byNewest).at(-1)!;
-  if (ts14Of(tag) > ts14Of(available)) return `${tag} is newer than ${available}, the newest version a release has made available at ${stage}`;
+  const unreleased = part.builds.filter((b) => !b.released.includes(tag)).map((b) => b.name);
+  if (unreleased.length > 0) return `no release made ${tag} available at ${stage}: the stage pin of ${unreleased.join(", ")} never named it`;
   return null;
 }
 

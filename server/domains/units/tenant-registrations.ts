@@ -96,6 +96,12 @@ export function tenantRegistrationWrite(stage: Stage, guid: string, registration
   return { path: guard(registrationPath(stage, guid)), content: serializePointer(TenantRegistrationSchema, registration) };
 }
 
+/** The builds a stage pin file names; an entry without a name or an image is none. */
+function pinnedBuildsIn(raw: string): { name: string; image: string; tag: string }[] {
+  const builds = (parseYaml(raw) as { builds?: { name?: unknown; image?: unknown; tag?: unknown }[] } | null)?.builds ?? [];
+  return builds.flatMap((b) => (typeof b.name === "string" && typeof b.image === "string" ? [{ name: b.name, image: b.image, tag: typeof b.tag === "string" ? b.tag : "" }] : []));
+}
+
 export class TenantRegistrations {
   /** `repo` is the deploy repository, where the registrations live. */
   constructor(private readonly repo: PlatformRepo) {}
@@ -337,9 +343,25 @@ export class TenantRegistrations {
    *  release of this installation has pinned the chart yet. */
   async listPinnedBuilds(stage: Stage, chart: string): Promise<{ name: string; image: string; tag: string }[]> {
     const raw = await this.repo.withBranch(this.branch, (books) => books.readFile(`${chart}/pins-${stage}.yaml`));
-    if (raw === null) return [];
-    const builds = (parseYaml(raw) as { builds?: { name?: unknown; image?: unknown; tag?: unknown }[] } | null)?.builds ?? [];
-    return builds.flatMap((b) => (typeof b.name === "string" && typeof b.image === "string" ? [{ name: b.name, image: b.image, tag: typeof b.tag === "string" ? b.tag : "" }] : []));
+    return raw === null ? [] : pinnedBuildsIn(raw);
+  }
+
+  /** The builds a chart's stage pin file names now, each with every tag the file has named for it on
+   *  the books branch, newest first: what releases have made available at this stage, then and now.
+   *  One turn, so the pins and their history are read off the same commit. */
+  async listPinHistory(stage: Stage, chart: string): Promise<{ name: string; image: string; tag: string; released: string[] }[]> {
+    const path = `${chart}/pins-${stage}.yaml`;
+    const { now, history } = await this.repo.withBranch(this.branch, async (books) => ({ now: await books.readFile(path), history: await books.readFileHistory(path) }));
+    if (now === null) return [];
+    const released = new Map<string, string[]>();
+    for (const raw of history) {
+      for (const b of pinnedBuildsIn(raw)) {
+        const tags = released.get(b.name) ?? [];
+        if (b.tag && !tags.includes(b.tag)) tags.push(b.tag);
+        released.set(b.name, tags);
+      }
+    }
+    return pinnedBuildsIn(now).map((b) => ({ ...b, released: released.get(b.name) ?? [] }));
   }
 
   /** Write the image tags approved for this tenant alone. One field of one file; writing what it

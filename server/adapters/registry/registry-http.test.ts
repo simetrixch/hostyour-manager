@@ -128,6 +128,14 @@ describe("HttpRegistryProbe.listTags", () => {
     expect(seen.every((r) => r.auth === `Basic ${AUTH}`)).toBe(true);
   });
 
+  it("gives up within its budget on a registry that sends the headers and stalls the body", async () => {
+    const file = writeDockerConfig({ [HOST]: { auth: AUTH } });
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => new Response(new ReadableStream({
+      start(controller) { init?.signal?.addEventListener("abort", () => controller.error(init.signal!.reason)); },
+    }), { status: 200 })));
+    await expect(new HttpRegistryProbe({ dockerConfigPath: file, timeoutMs: 50 }).listTags({ registryHost: HOST, repo: "example-engine" })).rejects.toMatchObject({ code: "UPSTREAM" });
+  });
+
   it("fails CLOSED on an undecidable status — a partial list is never offered as the whole one", async () => {
     const file = writeDockerConfig({ [HOST]: { auth: AUTH } });
     stubRouted({ "GET /v2/example-engine/tags/list": { status: 500 } });

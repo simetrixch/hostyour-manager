@@ -19,7 +19,7 @@ const GUID = "zsjs023ctne0";
 const NEW = "0.1.12-stable-20260925120000-abc1234";
 const OLD = "0.1.11-stable-20260920120000-def5678";
 const OLDEST = "0.1.10-stable-20260910120000-0a1b2c3";
-/** Built after the stage pin: a release has not made it available at prod yet. */
+/** Released after NEW; the stage was put back on NEW since. */
 const NEWER = "0.1.13-stable-20260926120000-1234567";
 const BETA = "0.1.12-beta-20260924120000-7654321";
 
@@ -27,8 +27,9 @@ const pinsFile = (builds: Record<string, string>): string =>
   `builds:\n${Object.entries(builds).map(([name, tag]) => `  - { name: ${name}, image: ${name}, tag: "${tag}" }`).join("\n")}\n`;
 
 /** One tenant at prod holding `approvedTags`, and the stage pins of two of its charts: by default the
- *  engine's second build still carries its placeholder, which names no released image. */
-function books(approvedTags: Approvals, enginePins: Record<string, string> = { "example-engine": NEW, "example-migrate": "" }): TenantRegistrations {
+ *  engine's second build still carries its placeholder, which names no released image. `enginePins` is
+ *  the engine chart's pin file as releases wrote it, oldest first; the last one stands. */
+function books(approvedTags: Approvals, enginePins: Record<string, string>[] = [{ "example-engine": NEW, "example-migrate": "" }]): TenantRegistrations {
   const repo = new FakePlatformRepo();
   const registration = TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: "acme", members: testMembers(["erp"]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), approvedTags, ...TEST_BUNDLE,
@@ -36,7 +37,7 @@ function books(approvedTags: Approvals, enginePins: Record<string, string> = { "
   const w = tenantRegistrationWrite("prod", GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
   repo.seed(repo.booksBranch, "charts/example-auth/pins-prod.yaml", pinsFile({ "example-auth": NEW }));
-  repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", pinsFile(enginePins));
+  for (const pins of enginePins) repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", pinsFile(pins));
   return new TenantRegistrations(repo);
 }
 
@@ -75,8 +76,16 @@ describe("tenant versions", () => {
     expect(current.erp["example-engine"]).toBe(NEW);
   });
 
-  it("offers per part the versions every image of it stands at in the registry, newest first, none newer than the stage pin and none on a channel the stage does not take", async () => {
-    const registrations = books({ erp: { "example-engine": OLD, "example-worker": OLD }, auth: { "example-auth": NEW } }, { "example-engine": NEW, "example-worker": NEW });
+  it("a build no choice names keeps what it holds when its stage pin moved on: a release makes a version available and moves no tenant", () => {
+    expect(withChosenVersions({ erp: { "example-engine": OLD } }, { erp: { "example-engine": NEW } }, {})).toEqual({ erp: { "example-engine": OLD } });
+  });
+
+  it("offers per part the versions a stage pin named that every image of it stands at in the registry, newest first, one put back on the stage included, and none on a channel the stage does not take", async () => {
+    // The releases pinned OLD, then NEWER, and then put NEW back on the stage: NEWER stays available.
+    const registrations = books(
+      { erp: { "example-engine": NEW, "example-worker": NEW }, auth: { "example-auth": NEW } },
+      [{ "example-engine": OLD, "example-worker": OLD }, { "example-engine": NEWER, "example-worker": NEWER }, { "example-engine": NEW, "example-worker": NEW }],
+    );
     const ports = {
       registrations,
       attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }, { unit: "example-platform", build: "example-worker" }],
@@ -94,7 +103,7 @@ describe("tenant versions", () => {
       stage: "prod",
       parts: [
         { name: "example-auth", builds: ["example-auth"], running: [NEW], versions: [{ tag: NEW, older: false }] },
-        { name: "example-platform", builds: ["example-engine", "example-worker"], running: [OLD], versions: [{ tag: NEW, older: false }, { tag: OLD, older: false }] },
+        { name: "example-platform", builds: ["example-engine", "example-worker"], running: [NEW], versions: [{ tag: NEWER, older: false }, { tag: NEW, older: false }, { tag: OLD, older: true }] },
       ],
     });
   });

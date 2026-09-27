@@ -20,6 +20,8 @@ export function VersionsDialog(props: {
   read: (id: string) => Promise<VersionsView>;
   onCancel: () => void;
   onConfirm: (versions: Record<string, string>) => void;
+  /** Whether the run is worth planning with no version changed, because it does more than move versions. */
+  plansUnchanged?: boolean;
   children?: ReactNode;
 }) {
   const [view, setView] = useState<VersionsView | null>(null);
@@ -42,6 +44,7 @@ export function VersionsDialog(props: {
     return tag !== undefined && !(p.running.length === 1 && p.running[0] === tag) ? [[p.name, tag]] : [];
   }));
   const downgrade = parts.some((p) => p.versions.some((v) => v.older && changes[p.name] === v.tag));
+  const plannable = view !== null && (props.plansUnchanged === true || Object.keys(changes).length > 0);
   const newest = (): void => setChosen(Object.fromEntries(parts.flatMap((p) => (p.versions[0] ? [[p.name, p.versions[0].tag]] : []))));
 
   return (
@@ -49,7 +52,7 @@ export function VersionsDialog(props: {
       title={props.title}
       confirmLabel={downgrade ? "Plan downgrade" : "Plan"}
       onCancel={props.onCancel}
-      onConfirm={() => props.onConfirm(changes)}
+      onConfirm={() => { if (plannable) props.onConfirm(changes); }}
     >
       {props.children}
       <p>
@@ -59,6 +62,7 @@ export function VersionsDialog(props: {
       {error && <p className="error">{error}</p>}
       {view === null && !error && <p className="muted">Reading the versions…</p>}
       {view && parts.length === 0 && <p className="muted">Nothing here runs a version that can be chosen.</p>}
+      {view && !plannable && parts.length > 0 && <p className="muted">Choose a version other than the one that runs to plan a change.</p>}
       {parts.length > 0 && (
         <p>
           <button type="button" className="btn" onClick={newest}>All to newest</button>

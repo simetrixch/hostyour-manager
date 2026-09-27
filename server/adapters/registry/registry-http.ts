@@ -142,27 +142,29 @@ function nextLink(header: string | null): string | null {
   }
 }
 
-/** Every tag of `repo` read through `request` (GET /v2/<repo>/tags/list, following the Link pages).
+/** One page of a tag list: its status, its Link header and its body, read whole. */
+interface TagPage {
+  status: number;
+  link: string | null;
+  body: string;
+}
+
+/** Every tag of `repo` read through `readPage` (GET /v2/<repo>/tags/list, following the Link pages).
  *  A 404 is an absent repository and answers []; a null tag list is a page with no tags. Any other
  *  non-2xx status, unparseable JSON or a non-array tags field THROWS: a partial list must never be
  *  taken for the whole one. */
-async function listTagPages(request: (path: string) => Promise<Response>, repo: string): Promise<string[]> {
+async function listTagPages(readPage: (path: string) => Promise<TagPage>, repo: string): Promise<string[]> {
   const out: string[] = [];
   let path = `/v2/${repo}/tags/list?n=1000`;
   for (let page = 0; page < 100_000; page++) {
-    const res = await request(path);
-    const link = res.headers.get("link");
-    if (res.status === 404) {
-      await res.arrayBuffer().catch(() => undefined);
-      return out;
-    }
-    if (!res.ok) {
-      await res.arrayBuffer().catch(() => undefined);
+    const res = await readPage(path);
+    if (res.status === 404) return out;
+    if (res.status < 200 || res.status > 299) {
       throw upstream(`the tags GET ${path} answered HTTP ${res.status} — the tag list cannot be trusted as complete`);
     }
     let body: { tags?: unknown };
     try {
-      body = (await res.json()) as { tags?: unknown };
+      body = JSON.parse(res.body) as { tags?: unknown };
     } catch (e) {
       throw upstream(`the tags GET ${path} returned unparseable JSON: ${errMsg(e)}`);
     }
@@ -171,7 +173,7 @@ async function listTagPages(request: (path: string) => Promise<Response>, repo: 
     } else if (body.tags !== null && body.tags !== undefined) {
       throw upstream(`the tags GET ${path} returned a non-array tags field`);
     }
-    const next = nextLink(link);
+    const next = nextLink(res.link);
     if (!next) break;
     path = next;
   }
@@ -229,14 +231,17 @@ export class HttpRegistryProbe implements RegistryProbe {
       const auth = await this.readBasicAuth(ref.registryHost);
       const { signal, done } = composeAbort(this.cfg.timeoutMs ?? 15_000, opts.signal);
       try {
-        return await fetch(`https://${ref.registryHost}${path}`, {
+        const res = await fetch(`https://${ref.registryHost}${path}`, {
           method: "GET",
           headers: { accept: "application/json", authorization: `Basic ${auth}` },
           signal,
           redirect: "manual", // never follow a redirect off the central registry (the credential is a header)
         });
+        // The body is read inside the budget too: a registry that sends the headers and then stalls
+        // fails like one that never answers.
+        return { status: res.status, link: res.headers.get("link"), body: await res.text() };
       } catch (e) {
-        throw upstream(`${ref.registryHost} is unreachable listing the tags of ${ref.repo}: ${errMsg(e)}`);
+        throw upstream(`${ref.registryHost} did not answer listing the tags of ${ref.repo}: ${errMsg(e)}`);
       } finally {
         done();
       }
@@ -318,7 +323,10 @@ export class HttpRegistryMaintenance implements RegistryMaintenance {
   }
 
   async listTags(repo: string, opts: { signal?: AbortSignal } = {}): Promise<string[]> {
-    return listTagPages((path) => this.request("GET", path, { accept: "application/json" }, opts.signal), repo);
+    return listTagPages(async (path) => {
+      const res = await this.request("GET", path, { accept: "application/json" }, opts.signal);
+      return { status: res.status, link: res.headers.get("link"), body: await res.text() };
+    }, repo);
   }
 
   async resolveDigest(repo: string, tag: string, opts: { signal?: AbortSignal } = {}): Promise<ManifestDigest> {

@@ -432,7 +432,7 @@ export function Consumers() {
           onCancel={() => setReleaseFor(null)}
           onConfirm={(versions) => {
             const c = releaseFor;
-            const tag = Object.values(versions)[0];
+            const [tag] = Object.values(versions);
             setReleaseFor(null);
             if (tag) void act((id) => setConsumerRelease(id, tag), c.id);
           }}

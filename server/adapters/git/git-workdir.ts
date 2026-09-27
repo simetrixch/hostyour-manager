@@ -1,10 +1,11 @@
-// The containment layer every git role reads a checkout through: one lexical guard and two readers,
+// The containment layer every git role reads a checkout through: one lexical guard and the readers,
 // so a path can never leave the workdir and can never touch .git — whether it comes from a
 // registration path, a values-chain path or a consumer's own chart path. Kept beside git-exec.ts (the
 // process layer) and out of git.ts (the roles), which is what keeps that file inside its line budget.
 import { readdir, readFile as fsReadFile, realpath } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { errValidation } from "../../kernel/errors.ts";
+import { runGit } from "./git-exec.ts";
 
 // Containment guard: the resolved path must stay inside the workdir and may not touch .git
 // (a write there could smuggle config/hooks; reads have no business there either).
@@ -63,4 +64,15 @@ export async function listWorkdirDir(workdir: string, relPath: string): Promise<
     if (code === "ENOENT" || code === "ENOTDIR") return [];
     throw e;
   }
+}
+
+// Every content a workdir-relative file has had along the checked-out branch's first-parent line,
+// newest first: one per commit that wrote it, none for one that deleted it, [] where it was never
+// written. `--first-parent` keeps to the branch's own line: a merge that carried another branch in
+// counts where it changed the file, that branch's own commits do not. Same lexical guard as the readers
+// above; the contents come from git's object store, not from the worktree.
+export async function readWorkdirFileHistory(workdir: string, relPath: string): Promise<string[]> {
+  safePath(workdir, relPath);
+  const shas = (await runGit(["log", "--first-parent", "--diff-filter=d", "--format=%H", "--", relPath], { cwd: workdir })).split("\n").filter(Boolean);
+  return Promise.all(shas.map((sha) => runGit(["show", `${sha}:${relPath}`], { cwd: workdir })));
 }

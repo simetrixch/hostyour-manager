@@ -63,13 +63,15 @@ function staleMembers(): TenantMemberRecord[] {
   return testMembers(["erp"]).map((m) => (m.name === "erp" ? { ...m, sources: [m.sources[0]!, { chart: "charts/old-ui", valueFiles: [], values: {} }] } : m));
 }
 
-function platformRepo(members: TenantMemberRecord[], files: Record<string, string> = {}): FakePlatformRepo {
+/** The books branch: `earlier` is what releases wrote before `files`, which stands now. */
+function platformRepo(members: TenantMemberRecord[], files: Record<string, string> = {}, earlier: Record<string, string> = {}): FakePlatformRepo {
   const repo = new FakePlatformRepo();
   const registration = TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: "acme", members, identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), approvedTags: HELD, ...TEST_BUNDLE,
   });
   const w = tenantRegistrationWrite("prod", GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
+  for (const [path, content] of Object.entries(earlier)) repo.seed(repo.booksBranch, path, content);
   for (const [path, content] of Object.entries(files)) repo.seed(repo.booksBranch, path, content);
   return repo;
 }
@@ -78,6 +80,12 @@ const OLD = "0.1.11-stable-20260920120000-def5678";
 const NEW = "0.1.12-stable-20260925120000-abc1234";
 /** A version released before the one the tenant holds. */
 const OLDER = "0.1.10-stable-20260915120000-0a1b2c3";
+/** An earlier release pinned OLDER at prod, before RELEASED pinned NEW. */
+const RELEASED_BEFORE = {
+  "charts/example-engine/pins-prod.yaml": `builds:
+  - { name: example-engine, image: example-engine, tag: "${OLDER}" }
+`,
+};
 /** The version the tenant holds before any upgrade. */
 const HELD = { erp: { "example-engine": OLD } };
 /** A release made NEW available: the stage pin of the engine and of the auth chart. */
@@ -125,11 +133,11 @@ class SteppingArgo extends FakeMasterArgoReader {
 const IMAGE = `${REGISTRY_HOST}/example-app:1.0.0`;
 const DEPLOYMENT = { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "app", image: IMAGE }] } } } };
 
-function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; carried?: string[]; carry?: () => Promise<void>; manifest?: string; files?: Record<string, string> } = {}): TenantOnboardPorts {
+function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; carried?: string[]; carry?: () => Promise<void>; manifest?: string; files?: Record<string, string>; earlier?: Record<string, string> } = {}): TenantOnboardPorts {
   return withAppsTemplate({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.manifest ?? MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment", { raw: DEPLOYMENT })] } }),
-    registrations: new TenantRegistrations(platformRepo(members, over.files)),
+    registrations: new TenantRegistrations(platformRepo(members, over.files, over.earlier)),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } }),
       argoReader: new SteppingArgo(over.argo ?? [() => rendering(resolved)]),
@@ -216,7 +224,7 @@ describe("tenant-refresh-members", () => {
     const prt = ports(resolved.members, { files: RELEASED, argo: [() => rendering(resolved.members), () => rendering(resolved.members, want)] });
     const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEW } }, planCtx());
     if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
-    expect(out.plan.summary).toContain(`Versions: example-platform ${OLD} → ${NEW}. No other tenant changes.`);
+    expect(out.plan.summary).toContain(`Versions: example-platform ${OLD} → ${NEW}. Recorded as the tenant's own at the stage pin it renders now: auth/example-auth ${NEW}. No other tenant changes.`);
     expect(out.params.chosenVersions).toEqual({ "example-engine": NEW });
     const p = out.params;
     const steps = makeTenantRefreshMembersDef(prt).steps(p);
@@ -234,7 +242,7 @@ describe("tenant-refresh-members", () => {
   it("says a downgrade where a part is put on a version older than the one it runs, and what a downgrade does not move back", async () => {
     seedTenant();
     const resolved = await planned(ports(staleMembers()));
-    const out = await makeTenantRefreshMembersDef(ports(resolved.members, { files: RELEASED })).planStream!({ tenantId: "tnt_1", versions: { "example-platform": OLDER } }, planCtx());
+    const out = await makeTenantRefreshMembersDef(ports(resolved.members, { files: RELEASED, earlier: RELEASED_BEFORE })).planStream!({ tenantId: "tnt_1", versions: { "example-platform": OLDER } }, planCtx());
     if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
     expect(out.plan.summary).toContain(`Downgrade: example-platform ${OLD} → ${OLDER}, older than what runs now. `);
     expect(out.plan.warnings).toEqual([`downgrade: example-platform ${OLD} → ${OLDER} — only the images move back; a database the newer version migrated stays migrated, and the older version must run on it`]);
@@ -242,16 +250,37 @@ describe("tenant-refresh-members", () => {
     expect(out.params.previousApproved).toEqual(HELD);
   });
 
-  it("REFUSES a part the tenant does not have, a version that is no image tag, a channel the stage does not take, a version newer than the stage pin, and one the registry lacks", async () => {
+  it("REFUSES a part the tenant does not have, a version that is no image tag, a channel the stage does not take, a version no release made available at the stage, and one the registry lacks", async () => {
     seedTenant();
     const resolved = await planned(ports(staleMembers()));
     const plan = (versions: Record<string, string>, missing: string[] = []) =>
-      makeTenantRefreshMembersDef(ports(resolved.members, { files: RELEASED, missing })).planStream!({ tenantId: "tnt_1", versions }, planCtx());
+      makeTenantRefreshMembersDef(ports(resolved.members, { files: RELEASED, earlier: RELEASED_BEFORE, missing })).planStream!({ tenantId: "tnt_1", versions }, planCtx());
     await expect(plan({ nope: NEW })).rejects.toThrow(/tenant acme has no part "nope" — its parts are example-auth, example-platform/);
-    await expect(plan({ "example-platform": "0.1.10" })).rejects.toThrow(/0\.1\.10 is not an image tag/);
+    await expect(plan({ "example-platform": "0.1.10" })).rejects.toThrow(/an image tag <x\.y\.z>-<channel>-<ts14>-<sha7>/);
     await expect(plan({ "example-platform": "0.1.12-beta-20260924120000-7654321" })).rejects.toThrow(/the beta channel reaches dev, test \(global\.channelStages\), not prod/);
-    await expect(plan({ "example-platform": "0.1.13-stable-20260926120000-1234567" })).rejects.toThrow(new RegExp(`is newer than ${NEW}, the newest version a release has made available at prod`));
+    await expect(plan({ "example-platform": "0.1.13-stable-20260926120000-1234567" })).rejects.toThrow(/no release made 0\.1\.13-stable-20260926120000-1234567 available at prod: the stage pin of example-engine never named it/);
     await expect(plan({ "example-platform": OLDER }, [`example-engine:${OLDER}`])).rejects.toThrow(new RegExp(`zot\\.m1\\.example/example-engine:${OLDER} is not in the registry`));
+  });
+
+  it("keeps every part the request does not name where it runs, though its stage pin moved on", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    const out = await makeTenantRefreshMembersDef(ports(resolved.members, { files: RELEASED })).planStream!({ tenantId: "tnt_1" }, planCtx());
+    if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
+    expect(out.plan.summary).not.toContain("Versions:");
+    expect(out.params.chosenVersions).toEqual({});
+    const p = out.params;
+    await makeTenantRefreshMembersDef(ports(resolved.members, { files: RELEASED })).steps(p).find((s) => s.name === "write-versions")!.run(stepCtx(p, [], []));
+    expect(db.db.select({ a: tenants.approvedTags }).from(tenants).get()?.a).toEqual({ erp: { "example-engine": OLD }, auth: { "example-auth": NEW } });
+  });
+
+  it("allows the abort of a run that changes no entry, though every member renders it: only its versions go back", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    const prt = ports(resolved.members, { files: RELEASED, argo: [() => rendering(resolved.members)] });
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEW } }, planCtx());
+    if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
+    await expect(makeTenantRefreshMembersDef(prt).assertAbortable!(out.params, { db: db.db })).resolves.toBeUndefined();
   });
 
   it("REFUSES a manifest that changes the member set: that is a new namespace and Application", async () => {

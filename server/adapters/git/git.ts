@@ -20,7 +20,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import type { BranchScope, ClonedRepo, CommitInput, RepoWriter, RepoCheckout, PlatformRepo, RepoReader } from "./port.ts";
 import { runGit, withAskpass } from "./git-exec.ts";
-import { listWorkdirDir, readWorkdirFile, safePath } from "./git-workdir.ts";
+import { listWorkdirDir, readWorkdirFile, readWorkdirFileHistory, safePath } from "./git-workdir.ts";
 
 const SHA40 = /^[0-9a-f]{40}$/;
 const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
@@ -376,11 +376,13 @@ export class GitPlatformRepo implements PlatformRepo {
       branch,
       readFile: (relPath) => readWorkdirFile(workdir, relPath),
       listDir: (relPath) => listWorkdirDir(workdir, relPath),
+      readFileHistory: (relPath) => readWorkdirFileHistory(workdir, relPath),
       commit: (input) => this.commitPushIn(workdir, branch, input),
       mintTag: (input) => this.mintTagIn(workdir, input),
     };
     return fn(scope);
   }
+
 
   private async resetToOrigin(branch: string, dir: string): Promise<string> {
     const existed = existsSync(join(dir, ".git"));

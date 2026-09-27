@@ -13,6 +13,25 @@ const SLOW = 60_000;
 
 afterEach(dropRoots);
 
+describe("GitPlatformRepo, a file's history on the books branch", () => {
+  const BOOKS = "m1.example.com";
+
+  it(
+    "reads every content a file has had, newest first, skips commits that did not write it, and answers [] for a file never written",
+    async () => {
+      const { originURL } = makeTrunkOnlyOrigin();
+      const repo = new GitPlatformRepo({ platformRepoURL: originURL, booksBranch: BOOKS, carriesTrunkToBooksBranch: true, workRoot: join(newRoot(), "work"), allowFileURLs: true });
+      const write = (path: string, content: string) => repo.withBranch(BOOKS, (books) => books.commit({ message: `write ${path}`, write: [{ path, content }] }));
+      await write("charts/example-engine/pins-prod.yaml", "tag: a\n");
+      await write("charts/other.yaml", "other: 1\n");
+      await write("charts/example-engine/pins-prod.yaml", "tag: b\n");
+      expect(await repo.withBranch(BOOKS, (books) => books.readFileHistory("charts/example-engine/pins-prod.yaml"))).toEqual(["tag: b\n", "tag: a\n"]);
+      expect(await repo.withBranch(BOOKS, (books) => books.readFileHistory("charts/never.yaml"))).toEqual([]);
+    },
+    SLOW,
+  );
+});
+
 describe("GitPlatformRepo, the books branch", () => {
   // The books branch of the installation under test: the FQDN of the cluster holding the master role.
   // The adapter refuses to be built on the trunk, so this is never "master".
