@@ -40,7 +40,7 @@ export const memberName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$
 export const buildName = z.string().regex(/^[a-z0-9-]+$/);
 
 /** An image tag the release pipeline pushes: the release tag and the commit, `<x.y.z>-<channel>-<ts14>-<sha7>`. */
-export const approvedImageTag = z.string().regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(alpha|beta|stable)-[0-9]{14}-[0-9a-f]{7}$/, "an image tag <x.y.z>-<channel>-<ts14>-<sha7>");
+export const approvedImageTag = z.string().regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.([0-9]{3}|0|[1-9][0-9]*)-(alpha|beta|stable)-[0-9]{14}-[0-9a-f]{7}$/, "an image tag <x.y.z>-<channel>-<ts14>-<sha7>");
 
 /** Whether `next` is an older release than `held`, by the UTC second each was minted at: the ts14 of
  *  an approved image tag orders releases whatever their x.y.z says. A tag outside that grammar (the

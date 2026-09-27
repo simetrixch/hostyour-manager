@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RELEASE_TAG_RE, parseReleaseTag, nextReleaseVersion } from "./release.ts";
+import { RELEASE_TAG_RE, RELEASE_VERSION_RE, parseReleaseTag, nextReleaseVersion } from "./release.ts";
 
 describe("release tag grammar", () => {
   it("accepts x.y.z-<channel>-<ts14> for every channel", () => {
@@ -29,6 +29,29 @@ describe("release tag grammar", () => {
 
   it("RELEASE_TAG_RE is anchored (no substring matches)", () => {
     expect(RELEASE_TAG_RE.test("prefix 0.6.0-stable-20260719120000")).toBe(false);
+  });
+});
+
+describe("three-digit versions (#303)", () => {
+  it("accepts a third position of three digits, leading zeros included, beside the form that stands", () => {
+    for (const tag of ["0.3.000-stable-20270101120000", "0.3.001-beta-20270101120000", "0.3.099-alpha-20270101120000", "0.1.16-stable-20260927135112"]) {
+      expect(RELEASE_TAG_RE.test(tag), tag).toBe(true);
+    }
+    expect(RELEASE_VERSION_RE.test("0.3.000")).toBe(true);
+    expect(parseReleaseTag("0.3.007-stable-20270101120000")).toEqual({ version: "0.3.007", channel: "stable", ts14: "20270101120000" });
+  });
+
+  it("still refuses a leading zero before the third position, and a third position of four digits with one", () => {
+    for (const tag of ["03.1.000-stable-20270101120000", "0.03.000-stable-20270101120000", "0.3.0000-stable-20270101120000", "0.3.00-stable-20270101120000"]) {
+      expect(RELEASE_TAG_RE.test(tag), tag).toBe(false);
+    }
+  });
+
+  it("follows 0.3.000 with 0.3.001, 0.3.007 with 0.3.008 and 0.3.099 with 0.3.100, and keeps the form that stands", () => {
+    expect(nextReleaseVersion(["0.3.000-stable-20270101120000"])).toBe("0.3.001");
+    expect(nextReleaseVersion(["0.3.007-stable-20270101120000", "0.3.006-beta-20270101110000"])).toBe("0.3.008");
+    expect(nextReleaseVersion(["0.3.099-stable-20270101120000"])).toBe("0.3.100");
+    expect(nextReleaseVersion(["0.1.16-stable-20260927135112"])).toBe("0.1.17");
   });
 });
 

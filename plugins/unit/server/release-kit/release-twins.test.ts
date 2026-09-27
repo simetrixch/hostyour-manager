@@ -190,9 +190,9 @@ function moveMaster(f: Fixture): void {
 /** A repository whose 1.2.3-stable release already stands on origin, put on dev by the bash spelling:
  *  the rerun is the subject here, and the first run's bytes are what the success-path scenario
  *  asserts. With `moved`, master has one commit on top of the released one. */
-function releasedRepo(opts: { moved: boolean }): Fixture {
+function releasedRepo(opts: { moved: boolean; version?: string }): Fixture {
   const f = fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true });
-  const first = run(BASH, [SCRIPTS.sh, "1.2.3", "stable", "dev"], f.cwd);
+  const first = run(BASH, [SCRIPTS.sh, opts.version ?? "1.2.3", "stable", "dev"], f.cwd);
   if (first.status !== 0) throw new Error(`the first release failed: ${first.stderr}`);
   if (opts.moved) moveMaster(f);
   return f;
@@ -324,7 +324,7 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
 
   it("refuses a malformed version identically", RUNS, async () => {
     const { stderr, stdout } = expectSameBytes(await bothSpellings(() => bareDir(), ["1.2", "stable", "dev"]));
-    expect(stderr).toBe("release: version must be x.y.z with no leading zeros (got '1.2')\n");
+    expect(stderr).toBe("release: version must be x.y.z, the third position three digits such as 000 (got '1.2')\n");
     expect(stdout).toBe("");
   });
 
@@ -427,6 +427,15 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
       expect(originRefs(f)).not.toContain("refs/heads/deploy/test");
       expect(originRefs(f)).not.toContain(`${head(f)}\trefs/heads/deploy/dev`);
     }
+  });
+
+  it("names the next three-digit version when a three-digit one is burnt: 0.3.008 after 0.3.007 (#303)", RUNS, async () => {
+    const o = await bothSpellings(() => releasedRepo({ moved: true, version: "0.3.007" }), ["0.3.007", "stable", "test"]);
+    const { stderr } = expectSameBytes(o);
+    expect(o.sh.status).toBe(1);
+    expect(stderr).toBe(
+      "release: 0.3.007-stable-<ts14> stands on origin at <sha7> and HEAD is <sha7>. A version names one commit, so 0.3.007 is burnt: release 0.3.008 instead. Nothing was pushed.\n",
+    );
   });
 
   it("reuses a tag that stands on origin on HEAD and pushes its deploy ref for a further stage, moving no branch (#293)", RUNS, async () => {

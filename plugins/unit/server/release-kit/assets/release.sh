@@ -13,7 +13,8 @@
 # (hostyour-manager#299).
 #
 # THE THREE INPUTS
-#   version  — x.y.z, no leading zeros.
+#   version  — x.y.z; the third position is written with three digits,
+#              leading zeros included (0.3.000, 0.3.001).
 #   channel  — the maturity CEILING of the release: alpha may reach dev only,
 #              beta dev and test, stable anywhere. The channel is part of the
 #              release tag; the stage is NOT.
@@ -195,8 +196,8 @@ esac
 
 [ -n "$VERSION" ] && [ -n "$CHANNEL" ] && [ -n "$STAGE" ] \
   || die "usage: release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod> [--existing]"
-[[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
-  || die "version must be x.y.z with no leading zeros (got '$VERSION')"
+[[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.([0-9]{3}|0|[1-9][0-9]*)$ ]] \
+  || die "version must be x.y.z, the third position three digits such as 000 (got '$VERSION')"
 case "$CHANNEL" in stable|beta|alpha) ;; *) die "channel must be stable|beta|alpha (got '$CHANNEL')" ;; esac
 case "$STAGE" in dev|test|prod) ;; *) die "stage must be dev|test|prod (got '$STAGE')" ;; esac
 
@@ -318,7 +319,11 @@ fi
 # plus one. This script reads no other repository, so where one sequence spans several, the person
 # holds that the number is still free.
 if [ -z "$EXISTING_ONLY" ] && [ -n "$EXISTING" ] && [ "$(git rev-parse --verify --quiet "${EXISTING}^{commit}")" != "$HEAD_SHA" ]; then
-  NEXT="${VERSION%.*}.$(( ${VERSION##*.} + 1 ))"
+  # Base ten, because 008 is no octal number; three digits stay three digits.
+  PATCH="${VERSION##*.}"
+  NEXT_PATCH="$(( 10#${PATCH} + 1 ))"
+  [ "${#PATCH}" -eq 3 ] && NEXT_PATCH="$(printf '%03d' "${NEXT_PATCH}")"
+  NEXT="${VERSION%.*}.${NEXT_PATCH}"
   die "${EXISTING} stands on origin at $(git rev-parse --short=7 "${EXISTING}^{commit}") and HEAD is $(git rev-parse --short=7 HEAD). A version names one commit, so ${VERSION} is burnt: release ${NEXT} instead. Nothing was pushed."
 fi
 

@@ -9,6 +9,7 @@ import {
   subdomain,
   GUID_ALPHABET,
   isOlderRelease,
+  approvedImageTag,
 } from "./tenant.ts";
 import { SEED_SELECTIONS, chosenSelections, appSelectionsToRequest } from "./app-selections.ts";
 import { RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
@@ -366,6 +367,15 @@ describe("TenantValidationReportSchema — the fan-out report envelope", () => {
       reportHash: "abc",
     };
     expect(TenantValidationReportSchema.safeParse(report).success).toBe(true);
+  });
+});
+
+describe("approvedImageTag — the three-digit form (#303)", () => {
+  it("accepts 0.3.000 and 0.3.001 image tags beside the form that stands, and orders them", () => {
+    expect(approvedImageTag.safeParse("0.3.000-stable-20270101120000-abc1234").success).toBe(true);
+    expect(approvedImageTag.safeParse("0.1.16-stable-20260927135112-74b90de").success).toBe(true);
+    expect(approvedImageTag.safeParse("0.3.0000-stable-20270101120000-abc1234").success).toBe(false);
+    expect(isOlderRelease("0.3.000-stable-20270101120000-abc1234", "0.3.001-stable-20270102120000-def5678")).toBe(true);
   });
 });
 

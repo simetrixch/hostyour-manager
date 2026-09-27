@@ -289,8 +289,8 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
   foreach ($rel in $stamped) { Say "$rel declares $Version" }
 }
 
-if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
-  Die "version must be x.y.z with no leading zeros (got '$Version')"
+if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.([0-9]{3}|0|[1-9][0-9]*)$') {
+  Die "version must be x.y.z, the third position three digits such as 000 (got '$Version')"
 }
 
 # The courtesy ceiling check. It WARNS and continues on purpose — see the description.
@@ -438,7 +438,9 @@ try {
   # person holds that the number is still free.
   if (-not $Existing -and $releaseTags.Count -gt 0 -and "$candidateSha" -ne "$headSha") {
     $parts = $Version.Split('.')
-    $next = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+    # Three digits stay three digits: 0.3.007 is followed by 0.3.008.
+    $nextPatch = [int]$parts[2] + 1
+    $next = "$($parts[0]).$($parts[1]).$(if ($parts[2].Length -eq 3) { $nextPatch.ToString('000') } else { $nextPatch })"
     $candidateShort = (git rev-parse --short=7 "$candidate^{commit}" | Select-Object -First 1)
     $headShort = (git rev-parse --short=7 HEAD | Select-Object -First 1)
     Die "$candidate stands on origin at $candidateShort and HEAD is $headShort. A version names one commit, so $Version is burnt: release $next instead. Nothing was pushed."
