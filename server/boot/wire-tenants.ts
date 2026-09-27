@@ -43,6 +43,7 @@ import type { UnitProbes } from "#unit/server/check-units.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
 import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
+import { makeTenantSetWebsiteDomainDef } from "../domains/units/tenant-website-domain.run.ts";
 import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-members.run.ts";
 import { makeTenantSetSenderDomainDef } from "../domains/units/tenant-sender-domain.run.ts";
 import { makeTenantAppsRepoDef } from "../domains/units/tenant-apps-repo.run.ts";
@@ -331,6 +332,7 @@ export function buildTenantOnboarding(
       units: () => unitProbes,
     }),
     makeAddAppDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
+    makeTenantSetWebsiteDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
     // The members of a standing tenant resolved again off the product's manifest: the same port set
     // add-app judges with, because it renders and gates the same fan-out.
     makeTenantRefreshMembersDef(onboardPorts),

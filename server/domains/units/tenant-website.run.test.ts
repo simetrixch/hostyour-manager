@@ -4,13 +4,15 @@ import { tenantZone } from "#unit/shared/unit-host.ts";
 import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { makeAddAppDef } from "./add-app.run.ts";
 import { makeRemoveAppDef } from "./tenant-lifecycle.run.ts";
+import { makeTenantSetWebsiteDomainDef } from "./tenant-website-domain.run.ts";
+import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { recordDnsWrite } from "../../db/dns-writes.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
-import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
+import { FakePlatformRepo, FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
-import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
-import { GUID, ctx, db, params, planCtx, ports, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
+import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
 
 // A website of a live tenant (#308), added and removed: named by its domain, running the bundle's
 // folder `web`, served at www.<domain> with <domain> redirecting there, its hosts pointed at the
@@ -95,5 +97,59 @@ describe("add-app for a website", () => {
     const step = makeRemoveAppDef(ports({ dns, registrations })).steps({ tenantId: "tnt_1", app: "example-ch" }).find((s) => s.name === "remove-website-records")!;
     await step.run(ctx(params(), step.name, []));
     expect([dns.record("www.example.ch", "CNAME"), dns.record("example.ch", "CNAME")]).toEqual([undefined, undefined]);
+  });
+});
+
+describe("tenant-set-website-domain", () => {
+  /** The deploy repository's manifest with the website front handing its chart the domain, as the
+   *  product's own does, so a member resolved again shows which domain it was resolved with. */
+  const withDomain = () => new FakeRepoReader({
+    resolvedSha: SHA,
+    files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML.replace("override: { web: { chart: charts/example-web } }", 'override: { web: { chart: charts/example-web, values: { site: { domain: "{domain}" } } } }'), ...APP_OVERLAYS },
+  });
+  const MOVE = { tenantId: "tnt_1", app: "example-ch", domain: "example.org" };
+
+  it("plans the move with the member resolved again at the new domain, the new hosts' records and the previous hosts' removal", async () => {
+    seedClusters();
+    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
+    const result = await makeTenantSetWebsiteDomainDef(ports({ registrations, repo: withDomain() }, WEBSITE_APPS)).planStream!(MOVE, planCtx());
+    expect(result.outcome).toBe("planned");
+    if (result.outcome !== "planned") return;
+    expect(result.params).toMatchObject({ previous: "example.ch", domain: "example.org", recordHosts: ["www.example.org", "example.org"], retiredHosts: ["www.example.ch", "example.ch"] });
+    expect(result.params.member.sources[1]!.values).toEqual({ site: { domain: "example.org" } });
+    expect(result.plan.steps.map((s) => s.name)).toEqual(["attest-target", "provision-website-records", "write-website-domain", "retire-previous-website-domain"]);
+  });
+
+  it("refuses an app that is no website, the domain it already has, a domain another website serves, and a domain typed with www", async () => {
+    seedClusters();
+    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }, { name: "shop", folder: "web", site: "shop", domain: "example.net" }]);
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations }, WEBSITE_APPS));
+    await expect(def.planStream!({ ...MOVE, app: "erp" }, planCtx())).rejects.toThrow(/is no website/);
+    await expect(def.planStream!({ ...MOVE, domain: "example.ch" }, planCtx())).rejects.toThrow(/already served at example\.ch/);
+    await expect(def.planStream!({ ...MOVE, domain: "example.net" }, planCtx())).rejects.toThrow(/already the domain of website "shop"/);
+    await expect(def.planStream!({ ...MOVE, domain: "www.example.org" }, planCtx())).rejects.toThrow(/type the domain without "www\."/);
+  });
+
+  it("records the new domain and member in one commit, and removes the previous hosts' records once the site answers; an abort puts the previous ones back", async () => {
+    seedClusters();
+    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
+    const dns = new FakeDnsProvider();
+    for (const name of ["www.example.ch", "example.ch"]) {
+      dns.seed(name, "CNAME", "acme.example.com");
+      recordDnsWrite(db.db, { name, type: "CNAME", content: "acme.example.com", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_add" });
+    }
+    const probe = new FakePublicProbe({ "https://www.example.org/": OK, "https://example.org/": REDIRECTS });
+    const prt = ports({ registrations, dns, probe, repo: withDomain() }, WEBSITE_APPS);
+    const planned = await makeTenantSetWebsiteDomainDef(prt).planStream!(MOVE, planCtx());
+    if (planned.outcome !== "planned") throw new Error("not planned");
+    const def = makeTenantSetWebsiteDomainDef(prt);
+    for (const step of def.steps(planned.params).slice(1)) await step.run(ctx(params(), step.name, []));
+    const moved = (await registrations.readTenant("prod", GUID))!.entry;
+    expect(moved.apps.find((a) => a.name === "example-ch")?.domain).toBe("example.org");
+    expect(moved.members.find((m) => m.name === "example-ch")).toEqual(planned.params.member);
+    expect([dns.record("www.example.org", "CNAME"), dns.record("www.example.ch", "CNAME"), dns.record("example.ch", "CNAME")]).toEqual(["acme.example.com", undefined, undefined]);
+    // The abort writes the previous domain and member back.
+    for (const cleanup of def.cleanups!(planned.params).reverse()) await cleanup.run(ctx(params(), cleanup.name, []));
+    expect((await registrations.readTenant("prod", GUID))!.entry.apps.find((a) => a.name === "example-ch")?.domain).toBe("example.ch");
   });
 });

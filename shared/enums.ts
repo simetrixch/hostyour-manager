@@ -449,6 +449,10 @@ export const RUN_KIND = [
   // Set, switch or clear the ONE own domain of a standing tenant: its record onto the tenant's zone,
   // the recorded domain, and the previous domain's record gone once the tenant answers at the new host.
   "tenant-set-own-domain",
+  // Move one website of a standing tenant to another domain: the new hosts' records onto the tenant's
+  // zone, the domain and the member resolved with it, and the previous hosts' records gone once the
+  // website answers at the new ones.
+  "tenant-set-website-domain",
   // Put the parts of a standing tenant on the versions chosen for them, and resolve every member again
   // off its product's manifest: also the one way a renamed chart reaches a tenant that already stands.
   "tenant-refresh-members",
@@ -514,7 +518,7 @@ export const RUN_FAMILY = {
     "mail-dns-publish", "dns-remove", "mail-dns-unpublish",
   ],
   consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate"],
-  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-apps-repo-purge", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-refresh-members", "tenant-set-sender-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
+  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-apps-repo-purge", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-refresh-members", "tenant-set-sender-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;
 
