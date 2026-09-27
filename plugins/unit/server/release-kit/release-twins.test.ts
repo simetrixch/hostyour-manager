@@ -237,12 +237,12 @@ interface Fixture {
 
 /** One scenario, performed twice on two identical repositories. Each side answers with its fixture
  *  as well, so a scenario can read what the run left on origin. */
-async function bothSpellings(build: () => Fixture, args: string[]): Promise<{ sh: ReturnType<typeof run> & Fixture; ps1: ReturnType<typeof run> & Fixture }> {
+async function bothSpellings(build: () => Fixture, args: string[], ps1Args: string[] = args): Promise<{ sh: ReturnType<typeof run> & Fixture; ps1: ReturnType<typeof run> & Fixture }> {
   const sh = build();
   const ps1 = build();
   return {
     sh: { ...(await runAsync(BASH, [SCRIPTS.sh, ...args], sh.cwd)), ...sh },
-    ps1: { ...(await runAsync("pwsh", ["-NoProfile", "-NonInteractive", "-File", SCRIPTS.ps1, ...args], ps1.cwd)), ...ps1 },
+    ps1: { ...(await runAsync("pwsh", ["-NoProfile", "-NonInteractive", "-File", SCRIPTS.ps1, ...ps1Args], ps1.cwd)), ...ps1 },
   };
 }
 
@@ -442,6 +442,40 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
       expect(originRefs(f)).not.toContain("refs/heads/deploy/");
       expect(originRefs(f)).toContain(`refs/tags/deploy/test/${tag}\n`);
     }
+  });
+
+  // PUTTING A RELEASE THAT STANDS ON A STAGE AGAIN (#299): --existing / -Existing, the way a unit goes
+  // back to an earlier release. The deploy ref names the release's own commit whatever is checked out,
+  // nothing is minted, and a release that never stood on origin is refused before any push.
+
+  it("puts a release that stands on origin on a stage again from a moved HEAD, at the release's own commit", RUNS, async () => {
+    const o = await bothSpellings(() => releasedRepo({ moved: true }), ["1.2.3", "stable", "test", "--existing"], ["1.2.3", "stable", "test", "-Existing"]);
+    const { stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(0);
+    expect(stdout).toContain("release: reusing the existing release 1.2.3-stable-<ts14> - one release per version+channel, so putting it on test rebuilds nothing\n");
+    expect(stdout).not.toContain("minted");
+    for (const f of [o.sh, o.ps1]) {
+      const [tag] = releaseTags(f);
+      expect(releaseTags(f)).toHaveLength(1);
+      const released = run("git", ["rev-list", "-n", "1", tag!], f.cwd).stdout.trim();
+      expect(released).not.toBe(head(f));
+      expect(originRefs(f)).toContain(`${released}\trefs/tags/deploy/test/${tag}\n`);
+      expect(originRefs(f)).not.toContain("refs/heads/deploy/");
+    }
+  });
+
+  it("refuses to put a release that never stood on origin, before any push", RUNS, async () => {
+    const before = new Map<string, string>();
+    const o = await bothSpellings(() => {
+      const f = releasedRepo({ moved: false });
+      before.set(f.cwd, originRefs(f));
+      return f;
+    }, ["9.9.9", "stable", "dev", "--existing"], ["9.9.9", "stable", "dev", "-Existing"]);
+    const { stdout, stderr } = expectSameBytes(o);
+    expect(o.sh.status).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toBe("release: no release 9.9.9-stable stands on origin, so there is none to put on dev. Nothing was pushed.\n");
+    for (const f of [o.sh, o.ps1]) expect(originRefs(f)).toBe(before.get(f.cwd));
   });
 
   it("drops a tag that never reached origin and names another commit, and cuts the release again", RUNS, async () => {

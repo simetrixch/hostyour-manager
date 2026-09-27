@@ -5,7 +5,12 @@
 # (same folder). The two are held byte-for-byte equivalent in behaviour.
 #
 # USAGE (run from the repo root)
-#   ./release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod>
+#   ./release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod> [--existing]
+#
+# --existing puts a release that already stands on origin on the stage and
+# mints nothing: the deploy ref is pushed at that release's own commit,
+# whatever is checked out. It is how a unit goes back to an earlier release
+# (hostyour-manager#299).
 #
 # THE THREE INPUTS
 #   version  — x.y.z, no leading zeros.
@@ -181,9 +186,15 @@ pin_branch() {
 VERSION="${1:-}"
 CHANNEL="${2:-}"
 STAGE="${3:-}"
+EXISTING_ONLY=""
+case "${4:-}" in
+  "") ;;
+  --existing) EXISTING_ONLY=yes ;;
+  *) die "usage: release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod> [--existing]" ;;
+esac
 
 [ -n "$VERSION" ] && [ -n "$CHANNEL" ] && [ -n "$STAGE" ] \
-  || die "usage: release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod>"
+  || die "usage: release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod> [--existing]"
 [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
   || die "version must be x.y.z with no leading zeros (got '$VERSION')"
 case "$CHANNEL" in stable|beta|alpha) ;; *) die "channel must be stable|beta|alpha (got '$CHANNEL')" ;; esac
@@ -290,6 +301,13 @@ if [ -n "$EXISTING" ] \
   EXISTING=""
 fi
 
+# --existing PUTS ONLY WHAT WAS RELEASED: the release has to stand on origin, because the deploy ref is
+# pushed at its commit and a tag that never left this machine is no release anybody built.
+if [ -n "$EXISTING_ONLY" ] \
+  && { [ -z "$EXISTING" ] || ! git ls-remote --exit-code --tags origin "refs/tags/${EXISTING}" >/dev/null 2>&1; }; then
+  die "no release ${VERSION}-${CHANNEL} stands on origin, so there is none to put on ${STAGE}. Nothing was pushed."
+fi
+
 # A VERSION NAMES ONE COMMIT. A tag that survived the residue rule and names a commit other than
 # HEAD is on origin, and origin's tag is the release: what stands at HEAD is a different tree, and
 # the version cannot name both. Reusing the tag would push its commit as the deploy ref from a
@@ -299,7 +317,7 @@ fi
 # repaired under its number but succeeded by the next one (#173). The next number is the patch
 # plus one. This script reads no other repository, so where one sequence spans several, the person
 # holds that the number is still free.
-if [ -n "$EXISTING" ] && [ "$(git rev-parse --verify --quiet "${EXISTING}^{commit}")" != "$HEAD_SHA" ]; then
+if [ -z "$EXISTING_ONLY" ] && [ -n "$EXISTING" ] && [ "$(git rev-parse --verify --quiet "${EXISTING}^{commit}")" != "$HEAD_SHA" ]; then
   NEXT="${VERSION%.*}.$(( ${VERSION##*.} + 1 ))"
   die "${EXISTING} stands on origin at $(git rev-parse --short=7 "${EXISTING}^{commit}") and HEAD is $(git rev-parse --short=7 HEAD). A version names one commit, so ${VERSION} is burnt: release ${NEXT} instead. Nothing was pushed."
 fi
@@ -326,7 +344,7 @@ else
 fi
 
 # The release COMMIT is the tag's. The rule above makes it HEAD as well, so every push below sends
-# what is checked out.
+# what is checked out - except under --existing, where the deploy ref names the release's own commit.
 SHA="$(git rev-list -n 1 "$TAG")"
 SHA7="${SHA:0:7}"
 

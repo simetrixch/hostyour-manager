@@ -49,6 +49,11 @@ on:
           - dev
           - test
           - prod
+      existing:
+        description: "Put the release version-channel that already stands on origin on the stage, minting nothing (going back to an earlier release)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -68,4 +73,4 @@ jobs:
           git config user.email "218061504+example-release[bot]@users.noreply.github.com"
 
       - name: Mint the release tag and push the deploy ref
-        run: bash release/release.sh "${{ inputs.version }}" "${{ inputs.channel }}" "${{ inputs.stage }}"
+        run: bash release/release.sh "${{ inputs.version }}" "${{ inputs.channel }}" "${{ inputs.stage }}" ${{ inputs.existing && '--existing' || '' }}

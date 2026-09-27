@@ -9,6 +9,10 @@
   may reach dev only, beta dev and test, stable anywhere - and the stage this run puts the release
   on. The channel is part of the release tag; the stage is not.
 
+  -Existing puts a release that already stands on origin on the stage and mints nothing: the deploy
+  ref is pushed at that release's own commit, whatever is checked out. It is how a unit goes back to
+  an earlier release (hostyour-manager#299).
+
   It:
     1. Validates version, channel and stage.
     2. Refuses a dirty worktree.
@@ -47,12 +51,16 @@
 
 .EXAMPLE
   ./release/release.ps1 0.6.0 stable prod
+
+.EXAMPLE
+  ./release/release.ps1 0.5.0 stable prod -Existing
 #>
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true, Position = 0)][string]$Version,
   [Parameter(Mandatory = $true, Position = 1)][ValidateSet('stable', 'beta', 'alpha')][string]$Channel,
-  [Parameter(Mandatory = $true, Position = 2)][ValidateSet('dev', 'test', 'prod')][string]$Stage
+  [Parameter(Mandatory = $true, Position = 2)][ValidateSet('dev', 'test', 'prod')][string]$Stage,
+  [switch]$Existing
 )
 $ErrorActionPreference = 'Stop'
 # git's output is read, and this script's own is written, as UTF-8 — what the bash spelling reads and
@@ -379,7 +387,7 @@ try {
   git fetch --tags --quiet origin 2>$null | Out-Null
 
   $prefix = "$Version-$Channel-"
-  $existing = @(git tag -l "$prefix*" | Sort-Object)
+  $releaseTags = @(git tag -l "$prefix*" | Sort-Object)
   $headSha = (git rev-parse --verify HEAD | Select-Object -First 1)
 
   # A TAG THAT NEVER REACHED ORIGIN AND NAMES ANOTHER COMMIT IS RESIDUE, and reusing it aims every
@@ -390,8 +398,8 @@ try {
   # A TAG THAT IS ON ORIGIN IS LEFT EXACTLY AS IT STANDS, whatever commit it names. That is mint-once
   # itself, and the reuse below relies on it: one release per version+channel, put on a further stage
   # without rebuilding.
-  if ($existing.Count -gt 0) {
-    $candidate = $existing[-1]
+  if ($releaseTags.Count -gt 0) {
+    $candidate = $releaseTags[-1]
     git ls-remote --exit-code --tags origin "refs/tags/$candidate" *> $null
     $onOrigin = ($LASTEXITCODE -eq 0)
     $candidateSha = (git rev-parse --verify --quiet "$candidate^{commit}" | Select-Object -First 1)
@@ -402,7 +410,20 @@ try {
       if ($LASTEXITCODE -ne 0) {
         Die "the leftover tag $candidate could not be dropped, and reusing it would release a commit nobody is releasing"
       }
-      $existing = @()
+      $releaseTags = @()
+    }
+  }
+
+  # -Existing PUTS ONLY WHAT WAS RELEASED: the release has to stand on origin, because the deploy ref is
+  # pushed at its commit and a tag that never left this machine is no release anybody built.
+  if ($Existing) {
+    $released = $false
+    if ($releaseTags.Count -gt 0) {
+      git ls-remote --exit-code --tags origin "refs/tags/$($releaseTags[-1])" *> $null
+      $released = ($LASTEXITCODE -eq 0)
+    }
+    if (-not $released) {
+      Die "no release $Version-$Channel stands on origin, so there is none to put on $Stage. Nothing was pushed."
     }
   }
 
@@ -415,7 +436,7 @@ try {
   # not repaired under its number but succeeded by the next one (#173). The next number is the
   # patch plus one. This script reads no other repository, so where one sequence spans several, the
   # person holds that the number is still free.
-  if ($existing.Count -gt 0 -and "$candidateSha" -ne "$headSha") {
+  if (-not $Existing -and $releaseTags.Count -gt 0 -and "$candidateSha" -ne "$headSha") {
     $parts = $Version.Split('.')
     $next = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
     $candidateShort = (git rev-parse --short=7 "$candidate^{commit}" | Select-Object -First 1)
@@ -423,8 +444,8 @@ try {
     Die "$candidate stands on origin at $candidateShort and HEAD is $headShort. A version names one commit, so $Version is burnt: release $next instead. Nothing was pushed."
   }
 
-  if ($existing.Count -gt 0) {
-    $tag = $existing[-1]
+  if ($releaseTags.Count -gt 0) {
+    $tag = $releaseTags[-1]
     # A TAG ON HEAD THAT NEVER REACHED ORIGIN IS THE RELEASE WITH ITS PUSH STILL OWED (#227): the mint
     # pushed HEAD and the run was cut before the tag's own push landed. Reusing it silently would fire
     # no build and pin nothing; it is pushed now, and the rest of the run proceeds as a reuse.
@@ -447,7 +468,7 @@ try {
   }
 
   # The release COMMIT is the tag's. The rule above makes it HEAD as well, so every push below sends
-  # what is checked out.
+  # what is checked out - except under -Existing, where the deploy ref names the release's own commit.
   $sha = (git rev-list -n 1 $tag).Trim()
   $sha7 = $sha.Substring(0, 7)
 
