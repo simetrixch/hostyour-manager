@@ -222,6 +222,10 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         ctx.log("meta", `tenant ${p.guid} member entries written (${commit}) — the master ArgoCD renders them once its ApplicationSet regenerates the member Applications`);
       },
     },
+    // The chosen versions, as the tenant's own, written before any wait: a member whose running
+    // version can no longer start (its image gone from the registry) gets healthy only on the version
+    // chosen, so a wait ahead of this write would never end.
+    writeVersionsStep(ports, p),
     {
       name: "watch-sync-set",
       title: "Wait until every member is Synced + Healthy rendering its new entry",
@@ -241,8 +245,6 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy, each rendering its new entry`);
       },
     },
-    // The chosen versions, as the tenant's own: written after the entries, awaited last.
-    writeVersionsStep(ports, p),
     watchVersionsStep(ports, p),
   ];
 }
