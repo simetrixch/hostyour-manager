@@ -9,7 +9,7 @@ import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { apps, clusters, servers, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { MASTER_ROLES, SLAVE_ROLES, TENANT_SETTLED_STATUS, type Stage, type ArgoSync, type ArgoHealth } from "../../../shared/enums.ts";
-import type { OrphanScanView, OrphanBuildView, DetectedScanView, LiveArgoView, ConsumerLiveView, ConsumerLiveProbeView, TenantLiveView } from "../../../shared/api-types.ts";
+import type { OrphanScanView, OrphanBuildView, DetectedScanView, LiveArgoView, ConsumerLiveView, ConsumerLiveProbeView, TenantLiveView, VersionsView } from "../../../shared/api-types.ts";
 import type { ChannelStagesView } from "../../../shared/api-types-onboard.ts";
 import { singleSourceRevision, targetedRevisionFor, type ClusterKubeResolver, type ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { tenantArgocdUrl } from "../../../shared/tenant.ts";
@@ -410,6 +410,9 @@ export interface TenantApiDeps extends ConsumerApiDeps {
    *  and no build unit of the deploy repository accounts for (tenant-apps-repo-purge.run.ts orphanBuildsScan). Absent
    *  with the tenant family unwired; the scan then lists no builds. */
   orphanBuilds?: () => Promise<OrphanBuildView[]>;
+  /** What the Versions dialog offers for one tenant (tenant-versions.ts readTenantVersions). Absent with
+   *  the tenant family unwired; the route then answers 501. */
+  versions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
   /** The public apex (global.unitApex) of a cluster, read off its values chain on the platform repo —
    *  the SAME resolver the tenant runs carry (create-tenant.run.ts TenantOnboardPorts). The invite
    *  route needs it because a tenant member is addressed at `<member>.<subdomain>.<unitApex>` and the
@@ -439,9 +442,9 @@ function rollupFanoutStatus(statuses: readonly ArgoAppStatus[]): { sync: ArgoSyn
 }
 
 export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): void {
-  const { executor, db, onboardingEnabled, appCatalog, resolver, deployRepoUrl, activator, registrations, orphanBuilds, resolveUnitApex } = deps;
+  const { executor, db, onboardingEnabled, appCatalog, resolver, deployRepoUrl, activator, registrations, orphanBuilds, versions, resolveUnitApex } = deps;
   // The routing move — a route file of its own, the way the resize is.
-  registerTenantActionRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
+  registerTenantActionRoutes(app, { db, executor, tenantEnabled: onboardingEnabled, ...(versions ? { versions } : {}) });
 
   // The tenant inventory: every onboarded tenant + which cluster it fans out on (JOIN clusters for
   // domain/stage). Always live — the read path never degrades on missing config.

@@ -19,6 +19,10 @@ import { STAGE, type Stage } from "../../shared/enums.ts";
 import type { ClusterKubeResolver, MasterKubeClients } from "../adapters/kube/port.ts";
 import { masterKubeInput } from "./master-kube.ts";
 import { HttpRegistryProbe, REGISTRY_PULL_DOCKERCONFIG_PATH } from "../adapters/registry/registry-http.ts";
+import { readChannelStages } from "../domains/inventory/channel-stages.ts";
+import { readTenantVersions } from "../domains/units/tenant-versions.ts";
+import type { VersionsView } from "../../shared/api-types.ts";
+import type { Db } from "../db/client.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import type { ObjectStore } from "../adapters/object-store/port.ts";
 import type { Activator } from "#unit/server/adapters/activation/port.ts";
@@ -40,7 +44,6 @@ import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-
 import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-members.run.ts";
-import { makeTenantSetApprovedTagDef } from "../domains/units/tenant-approved-tag.run.ts";
 import { makeTenantSetSenderDomainDef } from "../domains/units/tenant-sender-domain.run.ts";
 import { makeTenantAppsRepoDef } from "../domains/units/tenant-apps-repo.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
@@ -89,6 +92,9 @@ export interface TenantFamily {
   tenantRegistrations?: TenantRegistrations;
   /** The build half of that scan (#241). Undefined when the family is not configured. */
   orphanBuilds?: () => Promise<OrphanBuildView[]>;
+  /** What the Versions dialog offers for one tenant, read through the ports its run plans with.
+   *  Undefined when the family is not configured. */
+  versions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
   /** Bring the deploy repository's books branch into being and to its trunk, so the tenant
    *  ApplicationSet's git generator has a revision to resolve before the first tenant exists and the
    *  member charts on that revision are the current ones. It crosses as a closure because buildUnits
@@ -233,6 +239,7 @@ export function buildTenantOnboarding(
     registryProbe,
     buildRbac,
     attestedBuilds: () => registrations.listAttestedBuildNames(),
+    channelStages: () => readChannelStages(platformRepo),
     // The mirror of G23's tenant-subdomain clause, read off the consumer registration tree: a
     // subdomain that is an onboarded unit's host label would put this tenant's session cookies on
     // the host that consumer already serves (unit-dns.ts). Over every stage, as G23 reads the
@@ -327,8 +334,6 @@ export function buildTenantOnboarding(
     // The members of a standing tenant resolved again off the product's manifest: the same port set
     // add-app judges with, because it renders and gates the same fan-out.
     makeTenantRefreshMembersDef(onboardPorts),
-    // A version approved per tenant and app: it reads the stage pins and the registry the same way.
-    makeTenantSetApprovedTagDef(onboardPorts),
     // The tenant's sender domain: the product's manifest names the check, the public probe asks it.
     makeTenantSetSenderDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe }),
     // The tenant's own apps repository, created from the deploy repository's apps bundle through the GitHub App
@@ -367,5 +372,6 @@ export function buildTenantOnboarding(
   // (GET /api/tenants/:id/live), and scan the LIVE tenant pointers for orphans (GET /api/tenants/orphans)
   // through the very registrations the runs commit pointers with — all the same instances (and the same one
   // repoURL the appsets are rendered from) the runs use, never a second one.
-  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, orphanBuilds, carryTrunkToBooksBranch };
+  const versions = (db: Db, tenantId: string, signal?: AbortSignal): Promise<VersionsView> => readTenantVersions(onboardPorts, db, tenantId, signal);
+  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, orphanBuilds, versions, carryTrunkToBooksBranch };
 }

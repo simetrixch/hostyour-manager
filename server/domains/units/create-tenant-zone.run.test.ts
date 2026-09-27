@@ -24,7 +24,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 
@@ -85,6 +85,7 @@ function ports(dns: FakeDnsProvider | undefined, store = new FakeObjectStore()):
     deployRepoUrl: "https://github.com/acme/acme-deploy.git", platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git", argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com", resolveClusterValueFiles: async () => CHAIN,
     registryProbe: new FakeRegistryProbe(), buildRbac: new FakeBuildRbacWriter(),
+    channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [], consumerHostLabels: async () => [],
     ...(dns ? { dns } : {}),
   };

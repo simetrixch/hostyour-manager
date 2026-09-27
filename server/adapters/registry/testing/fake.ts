@@ -8,18 +8,26 @@ export class FakeRegistryProbe implements RegistryProbe {
   /** Every probed coordinate, in order, as "<repo>:<tag>". */
   readonly probes: string[] = [];
   private readonly missing: Set<string>;
+  private readonly tags: Readonly<Record<string, readonly string[]>>;
 
   constructor(scripted: {
     /** "<repo>:<tag>" keys the registry does not hold — models an image that was never released. */
     missing?: readonly string[];
+    /** What listTags answers per repository; a repository not named holds no tag. */
+    tags?: Readonly<Record<string, readonly string[]>>;
   } = {}) {
     this.missing = new Set(scripted.missing ?? []);
+    this.tags = scripted.tags ?? {};
   }
 
   async imageExists(ref: ImageRef): Promise<boolean> {
     const key = `${ref.repo}:${ref.tag}`;
     this.probes.push(key);
     return !this.missing.has(key);
+  }
+
+  async listTags(ref: Omit<ImageRef, "tag">): Promise<string[]> {
+    return [...(this.tags[ref.repo] ?? [])];
   }
 }
 

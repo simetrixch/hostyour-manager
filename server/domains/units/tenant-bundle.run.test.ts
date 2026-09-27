@@ -35,7 +35,7 @@ import type { RoleBindingManifest } from "../../adapters/kube/port.ts";
 import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
-import { APP_OVERLAYS, STANDING_MEMBER_NAMES as TEST_MEMBERS, TEST_BUNDLE, testMembers } from "./tenant-members.fixture.ts";
+import { APP_OVERLAYS, STANDING_MEMBER_NAMES as TEST_MEMBERS, TEST_BUNDLE, testMembers, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { ORG, PLACEHOLDER_TAG as PLACEHOLDER, SHA, TEMPLATE_MANIFEST, TEMPLATE_SPEC, TEMPLATE_URL, TENANT_URL, UNIT, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -128,6 +128,7 @@ function bare(over: Partial<TenantOnboardPorts> = {}, manifest = MANIFEST_YAML):
     registryProbe: new FakeRegistryProbe(),
     dns,
     buildRbac: new FakeBuildRbacWriter(),
+    channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }, { unit: UNIT, build: UNIT }],
     consumerHostLabels: async () => [],
     ...over,

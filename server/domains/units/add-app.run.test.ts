@@ -19,7 +19,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
-import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS, TEST_BUNDLE, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, ORG, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { buildUnitStepName } from "./tenant-builds.ts";
@@ -137,6 +137,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}, template: Reco
     // existing suites never trigger a build.
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
+    channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [
       { unit: "example-platform", build: "example-engine" },
       { unit: "swissbookai", build: "swissbookai-api" },

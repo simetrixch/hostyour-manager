@@ -29,6 +29,7 @@ import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { Activator } from "#unit/server/adapters/activation/port.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
+import type { ChannelStages } from "../inventory/channel-stages.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { provisionUnitDns, standingHostFrom, tenantRecordName } from "#unit/server/unit-dns.ts";
@@ -102,6 +103,9 @@ export interface TenantOnboardPorts {
    *  A build name is the flat image repository, so this is what turns the images a tenant pulls into
    *  the build namespaces whose release pipelines may sync it (tenantSyncUnits). */
   attestedBuilds: () => Promise<{ unit: string; build: string }[]>;
+  /** Which stages each release channel reaches (global.channelStages on the platform repo's trunk,
+   *  channel-stages.ts): a tenant is offered, and put on, only a version its stage takes. */
+  channelStages: () => Promise<ChannelStages>;
   /** The host label of every consumer standing at any stage (Registrations.listAttestedHostLabels over
    *  the stages). The subdomain belt refuses a subdomain that is one of them: the consumer on that
    *  label serves `<label>.<stage apex>`, which is the host this tenant's IdP would scope its session

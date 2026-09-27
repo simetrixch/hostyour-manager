@@ -114,6 +114,27 @@ function stubRouted(routes: Record<string, Scripted>): { seen: { method: string;
   return { seen };
 }
 
+describe("HttpRegistryProbe.listTags", () => {
+  it("lists every page with the pull credential of the host it is given; an absent repository is []", async () => {
+    const file = writeDockerConfig({ "ghcr.io": { auth: OTHER_AUTH }, [HOST]: { auth: AUTH } });
+    const { seen } = stubRouted({
+      "GET /v2/example-engine/tags/list": { status: 200, json: { tags: ["0.1.1-stable-20260101000000-abc1234"] }, headers: { link: '</v2/example-engine/tags/list?n=1000&last=a>; rel="next"' } },
+      "GET /v2/example-engine/tags/list?n=1000&last=a": { status: 200, json: { tags: ["0.1.2-stable-20260102000000-def5678"] } },
+      "GET /v2/gone/tags/list": { status: 404, json: { errors: [] } },
+    });
+    const probe = new HttpRegistryProbe({ dockerConfigPath: file });
+    expect(await probe.listTags({ registryHost: HOST, repo: "example-engine" })).toEqual(["0.1.1-stable-20260101000000-abc1234", "0.1.2-stable-20260102000000-def5678"]);
+    expect(await probe.listTags({ registryHost: HOST, repo: "gone" })).toEqual([]);
+    expect(seen.every((r) => r.auth === `Basic ${AUTH}`)).toBe(true);
+  });
+
+  it("fails CLOSED on an undecidable status — a partial list is never offered as the whole one", async () => {
+    const file = writeDockerConfig({ [HOST]: { auth: AUTH } });
+    stubRouted({ "GET /v2/example-engine/tags/list": { status: 500 } });
+    await expect(new HttpRegistryProbe({ dockerConfigPath: file }).listTags({ registryHost: HOST, repo: "example-engine" })).rejects.toMatchObject({ code: "UPSTREAM" });
+  });
+});
+
 describe("HttpRegistryMaintenance", () => {
   const cfg = (file: string) => ({ registryHost: HOST, dockerConfigPath: file });
 

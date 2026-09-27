@@ -59,6 +59,7 @@ import { resolveRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { sweepRepoCredentials } from "../domains/units/repo-credential-sweep.ts";
 import { migrateRegistrations } from "#unit/server/registrations-migration.ts";
 import { renameDeployRepoKeys } from "../domains/inventory/cluster-marking.ts";
+import { readChannelStages } from "../domains/inventory/channel-stages.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
 import type { AppEnv } from "../http/app-env.ts";
@@ -389,11 +390,11 @@ export async function wire(): Promise<Wired> {
       // Tenant (multi-app) onboarding routes — the SAME thin shape, gated on the tenant family's own
       // flag (DEPLOY_REPO). Registered right after the consumer routes; the read
       // path (tenant list/detail) stays live, the mutating triggers answer 501 until tenantEnabled.
-      registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: units.tenantEnabled, ...(units.tenantResolver ? { resolver: units.tenantResolver } : {}), ...(units.deployRepoUrl ? { deployRepoUrl: units.deployRepoUrl } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.activator ? { activator: units.activator } : {}), ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.orphanBuilds ? { orphanBuilds: units.orphanBuilds } : {}), ...(units.resolveUnitApex ? { resolveUnitApex: units.resolveUnitApex } : {}) });
+      registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: units.tenantEnabled, ...(units.tenantResolver ? { resolver: units.tenantResolver } : {}), ...(units.deployRepoUrl ? { deployRepoUrl: units.deployRepoUrl } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.activator ? { activator: units.activator } : {}), ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.orphanBuilds ? { orphanBuilds: units.orphanBuilds } : {}), ...(units.tenantVersions ? { versions: units.tenantVersions } : {}), ...(units.resolveUnitApex ? { resolveUnitApex: units.resolveUnitApex } : {}) });
       // The tenant's own apps repository: the run that creates and builds it, gated like the tenant routes.
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
       // The secrets of a standing consumer (#245) — gated like the other consumer triggers.
-      const repositoryRoutes = { executor, onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), githubApp };
+      const repositoryRoutes = { executor, onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(platformRepo ? { channelStages: () => readChannelStages(platformRepo) } : {}), githubApp };
       registerConsumerSecretsRoute(a, repositoryRoutes);
       registerConsumerReleaseRoute(a, repositoryRoutes);
       // One tenant's own catalog, read through the same closure tenant-add-app judges against.

@@ -34,7 +34,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 
 /** The standing members the product under test declares — stated by the fixture, the way a real
  *  tenant's registration states its own. */
@@ -184,6 +184,7 @@ function fakeTenantSeeder(): VaultSeeder {
     dns: new FakeDnsProvider(),
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
+    channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
     ...(over.activator ? { activator: over.activator } : {}),

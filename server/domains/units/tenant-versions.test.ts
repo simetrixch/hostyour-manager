@@ -5,8 +5,11 @@ import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
-import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
-import { fixTenantVersions, sameApprovals, stagePinsOf, withMissingPins, withNewestPins, type Approvals } from "./tenant-versions.ts";
+import { testMembers, TEST_BUNDLE, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
+import { fixTenantVersions, readTenantVersions, sameApprovals, stagePinsOf, withChosenVersions, withMissingPins, type Approvals } from "./tenant-versions.ts";
+import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import type { Logger } from "../../kernel/logger.ts";
 
 // The versions a tenant runs: the stage pins it starts on, the builds the boot fixes at the version
@@ -15,13 +18,17 @@ import type { Logger } from "../../kernel/logger.ts";
 const GUID = "zsjs023ctne0";
 const NEW = "0.1.12-stable-20260925120000-abc1234";
 const OLD = "0.1.11-stable-20260920120000-def5678";
+const OLDEST = "0.1.10-stable-20260910120000-0a1b2c3";
+/** Built after the stage pin: a release has not made it available at prod yet. */
+const NEWER = "0.1.13-stable-20260926120000-1234567";
+const BETA = "0.1.12-beta-20260924120000-7654321";
 
 const pinsFile = (builds: Record<string, string>): string =>
   `builds:\n${Object.entries(builds).map(([name, tag]) => `  - { name: ${name}, image: ${name}, tag: "${tag}" }`).join("\n")}\n`;
 
-/** One tenant at prod holding `approvedTags`, and the stage pins of two of its charts: the engine's
- *  second build still carries its placeholder, which names no released image. */
-function books(approvedTags: Approvals): TenantRegistrations {
+/** One tenant at prod holding `approvedTags`, and the stage pins of two of its charts: by default the
+ *  engine's second build still carries its placeholder, which names no released image. */
+function books(approvedTags: Approvals, enginePins: Record<string, string> = { "example-engine": NEW, "example-migrate": "" }): TenantRegistrations {
   const repo = new FakePlatformRepo();
   const registration = TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: "acme", members: testMembers(["erp"]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), approvedTags, ...TEST_BUNDLE,
@@ -29,7 +36,7 @@ function books(approvedTags: Approvals): TenantRegistrations {
   const w = tenantRegistrationWrite("prod", GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
   repo.seed(repo.booksBranch, "charts/example-auth/pins-prod.yaml", pinsFile({ "example-auth": NEW }));
-  repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", pinsFile({ "example-engine": NEW, "example-migrate": "" }));
+  repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", pinsFile(enginePins));
   return new TenantRegistrations(repo);
 }
 
@@ -61,11 +68,35 @@ describe("tenant versions", () => {
     expect(sameApprovals(next, { auth: { "example-auth": NEW }, erp: { "example-engine": NEW } })).toBe(false);
   });
 
-  it("an upgrade moves every pinned build onto its pin and keeps a build no pin names", () => {
-    const current = { erp: { "example-engine": OLD, "example-kept": OLD } };
-    expect(withNewestPins(current, { erp: { "example-engine": NEW }, auth: { "example-auth": NEW } }))
-      .toEqual({ erp: { "example-engine": NEW, "example-kept": OLD }, auth: { "example-auth": NEW } });
-    expect(current.erp["example-engine"]).toBe(OLD);
+  it("a choice moves every build it names, a build the tenant lacks starts at its pin, and any other keeps what it holds", () => {
+    const current = { erp: { "example-engine": NEW, "example-kept": OLD } };
+    expect(withChosenVersions(current, { erp: { "example-engine": NEW }, auth: { "example-auth": NEW } }, { "example-engine": OLD }))
+      .toEqual({ erp: { "example-engine": OLD, "example-kept": OLD }, auth: { "example-auth": NEW } });
+    expect(current.erp["example-engine"]).toBe(NEW);
+  });
+
+  it("offers per part the versions every image of it stands at in the registry, newest first, none newer than the stage pin and none on a channel the stage does not take", async () => {
+    const registrations = books({ erp: { "example-engine": OLD, "example-worker": OLD }, auth: { "example-auth": NEW } }, { "example-engine": NEW, "example-worker": NEW });
+    const ports = {
+      registrations,
+      attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }, { unit: "example-platform", build: "example-worker" }],
+      resolveClusterValueFiles: async () => [{ path: clusterMapPath("s1.example"), content: "global:\n  endpoints:\n    registry:\n      host: zot.s1.example\n" }],
+      registryProbe: new FakeRegistryProbe({
+        tags: {
+          "example-engine": [OLDEST, OLD, NEW, NEWER, BETA, "latest"],
+          "example-worker": [OLD, NEW, NEWER, BETA],
+          "example-auth": [NEW],
+        },
+      }),
+      channelStages: async () => TEST_CHANNEL_STAGES,
+    } as unknown as TenantOnboardPorts;
+    expect(await readTenantVersions(ports, db.db, "tnt_1")).toEqual({
+      stage: "prod",
+      parts: [
+        { name: "example-auth", builds: ["example-auth"], running: [NEW], versions: [{ tag: NEW, older: false }] },
+        { name: "example-platform", builds: ["example-engine", "example-worker"], running: [OLD], versions: [{ tag: NEW, older: false }, { tag: OLD, older: false }] },
+      ],
+    });
   });
 
   it("the boot fixes a missing build at the version it runs, keeps a held one, and commits nothing the second time", async () => {

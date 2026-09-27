@@ -343,7 +343,7 @@ export class TenantRegistrations {
   }
 
   /** Write the image tags approved for this tenant alone. One field of one file; writing what it
-   *  already carries commits nothing. tenant-set-approved-tag waits for the members around it. */
+   *  already carries commits nothing. */
   async setApprovedTags(stage: Stage, guid: string, approvedTags: Record<string, Record<string, string>>, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);

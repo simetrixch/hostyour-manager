@@ -17,7 +17,7 @@ import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { ports as onboardPorts, FakeBuildPlaneClusterReader, type FakeSeeder } from "./onboard.fixture.ts";
-import { testMembers } from "./tenant-members.fixture.ts";
+import { testMembers, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
@@ -89,6 +89,7 @@ function harness(over: { manifest?: string; ports?: Partial<TenantOnboardPorts>;
     registryProbe: new FakeRegistryProbe(),
     dns: new FakeDnsProvider(),
     buildRbac: new FakeBuildRbacWriter(),
+    channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [],
     consumerHostLabels: async () => [],
     onboard: () => ({ ports: onboard }),

@@ -142,6 +142,42 @@ function nextLink(header: string | null): string | null {
   }
 }
 
+/** Every tag of `repo` read through `request` (GET /v2/<repo>/tags/list, following the Link pages).
+ *  A 404 is an absent repository and answers []; a null tag list is a page with no tags. Any other
+ *  non-2xx status, unparseable JSON or a non-array tags field THROWS: a partial list must never be
+ *  taken for the whole one. */
+async function listTagPages(request: (path: string) => Promise<Response>, repo: string): Promise<string[]> {
+  const out: string[] = [];
+  let path = `/v2/${repo}/tags/list?n=1000`;
+  for (let page = 0; page < 100_000; page++) {
+    const res = await request(path);
+    const link = res.headers.get("link");
+    if (res.status === 404) {
+      await res.arrayBuffer().catch(() => undefined);
+      return out;
+    }
+    if (!res.ok) {
+      await res.arrayBuffer().catch(() => undefined);
+      throw upstream(`the tags GET ${path} answered HTTP ${res.status} — the tag list cannot be trusted as complete`);
+    }
+    let body: { tags?: unknown };
+    try {
+      body = (await res.json()) as { tags?: unknown };
+    } catch (e) {
+      throw upstream(`the tags GET ${path} returned unparseable JSON: ${errMsg(e)}`);
+    }
+    if (Array.isArray(body.tags)) {
+      for (const tg of body.tags) if (typeof tg === "string") out.push(tg);
+    } else if (body.tags !== null && body.tags !== undefined) {
+      throw upstream(`the tags GET ${path} returned a non-array tags field`);
+    }
+    const next = nextLink(link);
+    if (!next) break;
+    path = next;
+  }
+  return out;
+}
+
 export interface HttpRegistryProbeConfig {
   /** Where the Deployment mounts the manager-registry-pull dockerconfigjson (a plain directory
    *  mount, so the file refreshes in the running pod after an ESO resync). */
@@ -186,6 +222,25 @@ export class HttpRegistryProbe implements RegistryProbe {
       clearTimeout(t);
       if (opts.signal) opts.signal.removeEventListener("abort", onOuterAbort);
     }
+  }
+
+  async listTags(ref: Omit<ImageRef, "tag">, opts: { signal?: AbortSignal } = {}): Promise<string[]> {
+    return listTagPages(async (path) => {
+      const auth = await this.readBasicAuth(ref.registryHost);
+      const { signal, done } = composeAbort(this.cfg.timeoutMs ?? 15_000, opts.signal);
+      try {
+        return await fetch(`https://${ref.registryHost}${path}`, {
+          method: "GET",
+          headers: { accept: "application/json", authorization: `Basic ${auth}` },
+          signal,
+          redirect: "manual", // never follow a redirect off the central registry (the credential is a header)
+        });
+      } catch (e) {
+        throw upstream(`${ref.registryHost} is unreachable listing the tags of ${ref.repo}: ${errMsg(e)}`);
+      } finally {
+        done();
+      }
+    }, ref.repo);
   }
 
   /** The base64 basic-auth value for the registry host out of the mounted manager-registry-pull
@@ -263,37 +318,7 @@ export class HttpRegistryMaintenance implements RegistryMaintenance {
   }
 
   async listTags(repo: string, opts: { signal?: AbortSignal } = {}): Promise<string[]> {
-    const out: string[] = [];
-    let path = `/v2/${repo}/tags/list?n=1000`;
-    for (let page = 0; page < 100_000; page++) {
-      const res = await this.request("GET", path, { accept: "application/json" }, opts.signal);
-      const link = res.headers.get("link");
-      if (res.status === 404) {
-        await res.arrayBuffer().catch(() => undefined);
-        return out; // no such repo -> no tags (the defined "absent" answer)
-      }
-      if (!res.ok) {
-        await res.arrayBuffer().catch(() => undefined);
-        throw upstream(`the tags GET ${path} answered HTTP ${res.status} — the tag list cannot be trusted as complete`);
-      }
-      let body: { tags?: unknown };
-      try {
-        body = (await res.json()) as { tags?: unknown };
-      } catch (e) {
-        throw upstream(`the tags GET ${path} returned unparseable JSON: ${errMsg(e)}`);
-      }
-      if (body.tags === null || body.tags === undefined) {
-        // a null tag list is a valid "no tags on this page" answer — not an error
-      } else if (Array.isArray(body.tags)) {
-        for (const tg of body.tags) if (typeof tg === "string") out.push(tg);
-      } else {
-        throw upstream(`the tags GET ${path} returned a non-array tags field`);
-      }
-      const next = nextLink(link);
-      if (!next) break;
-      path = next;
-    }
-    return out;
+    return listTagPages((path) => this.request("GET", path, { accept: "application/json" }, opts.signal), repo);
   }
 
   async resolveDigest(repo: string, tag: string, opts: { signal?: AbortSignal } = {}): Promise<ManifestDigest> {

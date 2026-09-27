@@ -17,7 +17,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -124,6 +124,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
     registryProbe: new FakeRegistryProbe(),
     dns: new FakeDnsProvider(),
     buildRbac: new FakeBuildRbacWriter(),
+    channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
     ...over,

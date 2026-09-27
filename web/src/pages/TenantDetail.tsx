@@ -4,7 +4,7 @@ import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
   getTenant, getTenantAppCatalog, addTenantApp, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
-  setTenantSize, setTenantRouting, refreshTenantMembers, setTenantApprovedTag, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listRuns,
+  setTenantSize, setTenantRouting, setTenantVersions, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listRuns,
   type TenantDetailView,
 } from "../api.ts";
 import { tenantRowOffer } from "../tenantRows.ts";
@@ -15,8 +15,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { SetRoutingAction } from "../components/SetRoutingAction.tsx";
 import { TenantDomainActions } from "../components/TenantDomainActions.tsx";
-import { SetApprovedTagAction } from "../components/SetApprovedTagAction.tsx";
-import { RefreshMembersAction } from "../components/RefreshMembersAction.tsx";
+import { TenantVersionsAction } from "../components/TenantVersionsAction.tsx";
 import { TypeToConfirm } from "../components/TypeToConfirm.tsx";
 import { PurgeTenantDialog } from "../components/PurgeTenantDialog.tsx";
 import { RelocationTargetDialog } from "../components/RelocationTargetDialog.tsx";
@@ -294,8 +293,7 @@ export function TenantDetail() {
               answer and the run's wait could not end — the route refuses it too. */}
           {!unfinished && !t.suspended && <SetRoutingAction subdomain={t.subdomain} routing={t.routing} busy={busy} onRoute={(next) => void act(() => setTenantRouting(tenantId, next))} />}
           {!unfinished && !t.suspended && <TenantDomainActions t={t} busy={busy} act={act} />}
-          {!unfinished && !t.suspended && <RefreshMembersAction busy={busy} onRefresh={() => void act(() => refreshTenantMembers(tenantId))} />}
-          {!unfinished && !t.suspended && <SetApprovedTagAction subdomain={t.subdomain} approvedTags={t.approvedTags} busy={busy} onSet={(app, build, tag) => void act(() => setTenantApprovedTag(tenantId, app, build, tag))} />}
+          {!unfinished && !t.suspended && <TenantVersionsAction tenantId={tenantId} subdomain={t.subdomain} busy={busy} onSet={(versions) => void act(() => setTenantVersions(tenantId, versions))} />}
           {!unfinished && (
             <button type="button" className="btn" disabled={busy} onClick={() => setBackupT(t)}>
               Back up

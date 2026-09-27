@@ -9,7 +9,8 @@ import { syncedRevisionFor, type ArgoAppStatus } from "../../adapters/kube/port.
 import { consumerArgoAppName } from "../../../shared/consumer.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { parseReleaseTag, RELEASE_CHANNEL, RELEASE_TAG_RE } from "../../../shared/release.ts";
-import type { ConsumerReleaseOfferView } from "../../../shared/api-types-onboard.ts";
+import type { VersionsView } from "../../../shared/api-types.ts";
+import type { ChannelStages } from "../inventory/channel-stages.ts";
 import { attestTargetStep, loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import type { BuildPorts } from "#unit/server/build-chain.ts";
 import { injectReleaseKitStep } from "#unit/server/inject-release-kit.ts";
@@ -97,11 +98,27 @@ async function readReleases(ports: Pick<SetReleasePorts, "github" | "store" | "g
 const mintedBefore = (tag: string, running: string | null): boolean =>
   running !== null && parseReleaseTag(tag)!.ts14 < parseReleaseTag(running)!.ts14;
 
-/** What the release dialog offers for one app, read as the plan reads it. */
-export async function readReleaseOffer(ports: Pick<SetReleasePorts, "github" | "store" | "githubApp">, db: Db, appId: string, signal?: AbortSignal): Promise<ConsumerReleaseOfferView> {
+/** What the Versions dialog offers for one app, read as the plan reads it: its repository is one part,
+ *  and a release on a channel that does not reach the app's stage is left out, as the plan refuses it. */
+export async function readConsumerVersions(
+  ports: Pick<SetReleasePorts, "github" | "store" | "githubApp"> & { channelStages: () => Promise<ChannelStages> },
+  db: Db,
+  appId: string,
+  signal?: AbortSignal,
+): Promise<VersionsView> {
   const ac = loadAppCluster(db, appId);
   const { releases, running } = await readReleases(ports, (org) => readOwnerIdentity(db, org), repoUrlOf(db, appId), ac.stage, signal);
-  return { stage: ac.stage, running, releases: releases.map((r) => ({ tag: r.tag, older: mintedBefore(r.tag, running) })) };
+  const channels = await ports.channelStages();
+  const reachesStage = (tag: string): boolean => (channels[parseReleaseTag(tag)!.channel] ?? []).includes(ac.stage);
+  return {
+    stage: ac.stage,
+    parts: [{
+      name: ac.name,
+      builds: [],
+      running: running ? [running] : [],
+      versions: releases.filter((r) => reachesStage(r.tag)).map((r) => ({ tag: r.tag, older: mintedBefore(r.tag, running) })),
+    }],
+  };
 }
 
 /** watch-delivery: the delivery branch stands on the release, and the Application has synced it. The
@@ -191,7 +208,7 @@ export function makeSetReleaseDef(ports: SetReleasePorts): RunDefinition<SetRele
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: [{ resource: "master-kube", key: "m" }],
-        warnings: downgrade ? [`downgrade: "${ac.name}" goes back from ${running} to ${req.tag}`] : [],
+        warnings: downgrade ? [`downgrade: "${ac.name}" goes back from ${running} to ${req.tag} — only the release moves back; a database the newer release migrated stays migrated, and the older release must run on it`] : [],
         requiredSecrets: [],
       };
       return { outcome: "planned", params, plan };

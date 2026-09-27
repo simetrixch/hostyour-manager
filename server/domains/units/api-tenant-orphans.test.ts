@@ -30,7 +30,7 @@ import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { AppEnv } from "../../http/app-env.ts";
-import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -157,6 +157,7 @@ function onboardPorts(registrations: TenantRegistrations): TenantOnboardPorts {
     argoWatchTimeoutMs: 1000,
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
+    channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
     resolveUnitApex: async () => "example.com",

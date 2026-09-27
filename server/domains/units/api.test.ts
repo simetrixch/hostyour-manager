@@ -41,7 +41,7 @@ import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
-import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { ORG, TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 
 const SHA = "a".repeat(40);
@@ -353,7 +353,7 @@ function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
     argoWatchTimeoutMs: 1000,
     // ensure-images defaults: every image present ⇒ the step is a pure probe/no-op here.
     registryProbe: new FakeRegistryProbe(),
-    buildRbac: new FakeBuildRbacWriter(),
+    buildRbac: new FakeBuildRbacWriter(), channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [], dns: emptyZone(),
     resolveUnitApex: async () => "example.com",

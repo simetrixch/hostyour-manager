@@ -24,6 +24,10 @@ export interface RegistryProbe {
    *  credential — THROWS: presence cannot be decided, so the caller fails closed rather than
    *  guessing (never skip a build on a broken probe, never rebuild a live tag on one either). */
   imageExists(ref: ImageRef, opts?: { signal?: AbortSignal }): Promise<boolean>;
+  /** Every tag of <registryHost>/<repo> (GET /v2/<repo>/tags/list, following pagination); [] for an
+   *  absent repository. Any other undecidable outcome THROWS, as imageExists does: a partial list
+   *  would be offered as if it were the whole one. */
+  listTags(ref: Omit<ImageRef, "tag">, opts?: { signal?: AbortSignal }): Promise<string[]>;
 }
 
 /** A resolved manifest digest, e.g. "sha256:abc…". A registry DELETE is BY digest, never by tag,

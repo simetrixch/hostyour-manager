@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { DetectedConsumerView, DetectedScanView, RunView } from "../../../shared/api-types.ts";
 import {
-  listConsumers, getConsumerLive, offboardConsumer, purgeConsumer, setConsumerSecrets, setConsumerRelease,
+  listConsumers, getConsumerLive, offboardConsumer, purgeConsumer, setConsumerSecrets, getConsumerVersions, setConsumerRelease,
   scanDetectedConsumers, adoptConsumer, backupConsumer, restoreConsumer, migrateConsumer, listRuns, setConsumerSize, setConsumerDomain,
   type ConsumerView, type PurgeInput,
 } from "../api.ts";
@@ -15,7 +15,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { ConsumerLifecycleDialog, type LifecycleAction } from "../components/ConsumerLifecycleDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { ConsumerSecretsDialog } from "../components/ConsumerSecretsDialog.tsx";
-import { ConsumerReleaseDialog } from "../components/ConsumerReleaseDialog.tsx";
+import { VersionsDialog } from "../components/VersionsDialog.tsx";
 import { ConsumerActions } from "../components/ConsumerActions.tsx";
 import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
 import { DetectedConsumerPanel, type PurgeTarget } from "../components/DetectedConsumerPanel.tsx";
@@ -425,12 +425,23 @@ export function Consumers() {
       )}
 
       {releaseFor && (
-        <ConsumerReleaseDialog
-          name={releaseFor.name}
-          appId={releaseFor.id}
+        <VersionsDialog
+          title={`Versions of "${releaseFor.name}"`}
+          id={releaseFor.id}
+          read={getConsumerVersions}
           onCancel={() => setReleaseFor(null)}
-          onConfirm={(tag) => { const c = releaseFor; setReleaseFor(null); void act((id) => setConsumerRelease(id, tag), c.id); }}
-        />
+          onConfirm={(versions) => {
+            const c = releaseFor;
+            const tag = Object.values(versions)[0];
+            setReleaseFor(null);
+            if (tag) void act((id) => setConsumerRelease(id, tag), c.id);
+          }}
+        >
+          <p>
+            This <strong>plans</strong> a run and opens it. The release that stands is put on its stage again, nothing is
+            built, and the run waits until it is delivered.
+          </p>
+        </VersionsDialog>
       )}
 
       {sizeFor && (

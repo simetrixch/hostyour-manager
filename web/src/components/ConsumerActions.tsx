@@ -58,7 +58,7 @@ export function ConsumerActions(props: {
           suspended app renders none. A release minted before the one that runs is a downgrade (#299). */}
       {c.status === "active" && (
         <button type="button" className="btn" onClick={props.onSetRelease}>
-          Release…
+          Versions…
         </button>
       )}
       {/* Only on a RUNNING consumer: a suspended one's ingress is down, so a new domain could never answer. */}

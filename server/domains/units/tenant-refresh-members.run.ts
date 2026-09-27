@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import type { RunDefinition, Step, Cleanup, Plan } from "../../executor/types.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { STAGE } from "../../../shared/enums.ts";
-import { guid as guidSchema, isOlderRelease, TenantMemberRecordSchema, type TenantMemberRecord } from "../../../shared/tenant.ts";
+import { approvedImageTag, guid as guidSchema, isOlderRelease, TenantMemberRecordSchema, type TenantMemberRecord } from "../../../shared/tenant.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
@@ -21,7 +21,10 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { isDeepStrictEqual } from "node:util";
-import { restoreVersionsCleanup, sameApprovals, stagePinsOf, watchVersionsStep, withNewestPins, writeVersionsStep } from "./tenant-versions.ts";
+import {
+  restoreVersionsCleanup, sameApprovals, stagePinsOf, tenantVersionParts, versionRefusal, watchVersionsStep, withChosenVersions, writeVersionsStep,
+  type Approvals, type TenantVersionPart,
+} from "./tenant-versions.ts";
 
 // `tenant-refresh-members` — resolve every member of a STANDING tenant again from the product's
 // manifest and write the entries into its registration.
@@ -40,6 +43,11 @@ import { restoreVersionsCleanup, sameApprovals, stagePinsOf, watchVersionsStep, 
 // release is re-run (its builds attested again as its manifest declares them now) and pins the image on
 // the books branch, the fan-out is rendered again at those pins, and ensure-images proves every image
 // before anything is written.
+//
+// THE VERSIONS. The request names a version per part (tenant-versions.ts), the Versions dialog's choice;
+// a part it does not name keeps what it runs. The plan refuses a version the registry lacks for any image
+// of the part, one on a channel the stage does not take, and one newer than the stage pin. A version
+// older than what runs is a downgrade, allowed on purpose and said in the plan.
 //
 // THE KNOWN GAP. From the carry of the product's change into the books branch until this run's write
 // has synced, a member whose chart moved does not answer: the registration still names the old chart.
@@ -81,10 +89,16 @@ export const TenantRefreshMembersParams = z.object({
   buildUnits: z.array(BuildUnitSchema).default([]),
   /** The tenant's versions when this was planned (#296); an abort writes them back. */
   previousApproved: z.record(z.string(), z.record(z.string(), z.string())).default({}),
+  /** The version chosen per build: every build of a part the request names, at that part's tag. */
+  chosenVersions: z.record(z.string(), approvedImageTag).default({}),
 });
 export type TenantRefreshMembersParams = z.infer<typeof TenantRefreshMembersParams>;
 
-export const TenantRefreshMembersRequest = z.object({ tenantId: z.string().startsWith("tnt_") });
+export const TenantRefreshMembersRequest = z.object({
+  tenantId: z.string().startsWith("tnt_"),
+  /** The version chosen per part, `<part> -> <image tag>`; a part not named keeps what it runs. */
+  versions: z.record(z.string().min(1), z.string().min(1)).default({}),
+});
 
 function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberRecord[]): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -233,18 +247,18 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
 
 /** What one member's entry changes: its chart paths, or else its value files and values, or else its
  *  namespace labels. */
-/** Every build whose version the upgrade moves, `member/build old → new`, and apart from them every
- *  one it moves back: the stage pin can stand behind the version held (2026-09-27, #297), and
- *  a downgrade stays possible, so it is said rather than refused. */
-function versionMoves(before: Record<string, Record<string, string>>, after: Record<string, Record<string, string>>): { forward: string[]; back: string[] } {
+/** Every part whose version the run moves, `part old → new`, and apart from them every one it moves
+ *  back: a downgrade is chosen on purpose, so it is said rather than refused. */
+function versionMoves(parts: readonly TenantVersionPart[], after: Approvals): { forward: string[]; back: string[] } {
   const forward: string[] = [];
   const back: string[] = [];
-  for (const [m, builds] of Object.entries(after)) {
-    for (const [b, t] of Object.entries(builds)) {
-      const held = before[m]?.[b];
-      if (held === t) continue;
-      (held !== undefined && isOlderRelease(t, held) ? back : forward).push(`${m}/${b} ${held ?? "stage pin"} → ${t}`);
-    }
+  for (const part of parts) {
+    const builds = new Set(part.builds.map((b) => b.name));
+    const next = [...new Set(Object.values(after).flatMap((held) => Object.entries(held).filter(([b]) => builds.has(b)).map(([, t]) => t)))];
+    if (next.length === part.running.length && next.every((t) => part.running.includes(t))) continue;
+    const newest = part.running[0];
+    const line = `${part.name} ${part.running.join(" / ") || "stage pin"} → ${next.join(" / ")}`;
+    (newest !== undefined && next.some((t) => isOlderRelease(t, newest)) ? back : forward).push(line);
   }
   return { forward, back };
 }
@@ -322,10 +336,24 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         );
       }
       const changed = members.filter((m) => !sameMembers([m], previous.filter((b) => b.name === m.name)));
-      // The newest AVAILABLE version of every build the members render: the stage pin, which a release
-      // moves and no tenant renders (#296). write-versions reads it again when it runs.
-      const approved = withNewestPins(current.entry.approvedTags, await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(tc.stage, chart), members));
-      const moves = versionMoves(current.entry.approvedTags, approved);
+      const parts = await tenantVersionParts(ports, tc.stage, members, current.entry.approvedTags);
+      const channels = await ports.channelStages();
+      const chosenVersions: Record<string, string> = {};
+      for (const [name, tag] of Object.entries(req.versions)) {
+        const part = parts.find((p) => p.name === name);
+        if (!part) throw errValidation(`tenant ${tc.subdomain} has no part "${name}" — its parts are ${parts.map((p) => p.name).join(", ") || "none"}`);
+        const refusal = versionRefusal(tag, part, channels, tc.stage);
+        if (refusal) throw errValidation(`${name} of tenant ${tc.subdomain} cannot run ${tag} — ${refusal}`);
+        for (const b of part.builds) {
+          if (!(await ports.registryProbe.imageExists({ registryHost, repo: b.image, tag }, { signal: ctx.signal }))) {
+            throw errValidation(`${registryHost}/${b.image}:${tag} is not in the registry — a version is chosen only where every image of its part stands there`);
+          }
+          chosenVersions[b.name] = tag;
+        }
+      }
+      // A build the tenant does not hold yet starts at its stage pin; write-versions reads the pins again when it runs.
+      const approved = withChosenVersions(current.entry.approvedTags, await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(tc.stage, chart), members), chosenVersions);
+      const moves = versionMoves(parts, approved);
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
       const planned = await planBuildUnits({
         requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage: appsImage || undefined,
@@ -351,6 +379,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         subdomain, owner: tc.owner, apps, seedUsers, appsImage, appsImageTag: appsImageTag ?? "",
         buildUnits: planned.builds.units,
         previousApproved: current.entry.approvedTags,
+        chosenVersions,
       };
       const steps = tenantRefreshMembersSteps(ports, params);
       const plan: Plan = {
@@ -358,8 +387,8 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         targetKind: "tenant",
         targetId: tc.tenantId,
         summary:
-          `Upgrade tenant ${tc.guid} on ${tc.domain} (${tc.stage}) to the product's manifest at ${outcome.resolvedSha.slice(0, 7)} and the newest available versions: ` +
-          `${isCurrent ? "the tenant is current — every member entry matches the product's manifest and it runs the newest available versions, so the run changes nothing. " : ""}` +
+          `Versions of tenant ${tc.guid} on ${tc.domain} (${tc.stage}), its member entries resolved again off the product's manifest at ${outcome.resolvedSha.slice(0, 7)}: ` +
+          `${isCurrent ? "nothing changes — every member entry matches the product's manifest and every part runs the version asked for. " : ""}` +
           `${changed.length ? `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` : "the member entries are unchanged. "}` +
           `${moves.forward.length ? `Versions: ${moves.forward.join("; ")}. ` : ""}` +
           `${moves.back.length ? `Downgrade: ${moves.back.join("; ")}, older than what runs now. ` : ""}` +
@@ -371,7 +400,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         targets: [],
         locks: tenantLocks(ports.registrations),
         warnings: [
-          ...moves.back.map((d) => `downgrade: ${d} is older than what runs now — the stage pin stands behind the version held, and the run moves it back`),
+          ...moves.back.map((d) => `downgrade: ${d} — only the images move back; a database the newer version migrated stays migrated, and the older version must run on it`),
           ...planned.builds.units.map((u) =>
             `build unit ${u.unit} builds ${u.images.join(", ")}: ${u.registered ? "registered, so its builds are attested again as its manifest declares them now and its release is re-run; the attestation stays after an abort, and a tenant still pulling a build it drops stays on that build's last pin" : "not registered, so it is onboarded build-only"} — its next version is pinned for ${tc.stage} on the books branch`),
         ],

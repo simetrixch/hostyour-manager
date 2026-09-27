@@ -12,11 +12,11 @@ import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, Plugi
   ConsumerLiveView, TenantLiveView, // The DETECTED-consumer surface: the scan result the Detected tab renders and
   // the row-less live probe its rows are verified with. One declaration, both ends — as above.
   DetectedScanView, ConsumerLiveProbeView, // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
-  OperatorKeyView } from "../../shared/api-types.ts";
+  OperatorKeyView, VersionsView } from "../../shared/api-types.ts";
 import type { ServerReachView } from "../../shared/api-types-reach.ts";
 // The onboard wizard's two read views: the channel table (served literally from the platform repo's
 // clusters/platform/values-common.yaml) and what the prefill answers, identity included.
-import type { ChannelStagesView, ConsumerReleaseOfferView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
+import type { ChannelStagesView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
 import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
@@ -400,9 +400,8 @@ export const getConsumerSecretOffer = (appId: string): Promise<ConsumerSecretOff
  *  names the generate keys minted new in the same write (#285). */
 export const setConsumerSecrets = (appId: string, mint: string[]): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/consumers/${appId}/secrets`, { mint });
-/** The releases of an app's repository its release dialog offers (#299). */
-export const getConsumerReleaseOffer = (appId: string): Promise<ConsumerReleaseOfferView> =>
-  req<ConsumerReleaseOfferView>(`/api/consumers/${appId}/releases`);
+/** What the Versions dialog offers for an app: its repository's releases, as one part. */
+export const getConsumerVersions = (appId: string): Promise<VersionsView> => req<VersionsView>(`/api/consumers/${appId}/versions`);
 /** Put a release that stands on the app's stage again (#299), planned through the streaming
  *  planner; returns the { runId } of the planned run. */
 export const setConsumerRelease = (appId: string, tag: string): Promise<{ runId: string }> =>
@@ -666,12 +665,13 @@ export const setTenantRouting = (tenantId: string, routing: MemberRouting): Prom
 export const setTenantSenderDomain = (tenantId: string, domain: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/sender-domain`, { senderDomain: domain });
 
-/** Plan tenant-set-approved-tag: run one app of one tenant at `tag` for `build` ("" follows the stage pin again). */
-export const setTenantApprovedTag = (tenantId: string, app: string, build: string, tag: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/approved-tags`, { app, build, tag });
+/** What the Versions dialog offers for a tenant: per part, the versions the registry holds for it. */
+export const getTenantVersions = (tenantId: string): Promise<VersionsView> => req<VersionsView>(`/api/tenants/${tenantId}/versions`);
 
-/** Plan tenant-refresh-members: every member entry resolved again off the product's manifest. */
-export const refreshTenantMembers = (tenantId: string): Promise<{ runId: string }> => post(`/api/tenants/${tenantId}/refresh-members`);
+/** Plan tenant-refresh-members: the parts named put on the version chosen for each, and every member
+ *  entry resolved again off the product's manifest. */
+export const setTenantVersions = (tenantId: string, versions: Record<string, string>): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/refresh-members`, { versions });
 
 /** Plan setting, switching or clearing ("") the tenant's own domain. */
 /** Plan tenant-set-own-domain for a domain typed without www: the tenant is served at www.<domain>,

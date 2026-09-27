@@ -14,16 +14,6 @@ export interface ConsumerSecretOfferView {
   generateKeys: { key: string; kind: NonNullable<ConsumerSecretSpec["generate"]> }[];
 }
 
-/** What the release dialog offers (#299): the stage, the release that
- *  runs there now (null where the delivery branch carries none of this repository's releases), and
- *  every release of the repository, newest first, each marked where it was minted before the running
- *  one, which makes putting it on the stage a downgrade. */
-export interface ConsumerReleaseOfferView {
-  stage: Stage;
-  running: string | null;
-  releases: { tag: string; older: boolean }[];
-}
-
 /** A credential of an owner the wizard asks for where the measurement demands it: recorded
  *  (fingerprint and date) or not. */
 export interface OwnerCredentialView {

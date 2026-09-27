@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
-import { makeSetReleaseDef, readReleaseOffer, type SetReleaseParams, type SetReleasePorts } from "./set-release.run.ts";
+import { makeSetReleaseDef, readConsumerVersions, type SetReleaseParams, type SetReleasePorts } from "./set-release.run.ts";
 import { FakeClusterReader, FakeMasterArgoReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { StepCtx } from "../../executor/types.ts";
@@ -67,7 +67,7 @@ describe("set-release — the plan", () => {
     if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
     expect(out.plan.summary).toContain(`"acme" on prod (s1.example), where ${V12} runs now`);
     expect(out.plan.summary).toContain(`Downgrade: ${V10} is older than ${V12}.`);
-    expect(out.plan.warnings).toEqual([`downgrade: "acme" goes back from ${V12} to ${V10}`]);
+    expect(out.plan.warnings).toEqual([`downgrade: "acme" goes back from ${V12} to ${V10} — only the release moves back; a database the newer release migrated stays migrated, and the older release must run on it`]);
     expect(out.plan.steps.map((s) => s.name)).toEqual(["attest-target", "inject-release-kit", "put-release", "watch-delivery"]);
     expect(out.params).toMatchObject({ consumerName: "acme", version: "0.1.10", channel: "stable", stage: "prod", releaseCommit: commit("a"), repoCredentialId: "cred_pat_acme" });
   });
@@ -91,12 +91,12 @@ describe("set-release — the plan", () => {
     expect(await summary(BETA)).toMatch(/the beta channel reaches dev, test \(global\.channelStages\)/);
   });
 
-  it("offers the releases newest first, the running one and every older one marked, and nothing outside the grammar", async () => {
-    const offer = await readReleaseOffer(ports(repository(V11)), db.db, "app_1");
+  it("offers the repository as one part: its releases newest first, the running one and every older one marked, nothing outside the grammar and no channel the stage does not take", async () => {
+    const channelStages = async () => ({ alpha: ["dev" as const], beta: ["dev" as const, "test" as const], stable: ["dev" as const, "test" as const, "prod" as const] });
+    const offer = await readConsumerVersions({ ...ports(repository(V11)), channelStages }, db.db, "app_1");
     expect(offer).toEqual({
       stage: "prod",
-      running: V11,
-      releases: [{ tag: BETA, older: false }, { tag: V12, older: false }, { tag: V11, older: false }, { tag: V10, older: true }],
+      parts: [{ name: "acme", builds: [], running: [V11], versions: [{ tag: V12, older: false }, { tag: V11, older: false }, { tag: V10, older: true }] }],
     });
   });
 });

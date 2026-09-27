@@ -20,7 +20,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
@@ -165,6 +165,7 @@ function ports(registrations: TenantRegistrations): TenantOnboardPorts {
     registryProbe: new FakeRegistryProbe(),
     dns: new FakeDnsProvider(),
     buildRbac: new FakeBuildRbacWriter(),
+    channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
   };

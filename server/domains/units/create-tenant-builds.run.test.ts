@@ -27,7 +27,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { RELEASE_KIT_PATHS } from "#unit/server/release-kit/release-kit.ts";
@@ -127,7 +127,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
     dns: new FakeDnsProvider(),
-    buildRbac: new FakeBuildRbacWriter(),
+    buildRbac: new FakeBuildRbacWriter(), channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
     ...over,

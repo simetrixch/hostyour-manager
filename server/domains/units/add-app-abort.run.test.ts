@@ -24,7 +24,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
-import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS, TEST_BUNDLE, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, TEMPLATE_MANIFEST, TENANT_URL, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { ports as onboardPorts, FakeBuildPlaneClusterReader } from "./onboard.fixture.ts";
 import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
@@ -134,6 +134,7 @@ function harness(): Harness {
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
+    channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
   };

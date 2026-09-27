@@ -628,6 +628,24 @@ export interface TenantLiveView {
   reason?: "onboarding-not-configured";
 }
 
+/** GET /api/tenants/:id/versions and GET /api/consumers/:appId/versions — what the Versions dialog
+ *  offers: per part, the versions that can be chosen, newest first. A part is what one unit releases
+ *  together, so a choice moves all of it; a consumer is one part. */
+export interface VersionsView {
+  stage: Stage;
+  parts: {
+    /** The unit that builds the part; a build no unit claims stands alone under its own name. */
+    name: string;
+    /** The builds a choice moves; empty for a consumer, whose release moves its whole repository. */
+    builds: string[];
+    /** The versions the part runs now, newest first: one where all of it runs the same, none where
+     *  nothing of it runs a release. */
+    running: string[];
+    /** Newest first; `older` where choosing it moves the part back from what runs now. */
+    versions: { tag: string; older: boolean }[];
+  }[];
+}
+
 /* ---- Tenants: what a tenant-purge is AIMED at, and the two reads that can NAME one ----
  *
  * THE ONE DECLARATION of each shape below, consumed by BOTH ends: the server domain module returns these

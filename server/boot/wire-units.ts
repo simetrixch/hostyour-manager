@@ -1,5 +1,6 @@
 import type { Config } from "../kernel/config.ts";
-import type { OrphanBuildView } from "../../shared/api-types.ts";
+import type { OrphanBuildView, VersionsView } from "../../shared/api-types.ts";
+import type { Db } from "../db/client.ts";
 import type { Logger } from "../kernel/logger.ts";
 import type { CredentialStore } from "../security/store.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
@@ -135,6 +136,8 @@ export interface UnitsWiring {
   tenantRegistrations?: TenantRegistrations;
   /** The build half of the orphan scan (#241). Undefined when the tenant family is not configured. */
   orphanBuilds?: () => Promise<OrphanBuildView[]>;
+  /** What the Versions dialog offers for one tenant. Undefined when the tenant family is not configured. */
+  tenantVersions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
   /** Bring the deploy repository's books branch into being, and to its trunk, at boot. The tenant
    *  ApplicationSet's git generator reads that branch from the moment the installation is deployed,
    *  and every member Application reads its chart there too, so without this the ApplicationSet has
@@ -293,6 +296,7 @@ export function buildUnits(
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
     ...(tenant.orphanBuilds ? { orphanBuilds: tenant.orphanBuilds } : {}),
+    ...(tenant.versions ? { tenantVersions: tenant.versions } : {}),
     ...(tenant.carryTrunkToBooksBranch ? { carryTrunkToBooksBranch: tenant.carryTrunkToBooksBranch } : {}),
     // The unit plugin's activation client, surfaced for the tenant invite route.
     activator,
