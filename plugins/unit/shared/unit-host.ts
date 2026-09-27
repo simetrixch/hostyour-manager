@@ -73,7 +73,7 @@ export function ownDomainHosts(domain: string): { ownDomain: string; ownDomainRe
 
 /** Why a domain entry cannot be taken, or null: it is typed without `www.`, because the Manager adds it. */
 export function ownDomainEntryProblem(domain: string): string | null {
-  return domain.startsWith("www.") ? `type the domain without "www." (${domain.slice(4)}); the tenant is served at ${domain} and ${domain.slice(4)} redirects there` : null;
+  return domain.startsWith("www.") ? `type the domain without "www." (${domain.slice(4)}); it is served at ${domain} and ${domain.slice(4)} redirects there` : null;
 }
 
 /** The words no label and no subdomain may be: the stage words are the zones themselves, so a

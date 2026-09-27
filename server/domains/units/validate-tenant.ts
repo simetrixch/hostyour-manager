@@ -21,7 +21,7 @@ import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
-import type { TenantValidationReport } from "../../../shared/tenant.ts";
+import { appFolder, type TenantValidationReport } from "../../../shared/tenant.ts";
 import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, type AppRef, type FanoutMember } from "./tenant-fanout.ts";
 import { readAppCatalog } from "./app-catalog.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
@@ -153,14 +153,21 @@ function streamGate(deps: ValidateTenantDeps, g: GateResult): void {
   deps.log(`${g.id} ${g.status} — ${g.detail}`);
 }
 
-/** The requested apps as the fan-out needs them: each with the database list its catalog entry
- *  declares, which fills the `{databases}` token. An app the catalog does not name gets none — T4
- *  refuses it below, and until then it renders as the chart's own files say. */
+/** The requested apps as the fan-out needs them: each with the database list the catalog entry of its
+ *  folder declares, which fills the `{databases}` token, and a website with its folder, site and
+ *  domain. An app the catalog does not name gets no list — T4 refuses it below, and until then it
+ *  renders as the chart's own files say. */
 function withDatabases(apps: readonly AppChoice[], catalog: AppsManifest): AppRef[] {
-  const byName = new Map(catalog.apps.map((a) => [a.name, a]));
+  const byFolder = new Map(catalog.apps.map((a) => [a.name, a]));
   return apps.map((a) => {
-    const databases = byName.get(a.name)?.databases;
-    return databases ? { name: a.name, databases } : { name: a.name };
+    const databases = byFolder.get(appFolder(a))?.databases;
+    return {
+      name: a.name,
+      ...(a.folder === undefined ? {} : { folder: a.folder }),
+      ...(a.site === undefined ? {} : { site: a.site }),
+      ...(a.domain === undefined ? {} : { domain: a.domain }),
+      ...(databases === undefined ? {} : { databases }),
+    };
   });
 }
 

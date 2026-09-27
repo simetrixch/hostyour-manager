@@ -37,7 +37,7 @@
 // no db, no node builtins.
 import type { Stage } from "../../../shared/enums.ts";
 import type { TenantSource, TenantSpec } from "../../../shared/consumer.ts";
-import type { TenantMemberRecord, TenantSourceRecord } from "../../../shared/tenant.ts";
+import { appFolder, type TenantMemberRecord, type TenantSourceRecord } from "../../../shared/tenant.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
 /** One RENDER unit of the fan-out: a chart plus the value files layered on it. `member` is the member
@@ -65,13 +65,24 @@ export interface FanoutMember {
  *  read the catalog; it fills the `{databases}` token and nothing else. */
 export interface AppRef {
   name: string;
+  /** The app folder the app runs, where it is not the folder of its own name: a website's. */
+  folder?: string;
+  /** A website's site and domain (TenantAppSchema). */
+  site?: string;
+  domain?: string;
   databases?: readonly string[];
 }
 
-/** The two tokens the manifest defines. `{app}` is replaced inside any string; `{databases}` is a
- *  whole string value replaced by the app's database list, or DROPPED with its key when the app
- *  declares none, so a chart's own value files decide then. */
+/** The tokens the manifest defines. `{app}` (the member name) and `{folder}` (the app folder, the
+ *  member name for every app that is no website) are replaced inside any string. `{site}` and
+ *  `{domain}` are a website's: replaced inside any string, and a whole value of one of them is
+ *  DROPPED with its key for an app that has none, as `{databases}` is: a whole string value replaced
+ *  by the app's database list, or dropped when the app declares none, so a chart's own value files
+ *  decide then. */
 export const APP_TOKEN = "{app}";
+export const FOLDER_TOKEN = "{folder}";
+export const SITE_TOKEN = "{site}";
+export const DOMAIN_TOKEN = "{domain}";
 export const DATABASES_TOKEN = "{databases}";
 
 /** The tenant's own identity provider — the member the whole tenant authenticates against, so a
@@ -120,7 +131,7 @@ export function tenantNamespaces(members: readonly string[], guid: string, stage
   return members.map((m) => memberNamespace(guid, m, stage));
 }
 
-/** Substitute the two tokens the manifest defines throughout a source. `{app}` reaches every
+/** Substitute the tokens the manifest defines throughout a source. `{app}` reaches every
  *  valueFiles entry and every STRING inside values, at any depth — `values-{app}.yaml`,
  *  `example-engine-{app}`, `{ ingress: { engineService: "example-engine-{app}" } }`. `{databases}`
  *  stands as a whole string value inside values, where the product puts its database list key —
@@ -135,13 +146,18 @@ function substituteApp(source: TenantSource, app: AppRef | undefined): TenantSou
   // A standing member has no app, so nothing is substituted for it — a `{app}` left in a standing
   // member's source is the product's own mistake and reaches the chart as written, where it fails
   // loudly, rather than silently becoming the empty string.
-  const text = app === undefined ? (s: string) => s : (s: string): string => s.split(APP_TOKEN).join(app.name);
-  // DROPPED marks the list token of an app that declares no list: the key goes, and so does every
-  // object the drop leaves empty, so the chart's own value files (an overlay that still carries the
-  // list) decide, rather than an empty list or an empty map from here standing over them.
+  const tokens: readonly (readonly [string, string | undefined])[] = app === undefined ? [] : [
+    [APP_TOKEN, app.name], [FOLDER_TOKEN, appFolder(app)], [SITE_TOKEN, app.site], [DOMAIN_TOKEN, app.domain],
+  ];
+  const text = (s: string): string => tokens.reduce((out, [token, value]) => (value === undefined ? out : out.split(token).join(value)), s);
+  // DROPPED marks the list token of an app that declares no list, and a site or domain token of an app
+  // that has none: the key goes, and so does every object the drop leaves empty, so the chart's own
+  // value files (an overlay that still carries the list) decide, rather than an empty list or an
+  // empty map from here standing over them.
   const DROPPED = Symbol("dropped");
   const walk = (v: unknown): unknown => {
     if (app !== undefined && v === DATABASES_TOKEN) return app.databases === undefined ? DROPPED : [...app.databases];
+    if (app !== undefined && ((v === SITE_TOKEN && app.site === undefined) || (v === DOMAIN_TOKEN && app.domain === undefined))) return DROPPED;
     if (typeof v === "string") return text(v);
     if (Array.isArray(v)) return v.map(walk);
     if (v && typeof v === "object") {
@@ -161,13 +177,13 @@ function substituteApp(source: TenantSource, app: AppRef | undefined): TenantSou
 }
 
 /** The sources ONE app renders: the engine, then the front — the front replaced wholesale when the
- *  product's override map names this app.
+ *  product's override map names this app's folder.
  *
- *  The map is keyed by app name, so the lookup IS the selection. Testing `app === "web"`
- *  first and only then consulting the map would put a constant naming one app of one product in
- *  front of a map that already answers for it. */
+ *  The map is keyed by app folder, so the lookup IS the selection, and every website running the one
+ *  folder `web` gets its front. Testing `app === "web"` first and only then consulting the map would
+ *  put a constant naming one app of one product in front of a map that already answers for it. */
 function appSources(spec: TenantSpec, app: AppRef): TenantSourceRecord[] {
-  const front = spec.perApp.front.override?.[app.name] ?? spec.perApp.front;
+  const front = spec.perApp.front.override?.[appFolder(app)] ?? spec.perApp.front;
   return [substituteApp(spec.perApp.engine, app), substituteApp(front, app)];
 }
 

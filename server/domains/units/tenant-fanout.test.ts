@@ -181,6 +181,31 @@ describe("resolveMembers — the ONE resolution the registration records and the
     expect(erp.sources[1]!.chart).toBe("charts/example-ui");
   });
 
+  it("gives a website the front of its folder with its own name, site and domain, and drops a site or domain key of an app that has none", () => {
+    const sites = TenantSpecSchema.parse({
+      members: [{ name: "idp", chart: "charts/x", identityProvider: true }],
+      perApp: {
+        engine: { chart: "charts/e", valueFiles: ["values-{folder}.yaml"], values: { fullnameOverride: "e-{app}", appFolder: "{folder}", site: { id: "{site}" } } },
+        front: {
+          chart: "charts/f",
+          values: { fullnameOverride: "f-{app}" },
+          override: { web: { chart: "charts/w", values: { fullnameOverride: "w-{app}", site: { id: "{site}", domain: "{domain}", engineService: "e-{app}" } } } },
+        },
+      },
+    });
+    const website: AppRef = { name: "example-ch", folder: "web", site: "main", domain: "example.ch" };
+    const [engine, front] = resolveMembers(sites, [website]).find((x) => x.name === "example-ch")!.sources;
+    expect(engine).toEqual({ chart: "charts/e", valueFiles: ["values-web.yaml"], values: { fullnameOverride: "e-example-ch", appFolder: "web", site: { id: "main" } } });
+    expect(front).toEqual({ chart: "charts/w", valueFiles: [], values: { fullnameOverride: "w-example-ch", site: { id: "main", domain: "example.ch", engineService: "e-example-ch" } } });
+    // An app that is no website runs the folder of its own name, and its site keys go.
+    const [erpEngine, erpFront] = resolveMembers(sites, [app("erp")]).find((x) => x.name === "erp")!.sources;
+    expect(erpEngine).toEqual({ chart: "charts/e", valueFiles: ["values-erp.yaml"], values: { fullnameOverride: "e-erp", appFolder: "erp" } });
+    expect(erpFront!.chart).toBe("charts/f");
+    // An app named after the website folder, with no site and no domain, keeps that folder's front.
+    const [, webFront] = resolveMembers(sites, [app("web")]).find((x) => x.name === "web")!.sources;
+    expect(webFront).toEqual({ chart: "charts/w", valueFiles: [], values: { fullnameOverride: "w-web", site: { engineService: "e-web" } } });
+  });
+
   it("writes valueFiles and values on EVERY source, so the appset may read them bare", () => {
     for (const m of resolveMembers(SPEC, [app("erp"), app("web")])) {
       for (const s of m.sources) {

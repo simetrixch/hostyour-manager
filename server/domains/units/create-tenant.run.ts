@@ -5,7 +5,7 @@ import type { RunDefinition, Step, StepCtx, Plan } from "../../executor/types.ts
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId, mintTenantGuid } from "../../kernel/ids.ts";
 import { MEMBER_ROUTING, STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
-import { appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
+import { appFolders, appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { errValidation, errInternal } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -385,7 +385,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
     // The tenant's own apps repository, after the platform's images and for the same reason: created
     // through the App, written from the template with the chosen apps, onboarded build-only and built
     // once — its tag lands in the runtime for refresh-images and write-registration.
-    ...(p.appsUnit ? tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: (p.apps ?? []).map((a) => a.name) }, runtime) : []),
+    ...(p.appsUnit ? tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: appFolders(p.apps ?? []) }, runtime) : []),
     {
       name: "seed-tenant-crypto",
       title: "Seed the tenant's crypto entry in Vault (create-only)",
@@ -608,7 +608,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // under the unit's name (`<bundle>-<subdomain>`, tenant-apps-tree.ts).
       let appsUnit: CreateTenantParams["appsUnit"];
       if (withApps) {
-        const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen: req.apps.map((a) => a.name), spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
+        const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen: appFolders(req.apps), spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
         if (resolved.outcome === "refused") return refuse(resolved.why, { subdomain: req.subdomain, apps: req.apps.map((a) => a.name) });
         appsUnit = resolved.unit;
       }

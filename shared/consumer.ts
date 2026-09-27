@@ -77,8 +77,8 @@ export type SmtpEntry = z.infer<typeof SmtpEntrySchema>;
  *  chart. Kept INLINE here (never in shared/tenant.ts) because ConsumerManifestSchema references it
  *  and gates.ts already imports consumer.ts: defining it in tenant.ts would close the cycle
  *  consumer -> tenant -> gates -> consumer. The acyclic order stays enums <- consumer <- gates <-
- *  tenant. `perApp.front.override` DATA-DRIVES the name-keyed chart swap (e.g. an app named `web`
- *  renders charts/example-web instead of the default front chart charts/example-ui). */
+ *  tenant. `perApp.front.override` DATA-DRIVES the folder-keyed chart swap (e.g. every app running
+ *  the folder `web` renders charts/example-web instead of the default front chart charts/example-ui). */
 /** ONE chart render inside a member: the chart, the value files layered on top of the standard chain,
  *  and the values handed to it. A standing member has one; a per-app member has as many as the product
  *  declares under `perApp` (an engine and a front today).
@@ -136,12 +136,12 @@ export const TenantSpecSchema = z.object({
   // gates them: a tenant's apps require these services to exist.
   members: z.array(TenantMemberSchema).min(1),
   // The sources ONE selected app renders, in order. Every app of every tenant renders all of them;
-  // `override` swaps a whole source for an app the product names (an app called `web` renders a
-  // different front chart with different values from the operator apps).
+  // `override` swaps a whole source for the apps of a folder the product names (every app running the
+  // folder `web` renders a different front chart with different values from the operator apps).
   perApp: z.object({
     engine: TenantSourceSchema,
     front: TenantSourceSchema.extend({
-      /** A complete replacement source, keyed by app name. Keyed lookup IS the selection: the appset
+      /** A complete replacement source, keyed by app folder. Keyed lookup IS the selection: the appset
        *  never compares an app name against a literal, because the Manager has already resolved
        *  which source this app renders. */
       override: z.record(z.string(), TenantSourceSchema).optional(),

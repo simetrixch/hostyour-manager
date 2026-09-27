@@ -31,6 +31,26 @@ export const guid = z.string().regex(/^[0-9a-hjkmnp-tv-z]{12}$/);
  *  tenant: namespace <guid>-<name>, AppProject <guid>-<name>, Application <guid>-<name>-<stage>. */
 export const appName = z.string().regex(/^[a-z][a-z0-9-]{0,28}[a-z0-9]$/);
 
+/** A site of a website app folder: the id its content carries (a WebSite's `_id`, a WebPage's `site`). */
+export const siteId = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/);
+
+/** The app name of a website served at `domain`: the domain with `-` for every `.`, because a
+ *  namespace and an Application name carry no dot (`example.ch` becomes `example-ch`). */
+export function websiteAppName(domain: string): string {
+  return domain.split(".").join("-");
+}
+
+/** The app folder an apps[] entry runs: its own `folder` (a website's), else the folder of its name. */
+export function appFolder(app: { name: string; folder?: string }): string {
+  return app.folder ?? app.name;
+}
+
+/** The app folders a list of apps runs, each once, in order: what their bundle carries. Two
+ *  websites run one folder. */
+export function appFolders(apps: readonly { name: string; folder?: string }[]): string[] {
+  return [...new Set(apps.map(appFolder))];
+}
+
 /** A member's name — a standing member's or an app's. Both name the SAME thing: the suffix of a
  *  namespace, an AppProject and an Application, all `<guid>-<name>`. One grammar, because a
  *  collision between the two kinds is exactly what has to be impossible. */
@@ -98,13 +118,22 @@ export type TenantMemberRecord = z.infer<typeof TenantMemberRecordSchema>;
  *  operator app is USABLE) and `seedDemo` → SEED_DEMO_DATA_ON_BOOT (demo tier `seeds-demo/`: showcase
  *  records). `seed` is the LEGACY demo alias — READ-ONLY: a pre-existing pointer
  *  carrying {name, seed} folds seed → seedDemo here and is NEVER re-emitted (the writer always
- *  serializes the canonical {name, seedReference, seedDemo, selections}). Both default false, so a bare
+ *  serializes the canonical {name, seedReference, seedDemo, selections}, with folder, site and domain
+ *  on a website). Both default false, so a bare
  *  {name} from before the tiers parses unchanged and seeds nothing. `selections` carries every
  *  further selection the app's manifest declares; the two above are refused there, so one selection
- *  has one place. Imported everywhere the apps element is validated. */
+ *  has one place. Imported everywhere the apps element is validated.
+ *
+ *  A WEBSITE is an app whose folder's catalog entry lists `sites`. It carries the folder it runs, the
+ *  site it serves and the domain it is served at (`www.<domain>`), and it is named by that domain
+ *  (websiteAppName), so one folder serves as many websites as there are domains. An entry
+ *  without a folder runs the folder of its own name. */
 export const TenantAppSchema = z
   .object({
     name: appName,
+    folder: appName.optional(),
+    site: siteId.optional(),
+    domain: publicFqdn.optional(),
     seedReference: z.boolean().default(false),
     seedDemo: z.boolean().default(false),
     seed: z.boolean().optional(),
@@ -113,8 +142,11 @@ export const TenantAppSchema = z
       .default({})
       .refine((s) => !SEED_SELECTIONS.some((k) => k in s), { message: `${SEED_SELECTIONS.join(" and ")} are fields of the app entry, never keys of selections` }),
   })
-  .transform(({ name, seedReference, seedDemo, seed, selections }) => ({
+  .transform(({ name, folder, site, domain, seedReference, seedDemo, seed, selections }) => ({
     name,
+    ...(folder === undefined ? {} : { folder }),
+    ...(site === undefined ? {} : { site }),
+    ...(domain === undefined ? {} : { domain }),
     seedReference,
     seedDemo: seedDemo || (seed ?? false),
     selections,

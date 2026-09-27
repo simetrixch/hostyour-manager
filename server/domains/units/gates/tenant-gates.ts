@@ -33,9 +33,9 @@ import { parse } from "yaml";
 import { createHash } from "node:crypto";
 import { hardGatesPass, reportHashPayload, type GateResult, type GateEvidence } from "../../../../shared/gates.ts";
 import { ConsumerManifestSchema, type ConsumerManifest, type TenantSpec } from "../../../../shared/consumer.ts";
-import { TenantValidationReportSchema, type TenantValidationReport } from "../../../../shared/tenant.ts";
+import { TenantValidationReportSchema, appFolder, websiteAppName, type TenantValidationReport } from "../../../../shared/tenant.ts";
 import { chosenSelections } from "../../../../shared/app-selections.ts";
-import { APPS_MANIFEST_PATH, type AppsManifest } from "../../../../shared/apps-manifest.ts";
+import { APPS_MANIFEST_PATH, type AppEntry, type AppsManifest } from "../../../../shared/apps-manifest.ts";
 import type { RenderedDoc, HelmRenderResult } from "../../../adapters/helm/port.ts";
 import type { FanoutMember, AppRef } from "../tenant-fanout.ts";
 import { VAULT_ALIAS_TENANT_ANNOTATION } from "../admission-policy.ts";
@@ -375,14 +375,29 @@ export interface AppsCheckInput {
 const T4_EXPECTED =
   `every requested app is named by the app catalog (the apps repository's ${APPS_MANIFEST_PATH}, or ` +
   `the engine chart's values-<app>.yaml overlays where none stands) and chooses only selections that ` +
-  `catalog declares for it; it resolves to its own member's engine+front renders and both render, with ` +
-  `no standing-member collision and no duplicate app name.`;
+  `catalog declares for it; a website serves a site its folder lists and is named by its domain; it ` +
+  `resolves to its own member's engine+front renders and both render, with no standing-member ` +
+  `collision and no duplicate app name.`;
 
 function t4Reject(found: string, reason: string): GateResult {
   return {
     id: "T4", title: "apps", severity: "hard", status: "fail", expected: T4_EXPECTED,
     found, reason, detail: "apps did not resolve", evidence: [{ source: "manager", value: clip(found) }],
   };
+}
+
+/** Why an apps[] entry breaks the website rules, or null. An entry that carries a folder, a site or a
+ *  domain is a website: its folder's catalog entry lists sites, it serves one of them, it names its
+ *  domain, and it is named by that domain. An entry with none of the three is judged as every other
+ *  app is. How a domain is typed is checked where it is typed. */
+function websiteProblem(app: AppChoice, entry: AppEntry): string | null {
+  if (app.folder === undefined && app.site === undefined && app.domain === undefined) return null;
+  const name = `app "${cap(app.name)}"`;
+  if (entry.sites === undefined) return `${name} carries a site or a domain, but its folder "${cap(entry.name)}" lists no sites in the app catalog.`;
+  if (app.site === undefined || !entry.sites.includes(app.site)) return `${name} serves the site "${cap(app.site ?? "")}", which its folder "${cap(entry.name)}" does not list (${entry.sites.join(", ")}).`;
+  if (app.domain === undefined) return `${name} names no domain; a website is served at www.<domain>.`;
+  if (app.name !== websiteAppName(app.domain)) return `${name} is served at ${cap(app.domain)}, so it is named ${cap(websiteAppName(app.domain))}.`;
+  return null;
 }
 
 /** T4 — every apps[] entry is named by the catalog with only the selections it declares, resolved
@@ -396,12 +411,21 @@ export function gateT4Apps(input: AppsCheckInput): GateResult {
   const known = new Map(input.catalog.apps.map((a) => [a.name, a]));
   const seen = new Set<string>();
   for (const app of input.apps) {
-    const entry = known.get(app.name);
+    const folder = appFolder(app);
+    const entry = known.get(folder);
     if (entry === undefined) {
       const names = [...known.keys()].join(", ") || "which is empty";
+      const what = app.folder === undefined ? `app "${cap(app.name)}"` : `the folder "${cap(folder)}" of app "${cap(app.name)}"`;
       return t4Reject(
-        `app "${cap(app.name)}" is not in the app catalog (${names}).`,
+        `${what} is not in the app catalog (${names}).`,
         `the catalog names every app the bundle carries; an app it does not name has no folder to mount and no selections to offer, so the plan is rejected.`,
+      );
+    }
+    const website = websiteProblem(app, entry);
+    if (website !== null) {
+      return t4Reject(
+        website,
+        `a website loads one site of its folder, is served at www.<domain> and is named by that domain; an entry that breaks this serves the wrong content or collides with another member, so the plan is rejected.`,
       );
     }
     const unknown = chosenSelections(app).filter((s) => !(s in entry.selections));

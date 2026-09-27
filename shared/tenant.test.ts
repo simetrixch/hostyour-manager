@@ -10,6 +10,9 @@ import {
   GUID_ALPHABET,
   isOlderRelease,
   approvedImageTag,
+  websiteAppName,
+  appFolders,
+  TenantAppSchema,
 } from "./tenant.ts";
 import { SEED_SELECTIONS, chosenSelections, appSelectionsToRequest } from "./app-selections.ts";
 import { RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
@@ -161,6 +164,16 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
       { name: "crm", seedReference: false, seedDemo: true, selections: {} },
       { name: "shop", seedReference: false, seedDemo: true, selections: {} },
     ]);
+  });
+
+  it("carries a website's folder, site and domain, names it by its domain, and refuses a domain outside the grammar", () => {
+    expect(TenantAppSchema.parse({ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }))
+      .toEqual({ name: "example-ch", folder: "web", site: "main", domain: "example.ch", seedReference: false, seedDemo: false, selections: {} });
+    expect(TenantAppSchema.parse({ name: "erp" })).toEqual({ name: "erp", seedReference: false, seedDemo: false, selections: {} });
+    expect(websiteAppName("example.com")).toBe("example-com");
+    // Two websites run one folder, so their bundle carries it once.
+    expect(appFolders([{ name: "erp" }, { name: "example-ch", folder: "web" }, { name: "example-com", folder: "web" }])).toEqual(["erp", "web"]);
+    expect(TenantAppSchema.safeParse({ name: "example-ch", folder: "web", site: "main", domain: "Example.ch" }).success).toBe(false);
   });
 
   it("carries every further selection under selections, and refuses the two seed selections there — one selection has one place", () => {

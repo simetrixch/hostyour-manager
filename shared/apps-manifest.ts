@@ -7,7 +7,7 @@
 // Import boundary: shared/ is isomorphic. The web reads the TYPES here; the parser is the server's.
 import { z } from "zod";
 import { parse as parseYaml } from "yaml";
-import { appName } from "./tenant.ts";
+import { appName, siteId } from "./tenant.ts";
 
 /** WHERE an apps repository keeps its manifest — the root, so a bundle built from the repository
  *  and the repository itself describe the same apps. */
@@ -26,17 +26,19 @@ export const AppSelectionSchema = z.object({
 });
 export type AppSelection = z.infer<typeof AppSelectionSchema>;
 
-/** ONE app of the bundle. `name` is the folder and the member name the tenant deploys it as, so it
+/** ONE app of the bundle. `name` is the folder, and the member name the tenant deploys it as, so it
  *  carries the app-name grammar of the registration. `databases` is the list of databases the app
  *  opens, which the engine's ServiceClaim grants; the deploy repository's manifest says WHERE it goes through
  *  the `{databases}` token (tenant-fanout.ts), and an entry without one leaves that to the chart's
- *  own value files. */
+ *  own value files. An entry that lists `sites` is a website folder: it is deployed once per
+ *  website, each named by its own domain and serving one of these sites (TenantAppSchema). */
 export const AppEntrySchema = z.object({
   name: appName,
   title: z.string().min(1),
   description: z.string().default(""),
   selections: z.record(selectionName, AppSelectionSchema).default({}),
   databases: z.array(z.string().regex(/^[a-z][a-z0-9_-]*$/)).min(1).optional(),
+  sites: z.array(siteId).min(1).refine((s) => new Set(s).size === s.length, { message: "a site is listed once" }).optional(),
 });
 export type AppEntry = z.infer<typeof AppEntrySchema>;
 
@@ -63,7 +65,7 @@ export function parseAppsManifest(text: string): AppsManifest {
   const parsed = AppsManifestSchema.safeParse(doc);
   if (!parsed.success) {
     const why = parsed.error.issues.slice(0, 6).map((i) => `${i.path.length > 0 ? i.path.map(String).join(".") : "(root)"}: ${i.message}`).join("; ");
-    throw new Error(`${APPS_MANIFEST_PATH} does not match the apps manifest shape (apps[]: name, title, description, selections{title, default}, databases?): ${why}`);
+    throw new Error(`${APPS_MANIFEST_PATH} does not match the apps manifest shape (apps[]: name, title, description, selections{title, default}, databases?, sites?): ${why}`);
   }
   return parsed.data;
 }

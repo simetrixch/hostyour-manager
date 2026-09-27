@@ -2,7 +2,7 @@ import { z } from "zod";
 import { parse as parseYaml } from "yaml";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
-import { appName, guid as guidSchema, subdomain as subdomainSchema } from "../../../shared/tenant.ts";
+import { appFolders, appName, guid as guidSchema, subdomain as subdomainSchema } from "../../../shared/tenant.ts";
 import { ConsumerManifestSchema, type TenantSpec } from "../../../shared/consumer.ts";
 import { errValidation, errInternal } from "../../kernel/errors.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -125,7 +125,7 @@ export function makeTenantAppsRepoDef(ports: TenantOnboardPorts): RunDefinition<
     // once for what it offers, then the plan.
     planStream: async (rawParams, ctx) => {
       const req = TenantAppsRepoRequest.parse(rawParams);
-      const chosen = req.apps.map((a) => a.name);
+      const chosen = appFolders(req.apps);
       const refuse = (why: string) => ({ outcome: "rejected" as const, summary: `The apps repository of tenant ${req.guid} ("${req.subdomain}") was refused — ${why}`, planJson: { subdomain: req.subdomain, apps: chosen } });
       if (!ports.githubApp) return refuse(NO_GITHUB_APP);
       const master = resolveMasterCluster(ctx.db);

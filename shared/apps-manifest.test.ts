@@ -36,6 +36,12 @@ describe("parseAppsManifest", () => {
     expect(() => parseAppsManifest("apps:\n  - name: erp\n    title: ERP\n    selections:\n      seed-demo: { title: Demo }\n")).toThrow(/apps\.0\.selections\.seed-demo/);
   });
 
+  it("reads the sites a website folder lists, and refuses a site listed twice or outside the grammar", () => {
+    expect(parseAppsManifest("apps:\n  - { name: web, title: Website, sites: [main, shop] }\n").apps[0]!.sites).toEqual(["main", "shop"]);
+    expect(() => parseAppsManifest("apps:\n  - { name: web, title: Website, sites: [main, main] }\n")).toThrow(/a site is listed once/);
+    expect(() => parseAppsManifest("apps:\n  - { name: web, title: Website, sites: [Main] }\n")).toThrow(/apps\.0\.sites\.0/);
+  });
+
   it("refuses two entries of one name — the name is the folder and the member", () => {
     expect(() => parseAppsManifest("apps:\n  - { name: erp, title: A }\n  - { name: erp, title: B }\n")).toThrow(/two entries are both named "erp"/);
   });
