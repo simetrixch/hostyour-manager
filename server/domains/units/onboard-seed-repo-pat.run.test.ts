@@ -97,8 +97,15 @@ describe("onboard refresh-repo-pat step", () => {
 
   it("names only the Secret still missing when two of the three came back", async () => {
     const kube = new FakeClusterReader({ externalSecretsByNamespace: { [NS]: buildSecretRows() } });
+    // Two of the three come back the moment the step deletes them, before its first poll; bump-git-https
+    // never does. No timer races the step's poll.
+    const restored = buildSecretRows().map((r) => (r.targetSecret === "bump-git-https" ? r : { ...r, refreshTime: "2026-01-01T00:00:09Z" }));
+    const deleteSecret = kube.deleteSecret.bind(kube);
+    kube.deleteSecret = async (namespace, name) => {
+      await deleteSecret(namespace, name);
+      kube.setExternalSecrets(NS, restored);
+    };
     const { run } = step({ buildClusterReader: kube, releasePollIntervalMs: 1, buildSecretsMaterializeMs: 20 });
-    setTimeout(() => kube.setExternalSecrets(NS, buildSecretRows().map((r) => (r.targetSecret === "bump-git-https" ? r : { ...r, refreshTime: "2026-01-01T00:00:09Z" }))), 2);
     await expect(run(ctx([]))).rejects.toThrow(/^bump-git-https in acme-build did not materialize/);
   });
 

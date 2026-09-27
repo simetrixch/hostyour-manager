@@ -61,7 +61,7 @@ describe("GitRepoReader", () => {
     await expect(strict.cloneAtRef({ repoURL: originURL, ref: "main" })).rejects.toMatchObject({ code: "VALIDATION" });
     await expect(reader.cloneAtRef({ repoURL: originURL, ref: "main", credentialId: "cred_1" })).rejects.toMatchObject({ code: "VALIDATION" });
     await expect(reader.dispose(join("D:\\", "no-such-dir-far-outside-tmp"))).rejects.toMatchObject({ code: "VALIDATION" });
-  });
+  }, SLOW);
 });
 
 describe("GitPlatformRepo", () => {
@@ -180,12 +180,12 @@ describe("GitPlatformRepo", () => {
       // empty diff as "a previous attempt already landed this" and returns the PRE-WRITE HEAD as a
       // valid-looking commit SHA. The write is gone and the run reports success.
       //
-      // Driven against a real origin, ten times, because the failure is a race and a single
-      // pass could miss it. Removing the queue from withBranch turns this test red every run: the
-      // two turns tear the same directory apart, and what surfaces first depends on timing — a
-      // staged index lost behind a successful-looking SHA, or git itself failing on a worktree the
-      // other turn is rebuilding. The assertions below hold the property, not one symptom of losing
-      // it: the commit is not the pre-write HEAD, origin carries it, and the file is really there.
+      // Shown in two parts. First the exclusion itself, without a race: a turn that holds its callback
+      // open keeps the next turn of the branch from starting at all. Removing the queue from
+      // withBranch turns this red every run, because the second turn starts while the first is held
+      // (its setup needs well under the hold below). Then one real write beside an unlocked read,
+      // against a real origin, for the property the queue protects: the commit is not the pre-write
+      // HEAD, origin carries it, and the file is really there.
       const { originDir, originURL } = makeOrigin();
       const repo = makeRepo(originURL);
       const head = (): string => git(originDir, "rev-parse", "main").trim();
@@ -195,24 +195,35 @@ describe("GitPlatformRepo", () => {
       // needs an existing worktree, where the reader's reset lands on the writer's staged index.
       await repo.withBranch("main", (main) => main.readFile("hello.txt"));
 
-      for (let i = 0; i < 10; i++) {
-        const path = `registrations/acme/prod-${i}.yaml`;
-        const before = head();
-        const [written] = await Promise.all([
-          repo.withBranch("main", (main) =>
-            main.commit({ message: `write ${i} [run_${i}]`, write: [{ path, content: `n: ${i}
-` }] }),
-          ),
-          // The unlocked reader: GET /api/consumers/detected reaches the same
-          // worktree with no run lock (domains/units/api.ts -> registrations.listConsumerRegistrations).
-          repo.withBranch("main", (main) => main.listDir("registrations")),
-        ]);
+      const events: string[] = [];
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const first = repo.withBranch("main", async (main) => {
+        events.push("first starts");
+        await held;
+        await main.readFile("hello.txt");
+        events.push("first ends");
+      });
+      const second = repo.withBranch("main", async () => {
+        events.push("second starts");
+      });
+      // Long enough for an unqueued second turn to set up and start; a queued one cannot start at all.
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      release();
+      await Promise.all([first, second]);
+      expect(events).toEqual(["first starts", "first ends", "second starts"]);
 
-        expect(written.commit).not.toBe(before); // not the pre-write HEAD
-        expect(head()).toBe(written.commit); // and origin really carries it
-        expect(await repo.withBranch("main", (main) => main.readFile(path))).toBe(`n: ${i}
-`);
-      }
+      // The unlocked reader: GET /api/consumers/detected reaches the same worktree with no run lock
+      // (domains/units/api.ts -> registrations.listConsumerRegistrations).
+      const path = "registrations/acme/prod-0.yaml";
+      const before = head();
+      const [written] = await Promise.all([
+        repo.withBranch("main", (main) => main.commit({ message: "write 0 [run_0]", write: [{ path, content: "n: 0\n" }] })),
+        repo.withBranch("main", (main) => main.listDir("registrations")),
+      ]);
+      expect(written.commit).not.toBe(before); // not the pre-write HEAD
+      expect(head()).toBe(written.commit); // and origin really carries it
+      expect(await repo.withBranch("main", (main) => main.readFile(path))).toBe("n: 0\n");
     },
     SLOW,
   );
