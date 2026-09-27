@@ -33,7 +33,7 @@ import { parse } from "yaml";
 import { createHash } from "node:crypto";
 import { hardGatesPass, reportHashPayload, type GateResult, type GateEvidence } from "../../../../shared/gates.ts";
 import { ConsumerManifestSchema, type ConsumerManifest, type TenantSpec } from "../../../../shared/consumer.ts";
-import { TenantValidationReportSchema, appFolder, websiteAppName, type TenantValidationReport } from "../../../../shared/tenant.ts";
+import { TenantValidationReportSchema, appFolder, type TenantValidationReport } from "../../../../shared/tenant.ts";
 import { chosenSelections } from "../../../../shared/app-selections.ts";
 import { APPS_MANIFEST_PATH, type AppEntry, type AppsManifest } from "../../../../shared/apps-manifest.ts";
 import type { RenderedDoc, HelmRenderResult } from "../../../adapters/helm/port.ts";
@@ -375,7 +375,7 @@ export interface AppsCheckInput {
 const T4_EXPECTED =
   `every requested app is named by the app catalog (the apps repository's ${APPS_MANIFEST_PATH}, or ` +
   `the engine chart's values-<app>.yaml overlays where none stands) and chooses only selections that ` +
-  `catalog declares for it; a website serves a site its folder lists and is named by its domain; it ` +
+  `catalog declares for it; a website serves a site its folder lists at its own domain; it ` +
   `resolves to its own member's engine+front renders and both render, with no standing-member ` +
   `collision and no duplicate app name.`;
 
@@ -387,16 +387,16 @@ function t4Reject(found: string, reason: string): GateResult {
 }
 
 /** Why an apps[] entry breaks the website rules, or null. An entry that carries a folder, a site or a
- *  domain is a website: its folder's catalog entry lists sites, it serves one of them, it names its
- *  domain, and it is named by that domain. An entry with none of the three is judged as every other
- *  app is. How a domain is typed is checked where it is typed. */
+ *  domain is a website: its folder's catalog entry lists sites, it serves one of them, and it names its
+ *  domain. An entry with none of the three is judged as every other app is. The name a website gets
+ *  from its domain, and how a domain is typed, are checked where a website is added: its name stays
+ *  when its domain moves. */
 function websiteProblem(app: AppChoice, entry: AppEntry): string | null {
   if (app.folder === undefined && app.site === undefined && app.domain === undefined) return null;
   const name = `app "${cap(app.name)}"`;
   if (entry.sites === undefined) return `${name} carries a site or a domain, but its folder "${cap(entry.name)}" lists no sites in the app catalog.`;
   if (app.site === undefined || !entry.sites.includes(app.site)) return `${name} serves the site "${cap(app.site ?? "")}", which its folder "${cap(entry.name)}" does not list (${entry.sites.join(", ")}).`;
   if (app.domain === undefined) return `${name} names no domain; a website is served at www.<domain>.`;
-  if (app.name !== websiteAppName(app.domain)) return `${name} is served at ${cap(app.domain)}, so it is named ${cap(websiteAppName(app.domain))}.`;
   return null;
 }
 
@@ -425,7 +425,7 @@ export function gateT4Apps(input: AppsCheckInput): GateResult {
     if (website !== null) {
       return t4Reject(
         website,
-        `a website loads one site of its folder, is served at www.<domain> and is named by that domain; an entry that breaks this serves the wrong content or collides with another member, so the plan is rejected.`,
+        `a website loads one site of its folder and is served at www.<domain>; an entry that breaks this serves the wrong content or none, so the plan is rejected.`,
       );
     }
     const unknown = chosenSelections(app).filter((s) => !(s in entry.selections));

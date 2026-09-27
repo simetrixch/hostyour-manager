@@ -12,6 +12,8 @@ import { TENANT_LABEL_KEY, memberApplication, memberNamespace, tenantApplication
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
+import { websiteRecordHosts } from "./website-domain.ts";
+import { removeOwnDomainRecord } from "./own-domain-records.ts";
 
 // tenant-suspend / tenant-resume / remove-app — the
 // tenant (multi-app fan-out) analogues of the consumer suspend/resume/offboard runs (suspend-resume.
@@ -249,6 +251,24 @@ function removeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): S
   const { tenantId, app } = params;
   return [
     attestTenantTargetStep(ports, tenantId),
+    {
+      name: "remove-website-records",
+      title: "Remove the DNS records of a website's hosts",
+      run: async (ctx) => {
+        // Read before the drop, while the registration still names the website's domain; a resume after
+        // the drop finds no entry, and the records went on the first pass (#308).
+        const tc = loadTenantCluster(ctx.db, tenantId);
+        const current = await ports.registrations.readTenant(tc.stage, tc.guid);
+        const domain = current?.entry.apps.find((a) => a.name === app)?.domain;
+        if (current === null || domain === undefined) {
+          ctx.log("meta", `app "${app}" names no domain of its own — no website record to remove`);
+          return;
+        }
+        const hosts = websiteRecordHosts(domain, current.entry);
+        if (hosts.length === 0) ctx.log("meta", `website "${app}" is served at the tenant's own domain, whose records tenant-set-own-domain holds`);
+        for (const host of hosts) await removeOwnDomainRecord(ctx, ports, tc, host);
+      },
+    },
     {
       name: "remove-app-pointer",
       title: "Drop the app from the tenant registration (GitOps un-deploy)",

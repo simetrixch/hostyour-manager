@@ -40,6 +40,14 @@ export function websiteAppName(domain: string): string {
   return domain.split(".").join("-");
 }
 
+/** What makes an apps[] entry a website: the folder it runs, the site it serves, the domain it is
+ *  served at. */
+export interface TenantWebsite {
+  folder: string;
+  site: string;
+  domain: string;
+}
+
 /** The app folder an apps[] entry runs: its own `folder` (a website's), else the folder of its name. */
 export function appFolder(app: { name: string; folder?: string }): string {
   return app.folder ?? app.name;

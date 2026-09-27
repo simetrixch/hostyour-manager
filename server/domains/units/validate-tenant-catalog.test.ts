@@ -132,7 +132,7 @@ describe("gateT4Apps", () => {
     expect(gateT4Apps({ apps: [], members: [], renderedMembers: [], standingMembers: STANDING, catalog: { apps: [] } }).status).toBe("pass");
   });
 
-  it("holds a website to a site its folder lists and to the name of its domain", () => {
+  it("holds a website to a site its folder lists and to a domain", () => {
     const withWeb: AppsManifest = { apps: [...CATALOG.apps, { name: "web", title: "Website", description: "", selections: {}, sites: ["main", "shop"] }] };
     const judge = (apps: AppRef[], catalog: AppsManifest = withWeb) =>
       gateT4Apps({ apps, members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: STANDING, catalog });
@@ -140,7 +140,8 @@ describe("gateT4Apps", () => {
     // Two websites on the one folder, beside an app that is none, and the folder-named app without a site.
     expect(judge([app("erp"), site(), site({ name: "example-com", site: "shop", domain: "example.com" }), app("web")]).status).toBe("pass");
     expect(judge([site({ site: "blog" })]).found).toBe(`app "example-ch" serves the site "blog", which its folder "web" does not list (main, shop).`);
-    expect(judge([site({ name: "example" })]).found).toBe(`app "example" is served at example.ch, so it is named example-ch.`);
+    // Its name stays when its domain moves, so the gate does not hold the name to the domain.
+    expect(judge([site({ domain: "example.org" })]).status).toBe("pass");
     expect(judge([site({ folder: "erp" })]).found).toBe(`app "example-ch" carries a site or a domain, but its folder "erp" lists no sites in the app catalog.`);
     expect(judge([site({ folder: "shop" })]).found).toBe(`the folder "shop" of app "example-ch" is not in the app catalog (erp, crm, web).`);
   });

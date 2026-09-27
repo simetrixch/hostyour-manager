@@ -5,7 +5,9 @@ import type { Db } from "../../db/client.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
 import { STAGE } from "../../../shared/enums.ts";
-import { guid as guidSchema, appName, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
+import { guid as guidSchema, appName, appFolder, siteId, websiteAppName, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
+import { publicFqdn } from "../../../shared/consumer.ts";
+import { ownDomainEntryProblem } from "#unit/shared/unit-host.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -29,6 +31,8 @@ import { stagePinsOf } from "./tenant-versions.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
+import { customerHostProblem } from "./own-domain-records.ts";
+import { provisionWebsiteRecordsStep, waitForWebsite, websiteHosts, websiteRecordHosts, type WebsiteDomainPorts } from "./website-domain.ts";
 
 // The "tenant-add-app" Run. The subset sibling of
 // create-tenant: it fans ONE new app into a LIVE tenant. It shares create-tenant's streaming-plan
@@ -97,8 +101,15 @@ export const AddAppParams = z.object({
   subdomain: z.string().default(""),
   owner: z.string().default(""),
   seedUsers: z.boolean().default(false),
+  // A website's folder, site and domain (#308), written into its apps[] entry.
+  website: z.object({ folder: appName, site: siteId, domain: publicFqdn }).optional(),
+  // The website's hosts whose records this run writes: none where the tenant's own domain holds them.
+  websiteRecordHosts: z.array(publicFqdn).default([]),
 });
 export type AddAppParams = z.infer<typeof AddAppParams>;
+
+/** What add-app reads beyond the onboarding ports: the probe and its wait, for a website's hosts. */
+export type AddAppPorts = TenantOnboardPorts & Pick<WebsiteDomainPorts, "probe" | "routingWaitMs" | "routingPollMs">;
 
 /** The raw operator request from the add-app wizard: the target tenant + the new app name. */
 export const AddAppRequest = z.object({
@@ -110,6 +121,18 @@ export const AddAppRequest = z.object({
   seedReference: z.boolean().default(false),
   seedDemo: z.boolean().default(false),
   selections: z.record(z.string(), z.boolean()).default({}),
+  // A website names all three (TenantAppSchema): the folder it runs, the site it serves, and the
+  // domain, typed without `www.`, that it is served at and named by.
+  folder: appName.optional(),
+  site: siteId.optional(),
+  domain: publicFqdn.optional(),
+}).superRefine((r, ctx) => {
+  const given = [r.folder, r.site, r.domain].filter((v) => v !== undefined).length;
+  if (given !== 0 && given !== 3) ctx.addIssue({ code: "custom", path: ["domain"], message: "a website names its folder, its site and its domain" });
+  if (r.domain === undefined) return;
+  const typed = ownDomainEntryProblem(r.domain);
+  if (typed !== null) ctx.addIssue({ code: "custom", path: ["domain"], message: typed });
+  else if (r.app !== websiteAppName(r.domain)) ctx.addIssue({ code: "custom", path: ["app"], message: `a website served at ${r.domain} is named ${websiteAppName(r.domain)}` });
 });
 export type AddAppRequest = z.infer<typeof AddAppRequest>;
 
@@ -182,12 +205,12 @@ async function assertAddAppAbortable(ports: TenantOnboardPorts, p: AddAppParams,
   );
 }
 
-function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
+function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
   const ns = memberNamespace(p.guid, p.app, p.stage); // the NEW member's own namespace — no sibling is touched
   // What the bundle steps hand the steps after them: the built tag, and the image set and sync units
   // rendered again against it. Empty on a tenant that had its bundle already.
   const runtime: TenantBuildRuntime = {};
-  const app = { name: p.app, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections };
+  const app = { name: p.app, ...p.website, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections };
   return [
     {
       name: "attest-target",
@@ -211,7 +234,7 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
     // steps, composed here).
     ...(p.appsUnit
       ? [
-        ...tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: [p.app] }, runtime),
+        ...tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: [appFolder(app)] }, runtime),
         recordAppsRepoStep(ports, { subdomain: p.subdomain, guid: p.guid, stage: p.stage, org: p.appsUnit.org, bundle: p.appsUnit.templateBuild }, runtime),
       ]
       : []),
@@ -285,7 +308,7 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
         }
         // The app starts on the newest available version of every build, fixed as its own (#296).
         const approved = (await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), [p.member]))[p.app] ?? {};
-        const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, member: p.member, approved, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, runId: ctx.runId });
+        const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, ...(p.website ? { website: p.website } : {}), member: p.member, approved, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, runId: ctx.runId });
         ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit, app: p.app });
         ctx.log("meta", `app "${p.app}" appended to tenant ${p.guid} (${commit}) — the master ArgoCD will now generate the new Application`);
@@ -308,6 +331,8 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
         ctx.log("meta", `app "${p.app}" Application(s) are Synced + Healthy at ${p.chartsRef.slice(0, 7)}`);
       },
     },
+    // A website's hosts: their records, then the wait until it answers there (#308).
+    ...websiteSteps(ports, p),
     {
       name: "smoke",
       title: "Smoke-check the new member's namespace",
@@ -344,7 +369,26 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
   ];
 }
 
-export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppParams> {
+/** What the plan says about a website, or nothing for an app that is none. */
+function websitePlanLine(p: AddAppParams): string {
+  if (!p.website) return "";
+  const records = p.websiteRecordHosts.length
+    ? `this run points ${p.websiteRecordHosts.join(", ")} at the tenant's zone and waits until the site answers`
+    : "the tenant's own domain holds its records, and this run waits until the site answers";
+  return ` It is a website of site ${p.website.site}, served at www.${p.website.domain}, and ${p.website.domain} redirects there; ${records}.`;
+}
+
+/** A website's two steps after its member syncs: its hosts' records, then the wait until it answers. */
+function websiteSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
+  const website = p.website;
+  if (!website) return [];
+  return [
+    provisionWebsiteRecordsStep(ports, p.tenantId, p.websiteRecordHosts),
+    { name: "wait-website", title: `Wait until the website answers at www.${website.domain}`, run: (ctx) => waitForWebsite(ctx, ports, website.domain) },
+  ];
+}
+
+export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
   return {
     kind: "tenant-add-app",
     paramsSchema: AddAppParams,
@@ -367,6 +411,16 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       if (current.entry.apps.some((a) => a.name === req.app)) {
         throw errValidation(`app "${req.app}" already exists in tenant ${tc.guid}`);
       }
+      const website = req.folder !== undefined && req.site !== undefined && req.domain !== undefined ? { folder: req.folder, site: req.site, domain: req.domain } : undefined;
+      if (website) {
+        const serving = current.entry.apps.find((a) => a.domain === website.domain);
+        if (serving) throw errValidation(`${website.domain} is already the domain of website "${serving.name}" in tenant ${tc.guid}`);
+        const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
+        for (const host of websiteHosts(website.domain)) {
+          const problem = customerHostProblem(ctx.db, tc.tenantId, host, apex);
+          if (problem !== null) throw errValidation(problem);
+        }
+      }
       // Every app lives in the tenant's own bundle, and the deploy repository's TEMPLATE names what can be
       // added (#213, #215): the app is judged against the template's catalog, and the bundle steps
       // carry its folder and entry into the tenant's repository — creating the repository where
@@ -380,7 +434,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       if (!ports.githubApp) throw errValidation(NO_GITHUB_APP);
-      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [req.app], spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
+      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [appFolder({ name: req.app, ...website })], spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") throw errValidation(resolved.why);
       const appsUnit = resolved.unit;
       const appsImage = tenantAppsUnit(appsUnit.templateBuild, current.entry.subdomain);
@@ -399,7 +453,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
           // worth rendering the gates over (tenant-registrations.ts, the `branch` getter).
           ref: ports.registrations.branch,
           stage: tc.stage,
-          apps: [{ name: req.app, seedReference: req.seedReference, seedDemo: req.seedDemo, selections: req.selections }],
+          apps: [{ name: req.app, ...website, seedReference: req.seedReference, seedDemo: req.seedDemo, selections: req.selections }],
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           seedUsers: current.entry.seedUsers,
@@ -465,13 +519,15 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
         subdomain: current.entry.subdomain,
         owner: tc.owner,
         seedUsers: current.entry.seedUsers,
+        ...(website ? { website } : {}),
+        websiteRecordHosts: website ? websiteRecordHosts(website.domain, current.entry) : [],
       };
       const stepDefs = addAppSteps(ports, params);
       const plan: Plan = {
         kind: "tenant-add-app",
         targetKind: "tenant",
         targetId: tc.tenantId,
-        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at deploy repository ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.`,
+        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at deploy repository ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${websitePlanLine(params)}${hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),

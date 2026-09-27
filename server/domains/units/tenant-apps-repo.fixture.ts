@@ -9,6 +9,8 @@ import { seedAppIdentityRow, seedCredentialRow } from "../../security/store.fixt
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
+import type { AddAppPorts } from "./add-app.run.ts";
+import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 
 export const SHA = "a".repeat(40);
 export const GUID = "zsjs023ctne0";
@@ -89,7 +91,7 @@ export const PLACEHOLDER_TAG = "0.0.0-placeholder";
 /** What a create-tenant test of a tenant WITH apps needs beside its own ports: the GitHub App the
  *  repository is created with (installed in ORG), the template scripted on the deploy repository's reader, and
  *  the placeholder tag on the chain. The deploy repository manifest itself carries TEMPLATE_SPEC. */
-export function withAppsTemplate(ports: TenantOnboardPorts, files: Record<string, string> = {}): TenantOnboardPorts & { githubApp: FakeGitHubApp } {
+export function withAppsTemplate<P extends TenantOnboardPorts>(ports: P, files: Record<string, string> = {}): P & { githubApp: FakeGitHubApp } {
   if (!(ports.repo instanceof FakeRepoReader)) throw new Error("withAppsTemplate scripts the template on a FakeRepoReader");
   ports.repo.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: { ...TEMPLATE_FILES, ...files } });
   const githubApp = new FakeGitHubApp();
@@ -100,6 +102,12 @@ export function withAppsTemplate(ports: TenantOnboardPorts, files: Record<string
     githubApp,
     resolveClusterValueFiles: async (domain, stage) => [{ path: PLATFORM_VALUES_COMMON, content: `global:\n  placeholderTag: "${PLACEHOLDER_TAG}"\n` }, ...(await chain(domain, stage))],
   };
+}
+
+/** Onboarding ports as add-app reads them, for a test that adds no website: a probe that answers
+ *  nothing, and no wait. */
+export function addAppPorts<P extends TenantOnboardPorts>(ports: P): P & Pick<AddAppPorts, "probe" | "routingWaitMs" | "routingPollMs"> {
+  return { ...ports, probe: new FakePublicProbe({}), routingWaitMs: 0, routingPollMs: 0 };
 }
 
 /** The owner identities a tenant test stands on (#220, #225): the App's owner ORG

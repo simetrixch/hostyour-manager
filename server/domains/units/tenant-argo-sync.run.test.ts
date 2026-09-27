@@ -20,7 +20,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { RoleManifest, RoleBindingManifest } from "../../adapters/kube/port.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
-import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
+import { TEMPLATE_SPEC, addAppPorts, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
@@ -239,7 +239,7 @@ describe("add-app extends the grant", () => {
   it("re-renders it over EVERY member — the live registration's apps plus the one being added", async () => {
     const buildRbac = new FakeBuildRbacWriter();
     const p = addParams();
-    const step = makeAddAppDef(ports({ buildRbac, registrations: await seededRegistrations() })).steps(p).find((s) => s.name === "provision-argo-sync")!;
+    const step = makeAddAppDef(addAppPorts(ports({ buildRbac, registrations: await seededRegistrations() }))).steps(p).find((s) => s.name === "provision-argo-sync")!;
     await step.run(ctx(p, []));
     // A grant that shrank to the new member would leave every sibling Application unsyncable.
     expect(roleOf(buildRbac)?.rules[0]!.resourceNames).toEqual([
@@ -248,7 +248,7 @@ describe("add-app extends the grant", () => {
   });
 
   it("runs before the append, so the new member's Application is never generated without a grant naming it", () => {
-    const names = makeAddAppDef(ports()).steps(addParams()).map((s) => s.name);
+    const names = makeAddAppDef(addAppPorts(ports())).steps(addParams()).map((s) => s.name);
     expect(names.indexOf("provision-argo-sync")).toBe(names.indexOf("apply-appproject") + 1);
     expect(names.indexOf("provision-argo-sync")).toBeLessThan(names.indexOf("append-app"));
   });

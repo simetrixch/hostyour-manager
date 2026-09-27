@@ -330,7 +330,7 @@ export function buildTenantOnboarding(
       // registered into the slot by the time the run starts.
       units: () => unitProbes,
     }),
-    makeAddAppDef(onboardPorts),
+    makeAddAppDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
     // The members of a standing tenant resolved again off the product's manifest: the same port set
     // add-app judges with, because it renders and gates the same fan-out.
     makeTenantRefreshMembersDef(onboardPorts),

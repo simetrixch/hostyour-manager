@@ -1,18 +1,16 @@
 import { z } from "zod";
-import { and, eq, ne, notInArray } from "drizzle-orm";
-import type { Cleanup, RunDefinition, Step, StepCtx } from "../../executor/types.ts";
+import { eq } from "drizzle-orm";
+import type { Cleanup, RunDefinition, Step } from "../../executor/types.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
-import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { clusters, tenants } from "../../db/schema/inventory.ts";
-import { findDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
+import { tenants } from "../../db/schema/inventory.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { isTenantRecord, removeBookedRecord, tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
+import { tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
 import { tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
-import { sleep } from "#unit/server/release-cycle.ts";
 import type { TenantSetRoutingPorts } from "./tenant-routing.run.ts";
+import { customerHostProblem, provisionOwnDomainRecord, removeOwnDomainRecord, waitForAnswer } from "./own-domain-records.ts";
 
 // `tenant-set-own-domain` — set, switch or clear the ONE own domain of a standing tenant.
 //
@@ -74,53 +72,6 @@ function tenantHost(tc: TenantCluster, apex: string, domain: string): string {
   return domain || tenantZone(tc.subdomain, tc.stage, apex);
 }
 
-/** Point `domain` at the tenant's zone, where this installation's DNS provider manages the domain's
- *  zone, and enter the write into the book. Where it does not, say which record the operator sets. */
-async function provisionOwnDomainRecord(ctx: StepCtx, ports: TenantSetOwnDomainPorts, tc: TenantCluster, apex: string, domain: string): Promise<void> {
-  const zone = tenantZone(tc.subdomain, tc.stage, apex);
-  const operatorSets = `set CNAME ${domain} → ${zone} at the provider of ${domain}; the wait below ends once the tenant answers there`;
-  if (!ports.dns) {
-    ctx.log("meta", `no DNS provider is configured on this manager: ${operatorSets}`);
-    return;
-  }
-  let standing: string | null;
-  try {
-    standing = await ports.dns.readRecordContent({ name: domain, type: "CNAME", signal: ctx.signal });
-  } catch (e) {
-    if (e instanceof DnsZoneUnknownError) {
-      ctx.log("meta", `the DNS zone of ${domain} is not managed here: ${operatorSets}`);
-      return;
-    }
-    throw e;
-  }
-  if (standing !== null && standing !== zone && !isTenantRecord(ctx.db, domain, tc.guid)) {
-    throw errValidation(`${domain} stands as CNAME ${standing}, and the book of DNS writes does not name it tenant ${tc.guid}'s — remove it at the provider first, or choose another domain`);
-  }
-  if (standing === zone) {
-    if (findDnsWrite(ctx.db, { name: domain, type: "CNAME" }) === null) {
-      recordDnsWrite(ctx.db, { name: domain, type: "CNAME", content: zone, act: "updated", owner: { kind: "tenant", name: tc.guid, stage: tc.stage }, runId: ctx.runId });
-    }
-    ctx.log("meta", `${domain} already points at ${zone}`);
-    return;
-  }
-  // A CNAME stands alone under its name, so an address record there goes first.
-  if ((await ports.dns.readRecordContent({ name: domain, type: "A", signal: ctx.signal })) !== null) {
-    throw errValidation(`${domain} carries an A record — a CNAME cannot stand beside it; remove it at the provider first`);
-  }
-  const { created } = await ports.dns.upsertRecord({ name: domain, type: "CNAME", content: zone, signal: ctx.signal });
-  recordDnsWrite(ctx.db, { name: domain, type: "CNAME", content: zone, act: standing === null ? "inserted" : "updated", owner: { kind: "tenant", name: tc.guid, stage: tc.stage }, runId: ctx.runId });
-  ctx.log("meta", `DNS record ${domain} → CNAME ${zone} ${created ? "created" : "updated"}`);
-}
-
-/** Remove `domain`'s record where this installation wrote it for this tenant (the book says so), while
- *  it still points where the book says. A record in a zone nobody here manages is the operator's to
- *  remove, and the run says so. */
-async function removeOwnDomainRecord(ctx: StepCtx, ports: TenantSetOwnDomainPorts, tc: TenantCluster, domain: string): Promise<void> {
-  if (!(await removeBookedRecord(ctx, { dns: ports.dns, owner: { kind: "tenant", name: tc.guid }, recordName: domain }))) {
-    ctx.log("meta", `${domain} is not recorded as tenant ${tc.guid}'s own record — if it points at the tenant, remove it at its provider`);
-  }
-}
-
 /** On abort: put the previous own domain and redirect hosts back on the registration and the row. */
 function restoreOwnDomainCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwnDomainParams): Cleanup {
   return {
@@ -149,25 +100,6 @@ function removeNewRecordCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwnD
       }
     },
   };
-}
-
-/** Ask `url` until `accepts` takes its status, or fail at the deadline naming what was waited for. */
-async function waitForAnswer(ctx: StepCtx, ports: TenantSetOwnDomainPorts, url: string, wanted: string, accepts: (status: number) => boolean): Promise<string> {
-  const deadline = Date.now() + ports.routingWaitMs;
-  for (;;) {
-    const seen = await ports.probe.probe(url, { signal: ctx.signal });
-    if (seen.status !== null && accepts(seen.status)) return seen.detail;
-    if (ctx.signal.aborted) throw errValidation(`the wait for ${url} was cancelled`);
-    if (Date.now() >= deadline) {
-      throw errValidation(
-        `${url} did not answer with ${wanted} within ${Math.round(ports.routingWaitMs / 60_000)} minutes (last: ${seen.detail}) — ` +
-        `its record, its certificate or the product's charts are not in place yet. The previous hosts still stand: ` +
-        `retry this step once they are, or abort the run to record the previous own domain again.`,
-      );
-    }
-    ctx.log("meta", `${url} does not answer with ${wanted} yet (${seen.detail}); asking again in ${Math.round(ports.routingPollMs / 1000)}s`);
-    await sleep(ports.routingPollMs, ctx.signal);
-  }
 }
 
 function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwnDomainParams): Step[] {
@@ -244,28 +176,9 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       if (params.ownDomain !== "" && tc.routing !== "path") throw errValidation(`tenant ${tc.subdomain} is on ${tc.routing} routing — an own domain serves every member under a path of it, so move the tenant to path routing first`);
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       const zone = tenantZone(tc.subdomain, tc.stage, apex);
-      if (params.ownDomain !== "") {
-        // Every other LIVE tenant's hosts. An offboarded or purged tenant's are free again.
-        const others = db
-          .select({ subdomain: tenants.subdomain, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects })
-          .from(tenants)
-          .where(and(ne(tenants.id, params.tenantId), ne(tenants.ownDomain, ""), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
-          .all();
-        const clusterNames = db.select({ domain: clusters.domain }).from(clusters).all().map((c) => c.domain);
-        for (const host of ownHosts(params.ownDomain, params.ownDomainRedirects)) {
-          if (host === apex || host.endsWith(`.${apex}`)) {
-            throw errValidation(`${host} lies in the platform's own name space (${apex}) — an own domain and its redirect hosts are ones the customer brings`);
-          }
-          // A cluster's own name, or a name below it, is the installation's.
-          const cluster = clusterNames.find((d) => host === d || host.endsWith(`.${d}`));
-          if (cluster) throw errValidation(`${host} lies under the cluster name ${cluster} — an own domain and its redirect hosts are ones the customer brings`);
-          // One host carries one record, so it serves one tenant; and no host lies inside another tenant's
-          // (a session cookie scoped to the outer host would reach the inner one).
-          for (const o of others) {
-            const theirs = ownHosts(o.ownDomain, o.ownDomainRedirects).find((h) => h === host || h.endsWith(`.${host}`) || host.endsWith(`.${h}`));
-            if (theirs) throw errValidation(`${host} ${theirs === host ? "is already" : "overlaps"} a host of tenant ${o.subdomain} (${theirs})`);
-          }
-        }
+      for (const host of ownHosts(params.ownDomain, params.ownDomainRedirects)) {
+        const problem = customerHostProblem(db, params.tenantId, host, apex);
+        if (problem !== null) throw errValidation(problem);
       }
       const newHost = params.ownDomain || zone;
       const oldRecords = retiredHosts(params);

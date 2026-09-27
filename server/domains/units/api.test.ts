@@ -42,7 +42,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
-import { ORG, TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
+import { ORG, TEMPLATE_SPEC, addAppPorts, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 
 const SHA = "a".repeat(40);
 const config = parseConfig({ ...REQUIRED_ENV, PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
@@ -372,7 +372,7 @@ async function makeTenant(enabled: boolean): Promise<{ app: Hono<AppEnv>; execut
   const defs = enabled
     ? [
         makeCreateTenantDef(tenantOnboardPorts(reg)),
-        makeAddAppDef(tenantOnboardPorts(reg)),
+        makeAddAppDef(addAppPorts(tenantOnboardPorts(reg))),
         makeRemoveAppDef(tenantLifecyclePorts(reg)),
         makeSuspendTenantDef(tenantLifecyclePorts(reg)),
         makeResumeTenantDef(tenantLifecyclePorts(reg)),

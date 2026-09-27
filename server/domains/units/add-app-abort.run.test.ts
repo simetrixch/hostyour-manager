@@ -9,8 +9,8 @@ import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
 import { buildRunDefinitions } from "../runs/run-definitions.ts";
 import { getRun } from "../../executor/read.ts";
-import { makeAddAppDef } from "./add-app.run.ts";
-import type { TenantOnboardPorts } from "./create-tenant.run.ts";
+import { makeAddAppDef, type AddAppPorts } from "./add-app.run.ts";
+import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -112,7 +112,10 @@ function harness(): Harness {
   const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
   unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, TEST_BUNDLE.appsImage) } });
   const onboard = onboardPorts({ repo: unitReader, consumerRepo: new FakeRepoWriter(), github: new FakeGitHubConsumer(), buildPlane, buildClusterReader: new FakeBuildPlaneClusterReader(TEST_BUNDLE.appsImage) });
-  const ports: TenantOnboardPorts = {
+  const ports: AddAppPorts = {
+    probe: new FakePublicProbe({}),
+    routingWaitMs: 0,
+    routingPollMs: 0,
     onboard: () => ({ ports: onboard }),
     buildUnitRegistration: async () => null,
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
