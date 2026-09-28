@@ -396,7 +396,7 @@ function websiteProblem(app: AppChoice, entry: AppEntry): string | null {
   const name = `app "${cap(app.name)}"`;
   if (entry.sites === undefined) return `${name} carries a site or a domain, but its folder "${cap(entry.name)}" lists no sites in the app catalog.`;
   if (app.site === undefined || !entry.sites.includes(app.site)) return `${name} serves the site "${cap(app.site ?? "")}", which its folder "${cap(entry.name)}" does not list (${entry.sites.join(", ")}).`;
-  if (app.domain === undefined) return `${name} names no domain; a website is served at www.<domain>.`;
+  if (app.domain === undefined) return `${name} names no domain; a website is served at <domain>, and www.<domain> redirects there.`;
   return null;
 }
 
@@ -425,7 +425,7 @@ export function gateT4Apps(input: AppsCheckInput): GateResult {
     if (website !== null) {
       return t4Reject(
         website,
-        `a website loads one site of its folder and is served at www.<domain>; an entry that breaks this serves the wrong content or none, so the plan is rejected.`,
+        `a website loads one site of its folder and is served at <domain>; an entry that breaks this serves the wrong content or none, so the plan is rejected.`,
       );
     }
     const unknown = chosenSelections(app).filter((s) => !(s in entry.selections));

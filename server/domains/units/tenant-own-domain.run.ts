@@ -216,7 +216,8 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
           `${params.ownDomain ? `point ${ownHosts(params.ownDomain, redirects).join(", ")} at ${zone}, ` : ""}record it on the registration and the row, wait until ${tenantMemberUrl("path", tc.identityProvider, tc.stage, tc.subdomain, apex, params.ownDomain)}/ answers with a 2xx` +
           `${redirects.length ? ` and ${redirects.map((h) => `https://${h}/`).join(", ")} with a redirect` : ""}` +
           `${oldRecords.length ? `, then remove the records of ${oldRecords.join(", ")}` : ""}. The product's charts must serve ${newHost}${redirects.length ? " and its redirect hosts" : ""}, with certificates, for the wait to end. ` +
-          `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto ${zone}) BEFORE approving: from the moment the domain is recorded, the tenant answers only there.${replacementSentence(replacing)}`,
+          `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto ${zone}) BEFORE approving: from the moment the domain is recorded, the tenant answers only there.` +
+          `${params.previous === params.ownDomain ? "" : " Its identity provider moves with its host, so every user of the tenant signs in once more."}${replacementSentence(replacing)}`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),

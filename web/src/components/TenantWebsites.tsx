@@ -8,7 +8,7 @@ import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 
 /** The Websites section of the tenant page: every website of the tenant with its address and
  *  its site, the form that adds one, and the dialog that moves one to another domain. A website is
- *  typed without `www.`: it is served at `www.<domain>`, `<domain>` redirects there, and it is named
+ *  typed without `www.`: it is served at `<domain>`, `www.<domain>` redirects there, and it is named
  *  by the domain it is added with. Every action only PLANS its run and hands off to the Run screen. */
 export function TenantWebsites(props: {
   tenantId: string;
@@ -50,7 +50,7 @@ export function TenantWebsites(props: {
               <div className="row">
                 <span className="row__title">{w.name}</span>
                 <span className="row__meta">
-                  <a href={`https://www.${w.domain}/`} target="_blank" rel="noreferrer">www.{w.domain}</a> · site {w.site}
+                  <a href={`https://${w.domain}/`} target="_blank" rel="noreferrer">{w.domain}</a> · site {w.site}
                 </span>
                 <span className="row__end">
                   <button type="button" className="btn" disabled={busy} onClick={() => { setNext(w.domain); setMoving(w); }}>
@@ -72,7 +72,7 @@ export function TenantWebsites(props: {
             Add website
           </label>
           <span className="field__hint">
-            The domain without www: the site is served at www.{typed || "<domain>"}, and {typed || "<domain>"} redirects there.
+            The domain without www: the site is served at {typed || "<domain>"}, and www.{typed || "<domain>"} redirects there.
             {named ? ` The website is named ${named}.` : ""}
           </span>
           <input id="tenant-add-website" className="input" placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} disabled={busy} />
@@ -96,7 +96,7 @@ export function TenantWebsites(props: {
       {moving && (
         <ConfirmDialog
           title={`Move website ${moving.name}`}
-          confirmLabel={nextTyped ? `Serve at www.${nextTyped}` : "Serve at the new domain"}
+          confirmLabel={nextTyped ? `Serve at ${nextTyped}` : "Serve at the new domain"}
           confirmDisabled={!nextTyped || nextTyped === moving.domain}
           onCancel={() => setMoving(null)}
           onConfirm={() => { const w = moving; setMoving(null); void act(() => setTenantWebsiteDomain(tenantId, w.name, nextTyped)); }}
@@ -106,7 +106,7 @@ export function TenantWebsites(props: {
             <input className="input" value={next} onChange={(e) => setNext(e.target.value)} />
           </label>
           <p>
-            The website keeps its name {moving.name}. From the moment the new domain is recorded, it answers only there; the records of www.{moving.domain} and {moving.domain} go once it answers at the new hosts.
+            The website keeps its name {moving.name}. From the moment the new domain is recorded, it answers only there; the records of {moving.domain} and www.{moving.domain} go once it answers at the new hosts.
           </p>
         </ConfirmDialog>
       )}

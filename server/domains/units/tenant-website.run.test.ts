@@ -19,7 +19,7 @@ import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture
 import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
 
 // A website of a live tenant, added, moved and removed: named by its domain, running the bundle's
-// folder `web`, served at www.<domain> with <domain> redirecting there, its hosts pointed at the
+// folder `web`, served at <domain> with www.<domain> redirecting there, its hosts pointed at the
 // tenant's zone while it stands.
 
 useMemoryDb();
@@ -67,10 +67,10 @@ describe("add-app for a website", () => {
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.website).toEqual({ folder: "web", site: "main", domain: "example.ch" });
-    expect(result.params.websiteRecordHosts).toEqual(["www.example.ch", "example.ch"]);
+    expect(result.params.websiteRecordHosts).toEqual(["example.ch", "www.example.ch"]);
     const names = result.plan.steps.map((s) => s.name);
     expect(names.slice(names.indexOf("watch-sync-set"))).toEqual(["watch-sync-set", "provision-website-records", "wait-website", "smoke", "record-inventory"]);
-    expect(result.plan.summary).toContain("website of site main, served at www.example.ch, and example.ch redirects there");
+    expect(result.plan.summary).toContain("website of site main, served at example.ch, and www.example.ch redirects there");
   });
 
   it("refuses a website not named by its domain, a domain typed with www, and a domain another website serves", async () => {
@@ -106,18 +106,18 @@ describe("add-app for a website", () => {
     expect(result.outcome === "planned" && result.params.websiteRecordHosts).toEqual([]);
   });
 
-  it("points both hosts at the tenant's zone, then waits until the site answers and its bare domain redirects", async () => {
+  it("points both hosts at the tenant's zone, then waits until the site answers at its domain and its www host redirects", async () => {
     seedWebsiteTenant();
     const dns = new FakeDnsProvider();
-    const probe = new FakePublicProbe({ "https://www.example.ch/": OK, "https://example.ch/": REDIRECTS });
-    const p = params({ website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["www.example.ch", "example.ch"] });
+    const probe = new FakePublicProbe({ "https://example.ch/": OK, "https://www.example.ch/": REDIRECTS });
+    const p = params({ website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["example.ch", "www.example.ch"] });
     const steps = makeAddAppDef(ports({ dns, probe })).steps(p);
     const logs: string[] = [];
     for (const name of ["provision-website-records", "wait-website"]) await steps.find((s) => s.name === name)!.run(ctx(p, name, logs));
     const zone = tenantZone("acme", "prod", "example.com");
     expect([dns.record("www.example.ch", "CNAME"), dns.record("example.ch", "CNAME")]).toEqual([zone, zone]);
-    expect(probe.probed).toEqual(["https://www.example.ch/", "https://example.ch/"]);
-    expect(logs.some((l) => l.includes("https://example.ch/ redirects"))).toBe(true);
+    expect(probe.probed).toEqual(["https://example.ch/", "https://www.example.ch/"]);
+    expect(logs.some((l) => l.includes("https://www.example.ch/ redirects"))).toBe(true);
   });
 
   it("removes a website's records with its drop, and again off the checkpoint on a resume after the drop", async () => {
@@ -152,7 +152,7 @@ describe("add-app for a website", () => {
     const repo = new FakePlatformRepo();
     seedOtherTenantWebsite(repo, "example.ch");
     const registrations = tenantWith([], undefined, repo);
-    await expect(makeAddAppDef(ports({ registrations }, WEBSITE_APPS)).planStream!(WEBSITE, planCtx())).rejects.toThrow(/www\.example\.ch is already a website host of tenant other/);
+    await expect(makeAddAppDef(ports({ registrations }, WEBSITE_APPS)).planStream!(WEBSITE, planCtx())).rejects.toThrow("example.ch is already a website host of tenant other");
   });
 
   it("leaves a website's hosts standing when the tenant's own domain moves away from them", async () => {
@@ -187,7 +187,7 @@ describe("tenant-set-website-domain", () => {
     const result = await makeTenantSetWebsiteDomainDef(ports({ registrations, repo: withDomain() }, WEBSITE_APPS)).planStream!(MOVE, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
-    expect(result.params).toMatchObject({ previous: "example.ch", domain: "example.org", recordHosts: ["www.example.org", "example.org"], retiredHosts: ["www.example.ch", "example.ch"] });
+    expect(result.params).toMatchObject({ previous: "example.ch", domain: "example.org", recordHosts: ["example.org", "www.example.org"], retiredHosts: ["example.ch", "www.example.ch"] });
     expect(result.params.member.sources[1]!.values).toEqual({ site: { domain: "example.org" } });
     expect(result.plan.steps.map((s) => s.name)).toEqual(["attest-target", "provision-website-records", "write-website-domain", "retire-previous-website-domain"]);
   });
@@ -210,7 +210,7 @@ describe("tenant-set-website-domain", () => {
       dns.seed(name, "CNAME", "acme.example.com");
       recordDnsWrite(db.db, { name, type: "CNAME", content: "acme.example.com", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_add" });
     }
-    const probe = new FakePublicProbe({ "https://www.example.org/": OK, "https://example.org/": REDIRECTS });
+    const probe = new FakePublicProbe({ "https://example.org/": OK, "https://www.example.org/": REDIRECTS });
     const prt = ports({ registrations, dns, probe, repo: withDomain() }, WEBSITE_APPS);
     const planned = await makeTenantSetWebsiteDomainDef(prt).planStream!(MOVE, planCtx());
     if (planned.outcome !== "planned") throw new Error("not planned");

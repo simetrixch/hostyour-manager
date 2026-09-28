@@ -150,7 +150,7 @@ export type TenantMemberRecord = z.infer<typeof TenantMemberRecordSchema>;
  *  has one place. Imported everywhere the apps element is validated.
  *
  *  A WEBSITE is an app whose folder's catalog entry lists `sites`. It carries the folder it runs, the
- *  site it serves and the domain it is served at (`www.<domain>`), and it is named by that domain
+ *  site it serves and the domain it is served at (`<domain>`, which `www.<domain>` redirects to), and it is named by that domain
  *  (websiteAppName), so one folder serves as many websites as there are domains. An entry
  *  without a folder runs the folder of its own name. */
 export const TenantAppSchema = z

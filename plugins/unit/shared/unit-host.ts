@@ -65,15 +65,15 @@ export function tenantOwnHosts(ownDomain: string, ownDomainRedirects: readonly s
 }
 
 /** The own hosts an operator's domain entry gives a tenant: the domain is typed without `www.`, the
- *  tenant is served at `www.<domain>`, and `<domain>` redirects there. "" gives none, which returns
+ *  tenant is served at `<domain>`, and `www.<domain>` redirects there. "" gives none, which returns
  *  the tenant to its zone. The entry is checked by the caller (ownDomainEntryProblem). */
 export function ownDomainHosts(domain: string): { ownDomain: string; ownDomainRedirects: string[] } {
-  return domain === "" ? { ownDomain: "", ownDomainRedirects: [] } : { ownDomain: `www.${domain}`, ownDomainRedirects: [domain] };
+  return domain === "" ? { ownDomain: "", ownDomainRedirects: [] } : { ownDomain: domain, ownDomainRedirects: [`www.${domain}`] };
 }
 
 /** Why a domain entry cannot be taken, or null: it is typed without `www.`, because the Manager adds it. */
 export function ownDomainEntryProblem(domain: string): string | null {
-  return domain.startsWith("www.") ? `type the domain without "www." (${domain.slice(4)}); it is served at ${domain} and ${domain.slice(4)} redirects there` : null;
+  return domain.startsWith("www.") ? `type the domain without "www." (${domain.slice(4)}); it is served at ${domain.slice(4)}, and ${domain} redirects there` : null;
 }
 
 /** The words no label and no subdomain may be: the stage words are the zones themselves, so a

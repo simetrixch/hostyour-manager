@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { consumerUnitHost, HOST_LABEL_RE, RESERVED_HOST_LABELS, stageApex, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone } from "./unit-host.ts";
+import { consumerUnitHost, HOST_LABEL_RE, RESERVED_HOST_LABELS, stageApex, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, ownDomainEntryProblem, ownDomainHosts } from "./unit-host.ts";
 import { ConsumerManifestSchema, consumerHostLabel, hostLabel } from "#core/shared/consumer.ts";
 
 /** THE ONE composition of a unit's public host (simetrixch/hostyour-cloud#208): the stage is a
@@ -79,5 +79,17 @@ describe("the host label", () => {
       apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", name: "digita-auth", owner: "platform", envs: ["prod"], host: "auth", chart: { path: "deploy/chart" },
     });
     expect(consumerHostLabel(parsed)).toBe("auth");
+  });
+});
+
+describe("a tenant's own domain — typed without www, served at the apex", () => {
+  it("PLANTED DEFECT: serves the typed domain itself and redirects www.<domain> there", () => {
+    expect(ownDomainHosts("example.org")).toEqual({ ownDomain: "example.org", ownDomainRedirects: ["www.example.org"] });
+    expect(ownDomainHosts("")).toEqual({ ownDomain: "", ownDomainRedirects: [] });
+  });
+
+  it("refuses an entry typed with www, naming the address it would be served at", () => {
+    expect(ownDomainEntryProblem("www.example.org")).toBe('type the domain without "www." (example.org); it is served at example.org, and www.example.org redirects there');
+    expect(ownDomainEntryProblem("example.org")).toBeNull();
   });
 });

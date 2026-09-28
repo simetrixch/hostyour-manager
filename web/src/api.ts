@@ -678,8 +678,8 @@ export const setTenantVersions = (tenantId: string, versions: Record<string, str
   post<{ runId: string }>(`/api/tenants/${tenantId}/refresh-members`, { versions });
 
 /** Plan setting, switching or clearing ("") the tenant's own domain. */
-/** Plan tenant-set-own-domain for a domain typed without www: the tenant is served at www.<domain>,
- *  and <domain> redirects there ("" returns it to its zone). */
+/** Plan tenant-set-own-domain for a domain typed without www: the tenant is served at <domain>,
+ *  and www.<domain> redirects there ("" returns it to its zone). */
 export const setTenantOwnDomain = (tenantId: string, domain: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { domain });
 /** Plan add-app for a website: named by its domain, running the bundle's website folder. */

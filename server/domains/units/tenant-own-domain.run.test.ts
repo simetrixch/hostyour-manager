@@ -140,6 +140,24 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(h.probe.probed).toContain(`https://${BARE}/`);
   });
 
+  it("PLANTED DEFECT: moves a tenant standing at www.<domain> to <domain> when the domain is set again, writes and removes no record, and says its users sign in once more", async () => {
+    const h = await make({ ownDomain: OWN, ownDomainRedirects: [BARE], answers: [BARE], redirecting: [OWN] });
+    for (const host of [OWN, BARE]) {
+      h.dns.seed(host, "CNAME", ZONE);
+      recordDnsWrite(h.db.db, { name: host, type: "CNAME", content: ZONE, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_old" });
+    }
+    const planned = await plan(h, { ownDomain: BARE, ownDomainRedirects: [OWN], previous: OWN, previousRedirects: [BARE] });
+    expect(planned.summary).toContain(`Move tenant ${GUID} from ${OWN} to ${BARE}`);
+    expect(planned.summary).toContain("so every user of the tenant signs in once more");
+    expect(planned.summary).not.toContain("remove the records of");
+    await h.executor.approve(planned.runId);
+    await h.executor.settle(planned.runId);
+    expect(getRun(h.db.db, planned.runId)?.status).toBe("succeeded");
+    expect([h.rowDomain(), await h.regDomain(), h.rowRedirects(), await h.regRedirects()]).toEqual([BARE, BARE, [OWN], [OWN]]);
+    expect([h.dns.upserts, h.dns.creates, h.dns.deletes]).toEqual([[], [], []]);
+    expect(h.probe.probed).toEqual([idpAt(BARE), `https://${OWN}/`]);
+  });
+
   it("does not take a 2xx for a redirect host: it must answer the redirect itself", async () => {
     const h = await make({ answers: [OWN, BARE] });
     h.probe.set(`https://${BARE}/`, OK);

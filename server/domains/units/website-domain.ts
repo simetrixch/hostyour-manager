@@ -1,6 +1,6 @@
 // A website's own domain, as the runs that add, move and remove a website handle it.
 //
-// A website of a tenant answers at `www.<domain>`, and `<domain>` redirects there, the way the tenant's
+// A website of a tenant answers at `<domain>`, and `www.<domain>` redirects there, the way the tenant's
 // own domain does (ownDomainHosts). Each host gets a CNAME onto the tenant's zone, written and booked
 // by the same helpers tenant-set-own-domain uses, so a record in a zone the customer manages never has
 // to change when the tenant moves. The hosts the tenant's own domain already holds belong to
@@ -20,7 +20,7 @@ import { STAGE } from "../../../shared/enums.ts";
 /** What the website steps read: the DNS provider, the zone's apex, and the probe with its wait. */
 export type WebsiteDomainPorts = RecordPorts & Pick<TenantLifecyclePorts, "resolveUnitApex"> & AnswerWaitPorts;
 
-/** The hosts a website answers at: `www.<domain>`, then `<domain>`, which redirects there. */
+/** The hosts a website answers at: `<domain>`, then `www.<domain>`, which redirects there. */
 export function websiteHosts(domain: string): string[] {
   const { ownDomain, ownDomainRedirects } = ownDomainHosts(domain);
   return [ownDomain, ...ownDomainRedirects];
@@ -93,7 +93,7 @@ export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId:
   };
 }
 
-/** Wait until the website answers at `https://www.<domain>/`, and `https://<domain>/` redirects. The
+/** Wait until the website answers at `https://<domain>/`, and `https://www.<domain>/` redirects. The
  *  probe does not follow a redirect, so the site's own root may answer with one too (a language
  *  redirect), and anything below 400 is an answer. */
 export async function waitForWebsite(ctx: Parameters<typeof waitForAnswer>[0], ports: WebsiteDomainPorts, domain: string, next: string): Promise<void> {

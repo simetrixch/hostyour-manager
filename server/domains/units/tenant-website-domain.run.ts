@@ -159,6 +159,7 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       const replacing = await websiteRecordsToReplace(ctx.db, ports, tc, recordHosts, ctx.signal);
       const params: TenantSetWebsiteDomainParams = { tenantId: tc.tenantId, app: req.app, domain: req.domain, previous: entry.domain, member, previousMember, recordHosts, retiredHosts, replacing };
       const steps = websiteDomainSteps(ports, params);
+      const [site, ...redirects] = websiteHosts(req.domain);
       return {
         outcome: "planned",
         params,
@@ -167,9 +168,9 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
           targetKind: "tenant",
           targetId: tc.tenantId,
           summary:
-            `Move website ${req.app} of tenant ${tc.guid} from www.${entry.domain} to www.${req.domain} (${tc.domain}, ${tc.stage}): ` +
+            `Move website ${req.app} of tenant ${tc.guid} from ${entry.domain} to ${req.domain} (${tc.domain}, ${tc.stage}): ` +
             `${recordHosts.length ? `point ${recordHosts.join(", ")} at the tenant's zone, ` : ""}record the domain and the member resolved with it, ` +
-            `wait until https://www.${req.domain}/ answers and https://${req.domain}/ redirects` +
+            `wait until https://${site}/ answers and ${redirects.map((h) => `https://${h}/`).join(", ")} redirects` +
             `${retiredHosts.length ? `, then remove the records of ${retiredHosts.join(", ")}` : ""}. The website keeps its name ${req.app}. ` +
             `From the moment the new domain is recorded, the website answers only there. ` +
             `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto the tenant's zone) BEFORE approving.${replacementSentence(replacing)}`,

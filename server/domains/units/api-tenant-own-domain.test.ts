@@ -7,8 +7,8 @@ import type { Executor } from "../../executor/executor.ts";
 import { registerTenantOwnDomainRoutes } from "./api-tenant-own-domain.ts";
 import { toApiError } from "../../http/middleware/error-shape.ts";
 
-// The route takes ONE domain, typed without www, and plans the own hosts it gives: www.<domain> served,
-// <domain> redirecting there. The tenant's standing own hosts come off its row as the plan's `previous`:
+// The route takes ONE domain, typed without www, and plans the own hosts it gives: <domain> served,
+// www.<domain> redirecting there. The tenant's standing own hosts come off its row as the plan's `previous`:
 // a request that named them itself could never match a tenant with redirect hosts.
 
 describe("POST /api/tenants/:id/own-domain", () => {
@@ -32,11 +32,11 @@ describe("POST /api/tenants/:id/own-domain", () => {
     return { post, planned };
   }
 
-  it("serves www.<domain>, redirects <domain> there, and takes the row's standing hosts as previous", async () => {
+  it("serves <domain>, redirects www.<domain> there, and takes the row's standing hosts as previous", async () => {
     const r = route();
     expect((await r.post({ domain: " Shop.Test " })).status).toBe(201);
     expect(r.planned).toEqual([{
-      tenantId: "tnt_1", ownDomain: "www.shop.test", ownDomainRedirects: ["shop.test"], previous: "www.customer.test", previousRedirects: ["customer.test"], replacing: [],
+      tenantId: "tnt_1", ownDomain: "shop.test", ownDomainRedirects: ["www.shop.test"], previous: "www.customer.test", previousRedirects: ["customer.test"], replacing: [],
     }]);
   });
 

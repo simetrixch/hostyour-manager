@@ -1,6 +1,6 @@
 // The own-domain move's route, apart from api.ts the way the routing move is: POST
 // /api/tenants/:id/own-domain plans tenant-set-own-domain (tenant-own-domain.run.ts) with the own hosts
-// the body's one domain gives (ownDomainHosts: www.<domain>, and <domain> redirecting there; "" clears
+// the body's one domain gives (ownDomainHosts: <domain>, and www.<domain> redirecting there; "" clears
 // them), validated through the run's OWN params schema. Approve via the Runs API.
 import type { Hono } from "hono";
 import { eq } from "drizzle-orm";

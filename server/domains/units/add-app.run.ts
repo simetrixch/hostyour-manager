@@ -384,7 +384,7 @@ function websitePlanLine(p: AddAppParams): string {
   const records = p.websiteRecordHosts.length
     ? `this run points ${p.websiteRecordHosts.join(", ")} at the tenant's zone and waits until the site answers`
     : "the tenant's own domain holds its records, and this run waits until the site answers";
-  return ` It is a website of site ${p.website.site}, served at www.${p.website.domain}, and ${p.website.domain} redirects there; ${records}.`;
+  return ` It is a website of site ${p.website.site}, served at ${websiteHosts(p.website.domain)[0]}, and ${websiteHosts(p.website.domain).slice(1).join(", ")} redirects there; ${records}.`;
 }
 
 /** A website's two steps after its member syncs: its hosts' records, then the wait until it answers. */
@@ -393,7 +393,7 @@ function websiteSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
   if (!website) return [];
   return [
     provisionWebsiteRecordsStep(ports, p.tenantId, p.websiteRecordHosts, p.websiteReplacing),
-    { name: "wait-website", title: `Wait until the website answers at www.${website.domain}`, run: (ctx) => waitForWebsite(ctx, ports, website.domain, "The website's member stands: retry this step once its records and certificate are in place, or remove the website.") },
+    { name: "wait-website", title: `Wait until the website answers at ${websiteHosts(website.domain)[0]}`, run: (ctx) => waitForWebsite(ctx, ports, website.domain, "The website's member stands: retry this step once its records and certificate are in place, or remove the website.") },
   ];
 }
 
