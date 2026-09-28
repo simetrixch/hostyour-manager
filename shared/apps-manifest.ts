@@ -42,8 +42,19 @@ export const AppEntrySchema = z.object({
 });
 export type AppEntry = z.infer<typeof AppEntrySchema>;
 
+/** THE ENGINE A BUNDLE IS WRITTEN FOR: the build it runs on and that build's version line, the first
+ *  two numbers of a version. A breaking change of the engine's app contract starts a new line, so a
+ *  tenant runs the bundle only beside that build on that line (server/domains/units/engine-line.ts).
+ *  Quoted, because YAML reads `0.3` as a number and `0.10` as `0.1`. */
+export const AppsEngineSchema = z.object({
+  build: z.string().regex(/^[a-z0-9-]+$/, "a build name is lower-case letters, digits and hyphens"),
+  line: z.string().regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/, "a version line is the first two numbers of a version, quoted, such as \"0.3\""),
+});
+export type AppsEngine = z.infer<typeof AppsEngineSchema>;
+
 export const AppsManifestSchema = z.object({
   apps: z.array(AppEntrySchema),
+  engine: AppsEngineSchema.optional(),
 }).superRefine((m, ctx) => {
   const names = m.apps.map((a) => a.name);
   const dup = names.find((n, i) => names.indexOf(n) !== i);
@@ -65,7 +76,7 @@ export function parseAppsManifest(text: string): AppsManifest {
   const parsed = AppsManifestSchema.safeParse(doc);
   if (!parsed.success) {
     const why = parsed.error.issues.slice(0, 6).map((i) => `${i.path.length > 0 ? i.path.map(String).join(".") : "(root)"}: ${i.message}`).join("; ");
-    throw new Error(`${APPS_MANIFEST_PATH} does not match the apps manifest shape (apps[]: name, title, description, selections{title, default}, databases?, sites?): ${why}`);
+    throw new Error(`${APPS_MANIFEST_PATH} does not match the apps manifest shape (apps[]: name, title, description, selections{title, default}, databases?, sites?; engine?{build, line}): ${why}`);
   }
   return parsed.data;
 }

@@ -18,7 +18,7 @@ import { parse as parseYaml } from "yaml";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { CONSUMER_MANIFEST_PATH, ConsumerManifestSchema, consumerName, tenantAppsTemplate, type ConsumerManifest, type TenantSpec } from "../../../shared/consumer.ts";
-import { APPS_MANIFEST_PATH, parseAppsManifest } from "../../../shared/apps-manifest.ts";
+import { APPS_MANIFEST_PATH, AppsEngineSchema, parseAppsManifest, type AppsEngine } from "../../../shared/apps-manifest.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -54,6 +54,9 @@ export const TenantAppsUnitSchema = z.object({
   // The unit already stands registered build-only on this installation (a second run): its release
   // is re-run through the registered chain instead of the whole onboarding.
   registered: z.boolean(),
+  // The engine the catalog's apps.yaml declares its bundle written for (engine-line.ts), where it
+  // declares one.
+  engine: AppsEngineSchema.optional(),
 });
 export type TenantAppsUnit = z.infer<typeof TenantAppsUnitSchema>;
 
@@ -140,9 +143,12 @@ export async function resolveTenantAppsUnit(
   input.log(`template ${template.repo} (${template.name}), owner ${org}, repository ${tenantAppsRepoURL(org, template.name, input.subdomain)}`);
   const read = await readTemplate(ports, template.repo, input.signal);
   let offered: string[];
+  let engine: AppsEngine | undefined;
   const unfolded: string[] = [];
   try {
-    offered = parseAppsManifest(read.appsYaml).apps.map((a) => a.name);
+    const catalog = parseAppsManifest(read.appsYaml);
+    offered = catalog.apps.map((a) => a.name);
+    engine = catalog.engine;
     // The bundle's build installs what the template's .npmrc routes to GitHub Packages with the
     // owner's packages reader (#220, #221) — asked here, before anything is created.
     const scopes = npmrcPackageScopes(read.npmrc);
@@ -157,7 +163,7 @@ export async function resolveTenantAppsUnit(
   if (unfolded.length > 0) return refuse(`${unfolded.join(", ")} ${unfolded.length === 1 ? "has" : "have"} no folder in ${template.repo} although its ${APPS_MANIFEST_PATH} names ${unfolded.length === 1 ? "it" : "them"} — the bundle would refuse to build`);
   const registration = (await ports.buildUnitRegistration?.(unit)) ?? null;
   if (registration?.form === "deployable") return refuse(`the unit ${unit} is registered as DEPLOYABLE on this installation — a tenant's apps repository is a build-only unit; offboard that unit first`);
-  return { outcome: "resolved", unit: { org, templateRepoURL: template.repo, templateBuild: template.name, registered: registration !== null } };
+  return { outcome: "resolved", unit: { org, templateRepoURL: template.repo, templateBuild: template.name, registered: registration !== null, ...(engine ? { engine } : {}) } };
 }
 
 /** The three steps, in order: create-repository, write-tree, onboard-build-only. The build plane is

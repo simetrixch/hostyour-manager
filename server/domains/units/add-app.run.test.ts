@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
-import { makeAddAppDef, AddAppParams } from "./add-app.run.ts";
+import { makeAddAppDef, AddAppParams, type AddAppPorts } from "./add-app.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberApplication, memberAppProject } from "./tenant-fanout.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -134,6 +134,30 @@ describe("add-app run definition", () => {
 });
 
 describe("add-app streaming planner", () => {
+  // The bundle this run builds is the tenant's own repository at its head; the new app's engine starts
+  // at its stage pin. The two have to be of one line (engine-line.ts).
+  const withEngineAt = (line: string): AddAppPorts => {
+    const repo = seededPlatformRepo();
+    repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", `builds:\n  - { name: example-engine, image: example-engine, tag: "0.1.12-stable-20260925120000-abc1234" }\n`);
+    const prt = ports({ registrations: new TenantRegistrations(repo) });
+    (prt.repo as FakeRepoReader).scriptFor(TEST_BUNDLE.appsRepo, { resolvedSha: SHA, files: { "apps.yaml": `apps:\n  - name: erp\n    title: ERP\nengine:\n  build: example-engine\n  line: "${line}"\n` } });
+    return prt;
+  };
+
+  it("plans an app whose engine starts on the line of the tenant's own bundle, read at its head", async () => {
+    seedClusters();
+    const prt = withEngineAt("0.1");
+    const result = await makeAddAppDef(prt).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
+    expect(result.outcome).toBe("planned");
+    expect((prt.repo as FakeRepoReader).clones.map((c) => `${c.repoURL}@${c.ref}`)).toContain(`${TEST_BUNDLE.appsRepo}@HEAD`);
+  });
+
+  it("PLANTED DEFECT: refuses an app whose engine would start on another line than the tenant's bundle", async () => {
+    seedClusters();
+    await expect(makeAddAppDef(withEngineAt("0.2")).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx()))
+      .rejects.toThrow(`app "${NEW_APP}" cannot be added to tenant acme: the apps bundle is written for example-engine 0.2, and ${NEW_APP} would run example-engine 0.1.12-stable-20260925120000-abc1234, of another line`);
+  });
+
   it("loads the live tenant, validates the new app, and freezes a plan (targetKind tenant)", async () => {
     seedClusters();
     const def = makeAddAppDef(ports());

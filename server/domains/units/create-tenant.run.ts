@@ -3,7 +3,7 @@ import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
 import { and, eq } from "drizzle-orm";
 import type { RunDefinition, Step, StepCtx, Plan } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
-import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId, mintTenantGuid } from "../../kernel/ids.ts";
+import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
 import { MEMBER_ROUTING, STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
 import { appFolders, appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { errValidation, errInternal } from "../../kernel/errors.ts";
@@ -35,7 +35,8 @@ import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { provisionUnitDns, standingHostFrom, tenantRecordName } from "#unit/server/unit-dns.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { tenantActivateStep } from "./create-tenant-activate.ts";
-import { writeRegistrationStep } from "./create-tenant-registration.ts";
+import { mintFreeGuid, writeRegistrationStep } from "./create-tenant-registration.ts";
+import { builtBundleEngine, newMembersRefusal } from "./engine-line.ts";
 import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tenant-abort.ts";
 import { assertReplacesOnTargetCluster, ensureSubdomainFreeStep, resolveReplaceTargets, ReplaceTargetSchema } from "./tenant-replace.ts";
 import { probeTenantTarget, probeTenantDns, probeBuildUnit } from "./tenant-probes.ts";
@@ -158,7 +159,6 @@ export interface TenantOnboardPorts {
   githubApp?: GitHubApp;
 }
 
-const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely
 
 /** The frozen create-tenant params: the operator's fields + everything the streaming plan resolved
  *  (the minted guid, the pinned chartsRef, the approved report, the frozen expected-Application set). */
@@ -561,22 +561,6 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
   ];
 }
 
-/** Mint a guid the registrations tree does not already hold at this stage. The 32^12 CSPRNG space makes
- *  a first-try free guid overwhelmingly likely; exhausting the bounded retry is INTERNAL (never reuse). */
-async function mintFreeGuid(ports: TenantOnboardPorts, stage: Stage): Promise<string> {
-  for (let i = 0; i < GUID_MINT_ATTEMPTS; i++) {
-    const candidate = mintTenantGuid();
-    // The question is only "does a registrations/<candidate>/<stage>.yaml stand", so this reads through
-    // the TOLERANT scan and treats ABSENT as the one answer that means the guid is FREE. The strict
-    // readTenant THROWS on a body it cannot parse — failing an entire create-tenant plan over a
-    // candidate it should simply have discarded — while its null covers only an absent file.
-    // "unreadable" means the guid IS taken (a file stands at that path), so the loop moves on and the
-    // guid is never handed out twice.
-    if ((await ports.registrations.scanTenant(stage, candidate)).status === "absent") return candidate;
-  }
-  throw errInternal(`could not mint a free tenant guid after ${GUID_MINT_ATTEMPTS} attempts`);
-}
-
 export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<CreateTenantParams> {
   return {
     kind: "tenant-create",
@@ -654,6 +638,9 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
           planJson: outcome.report,
         };
       }
+      // The bundle is built from the catalog, and every engine starts at its stage pin (engine-line.ts).
+      const lineRefusal = withApps ? await newMembersRefusal({ engine: await builtBundleEngine(ports, undefined, appsUnit?.engine, ctx), held: {}, newMembers: outcome.memberRecords, pinned: (chart) => ports.registrations.listPinnedBuilds(req.stage, chart) }) : null;
+      if (lineRefusal !== null) return refuse(lineRefusal, outcome.report);
       // Idempotent-by-subdomain: resolve the existing same-subdomain tenants to REPLACE — the union
       // of the DB inventory + a GitOps pointer scan (the scan also reaps ORPHANS), deduped by guid.
       const replaces = await resolveReplaceTargets({ db: ctx.db, registrations: ports.registrations }, req.stage, req.subdomain);

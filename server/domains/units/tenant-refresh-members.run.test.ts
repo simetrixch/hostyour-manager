@@ -6,6 +6,8 @@ import type { Cleanup } from "../../executor/types.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { buildUnitStepName } from "./tenant-builds.ts";
 import { DEPLOY_URL, GUID, HELD, HeldImagesGoneArgo, MANIFEST_YAML, NEW, OLD, OLDER, RELEASED, RELEASED_BEFORE, SHA, db, planCtx, planned, ports, rendering, resolved, seedTenant, staleMembers, stepCtx, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
+import type { TenantOnboardPorts } from "./create-tenant.run.ts";
+import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 
 // tenant-refresh-members: the plan resolves the members again off the product's manifest and names
 // what changes, refuses a tenant with nothing to change or a changed member set, and the steps write
@@ -66,6 +68,30 @@ describe("tenant-refresh-members", () => {
     await expect(watch.run(stepCtx(p, [], []))).resolves.toBeUndefined();
     await cleanups[0]!.run(stepCtx(p, [], []));
     expect((await prt.registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual({ erp: { "example-engine": OLD } });
+  });
+
+  // The bundle the tenant runs is read off its own repository at the release it was built from, and
+  // the engines a run puts the tenant on have to be of the line that bundle declares (engine-line.ts).
+  const bundleWith = (prt: TenantOnboardPorts, line: string): TenantOnboardPorts => {
+    (prt.repo as FakeRepoReader).scriptFor("https://github.com/acme-org/example-apps-acme.git", { resolvedSha: SHA, files: { "apps.yaml": `apps:\n  - name: erp\n    title: ERP\nengine:\n  build: example-engine\n  line: "${line}"\n` } });
+    return prt;
+  };
+
+  it("plans versions on the line the running bundle declares, reading it off the bundle's own release", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    const prt = bundleWith(ports(resolved.members, { files: RELEASED }), "0.1");
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEW } }, planCtx());
+    expect(out.outcome).toBe("planned");
+    expect((prt.repo as FakeRepoReader).clones.map((c) => `${c.repoURL}@${c.ref}`)).toContain("https://github.com/acme-org/example-apps-acme.git@0.1.0-stable-20260101000000");
+  });
+
+  it("PLANTED DEFECT: refuses versions that would put the tenant's engine on another line than its bundle", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    const prt = bundleWith(ports(resolved.members, { files: RELEASED }), "0.2");
+    await expect(makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEW } }, planCtx()))
+      .rejects.toThrow(`tenant acme cannot run these versions: the apps bundle is written for example-engine 0.2, and erp would run example-engine ${NEW}, of another line`);
   });
 
   it("moves a tenant whose held images are gone onto the versions chosen: the versions are written before any wait", async () => {

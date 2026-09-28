@@ -14,7 +14,7 @@ import { makeTenantAppsRepoDef, type TenantAppsRepoParams } from "./tenant-apps-
 import { mergeAppsManifest } from "./tenant-apps-tree.ts";
 import { DEPLOY_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, TEMPLATE_FILES, TEMPLATE_MANIFEST, TEMPLATE_URL, TENANT_URL, UNIT, deployManifest, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
-import { TenantRegistrations } from "./tenant-registrations.ts";
+import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { ports as onboardPorts, FakeBuildPlaneClusterReader, type FakeSeeder } from "./onboard.fixture.ts";
 import { testMembers, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
@@ -164,6 +164,34 @@ function pass(h: Harness, p: TenantAppsRepoParams): (name: string) => Step {
 function step(h: Harness, p: TenantAppsRepoParams, name: string) {
   return pass(h, p)(name);
 }
+
+describe("tenant-apps-repo planStream — the engine line of the bundle it builds", () => {
+  // A tenant that holds example-engine at `tag`, and a catalog written for `line`: the unit is not
+  // registered yet, so the bundle this run builds is the catalog's.
+  const tenantOn = (tag: string, line: string): Harness => {
+    const repo = new FakePlatformRepo();
+    const registration = TenantRegistrationSchema.parse({
+      cluster: "s1", subdomain: SUBDOMAIN, members: testMembers([{ name: "erp" }]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"),
+      approvedTags: { erp: { "example-engine": tag } },
+    });
+    const w = tenantRegistrationWrite("prod", GUID, registration);
+    repo.seed(repo.booksBranch, w.path, w.content);
+    const h = harness({ ports: { registrations: new TenantRegistrations(repo) } });
+    h.deployReader.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: { ...TEMPLATE_FILES, "apps.yaml": `${TEMPLATE_APPS_YAML}engine:\n  build: example-engine\n  line: "${line}"\n` } });
+    return h;
+  };
+
+  it("plans a bundle written for the line the tenant's engines run on", async () => {
+    expect((await plan(tenantOn("0.3.004-stable-20260928080242-a1b2c3d", "0.3"))).outcome).toBe("planned");
+  });
+
+  it("PLANTED DEFECT: refuses a bundle written for another line than the tenant's engines", async () => {
+    const r = await plan(tenantOn("0.3.004-stable-20260928080242-a1b2c3d", "0.4"));
+    expect(r.outcome).toBe("rejected");
+    if (r.outcome !== "rejected") return;
+    expect(r.summary).toContain("the apps bundle is written for example-engine 0.4, and erp would run example-engine 0.3.004-stable-20260928080242-a1b2c3d, of another line");
+  });
+});
 
 describe("tenant-apps-repo planStream — the refusals, each a sentence", () => {
   it("refuses without the GitHub App, naming the three config keys", async () => {

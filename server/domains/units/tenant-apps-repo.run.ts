@@ -13,6 +13,7 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema, type TenantAppsRepoRuntime } from "./tenant-apps-steps.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
+import { builtBundleEngine, engineLineRefusal } from "./engine-line.ts";
 
 // The "tenant-apps-repo" Run: the tenant's OWN apps repository for a STANDING tenant — the same
 // three steps tenant-create runs on the way (tenant-apps-steps.ts), between the build plane's
@@ -131,6 +132,12 @@ export function makeTenantAppsRepoDef(ports: TenantOnboardPorts): RunDefinition<
       const master = resolveMasterCluster(ctx.db);
       const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen, spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") return refuse(resolved.why);
+      // The engines the tenant holds, beside the bundle this run builds (engine-line.ts): its own
+      // repository at its head where the unit stands registered, the catalog where it does not.
+      const standing = await ports.registrations.readTenant(req.stage, req.guid);
+      const standingRepoURL = resolved.unit.registered ? tenantAppsRepoURL(resolved.unit.org, resolved.unit.templateBuild, req.subdomain) : undefined;
+      const lineRefusal = engineLineRefusal(await builtBundleEngine(ports, standingRepoURL, resolved.unit.engine, ctx), standing?.entry.approvedTags ?? {});
+      if (lineRefusal !== null) return refuse(lineRefusal);
       const unit = tenantAppsUnit(resolved.unit.templateBuild, req.subdomain);
       const params: TenantAppsRepoParams = {
         subdomain: req.subdomain, guid: req.guid, stage: req.stage, apps: chosen, owner: req.owner ?? req.subdomain,

@@ -33,6 +33,7 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { customerHostProblem, replacementSentence, ReplacedRecord } from "./own-domain-records.ts";
 import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace, type WebsiteDomainPorts } from "./website-domain.ts";
+import { builtBundleEngine, newMembersRefusal, throwEngineLineRefusal } from "./engine-line.ts";
 
 // The "tenant-add-app" Run. The subset sibling of
 // create-tenant: it fans ONE new app into a LIVE tenant. It shares create-tenant's streaming-plan
@@ -487,6 +488,8 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       // standing members plus this one app, so exactly one entry of the outcome is it.
       const newMember = outcome.memberRecords.find((m) => m.name === req.app);
       if (!newMember) throw errValidation(`the validated fan-out has no member for app "${req.app}" — the tenant product's manifest does not build one`);
+      // The bundle this run builds, beside the new app's engines at their stage pins (engine-line.ts).
+      throwEngineLineRefusal(await newMembersRefusal({ engine: await builtBundleEngine(ports, hasBundle ? current.entry.appsRepo : undefined, resolved.unit.engine, ctx), held: current.entry.approvedTags, newMembers: [newMember], pinned: (chart) => ports.registrations.listPinnedBuilds(tc.stage, chart) }), `app "${req.app}" cannot be added to tenant ${tc.subdomain}`);
       const expectedApps = [memberApplication(tc.guid, req.app, tc.stage)];
       // Freeze the ensure-images set for the SUBSET render (the trio + the new app), filtered to
       // the tenant cluster's registry host — the already-live members' images are provably present.

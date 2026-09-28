@@ -8,10 +8,12 @@
 // TenantRegistrationSchema.parse re-validates as a belt.
 import { and, eq } from "drizzle-orm";
 import type { Step } from "../../executor/types.ts";
+import type { Stage } from "../../../shared/enums.ts";
+import { mintTenantGuid } from "../../kernel/ids.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import type { TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
-import { errValidation } from "../../kernel/errors.ts";
+import { errInternal, errValidation } from "../../kernel/errors.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { probeDeploy } from "./tenant-probes.ts";
 import { stagePinsOf } from "./tenant-versions.ts";
@@ -73,4 +75,22 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
       ctx.log("meta", `tenant registration committed to the deploy repository (${commit}) — the ArgoCD on ${p.cluster} will now generate + sync the fan-out`);
     },
   };
+}
+
+const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely
+
+/** Mint a guid the registrations tree does not already hold at this stage. The 32^12 CSPRNG space makes
+ *  a first-try free guid overwhelmingly likely; exhausting the bounded retry is INTERNAL (never reuse). */
+export async function mintFreeGuid(ports: TenantOnboardPorts, stage: Stage): Promise<string> {
+  for (let i = 0; i < GUID_MINT_ATTEMPTS; i++) {
+    const candidate = mintTenantGuid();
+    // The question is only "does a registrations/<candidate>/<stage>.yaml stand", so this reads through
+    // the TOLERANT scan and treats ABSENT as the one answer that means the guid is FREE. The strict
+    // readTenant THROWS on a body it cannot parse — failing an entire create-tenant plan over a
+    // candidate it should simply have discarded — while its null covers only an absent file.
+    // "unreadable" means the guid IS taken (a file stands at that path), so the loop moves on and the
+    // guid is never handed out twice.
+    if ((await ports.registrations.scanTenant(stage, candidate)).status === "absent") return candidate;
+  }
+  throw errInternal(`could not mint a free tenant guid after ${GUID_MINT_ATTEMPTS} attempts`);
 }
