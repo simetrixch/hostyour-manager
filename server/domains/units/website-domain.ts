@@ -6,9 +6,13 @@
 // to change when the tenant moves. The hosts the tenant's own domain already holds belong to
 // tenant-set-own-domain: a website served there writes and removes no record of its own.
 import type { Cleanup, Step } from "../../executor/types.ts";
-import { loadTenantCluster } from "./lifecycle.ts";
-import { ownDomainHosts, tenantOwnHosts } from "#unit/shared/unit-host.ts";
-import { provisionOwnDomainRecord, removeOwnDomainRecord, waitForAnswer, type AnswerWaitPorts, type RecordPorts } from "./own-domain-records.ts";
+import type { Db } from "../../db/client.ts";
+import { loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
+import { ownDomainHosts, tenantOwnHosts, tenantZone } from "#unit/shared/unit-host.ts";
+import {
+  provisionOwnDomainRecord, recordsToReplace, removeOwnDomainRecord, restoreReplacedRecords, waitForAnswer,
+  type AnswerWaitPorts, type RecordPorts, type ReplacedRecord,
+} from "./own-domain-records.ts";
 import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { STAGE } from "../../../shared/enums.ts";
@@ -49,20 +53,30 @@ export async function otherTenantsWebsiteHosts(registrations: Pick<TenantRegistr
   return hosts;
 }
 
-/** On abort: remove the records of `hosts`, where this installation wrote them for the tenant. */
-export function removeWebsiteRecordsCleanup(ports: WebsiteDomainPorts, tenantId: string, hosts: readonly string[]): Cleanup {
+/** The records standing at a website's `hosts` that its run replaces, read when the run is planned. */
+export async function websiteRecordsToReplace(db: Db, ports: WebsiteDomainPorts, tc: TenantCluster, hosts: readonly string[], signal?: AbortSignal): Promise<ReplacedRecord[]> {
+  if (hosts.length === 0) return [];
+  const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
+  return recordsToReplace(db, ports, tc.guid, tenantZone(tc.subdomain, tc.stage, apex), hosts, signal);
+}
+
+/** On abort: remove the records of `hosts`, where this installation wrote them for the tenant, and write
+ *  back the records the run replaced there. */
+export function removeWebsiteRecordsCleanup(ports: WebsiteDomainPorts, tenantId: string, hosts: readonly string[], replacing: readonly ReplacedRecord[]): Cleanup {
   return {
     name: "remove-website-records",
-    title: `Remove the DNS records of ${hosts.join(", ") || "no host"}`,
+    title: `Remove the DNS records of ${hosts.join(", ") || "no host"}${replacing.length ? ", and write back the records they replaced" : ""}`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, tenantId);
       for (const host of hosts) await removeOwnDomainRecord(ctx, ports, tc, host);
+      await restoreReplacedRecords(ctx, ports, replacing);
     },
   };
 }
 
-/** Point every host of `hosts` at the tenant's zone. An abort removes them again. */
-export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId: string, hosts: readonly string[]): Step {
+/** Point every host of `hosts` at the tenant's zone, replacing the records the plan froze in `replacing`.
+ *  An abort removes them again and writes the replaced records back. */
+export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId: string, hosts: readonly string[], replacing: readonly ReplacedRecord[]): Step {
   return {
     name: "provision-website-records",
     title: "Point the website's hosts at the tenant's zone",
@@ -72,9 +86,9 @@ export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId:
         return;
       }
       const tc = loadTenantCluster(ctx.db, tenantId);
-      ctx.registerCleanup(removeWebsiteRecordsCleanup(ports, tenantId, hosts));
+      ctx.registerCleanup(removeWebsiteRecordsCleanup(ports, tenantId, hosts, replacing));
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
-      for (const host of hosts) await provisionOwnDomainRecord(ctx, ports, tc, apex, host);
+      for (const host of hosts) await provisionOwnDomainRecord(ctx, ports, tc, apex, host, replacing);
     },
   };
 }

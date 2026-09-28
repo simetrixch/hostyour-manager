@@ -90,6 +90,15 @@ export class CloudflareDns implements DnsProvider {
     return { deleted: existing.length };
   }
 
+  async createRecord(input: { name: string; type: DnsRecordType; content: string; signal?: AbortSignal }): Promise<void> {
+    const zone = await this.zoneId(input.name, input.signal);
+    await this.send<CfRecord>(`/zones/${zone}/dns_records`, {
+      method: "POST",
+      body: { type: input.type, name: input.name, content: input.content, ttl: 1, proxied: false },
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+  }
+
   async readRecordContent(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string | null> {
     return (await this.listRecordContents(input))[0] ?? null;
   }

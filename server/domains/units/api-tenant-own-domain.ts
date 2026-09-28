@@ -37,6 +37,6 @@ export function registerTenantOwnDomainRoutes(app: Hono<AppEnv>, deps: TenantOwn
       tenantId: id, ...hosts, previous: now?.ownDomain, previousRedirects: now?.ownDomainRedirects,
     });
     if (!parsed.success) throw errValidation(`invalid own-domain request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    return c.json(await executor.plan("tenant-set-own-domain", parsed.data), 201);
+    return c.json(await executor.planStreamed("tenant-set-own-domain", parsed.data), 201);
   });
 }

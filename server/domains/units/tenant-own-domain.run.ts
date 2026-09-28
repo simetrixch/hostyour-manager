@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import type { Cleanup, RunDefinition, Step } from "../../executor/types.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
-import { errValidation } from "../../kernel/errors.ts";
+import { errInternal, errValidation } from "../../kernel/errors.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
@@ -10,7 +10,7 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
 import { tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
 import type { TenantSetRoutingPorts } from "./tenant-routing.run.ts";
-import { customerHostProblem, provisionOwnDomainRecord, removeOwnDomainRecord, waitForAnswer } from "./own-domain-records.ts";
+import { customerHostProblem, provisionOwnDomainRecord, recordsToReplace, removeOwnDomainRecord, replacementSentence, restoreReplacedRecords, waitForAnswer, ReplacedRecord } from "./own-domain-records.ts";
 import { otherTenantsWebsiteHosts, tenantWebsiteHosts } from "./website-domain.ts";
 
 /** What a failed wait tells the operator to do next. */
@@ -51,6 +51,9 @@ export const TenantSetOwnDomainParams = z
      *  tenant that has moved since, and an abort records them again. */
     previous: ownDomain,
     previousRedirects: z.array(publicFqdn).default([]),
+    /** The records standing at the new hosts that this run replaces, frozen by the plan; an abort
+     *  writes them back. */
+    replacing: z.array(ReplacedRecord).default([]),
   })
   .superRefine((p, ctx) => {
     if (p.ownDomain === "" && p.ownDomainRedirects.length > 0) ctx.addIssue({ code: "custom", path: ["ownDomainRedirects"], message: "redirect hosts need an own domain to redirect to" });
@@ -91,7 +94,8 @@ function restoreOwnDomainCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
 }
 
 /** On abort: remove the requested hosts' records — except those the tenant's recorded hosts name after
- *  all. Runs after restore-own-domain (cleanups run in reverse order). */
+ *  all — and write back the records the run replaced at the hosts it removed. Runs after
+ *  restore-own-domain (cleanups run in reverse order). */
 function removeNewRecordCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwnDomainParams): Cleanup {
   return {
     name: "remove-new-own-domain-record",
@@ -102,6 +106,7 @@ function removeNewRecordCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwnD
       for (const host of ownHosts(p.ownDomain, p.ownDomainRedirects)) {
         if (!used.has(host)) await removeOwnDomainRecord(ctx, ports, tc, host);
       }
+      await restoreReplacedRecords(ctx, ports, p.replacing.filter((r) => !used.has(r.name)));
     },
   };
 }
@@ -120,7 +125,7 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         ctx.registerCleanup(removeNewRecordCleanup(ports, p));
         const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
-        for (const host of ownHosts(p.ownDomain, p.ownDomainRedirects)) await provisionOwnDomainRecord(ctx, ports, tc, apex, host);
+        for (const host of ownHosts(p.ownDomain, p.ownDomainRedirects)) await provisionOwnDomainRecord(ctx, ports, tc, apex, host, p.replacing);
       },
     },
     {
@@ -173,7 +178,13 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
     kind: "tenant-set-own-domain",
     paramsSchema: TenantSetOwnDomainParams,
     mutating: true,
-    plan: async (params, { db }) => {
+    plan: () => {
+      throw errInternal("tenant-set-own-domain is planned via planStream, not plan()");
+    },
+    // Streamed so the plan can freeze the records it replaces into the params, where the abort reads them.
+    planStream: async (rawParams, ctx) => {
+      const params = TenantSetOwnDomainParams.parse(rawParams);
+      const db = ctx.db;
       const tc = loadTenantCluster(db, params.tenantId);
       const row = db.select({ suspended: tenants.suspended, status: tenants.status }).from(tenants).where(eq(tenants.id, params.tenantId)).get();
       if (row?.status === "provisioning") throw errValidation(`tenant ${tc.subdomain} is still provisioning — finish or remove its create-tenant run before setting its own domain`);
@@ -193,8 +204,10 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       const newHost = params.ownDomain || zone;
       const oldRecords = retiredHosts(params);
       const redirects = params.ownDomainRedirects;
-      const steps = tenantSetOwnDomainSteps(ports, params);
-      return {
+      const replacing = await recordsToReplace(db, ports, tc.guid, zone, ownHosts(params.ownDomain, redirects), ctx.signal);
+      const frozen: TenantSetOwnDomainParams = { ...params, replacing };
+      const steps = tenantSetOwnDomainSteps(ports, frozen);
+      return { outcome: "planned", params: frozen, plan: {
         kind: "tenant-set-own-domain",
         targetKind: "tenant",
         targetId: params.tenantId,
@@ -203,13 +216,13 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
           `${params.ownDomain ? `point ${ownHosts(params.ownDomain, redirects).join(", ")} at ${zone}, ` : ""}record it on the registration and the row, wait until ${tenantMemberUrl("path", tc.identityProvider, tc.stage, tc.subdomain, apex, params.ownDomain)}/ answers with a 2xx` +
           `${redirects.length ? ` and ${redirects.map((h) => `https://${h}/`).join(", ")} with a redirect` : ""}` +
           `${oldRecords.length ? `, then remove the records of ${oldRecords.join(", ")}` : ""}. The product's charts must serve ${newHost}${redirects.length ? " and its redirect hosts" : ""}, with certificates, for the wait to end. ` +
-          `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto ${zone}) BEFORE approving: from the moment the domain is recorded, the tenant answers only there.`,
+          `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto ${zone}) BEFORE approving: from the moment the domain is recorded, the tenant answers only there.${replacementSentence(replacing)}`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
         warnings: [],
         requiredSecrets: [],
-      };
+      } };
     },
     steps: (params) => tenantSetOwnDomainSteps(ports, params),
     cleanups: (params) => [removeNewRecordCleanup(ports, params), restoreOwnDomainCleanup(ports, params)],

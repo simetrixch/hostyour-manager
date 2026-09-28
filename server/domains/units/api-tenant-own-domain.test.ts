@@ -24,7 +24,7 @@ describe("POST /api/tenants/:id/own-domain", () => {
       routing: "path", ownDomain: "www.customer.test", ownDomainRedirects: ["customer.test"], suspended: false, status: "active",
     }).run();
     const planned: unknown[] = [];
-    const executor = { plan: async (_kind: string, params: unknown) => { planned.push(params); return { runId: "run_1" }; } } as unknown as Executor;
+    const executor = { planStreamed: async (_kind: string, params: unknown) => { planned.push(params); return { runId: "run_1" }; } } as unknown as Executor;
     const app = new Hono<AppEnv>();
     app.onError((err, c) => { const { status, body } = toApiError(err); return c.json(body, status as 400); });
     registerTenantOwnDomainRoutes(app, { db: h.db, executor, tenantEnabled: true });
@@ -36,14 +36,14 @@ describe("POST /api/tenants/:id/own-domain", () => {
     const r = route();
     expect((await r.post({ domain: " Shop.Test " })).status).toBe(201);
     expect(r.planned).toEqual([{
-      tenantId: "tnt_1", ownDomain: "www.shop.test", ownDomainRedirects: ["shop.test"], previous: "www.customer.test", previousRedirects: ["customer.test"],
+      tenantId: "tnt_1", ownDomain: "www.shop.test", ownDomainRedirects: ["shop.test"], previous: "www.customer.test", previousRedirects: ["customer.test"], replacing: [],
     }]);
   });
 
   it("returns the tenant to its zone for an empty domain", async () => {
     const r = route();
     expect((await r.post({ domain: "" })).status).toBe(201);
-    expect(r.planned).toEqual([{ tenantId: "tnt_1", ownDomain: "", ownDomainRedirects: [], previous: "www.customer.test", previousRedirects: ["customer.test"] }]);
+    expect(r.planned).toEqual([{ tenantId: "tnt_1", ownDomain: "", ownDomainRedirects: [], previous: "www.customer.test", previousRedirects: ["customer.test"], replacing: [] }]);
   });
 
   it("refuses a domain typed with www, and a body without a domain", async () => {

@@ -42,6 +42,9 @@ export interface DnsProvider {
    *  A TXT content is answered as the ONE text the record is, however the provider stores it, and
    *  `deleteRecord` compares a content against the same text. */
   listRecordContents(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string[]>;
+  /** Create ONE record beside any others of that name and type — what an abort writes back where a
+   *  run deleted several address records of a customer's host. Never proxied, as upsertRecord. */
+  createRecord(input: { name: string; type: DnsRecordType; content: string; signal?: AbortSignal }): Promise<void>;
 }
 
 /** A name no zone of this provider's token covers: the token is scoped elsewhere, or the domain is

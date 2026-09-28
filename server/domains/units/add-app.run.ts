@@ -31,8 +31,8 @@ import { stagePinsOf } from "./tenant-versions.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
-import { customerHostProblem } from "./own-domain-records.ts";
-import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, type WebsiteDomainPorts } from "./website-domain.ts";
+import { customerHostProblem, replacementSentence, ReplacedRecord } from "./own-domain-records.ts";
+import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace, type WebsiteDomainPorts } from "./website-domain.ts";
 
 // The "tenant-add-app" Run. The subset sibling of
 // create-tenant: it fans ONE new app into a LIVE tenant. It shares create-tenant's streaming-plan
@@ -105,6 +105,8 @@ export const AddAppParams = z.object({
   website: z.object({ folder: appName, site: siteId, domain: publicFqdn }).optional(),
   // The website's hosts whose records this run writes: none where the tenant's own domain holds them.
   websiteRecordHosts: z.array(publicFqdn).default([]),
+  // The records standing at those hosts that this run replaces; an abort writes them back.
+  websiteReplacing: z.array(ReplacedRecord).default([]),
 });
 export type AddAppParams = z.infer<typeof AddAppParams>;
 
@@ -388,7 +390,7 @@ function websiteSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
   const website = p.website;
   if (!website) return [];
   return [
-    provisionWebsiteRecordsStep(ports, p.tenantId, p.websiteRecordHosts),
+    provisionWebsiteRecordsStep(ports, p.tenantId, p.websiteRecordHosts, p.websiteReplacing),
     { name: "wait-website", title: `Wait until the website answers at www.${website.domain}`, run: (ctx) => waitForWebsite(ctx, ports, website.domain, "The website's member stands: retry this step once its records and certificate are in place, or remove the website.") },
   ];
 }
@@ -528,13 +530,14 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
         seedUsers: current.entry.seedUsers,
         ...(website ? { website } : {}),
         websiteRecordHosts: website ? websiteRecordHosts(website.domain, current.entry) : [],
+        websiteReplacing: website ? await websiteRecordsToReplace(ctx.db, ports, tc, websiteRecordHosts(website.domain, current.entry), ctx.signal) : [],
       };
       const stepDefs = addAppSteps(ports, params);
       const plan: Plan = {
         kind: "tenant-add-app",
         targetKind: "tenant",
         targetId: tc.tenantId,
-        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at deploy repository ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${websitePlanLine(params)}${hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.`,
+        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at deploy repository ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${websitePlanLine(params)}${hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.${replacementSentence(params.websiteReplacing)}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
@@ -544,7 +547,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       return { outcome: "planned", params, plan };
     },
     steps: (params) => addAppSteps(ports, params),
-    cleanups: (params) => [revertAppendCleanup(ports, params), removeWebsiteRecordsCleanup(ports, params.tenantId, params.websiteRecordHosts)],
+    cleanups: (params) => [revertAppendCleanup(ports, params), removeWebsiteRecordsCleanup(ports, params.tenantId, params.websiteRecordHosts, params.websiteReplacing)],
     // The rollback's precondition: the drop above is destructive by cascade (the member's databases go
     // with its ServiceClaim), so it must never fire for a run whose NEW member has meanwhile gone live.
     assertAbortable: (params, deps) => assertAddAppAbortable(ports, params, deps.db),

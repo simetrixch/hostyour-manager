@@ -4,7 +4,7 @@ import { tenantZone } from "#unit/shared/unit-host.ts";
 import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { makeAddAppDef } from "./add-app.run.ts";
 import { makeRemoveAppDef } from "./tenant-lifecycle.run.ts";
-import { makeTenantSetOwnDomainDef } from "./tenant-own-domain.run.ts";
+import { makeTenantSetOwnDomainDef, TenantSetOwnDomainParams } from "./tenant-own-domain.run.ts";
 import { CreateTenantRequest } from "./create-tenant.run.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { eq } from "drizzle-orm";
@@ -83,6 +83,22 @@ describe("add-app for a website", () => {
     await expect(makeAddAppDef(ports({ registrations: moved }, WEBSITE_APPS)).planStream!(WEBSITE, planCtx())).rejects.toThrow(/example\.ch is already the domain of website "old-site"/);
   });
 
+  it("lists an address record at a website host in the plan, replaces it with the CNAME, and writes it back on abort", async () => {
+    seedWebsiteTenant();
+    const dns = new FakeDnsProvider();
+    dns.seed("www.example.ch", "A", "192.0.2.10");
+    const result = await makeAddAppDef(ports({ dns }, WEBSITE_APPS)).planStream!(WEBSITE, planCtx());
+    if (result.outcome !== "planned") throw new Error("the website was not planned");
+    expect(result.params.websiteReplacing).toEqual([{ name: "www.example.ch", type: "A", content: "192.0.2.10" }]);
+    expect(result.plan.summary).toContain("It deletes A www.example.ch → 192.0.2.10, which this installation did not write, and an abort writes it back.");
+    const p = params({ website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["www.example.ch", "example.ch"], websiteReplacing: result.params.websiteReplacing });
+    const def = makeAddAppDef(ports({ dns }));
+    await def.steps(p).find((s) => s.name === "provision-website-records")!.run(ctx(p, "provision-website-records", []));
+    expect([dns.record("www.example.ch", "A"), dns.record("www.example.ch", "CNAME")]).toEqual([undefined, tenantZone("acme", "prod", "example.com")]);
+    await def.cleanups!(p).find((c) => c.name === "remove-website-records")!.run(ctx(p, "remove-website-records", []));
+    expect([dns.record("www.example.ch", "A"), dns.record("www.example.ch", "CNAME"), dns.record("example.ch", "CNAME")]).toEqual(["192.0.2.10", undefined, undefined]);
+  });
+
   it("writes no record for a website on the tenant's own domain, whose records tenant-set-own-domain holds", async () => {
     seedWebsiteTenant();
     const own = tenantWith([], { ownDomain: "www.example.ch", ownDomainRedirects: ["example.ch"] });
@@ -149,7 +165,7 @@ describe("add-app for a website", () => {
     }
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }], { ownDomain: "www.example.ch", ownDomainRedirects: ["example.ch"] });
     const probe = new FakePublicProbe({ "https://www.example.org/auth/": OK, "https://example.org/": REDIRECTS });
-    const p = { tenantId: "tnt_1", ownDomain: "www.example.org", ownDomainRedirects: ["example.org"], previous: "www.example.ch", previousRedirects: ["example.ch"] };
+    const p = TenantSetOwnDomainParams.parse({ tenantId: "tnt_1", ownDomain: "www.example.org", ownDomainRedirects: ["example.org"], previous: "www.example.ch", previousRedirects: ["example.ch"] });
     const retire = makeTenantSetOwnDomainDef(ports({ dns, probe, registrations })).steps(p).find((s) => s.name === "retire-previous-own-domain")!;
     await retire.run(ctx(params(), retire.name, []));
     expect([dns.record("www.example.ch", "CNAME"), dns.record("example.ch", "CNAME")]).toEqual(["acme.example.com", "acme.example.com"]);

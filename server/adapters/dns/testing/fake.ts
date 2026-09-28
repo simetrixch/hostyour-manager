@@ -10,6 +10,8 @@ export class FakeDnsProvider implements DnsProvider {
   private readonly records = new Map<string, string[]>();
   /** Every upsert, in order — a test asserts the one record per unit and its content. */
   readonly upserts: Array<{ name: string; type: DnsRecordType; content: string; created: boolean }> = [];
+  /** Every create, in order — the records an abort wrote back. */
+  readonly creates: Array<{ name: string; type: DnsRecordType; content: string }> = [];
   /** Every delete call, in order, with the content it was narrowed to and how many records it removed. */
   readonly deletes: Array<{ name: string; type: DnsRecordType; content?: string; deleted: number }> = [];
   /** When set, every call throws it — the API-failure path (an unreachable/refusing provider). */
@@ -39,12 +41,17 @@ export class FakeDnsProvider implements DnsProvider {
     return this.records.get(this.key(name, type))?.[0];
   }
 
+  private refuseBesideCname(name: string, type: DnsRecordType): void {
+    const own = this.key(name, type);
+    const beside = [...this.records.keys()].some((key) => key !== own && key.endsWith(` ${name}`) && (type === "CNAME" || key.startsWith("CNAME ")));
+    if (beside) throw new Error(`a CNAME stands alone under its name, and ${name} already carries another record`);
+  }
+
   async upsertRecord(input: { name: string; type: DnsRecordType; content: string }): Promise<{ created: boolean }> {
     if (this.failWith) throw this.failWith;
     this.zoneOf(input.name);
     const own = this.key(input.name, input.type);
-    const beside = [...this.records.keys()].some((key) => key !== own && key.endsWith(` ${input.name}`) && (input.type === "CNAME" || key.startsWith("CNAME ")));
-    if (beside) throw new Error(`a CNAME stands alone under its name, and ${input.name} already carries another record`);
+    this.refuseBesideCname(input.name, input.type);
     const created = !this.records.has(own);
     this.records.set(own, [input.content]);
     this.upserts.push({ name: input.name, type: input.type, content: input.content, created });
@@ -62,6 +69,15 @@ export class FakeDnsProvider implements DnsProvider {
     else this.records.set(key, kept);
     this.deletes.push({ name: input.name, type: input.type, ...(input.content === undefined ? {} : { content: input.content }), deleted });
     return { deleted };
+  }
+
+  async createRecord(input: { name: string; type: DnsRecordType; content: string }): Promise<void> {
+    if (this.failWith) throw this.failWith;
+    this.zoneOf(input.name);
+    this.refuseBesideCname(input.name, input.type);
+    const key = this.key(input.name, input.type);
+    this.records.set(key, [...(this.records.get(key) ?? []), input.content]);
+    this.creates.push({ name: input.name, type: input.type, content: input.content });
   }
 
   async readRecordContent(input: { name: string; type: DnsRecordType }): Promise<string | null> {

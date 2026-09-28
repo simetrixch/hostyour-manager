@@ -1,6 +1,9 @@
 // The records and the wait of a customer's own hosts: the tenant's own domain (tenant-set-own-domain)
 // and a website's domain (website-domain.ts). Each host gets a CNAME onto the tenant's zone, entered
 // into the book of DNS writes; a host in a zone nobody here manages is named for the operator to set.
+// An address record, or a CNAME this installation did not write, standing at such a host is replaced:
+// the plan lists it, the run deletes it, and an abort writes it back.
+import { z } from "zod";
 import { and, ne, notInArray } from "drizzle-orm";
 import type { StepCtx } from "../../executor/types.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
@@ -14,6 +17,7 @@ import { isTenantRecord, removeBookedRecord, tenantZone } from "#unit/server/uni
 import { tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
 import { sleep } from "#unit/server/release-cycle.ts";
 import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
+import { publicFqdn } from "../../../shared/consumer.ts";
 
 /** What writing and removing a record reads: the installation's DNS provider, where one is configured. */
 export type RecordPorts = Pick<TenantLifecyclePorts, "dns">;
@@ -47,9 +51,56 @@ export function customerHostProblem(db: Db, tenantId: string, host: string, apex
   return null;
 }
 
+/** A record that stood at a customer's host, written by nobody here: what a run replaces with its
+ *  CNAME, frozen into the run's params at plan time so that an abort can write it back. */
+export const ReplacedRecord = z.object({ name: publicFqdn, type: z.enum(["A", "AAAA", "CNAME"]), content: z.string().min(1) });
+export type ReplacedRecord = z.infer<typeof ReplacedRecord>;
+
+const ADDRESS_TYPES = ["A", "AAAA"] as const;
+
+/** The records a CNAME onto `zone` replaces at `hosts`: every A and AAAA record, and a CNAME pointing
+ *  elsewhere that the book of DNS writes does not carry. A record the book carries for another owner
+ *  is refused, never replaced. A host in a zone nobody here manages has none: its operator sets it. */
+export async function recordsToReplace(db: Db, ports: RecordPorts, guid: string, zone: string, hosts: readonly string[], signal?: AbortSignal): Promise<ReplacedRecord[]> {
+  if (!ports.dns) return [];
+  const replaced: ReplacedRecord[] = [];
+  for (const host of hosts) {
+    let cname: string | null;
+    try {
+      cname = await ports.dns.readRecordContent({ name: host, type: "CNAME", ...(signal ? { signal } : {}) });
+    } catch (e) {
+      if (e instanceof DnsZoneUnknownError) continue;
+      throw e;
+    }
+    if (cname !== null && cname !== zone && !isTenantRecord(db, host, guid)) {
+      const booked = findDnsWrite(db, { name: host, type: "CNAME" });
+      if (booked !== null) throw errValidation(`${host} stands as CNAME ${cname}, which this installation wrote for ${booked.owner.kind} ${booked.owner.name} — it is not tenant ${guid}'s to replace`);
+      replaced.push({ name: host, type: "CNAME", content: cname });
+    }
+    for (const type of ADDRESS_TYPES) {
+      for (const content of await ports.dns.listRecordContents({ name: host, type, ...(signal ? { signal } : {}) })) {
+        const booked = findDnsWrite(db, { name: host, type });
+        if (booked !== null) throw errValidation(`${host} carries the ${type} record ${content}, which this installation wrote for ${booked.owner.kind} ${booked.owner.name} — it is not tenant ${guid}'s to replace`);
+        replaced.push({ name: host, type, content });
+      }
+    }
+  }
+  return replaced;
+}
+
+/** The plan summary's sentence on the records the run replaces, or "" where it replaces none. The
+ *  summary is what the run screen shows before the approval. */
+export function replacementSentence(replacing: readonly ReplacedRecord[]): string {
+  if (replacing.length === 0) return "";
+  const records = replacing.map((r) => `${r.type} ${r.name} → ${r.content}`).join(", ");
+  return ` It deletes ${records}, which this installation did not write, and an abort writes ${replacing.length === 1 ? "it" : "them"} back.`;
+}
+
 /** Point `domain` at the tenant's zone, where this installation's DNS provider manages the domain's
- *  zone, and enter the write into the book. Where it does not, say which record the operator sets. */
-export async function provisionOwnDomainRecord(ctx: StepCtx, ports: RecordPorts, tc: TenantCluster, apex: string, domain: string): Promise<void> {
+ *  zone, and enter the write into the book. Where it does not, say which record the operator sets.
+ *  The records the plan froze in `replacing` are deleted first; any other record found there now was
+ *  not in the plan, and refuses. */
+export async function provisionOwnDomainRecord(ctx: StepCtx, ports: RecordPorts, tc: TenantCluster, apex: string, domain: string, replacing: readonly ReplacedRecord[]): Promise<void> {
   const zone = tenantZone(tc.subdomain, tc.stage, apex);
   const operatorSets = `set CNAME ${domain} → ${zone} at the provider of ${domain}; the wait below ends once the tenant answers there`;
   if (!ports.dns) {
@@ -66,8 +117,9 @@ export async function provisionOwnDomainRecord(ctx: StepCtx, ports: RecordPorts,
     }
     throw e;
   }
-  if (standing !== null && standing !== zone && !isTenantRecord(ctx.db, domain, tc.guid)) {
-    throw errValidation(`${domain} stands as CNAME ${standing}, and the book of DNS writes does not name it tenant ${tc.guid}'s — remove it at the provider first, or choose another domain`);
+  const planned = (type: ReplacedRecord["type"], content: string): boolean => replacing.some((r) => r.name === domain && r.type === type && r.content === content);
+  if (standing !== null && standing !== zone && !isTenantRecord(ctx.db, domain, tc.guid) && !planned("CNAME", standing)) {
+    throw errValidation(`${domain} stands as CNAME ${standing}, which the plan did not list and the book of DNS writes does not name tenant ${tc.guid}'s — plan the run again`);
   }
   if (standing === zone) {
     if (findDnsWrite(ctx.db, { name: domain, type: "CNAME" }) === null) {
@@ -77,8 +129,12 @@ export async function provisionOwnDomainRecord(ctx: StepCtx, ports: RecordPorts,
     return;
   }
   // A CNAME stands alone under its name, so an address record there goes first.
-  if ((await ports.dns.readRecordContent({ name: domain, type: "A", signal: ctx.signal })) !== null) {
-    throw errValidation(`${domain} carries an A record — a CNAME cannot stand beside it; remove it at the provider first`);
+  for (const type of ADDRESS_TYPES) {
+    for (const content of await ports.dns.listRecordContents({ name: domain, type, signal: ctx.signal })) {
+      if (!planned(type, content)) throw errValidation(`${domain} carries the ${type} record ${content}, which was not there when this run was planned — a CNAME cannot stand beside it; plan the run again`);
+      await ports.dns.deleteRecord({ name: domain, type, content, signal: ctx.signal });
+      ctx.log("meta", `${type} record ${domain} → ${content} deleted — an abort writes it back`);
+    }
   }
   const { created } = await ports.dns.upsertRecord({ name: domain, type: "CNAME", content: zone, signal: ctx.signal });
   recordDnsWrite(ctx.db, { name: domain, type: "CNAME", content: zone, act: standing === null ? "inserted" : "updated", owner: { kind: "tenant", name: tc.guid, stage: tc.stage }, runId: ctx.runId });
@@ -91,6 +147,23 @@ export async function provisionOwnDomainRecord(ctx: StepCtx, ports: RecordPorts,
 export async function removeOwnDomainRecord(ctx: StepCtx, ports: RecordPorts, tc: TenantCluster, domain: string): Promise<void> {
   if (!(await removeBookedRecord(ctx, { dns: ports.dns, owner: { kind: "tenant", name: tc.guid }, recordName: domain }))) {
     ctx.log("meta", `${domain} is not recorded as tenant ${tc.guid}'s own record — if it points at the tenant, remove it at its provider`);
+  }
+}
+
+/** On abort, after the tenant's own records are removed: write back every replaced record that no
+ *  longer stands. Where a CNAME stands at its host again, an address record cannot go beside it, and a
+ *  replaced CNAME would overwrite it, so that record is named and left. */
+export async function restoreReplacedRecords(ctx: StepCtx, ports: RecordPorts, replacing: readonly ReplacedRecord[]): Promise<void> {
+  if (!ports.dns || replacing.length === 0) return;
+  for (const r of replacing) {
+    if ((await ports.dns.listRecordContents({ name: r.name, type: r.type, signal: ctx.signal })).includes(r.content)) continue;
+    const cname = await ports.dns.readRecordContent({ name: r.name, type: "CNAME", signal: ctx.signal });
+    if (cname !== null) {
+      ctx.log("meta", `${r.name} stands as CNAME ${cname} — the replaced ${r.type} record → ${r.content} is not written back beside it; set it at the provider if it is wanted`);
+      continue;
+    }
+    await ports.dns.createRecord({ name: r.name, type: r.type, content: r.content, signal: ctx.signal });
+    ctx.log("meta", `${r.type} record ${r.name} → ${r.content} written back`);
   }
 }
 

@@ -9,8 +9,8 @@ import { ownDomainEntryProblem } from "#unit/shared/unit-host.ts";
 import { attestTenantTargetStep, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { validateTenant } from "./validate-tenant.ts";
-import { customerHostProblem, removeOwnDomainRecord } from "./own-domain-records.ts";
-import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts } from "./website-domain.ts";
+import { customerHostProblem, removeOwnDomainRecord, replacementSentence, ReplacedRecord } from "./own-domain-records.ts";
+import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace } from "./website-domain.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { WEBSITE_NEEDS_PATH, type AddAppPorts } from "./add-app.run.ts";
 
@@ -42,6 +42,8 @@ export const TenantSetWebsiteDomainParams = z.object({
    *  none of those the tenant's own domain holds. */
   recordHosts: z.array(publicFqdn).default([]),
   retiredHosts: z.array(publicFqdn).default([]),
+  /** The records standing at recordHosts that this run replaces; an abort writes them back. */
+  replacing: z.array(ReplacedRecord).default([]),
 });
 export type TenantSetWebsiteDomainParams = z.infer<typeof TenantSetWebsiteDomainParams>;
 
@@ -67,7 +69,7 @@ function restoreWebsiteDomainCleanup(ports: AddAppPorts, p: TenantSetWebsiteDoma
 function websiteDomainSteps(ports: AddAppPorts, p: TenantSetWebsiteDomainParams): Step[] {
   return [
     attestTenantTargetStep(ports, p.tenantId),
-    provisionWebsiteRecordsStep(ports, p.tenantId, p.recordHosts),
+    provisionWebsiteRecordsStep(ports, p.tenantId, p.recordHosts, p.replacing),
     {
       name: "write-website-domain",
       title: "Record the website's new domain and its member entry on the registration",
@@ -154,7 +156,8 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       const recordHosts = websiteRecordHosts(req.domain, current.entry);
       const kept = new Set(recordHosts);
       const retiredHosts = websiteRecordHosts(entry.domain, current.entry).filter((h) => !kept.has(h));
-      const params: TenantSetWebsiteDomainParams = { tenantId: tc.tenantId, app: req.app, domain: req.domain, previous: entry.domain, member, previousMember, recordHosts, retiredHosts };
+      const replacing = await websiteRecordsToReplace(ctx.db, ports, tc, recordHosts, ctx.signal);
+      const params: TenantSetWebsiteDomainParams = { tenantId: tc.tenantId, app: req.app, domain: req.domain, previous: entry.domain, member, previousMember, recordHosts, retiredHosts, replacing };
       const steps = websiteDomainSteps(ports, params);
       return {
         outcome: "planned",
@@ -169,7 +172,7 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
             `wait until https://www.${req.domain}/ answers and https://${req.domain}/ redirects` +
             `${retiredHosts.length ? `, then remove the records of ${retiredHosts.join(", ")}` : ""}. The website keeps its name ${req.app}. ` +
             `From the moment the new domain is recorded, the website answers only there. ` +
-            `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto the tenant's zone) BEFORE approving.`,
+            `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto the tenant's zone) BEFORE approving.${replacementSentence(replacing)}`,
           steps: steps.map((s) => ({ name: s.name, title: s.title })),
           targets: [],
           locks: tenantLocks(ports.registrations),
@@ -179,7 +182,7 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       };
     },
     steps: (params) => websiteDomainSteps(ports, params),
-    cleanups: (params) => [removeWebsiteRecordsCleanup(ports, params.tenantId, params.recordHosts), restoreWebsiteDomainCleanup(ports, params)],
+    cleanups: (params) => [removeWebsiteRecordsCleanup(ports, params.tenantId, params.recordHosts, params.replacing), restoreWebsiteDomainCleanup(ports, params)],
     // Refused once a previous host's record, which this installation wrote, is gone: the website then
     // stands on its new hosts alone, and the abort would move it back onto hosts that no longer point at it.
     assertAbortable: async (params) => {

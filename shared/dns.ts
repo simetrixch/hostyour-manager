@@ -18,7 +18,7 @@ import type { MailDnsRecord } from "./mail.ts";
  *  onboarding run kinds provision, onto their cluster's FQDN; TXT for the mail records of a sender
  *  domain (SPF, DKIM, DMARC); A only read and removed — the master's egress address, and an address
  *  record standing where a unit's CNAME belongs. Nothing else is ever written through this platform. */
-export const DNS_RECORD_TYPE = ["A", "CNAME", "TXT"] as const;
+export const DNS_RECORD_TYPE = ["A", "AAAA", "CNAME", "TXT"] as const;
 export type DnsRecordType = (typeof DNS_RECORD_TYPE)[number];
 
 /** What a row of the inventory may carry — the types above plus the PTR, which lives at the
