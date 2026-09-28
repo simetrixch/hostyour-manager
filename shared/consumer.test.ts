@@ -369,3 +369,23 @@ describe("TenantSpecSchema appsOrg (the owner a tenant's own repository is creat
     }
   });
 });
+
+describe("TenantSpecSchema libraryRepos (the product's libraries the boot writes the release kit into)", () => {
+  const spec = (over: Record<string, unknown> = {}): unknown => ({
+    members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }],
+    perApp: { engine: { chart: "charts/example-engine" }, front: { chart: "charts/example-ui" } },
+    ...over,
+  });
+
+  it("is an empty list where the deploy repository names none", () => {
+    expect(TenantSpecSchema.parse(spec()).libraryRepos).toEqual([]);
+  });
+
+  it("carries https clone URLs and refuses anything else", () => {
+    const repos = ["https://github.com/example/example-plugins.git", "https://github.com/example/example-testkit.git"];
+    expect(TenantSpecSchema.parse(spec({ libraryRepos: repos })).libraryRepos).toEqual(repos);
+    for (const bad of ["example/example-plugins", "git@github.com:example/example-plugins.git", "https://github.com/example/example-plugins"]) {
+      expect(TenantSpecSchema.safeParse(spec({ libraryRepos: [bad] })).success, `accepted ${bad}`).toBe(false);
+    }
+  });
+});

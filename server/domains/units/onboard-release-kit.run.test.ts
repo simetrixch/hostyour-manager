@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { injectReleaseKitStep, removeReleaseKit, syncReleaseKits } from "#unit/server/inject-release-kit.ts";
 import { DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
-import { RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "#unit/server/release-kit/release-kit.ts";
+import { RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS, RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
+import { gateReleaseWorkflow } from "./gates/release-workflow.ts";
 import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { errUpstream } from "../../kernel/errors.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
@@ -217,11 +218,72 @@ describe("syncReleaseKits at boot (a unit released by hand runs the kit that sta
     await syncReleaseKits({
       registrations: { listBuildRegistrations: async () => registered } as never, writer, version: "0.8.0", logger,
       credentialFor: async (repoURL) => { if (repoURL === LOST) throw new Error("no identity"); return "cred_x"; },
+      libraryRepos: async () => [], refuseWorkflow: () => null,
     });
     expect(writer.commits.map((c) => c.repoURL)).toEqual([OLD]);
     expect(writer.commits[0]!.message).toBe("chore(release-kit): sync platform release tooling [boot 0.8.0]");
     expect(writer.commits[0]!.remove).toEqual(["release/stale.sh"]);
     for (const f of RELEASE_KIT_FILES) expect(writer.filesFor(OLD)[f.path]).toBe(f.content);
     expect(failed).toEqual(["lost"]);
+  });
+
+  // The deploy repository's libraryRepos: repositories no registration names, synced the same way,
+  // each judged by G28 first because none of them was onboarded.
+  const refuseWorkflow = (found: string | null): string | null => {
+    const gate = gateReleaseWorkflow({ found });
+    return gate.status === "pass" ? null : `${gate.found}; ${gate.reason ?? ""}`;
+  };
+  const OWN_PUBLISH = "name: Release\non:\n  push:\n    tags: ['v*']\n  workflow_dispatch:\njobs: {}\n";
+
+  it("writes the kit into every listed library, refuses one whose own workflow stands where the kit's goes, and goes on past a failure", async () => {
+    const HAND_COPY = "https://github.com/x/plugins.git";
+    const OWN = "https://github.com/x/testkit.git";
+    const LOST = "https://github.com/x/lost-lib.git";
+    const FRESH = "https://github.com/x/fresh-lib.git";
+    const writer = new FakeRepoWriter();
+    writer.seed(HAND_COPY, "release/release.sh", "#!/usr/bin/env bash\n# a hand copy\n");
+    writer.seed(OWN, RELEASE_KIT_WORKFLOW.path, OWN_PUBLISH);
+    writer.seed(FRESH, "package.json", "{}\n");
+    const errors: { library?: string; reason?: string }[] = [];
+    const logger = { info: () => undefined, error: (o: { library?: string; reason?: string }) => errors.push(o) } as unknown as Logger;
+    await syncReleaseKits({
+      registrations: { listBuildRegistrations: async () => [] } as never, writer, version: "0.8.0", logger,
+      credentialFor: async (repoURL) => { if (repoURL === LOST) throw new Error("no identity"); return "cred_app"; },
+      libraryRepos: async () => [HAND_COPY, OWN, LOST, FRESH], refuseWorkflow,
+    });
+    expect(writer.commits.map((c) => c.repoURL)).toEqual([HAND_COPY, FRESH]);
+    for (const repo of [HAND_COPY, FRESH]) for (const f of RELEASE_KIT_FILES) expect(writer.filesFor(repo)[f.path]).toBe(f.content);
+    // The library's own workflow is left exactly as it stands, and the log says why, by name.
+    expect(writer.filesFor(OWN)[RELEASE_KIT_WORKFLOW.path]).toBe(OWN_PUBLISH);
+    expect(errors.find((e) => e.library === OWN)?.reason).toContain("the unit's own workflow (on: push, workflow_dispatch)");
+    expect(errors.map((e) => e.library)).toEqual([OWN, LOST]);
+  });
+
+  it("PLANTED DEFECT: without the gate, the library's own workflow would be replaced", async () => {
+    const OWN = "https://github.com/x/testkit.git";
+    const writer = new FakeRepoWriter();
+    writer.seed(OWN, RELEASE_KIT_WORKFLOW.path, OWN_PUBLISH);
+    const logger = { info: () => undefined, error: () => undefined } as unknown as Logger;
+    await syncReleaseKits({
+      registrations: { listBuildRegistrations: async () => [] } as never, writer, version: "0.8.0", logger,
+      credentialFor: async () => "cred_app", libraryRepos: async () => [OWN], refuseWorkflow: () => null,
+    });
+    expect(writer.filesFor(OWN)[RELEASE_KIT_WORKFLOW.path]).toBe(RELEASE_KIT_WORKFLOW.content);
+  });
+
+  it("syncs the units when the deploy repository names no library, and when its list cannot be read", async () => {
+    const UNIT = "https://github.com/x/unit.git";
+    for (const libraryRepos of [async (): Promise<string[]> => [], async (): Promise<string[]> => { throw new Error("clone failed"); }]) {
+      const writer = new FakeRepoWriter();
+      const errors: string[] = [];
+      const logger = { info: () => undefined, error: (_o: unknown, msg: string) => errors.push(msg) } as unknown as Logger;
+      await syncReleaseKits({
+        registrations: { listBuildRegistrations: async () => [{ unit: "unit", entry: { repoURL: UNIT } }] } as never, writer, version: "0.8.0", logger,
+        credentialFor: async () => "cred_x", libraryRepos, refuseWorkflow,
+      });
+      expect(writer.commits.map((c) => c.repoURL)).toEqual([UNIT]);
+      expect(errors.length).toBeLessThanOrEqual(1);
+      if (errors.length === 1) expect(errors[0]).toContain("libraryRepos could not be read");
+    }
   });
 });

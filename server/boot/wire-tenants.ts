@@ -46,7 +46,7 @@ import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantSetWebsiteDomainDef } from "../domains/units/tenant-website-domain.run.ts";
 import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-members.run.ts";
 import { makeTenantSetSenderDomainDef } from "../domains/units/tenant-sender-domain.run.ts";
-import { makeTenantAppsRepoDef } from "../domains/units/tenant-apps-repo.run.ts";
+import { makeTenantAppsRepoDef, readTenantSpec } from "../domains/units/tenant-apps-repo.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
 import { makeTenantPurgeDef } from "../domains/units/tenant-purge.run.ts";
@@ -97,6 +97,9 @@ export interface TenantFamily {
    *  is synchronous and the boot that awaits it is not. Undefined when the family is not configured —
    *  there is then no deploy repository to write into. */
   carryTrunkToBooksBranch?: () => Promise<void>;
+  /** The deploy repository's `tenant.libraryRepos` off the books branch, which the boot's kit sync
+   *  writes the release kit into. Undefined when the family is not configured. */
+  libraryRepos?: () => Promise<string[]>;
 }
 
 // ---- Tenant (multi-app) onboarding: the deploy repository + the manager-side HelmRenderer ----
@@ -366,5 +369,6 @@ export function buildTenantOnboarding(
   // through the very registrations the runs commit pointers with — all the same instances (and the same one
   // repoURL the appsets are rendered from) the runs use, never a second one.
   const versions = (db: Db, tenantId: string, signal?: AbortSignal): Promise<VersionsView> => readTenantVersions(onboardPorts, db, tenantId, signal);
-  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, versions, carryTrunkToBooksBranch };
+  const libraryRepos = async (): Promise<string[]> => (await readTenantSpec(onboardPorts, {}))?.libraryRepos ?? [];
+  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, versions, carryTrunkToBooksBranch, libraryRepos };
 }

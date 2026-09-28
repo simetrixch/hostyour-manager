@@ -53,6 +53,7 @@ import { ensureAppIdentityRow } from "../security/app-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { refreshAppTokens } from "#unit/server/app-token-refresh.ts";
 import { syncReleaseKits } from "#unit/server/inject-release-kit.ts";
+import { gateReleaseWorkflow } from "../domains/units/gates/release-workflow.ts";
 import { reapRegistry } from "./registry-reap.ts";
 import { tenantHeldPins } from "../domains/units/tenant-pins.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
@@ -89,10 +90,12 @@ export interface Wired {
    *  and then every 45 minutes. Never rejects — every failure is logged per unit. A no-op where the
    *  consumer family is not wired: there are then no build registrations. */
   refreshAppTokens: () => Promise<void>;
-  /** The current release kit written into the repository of every registered unit, where it differs
-   *  (plugins/unit/server/inject-release-kit.ts syncReleaseKits): a unit released by hand runs the kit
-   *  this Manager ships. boot.ts runs it once behind the listening server; the kit changes only with
-   *  a release, and a release boots the Manager. Never rejects — every failure is logged per unit. */
+  /** The current release kit written into the repository of every registered unit and of every library
+   *  the deploy repository names, where it differs (plugins/unit/server/inject-release-kit.ts
+   *  syncReleaseKits): a release made there by hand runs the kit this Manager ships. boot.ts runs it
+   *  once behind the listening server, after the deploy carry, so a library added to the deploy
+   *  repository's trunk is on the books branch it is read from; the kit changes only with a release,
+   *  and a release boots the Manager. Never rejects — every failure is logged per repository. */
   syncReleaseKits: () => Promise<void>;
   /** One prune of the central registry (server/boot/registry-reap.ts), on this server's database,
    *  credential store and GitHub App; its floor holds every carrier's pins, every plugin's, and every
@@ -408,6 +411,11 @@ export async function wire(): Promise<Wired> {
       ? () => syncReleaseKits({
         registrations, writer: consumerRepo, version: config.version, logger,
         credentialFor: (repoURL) => resolveRepoCredentialId({ repoURL, githubApp, owners: (org) => readOwnerIdentity(db.db, org), store }),
+        libraryRepos: units.libraryRepos ?? (async () => []),
+        refuseWorkflow: (found) => {
+          const gate = gateReleaseWorkflow({ found });
+          return gate.status === "pass" ? null : `${gate.found}; ${gate.reason ?? ""}`;
+        },
       })
       : async (): Promise<void> => undefined,
     reapRegistry: reapRegistryLater,

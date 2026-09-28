@@ -44,8 +44,11 @@ export async function boot(): Promise<void> {
   });
   wired.serveEmergencySocket();
   // The one slow act of boot runs behind the listening server, so /healthz answers from the first
-  // second and the liveness probe has nothing to kill (#166).
-  void wired.carryDeployTrunk();
+  // second and the liveness probe has nothing to kill (#166). The release kit this Manager ships
+  // follows it, into every registered unit's and every library's repository where it differs: once,
+  // behind the listener, and after the carry, because the libraries are read off the books branch the
+  // carry brings to the deploy repository's trunk. Neither rejects.
+  void wired.carryDeployTrunk().then(() => wired.syncReleaseKits());
   // ... and again every ten minutes, so a change on the deploy trunk reaches a standing tenant
   // without a boot or a plan (#169).
   scheduleDeployCarry(wired.carryDeployTrunk, logger);
@@ -54,9 +57,6 @@ export async function boot(): Promise<void> {
   // App can release at any hour, not only the one after its onboarding (#184).
   void wired.refreshAppTokens();
   scheduleAppTokenRefresh(wired.refreshAppTokens, logger);
-  // The release kit this Manager ships, into every registered unit's repository where it differs:
-  // once, behind the listener — a unit released by hand runs the kit that stands in its repository.
-  void wired.syncReleaseKits();
   // The registry reaper, once a day at the configured hour (UTC), on this server's own database and
   // credentials; unconfigured, it does not run and the boot says so.
   if (wired.reapRegistry && config.registryReaper) scheduleRegistryReap(wired.reapRegistry, logger, config.registryReaper.hourUtc);

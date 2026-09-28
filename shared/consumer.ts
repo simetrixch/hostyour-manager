@@ -156,6 +156,13 @@ export const TenantSpecSchema = z.object({
     repo: gitRepoURL,
     builds: z.array(z.string().regex(/^[a-z0-9-]+$/)).min(1),
   })).default([]),
+  /** THE PRODUCT'S LIBRARIES: repositories that release packages and deploy nothing, which no
+   *  registration names. The boot writes the current release kit into each, as it does into every
+   *  registered unit (plugins/unit/server/inject-release-kit.ts syncReleaseKits), unless a workflow of
+   *  the repository's own stands where the kit's goes. A repository taken off this list keeps the
+   *  kit that stands in it until somebody deletes it. The SPA lists no library; the boot log names
+   *  every repository the kit was written into. */
+  libraryRepos: z.array(gitRepoURL).default([]),
   /** THE GITHUB OWNER A TENANT'S OWN REPOSITORY IS CREATED IN, stated by the deploy repository because
    *  the deploy repository is the customer's: the platform's GitHub App is installed in exactly one
    *  owner (adapters/github-app installationOrg), and a plan whose deploy repository names another is
