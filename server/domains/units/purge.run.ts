@@ -24,6 +24,7 @@ import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { removeReleaseKit } from "#unit/server/inject-release-kit.ts";
 import { assertNoOrphans } from "./offboard-orphans.ts";
+import { consumerSecretEntry, forgetSecretEntry } from "../../db/secret-writes.ts";
 
 // purge / force-offboard (the orphan-removal companion to offboard.run.ts). A consumer onboard that
 // FAILS after it has created cluster/Vault artifacts but BEFORE the final record-inventory step
@@ -419,6 +420,7 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
           stage: t.stage,
           consumerName: t.name,
         });
+        forgetSecretEntry(ctx.db, consumerSecretEntry(t.stage, t.name));
         ctx.log("meta", `ceremony secrets removed — ${KV_MOUNT}/${t.stage}/consumer/${t.name}/app deleted (all versions); a re-onboard mints fresh secrets instead of inheriting these`);
       },
     },

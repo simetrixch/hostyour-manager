@@ -2,17 +2,18 @@ import { useEffect, useState } from "react";
 import { getConsumerSecretOffer } from "../api.ts";
 import type { ConsumerSecretOfferView } from "../../../shared/api-types-onboard.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { changesSecrets, secretStateLabel, toggleMint } from "../consumerSecrets.ts";
 
-/** Plan a change of a standing consumer's secrets (#245, #285).
- *
- *  The keys its operator answers are filled on the Run screen's approve card, each optional. The
- *  keys the Manager mints are chosen HERE, each unticked: the Manager cannot ask Vault which of them
- *  the entry already holds, and minting one it holds rotates it, so nothing is minted that nobody
- *  ticked. The list is the manifest as the plan reads it; no value is read or shown. */
-export function ConsumerSecretsDialog(props: { name: string; appId: string; onCancel: () => void; onConfirm: (mint: string[]) => void }) {
+/** The Secrets dialog of a standing consumer: every key its manifest declares, one row each, with what
+ *  the Manager's book knows of its value and the one thing that can be done with it. A key the
+ *  operator supplies takes its new value here; a key the Manager mints can be ticked to mint it new.
+ *  The values go on to the run's approve form in memory only (heldSecrets.ts), and approving there
+ *  writes them. */
+export function ConsumerSecretsDialog(props: { name: string; appId: string; onCancel: () => void; onConfirm: (mint: string[], values: Record<string, string>) => void }) {
   const [offer, setOffer] = useState<ConsumerSecretOfferView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mint, setMint] = useState<string[]>([]);
+  const [values, setValues] = useState<Record<string, string>>({});
 
   const { appId } = props;
   useEffect(() => {
@@ -23,32 +24,68 @@ export function ConsumerSecretsDialog(props: { name: string; appId: string; onCa
     return () => { alive = false; };
   }, [appId]);
 
-  const toggle = (key: string, on: boolean): void => setMint((m) => (on ? [...m, key] : m.filter((k) => k !== key)));
-
   return (
-    <ConfirmDialog title={`Change the secrets of "${props.name}"?`} confirmLabel="Plan secrets change" onCancel={props.onCancel} onConfirm={() => props.onConfirm(mint)}>
-      <p>
-        This <strong>plans</strong> a run and opens it.{" "}
-        {offer !== null && (offer.operatorKeys.length > 0
-          ? `Its approve card asks for ${offer.operatorKeys.map((k) => k.key).join(", ")}, each optional: what you fill changes.`
-          : "The consumer declares no key its operator supplies, so its approve card asks for none.")}
-      </p>
+    <ConfirmDialog
+      title={`Secrets of "${props.name}"`}
+      confirmLabel="Plan the change"
+      confirmDisabled={!changesSecrets(values, mint)}
+      onCancel={props.onCancel}
+      onConfirm={() => props.onConfirm(mint, values)}
+    >
       {error && <p className="error">{error}</p>}
       {offer === null && !error && <p className="muted">Reading the manifest…</p>}
-      {offer && offer.generateKeys.length > 0 && (
+      {offer && offer.keys.length === 0 && <p>Its manifest declares no secret.</p>}
+      {offer && offer.keys.length > 0 && (
         <>
-          <p>
-            Tick a key the platform generates to mint it new in the same write. Where the entry already holds it, that
-            <strong> rotates</strong> it, and whatever reads the old value breaks until it is updated.
+          <div className="table__wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Value</th>
+                <th>Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {offer.keys.map((k) => (
+                <tr key={k.key}>
+                  <td>
+                    <strong className="mono">{k.key}</strong>
+                    {k.description && <div className="muted">{k.description}</div>}
+                  </td>
+                  <td>{secretStateLabel(k)}</td>
+                  <td>
+                    {k.kind === undefined ? (
+                      <input
+                        type="password"
+                        className="input"
+                        autoComplete="off"
+                        aria-label={`New value of ${k.key}`}
+                        placeholder="new value (empty keeps it)"
+                        value={values[k.key] ?? ""}
+                        onChange={(e) => setValues((v) => ({ ...v, [k.key]: e.target.value }))}
+                      />
+                    ) : (
+                      <label className="field field--row" title={k.mintRefused}>
+                        <input type="checkbox" disabled={k.mintRefused !== undefined} checked={mint.includes(k.key)} onChange={(e) => setMint((m) => toggleMint(offer.keys, m, k.key, e.target.checked))} />
+                        <span>mint new ({k.kind}){k.mintRefused ? " — not here" : ""}</span>
+                      </label>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+          {mint.length > 0 && (
+            <p className="alert alert--warn">
+              Minting new replaces {mint.join(", ")}: whatever reads the old value breaks until it is updated.
+            </p>
+          )}
+          <p className="muted">
+            Unknown means the consumer was onboarded before the Manager kept a book of the keys it writes. The values go to the next
+            screen in this page&rsquo;s memory only; it shows the plan, and approving there writes them.
           </p>
-          {offer.generateKeys.map((k) => (
-            <label className="field field--row" key={k.key}>
-              <input type="checkbox" checked={mint.includes(k.key)} onChange={(e) => toggle(k.key, e.target.checked)} />
-              <span>
-                <strong>{k.key}</strong> <span className="muted">({k.kind})</span>
-              </span>
-            </label>
-          ))}
         </>
       )}
     </ConfirmDialog>

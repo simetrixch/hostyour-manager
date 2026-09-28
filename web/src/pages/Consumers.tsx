@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { DetectedConsumerView, DetectedScanView, RunView } from "../../../shared/api-types.ts";
 import {
-  listConsumers, getConsumerLive, offboardConsumer, purgeConsumer, setConsumerSecrets, getConsumerVersions, setConsumerRelease,
+  listConsumers, getConsumerLive, offboardConsumer, purgeConsumer, getConsumerVersions, setConsumerRelease,
   scanDetectedConsumers, adoptConsumer, backupConsumer, restoreConsumer, migrateConsumer, listRuns, setConsumerSize, setConsumerDomain,
   type ConsumerView, type PurgeInput,
 } from "../api.ts";
@@ -15,6 +15,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { ConsumerLifecycleDialog, type LifecycleAction } from "../components/ConsumerLifecycleDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { ConsumerSecretsDialog } from "../components/ConsumerSecretsDialog.tsx";
+import { planSecretsChange } from "../consumerSecrets.ts";
 import { VersionsDialog } from "../components/VersionsDialog.tsx";
 import { ConsumerActions } from "../components/ConsumerActions.tsx";
 import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
@@ -420,7 +421,7 @@ export function Consumers() {
           name={secretsFor.name}
           appId={secretsFor.id}
           onCancel={() => setSecretsFor(null)}
-          onConfirm={(mint) => { const c = secretsFor; setSecretsFor(null); void act((id) => setConsumerSecrets(id, mint), c.id); }}
+          onConfirm={(mint, values) => { const c = secretsFor; setSecretsFor(null); void act((id) => planSecretsChange(id, mint, values), c.id); }}
         />
       )}
 

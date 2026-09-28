@@ -29,6 +29,7 @@ import { EPHEMERAL_STREAM } from "../../../shared/enums.ts";
 // tenant's create-tenant-activate.ts so both invite steps parse + surface the response identically.
 import { extractActivateUrl, extractMail, mailLine } from "#unit/server/activation-result.ts";
 import { consumerUnitHost } from "#unit/server/unit-dns.ts";
+import { consumerSecretEntry, recordSecretWrites } from "../../db/secret-writes.ts";
 
 type Wait = { budgetMs: number; intervalMs: number };
 const DEFAULT_WAIT: Wait = { budgetMs: 10 * 60_000, intervalMs: 10_000 };
@@ -57,6 +58,7 @@ async function rotateBootstrapToken(ports: OnboardPorts, p: DeployableOnboardPar
   }
   const token = mintSecretValue(kind);
   await ports.seeder.patchApp({ stage: p.stage, consumerName: p.consumerName, data: { [key]: token } });
+  recordSecretWrites(ctx.db, { entry: consumerSecretEntry(p.stage, p.consumerName), keys: [key], act: "minted", runId: ctx.runId });
   const { clusterReader } = await ports.resolver.resolve(p.clusterId);
   const targets = [...new Set((await clusterReader.listExternalSecrets(p.namespace)).map((r) => r.targetSecret || r.name))];
   for (const name of targets) await clusterReader.deleteSecret(p.namespace, name);

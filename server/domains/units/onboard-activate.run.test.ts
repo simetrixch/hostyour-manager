@@ -18,6 +18,7 @@ import type { GateReport } from "../../../shared/gates.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
+import { consumerSecretEntry, listSecretWrites } from "../../db/secret-writes.ts";
 
 // Focused tests for the post-onboard `activate` step (impl: onboard-activate.ts). Kept apart from
 // onboard.run.test.ts so each file stays within the per-file line budget; the harness below is a
@@ -164,6 +165,8 @@ describe("onboard post-onboard activation step", () => {
     const steps = makeOnboardDef(ports({ seeder, activator })).steps(p);
     const logs: string[] = [];
     await steps.find((s) => s.name === "seed-secrets")!.run(ctx(p, "seed-secrets", logs));
+    // The book saw the onboarding write the entry, key by key and without a value.
+    expect(listSecretWrites(db.db, consumerSecretEntry("prod", "acme")).map((w) => [w.key, w.act])).toEqual([[BOOTSTRAP_SPEC.key, "seeded"]]);
     await steps.find((s) => s.name === "activate")!.run(ctx(p, "activate", logs, { "activation-input:email": "admin@acme.test" }));
 
     expect(activator.calls).toHaveLength(1);

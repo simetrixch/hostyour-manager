@@ -17,6 +17,7 @@ import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { buildConsumerSecretData } from "#unit/server/secret-mint.ts";
 import { ConsumerManifestSchema, CONSUMER_MANIFEST_PATH } from "../../../shared/consumer.ts";
 import type { ConsumerSecretOfferView } from "../../../shared/api-types-onboard.ts";
+import { consumerSecretEntry, listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
 
 // "consumer-set-secrets" — change a declared secret of a STANDING consumer (hostyour-manager#245).
 //
@@ -106,14 +107,38 @@ function repoUrlOf(db: Db, appId: string): string {
   return row.repoUrl;
 }
 
-/** What the Secrets dialog offers for one consumer, read off its manifest as the plan reads it. */
+/** What the Secrets dialog offers for one consumer: every key its manifest declares, read as the plan
+ *  reads it, with what the book of secret writes knows of it. The book speaks for the whole entry only
+ *  where it saw the onboarding write it; a consumer onboarded before the book has keys it cannot
+ *  speak for, and says so. */
 export async function readSecretOffer(ports: ManifestReadPorts, db: Db, appId: string, signal?: AbortSignal): Promise<ConsumerSecretOfferView> {
   const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(db, org), repoUrlOf(db, appId), signal);
   if (read.outcome === "refused") throw errValidation(read.why);
+  const ac = loadAppCluster(db, appId);
+  const book = new Map(listSecretWrites(db, consumerSecretEntry(ac.stage, ac.name)).map((w) => [w.key, w]));
+  const whole = [...book.values()].some((w) => w.act === "seeded");
   return {
-    operatorKeys: operatorKeys(read.secrets).map((s) => ({ key: s.key, ...(s.description ? { description: s.description } : {}) })),
-    generateKeys: read.secrets.flatMap((s) => (s.generate ? [{ key: s.key, kind: s.generate }] : [])),
+    keys: read.secrets.map((s) => {
+      const written = book.get(s.key);
+      const partner = pairPartner(s, read.secrets);
+      const refused = s.generate ? refuseMint(partner ? [s.key, partner] : [s.key], read.secrets, read.dkimKey) : null;
+      return {
+        key: s.key,
+        ...(s.description ? { description: s.description } : {}),
+        ...(s.generate ? { kind: s.generate } : {}),
+        ...(refused ? { mintRefused: refused } : {}),
+        ...(partner ? { pairWith: partner } : {}),
+        ...(written ? { state: "set" as const, writtenAt: written.writtenAt.getTime() } : { state: whole ? ("never" as const) : ("unknown" as const) }),
+      };
+    }),
   };
+}
+
+/** The other half of the keypair `spec` belongs to, or undefined. */
+function pairPartner(spec: ConsumerSecretSpec, declared: readonly ConsumerSecretSpec[]): string | undefined {
+  if (spec.generate === "rsa2048-public") return spec.pairWith;
+  if (spec.generate === "rsa2048") return declared.find((d) => d.generate === "rsa2048-public" && d.pairWith === spec.key)?.key;
+  return undefined;
 }
 
 /** Why the generate keys a request names cannot be minted by this run, or null where they can: a
@@ -166,6 +191,9 @@ function setSecretsSteps(ports: SetSecretsPorts, p: SetSecretsParams): Step[] {
         if (keys.length === 0) throw errValidation("no value was supplied — every box was left empty and no key is minted, so there is nothing to change");
         const ac = loadAppCluster(ctx.db, p.appId);
         await ports.seeder.patchApp({ stage: ac.stage, consumerName: ac.name, data });
+        const entry = consumerSecretEntry(ac.stage, ac.name);
+        recordSecretWrites(ctx.db, { entry, keys: keys.filter((k) => !(k in minted)), act: "set", runId: ctx.runId });
+        recordSecretWrites(ctx.db, { entry, keys: Object.keys(minted), act: "minted", runId: ctx.runId });
         ctx.checkpoint({ keys });
         ctx.log("meta", `${keys.length} secret(s) of ${ac.name} merged into ${ac.stage}/consumer/${ac.name}/app: ${keys.join(", ")}${p.mint.length > 0 ? ` (minted new: ${Object.keys(minted).join(", ")})` : ""} — every other value of the entry is untouched and was not read`);
       },

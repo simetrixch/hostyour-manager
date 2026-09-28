@@ -18,6 +18,7 @@ import { errUpstream } from "../../kernel/errors.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
+import { consumerSecretEntry, listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
 
 // purge (force-offboard by NAME) tests — mirrors offboard.run.test.ts conventions (the same fake
 // kube/vault/git clients, the same in-memory DB). The load-bearing NEW properties purge must have and
@@ -155,9 +156,11 @@ describe("purge run definition", () => {
     await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
     const seeder = new RecordingTeardownSeeder();
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
+    recordSecretWrites(db.db, { entry: consumerSecretEntry("prod", "acme"), keys: ["JWT_SECRET"], act: "seeded", runId: "run_onb" });
 
     const logs: string[] = [];
     await runAll(ports(reg, { buildRbac, seeder, cluster }), logs);
+    expect(listSecretWrites(db.db, consumerSecretEntry("prod", "acme"))).toEqual([]); // the book forgets the entry with it
 
     // Every artifact reaped, by name, with no row anywhere:
     expect(await reg.readRegistration("prod", "acme")).toBeNull(); // registration gone

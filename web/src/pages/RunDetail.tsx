@@ -8,6 +8,7 @@ import { abortOffer, recoverable, runOnScreen } from "../runScreen.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SkipStepDialog } from "../components/SkipStepDialog.tsx";
 import { RunApproveForm } from "../components/RunApproveForm.tsx";
+import { dropSecrets, heldSecrets } from "../heldSecrets.ts";
 import { DeploySlaveApproveForm } from "../components/DeploySlaveApproveForm.tsx";
 import { FailedRunActions } from "../components/FailedRunActions.tsx";
 import { FailedCreateTenantCallout } from "../components/FailedCreateTenantCallout.tsx";
@@ -33,6 +34,8 @@ function lineClass(l: RunEventView): string {
 export function RunDetail() {
   const { id } = useParams();
   const runId = id ?? "";
+  // Values a dialog took for this run live only while its page is open.
+  useEffect(() => () => dropSecrets(runId), [runId]);
   const [loaded, setLoaded] = useState<RunView | null>(null); // what the last GET returned — see `run` below
   const [lines, setLines] = useState<RunEventView[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -245,7 +248,8 @@ export function RunDetail() {
             optionalSecrets={run.optionalSecrets}
             requiredInputs={run.requiredInputs}
             secretHints={run.secretHints}
-            onApprove={(payload) => act(() => approveRun(runId, payload))}
+            initialSecrets={heldSecrets(runId)}
+            onApprove={(payload) => { dropSecrets(runId); void act(() => approveRun(runId, payload)); }}
             onDelete={() => setConfirmDelete(true)}
           />
         ) : (

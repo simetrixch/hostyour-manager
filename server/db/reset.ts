@@ -29,6 +29,9 @@ const WIPE_ORDER = [
   // there are no such runs — a row pointing at a run the wipe removed would be a link to nothing.
   // The records themselves stay in the zone, as every leftover of a reset does.
   "dns_writes",
+  // secret_writes is the same kind of book, for the keys this manager's runs wrote into consumers'
+  // Vault entries; wiped for the same reason. The entries stay in Vault, as every leftover does.
+  "secret_writes",
   "audit",
 ] as const;
 

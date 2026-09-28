@@ -19,10 +19,12 @@ export function RunApproveForm(props: {
   requiredInputs: OperatorInput[];
   /** Per key, what its declaration says the value is (#244). */
   secretHints: SecretHints;
+  /** Values a dialog already took for this run (heldSecrets.ts), filled in and still editable. */
+  initialSecrets?: Record<string, string> | undefined;
   onApprove: (payload: Record<string, string>) => void;
   onDelete: () => void;
 }): ReactNode {
-  const [secretVals, setSecretVals] = useState<Record<string, string>>({});
+  const [secretVals, setSecretVals] = useState<Record<string, string>>(() => props.initialSecrets ?? {});
   const [inputVals, setInputVals] = useState<Record<string, string>>({});
   const { requiredSecrets, optionalSecrets, requiredInputs, secretHints } = props;
   const hasSecrets = requiredSecrets.length > 0 || optionalSecrets.length > 0;

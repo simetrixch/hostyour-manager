@@ -23,6 +23,7 @@ import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
 import { provisionUnitDns, removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
+import { consumerSecretEntry, forgetSecretEntry, recordSecretWrites } from "../../db/secret-writes.ts";
 
 // The compensations below are IDEMPOTENT WITHOUT SWALLOWING: each one tolerates exactly the
 // "already absent" outcome (a read-first skip, or a delete that resolves deleted:false) and lets every
@@ -162,6 +163,7 @@ export function removeCeremonySecretsCleanup(ports: OnboardPorts, p: DeployableO
     title: "Destroy the ceremony secrets this run minted (Vault consumer tier)",
     run: async (ctx) => {
       await ports.seeder.deleteApp({ stage: p.stage, consumerName: p.consumerName });
+      forgetSecretEntry(ctx.db, consumerSecretEntry(p.stage, p.consumerName));
       ctx.log("meta", `ceremony secrets removed — ${KV_MOUNT}/${p.stage}/consumer/${p.consumerName}/app deleted (all versions); a later onboard of "${p.consumerName}" mints fresh secrets instead of inheriting this run's`);
     },
   };
@@ -287,6 +289,7 @@ export function seedSecretsStep(ports: OnboardPorts, p: DeployableOnboardParams,
       // probe — so a crash between the Vault create and this line loses the armed inverse; the entry
       // then survives an abort and offboard/purge's remove-app-secrets remains its removal.
       ctx.registerCleanup(removeCeremonySecretsCleanup(ports, p));
+      recordSecretWrites(ctx.db, { entry: consumerSecretEntry(p.stage, p.consumerName), keys, act: "seeded", runId: ctx.runId });
       // Keep the freshly-minted bootstrap token in-run memory for a manifest-declared activation
       // call — reachable ONLY on a real create (the create-only re-run returned above), so the
       // value in `data` IS the live token, not a re-minted one Vault refused. Never persisted/logged

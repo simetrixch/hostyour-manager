@@ -5,13 +5,27 @@ import type { ReleaseChannel } from "./release.ts";
 import type { PackagesReaderView } from "./apps-manifest.ts";
 import type { ConsumerSecretSpec } from "./consumer.ts";
 
-/** GET /api/consumers/:appId/secrets — what the Secrets dialog of a standing consumer offers, read
- *  off its manifest as the set-secrets plan reads it: the keys its operator answers, filled at
- *  approve, and the keys the Manager mints, each with its declared kind, minted only where the
- *  dialog ticks it. Names, sentences and kinds only; no value is read or shown. */
+/** One key a standing consumer's manifest declares, as its Secrets dialog shows it. Names, sentences,
+ *  kinds and dates only; no value is read or shown. */
+export interface ConsumerSecretKeyView {
+  key: string;
+  description?: string;
+  /** The kind the Manager mints the key as; absent where the operator supplies the value. */
+  kind?: NonNullable<ConsumerSecretSpec["generate"]>;
+  /** Why a generated key cannot be minted again by the dialog, where it cannot. */
+  mintRefused?: string;
+  /** The other half of a keypair: the two are minted together or not at all. */
+  pairWith?: string;
+  /** What the book of secret writes knows: written by this Manager (`set`, at `writtenAt`), never
+   *  written since the onboarding (`never`), or `unknown` for a consumer onboarded before the book. */
+  state: "set" | "never" | "unknown";
+  writtenAt?: number;
+}
+
+/** GET /api/consumers/:appId/secrets — what the Secrets dialog of a standing consumer offers: every
+ *  key its manifest declares, read as the set-secrets plan reads it. */
 export interface ConsumerSecretOfferView {
-  operatorKeys: { key: string; description?: string }[];
-  generateKeys: { key: string; kind: NonNullable<ConsumerSecretSpec["generate"]> }[];
+  keys: ConsumerSecretKeyView[];
 }
 
 /** A credential of an owner the wizard asks for where the measurement demands it: recorded

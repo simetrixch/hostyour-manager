@@ -24,7 +24,7 @@ export function optionalSecretFieldHint(_key: string): string {
 
 /** The prefix a consumer's own declared secret rides under. Stripped, because the name that follows
  *  it is the one the consumer's manifest declares and the one its author knows the value by. */
-const CONSUMER_SECRET_PREFIX = "consumer-secret:";
+export const CONSUMER_SECRET_PREFIX = "consumer-secret:";
 
 /** What the person reads above the box. Total: a key this module has nothing to add to is shown as
  *  it is, which is a name the plan chose rather than a word invented here. */

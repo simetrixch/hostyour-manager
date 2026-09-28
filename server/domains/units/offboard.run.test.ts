@@ -18,6 +18,7 @@ import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
+import { consumerSecretEntry, listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
 
 const SHA = "a".repeat(40);
 
@@ -323,9 +324,11 @@ describe("offboard run definition", () => {
   it("remove-app-secrets deletes the consumer-tier entry so a re-onboard cannot inherit the old keys", async () => {
     seedApp();
     const seeder = new RecordingTeardownSeeder();
+    recordSecretWrites(db.db, { entry: consumerSecretEntry("prod", "acme"), keys: ["JWT_SECRET"], act: "seeded", runId: "run_onb" });
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-app-secrets")!;
     const logs: string[] = [];
     await step.run(ctx("remove-app-secrets", logs));
+    expect(listSecretWrites(db.db, consumerSecretEntry("prod", "acme"))).toEqual([]); // the book forgets the entry with it
 
     // The CONSUMER tier (<stage>/consumer/<name>/app), not the app tier — a different Vault path
     // from remove-repo-pat's, which is the whole reason an offboard deleting only that one misses it. toEqual is exact:

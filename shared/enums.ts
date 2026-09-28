@@ -574,6 +574,12 @@ export type DmarcPolicy = (typeof DMARC_POLICY)[number];
 export const DNS_WRITE_ACT = ["inserted", "updated"] as const;
 export type DnsWriteAct = (typeof DNS_WRITE_ACT)[number];
 
+/** What ONE write of this Manager did to a key of a consumer's Vault entry, as the book of secret
+ *  writes (secret_writes) records it: `seeded` with the entry at onboarding, `set` from a value the
+ *  operator supplied later, `minted` by the Manager after the onboarding. */
+export const SECRET_WRITE_ACT = ["seeded", "set", "minted"] as const;
+export type SecretWriteAct = (typeof SECRET_WRITE_ACT)[number];
+
 /** Whose record a DNS write was made for: a consumer's host, a tenant's wildcard, or a sender
  *  domain's mail record. The inventory's owner kinds (shared/dns.ts) are these plus `installer`,
  *  which names a record no run of this Manager writes and the book therefore never carries. */

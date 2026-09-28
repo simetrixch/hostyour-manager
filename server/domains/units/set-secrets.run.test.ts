@@ -9,6 +9,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
 import { seedCredentialRow } from "../../security/store.fixture.ts";
+import { consumerSecretEntry, listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
 
 // The one path that changes a declared secret of a standing consumer (#245): the manifest says which
 // keys exist, the merge write carries only what the operator filled, and the two acts that make a
@@ -128,11 +129,18 @@ describe("consumer-set-secrets", () => {
     expect(seeder.patchedApps).toEqual([]);
   });
 
-  it("offers the Secrets dialog the keys the operator fills and, apart, the generate keys with their kinds", async () => {
-    expect(await readSecretOffer(ports(), db.db, "app_1")).toEqual({
-      operatorKeys: [{ key: "SMTP_URL", description: expect.stringMatching(/^SMTP URL/) }, { key: "S3_SESSION_TOKEN", description: "added to the manifest after the onboarding" }],
-      generateKeys: [{ key: "JWT_ACCESS_SECRET", kind: "hex32" }, { key: "DKIM_KEY_ENCRYPTION_KEY", kind: "hex32" }],
-    });
+  it("offers every declared key with what the book of secret writes knows of it (#317)", async () => {
+    const before = await readSecretOffer(ports(), db.db, "app_1");
+    // Onboarded before the book: nothing is known of any key. The rows keep the manifest's order.
+    expect(before.keys.map((k) => [k.key, k.kind ?? "operator", k.state])).toEqual([
+      ["JWT_ACCESS_SECRET", "hex32", "unknown"], ["SMTP_URL", "operator", "unknown"], ["S3_SESSION_TOKEN", "operator", "unknown"], ["DKIM_KEY_ENCRYPTION_KEY", "hex32", "unknown"],
+    ]);
+    expect(before.keys[1]!.description).toMatch(/^SMTP URL/);
+    // The book saw the onboarding write the entry: a key it did not write was never set since.
+    recordSecretWrites(db.db, { entry: consumerSecretEntry("prod", "swissbookai"), keys: ["SMTP_URL", "JWT_ACCESS_SECRET", "DKIM_KEY_ENCRYPTION_KEY"], act: "seeded", runId: "run_onb" });
+    const after = await readSecretOffer(ports(), db.db, "app_1");
+    expect(after.keys.map((k) => [k.key, k.state])).toEqual([["JWT_ACCESS_SECRET", "set"], ["SMTP_URL", "set"], ["S3_SESSION_TOKEN", "never"], ["DKIM_KEY_ENCRYPTION_KEY", "set"]]);
+    expect(after.keys[1]!.writtenAt).toEqual(expect.any(Number));
   });
 
   describe("minting a generate key (#285)", () => {
@@ -152,6 +160,9 @@ describe("consumer-set-secrets", () => {
       expect(data["DKIM_KEY_ENCRYPTION_KEY"]).toMatch(/^[0-9a-f]{64}$/);
       expect(logs.some((l) => l.includes("minted new: DKIM_KEY_ENCRYPTION_KEY"))).toBe(true);
       expect(logs.some((l) => l.includes(data["DKIM_KEY_ENCRYPTION_KEY"]!))).toBe(false); // nothing minted is logged
+      // The book: the typed key as set, the minted one as minted, never a value.
+      const book = listSecretWrites(db.db, consumerSecretEntry("prod", "swissbookai")).map((w) => [w.key, w.act]).sort();
+      expect(book).toEqual([["DKIM_KEY_ENCRYPTION_KEY", "minted"], ["SMTP_URL", "set"]]);
     });
 
     it("mints no generate key where the request names none", async () => {
