@@ -4,15 +4,16 @@ import type { DbHandle } from "../../db/client.ts";
 import { apps, tenants } from "../../db/schema/inventory.ts";
 import { makeBackupDef, makeTenantBackupDef } from "./backup.run.ts";
 import { FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
+import { listBackups } from "../../db/unit-backups.ts";
 import {
-  openFixtureDb, seedClusters, seedConsumerRow, seedTenantRows, seedConsumerRegistration, seedTenantWorld,
-  makeFakes, consumerPorts, tenantPorts, driveSteps, jobNames, GUID, CONSUMER, SOURCE,
+  openFixtureDb, seedClusters, seedMaster, seedConsumerRow, seedTenantRows, seedConsumerRegistration, seedTenantWorld,
+  makeFakes, consumerPorts, tenantPorts, driveSteps, jobNames, stepCtx, GUID, CONSUMER, SOURCE, INSTALLATION,
 } from "./relocation.fixture.ts";
 
 // backup / tenant-backup — the first half of the ONE relocation mechanism, run for its own sake. The
 // journey both defs must satisfy: a backup LEAVES THE UNIT RUNNING — access is closed and
-// measured closed only for the dump, then reopened, the folder stays, and nothing of the unit's
-// state (row, registration, cluster objects) is any different afterwards.
+// measured closed only for the dump, then reopened, a new generation stays on the box, and nothing
+// of the unit's state (row, registration, cluster objects) is any different afterwards.
 
 let db: DbHandle;
 beforeEach(() => { db = openFixtureDb(); });
@@ -38,7 +39,8 @@ describe("backup (consumer)", () => {
     expect(plan.summary).toContain("STAYS");
   });
 
-  it("journey: a backup leaves the unit running — quiesce is flipped back, the row is untouched, and the dump jobs filled the folder", async () => {
+  it("journey: a backup leaves the unit running — quiesce is flipped back, the row is untouched, and the dump jobs filled a new generation", async () => {
+    seedMaster(db);
     seedClusters(db);
     seedConsumerRow(db);
     const f = makeFakes();
@@ -55,13 +57,21 @@ describe("backup (consumer)", () => {
     // Access was MEASURED closed on the unit's public host, never assumed.
     expect(f.probe.probed).toEqual([`https://${CONSUMER}.${SOURCE.domain}/`]);
     // The dump ran where the stores are (the registration copy in the unit ns, mongo in the platform
-    // ns) and the folder was verified; nothing cleared anything.
+    // ns), the manifest was laid last and the generation verified; nothing cleared anything.
     const names = jobNames(f.source);
     expect(names).toContain(`reloc-dump-reg-${CONSUMER}`);
     expect(names).toContain(`reloc-dump-mongo-${CONSUMER}`);
+    expect(names).toContain(`reloc-manifest-${CONSUMER}`);
     expect(names).toContain(`reloc-verify-dump-${CONSUMER}`);
     expect(names.find((n) => n.startsWith("reloc-clear-source"))).toBeUndefined();
     expect(jobNames(f.target)).toEqual([]);
+    // One generation, entered in the book and restorable, filed under the installation, the stage and the kind.
+    const [g, ...more] = listBackups(db.db, { kind: "consumer", unit: CONSUMER, stage: "prod" });
+    expect(more).toEqual([]);
+    expect(g).toMatchObject({ trigger: "manual", state: "ok", runId: "run_reloc" });
+    expect(g!.folder).toBe(`${INSTALLATION}/prod/consumers/${CONSUMER}/${g!.generation}`);
+    const verify = f.source.reader.jobs.find((j) => j.spec.name === `reloc-verify-dump-${CONSUMER}`);
+    expect(verify?.spec.script).toContain(`"manifest.txt"`);
   });
 
   it("verify-quiesced fails LOUD when the public address still answers — a chart that ignored the flag", async () => {
@@ -91,6 +101,7 @@ describe("backup (consumer)", () => {
 
 describe("tenant-backup", () => {
   it("journey: a backup leaves the tenant running, and the dump covers every store of the bracket", async () => {
+    seedMaster(db);
     seedClusters(db);
     seedTenantRows(db);
     const f = makeFakes();
@@ -124,14 +135,17 @@ describe("tenant-backup", () => {
     expect(byName.get(`reloc-dump-crypto-${GUID}`)).toBe(`${GUID}-auth-prod`);
     expect(byName.get(`reloc-dump-bucket-${GUID}`)).toBe(`${GUID}-web-prod`);
     expect(byName.get(`reloc-dump-engine-key-${GUID}`)).toBe(`${GUID}-web-prod`);
-    // All five properties land under the SAME vault/ folder, so a hand recovery finds the tenant's
-    // whole identity in one place rather than four files in one folder and a fifth somewhere else.
+    // All five properties land under the SAME vault/ folder of the generation, so a hand recovery finds
+    // the tenant's whole identity in one place rather than four files in one folder and a fifth elsewhere.
+    const [g] = listBackups(db.db, { kind: "tenant", unit: GUID, stage: "prod" });
+    expect(g?.folder).toBe(`${INSTALLATION}/prod/tenants/${GUID}/${g?.generation}`);
     const engineKeyJob = f.source.reader.jobs.find((j) => j.spec.name === `reloc-dump-engine-key-${GUID}`);
-    expect(engineKeyJob?.spec.script).toContain(`box:${GUID}/vault/engine-api-key`);
+    expect(engineKeyJob?.spec.script).toContain(`box:${g?.folder}/vault/engine-api-key`);
     expect(engineKeyJob?.spec.env?.some((e) => e.secretKeyRef?.name === "hostyour-engine-api-key")).toBe(true);
   });
 
-  it("verify-dump fails LOUD when the folder is incomplete", async () => {
+  it("verify-dump fails LOUD when the generation is incomplete, and an abort deletes that generation", async () => {
+    seedMaster(db);
     seedClusters(db);
     seedTenantRows(db);
     const f = makeFakes();
@@ -139,8 +153,18 @@ describe("tenant-backup", () => {
     await seedTenantWorld(ports.registrations);
     f.source.reader.setJobResult(`reloc-verify-dump-${GUID}`, { succeeded: false, logs: "MISSING vault" });
 
-    await expect(driveSteps(db, makeTenantBackupDef(ports).steps({ tenantId: "tnt_1" }), { tenantId: "tnt_1" }, [])).rejects.toThrow(/MISSING vault/);
+    const def = makeTenantBackupDef(ports);
+    await expect(driveSteps(db, def.steps({ tenantId: "tnt_1" }), { tenantId: "tnt_1" }, [])).rejects.toThrow(/MISSING vault/);
     // The registration is still quiesced — the run stopped before open-access, and a retry resumes.
     expect((await ports.registrations.readTenant("prod", GUID))?.entry.quiesced).toBe(true);
+    // The unverified generation is no backup: nothing may restore it.
+    const unit = { kind: "tenant" as const, unit: GUID, stage: "prod" as const };
+    expect(listBackups(db.db, unit).map((b) => b.state)).toEqual(["taking"]);
+    // The abort's inverse deletes it from the box and marks it failed.
+    const [discard] = def.cleanups!({ tenantId: "tnt_1" });
+    await discard!.run(stepCtx(db, discard!.name, { tenantId: "tnt_1" }, []));
+    const purge = f.source.reader.jobs.find((j) => j.spec.name === `reloc-purge-generation-${GUID}`);
+    expect(purge?.spec.script).toContain(`rclone purge "box:${listBackups(db.db, unit)[0]!.folder}"`);
+    expect(listBackups(db.db, unit).map((b) => b.state)).toEqual(["failed"]);
   });
 });

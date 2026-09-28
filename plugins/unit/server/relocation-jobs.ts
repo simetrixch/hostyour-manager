@@ -9,9 +9,10 @@
 // `mongodb`, a tenant's bucket key in an app member namespace, a consumer's claim Secrets in its own
 // namespace. So a phase is a LIST of jobs, each placed where its credentials are.
 //
-// THE STAGING AREA: every job reaches the Hetzner Storage Box as the rclone remote `box:` (SFTP),
-// under ONE folder named after the unit — keep the folder and the run was a backup, restore from it
-// and it was a restore, delete it at the end and it was a move.
+// THE STAGING AREA: every job reaches the Hetzner Storage Box as the rclone remote `box:` (SFTP). A
+// dump writes a NEW generation, `<installation>/<stage>/<tenants|consumers>/<unit>/<generation>/`
+// (generationFolder), and nothing overwrites or deletes one but retention: a backup keeps it, a
+// restore reads the one the operator picked, a move restores from the one it just took and keeps it.
 //
 // EVERY credential a job needs rides as secretKeyRef, the box credential included. The database ones
 // are already on the cluster; the box one is not — it comes from the Manager's own env
@@ -40,6 +41,19 @@ export const MONGO_NAMESPACE = "mongodb";
 export const MONGO_ROOT_SECRET = { name: "mongodb-credentials", key: "root-password" } as const;
 export function mongoHost(stage: Stage): string {
   return `mongodb-${stage}-headless.mongodb.svc.cluster.local:27017`;
+}
+
+/** The UTC moment a generation is taken, as its folder names it — `YYYYMMDDTHHMMSSZ`, the form the
+ *  machine backup names its directories in (hostyour-cloud lifecycle/master-backup-driver.sh). */
+export function generationId(at: Date): string {
+  return at.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+/** Where ONE generation of a unit's backup stands below the box root: everything of an installation
+ *  under its FQDN, beside its machine backups in `<installation>/master/`, and the units by their own
+ *  stage and kind (hostyour-cloud#254). */
+export function generationFolder(g: { installation: string; stage: Stage; kind: "tenant" | "consumer"; unit: string; generation: string }): string {
+  return `${g.installation}/${g.stage}/${g.kind}s/${g.unit}/${g.generation}`;
 }
 
 /** A Job name: `reloc-<purpose>-<unit>`, bounded to the DNS-label limit. Stable per unit+purpose so
@@ -120,9 +134,71 @@ export const writeFile = (path: string, content: string): string => `cat > ${pat
 /** Quote a name list for a sh word list. */
 export const quoted = (names: readonly string[]): string => names.map((n) => `"${n}"`).join(" ");
 
-/** Verify the dump: every expected entry stands in the unit's box folder, or the job fails naming
+/** Print a `SHA256 <hash>  <path>` line for a file a job is about to carry to the box: `local` is where
+ *  it stands in the pod, `path` where it goes inside the generation. Both may name shell variables of
+ *  the job's own loop. The dump step collects these lines into the generation's manifest. */
+export const hashLine = (local: string, path: string): string => `echo "SHA256 $(sha256sum "${local}" | cut -d' ' -f1)  ${path}"\n`;
+
+/** The `sha256  path` lines of a job's log, in order — what hashLine printed. */
+export function parseSha256Lines(logs: string): string[] {
+  return logs
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => /^SHA256 [0-9a-f]{64}  /.test(l))
+    .map((l) => l.slice("SHA256 ".length));
+}
+
+/** The manifest.txt of one generation: what it is, then one `sha256  path` line per file a dump job
+ *  hashed — the form the machine backup's manifest has, which `sha256sum -c` reads inside the folder.
+ *  A bucket is synced object by object and carries no line of its own. */
+export function generationManifest(g: { unit: string; kind: string; stage: Stage; generation: string; trigger: string; runId: string | null; installation: string; stores: readonly string[] }, sums: readonly string[]): string {
+  return [
+    `INSTALLATION=${g.installation}`,
+    `KIND=${g.kind}`,
+    `UNIT=${g.unit}`,
+    `STAGE=${g.stage}`,
+    `GENERATION=${g.generation}`,
+    `TRIGGER=${g.trigger}`,
+    `RUN=${g.runId ?? "-"}`,
+    `STORES=${g.stores.join(",")}`,
+    ...sums,
+  ].join("\n");
+}
+
+/** Lay the manifest into the generation, as its last file. */
+export function writeManifestJob(i: { unit: string; folder: string; namespace: string; manifest: string; image: string }): RelocationJob {
+  return {
+    namespace: i.namespace,
+    spec: {
+      ...boxSpec("manifest", i.unit),
+      image: i.image,
+      script: BOX_REMOTE + writeFile("/tmp/manifest.txt", i.manifest) + `rclone copyto /tmp/manifest.txt "box:${i.folder}/manifest.txt"\n`,
+    },
+  };
+}
+
+/** Delete ONE generation from the box — a failed one, or one retention drops. A folder that is not
+ *  there is the idempotent no-op; any other failure of the delete fails the job. */
+export function purgeGenerationJob(i: { unit: string; folder: string; namespace: string; image: string }): RelocationJob {
+  return {
+    namespace: i.namespace,
+    spec: {
+      ...boxSpec("purge-generation", i.unit),
+      image: i.image,
+      script: BOX_REMOTE + `if rclone lsf "box:${i.folder}" >/dev/null 2>&1; then
+  rclone purge "box:${i.folder}"
+  echo "PURGED ${i.folder}"
+else
+  echo "ABSENT ${i.folder}"
+fi
+`,
+    },
+  };
+}
+
+/** Verify the dump: every expected entry stands in the generation's folder, or the job fails naming
  *  the missing one. Runs where the box is reachable and no cluster Secret is needed. */
-export function verifyDumpJob(i: { unit: string; namespace: string; expected: readonly string[]; image: string }): RelocationJob {
+export function verifyDumpJob(i: { unit: string; folder: string; namespace: string; expected: readonly string[]; image: string }): RelocationJob {
   return {
     namespace: i.namespace,
     spec: {
@@ -131,7 +207,7 @@ export function verifyDumpJob(i: { unit: string; namespace: string; expected: re
       script:
         BOX_REMOTE +
         `for entry in ${quoted(i.expected)}; do
-  [ -n "$(rclone lsf "box:${i.unit}/$entry" 2>/dev/null)" ] || { echo "MISSING $entry"; exit 1; }
+  [ -n "$(rclone lsf "box:${i.folder}/$entry" 2>/dev/null)" ] || { echo "MISSING $entry"; exit 1; }
   echo "PRESENT $entry"
 done
 `,
@@ -142,13 +218,13 @@ done
 /** Read the dumped registration back off the box — how a restore learns what the unit WAS (its
  *  deploy group, its apps) after the live registration is long removed. The file rides the job log
  *  between two markers; readRegistrationFromLogs cuts it back out. */
-export function readRegistrationJob(i: { unit: string; namespace: string; image: string }): RelocationJob {
+export function readRegistrationJob(i: { unit: string; folder: string; namespace: string; image: string }): RelocationJob {
   return {
     namespace: i.namespace,
     spec: {
       ...boxSpec("read-reg", i.unit),
       image: i.image,
-      script: BOX_REMOTE + `echo "REGISTRATION-BEGIN"\nrclone cat "box:${i.unit}/registration.yaml"\necho "REGISTRATION-END"\n`,
+      script: BOX_REMOTE + `echo "REGISTRATION-BEGIN"\nrclone cat "box:${i.folder}/registration.yaml"\necho "REGISTRATION-END"\n`,
     },
   };
 }

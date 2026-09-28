@@ -42,6 +42,7 @@ import { registerReleaseRoutes } from "../domains/releases/api.ts";
 import { searchPlatformApps } from "../domains/registry-cleanup/search.ts";
 import { registerConsumerRoutes, registerTenantRoutes } from "../domains/units/api.ts";
 import { registerSetSizeRoutes } from "../domains/units/api-set-size.ts";
+import { registerBackupRoutes } from "../domains/units/api-backups.ts";
 import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerConsumerSecretsRoute } from "../domains/units/api-consumer-secrets.ts";
@@ -344,6 +345,7 @@ export async function wire(): Promise<Wired> {
       // store: the onboard POST seals the operator's raw repo PAT into the credential store BEFORE
       // the run exists — only the sealed reference enters the executor.
       // What sizes ONE unit and puts it on a size; the size table itself is the unit plugin's.
+      registerBackupRoutes(a, { db: db.db });
       registerSetSizeRoutes(a, { db: db.db, executor, ...(units.registrations ? { registrations: units.registrations } : {}), onboardingEnabled: units.enabled, tenantEnabled: units.tenantEnabled });
       registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });
       registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });

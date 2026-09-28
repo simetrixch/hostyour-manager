@@ -1,17 +1,22 @@
 // relocation.ts — the ONE carrier behind move, backup and restore. The three run kinds are
 // slices of a single step vocabulary built here and in relocation-restore.ts / relocation-migrate.ts:
-// backup = close access, dump every store, verify the folder, reopen (the folder STAYS); restore =
-// provide the target and rebuild the unit from the folder; migrate = both halves plus the repoint
-// and the one-record DNS switch. What differs per unit KIND (consumer vs tenant) is folded into ONE
+// backup = close access, dump every store into a new generation, verify it, reopen (the generation
+// STAYS); restore = provide the target and rebuild the unit from the generation the operator picked;
+// migrate = both halves plus the repoint and the one-record DNS switch, restoring from the generation
+// it took. What differs per unit KIND (consumer vs tenant) is folded into ONE
 // object — the RelocationWorld — resolved fresh at every step from the inventory + the registration,
 // so the steps themselves can never fork into per-kind code paths that drift.
-import type { Step, StepCtx } from "#core/server/executor/types.ts";
+import type { Cleanup, Step, StepCtx } from "#core/server/executor/types.ts";
 import type { ClusterKubeResolver, JobResult, WorkloadStatus } from "#core/server/adapters/kube/port.ts";
 import type { PublicProbe } from "./adapters/http-probe/port.ts";
 import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
-import type { Stage } from "#core/shared/enums.ts";
+import type { BackupTrigger, Stage } from "#core/shared/enums.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
-import { boxSecretData, boxSecretName, jobReadsBoxSecret, verifyDumpJob, type RelocationJob, type StorageBoxAccess } from "./relocation-jobs.ts";
+import { findBackup, findBackupOfRun, recordBackupFinished, recordBackupStarted, type UnitBackup } from "#core/server/db/unit-backups.ts";
+import {
+  boxSecretData, boxSecretName, generationFolder, generationId, generationManifest, jobReadsBoxSecret, parseSha256Lines,
+  purgeGenerationJob, verifyDumpJob, writeManifestJob, MONGO_NAMESPACE, type RelocationJob, type StorageBoxAccess,
+} from "./relocation-jobs.ts";
 import { loadActiveTargetCluster, type TargetCluster } from "./relocation-target.ts";
 
 /** What every relocation step reaches the world through. `jobTimeoutMs` is the per-Job budget — a
@@ -32,10 +37,13 @@ export interface RelocationPorts {
  *  Resolved by a WorldOf factory at STEP time (never frozen), so a resumed step reads the world as
  *  it stands. */
 export interface RelocationWorld {
-  /** The unit's one identity: the consumer name, or the tenant guid. Also the box folder name. */
+  /** The unit's one identity: the consumer name, or the tenant guid. */
   unit: string;
   kindWord: "consumer" | "tenant";
   stage: Stage;
+  /** The installation the unit belongs to — the master's domain, the first folder of its backups.
+   *  Read when a generation is opened, and only then. */
+  installation(): string;
   sourceClusterId: string;
   sourceDomain: string;
   /** The source cluster's SHORT name (what the registration's cluster field carries). */
@@ -56,21 +64,22 @@ export interface RelocationWorld {
   /** Wait for the unit's Application(s) to converge Synced/Healthy on the given cluster — the same
    *  wait for the quiesced and the open render (neither prunes), so intent only names the state. */
   watchConverged(ctx: StepCtx, clusterId: string, intent: string): Promise<void>;
-  /** The dump job set for this unit (each job in the namespace whose Secrets it needs). */
-  dumpJobs(registrationYaml: string, ctx: StepCtx): Promise<RelocationJob[]>;
-  /** What a complete dump leaves on the box — what verify-dump demands. */
+  /** The dump job set for this unit, writing into the generation `folder` (each job in the namespace
+   *  whose Secrets it needs). */
+  dumpJobs(folder: string, registrationYaml: string, ctx: StepCtx): Promise<RelocationJob[]>;
+  /** What a complete dump leaves in a generation — what verify-dump demands, the manifest aside. */
   expectedDumpEntries(ctx: StepCtx): Promise<string[]>;
-  /** The restore job set — the dump's mirror, run on the TARGET cluster. */
-  restoreJobs(ctx: StepCtx): Promise<RelocationJob[]>;
+  /** The restore job set — the dump's mirror, reading the generation `folder` on the TARGET cluster. */
+  restoreJobs(folder: string, ctx: StepCtx): Promise<RelocationJob[]>;
   /** The completeness listings run on the TARGET before DNS — each job compares what it can see
-   *  against the box copy and fails naming what is missing. */
-  verifyCompletenessJobs(ctx: StepCtx): Promise<RelocationJob[]>;
+   *  against the generation `folder` and fails naming what is missing. */
+  verifyCompletenessJobs(folder: string, ctx: StepCtx): Promise<RelocationJob[]>;
   /** List the SOURCE's databases (`DB` lines) — the data half of verify-source-released. null when
    *  the unit holds no database the ServiceClaim cascade could have destroyed (a consumer whose
    *  claims are s3/redis/registry-pull/forwardauth only, or whose mongodb databases[] is empty), so
    *  the step measures the handle alone instead of reading an empty listing as destruction. */
   sourceDbListJob(ctx: StepCtx): Promise<RelocationJob | null>;
-  /** Drop the source databases + delete the box folder — the LAST thing a move does. */
+  /** Drop the source databases — the LAST thing a move does. */
   clearSourceJobs(ctx: StepCtx): Promise<RelocationJob[]>;
   /** Arm the target with what no chart of the platform repository can render for it: a consumer's
    *  repository credential (its five fences come off its registration, so the repoint after this
@@ -107,6 +116,27 @@ export interface RelocationWorld {
 
 /** The per-kind world factory the step builders close over — resolved fresh at every step. */
 export type WorldOf = (ctx: StepCtx) => Promise<RelocationWorld>;
+
+/** Which generation a target-side step reads: the one this run took (a move), or the one the operator
+ *  picked (a restore). */
+export type GenerationOf = (ctx: StepCtx, w: RelocationWorld) => UnitBackup;
+
+/** The generation this run took — what a move restores from. */
+export const generationOfThisRun: GenerationOf = (ctx) => {
+  const g = findBackupOfRun(ctx.db, ctx.runId);
+  if (!g) throw errValidation(`run ${ctx.runId} took no backup generation — its dump step opens one before anything reads it`);
+  return g;
+};
+
+/** The generation the operator picked — what a restore reads, and only a written and verified one. */
+export function pickedGeneration(generation: string): GenerationOf {
+  return (ctx, w) => {
+    const g = findBackup(ctx.db, { kind: w.kindWord, unit: w.unit, stage: w.stage, generation });
+    if (!g) throw errValidation(`${w.kindWord} ${w.unit} (${w.stage}) has no backup generation ${generation}`);
+    if (g.state !== "ok") throw errValidation(`generation ${generation} of ${w.kindWord} ${w.unit} is ${g.state} — only a written and verified generation is restored`);
+    return g;
+  };
+}
 
 export function requireStorageBox(ports: RelocationPorts, runKind: string): StorageBoxAccess {
   if (!ports.storageBox) {
@@ -210,47 +240,91 @@ export function verifyQuiescedStep(ports: RelocationPorts, worldOf: WorldOf): St
   };
 }
 
-/** Dump EVERY store of the unit into its box folder — the registration, the databases, the bucket,
- *  the crypto material (a tenant) or the PVCs (a consumer), each job where its Secrets live. */
-export function dumpStep(ports: RelocationPorts, worldOf: WorldOf): Step {
+/** The generation this run writes: entered in the book of backups the first time, the same one again
+ *  when the step resumes. The inverse that deletes an unfinished one is armed with it. */
+function openGeneration(ctx: StepCtx, w: RelocationWorld, trigger: BackupTrigger, inverse: Cleanup): UnitBackup {
+  const taken = findBackupOfRun(ctx.db, ctx.runId);
+  if (taken) return taken;
+  const generation = generationId(new Date());
+  const folder = generationFolder({ installation: w.installation(), stage: w.stage, kind: w.kindWord, unit: w.unit, generation });
+  recordBackupStarted(ctx.db, { kind: w.kindWord, unit: w.unit, stage: w.stage, generation, folder, trigger, runId: ctx.runId });
+  ctx.registerCleanup(inverse);
+  return generationOfThisRun(ctx, w);
+}
+
+/** Dump EVERY store of the unit into a NEW generation on the box — the registration, the databases,
+ *  the bucket, the crypto material (a tenant) or the PVCs (a consumer), each job where its Secrets
+ *  live — and lay the manifest last, with the checksum of every file a job hashed. */
+export function dumpStep(ports: RelocationPorts, worldOf: WorldOf, trigger: BackupTrigger): Step {
   return {
     name: "dump",
-    title: "Dump every store into the Storage Box folder",
+    title: "Dump every store into a new backup generation on the Storage Box",
     run: async (ctx) => {
       const w = await worldOf(ctx);
       requireStorageBox(ports, "dump");
-      requireDbtoolsImage(ports, "dump");
+      const image = requireDbtoolsImage(ports, "dump");
+      const g = openGeneration(ctx, w, trigger, discardGenerationCleanup(ports, worldOf));
       const registrationYaml = await w.readRegistrationYaml();
-      const jobs = await w.dumpJobs(registrationYaml, ctx);
-      for (const job of jobs) await runRelocationJob(ports, ctx, w.sourceClusterId, job);
-      ctx.checkpoint({ folder: w.unit, jobs: jobs.map((j) => j.spec.name) });
-      ctx.log("meta", `${w.kindWord} ${w.unit} dumped — ${jobs.length} job(s) filled the folder /${w.unit}/ on the storage box`);
+      const jobs = await w.dumpJobs(g.folder, registrationYaml, ctx);
+      const sums: string[] = [];
+      for (const job of jobs) sums.push(...parseSha256Lines(await runRelocationJob(ports, ctx, w.sourceClusterId, job)));
+      const manifest = generationManifest({ ...g, kind: w.kindWord, installation: w.installation(), stores: await w.expectedDumpEntries(ctx) }, sums);
+      await runRelocationJob(ports, ctx, w.sourceClusterId, writeManifestJob({ unit: w.unit, folder: g.folder, namespace: w.homeNamespace, manifest, image }));
+      ctx.checkpoint({ generation: g.generation, jobs: jobs.map((j) => j.spec.name) });
+      ctx.log("meta", `${w.kindWord} ${w.unit} dumped — ${jobs.length} job(s) filled the generation ${g.folder}/ on the storage box, and its manifest carries ${sums.length} checksum(s)`);
     },
   };
 }
 
-/** Verify the dump: every expected folder entry stands on the box, or the run stops HERE — before
- *  anything downstream trusts a half-written folder. */
+/** Verify the dump: every expected entry stands in the generation, the manifest included, or the run
+ *  stops HERE — before anything downstream trusts a half-written generation. Only now is the
+ *  generation entered as restorable. */
 export function verifyDumpStep(ports: RelocationPorts, worldOf: WorldOf): Step {
   return {
     name: "verify-dump",
-    title: "Verify the dump is complete on the Storage Box",
+    title: "Verify the generation is complete on the Storage Box",
     run: async (ctx) => {
       const w = await worldOf(ctx);
       requireStorageBox(ports, "verify-dump");
       const image = requireDbtoolsImage(ports, "verify-dump");
-      const expected = await w.expectedDumpEntries(ctx);
-      const job = verifyDumpJob({ unit: w.unit, namespace: w.homeNamespace, expected, image });
-      await runRelocationJob(ports, ctx, w.sourceClusterId, job);
-      ctx.checkpoint({ expected });
-      ctx.log("meta", `dump of ${w.unit} verified — ${expected.join(", ")} all stand in the folder`);
+      const g = generationOfThisRun(ctx, w);
+      const expected = [...(await w.expectedDumpEntries(ctx)), "manifest.txt"];
+      await runRelocationJob(ports, ctx, w.sourceClusterId, verifyDumpJob({ unit: w.unit, folder: g.folder, namespace: w.homeNamespace, expected, image }));
+      recordBackupFinished(ctx.db, g, { state: "ok" });
+      ctx.checkpoint({ expected, generation: g.generation });
+      ctx.log("meta", `generation ${g.generation} of ${w.unit} verified — ${expected.join(", ")} all stand in ${g.folder}/, and it is a restorable backup from now on`);
+    },
+  };
+}
+
+/** The name the dump step arms its inverse under; the run definition supplies the cleanup itself. */
+export const DISCARD_GENERATION = "discard-generation";
+
+/** The inverse of the dump, for an aborted run: a generation that never became `ok` is deleted from
+ *  the box and marked failed. A verified one stays, because it is a complete backup whatever failed
+ *  after it. */
+export function discardGenerationCleanup(ports: RelocationPorts, worldOf: WorldOf): Cleanup {
+  return {
+    name: DISCARD_GENERATION,
+    title: "Delete the unfinished backup generation from the Storage Box",
+    run: async (ctx) => {
+      const g = findBackupOfRun(ctx.db, ctx.runId);
+      if (!g || g.state !== "taking") {
+        ctx.log("meta", g ? `generation ${g.generation} is ${g.state} — it stays` : "this run opened no generation — nothing to delete");
+        return;
+      }
+      const w = await worldOf(ctx);
+      const image = requireDbtoolsImage(ports, DISCARD_GENERATION);
+      await runRelocationJob(ports, ctx, w.sourceClusterId, purgeGenerationJob({ unit: w.unit, folder: g.folder, namespace: MONGO_NAMESPACE, image }));
+      recordBackupFinished(ctx.db, g, { state: "failed", detail: `run ${ctx.runId} was aborted before the generation was verified` });
+      ctx.log("meta", `unfinished generation ${g.folder}/ deleted from the storage box and marked failed`);
     },
   };
 }
 
 /** Reopen access: flip quiesced back and wait for the running render to converge — on the SOURCE
  *  for a backup (the unit stays where it was), on the TARGET for a move or restore (the registration
- *  now points there). The box folder is untouched: keeping it is what makes the run a backup. */
+ *  now points there). The generation is untouched: keeping it is what makes the run a backup. */
 export function openAccessStep(worldOf: WorldOf, on: "source" | "target", targetClusterId?: string): Step {
   return {
     name: "open-access",

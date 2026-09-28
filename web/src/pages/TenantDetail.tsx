@@ -4,7 +4,7 @@ import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
   getTenant, getTenantAppCatalog, addTenantApp, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
-  setTenantSize, setTenantRouting, setTenantVersions, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listRuns,
+  setTenantSize, setTenantRouting, setTenantVersions, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns,
   type TenantDetailView,
 } from "../api.ts";
 import { tenantRowOffer } from "../tenantRows.ts";
@@ -20,6 +20,7 @@ import { TenantVersionsAction } from "../components/TenantVersionsAction.tsx";
 import { TypeToConfirm } from "../components/TypeToConfirm.tsx";
 import { PurgeTenantDialog } from "../components/PurgeTenantDialog.tsx";
 import { RelocationTargetDialog } from "../components/RelocationTargetDialog.tsx";
+import { chosenGeneration } from "../backups.ts";
 import { TenantStatusBadge, UnfinishedTenantNotice } from "../components/TenantStatusBadge.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -410,7 +411,7 @@ export function TenantDetail() {
             </Link>
           )}
           {/* Restore is offered on the OFFBOARDED row only: an offboard kept the tenant's Vault entry
-              and cluster state, so a restore rebuilds it data-identically from its Storage Box folder.
+              and cluster state, so a restore rebuilds it data-identically from a generation of its backup.
               A PURGED tenant lost its Vault path — its identity cannot be rebuilt by a restore, which
               deliberately never writes Vault. */}
           {!purged && (
@@ -451,8 +452,8 @@ export function TenantDetail() {
             This <strong>plans</strong> a backup run and opens it — you approve on the next screen. The run{" "}
             <strong>closes access to the whole tenant for the duration of the dump</strong> (downtime, never an inconsistent copy),
             dumps every <span className="mono">{backupT.guid}_*</span> database, the object-storage bucket and the crypto material
-            into the Storage Box folder <span className="mono">/{backupT.guid}/</span>, verifies the folder and reopens. The folder
-            stays.
+            into a new generation of the tenant&apos;s backup on the Storage Box, verifies it and reopens. It stays beside the
+            earlier ones.
           </p>
         </ConfirmDialog>
       )}
@@ -464,12 +465,9 @@ export function TenantDetail() {
           confirmLabel={relocT.kind === "move" ? "Plan move" : "Plan restore"}
           currentClusterId={relocT.t.clusterId}
           loadTargets={listTenantTargets}
+          loadGenerations={relocT.kind === "restore" ? () => listTenantBackups(tenantId) : undefined}
           onCancel={() => setRelocT(null)}
-          onConfirm={(targetClusterId) => {
-            const { kind } = relocT;
-            setRelocT(null);
-            void act(() => (kind === "move" ? migrateTenant(tenantId, targetClusterId) : restoreTenant(tenantId, targetClusterId)));
-          }}
+          onConfirm={(targetClusterId, generation) => { const { kind } = relocT; setRelocT(null); void act(() => (kind === "move" ? migrateTenant(tenantId, targetClusterId) : restoreTenant(tenantId, targetClusterId, chosenGeneration(generation)))); }}
         >
           {relocT.kind === "move" ? (
             <p>
@@ -482,7 +480,7 @@ export function TenantDetail() {
           ) : (
             <p>
               This <strong>plans</strong> a restore and opens it — you approve on the next screen. The run rebuilds tenant{" "}
-              <span className="mono">{relocT.t.guid}</span> from its Storage Box folder: every member is provisioned from the dumped
+              <span className="mono">{relocT.t.guid}</span> from the backup generation you choose: every member is provisioned from the dumped
               registration, the fan-out deploys closed, every <span className="mono">{relocT.t.guid}_*</span> database and the bucket
               are replayed and verified (the crypto material stays in Vault, byte-identical), the tenant's DNS record is set, and access
               opens last.

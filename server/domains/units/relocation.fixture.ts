@@ -45,6 +45,13 @@ export function openFixtureDb(): DbHandle {
   return openDb(":memory:");
 }
 
+/** The master, whose domain is the installation every backup generation is filed under. */
+export const INSTALLATION = "master.example";
+export function seedMaster(db: DbHandle): void {
+  db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "10.1.1.10", sshUser: "root", role: "master", status: "healthy" }).run();
+  db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: INSTALLATION, name: "master", status: "active" }).run();
+}
+
 /** Both prod clusters, source + target. */
 export function seedClusters(db: DbHandle): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();

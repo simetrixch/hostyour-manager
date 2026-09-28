@@ -6,8 +6,9 @@ import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { makeMigrateDef, makeTenantMigrateDef } from "./migrate.run.ts";
 import { repointStep } from "#unit/server/relocation-migrate.ts";
 import { consumerWorld } from "./relocation-world-consumer.ts";
+import { listBackups } from "../../db/unit-backups.ts";
 import {
-  openFixtureDb, seedClusters, seedConsumerRow, seedTenantRows, seedConsumerRegistration, seedTenantWorld,
+  openFixtureDb, seedClusters, seedMaster, seedConsumerRow, seedTenantRows, seedConsumerRegistration, seedTenantWorld,
   makeFakes, consumerPorts, tenantPorts, driveSteps, stepCtx, jobNames, missing, GUID, CONSUMER, SUBDOMAIN, SOURCE, TARGET,
 } from "./relocation.fixture.ts";
 
@@ -58,6 +59,7 @@ describe("migrate (consumer)", () => {
   });
 
   it("journey: moves the consumer — repointed registration, one record updated in place, source cleared LAST, row on the target", async () => {
+    seedMaster(db);
     seedClusters(db);
     seedConsumerRow(db);
     const f = makeFakes();
@@ -93,6 +95,13 @@ describe("migrate (consumer)", () => {
     // the clear came AFTER the target held everything (the job orders on each side say so).
     expect(jobNames(f.source)).toContain(`reloc-dump-mongo-${CONSUMER}`);
     expect(jobNames(f.target)).toContain(`reloc-restore-mongo-${CONSUMER}`);
+    // The restore read the generation THIS move took, and that generation stays on the box as the
+    // backup of the moment before the move: nothing of the clear reaches the box.
+    const [taken, ...more] = listBackups(db.db, { kind: "consumer", unit: CONSUMER, stage: "prod" });
+    expect(more).toEqual([]);
+    expect(taken).toMatchObject({ trigger: "move", state: "ok", runId: "run_reloc" });
+    expect(f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-mongo-${CONSUMER}`)?.spec.script).toContain(`box:${taken!.folder}/mongo/`);
+    expect(f.source.reader.jobs.find((j) => j.spec.name === `reloc-clear-source-${CONSUMER}`)?.spec.script).not.toContain("box:");
     const sourceJobs = jobNames(f.source);
     expect(sourceJobs.indexOf(`reloc-clear-source-${CONSUMER}`)).toBeGreaterThan(sourceJobs.indexOf(`reloc-list-source-${CONSUMER}`));
     // The source namespace was marked relocating BEFORE the flip pruned the Application, so the
@@ -131,6 +140,7 @@ describe("repoint (the claim mark)", () => {
 
 describe("tenant-migrate", () => {
   it("journey: a tenant with Garage object storage is moved whole — bucket dumped and restored, source CR released via the relocating annotation, source cleared last", async () => {
+    seedMaster(db);
     seedClusters(db);
     seedTenantRows(db);
     const f = makeFakes();
@@ -170,8 +180,10 @@ describe("tenant-migrate", () => {
     expect(jobNames(f.target)).toContain(`reloc-verify-bucket-${GUID}`);
     // ONE wildcard record now points at the target.
     expect(f.dns.record(`*.${SUBDOMAIN}.example.com`, "CNAME")).toBe(TARGET.domain);
-    // The source fell LAST: databases dropped + folder purged (the clear job), namespaces reaped.
+    // The source fell LAST: databases dropped (the clear job), namespaces reaped. The generation the
+    // move took stays on the box.
     expect(jobNames(f.source)).toContain(`reloc-clear-source-${GUID}`);
+    expect(listBackups(db.db, { kind: "tenant", unit: GUID, stage: "prod" }).map((b) => [b.trigger, b.state])).toEqual([["move", "ok"]]);
     for (const member of ["auth", "jobs", "report", "web"]) {
       expect(f.source.reader.deletedNamespaces).toContain(`${GUID}-${member}-prod`);
     }
@@ -181,7 +193,8 @@ describe("tenant-migrate", () => {
     expect(row?.status).toBe("active");
   });
 
-  it("journey: an injected restore failure leaves the source fully intact — nothing cleared, nothing recorded, the folder survives", async () => {
+  it("journey: an injected restore failure leaves the source fully intact — nothing cleared, nothing recorded, the generation survives", async () => {
+    seedMaster(db);
     seedClusters(db);
     seedTenantRows(db);
     const f = makeFakes();
@@ -197,11 +210,12 @@ describe("tenant-migrate", () => {
       }),
     ).rejects.toThrow(/disk full/);
 
-    // clear-source never ran: the source databases and the box folder are untouched, no source
-    // namespace fell, and the inventory still names the source cluster.
+    // clear-source never ran: the source databases are untouched, no source namespace fell, and the
+    // inventory still names the source cluster. The verified generation stays a backup.
     expect(jobNames(f.source).find((n) => n.startsWith("reloc-clear-source"))).toBeUndefined();
     expect(f.source.reader.deletedNamespaces).toEqual([]);
     const row = db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get();
     expect(row?.clusterId).toBe(SOURCE.clusterId);
+    expect(listBackups(db.db, { kind: "tenant", unit: GUID, stage: "prod" }).map((b) => b.state)).toEqual(["ok"]);
   });
 });

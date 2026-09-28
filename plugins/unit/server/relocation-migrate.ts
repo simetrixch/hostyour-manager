@@ -4,7 +4,7 @@
 // (relocation-restore.ts): a move is a backup, a restore into the target, and a repoint — one
 // carrier, never a third code path.
 import type { Step } from "#core/server/executor/types.ts";
-import { requireDbtoolsImage, requireStorageBox, runRelocationJob, type RelocationPorts, type WorldOf } from "./relocation.ts";
+import { requireDbtoolsImage, runRelocationJob, type RelocationPorts, type WorldOf } from "./relocation.ts";
 import { targetOf } from "./relocation-restore.ts";
 
 /** Flip the registration's cluster field onto the target — for a tenant, with the relocating
@@ -22,21 +22,20 @@ export function repointStep(worldOf: WorldOf, targetClusterId: string): Step {
 }
 
 /** Clear the SOURCE — the last mutation of a move, strictly after completeness, DNS and reopening:
- *  drop the source databases, remove the source-side isolation objects and namespaces, delete the
- *  box folder. After this the folder is gone (a move), where a backup would have kept it. */
+ *  drop the source databases, remove the source-side isolation objects and namespaces. The generation
+ *  the move took stays on the box, as the backup of the moment before it. */
 export function clearSourceStep(ports: RelocationPorts, worldOf: WorldOf): Step {
   return {
     name: "clear-source",
-    title: "Clear the source (drop its data, remove its objects, delete the box folder)",
+    title: "Clear the source (drop its data, remove its objects)",
     run: async (ctx) => {
       const w = await worldOf(ctx);
-      requireStorageBox(ports, "clear-source");
-      requireDbtoolsImage(ports, "clear-source");
       const jobs = await w.clearSourceJobs(ctx);
+      if (jobs.length > 0) requireDbtoolsImage(ports, "clear-source");
       for (const job of jobs) await runRelocationJob(ports, ctx, w.sourceClusterId, job);
       await w.clearSourceCluster(ctx);
       ctx.checkpoint({ jobs: jobs.map((j) => j.spec.name), cleared: true });
-      ctx.log("meta", `source cleared for ${w.unit} — its databases are dropped, its cluster objects removed and the box folder /${w.unit}/ is gone; the unit serves from the target alone. Anything the steps above reported as KEPT on the source is handarbeit and is named there`);
+      ctx.log("meta", `source cleared for ${w.unit} — its databases are dropped and its cluster objects removed; the unit serves from the target alone, and the generation this move took stays on the storage box. Anything the steps above reported as KEPT on the source is handarbeit and is named there`);
     },
   };
 }

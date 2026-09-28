@@ -9,7 +9,7 @@ import type { RunDefinition, LockClaim, Step } from "../../executor/types.ts";
 import { attestTargetStep, attestTenantTargetStep, loadAppCluster, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { assertMovableTo } from "#unit/server/relocation-target.ts";
-import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, type RelocationPorts, type WorldOf } from "#unit/server/relocation.ts";
+import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, discardGenerationCleanup, generationOfThisRun, type RelocationPorts, type WorldOf } from "#unit/server/relocation.ts";
 import { provisionTargetStep, watchTargetStep, restoreStep, verifyCompletenessStep, switchDnsStep, targetSmokeStep, recordStep } from "#unit/server/relocation-restore.ts";
 import { repointStep, clearSourceStep } from "#unit/server/relocation-migrate.ts";
 import { verifySourceReleasedStep } from "#unit/server/verify-source-released.ts";
@@ -32,14 +32,14 @@ function migrateSteps(ports: RelocationPorts, worldOf: WorldOf, targetClusterId:
     attest,
     quiesceStep(worldOf),
     verifyQuiescedStep(ports, worldOf),
-    dumpStep(ports, worldOf),
+    dumpStep(ports, worldOf, "move"),
     verifyDumpStep(ports, worldOf),
     provisionTargetStep(worldOf, targetClusterId),
     repointStep(worldOf, targetClusterId),
     watchTargetStep(worldOf, targetClusterId),
     verifySourceReleasedStep(ports, worldOf),
-    restoreStep(ports, worldOf, targetClusterId),
-    verifyCompletenessStep(ports, worldOf, targetClusterId),
+    restoreStep(ports, worldOf, targetClusterId, generationOfThisRun),
+    verifyCompletenessStep(ports, worldOf, targetClusterId, generationOfThisRun),
     switchDnsStep(ports, worldOf, targetClusterId, "consumer-migrate"),
     targetSmokeStep(ports, worldOf, targetClusterId),
     openAccessStep(worldOf, "target", targetClusterId),
@@ -49,7 +49,7 @@ function migrateSteps(ports: RelocationPorts, worldOf: WorldOf, targetClusterId:
 }
 
 const summaryTail =
-  "The address stays the unit's own — the move updates the CONTENT of its one DNS record and nothing else, so sessions and integrations survive. The source is verified to have RELEASED the unit while still holding its data before anything is restored, and it is cleared LAST — a failure anywhere before that leaves the source data and the box folder fully intact.";
+  "The address stays the unit's own — the move updates the CONTENT of its one DNS record and nothing else, so sessions and integrations survive. The source is verified to have RELEASED the unit while still holding its data before anything is restored, and it is cleared LAST — a failure anywhere before that leaves the source data intact. The generation the move takes stays on the storage box as the backup of the moment before it.";
 
 export function makeMigrateDef(ports: ConsumerRelocationPorts): RunDefinition<MigrateParams> {
   return {
@@ -64,7 +64,7 @@ export function makeMigrateDef(ports: ConsumerRelocationPorts): RunDefinition<Mi
         kind: "consumer-migrate",
         targetKind: "app",
         targetId: params.appId,
-        summary: `Move consumer "${ac.name}" (${ac.stage}) from ${ac.domain} to ${target.domain} through the Storage Box folder /${ac.name}/: quiesce and verify closed, dump every store, provision the target, repoint the registration, verify the source released the unit, restore, verify completeness, switch the one DNS record, smoke, reopen, clear the source. ${summaryTail}`,
+        summary: `Move consumer "${ac.name}" (${ac.stage}) from ${ac.domain} to ${target.domain} through a new backup generation on the Storage Box: quiesce and verify closed, dump every store, provision the target, repoint the registration, verify the source released the unit, restore, verify completeness, switch the one DNS record, smoke, reopen, clear the source. ${summaryTail}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: [{ resource: "git-branch", key: ports.registrations.branch }, { resource: "git-branch", key: ac.domain }, { resource: "git-branch", key: target.domain }, masterKubeLock],
@@ -73,6 +73,7 @@ export function makeMigrateDef(ports: ConsumerRelocationPorts): RunDefinition<Mi
       };
     },
     steps: (params) => migrateSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, attestTargetStep(ports, params.appId), "moved consumer"),
+    cleanups: (params) => [discardGenerationCleanup(ports, consumerWorld(ports, params.appId))],
   };
 }
 
@@ -89,7 +90,7 @@ export function makeTenantMigrateDef(ports: TenantRelocationPorts): RunDefinitio
         kind: "tenant-migrate",
         targetKind: "tenant",
         targetId: params.tenantId,
-        summary: `Move tenant ${tc.guid} (${tc.stage}) from ${tc.domain} to ${target.domain} through the Storage Box folder /${tc.guid}/ — the WHOLE bracket, under the unchanged guid: quiesce and verify closed, dump every ${tc.guid}_* database + the bucket + the crypto material, provision every member on the target, repoint (every source member namespace is marked relocating first, which is what keeps its databases when the flip prunes the ServiceClaims), verify the source released the tenant — its fan-out pruned — while still holding its data, restore, verify completeness, switch the one wildcard record, smoke, reopen, clear the source. ${summaryTail}`,
+        summary: `Move tenant ${tc.guid} (${tc.stage}) from ${tc.domain} to ${target.domain} through a new backup generation on the Storage Box — the WHOLE bracket, under the unchanged guid: quiesce and verify closed, dump every ${tc.guid}_* database + the bucket + the crypto material, provision every member on the target, repoint (every source member namespace is marked relocating first, which is what keeps its databases when the flip prunes the ServiceClaims), verify the source released the tenant — its fan-out pruned — while still holding its data, restore, verify completeness, switch the one wildcard record, smoke, reopen, clear the source. ${summaryTail}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
@@ -98,5 +99,6 @@ export function makeTenantMigrateDef(ports: TenantRelocationPorts): RunDefinitio
       };
     },
     steps: (params) => migrateSteps(ports, tenantWorld(ports, params.tenantId), params.targetClusterId, attestTenantTargetStep(ports, params.tenantId), "moved tenant"),
+    cleanups: (params) => [discardGenerationCleanup(ports, tenantWorld(ports, params.tenantId))],
   };
 }

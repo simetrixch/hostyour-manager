@@ -1,6 +1,6 @@
 // The TARGET-side steps of the relocation carrier — the "second half" of the sequence that IS the restore
 // run kind, and that a migrate composes after its dump half: provide the target, rebuild the unit from
-// the box folder, prove completeness BEFORE DNS, switch the one record, smoke, and settle the
+// a backup generation (GenerationOf says which), prove completeness BEFORE DNS, switch the one record, smoke, and settle the
 // inventory. Kind differences all live behind the RelocationWorld.
 import type { Step, StepCtx } from "#core/server/executor/types.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
@@ -8,7 +8,7 @@ import { assertDeployState } from "./lifecycle.ts";
 import { provisionUnitDns } from "./unit-dns.ts";
 import { readRegistrationJob, readRegistrationFromLogs, MONGO_NAMESPACE } from "./relocation-jobs.ts";
 import { loadActiveTargetCluster, type TargetCluster } from "./relocation-target.ts";
-import { requireDbtoolsImage, requireStorageBox, runRelocationJob, type RelocationPorts, type WorldOf } from "./relocation.ts";
+import { requireDbtoolsImage, requireStorageBox, runRelocationJob, type GenerationOf, type RelocationPorts, type WorldOf } from "./relocation.ts";
 
 /** The target of this run, resolved fresh at every step (active, like the plan said). */
 export function targetOf(ctx: StepCtx, targetClusterId: string): TargetCluster {
@@ -47,12 +47,12 @@ export function provisionTargetStep(worldOf: WorldOf, targetClusterId: string): 
   };
 }
 
-/** provision-target for a RESTORE: read the DUMPED registration off the box (a job on the target —
- *  the unit's own namespaces do not exist yet, so it runs in the platform mongodb namespace),
- *  provision the isolation it names, and re-commit it onto the target, quiesced. One step, because
- *  the registration bytes read here are exactly what the two writes need, and a resumed step
- *  re-reads them rather than trusting a stale copy. */
-export function provisionTargetFromDumpStep(ports: RelocationPorts, worldOf: WorldOf, targetClusterId: string): Step {
+/** provision-target for a RESTORE: read the DUMPED registration out of the picked generation (a job
+ *  on the target — the unit's own namespaces do not exist yet, so it runs in the platform mongodb
+ *  namespace), provision the isolation it names, and re-commit it onto the target, quiesced. One
+ *  step, because the registration bytes read here are exactly what the two writes need, and a
+ *  resumed step re-reads them rather than trusting a stale copy. */
+export function provisionTargetFromDumpStep(ports: RelocationPorts, worldOf: WorldOf, targetClusterId: string, generationOf: GenerationOf): Step {
   return {
     name: "provision-target",
     title: "Read the dumped registration and provision the target cluster",
@@ -61,10 +61,11 @@ export function provisionTargetFromDumpStep(ports: RelocationPorts, worldOf: Wor
       const target = targetOf(ctx, targetClusterId);
       requireStorageBox(ports, "restore");
       const image = requireDbtoolsImage(ports, "restore");
-      const logs = await runRelocationJob(ports, ctx, target.clusterId, readRegistrationJob({ unit: w.unit, namespace: MONGO_NAMESPACE, image }));
+      const g = generationOf(ctx, w);
+      const logs = await runRelocationJob(ports, ctx, target.clusterId, readRegistrationJob({ unit: w.unit, folder: g.folder, namespace: MONGO_NAMESPACE, image }));
       const registrationYaml = readRegistrationFromLogs(logs);
       if (registrationYaml === null || registrationYaml.trim() === "") {
-        throw errValidation(`the box folder /${w.unit}/ carries no readable registration.yaml — a restore rebuilds the unit FROM its dump, and this folder has none`);
+        throw errValidation(`the generation ${g.folder}/ carries no readable registration.yaml — a restore rebuilds the unit FROM its dump, and this generation has none`);
       }
       await w.provisionTarget(ctx, target, registrationYaml);
       await w.writeRegistrationFromDump(ctx, registrationYaml, target);
@@ -85,20 +86,21 @@ export function watchTargetStep(worldOf: WorldOf, targetClusterId: string): Step
   };
 }
 
-/** Restore every store from the box folder into the target. */
-export function restoreStep(ports: RelocationPorts, worldOf: WorldOf, targetClusterId: string): Step {
+/** Restore every store from the generation into the target. */
+export function restoreStep(ports: RelocationPorts, worldOf: WorldOf, targetClusterId: string, generationOf: GenerationOf): Step {
   return {
     name: "restore",
-    title: "Restore every store from the Storage Box folder",
+    title: "Restore every store from the backup generation",
     run: async (ctx) => {
       const w = await worldOf(ctx);
       requireStorageBox(ports, "restore");
       requireDbtoolsImage(ports, "restore");
       const target = targetOf(ctx, targetClusterId);
-      const jobs = await w.restoreJobs(ctx);
+      const g = generationOf(ctx, w);
+      const jobs = await w.restoreJobs(g.folder, ctx);
       for (const job of jobs) await runRelocationJob(ports, ctx, target.clusterId, job);
-      ctx.checkpoint({ jobs: jobs.map((j) => j.spec.name) });
-      ctx.log("meta", `${w.kindWord} ${w.unit} restored on ${target.cluster} — ${jobs.length} job(s) replayed the folder /${w.unit}/`);
+      ctx.checkpoint({ generation: g.generation, jobs: jobs.map((j) => j.spec.name) });
+      ctx.log("meta", `${w.kindWord} ${w.unit} restored on ${target.cluster} — ${jobs.length} job(s) replayed the generation ${g.folder}/`);
     },
   };
 }
@@ -106,14 +108,14 @@ export function restoreStep(ports: RelocationPorts, worldOf: WorldOf, targetClus
 /** Completeness BEFORE DNS: every dumped database stands on the target, the bucket matches the box
  *  copy, and (a tenant) the crypto material materialized. A failure aborts the run right here —
  *  the address never switches onto an incomplete unit. */
-export function verifyCompletenessStep(ports: RelocationPorts, worldOf: WorldOf, targetClusterId: string): Step {
+export function verifyCompletenessStep(ports: RelocationPorts, worldOf: WorldOf, targetClusterId: string, generationOf: GenerationOf): Step {
   return {
     name: "verify-completeness",
     title: "Verify the target holds everything the dump holds (before DNS)",
     run: async (ctx) => {
       const w = await worldOf(ctx);
       const target = targetOf(ctx, targetClusterId);
-      const jobs = await w.verifyCompletenessJobs(ctx);
+      const jobs = await w.verifyCompletenessJobs(generationOf(ctx, w).folder, ctx);
       for (const job of jobs) await runRelocationJob(ports, ctx, target.clusterId, job);
       await w.verifyCompletenessExtra?.(ctx, target);
       ctx.checkpoint({ jobs: jobs.map((j) => j.spec.name), complete: true });

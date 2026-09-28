@@ -13,6 +13,7 @@ import { parse as parseYaml } from "yaml";
 import { localTx } from "../../executor/stepkit.ts";
 import { serializePointer } from "#unit/server/registration-laws.ts";
 import { loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { resolveMasterCluster } from "../inventory/read.ts";
 import { tenantSelector, allPruned, lingering } from "./tenant-lifecycle.run.ts";
 import { memberAppProject, memberApplication, memberNamespace, tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";
 import { renderTenantAppProject } from "./appproject.ts";
@@ -108,6 +109,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       unit: tc.guid,
       kindWord: "tenant",
       stage: tc.stage,
+      installation: () => resolveMasterCluster(ctx.db).domain,
       sourceClusterId: tc.clusterId,
       sourceDomain: tc.domain,
       sourceCluster: (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.cluster ?? "",
@@ -119,10 +121,10 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       setQuiesced: (q, runId) => ports.registrations.setTenantQuiesced(tc.stage, tc.guid, q, runId),
       readRegistrationYaml: async () => serializePointer(TenantRegistrationSchema, await readRegistration(ports, tc.stage, tc.guid)),
       watchConverged: async (c, clusterId, intent) => watchSet(tenantApplicationSet(allMembers, tc.guid, tc.stage))(c, clusterId, intent),
-      dumpJobs: async (registrationYaml) => tenantDumpJobs({ guid: tc.guid, stage: tc.stage, apps, identityProvider: tc.identityProvider, image, registrationYaml }),
+      dumpJobs: async (folder, registrationYaml) => tenantDumpJobs({ guid: tc.guid, folder, stage: tc.stage, apps, identityProvider: tc.identityProvider, image, registrationYaml }),
       expectedDumpEntries: async () => tenantExpectedDumpEntries(apps),
-      restoreJobs: async () => tenantRestoreJobs({ guid: tc.guid, stage: tc.stage, apps, identityProvider: tc.identityProvider, image }),
-      verifyCompletenessJobs: async () => tenantVerifyCompletenessJobs({ guid: tc.guid, stage: tc.stage, apps, identityProvider: tc.identityProvider, image }),
+      restoreJobs: async (folder) => tenantRestoreJobs({ guid: tc.guid, folder, stage: tc.stage, apps, identityProvider: tc.identityProvider, image }),
+      verifyCompletenessJobs: async (folder) => tenantVerifyCompletenessJobs({ guid: tc.guid, folder, stage: tc.stage, apps, identityProvider: tc.identityProvider, image }),
       sourceDbListJob: async () => tenantSourceDbListJob({ guid: tc.guid, stage: tc.stage, image }),
       clearSourceJobs: async () => tenantClearSourceJobs({ guid: tc.guid, stage: tc.stage, image }),
       provisionTarget: async (c, target, dumpedRegistrationYaml) => {

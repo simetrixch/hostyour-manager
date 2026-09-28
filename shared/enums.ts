@@ -469,9 +469,9 @@ export const RUN_KIND = [
   // pipeline places the delivery branch, as for every release.
   "consumer-set-release",
   // The relocation run kinds — ONE mechanism over the Hetzner Storage Box, three slices of it:
-  // backup = close access, dump every store, verify, reopen (the box folder stays); restore = provide
-  // the target and rebuild the unit from a folder; migrate = both halves plus the repoint and the
-  // one-record DNS switch. Never three code paths — the defs compose shared step builders.
+  // backup = close access, dump every store into a new generation, verify, reopen (the generation
+  // stays); restore = provide the target and rebuild the unit from a picked generation; migrate =
+  // both halves plus the repoint and the one-record DNS switch. Never three code paths — the defs compose shared step builders.
   // The tenant three are the same mechanism over the whole member bracket.
   "consumer-backup", "consumer-restore", "consumer-migrate",
   "tenant-backup", "tenant-restore", "tenant-migrate",
@@ -579,6 +579,17 @@ export type DnsWriteAct = (typeof DNS_WRITE_ACT)[number];
  *  operator supplied later, `minted` by the Manager after the onboarding. */
 export const SECRET_WRITE_ACT = ["seeded", "set", "minted"] as const;
 export type SecretWriteAct = (typeof SECRET_WRITE_ACT)[number];
+
+/** What took ONE generation of a unit's backup, as the book of backups (unit_backups) records it: the
+ *  Backup run (`manual`), a move, which dumps before it restores (`move`), or the Manager's nightly
+ *  pass (`nightly`). */
+export const BACKUP_TRIGGER = ["manual", "move", "nightly"] as const;
+export type BackupTrigger = (typeof BACKUP_TRIGGER)[number];
+
+/** Where ONE generation stands: being written, written and verified, failed (its folder is deleted),
+ *  or taken off the box by retention. Only an `ok` generation can be restored. */
+export const BACKUP_STATE = ["taking", "ok", "failed", "pruned"] as const;
+export type BackupState = (typeof BACKUP_STATE)[number];
 
 /** Whose record a DNS write was made for: a consumer's host, a tenant's wildcard, or a sender
  *  domain's mail record. The inventory's owner kinds (shared/dns.ts) are these plus `installer`,

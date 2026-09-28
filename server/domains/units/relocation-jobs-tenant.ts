@@ -5,7 +5,7 @@ import type { JobEnvVar } from "../../adapters/kube/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
 import { TENANT_SECRET, TENANT_S3_SECRET } from "./tenant-secrets.ts";
-import { type RelocationJob, MONGO_NAMESPACE, boxSpec, mongoEnv, BOX_REMOTE, writeFile, listMongoDbs, MONGO_FLAGS, relocationJobName } from "#unit/server/relocation-jobs.ts";
+import { type RelocationJob, MONGO_NAMESPACE, boxSpec, mongoEnv, BOX_REMOTE, writeFile, listMongoDbs, MONGO_FLAGS, relocationJobName, hashLine } from "#unit/server/relocation-jobs.ts";
 
 /** What the S3_REMOTE block needs in a tenant app member namespace. EVERY value comes off the
  *  tenant's own bucket Secret, the endpoint included — there is no cluster constant to fall back on
@@ -52,6 +52,8 @@ export RCLONE_CONFIG_S3_FORCE_PATH_STYLE=true
 
 export interface TenantJobInputs {
   guid: string;
+  /** The generation the jobs write or read, below the box root (generationFolder). */
+  folder: string;
   stage: Stage;
   /** The tenant's app member names (its apps[] matrix) — where the bucket-key Secret lives. */
   apps: readonly string[];
@@ -81,12 +83,13 @@ export function tenantDumpJobs(i: TenantJobInputs & { registrationYaml: string }
         script:
           BOX_REMOTE +
           writeFile("/tmp/registration.yaml", i.registrationYaml) +
-          `rclone copyto /tmp/registration.yaml "box:${i.guid}/registration.yaml"
+          hashLine("/tmp/registration.yaml", "registration.yaml") +
+          `rclone copyto /tmp/registration.yaml "box:${i.folder}/registration.yaml"
 ${listMongoDbs(`${i.guid}_`)} > /tmp/dbs
 cat /tmp/dbs
 sed 's/^DB //' /tmp/dbs | while read -r db; do
   mongodump ${MONGO_FLAGS} --db "$db" --archive="/tmp/$db.archive" --quiet
-  rclone copyto "/tmp/$db.archive" "box:${i.guid}/mongo/$db.archive"
+  ${hashLine("/tmp/$db.archive", "mongo/$db.archive")}  rclone copyto "/tmp/$db.archive" "box:${i.folder}/mongo/$db.archive"
   rm -f "/tmp/$db.archive"
 done
 `,
@@ -99,7 +102,7 @@ done
         image: i.image,
         script:
           BOX_REMOTE +
-          TENANT_CRYPTO_KEYS.map((k) => `printf '%s' "$${k.env}" > "/tmp/${k.property}"\nrclone copyto "/tmp/${k.property}" "box:${i.guid}/vault/${k.property}"\n`).join(""),
+          TENANT_CRYPTO_KEYS.map((k) => `printf '%s' "$${k.env}" > "/tmp/${k.property}"\n${hashLine(`/tmp/${k.property}`, `vault/${k.property}`)}rclone copyto "/tmp/${k.property}" "box:${i.folder}/vault/${k.property}"\n`).join(""),
       },
     },
   ];
@@ -110,7 +113,7 @@ done
       spec: {
         ...boxSpec("dump-bucket", i.guid, tenantS3Env()),
         image: i.image,
-        script: BOX_REMOTE + S3_REMOTE + `rclone sync "s3:${i.guid}" "box:${i.guid}/bucket" --create-empty-src-dirs\n`,
+        script: BOX_REMOTE + S3_REMOTE + `rclone sync "s3:${i.guid}" "box:${i.folder}/bucket" --create-empty-src-dirs\n`,
       },
     });
     // The fifth crypto file, beside the other four under vault/. It runs HERE and not with them
@@ -133,7 +136,8 @@ done
         script:
           BOX_REMOTE +
           `printf '%s' "$${TENANT_ENGINE_KEY.env}" > "/tmp/${TENANT_ENGINE_KEY.property}"\n` +
-          `rclone copyto "/tmp/${TENANT_ENGINE_KEY.property}" "box:${i.guid}/vault/${TENANT_ENGINE_KEY.property}"\n`,
+          hashLine(`/tmp/${TENANT_ENGINE_KEY.property}`, `vault/${TENANT_ENGINE_KEY.property}`) +
+          `rclone copyto "/tmp/${TENANT_ENGINE_KEY.property}" "box:${i.folder}/vault/${TENANT_ENGINE_KEY.property}"\n`,
       },
     });
   }
@@ -157,8 +161,8 @@ export function tenantRestoreJobs(i: TenantJobInputs): RelocationJob[] {
         image: i.image,
         script:
           BOX_REMOTE +
-          `rclone lsf "box:${i.guid}/mongo/" | while read -r f; do
-  rclone copyto "box:${i.guid}/mongo/$f" "/tmp/$f"
+          `rclone lsf "box:${i.folder}/mongo/" | while read -r f; do
+  rclone copyto "box:${i.folder}/mongo/$f" "/tmp/$f"
   mongorestore ${MONGO_FLAGS} --archive="/tmp/$f" --drop --quiet
   rm -f "/tmp/$f"
 done
@@ -173,7 +177,7 @@ done
       spec: {
         ...boxSpec("restore-bucket", i.guid, tenantS3Env()),
         image: i.image,
-        script: BOX_REMOTE + S3_REMOTE + `rclone sync "box:${i.guid}/bucket" "s3:${i.guid}" --create-empty-src-dirs\n`,
+        script: BOX_REMOTE + S3_REMOTE + `rclone sync "box:${i.folder}/bucket" "s3:${i.guid}" --create-empty-src-dirs\n`,
       },
     });
   }
@@ -194,7 +198,7 @@ export function tenantVerifyCompletenessJobs(i: TenantJobInputs): RelocationJob[
         script:
           BOX_REMOTE +
           `${listMongoDbs(`${i.guid}_`)} | sed 's/^DB //' > /tmp/have
-rclone lsf "box:${i.guid}/mongo/" | sed 's/\\.archive$//' | while read -r want; do
+rclone lsf "box:${i.folder}/mongo/" | sed 's/\\.archive$//' | while read -r want; do
   grep -qx "$want" /tmp/have || { echo "MISSING database $want"; exit 1; }
 done
 echo "COMPLETE mongo"
@@ -212,7 +216,7 @@ echo "COMPLETE mongo"
         script:
           BOX_REMOTE +
           S3_REMOTE +
-          `want=$(rclone size "box:${i.guid}/bucket" --json | sed 's/.*"count":\\([0-9]*\\).*/\\1/')
+          `want=$(rclone size "box:${i.folder}/bucket" --json | sed 's/.*"count":\\([0-9]*\\).*/\\1/')
 have=$(rclone size "s3:${i.guid}" --json | sed 's/.*"count":\\([0-9]*\\).*/\\1/')
 echo "COUNT box=$want target=$have"
 [ "$want" = "$have" ] || { echo "MISSING bucket objects: box has $want, target has $have"; exit 1; }
@@ -239,23 +243,20 @@ export function tenantSourceDbListJob(i: { guid: string; stage: Stage; image: st
   };
 }
 
-/** Clear the SOURCE, last: drop the `<guid>_*` databases and delete the box folder. The
- *  box purge runs from the mongodb namespace too — it only needs the box. */
+/** Clear the SOURCE, last: drop the `<guid>_*` databases. The box is not touched: the generation the
+ *  move took stays as the backup of the moment before it. */
 export function tenantClearSourceJobs(i: { guid: string; stage: Stage; image: string }): RelocationJob[] {
   return [
     {
       namespace: MONGO_NAMESPACE,
       spec: {
-        ...boxSpec("clear-source", i.guid, mongoEnv(i.stage)),
+        name: relocationJobName("clear-source", i.guid),
+        env: mongoEnv(i.stage),
         image: i.image,
-        script:
-          BOX_REMOTE +
-          `${listMongoDbs(`${i.guid}_`)} | sed 's/^DB //' | while read -r db; do
+        script: `${listMongoDbs(`${i.guid}_`)} | sed 's/^DB //' | while read -r db; do
   mongosh ${MONGO_FLAGS} --quiet --eval "db.getSiblingDB('$db').dropDatabase()"
   echo "DROPPED $db"
 done
-rclone purge "box:${i.guid}" || true
-echo "FOLDER ${i.guid} removed"
 `,
       },
     },

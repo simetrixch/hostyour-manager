@@ -15,6 +15,7 @@ import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { serializePointer, parseRegistration } from "#unit/server/registration-laws.ts";
 import type { Registrations } from "#unit/server/registrations.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
+import { resolveMasterCluster } from "../inventory/read.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { } from "#unit/server/build-rbac.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
@@ -79,6 +80,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       unit: ac.name,
       kindWord: "consumer",
       stage: ac.stage,
+      installation: () => resolveMasterCluster(ctx.db).domain,
       sourceClusterId: ac.clusterId,
       sourceDomain: ac.domain,
       sourceCluster: ac.clusterName,
@@ -95,10 +97,10 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         }
         c.log("meta", `Application ${appName} is Synced + Healthy — the consumer render is ${intent}`);
       },
-      dumpJobs: async (registrationYaml) => consumerDumpJobs({ ...(await jobInputs()), registrationYaml }),
+      dumpJobs: async (folder, registrationYaml) => consumerDumpJobs({ ...(await jobInputs()), folder, registrationYaml }),
       expectedDumpEntries: async () => consumerExpectedDumpEntries(await jobInputs()),
-      restoreJobs: async () => consumerRestoreJobs(await jobInputs()),
-      verifyCompletenessJobs: async () => consumerVerifyCompletenessJobs(await jobInputs()),
+      restoreJobs: async (folder) => consumerRestoreJobs({ ...(await jobInputs()), folder }),
+      verifyCompletenessJobs: async (folder) => consumerVerifyCompletenessJobs({ ...(await jobInputs()), folder }),
       sourceDbListJob: async () => {
         const i = await jobInputs();
         return consumerSourceDbListJob({ name: i.name, stage: i.stage, databases: i.databases, services: i.services, image });

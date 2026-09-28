@@ -3,7 +3,8 @@ import type { DbHandle } from "../../db/client.ts";
 import { runRelocationJob } from "#unit/server/relocation.ts";
 import {
   boxSecretName, jobReadsBoxSecret,
-  verifyDumpJob, readRegistrationJob,
+  verifyDumpJob, readRegistrationJob, writeManifestJob, purgeGenerationJob,
+  generationId, generationFolder, generationManifest, hashLine, parseSha256Lines,
   type RelocationJob,
 } from "#unit/server/relocation-jobs.ts";
 import {
@@ -29,6 +30,8 @@ afterEach(() => { db.sqlite.close(); });
 const IMAGE = "registrations.example/dbtools:1.0.0";
 const GUID = "zsjs023ctne0";
 const CONSUMER = "acme";
+const TENANT_FOLDER = `master.example/prod/tenants/${GUID}/20260928T030000Z`;
+const CONSUMER_FOLDER = `master.example/prod/consumers/${CONSUMER}/20260928T030000Z`;
 const ALL_SERVICES: ConsumerService[] = ["mongodb", "postgresql"];
 
 /** Every job every relocation phase builds, both kinds of unit, with each optional store PRESENT —
@@ -36,8 +39,8 @@ const ALL_SERVICES: ConsumerService[] = ["mongodb", "postgresql"];
  *  can. A job hidden behind an absent claim carries no credential, so the maximal shape is the one
  *  worth asserting over. */
 function everyJob(): RelocationJob[] {
-  const tenant = { guid: GUID, stage: "prod" as const, apps: ["web"], image: IMAGE , identityProvider: "auth" };
-  const consumer = { name: CONSUMER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, pvcs: ["data"], image: IMAGE };
+  const tenant = { guid: GUID, folder: TENANT_FOLDER, stage: "prod" as const, apps: ["web"], image: IMAGE , identityProvider: "auth" };
+  const consumer = { name: CONSUMER, folder: CONSUMER_FOLDER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, pvcs: ["data"], image: IMAGE };
   return [
     ...tenantDumpJobs({ ...tenant, registrationYaml: "guid: zsjs023ctne0\n" }),
     ...tenantRestoreJobs(tenant),
@@ -49,10 +52,52 @@ function everyJob(): RelocationJob[] {
     ...consumerVerifyCompletenessJobs(consumer),
     ...consumerClearSourceJobs({ name: CONSUMER, stage: "prod", databases: consumer.databases, services: ALL_SERVICES, image: IMAGE }),
     consumerSourceDbListJob({ name: CONSUMER, stage: "prod", databases: consumer.databases, services: ALL_SERVICES, image: IMAGE })!,
-    verifyDumpJob({ unit: CONSUMER, namespace: CONSUMER, expected: ["registration.yaml"], image: IMAGE }),
-    readRegistrationJob({ unit: CONSUMER, namespace: "mongodb", image: IMAGE }),
+    verifyDumpJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: CONSUMER, expected: ["registration.yaml"], image: IMAGE }),
+    readRegistrationJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: "mongodb", image: IMAGE }),
+    writeManifestJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: CONSUMER, manifest: "UNIT=acme", image: IMAGE }),
+    purgeGenerationJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: "mongodb", image: IMAGE }),
   ];
 }
+
+describe("backup generations (hostyour-cloud#254)", () => {
+  it("names a generation by its UTC moment and places it under the installation, the stage and the kind", () => {
+    const generation = generationId(new Date("2026-09-28T03:00:07.412Z"));
+    expect(generation).toBe("20260928T030007Z");
+    expect(generationFolder({ installation: "master.example", stage: "prod", kind: "tenant", unit: GUID, generation })).toBe(`master.example/prod/tenants/${GUID}/20260928T030007Z`);
+    expect(generationFolder({ installation: "master.example", stage: "test", kind: "consumer", unit: CONSUMER, generation })).toBe(`master.example/test/consumers/${CONSUMER}/20260928T030007Z`);
+  });
+
+  it("every box path a job names lies inside its own generation, so no job can touch another generation", () => {
+    for (const job of everyJob()) {
+      for (const path of job.spec.script.match(/box:[^"\s]*/g) ?? []) {
+        expect([`box:${TENANT_FOLDER}`, `box:${CONSUMER_FOLDER}`].some((f) => path.startsWith(f)), `${job.spec.name} names ${path}`).toBe(true);
+      }
+    }
+  });
+
+  it("carries a hashed file's checksum from the job log into the manifest, in the form sha256sum -c reads", () => {
+    const hash = "a".repeat(64);
+    expect(hashLine("/tmp/$db.archive", "mongo/$db.archive")).toContain(`sha256sum "/tmp/$db.archive"`);
+    const sums = parseSha256Lines(`DB acme_main\nSHA256 ${hash}  mongo/acme_main.archive\nSHA256 not-a-hash  x\n`);
+    expect(sums).toEqual([`${hash}  mongo/acme_main.archive`]);
+    const manifest = generationManifest({ unit: CONSUMER, kind: "consumer", stage: "prod", generation: "20260928T030000Z", trigger: "manual", runId: "run_1", installation: "master.example", stores: ["registration.yaml", "mongo"] }, sums);
+    expect(manifest.split("\n")).toEqual([
+      "INSTALLATION=master.example", "KIND=consumer", "UNIT=acme", "STAGE=prod", "GENERATION=20260928T030000Z", "TRIGGER=manual", "RUN=run_1", "STORES=registration.yaml,mongo",
+      `${hash}  mongo/acme_main.archive`,
+    ]);
+  });
+
+  it("a move's clear-source drops the source databases and leaves the box alone", () => {
+    const jobs = [...tenantClearSourceJobs({ guid: GUID, stage: "prod", image: IMAGE }), ...consumerClearSourceJobs({ name: CONSUMER, stage: "prod", databases: ["acme_main"], services: ALL_SERVICES, image: IMAGE })];
+    expect(jobs).toHaveLength(2);
+    for (const job of jobs) {
+      expect(job.spec.script).not.toContain("box:");
+      expect(jobReadsBoxSecret(job.spec)).toBe(false);
+    }
+    // A consumer without a Mongo database has nothing a job must drop.
+    expect(consumerClearSourceJobs({ name: CONSUMER, stage: "prod", databases: [], services: ["postgresql"], image: IMAGE })).toEqual([]);
+  });
+});
 
 describe("relocation job credentials", () => {
   it("no jobSpec of any phase carries a literal credential value — every env value is a name or a coordinate", () => {
@@ -70,8 +115,9 @@ describe("relocation job credentials", () => {
 
   it("every job that reaches the box reads the three box variables off a Secret named after that job", () => {
     const boxJobs = everyJob().filter((j) => jobReadsBoxSecret(j.spec));
-    // All but the two source LISTINGS reach the box; those only read a database.
-    expect(boxJobs.length).toBe(everyJob().length - 2);
+    // All but the two source LISTINGS and the two clear-source drops reach the box; those only touch
+    // a database.
+    expect(boxJobs.length).toBe(everyJob().length - 4);
     for (const job of boxJobs) {
       const refs = (job.spec.env ?? []).filter((e) => e.name.startsWith("STORAGE_BOX_"));
       expect(refs.map((e) => e.name).sort()).toEqual(["STORAGE_BOX_HOST", "STORAGE_BOX_PASSWORD", "STORAGE_BOX_USER"]);
@@ -83,8 +129,9 @@ describe("relocation job credentials", () => {
   });
 
   it("the box Secret is named per JOB, so two units relocating at once in the shared mongodb namespace cannot reap each other's", () => {
-    const mine = tenantClearSourceJobs({ guid: GUID, stage: "prod", image: IMAGE })[0]!;
-    const theirs = tenantClearSourceJobs({ guid: "other0000000", stage: "prod", image: IMAGE })[0]!;
+    const dumpOf = (guid: string) => tenantDumpJobs({ guid, folder: `master.example/prod/tenants/${guid}/20260928T030000Z`, stage: "prod", apps: [], image: IMAGE, identityProvider: "auth", registrationYaml: "" })[0]!;
+    const mine = dumpOf(GUID);
+    const theirs = dumpOf("other0000000");
     expect(mine.namespace).toBe(theirs.namespace);
     expect(boxSecretName(mine.spec.name)).not.toBe(boxSecretName(theirs.spec.name));
   });
@@ -99,7 +146,7 @@ describe("runRelocationJob places and reaps the box credential", () => {
   it("the credential STANDS while the job runs and is gone afterwards", async () => {
     const f = makeFakes();
     const ports = consumerPorts(f);
-    const job = verifyDumpJob({ unit: CONSUMER, namespace: CONSUMER, expected: ["registration.yaml"], image: IMAGE });
+    const job = verifyDumpJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: CONSUMER, expected: ["registration.yaml"], image: IMAGE });
     await runRelocationJob(ports, stepCtx(db, "verify-dump", {}, []), SOURCE.clusterId, job);
 
     const secret = boxSecretName(job.spec.name);
@@ -120,7 +167,7 @@ describe("runRelocationJob places and reaps the box credential", () => {
   it("the credential is reaped even when the job FAILS — the run's error is what surfaces, not a leftover", async () => {
     const f = makeFakes();
     const ports = consumerPorts(f);
-    const job = verifyDumpJob({ unit: CONSUMER, namespace: CONSUMER, expected: ["registration.yaml"], image: IMAGE });
+    const job = verifyDumpJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: CONSUMER, expected: ["registration.yaml"], image: IMAGE });
     f.source.reader.setJobResult(job.spec.name, { succeeded: false, logs: "MISSING registration.yaml" });
 
     await expect(runRelocationJob(ports, stepCtx(db, "verify-dump", {}, []), SOURCE.clusterId, job)).rejects.toThrow(/did not succeed/);
@@ -131,7 +178,7 @@ describe("runRelocationJob places and reaps the box credential", () => {
     const f = makeFakes();
     const ports = consumerPorts(f);
     delete (ports as { storageBox?: unknown }).storageBox;
-    const job = verifyDumpJob({ unit: CONSUMER, namespace: CONSUMER, expected: ["registration.yaml"], image: IMAGE });
+    const job = verifyDumpJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: CONSUMER, expected: ["registration.yaml"], image: IMAGE });
 
     await expect(runRelocationJob(ports, stepCtx(db, "verify-dump", {}, []), SOURCE.clusterId, job)).rejects.toThrow(/requires the Hetzner Storage Box/);
     expect(f.source.reader.jobs).toEqual([]);

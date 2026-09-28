@@ -5,7 +5,7 @@ import type { ConsumerService } from "../../../shared/consumer.ts";
 import type { JobEnvVar } from "../../adapters/kube/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import {
-  boxSpec, BOX_REMOTE, MONGO_FLAGS, mongoEnv, writeFile, quoted, relocationJobName,
+  boxSpec, BOX_REMOTE, MONGO_FLAGS, mongoEnv, writeFile, quoted, relocationJobName, hashLine,
   MONGO_NAMESPACE,
   type RelocationJob,
 } from "#unit/server/relocation-jobs.ts";
@@ -20,8 +20,10 @@ const consumerPostgresEnv = (): JobEnvVar[] => [{ name: "POSTGRES_PASSWORD", sec
 
 
 export interface ConsumerJobInputs {
-  /** The unit — the box folder `/<name>/` and the job names. */
+  /** The unit — the job names. */
   name: string;
+  /** The generation the jobs write or read, below the box root (generationFolder). */
+  folder: string;
   /** The unit's namespace on the cluster, `<name>-<stage>` — where its Secrets and PVCs stand, so
    *  where every job that reads them runs. */
   namespace: string;
@@ -46,7 +48,7 @@ export function consumerDumpJobs(i: ConsumerJobInputs & { registrationYaml: stri
       spec: {
         ...boxSpec("dump-reg", i.name),
         image: i.image,
-        script: BOX_REMOTE + writeFile("/tmp/registration.yaml", i.registrationYaml) + `rclone copyto /tmp/registration.yaml "box:${i.name}/registration.yaml"\n`,
+        script: BOX_REMOTE + writeFile("/tmp/registration.yaml", i.registrationYaml) + hashLine("/tmp/registration.yaml", "registration.yaml") + `rclone copyto /tmp/registration.yaml "box:${i.folder}/registration.yaml"\n`,
       },
     },
   ];
@@ -60,7 +62,7 @@ export function consumerDumpJobs(i: ConsumerJobInputs & { registrationYaml: stri
           BOX_REMOTE +
           `for db in ${quoted(i.databases)}; do
   mongodump ${MONGO_FLAGS} --db "$db" --archive="/tmp/$db.archive" --quiet
-  rclone copyto "/tmp/$db.archive" "box:${i.name}/mongo/$db.archive"
+  ${hashLine("/tmp/$db.archive", "mongo/$db.archive")}  rclone copyto "/tmp/$db.archive" "box:${i.folder}/mongo/$db.archive"
   rm -f "/tmp/$db.archive"
 done
 `,
@@ -78,7 +80,7 @@ done
         script:
           BOX_REMOTE +
           `PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_POSTGRES.user} -f /tmp/postgres-all.sql
-rclone copyto /tmp/postgres-all.sql "box:${i.name}/postgres/all.sql"
+${hashLine("/tmp/postgres-all.sql", "postgres/all.sql")}rclone copyto /tmp/postgres-all.sql "box:${i.folder}/postgres/all.sql"
 `,
       },
     });
@@ -92,7 +94,7 @@ rclone copyto /tmp/postgres-all.sql "box:${i.name}/postgres/all.sql"
         pvcMounts: i.pvcs.map((claim) => ({ claimName: claim, mountPath: `/pvc/${claim}`, readOnly: true })),
         script:
           BOX_REMOTE +
-          i.pvcs.map((claim) => `tar czf "/tmp/${claim}.tar.gz" -C "/pvc/${claim}" .\nrclone copyto "/tmp/${claim}.tar.gz" "box:${i.name}/pvc/${claim}.tar.gz"\nrm -f "/tmp/${claim}.tar.gz"\n`).join(""),
+          i.pvcs.map((claim) => `tar czf "/tmp/${claim}.tar.gz" -C "/pvc/${claim}" .\n${hashLine(`/tmp/${claim}.tar.gz`, `pvc/${claim}.tar.gz`)}rclone copyto "/tmp/${claim}.tar.gz" "box:${i.folder}/pvc/${claim}.tar.gz"\nrm -f "/tmp/${claim}.tar.gz"\n`).join(""),
       },
     });
   }
@@ -121,8 +123,8 @@ export function consumerRestoreJobs(i: ConsumerJobInputs): RelocationJob[] {
         image: i.image,
         script:
           BOX_REMOTE +
-          `rclone lsf "box:${i.name}/mongo/" | while read -r f; do
-  rclone copyto "box:${i.name}/mongo/$f" "/tmp/$f"
+          `rclone lsf "box:${i.folder}/mongo/" | while read -r f; do
+  rclone copyto "box:${i.folder}/mongo/$f" "/tmp/$f"
   mongorestore ${MONGO_FLAGS} --archive="/tmp/$f" --drop --quiet
   rm -f "/tmp/$f"
 done
@@ -138,7 +140,7 @@ done
         image: i.image,
         script:
           BOX_REMOTE +
-          `rclone copyto "box:${i.name}/postgres/all.sql" /tmp/postgres-all.sql
+          `rclone copyto "box:${i.folder}/postgres/all.sql" /tmp/postgres-all.sql
 PGPASSWORD="$POSTGRES_PASSWORD" psql -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_POSTGRES.user} -d postgres -f /tmp/postgres-all.sql
 `,
       },
@@ -153,7 +155,7 @@ PGPASSWORD="$POSTGRES_PASSWORD" psql -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_
         pvcMounts: i.pvcs.map((claim) => ({ claimName: claim, mountPath: `/pvc/${claim}` })),
         script:
           BOX_REMOTE +
-          i.pvcs.map((claim) => `rclone copyto "box:${i.name}/pvc/${claim}.tar.gz" "/tmp/${claim}.tar.gz"\ntar xzf "/tmp/${claim}.tar.gz" -C "/pvc/${claim}"\nrm -f "/tmp/${claim}.tar.gz"\n`).join(""),
+          i.pvcs.map((claim) => `rclone copyto "box:${i.folder}/pvc/${claim}.tar.gz" "/tmp/${claim}.tar.gz"\ntar xzf "/tmp/${claim}.tar.gz" -C "/pvc/${claim}"\nrm -f "/tmp/${claim}.tar.gz"\n`).join(""),
       },
     });
   }
@@ -174,7 +176,7 @@ export function consumerVerifyCompletenessJobs(i: ConsumerJobInputs): Relocation
         script:
           BOX_REMOTE +
           `mongosh ${MONGO_FLAGS} --quiet --eval 'db.adminCommand({listDatabases:1,nameOnly:true}).databases.forEach(function(d){print(d.name)})' > /tmp/have
-rclone lsf "box:${i.name}/mongo/" | sed 's/\\.archive$//' | while read -r want; do
+rclone lsf "box:${i.folder}/mongo/" | sed 's/\\.archive$//' | while read -r want; do
   grep -qx "$want" /tmp/have || { echo "MISSING database $want"; exit 1; }
 done
 echo "COMPLETE mongo"
@@ -218,25 +220,23 @@ done
   };
 }
 
-/** Clear the consumer's SOURCE: drop its Mongo databases[] and delete the box folder. The
- *  per-consumer PostgreSQL and the PVCs fall with the source namespace, which the run deletes in the
- *  same step. */
+/** Clear the consumer's SOURCE: drop its Mongo databases[]. The per-consumer PostgreSQL and the PVCs
+ *  fall with the source namespace, which the run deletes in the same step. The box is not touched: the
+ *  generation the move took stays as the backup of the moment before it. */
 export function consumerClearSourceJobs(i: { name: string; stage: Stage; databases: readonly string[]; services: readonly ConsumerService[]; image: string }): RelocationJob[] {
-  const dropMongo =
-    i.services.includes("mongodb") && i.databases.length > 0
-      ? `for db in ${quoted(i.databases)}; do
-  mongosh ${MONGO_FLAGS} --quiet --eval "db.getSiblingDB('$db').dropDatabase()"
-  echo "DROPPED $db"
-done
-`
-      : "";
+  if (!i.services.includes("mongodb") || i.databases.length === 0) return [];
   return [
     {
       namespace: MONGO_NAMESPACE,
       spec: {
-        ...boxSpec("clear-source", i.name, mongoEnv(i.stage)),
+        name: relocationJobName("clear-source", i.name),
+        env: mongoEnv(i.stage),
         image: i.image,
-        script: BOX_REMOTE + dropMongo + `rclone purge "box:${i.name}" || true\necho "FOLDER ${i.name} removed"\n`,
+        script: `for db in ${quoted(i.databases)}; do
+  mongosh ${MONGO_FLAGS} --quiet --eval "db.getSiblingDB('$db').dropDatabase()"
+  echo "DROPPED $db"
+done
+`,
       },
     },
   ];

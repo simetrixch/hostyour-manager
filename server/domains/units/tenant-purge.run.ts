@@ -443,8 +443,8 @@ function tenantPurgeSteps(ports: TenantLifecyclePorts, params: TenantPurgeParams
         await assertTenantNotLive(ctx.db, ports.registrations, p, purgeLiveRefusal(p));
         const { clusterReader } = await ports.resolver.resolve(c.clusterId);
         // A relocating tenant is mid-MOVE: its CR delete is meant as a release, its data is being
-        // carried through the staging area, and the box folder is its only complete copy until the
-        // move finishes. A purge in that window would reap the member namespaces WITHOUT the release
+        // carried through the staging area, and the generation the move took is its only complete copy
+        // until the move finishes. A purge in that window would reap the member namespaces WITHOUT the release
         // semantics this run intends — destructive where the move needs a hand-off — so it is
         // refused outright while the annotation stands.
         // THE ORPHAN BELT. assertTenantNotLive above answers from the INVENTORY, and an orphan has no

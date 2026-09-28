@@ -302,18 +302,18 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     });
   }
 
-  // Relocation with a target: restore rebuilds the unit from its Storage Box folder onto
-  // the named cluster, migrate moves it there through the same folder. Both need the target, which no
-  // row can answer, so they take a body — validated through the run's OWN params schema, one contract.
+  // Relocation with a target: restore rebuilds the unit from the backup generation the body names onto
+  // the named cluster, migrate moves it there through a generation of its own. Both need the target,
+  // which no row can answer, so they take a body — validated through the run's OWN params schema.
   for (const { path, kind } of [
     { path: "restore", kind: "consumer-restore" },
     { path: "migrate", kind: "consumer-migrate" },
   ] as const) {
     app.post(`/api/consumers/:appId/${path}`, async (c) => {
       if (!onboardingEnabled) throw errNotConfigured("onboarding is not configured on this manager");
-      const body = (await c.req.json().catch(() => ({}))) as { targetClusterId?: unknown };
+      const body = (await c.req.json().catch(() => ({}))) as { targetClusterId?: unknown; generation?: unknown };
       const schema = kind === "consumer-restore" ? RestoreParams : MigrateParams;
-      const parsed = schema.safeParse({ appId: c.req.param("appId"), targetClusterId: body.targetClusterId });
+      const parsed = schema.safeParse({ appId: c.req.param("appId"), targetClusterId: body.targetClusterId, generation: body.generation });
       if (!parsed.success) throw errValidation(`invalid ${kind} request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
       return c.json(await executor.plan(kind, parsed.data), 201);
     });
@@ -744,8 +744,8 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     });
   }
 
-  // Tenant relocation with a target: tenant-restore rebuilds the whole bracket from its
-  // Storage Box folder onto the named cluster, tenant-migrate moves it there through the same folder.
+  // Tenant relocation with a target: tenant-restore rebuilds the whole bracket from the backup
+  // generation the body names onto the named cluster, tenant-migrate moves it there through its own.
   // Validated through the run's OWN params schema — one contract, exactly like the consumer routes.
   for (const { path, kind, refuse } of [
     { path: "restore", kind: "tenant-restore", refuse: "restoring it" },
@@ -755,9 +755,9 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
       if (!onboardingEnabled) throw errNotConfigured("tenant onboarding is not configured on this manager");
       const id = c.req.param("id");
       assertTenantProvisioned(loadTenantStatus(db, id), refuse);
-      const body = (await c.req.json().catch(() => ({}))) as { targetClusterId?: unknown };
+      const body = (await c.req.json().catch(() => ({}))) as { targetClusterId?: unknown; generation?: unknown };
       const schema = kind === "tenant-restore" ? TenantRestoreParams : TenantMigrateParams;
-      const parsed = schema.safeParse({ tenantId: id, targetClusterId: body.targetClusterId });
+      const parsed = schema.safeParse({ tenantId: id, targetClusterId: body.targetClusterId, generation: body.generation });
       if (!parsed.success) invalid(kind, parsed.error);
       return c.json(await executor.plan(kind, parsed.data), 201);
     });

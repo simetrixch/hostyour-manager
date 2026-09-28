@@ -16,6 +16,7 @@ import { ConsumerLifecycleDialog, type LifecycleAction } from "../components/Con
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { ConsumerSecretsDialog } from "../components/ConsumerSecretsDialog.tsx";
 import { planSecretsChange } from "../consumerSecrets.ts";
+import { chosenGeneration } from "../backups.ts";
 import { VersionsDialog } from "../components/VersionsDialog.tsx";
 import { ConsumerActions } from "../components/ConsumerActions.tsx";
 import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
@@ -172,8 +173,8 @@ export function Consumers() {
 
   // Offboarded consumers keep their inventory row for audit but have nothing live to
   // reconcile, so they are hidden from the Reconciliation tab — and surfaced in their own list
-  // below, because ONE run kind still applies to them: Restore rebuilds such a consumer from its
-  // Storage Box folder.
+  // below, because ONE run kind still applies to them: Restore rebuilds such a consumer from a
+  // generation of its backup.
   const visibleRows = rows?.filter((c) => c.status !== "offboarded") ?? null;
   const offboardedRows = rows?.filter((c) => c.status === "offboarded") ?? [];
 
@@ -408,11 +409,7 @@ export function Consumers() {
           c={relocFor.c}
           kind={relocFor.kind}
           onCancel={() => setRelocFor(null)}
-          onConfirm={(targetClusterId) => {
-            const { c, kind } = relocFor;
-            setRelocFor(null);
-            void act((id) => (kind === "move" ? migrateConsumer(id, targetClusterId) : restoreConsumer(id, targetClusterId)), c.id);
-          }}
+          onConfirm={(targetClusterId, generation) => { const { c, kind } = relocFor; setRelocFor(null); void act((id) => (kind === "move" ? migrateConsumer(id, targetClusterId) : restoreConsumer(id, targetClusterId, chosenGeneration(generation))), c.id); }}
         />
       )}
 

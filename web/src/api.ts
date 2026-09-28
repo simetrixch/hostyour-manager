@@ -17,6 +17,7 @@ import type { ServerReachView } from "../../shared/api-types-reach.ts";
 // The onboard wizard's two read views: the channel table (served literally from the platform repo's
 // clusters/platform/values-common.yaml) and what the prefill answers, identity included.
 import type { ChannelStagesView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
+import type { UnitBackupView } from "../../shared/api-types-backups.ts";
 import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
@@ -412,14 +413,16 @@ export const setConsumerDomain = (name: string, stage: string, fqdn: string): Pr
   post<{ runId: string }>(`/api/consumers/${name}/stages/${stage}/fqdn`, { fqdn });
 export const setConsumerSize = (appId: string, size: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/consumers/${appId}/size`, { size });
-/** Backup: close access, dump every store into the Storage Box folder, verify it, reopen — the
- *  folder stays and the consumer keeps running where it is. */
+/** Backup: close access, dump every store into a new generation on the Storage Box, verify it,
+ *  reopen — the generation stays and the consumer keeps running where it is. */
 export const backupConsumer = (appId: string): Promise<{ runId: string }> => post(`/api/consumers/${appId}/backup`);
-/** Restore the consumer from its Storage Box folder onto the named cluster — the disaster-recovery
+/** The generations of the consumer's backup, newest first. */
+export const listConsumerBackups = (appId: string): Promise<UnitBackupView[]> => req<UnitBackupView[]>(`/api/consumers/${appId}/backups`);
+/** Restore the consumer from the named generation onto the named cluster — the disaster-recovery
  *  half of the one relocation mechanism, and the path that rebuilds an offboarded consumer. */
-export const restoreConsumer = (appId: string, targetClusterId: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/consumers/${appId}/restore`, { targetClusterId });
-/** Move the consumer to the named cluster through its Storage Box folder — dump, restore, repoint,
+export const restoreConsumer = (appId: string, targetClusterId: string, generation: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/consumers/${appId}/restore`, { targetClusterId, generation });
+/** Move the consumer to the named cluster through a new backup generation — dump, restore, repoint,
  *  one DNS record updated; the source is cleared last. */
 export const migrateConsumer = (appId: string, targetClusterId: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/consumers/${appId}/migrate`, { targetClusterId });
@@ -642,14 +645,16 @@ export const restartTenantWorkloads = (tenantId: string): Promise<{ runId: strin
 /** The tenant twin of setConsumerSize — the figures bound EACH member namespace of the tenant. */
 export const setTenantSize = (tenantId: string, size: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/size`, { size });
-/** Backup: close access, dump every store of the whole bracket into the Storage Box folder, verify
- *  it, reopen — the folder stays and the tenant keeps running where it is. */
+/** Backup: close access, dump every store of the whole bracket into a new generation on the Storage
+ *  Box, verify it, reopen — the generation stays and the tenant keeps running where it is. */
 export const backupTenant = (tenantId: string): Promise<{ runId: string }> => post(`/api/tenants/${tenantId}/backup`);
-/** Restore the tenant from its Storage Box folder onto the named cluster — rebuilds an offboarded
+/** The generations of the tenant's backup, newest first. */
+export const listTenantBackups = (tenantId: string): Promise<UnitBackupView[]> => req<UnitBackupView[]>(`/api/tenants/${tenantId}/backups`);
+/** Restore the tenant from the named generation onto the named cluster — rebuilds an offboarded
  *  tenant data-identically, under its unchanged guid. */
-export const restoreTenant = (tenantId: string, targetClusterId: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/restore`, { targetClusterId });
-/** Move the tenant to the named cluster through its Storage Box folder — the whole bracket, one
+export const restoreTenant = (tenantId: string, targetClusterId: string, generation: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/restore`, { targetClusterId, generation });
+/** Move the tenant to the named cluster through a new backup generation — the whole bracket, one
  *  wildcard record updated; the source is cleared last. */
 export const migrateTenant = (tenantId: string, targetClusterId: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/migrate`, { targetClusterId });

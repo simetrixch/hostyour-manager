@@ -5,7 +5,7 @@ import { verifySourceReleasedStep } from "#unit/server/verify-source-released.ts
 import { makeTenantMigrateDef } from "./migrate.run.ts";
 import { consumerWorld } from "./relocation-world-consumer.ts";
 import {
-  openFixtureDb, seedClusters, seedTenantRows, seedConsumerRow, seedTenantWorld, seedConsumerRegistration,
+  openFixtureDb, seedClusters, seedMaster, seedTenantRows, seedConsumerRow, seedTenantWorld, seedConsumerRegistration,
   makeFakes, tenantPorts, consumerPorts, driveSteps, stepCtx, jobNames, missing, GUID, TARGET,
 } from "./relocation.fixture.ts";
 
@@ -54,6 +54,7 @@ describe("verify-source-released (step level)", () => {
   });
 
   it("COUNTER-PROBE: with the relocating skip disabled (the operator deprovisioned the source), the migrate aborts BEFORE restore because the source databases are missing", async () => {
+    seedMaster(db);
     seedClusters(db);
     seedTenantRows(db);
     const f = makeFakes();

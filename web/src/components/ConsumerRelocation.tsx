@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 import type { ReactNode } from "react";
 import type { RunView } from "../../../shared/api-types.ts";
-import { listOnboardTargets, type ConsumerView } from "../api.ts";
+import { listConsumerBackups, listOnboardTargets, type ConsumerView } from "../api.ts";
 import { relocationRun, relocationLine } from "../relocationBand.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { RelocationTargetDialog } from "./RelocationTargetDialog.tsx";
@@ -11,7 +11,7 @@ import { RelocationTargetDialog } from "./RelocationTargetDialog.tsx";
  *  page opens for Back up and Move…/Restore…. All plan-then-approve: confirming only PLANS a run. */
 
 /** Offboarded consumers (their row is kept): nothing to reconcile, ONE run kind left — Restore rebuilds the
- *  consumer from its Storage Box folder onto a chosen active cluster, at its own stage. */
+ *  consumer from a generation of its backup onto a chosen active cluster, at its own stage. */
 export function OffboardedConsumers(props: { rows: ConsumerView[]; runs: RunView[]; onRestore: (c: ConsumerView) => void }): ReactNode {
   if (props.rows.length === 0) return null;
   return (
@@ -48,14 +48,14 @@ export function ConsumerBackupDialog(props: { c: ConsumerView; onCancel: () => v
     <ConfirmDialog title={`Back up "${props.c.name}"?`} confirmLabel="Plan backup" onCancel={props.onCancel} onConfirm={props.onConfirm}>
       <p>
         This <strong>plans</strong> a backup run and opens it — you approve on the next screen. The run <strong>closes access for
-        the duration of the dump</strong> (downtime, never an inconsistent copy), dumps every store into the Storage Box folder{" "}
-        <span className="mono">/{props.c.name}/</span>, verifies the folder and reopens. The folder stays.
+        the duration of the dump</strong> (downtime, never an inconsistent copy), dumps every store into a new generation of{" "}
+        <span className="mono">{props.c.name}</span>&apos;s backup on the Storage Box, verifies it and reopens. It stays beside the earlier ones.
       </p>
     </ConfirmDialog>
   );
 }
 
-export function ConsumerRelocationDialog(props: { c: ConsumerView; kind: "move" | "restore"; onCancel: () => void; onConfirm: (targetClusterId: string) => void }): ReactNode {
+export function ConsumerRelocationDialog(props: { c: ConsumerView; kind: "move" | "restore"; onCancel: () => void; onConfirm: (targetClusterId: string, generation: string | null) => void }): ReactNode {
   const { c, kind } = props;
   return (
     <RelocationTargetDialog
@@ -64,6 +64,7 @@ export function ConsumerRelocationDialog(props: { c: ConsumerView; kind: "move" 
       confirmLabel={kind === "move" ? "Plan move" : "Plan restore"}
       currentClusterId={c.clusterId}
       loadTargets={listOnboardTargets}
+      loadGenerations={kind === "restore" ? () => listConsumerBackups(c.id) : undefined}
       onCancel={props.onCancel}
       onConfirm={props.onConfirm}
     >
@@ -77,7 +78,7 @@ export function ConsumerRelocationDialog(props: { c: ConsumerView; kind: "move" 
       ) : (
         <p>
           This <strong>plans</strong> a restore and opens it — you approve on the next screen. The run rebuilds{" "}
-          <span className="mono">{c.name}</span> from its Storage Box folder: the dumped registration is re-committed on the chosen
+          <span className="mono">{c.name}</span> from the backup generation you choose: the dumped registration is re-committed on the chosen
           cluster (closed), every store is replayed and verified, the DNS record is set, and access opens last.
         </p>
       )}

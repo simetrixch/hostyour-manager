@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import type { UnitBackupView } from "../../../shared/api-types-backups.ts";
+import { generationLabel, restorableGenerations } from "../backups.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -25,15 +27,20 @@ export function RelocationTargetDialog(props: {
   /** The unit's current cluster — excluded for a move (source ≠ target). */
   currentClusterId: string;
   loadTargets: () => Promise<RelocationTargetView[]>;
-  onConfirm: (targetClusterId: string) => void;
+  /** A restore reads ONE generation of the unit's backup: offered newest first, the newest chosen. */
+  loadGenerations?: (() => Promise<UnitBackupView[]>) | undefined;
+  onConfirm: (targetClusterId: string, generation: string | null) => void;
   onCancel: () => void;
   children: ReactNode; // the blast-radius copy the operator must read before confirming
 }): ReactNode {
   const [targets, setTargets] = useState<RelocationTargetView[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [clusterId, setClusterId] = useState("");
+  const [generations, setGenerations] = useState<UnitBackupView[] | null>(null);
+  const [generation, setGeneration] = useState<string | null>(null);
   const titleId = useId();
   const selectId = useId();
+  const generationId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   // onCancel via a ref so the once-registered Escape listener always calls the latest handler.
@@ -41,6 +48,8 @@ export function RelocationTargetDialog(props: {
   onCancelRef.current = props.onCancel;
   const loadRef = useRef(props.loadTargets);
   loadRef.current = props.loadTargets;
+  const generationsRef = useRef(props.loadGenerations);
+  generationsRef.current = props.loadGenerations;
   useEffect(() => {
     cancelRef.current?.focus();
     const onKey = (e: KeyboardEvent): void => {
@@ -51,8 +60,16 @@ export function RelocationTargetDialog(props: {
       .current()
       .then(setTargets)
       .catch((e: unknown) => setLoadError(msg(e)));
+    generationsRef.current?.()
+      .then((all) => {
+        const ok = restorableGenerations(all);
+        setGenerations(ok);
+        setGeneration(ok[0]?.generation ?? null);
+      })
+      .catch((e: unknown) => setLoadError(msg(e)));
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  const picksGeneration = props.loadGenerations !== undefined;
 
   const admitted = (targets ?? []).filter((t) => t.status === "active" && (props.kind === "restore" || t.id !== props.currentClusterId));
 
@@ -66,7 +83,7 @@ export function RelocationTargetDialog(props: {
           {props.children}
           {loadError && (
             <p role="alert" className="alert alert--danger">
-              Could not load the target clusters: {loadError}
+              Could not load what the dialog offers: {loadError}
             </p>
           )}
           <label className="field" htmlFor={selectId}>
@@ -81,6 +98,22 @@ export function RelocationTargetDialog(props: {
             </select>
             <span className="field__hint">Any active cluster — the unit keeps its own stage; the cluster&apos;s stage is the platform&apos;s.</span>
           </label>
+          {picksGeneration && (
+            <label className="field" htmlFor={generationId}>
+              <span className="field__label">Backup generation</span>
+              <select id={generationId} className="field__input" value={generation ?? ""} onChange={(e) => setGeneration(e.target.value)}>
+                {(generations ?? []).map((g) => (
+                  <option key={g.generation} value={g.generation}>
+                    {generationLabel(g)}
+                  </option>
+                ))}
+              </select>
+              <span className="field__hint">Only a written and verified generation is offered; the newest is chosen.</span>
+            </label>
+          )}
+          {picksGeneration && generations !== null && generations.length === 0 && (
+            <p className="note">This unit has no written and verified backup generation, so there is nothing to restore.</p>
+          )}
           {targets !== null && admitted.length === 0 && (
             <p className="note">
               No admissible target: a {props.kind} needs an ACTIVE cluster{props.kind === "move" ? " other than the unit's own" : ""}.
@@ -91,7 +124,7 @@ export function RelocationTargetDialog(props: {
           <button type="button" className="btn" ref={cancelRef} onClick={props.onCancel}>
             Cancel
           </button>
-          <button type="button" className="btn btn--primary" disabled={clusterId === ""} onClick={() => props.onConfirm(clusterId)}>
+          <button type="button" className="btn btn--primary" disabled={clusterId === "" || (picksGeneration && generation === null)} onClick={() => props.onConfirm(clusterId, generation)}>
             {props.confirmLabel}
           </button>
         </div>

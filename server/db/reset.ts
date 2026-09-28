@@ -32,6 +32,9 @@ const WIPE_ORDER = [
   // secret_writes is the same kind of book, for the keys this manager's runs wrote into consumers'
   // Vault entries; wiped for the same reason. The entries stay in Vault, as every leftover does.
   "secret_writes",
+  // unit_backups indexes the generations on the Storage Box for the units in the inventory the wipe
+  // removes; without those rows no restore can name a unit. The generations stay on the box.
+  "unit_backups",
   "audit",
 ] as const;
 
