@@ -113,13 +113,8 @@ export interface TenantLifecyclePorts {
    *  (#241): the repository stands when the tenant goes. */
   githubApp?: GitHubApp;
   /** The build registrations (registrations/<unit>/build.yaml) the bundle's build-only onboarding
-   *  wrote — its removal goes with the tenant's last app, and the orphan purge (#241) reads them to
-   *  say which one nothing accounts for. Optional and said when absent. */
-  buildRegistrations?: Pick<Registrations, "removeBuildRegistration" | "readBuildRegistration" | "readUnitStages" | "listBuildRegistrations" | "branch">;
-  /** The units the deploy repository's `tenant.buildRepos` names, read off its books branch — what accounts
-   *  for a build-only registration beside a tenant's own apps bundle (#241: the first purge listed
-   *  the deploy repository's own build units as orphaned and took three of the customer's repositories). */
-  deployBuildUnits?: (signal?: AbortSignal) => Promise<string[]>;
+   *  wrote — its removal goes with the tenant's last app. Optional and said when absent. */
+  buildRegistrations?: Pick<Registrations, "removeBuildRegistration">;
 }
 
 /** A tenant + its cluster context, resolved from the tenants row (tnt_) and its clusters row. The

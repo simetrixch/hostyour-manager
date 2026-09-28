@@ -50,10 +50,6 @@ import { makeTenantAppsRepoDef } from "../domains/units/tenant-apps-repo.run.ts"
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
 import { makeTenantPurgeDef } from "../domains/units/tenant-purge.run.ts";
-import { makeTenantAppsRepoPurgeDef, orphanBuildsScan } from "../domains/units/tenant-apps-repo-purge.run.ts";
-import { readTenantSpec } from "../domains/units/tenant-apps-repo.run.ts";
-import { unitNameFromRepoURL } from "../../shared/consumer.ts";
-import type { OrphanBuildView } from "../../shared/api-types.ts";
 import type { RelocationPorts } from "#unit/server/relocation.ts";
 import type { TenantRelocationPorts } from "../domains/units/relocation-world-tenant.ts";
 import { makeTenantBackupDef } from "../domains/units/backup.run.ts";
@@ -91,8 +87,6 @@ export interface TenantFamily {
   /** The pointer registrations its orphan-scan read route diffs against the inventory. Undefined
    *  when the family is not configured. */
   tenantRegistrations?: TenantRegistrations;
-  /** The build half of that scan (#241). Undefined when the family is not configured. */
-  orphanBuilds?: () => Promise<OrphanBuildView[]>;
   /** What the Versions dialog offers for one tenant, read through the ports its run plans with.
    *  Undefined when the family is not configured. */
   versions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
@@ -303,11 +297,7 @@ export function buildTenantOnboarding(
     // same registrations the onboarding wrote; the repository stands (#241).
     githubApp,
     buildRegistrations: registrations,
-    // What accounts for a build-only registration beside a tenant's bundle: the deploy repository's own build
-    // units, read off its books branch at every scan (#241).
-    deployBuildUnits: async (signal) => ((await readTenantSpec(onboardPorts, signal ? { signal } : {}))?.buildRepos ?? []).map((b) => unitNameFromRepoURL(b.repo)),
   };
-  const orphanBuilds = orphanBuildsScan(lifecyclePorts);
 
   // The tenant relocation ports: the lifecycle set (registrations/resolver/dns/argo-sync/apex) plus the
   // shared relocation surface and the platform repo URL the member AppProjects allow as a source.
@@ -360,7 +350,6 @@ export function buildTenantOnboarding(
     // cascade) + the namespace. Same narrow port set as the other lifecycle run kinds — the teardown and the
     // two cluster-side deletes all resolve through the per-cluster resolver.
     makeTenantPurgeDef(lifecyclePorts),
-    makeTenantAppsRepoPurgeDef(lifecyclePorts),
     // tenant-backup / tenant-restore / tenant-migrate — the same ONE relocation mechanism over the
     // whole member bracket.
     makeTenantBackupDef(tenantRelocationPorts),
@@ -375,5 +364,5 @@ export function buildTenantOnboarding(
   // through the very registrations the runs commit pointers with — all the same instances (and the same one
   // repoURL the appsets are rendered from) the runs use, never a second one.
   const versions = (db: Db, tenantId: string, signal?: AbortSignal): Promise<VersionsView> => readTenantVersions(onboardPorts, db, tenantId, signal);
-  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, orphanBuilds, versions, carryTrunkToBooksBranch };
+  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, versions, carryTrunkToBooksBranch };
 }

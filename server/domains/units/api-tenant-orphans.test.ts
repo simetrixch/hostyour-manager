@@ -232,7 +232,7 @@ describe("GET /api/tenants/orphans (the pointer scan)", () => {
     db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_2", guid: ORPHAN_GUID, subdomain: "ghost", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     const { app, cookie, registrations } = await makeTenant(true);
     await seedPointer(registrations, ORPHAN_GUID, "ghost");
-    expect(await (await app.request("/api/tenants/orphans", authed(cookie))).json()).toEqual({ orphans: [], skipped: [], builds: [] });
+    expect(await (await app.request("/api/tenants/orphans", authed(cookie))).json()).toEqual({ orphans: [], skipped: [] });
   });
 
   it("carries every pointer it could NOT read to the browser — an empty list may never mean 'unchecked'", async () => {
@@ -263,12 +263,12 @@ describe("GET /api/tenants/orphans (the pointer scan)", () => {
     registrations.listTenantPointers = () => Promise.reject(new Error("deploy repository unreachable"));
     const res = await app.request("/api/tenants/orphans", authed(cookie));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ orphans: [], skipped: [], builds: [], error: "deploy repository unreachable" });
+    expect(await res.json()).toEqual({ orphans: [], skipped: [], error: "deploy repository unreachable" });
   });
 
   it("degrades to a reason (not 501) when tenant onboarding is not wired — it is a READ", async () => {
     const { app, cookie } = await makeTenant(false);
-    expect(await (await app.request("/api/tenants/orphans", authed(cookie))).json()).toEqual({ orphans: [], skipped: [], builds: [], reason: "onboarding-not-configured" });
+    expect(await (await app.request("/api/tenants/orphans", authed(cookie))).json()).toEqual({ orphans: [], skipped: [], reason: "onboarding-not-configured" });
   });
 });
 

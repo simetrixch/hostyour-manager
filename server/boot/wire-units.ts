@@ -1,5 +1,5 @@
 import type { Config } from "../kernel/config.ts";
-import type { OrphanBuildView, VersionsView } from "../../shared/api-types.ts";
+import type { VersionsView } from "../../shared/api-types.ts";
 import type { Db } from "../db/client.ts";
 import type { Logger } from "../kernel/logger.ts";
 import type { CredentialStore } from "../security/store.ts";
@@ -130,8 +130,6 @@ export interface UnitsWiring {
    *  Undefined when tenant onboarding is not configured; the scan route then degrades to an empty
    *  result with a reason. */
   tenantRegistrations?: TenantRegistrations;
-  /** The build half of the orphan scan (#241). Undefined when the tenant family is not configured. */
-  orphanBuilds?: () => Promise<OrphanBuildView[]>;
   /** What the Versions dialog offers for one tenant. Undefined when the tenant family is not configured. */
   tenantVersions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
   /** Bring the deploy repository's books branch into being, and to its trunk, at boot. The tenant
@@ -290,7 +288,6 @@ export function buildUnits(
     ...(tenant.deployRepoUrl ? { deployRepoUrl: tenant.deployRepoUrl } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
-    ...(tenant.orphanBuilds ? { orphanBuilds: tenant.orphanBuilds } : {}),
     ...(tenant.versions ? { tenantVersions: tenant.versions } : {}),
     ...(tenant.carryTrunkToBooksBranch ? { carryTrunkToBooksBranch: tenant.carryTrunkToBooksBranch } : {}),
     // The unit plugin's activation client, surfaced for the tenant invite route.

@@ -482,10 +482,6 @@ export const RUN_KIND = [
   // plane and never on the tenant's cluster, and because a standing tenant gains an app through it
   // without being created again.
   "tenant-apps-repo",
-  // The removal of a build registration nothing accounts for — no tenant names it, no stage file
-  // stands beside it (#241): the repository where the platform created it, the registration, the
-  // Vault entry. Keyed on the unit name the orphan scan found, as tenant-purge is keyed on the guid.
-  "tenant-apps-repo-purge",
   "tenant-suspend", "tenant-resume", "tenant-offboard",         // tenant lifecycle
   "tenant-purge",                                               // force-offboard by guid (orphan removal)
   "tenant-check",                                               // asks every tenant whether anybody can still administer it
@@ -518,7 +514,7 @@ export const RUN_FAMILY = {
     "mail-dns-publish", "dns-remove", "mail-dns-unpublish",
   ],
   consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate"],
-  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-apps-repo-purge", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-refresh-members", "tenant-set-sender-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
+  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-refresh-members", "tenant-set-sender-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;
 

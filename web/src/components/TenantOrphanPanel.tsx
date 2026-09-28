@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { OrphanBuildView, OrphanScanView, OrphanTenantView, PurgeTenantTarget } from "../../../shared/api-types.ts";
+import type { OrphanScanView, OrphanTenantView, PurgeTenantTarget } from "../../../shared/api-types.ts";
 
 /** The orphans the scan could READ, each with the one action it allows. A tenant whose slave name
  *  resolves to no registered cluster keeps its row but gets NO purge button: a purge is keyed on a
@@ -49,31 +49,6 @@ function OrphanRows({ orphans, onPurge }: { orphans: OrphanTenantView[]; onPurge
   );
 }
 
-/** The build registrations nothing accounts for (#241): no tenant names one as its apps bundle, the
- *  deploy repository's buildRepos does not name it and no stage file stands beside it, so no run of a tenant
- *  will ever take it away. The one action is the purge — the registration and the Vault entry; the
- *  repository on GitHub stands. The plan refuses a unit that is accounted for after all. */
-function OrphanBuildRows({ builds, onPurge }: { builds: OrphanBuildView[]; onPurge: (unit: string) => void }) {
-  return (
-    <ul className="rows">
-      {builds.map((b) => (
-        <li key={`build/${b.unit}`}>
-          <div className="row">
-            <span className="badge badge--degraded">build</span>
-            <span className="row__title mono">{b.unit}</span>
-            <span className="row__meta">registrations/{b.unit}/build.yaml · {b.repoURL} · named by no tenant and no build unit of the deploy repository, at no stage</span>
-            <span className="row__end">
-              <button type="button" className="btn btn--danger" onClick={() => onPurge(b.unit)}>
-                Purge…
-              </button>
-            </span>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 /** What the ORPHAN SCAN found — tenants the GitOps pointers know and the inventory
  *  does not, so they are on no list of the Tenants page and no row-keyed run kind can reach them. Its own
  *  component, like FailedCreateTenantCallout is on the run screen: the page owns the scan STATE and the
@@ -91,14 +66,13 @@ export function TenantOrphanPanel(props: {
   scanError: string | null;
   scan: OrphanScanView | null;
   onPurge: (t: PurgeTenantTarget) => void;
-  onPurgeBuild: (unit: string) => void;
 }): ReactNode {
   const { scanning, scanError, scan } = props;
   return (
     <section className="panel">
       <header className="panel__head">
         <h3 className="panel__title">Orphaned tenants</h3>
-        {scan !== null && scan.error === undefined && scan.reason === undefined && <span className="panel__count">{scan.orphans.length + scan.builds.length}</span>}
+        {scan !== null && scan.error === undefined && scan.reason === undefined && <span className="panel__count">{scan.orphans.length}</span>}
       </header>
       {scanning ? (
         <div className="loading">
@@ -131,16 +105,6 @@ export function TenantOrphanPanel(props: {
             </div>
           ) : (
             <OrphanRows orphans={scan.orphans} onPurge={props.onPurge} />
-          )}
-          {scan.builds.length > 0 && (
-            <>
-              <p role="alert" className="alert alert--warn">
-                {scan.builds.length} build registration(s) nothing accounts for: no tenant names them as its apps bundle, the deploy repository&rsquo;s
-                buildRepos does not name them and no stage file stands beside them. Each is presented by the App-token refresh every tick and
-                keeps its Vault entry until purged. A purge removes the registration and the Vault entry; the repository on GitHub stands.
-              </p>
-              <OrphanBuildRows builds={scan.builds} onPurge={props.onPurgeBuild} />
-            </>
           )}
           {/* Pointers the scan could not parse. Listed rather than dropped: one of them may BE an
               orphan, and only the operator can go look at the file the reason names. */}

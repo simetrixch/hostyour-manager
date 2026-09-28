@@ -9,7 +9,7 @@ import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { apps, clusters, servers, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { MASTER_ROLES, SLAVE_ROLES, TENANT_SETTLED_STATUS, type Stage, type ArgoSync, type ArgoHealth } from "../../../shared/enums.ts";
-import type { OrphanScanView, OrphanBuildView, DetectedScanView, LiveArgoView, ConsumerLiveView, ConsumerLiveProbeView, TenantLiveView, VersionsView } from "../../../shared/api-types.ts";
+import type { OrphanScanView, DetectedScanView, LiveArgoView, ConsumerLiveView, ConsumerLiveProbeView, TenantLiveView, VersionsView } from "../../../shared/api-types.ts";
 import type { ChannelStagesView } from "../../../shared/api-types-onboard.ts";
 import { singleSourceRevision, targetedRevisionFor, type ClusterKubeResolver, type ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { tenantArgocdUrl } from "../../../shared/tenant.ts";
@@ -406,10 +406,6 @@ export interface TenantApiDeps extends ConsumerApiDeps {
    *  TenantRegistrations the tenant runs commit through. Absent when tenant onboarding is not wired ⇒ the
    *  scan route answers { orphans: [], reason } instead of 501: it is a READ, and a read degrades. */
   registrations?: TenantRegistrations;
-  /** The build half of the orphan scan (#241): every build registration no stage file, no tenant
-   *  and no build unit of the deploy repository accounts for (tenant-apps-repo-purge.run.ts orphanBuildsScan). Absent
-   *  with the tenant family unwired; the scan then lists no builds. */
-  orphanBuilds?: () => Promise<OrphanBuildView[]>;
   /** What the Versions dialog offers for one tenant (tenant-versions.ts readTenantVersions). Absent with
    *  the tenant family unwired; the route then answers 501. */
   versions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
@@ -442,7 +438,7 @@ function rollupFanoutStatus(statuses: readonly ArgoAppStatus[]): { sync: ArgoSyn
 }
 
 export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): void {
-  const { executor, db, onboardingEnabled, appCatalog, resolver, deployRepoUrl, activator, registrations, orphanBuilds, versions, resolveUnitApex } = deps;
+  const { executor, db, onboardingEnabled, appCatalog, resolver, deployRepoUrl, activator, registrations, versions, resolveUnitApex } = deps;
   // The routing move — a route file of its own, the way the resize is.
   registerTenantActionRoutes(app, { db, executor, tenantEnabled: onboardingEnabled, ...(versions ? { versions } : {}) });
 
@@ -604,12 +600,12 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   // separate literals, so without that check a renamed field or a mistyped `reason` in any one of them
   // would reach the UI as an absent value and render as an all-clear.
   app.get("/api/tenants/orphans", async (c) => {
-    if (!registrations) return c.json({ orphans: [], skipped: [], builds: [], reason: "onboarding-not-configured" } satisfies OrphanScanView);
+    if (!registrations) return c.json({ orphans: [], skipped: [], reason: "onboarding-not-configured" } satisfies OrphanScanView);
     try {
       const { orphans, skipped } = await scanOrphanTenants({ db, registrations, ...(resolver ? { resolver } : {}) });
-      return c.json({ orphans, skipped, builds: orphanBuilds ? await orphanBuilds() : [] } satisfies OrphanScanView);
+      return c.json({ orphans, skipped } satisfies OrphanScanView);
     } catch (e) {
-      return c.json({ orphans: [], skipped: [], builds: [], error: errText(e) } satisfies OrphanScanView);
+      return c.json({ orphans: [], skipped: [], error: errText(e) } satisfies OrphanScanView);
     }
   });
 

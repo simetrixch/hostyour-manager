@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { OrphanScanView, PurgeTenantTarget, WorkloadStatusView } from "../../../shared/api-types.ts";
 import {
-  listTenants, getTenantLive, scanTenantOrphans, purgeTenant, purgeTenantAppsRepo,
+  listTenants, getTenantLive, scanTenantOrphans, purgeTenant,
   type TenantView,
 } from "../api.ts";
 import { TENANT_RUN_KINDS } from "../runKinds.ts";
@@ -213,17 +213,6 @@ export function Tenants() {
     }
   }
 
-  // The build twin (#241): keyed on the unit name alone, the plan refuses what is accounted for.
-  async function purgeBuild(unit: string): Promise<void> {
-    setError(null);
-    try {
-      const { runId } = await purgeTenantAppsRepo(unit);
-      nav(`/runs/${runId}`);
-    } catch (e) {
-      setError(msg(e));
-    }
-  }
-
   // Offboarded tenants keep their inventory row for audit and have nothing live to reconcile, so
   // they leave the CARDS — but not the page: they move to their own list below it, where the one run kind
   // they still have is offered (see the component docblock). A PROVISIONING tenant stays on the cards:
@@ -262,7 +251,7 @@ export function Tenants() {
           than showing either tab's data, and it must stay put while the operator works through it.
           Rendered only once a scan has actually run. */}
       {(scanning || scanError !== null || scan !== null) && (
-        <TenantOrphanPanel scanning={scanning} scanError={scanError} scan={scan} onPurge={setPurgeFor} onPurgeBuild={(unit) => void purgeBuild(unit)} />
+        <TenantOrphanPanel scanning={scanning} scanError={scanError} scan={scan} onPurge={setPurgeFor} />
       )}
 
       {/* The finding, above everything else on the page. A tenant nobody can get into is the one

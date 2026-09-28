@@ -628,10 +628,6 @@ export const scanTenantOrphans = (): Promise<OrphanScanView> => req<OrphanScanVi
  *  Run screen; nothing is deleted until that approval. */
 export const purgeTenant = (input: TenantPurgeInput): Promise<{ runId: string }> =>
   post<{ runId: string }>("/api/tenants/purge", input as unknown as Record<string, unknown>);
-/** Remove a build registration nothing accounts for (#241), by the unit name the orphan scan found.
- *  Plans and returns a { runId } to approve on the Run screen; nothing is deleted until that approval. */
-export const purgeTenantAppsRepo = (unit: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>("/api/tenants/apps-repo/purge", { unit });
 /** What the tenant a create-tenant run MINTED is right now, decided SERVER-SIDE from the tenants row —
  *  never from the run's kind + status. The union it answers in is RunTenantStateView
  *  (shared/api-types.ts), the SAME declaration resolveRunTenantState returns: the six states, why the row

@@ -738,13 +738,7 @@ export interface SkippedTenantPointerView {
 export interface OrphanScan {
   orphans: OrphanTenantView[];
   skipped: SkippedTenantPointerView[];
-  /** Build registrations nothing accounts for (#241); their one action is POST /api/tenants/apps-repo/purge. */
-  builds: OrphanBuildView[];
 }
-
-/** A build registration no tenant names as its `appsImage` and no stage file stands beside
- *  (tenant-apps-repo-purge.run.ts scanOrphanBuilds). */
-export type OrphanBuildView = { unit: string; repoURL: string };
 
 /** GET /api/tenants/orphans — the scan plus the route's FAIL-SOFT envelope, which is the same honesty
  *  rule applied per SCAN that `skipped` applies per pointer: `error` set means the scan itself could not
