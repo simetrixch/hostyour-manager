@@ -33,7 +33,7 @@ import type { SkippedConsumerPointerView } from "#core/shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "#core/server/adapters/git/port.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 import { resolveClusterMarkingIn } from "#core/server/domains/inventory/cluster-marking.ts";
-import { makeRegistrationGuard, migrateRegistrationFiles, parseRegistration, schemaWhy, serializePointer, trailer, type RegistrationMigration } from "./registration-laws.ts";
+import { makeRegistrationGuard, parseRegistration, schemaWhy, serializePointer, trailer } from "./registration-laws.ts";
 
 const REGISTRATION_GUARD = /^registrations\/[a-z0-9-]+\/(dev|test|prod|build)\.yaml$/;
 
@@ -474,20 +474,6 @@ export class Registrations {
         remove: [guard(buildPath(name))],
       });
       return { removed: true };
-    });
-  }
-
-  /** Every file of every unit — build.yaml and each stage file — brought to the schema this release
-   *  ships (migrateRegistrationFiles), in ONE turn and at most ONE commit ending in `marker`. The
-   *  boot runs it once (registrations-migration.ts). A file the schema refuses is answered by path
-   *  and reason, never rewritten. */
-  async migrateToSchema(marker: string): Promise<RegistrationMigration> {
-    return this.repo.withBranch(this.branch, async (books) => {
-      const paths: string[] = [];
-      for (const unit of await books.listDir("registrations")) {
-        paths.push(buildPath(unit), ...STAGE.map((stage) => stagePath(stage, unit)));
-      }
-      return migrateRegistrationFiles(books, ConsumerRegistrationSchema, paths, guard, marker);
     });
   }
 

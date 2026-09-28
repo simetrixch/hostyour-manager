@@ -3,7 +3,7 @@ import { loadConfig, type Config } from "../kernel/config.ts";
 import { runActor } from "../kernel/actor.ts";
 import { createLogger, type Logger } from "../kernel/logger.ts";
 import { openDb, type DbHandle } from "../db/client.ts";
-import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf, checkRegistrationsMigrated, type CheckResult } from "./selfchecks.ts";
+import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf, type CheckResult } from "./selfchecks.ts";
 import { bootPhases } from "./boot-phases.ts";
 import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
 import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
@@ -19,7 +19,6 @@ import { RunEventBus } from "../executor/bus.ts";
 import { Executor } from "../executor/executor.ts";
 import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-definitions.ts";
 import { repointUnitRecords } from "../domains/units/cluster-rename-records.ts";
-import { fixTenantVersions } from "../domains/units/tenant-versions.ts";
 import { buildUnits } from "./wire-units.ts";
 import { createSshSession } from "../adapters/ssh/ssh2-session.ts";
 import { HttpReleaseDownloads } from "../adapters/downloads/downloads.ts";
@@ -56,9 +55,6 @@ import { reapRegistry } from "./registry-reap.ts";
 import { tenantHeldPins } from "../domains/units/tenant-pins.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
 import { resolveRepoCredentialId } from "#unit/server/repo-identity.ts";
-import { sweepRepoCredentials } from "../domains/units/repo-credential-sweep.ts";
-import { migrateRegistrations } from "#unit/server/registrations-migration.ts";
-import { renameDeployRepoKeys } from "../domains/inventory/cluster-marking.ts";
 import { readChannelStages } from "../domains/inventory/channel-stages.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
@@ -101,18 +97,6 @@ export interface Wired {
    *  image a tenant holds. boot.ts schedules it daily at REGISTRY_REAPER_HOUR. Undefined where the
    *  reaper is not configured. Never rejects. */
   reapRegistry: (() => Promise<void>) | undefined;
-  /** Every standing registration on both books brought to the schema this release ships
-   *  (plugins/unit/server/registrations-migration.ts): a file the schema now defaults a key of is
-   *  rewritten with it, one commit per books per boot. boot.ts runs it once, behind the listening
-   *  server and after the deploy carry, and never again until the next boot — a schema changes
-   *  only with a release, and a release boots the Manager. Never rejects: every failure is logged,
-   *  and the outcome becomes the `registrations.schema` self-check row on /readyz. */
-  migrateRegistrations: () => Promise<void>;
-  /** The deploy repository's two keys brought to their names of this release in every cluster map
-   *  (domains/inventory/cluster-marking.ts renameDeployRepoKeys). boot.ts runs it once, behind the
-   *  listening server. Never rejects: a failure is logged, and the next boot tries again. A no-op
-   *  where no platform repository is configured. */
-  migrateClusterMaps: () => Promise<void>;
 }
 
 /** The carry as boot runs it: LOG AND CONTINUE on failure — a deploy repository that is unreachable at
@@ -282,18 +266,11 @@ export async function wire(): Promise<Wired> {
   // registration (wire-units.ts carryTrunkToBooksBranch); every tenant plan carries it again.
   const carryDeployTrunk = carryDeployTrunkLater(units.carryTrunkToBooksBranch, logger);
   // The deletion after each rewrite reaches the build namespaces over the master-local cluster
-  // reader: they stand on this cluster whatever cluster a unit targets. The same tick takes a token
-  // repository Secret off every live unit the App reaches (repo-credential-sweep.ts).
-  const { resolver: unitResolver, repoCredential, consumerRepo } = units;
+  // reader: they stand on this cluster whatever cluster a unit targets.
+  const { consumerRepo } = units;
   const refreshAppTokensLater = registrations && unit
     ? async (): Promise<void> => {
-        try {
-          await refreshAppTokens({ store, registrations, seeder: unit.seeder, kube: masterKube.clusterReader, logger, deployRepo: config.deployRepo, githubApp, owners: (org) => readOwnerIdentity(db.db, org) });
-        } finally {
-          if (unitResolver && repoCredential) {
-            await sweepRepoCredentials({ db: db.db, githubApp, resolver: unitResolver, repoCredential, logger });
-          }
-        }
+        await refreshAppTokens({ store, registrations, seeder: unit.seeder, kube: masterKube.clusterReader, logger, deployRepo: config.deployRepo, githubApp, owners: (org) => readOwnerIdentity(db.db, org) });
       }
     : async (): Promise<void> => undefined;
   // Each active plugin's own boot work, once, after the core's seeds (server/plugin.ts onBoot).
@@ -318,23 +295,6 @@ export async function wire(): Promise<Wired> {
     if (c.kind === "skipped") logger.info({ check: c.name, detail: c.detail }, "self-check skipped");
     else if (!c.ok) logger.warn({ check: c.name, detail: c.detail }, "self-check degraded");
   }
-  // The registrations brought to this release's schema, behind the listener (Wired.migrateRegistrations).
-  // Its verdict joins the checks above once it has run: /readyz reads that array live, so the row
-  // stands there from the moment the measurement exists and not before. Then every tenant gets the
-  // versions it runs fixed as its own, on the registrations as migrated.
-  const migrateRegistrationsLater = async (): Promise<void> => {
-    checks.push(checkRegistrationsMigrated(await migrateRegistrations({ registrations, tenantRegistrations, version: config.version, logger })));
-    if (tenantRegistrations) await fixTenantVersions({ registrations: tenantRegistrations, db: db.db, version: config.version, logger });
-  };
-  const migrateClusterMapsLater = async (): Promise<void> => {
-    if (!platformRepo) return;
-    try {
-      const { renamed, commit } = await renameDeployRepoKeys(platformRepo, config.version);
-      if (commit) logger.info({ renamed, commit }, "the deploy repository's keys in the cluster maps renamed to deployUrl and deployRepo");
-    } catch (err) {
-      logger.error({ err: String(err) }, "the cluster maps could not be brought to the deploy repository's key names deployUrl and deployRepo — a map that still carries catalogUrl is not read by a chart that reads deployUrl, until a boot succeeds");
-    }
-  };
   const session = new SessionCodec(db.db, config);
   const loginTx = new LoginTxCodec(db.db);
   const oidc = createOidcAdapter(config, logger);
@@ -446,8 +406,6 @@ export async function wire(): Promise<Wired> {
         credentialFor: (repoURL) => resolveRepoCredentialId({ repoURL, githubApp, owners: (org) => readOwnerIdentity(db.db, org), store }),
       })
       : async (): Promise<void> => undefined,
-    migrateRegistrations: migrateRegistrationsLater,
-    migrateClusterMaps: migrateClusterMapsLater,
     reapRegistry: reapRegistryLater,
   };
 }

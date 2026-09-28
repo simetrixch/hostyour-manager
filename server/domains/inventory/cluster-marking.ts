@@ -657,30 +657,6 @@ export async function removeClusterMarking(
   return { changed: true };
 }
 
-/** THE DEPLOY REPOSITORY'S TWO KEYS UNDER THEIR NAMES OF THIS RELEASE, in every map on the books
- *  branch (#280): `catalogUrl` and `catalogRepo` became `deployUrl` and `deployRepo`. A slave's map is
- *  written again only when a run marks the slave, so without this a standing slave's map kept the old
- *  keys, and a chart reading the new ones stopped rendering for it. Boot runs it once.
- *
- *  A text rename of the two key lines of the `global` block and nothing else, so the header, the
- *  order and every other value stay as they stand. One commit for every map it changes, none when no
- *  map carries an old key, ending in the version of the Manager whose boot made it. */
-export async function renameDeployRepoKeys(repo: PlatformRepo, version: string): Promise<{ renamed: string[]; commit: string | null }> {
-  return repo.withBranch(repo.booksBranch, async (books) => {
-    const write: { path: string; content: string }[] = [];
-    for (const entry of await books.listDir(CLUSTER_MAP_DIR)) {
-      if (!entry.endsWith(".yaml")) continue;
-      const path = `${CLUSTER_MAP_DIR}/${entry}`;
-      const text = await books.readFile(path);
-      const renamed = text?.replace(/^ {2}catalogUrl:/m, "  deployUrl:").replace(/^ {2}catalogRepo:/m, "  deployRepo:");
-      if (renamed !== undefined && renamed !== text) write.push({ path, content: renamed });
-    }
-    if (write.length === 0) return { renamed: [], commit: null };
-    const { commit } = await books.commit({ message: `deploy(clusters): name the deploy repository deployUrl and deployRepo in ${write.length} map(s) [boot ${version}]`, write });
-    return { renamed: write.map((w) => w.path), commit };
-  });
-}
-
 /** The inverse: drop the slave part, leaving the cluster marked but unreachable — the master's
  *  slaves ApplicationSet stops generating for it, which IS the teardown of its management plane.
  *  The map itself STAYS: the cluster still has a role, a stage and a build plane. Tolerates an

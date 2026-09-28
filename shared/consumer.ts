@@ -542,11 +542,10 @@ export function consumerArgocdUrl(masterFqdn: string | null, argoNamespace: stri
  *  and the ApplicationSet selects on the third; `services` is mandatory in the deployable form (an
  *  empty list is fine) for the same reason — a fourth Application source gates on it.
  *
- *  A FIELD ADDED HERE HAS A DEFAULT, AND THE BOOT WRITES IT: the Manager's boot parses every standing
- *  registration through this schema and commits the ones whose serialized form differs
- *  (plugins/unit/server/registrations-migration.ts), so a standing unit meets a new key at the next
- *  boot rather than at a hand. A field the schema cannot fill by itself — required, no default — is
- *  a run kind's job, never a boot's; an optional one, where absent is a meaning, stays absent.
+ *  A FIELD ADDED HERE HAS A DEFAULT, so every file a run writes carries it. A file written before the
+ *  field existed carries no key for it until a run rewrites it: a standing installation is brought
+ *  onto a new field by hand, once. A field the schema cannot fill by itself — required, no default —
+ *  is a run kind's job; an optional one, where absent is a meaning, stays absent.
  *
  *  The invariant `name == basename(repoURL)` is what makes the split safe: with ONE writer plus this
  *  invariant, the `repoURL` in a unit's build.yaml and in its stage files cannot contradict itself. */

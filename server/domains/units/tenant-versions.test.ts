@@ -6,14 +6,13 @@ import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { testMembers, TEST_BUNDLE, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
-import { fixTenantVersions, readTenantVersions, sameApprovals, stagePinsOf, withChosenVersions, withMissingPins, type Approvals } from "./tenant-versions.ts";
+import { readTenantVersions, sameApprovals, stagePinsOf, withChosenVersions, withMissingPins, type Approvals } from "./tenant-versions.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
-import type { Logger } from "../../kernel/logger.ts";
 
-// The versions a tenant runs: the stage pins it starts on, the builds the boot fixes at the version
-// they run, and the comparison that makes a current tenant a run with nothing to do.
+// The versions a tenant runs: the stage pins it starts on, and the comparison that makes a current
+// tenant a run with nothing to do.
 
 const GUID = "zsjs023ctne0";
 const NEW = "0.1.12-stable-20260925120000-abc1234";
@@ -49,9 +48,6 @@ beforeEach(() => {
   db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
 });
 afterEach(() => { db.sqlite.close(); });
-
-const logs: string[] = [];
-const logger = { info: (_o: unknown, m: string) => logs.push(m), error: (_o: unknown, m: string) => logs.push(m) } as unknown as Logger;
 
 describe("tenant versions", () => {
   it("takes the stage pin of every build a member's charts pin, and leaves a placeholder out", async () => {
@@ -106,27 +102,5 @@ describe("tenant versions", () => {
         { name: "example-platform", builds: ["example-engine", "example-worker"], running: [NEW], versions: [{ tag: NEWER, older: false }, { tag: NEW, older: false }, { tag: OLD, older: true }] },
       ],
     });
-  });
-
-  it("the boot fixes a missing build at the version it runs, keeps a held one, and commits nothing the second time", async () => {
-    const registrations = books({ erp: { "example-engine": OLD } });
-    let writes = 0;
-    const setApprovedTags = registrations.setApprovedTags.bind(registrations);
-    registrations.setApprovedTags = async (...args) => { writes++; return setApprovedTags(...args); };
-    await fixTenantVersions({ registrations, db: db.db, version: "0.8.0", logger });
-    const want = { erp: { "example-engine": OLD }, auth: { "example-auth": NEW } };
-    expect((await registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual(want);
-    expect(db.db.select({ a: tenants.approvedTags }).from(tenants).get()?.a).toEqual(want);
-    await fixTenantVersions({ registrations, db: db.db, version: "0.8.0", logger });
-    expect(writes).toBe(1);
-  });
-
-  it("the boot never rejects: a stage it cannot read is logged and the other stages are fixed", async () => {
-    const registrations = books({});
-    const listTenantPointers = registrations.listTenantPointers.bind(registrations);
-    registrations.listTenantPointers = async (stage) => { if (stage === "dev") throw new Error("books unreadable"); return listTenantPointers(stage); };
-    await expect(fixTenantVersions({ registrations, db: db.db, version: "0.8.0", logger })).resolves.toBeUndefined();
-    expect(logs.some((l) => l.includes("could not be fixed"))).toBe(true);
-    expect((await registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual({ auth: { "example-auth": NEW }, erp: { "example-engine": NEW } });
   });
 });

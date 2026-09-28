@@ -33,7 +33,7 @@ import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts"
 import type { SkippedTenantPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { errInternal, errValidation } from "../../kernel/errors.ts";
-import { serializePointer, makeRegistrationGuard, trailer, schemaWhy, migrateRegistrationFiles, type RegistrationMigration } from "#unit/server/registration-laws.ts";
+import { serializePointer, makeRegistrationGuard, trailer, schemaWhy } from "#unit/server/registration-laws.ts";
 
 /** registrations/<guid>/<stage>.yaml — the ONE per-tenant-per-stage file. The guid segment mirrors
  *  shared/tenant.ts:guid (12 chars of Crockford base32 minus i/l/o/u). */
@@ -441,20 +441,6 @@ export class TenantRegistrations {
         remove: [guard(registrationPath(stage, guid))],
       }),
     );
-  }
-
-  /** Every registrations/<guid>/<stage>.yaml brought to the schema this release ships
-   *  (registration-laws.ts migrateRegistrationFiles), in ONE turn and at most ONE commit ending in
-   *  `marker`. The boot runs it once (registrations-migration.ts), after the deploy carry. A file
-   *  the schema refuses is answered by path and reason, never rewritten. */
-  async migrateToSchema(marker: string): Promise<RegistrationMigration> {
-    return this.repo.withBranch(this.branch, async (books) => {
-      const paths: string[] = [];
-      for (const g of await books.listDir("registrations")) {
-        paths.push(...STAGE.map((stage) => registrationPath(stage, g)));
-      }
-      return migrateRegistrationFiles(books, TenantRegistrationSchema, paths, guard, marker);
-    });
   }
 
   /** Rewrite the whole registration file from a complete entry. Every read-modify-write op above goes

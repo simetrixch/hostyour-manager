@@ -45,19 +45,13 @@ export async function boot(): Promise<void> {
   wired.serveEmergencySocket();
   // The one slow act of boot runs behind the listening server, so /healthz answers from the first
   // second and the liveness probe has nothing to kill (#166).
-  // The carry never rejects, so the registrations follow it: every standing registration brought to
-  // this release's schema, once per boot and never on a timer — a schema changes only with a release,
-  // and a release boots the Manager. After the carry rather than beside it only so the log reads in
-  // order; the carry brings charts and rewrites no registration.
-  // The cluster maps follow, once per boot too: their two deploy repository keys under this release's names.
-  void wired.carryDeployTrunk().then(wired.migrateRegistrations).then(wired.migrateClusterMaps);
+  void wired.carryDeployTrunk();
   // ... and again every ten minutes, so a change on the deploy trunk reaches a standing tenant
   // without a boot or a plan (#169).
   scheduleDeployCarry(wired.carryDeployTrunk, logger);
   // The App tokens behind the build repo-pat entries: rewritten once now, behind the listener, and
   // then every 45 minutes — a token lives 60, so a unit whose credential is the platform's GitHub
-  // App can release at any hour, not only the one after its onboarding (#184). The same tick takes a
-  // token repository Secret off every live unit the App reaches (repo-credential-sweep.ts).
+  // App can release at any hour, not only the one after its onboarding (#184).
   void wired.refreshAppTokens();
   scheduleAppTokenRefresh(wired.refreshAppTokens, logger);
   // The release kit this Manager ships, into every registered unit's repository where it differs:

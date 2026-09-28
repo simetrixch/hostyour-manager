@@ -7,7 +7,6 @@ import { servers, clusters } from "../../db/schema/inventory.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import {
   clusterShortName, resolveClusterMarking, buildPlaneFqdnFromMarkings, projectClusterMarking, removeSlaveMarkingPart, writeClusterMarking, CLUSTER_MARKING_FILE_KEYS, moveClusterMarking,
-  renameDeployRepoKeys,
 } from "./cluster-marking.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -437,24 +436,5 @@ global:
 ` });
     await expect(moveClusterMarking(repo, SLAVE, TO, "run_1")).rejects.toThrow(/already stands on .* beside/);
     await expect(moveClusterMarking(repo, OTHER, "s2.new.example.com", "run_1")).rejects.toThrow(/no cluster map for s2\.example\.com/);
-  });
-});
-
-describe("renameDeployRepoKeys", () => {
-  it("renames the deploy repository's two keys in every map carrying them, in one commit, and moves nothing else", async () => {
-    // The header spells the old key the way a key line does: it is the file's text, never a key, and
-    // stays as written.
-    const header = "#  catalogUrl: the key this map carried before the rename";
-    const old = FULL_MAP.replace("  deployUrl:", "  catalogUrl:").replace("  deployRepo:", "  catalogRepo:");
-    const repo = repoWith({ [MASTER]: `${header}\n${old}`, [SLAVE]: slaveMap });
-    const before = repo.commits.length;
-    expect(await renameDeployRepoKeys(repo, "0.8.280")).toEqual({ renamed: [clusterMapPath(MASTER)], commit: expect.any(String) });
-    expect(repo.commits.slice(before).map((c) => c.message)).toEqual(["deploy(clusters): name the deploy repository deployUrl and deployRepo in 1 map(s) [boot 0.8.280]"]);
-    expect(repo.read(repo.booksBranch, clusterMapPath(MASTER))).toBe(`${header}\n${FULL_MAP}`);
-    expect(repo.read(repo.booksBranch, clusterMapPath(SLAVE))).toBe(slaveMap);
-    expect((await resolveClusterMarking(repo, MASTER)).deployRepo).toBe("acme/acme-deploy");
-    // A second boot finds nothing to rename and commits nothing.
-    expect(await renameDeployRepoKeys(repo, "0.8.280")).toEqual({ renamed: [], commit: null });
-    expect(repo.commits.length).toBe(before + 1);
   });
 });

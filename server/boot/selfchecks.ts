@@ -15,7 +15,6 @@ import { assertMirrorsDeployStateName, readDeployStateName } from "../domains/in
 import { readAnsiwisePin, ANSIWISE_PIN_PATH, ANSIWISE_PIN_BRANCH, ANSIWISE_PIN_KEY } from "../domains/inventory/ansiwise-pin.ts";
 import { readInstallOrder, holdsInstallOrder, INSTALL_ORDER_PATH } from "../domains/inventory/install-order.ts";
 import { PROGRAM_STEP_PREFIX } from "../domains/runs/defs/ansiwise-run.kit.ts";
-import type { MigratedBooks } from "#unit/server/registrations-migration.ts";
 import type { PlatformRepo } from "../adapters/git/port.ts";
 import type { GitHubApp } from "../adapters/github-app/port.ts";
 import { spaBytes } from "../http/spa.ts";
@@ -486,37 +485,6 @@ async function checkDeployIdentity(config: Config, githubApp: GitHubApp): Promis
   } catch (e) {
     return { name, kind: "degrading", ok: false, detail: messageOf(e) };
   }
-}
-
-/**
- * DOES EVERY STANDING REGISTRATION STAND IN THE SCHEMA THIS RELEASE SHIPS? The boot migration
- * (plugins/unit/server/registrations-migration.ts) rewrites every registration the schema can fill and
- * names every one it REFUSES — a file every reader refuses the same way, so the unit it names is not
- * served until a person settles it. This row carries those names, and how much was covered per
- * books: files read, files rewritten, the commit.
- *
- * DECLARED FROM THE MIGRATION'S OUTCOME rather than measured here, because the migration runs BEHIND
- * the listener (boot.ts, after the deploy carry) and a walk of both books ahead of it would hold
- * /healthz shut for the length of two clones. The row is pushed onto the boot's checks once the
- * migration has run (wire.ts Wired.migrateRegistrations), so /readyz lists it from then on and not
- * before: unlisted is "not measured yet", never a green light. DEGRADING, as every check that reaches
- * a remote is; a books that could not be read is red with the reason. Without books it SKIPS and
- * says so.
- */
-export function checkRegistrationsMigrated(outcomes: MigratedBooks[]): CheckResult {
-  const name = "registrations.schema";
-  if (outcomes.length === 0) {
-    return { name, kind: "skipped", ok: false, detail: "no books are configured on this manager — there is no registration to hold to the schema" };
-  }
-  const failed = outcomes.flatMap((o) => ("failed" in o ? [`the ${o.books} books ${o.branch} could not be read: ${o.failed}`] : []));
-  const refused = outcomes.flatMap((o) => ("failed" in o ? [] : o.refused.map((r) => `${o.books} books ${o.branch}: ${r.path} ${r.reason}`)));
-  const covered = outcomes
-    .map((o) => ("failed" in o ? `${o.books} ${o.branch}: not read` : `${o.books} ${o.branch}: ${o.read} read, ${o.rewritten.length} rewritten${o.commit ? ` (${o.commit})` : ""}, ${o.refused.length} refused`))
-    .join("; ");
-  const wrong = [...failed, ...refused];
-  return wrong.length === 0
-    ? { name, kind: "degrading", ok: true, detail: covered }
-    : { name, kind: "degrading", ok: false, detail: `${wrong.join("; ")} — ${covered}` };
 }
 
 /** Async checks (jose is Promise-based, the platform-repo read is a git fetch). Run after

@@ -1,22 +1,21 @@
 // The versions a tenant runs (hostyour-manager#296). A release only makes a version AVAILABLE: it moves
 // the stage pin (charts/<chart>/pins-<stage>.yaml on the books branch). Every tenant holds its own fixed
-// version of every build its members render (tenant.approvedTags, #283), so no tenant renders the stage
-// pin and a release moves none. Three writers set those versions: create-tenant and add-app (the newest
-// available when the member is created), the tenant's Versions run (the version chosen per part), and
-// the boot, which fixes a build a tenant does not hold yet at the version it runs.
+// version of every build its members render (tenant.approvedTags, #283), so a release moves no build a
+// tenant holds. Two writers set those versions: create-tenant and add-app (the newest available when the
+// member is created), and the tenant's Versions run (the version chosen per part). A build a member's
+// chart gains later renders the stage pin until that run fixes it.
 //
 // A PART is the set of builds one unit releases together (its build registration), so one release tag
 // names every image of it and a choice moves them all: a tenant never runs the engine of one release
 // beside the app of another.
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Cleanup, Step, StepCtx } from "../../executor/types.ts";
-import { STAGE, type Stage } from "../../../shared/enums.ts";
+import type { Stage } from "../../../shared/enums.ts";
 import { approvedImageTag, isOlderRelease, type TenantMemberRecord } from "../../../shared/tenant.ts";
 import type { ReleaseChannel } from "../../../shared/release.ts";
 import type { VersionsView } from "../../../shared/api-types.ts";
 import type { Db } from "../../db/client.ts";
 import { tenants } from "../../db/schema/inventory.ts";
-import type { Logger } from "../../kernel/logger.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
@@ -24,7 +23,6 @@ import type { ChannelStages } from "../inventory/channel-stages.ts";
 import { loadTenantCluster } from "./lifecycle.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { memberApplication } from "./tenant-fanout.ts";
-import type { TenantRegistrations } from "./tenant-registrations.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 
 export type Approvals = Record<string, Record<string, string>>;
@@ -180,29 +178,6 @@ export function rendersApproval(status: ArgoAppStatus | undefined, deployRepoUrl
 
 export const sameApprovals = (a: Approvals, b: Approvals): boolean =>
   JSON.stringify(Object.entries(a).sort().map(([m, x]) => [m, Object.entries(x).sort()])) === JSON.stringify(Object.entries(b).sort().map(([m, x]) => [m, Object.entries(x).sort()]));
-
-/** At boot: every standing tenant at every stage gets each build it does not hold yet fixed at the
- *  version it runs now, the stage pin, so the next release moves none of them. Nothing it runs changes.
- *  NEVER rejects: boot starts it unawaited behind the listener, and every failure is logged. */
-export async function fixTenantVersions(deps: { registrations: TenantRegistrations; db: Db; version: string; logger: Logger }): Promise<void> {
-  for (const stage of STAGE) {
-    try {
-      const { pointers } = await deps.registrations.listTenantPointers(stage);
-      for (const { guid } of pointers) {
-        const read = await deps.registrations.readTenant(stage, guid);
-        if (!read) continue;
-        const current = read.entry.approvedTags;
-        const next = withMissingPins(current, await stagePinsOf((chart) => deps.registrations.listPinnedBuilds(stage, chart), read.entry.members));
-        if (sameApprovals(current, next)) continue;
-        const { commit } = await deps.registrations.setApprovedTags(stage, guid, next, `boot ${deps.version}`);
-        deps.db.update(tenants).set({ approvedTags: next, updatedAt: new Date() }).where(and(eq(tenants.guid, guid), eq(tenants.stage, stage))).run();
-        deps.logger.info({ guid, stage, commit }, "tenant versions fixed at the versions it runs — a release no longer moves this tenant");
-      }
-    } catch (e) {
-      deps.logger.error({ stage, err: e instanceof Error ? e.message : String(e) }, "the tenant versions of this stage could not be fixed — a tenant missing one keeps following the stage pin for it until a boot succeeds");
-    }
-  }
-}
 
 /** What the version steps of a tenant run read off its params. */
 export interface TenantVersionsParams {

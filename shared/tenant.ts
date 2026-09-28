@@ -209,17 +209,12 @@ export function refineAppsBundle(e: AppsBundleFields, ctx: z.RefinementCtx): voi
  *  `missingkey=error` without a `dig`. Kept fully JSON-round-trip-clean so the registry serializer's
  *  serialize -> validate -> re-parse law holds.
  *
- *  THE RULE FOR EVERY FIELD ADDED HERE: IT HAS A DEFAULT, AND THE BOOT WRITES IT. A registration is
- *  written by the run that creates the tenant and rewritten only by a flip, so every file written
- *  before a field existed carries no key for it — and the tenants ApplicationSet reads the file bare,
- *  where a missing key is a render failure for the whole tenant. The Manager's boot parses every
- *  standing registration through this schema and commits the ones whose serialized form differs
- *  (plugins/unit/server/registrations-migration.ts), which is what brings a standing tenant onto a
- *  new field with no offboard and no hand. That write-back can only fill what the schema itself
- *  fills: a field with a default reaches every standing file at the next boot; an OPTIONAL field
- *  (`appsRepo`, where absent is a meaning) is left absent; a REQUIRED field with no default refuses
- *  every standing file, and its value is a run kind's job — a run that knows the tenant — never a
- *  boot's. */
+ *  THE RULE FOR EVERY FIELD ADDED HERE: IT HAS A DEFAULT. A registration is written by the run that
+ *  creates the tenant and rewritten only by a flip, so every file written before a field existed
+ *  carries no key for it — and the tenants ApplicationSet reads the file bare, where a missing key is
+ *  a render failure for the whole tenant. A standing installation is brought onto a new field by
+ *  hand, once. An OPTIONAL field (`appsRepo`, where absent is a meaning) is left absent; a REQUIRED
+ *  field with no default is a run kind's job — a run that knows the tenant. */
 export const TenantRegistrationSchema = z
   .object({
     // The target SLAVE the tenant fans out on — the ArgoCD-REGISTERED cluster name (plane
@@ -265,9 +260,8 @@ export const TenantRegistrationSchema = z
     // The app key is the name every member chart receives as tenant.appName (the app for a per-app
     // member, the member name for a standing one). A build with no approval follows the stage pin;
     // an approval is never an empty value, which the charts refuse. create-tenant and add-app write
-    // the newest available version, the boot fixes a build a tenant does not hold yet at the version
-    // it runs, and the tenant's Versions run (tenant-refresh-members) writes the version chosen per
-    // part. Defaulted to {} for every file written before it existed.
+    // the newest available version, and the tenant's Versions run (tenant-refresh-members) writes the
+    // version chosen per part. Defaulted to {} for every file written before it existed.
     approvedTags: z.record(memberName, z.record(buildName, approvedImageTag)).default({}),
     // The domain the tenant's mail is sent as, or "" where it is sent as the platform's own domain.
     // Every member receives it as tenant.senderDomain; the product's charts send as
@@ -290,8 +284,8 @@ export const TenantRegistrationSchema = z
     suspended: z.boolean().default(false), // tenant-wide pause: replicas 0, no Ingress
     quiesced: z.boolean().default(false), // the deeper pause a removal-in-flight holds a tenant in
     // The tenant's own apps bundle, all three or none (appsBundleFields above). The two the tenants
-    // ApplicationSet reads bare default to the empty string HERE, so a registration written before
-    // they existed gains both at the boot migration; the params keep them optional.
+    // ApplicationSet reads bare default to the empty string HERE, so every registration a run writes
+    // carries both; the params keep them optional.
     ...appsBundleFields,
     appsImage: appsBundleFields.appsImage.default(""),
     appsImageTag: appsBundleFields.appsImageTag.default(""),

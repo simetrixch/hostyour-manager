@@ -1,6 +1,5 @@
 // A unit's ArgoCD repository access, written by ONE rule wherever a run provisions it: the
-// onboarding's provision-repo-credential and the relocation's provision-target. The App-token refresh
-// tick holds the App half of the rule on every live unit (repo-credential-sweep.ts).
+// onboarding's provision-repo-credential and the relocation's provision-target.
 import type { CredentialStore, UseContext } from "../../security/store.ts";
 import type { RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
