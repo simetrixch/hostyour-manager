@@ -7,8 +7,8 @@ import type { RunKind } from "../../shared/enums.ts";
 // CLUSTER (targetKind "cluster"), so a targetId filter would silently drop every onboard run.
 
 describe("CONSUMER_RUN_KINDS", () => {
-  it("is exactly the consumer lifecycle kinds (incl. purge — force-offboard by name — adopt-consumer — row reconstruction from the registration — restart-workloads and the relocation run kinds backup/restore/migrate)", () => {
-    expect([...CONSUMER_RUN_KINDS].sort()).toEqual(["consumer-adopt", "consumer-backup", "consumer-migrate", "consumer-offboard", "consumer-onboard", "consumer-purge", "consumer-restart-workloads", "consumer-restore", "consumer-resume", "consumer-set-domain", "consumer-set-release", "consumer-set-secrets", "consumer-set-size", "consumer-suspend"]);
+  it("is exactly the consumer lifecycle kinds (incl. purge — force-offboard by name — adopt-consumer — row reconstruction from the registration — restart-workloads, the relocation run kinds backup/restore/migrate and the nightly backup)", () => {
+    expect([...CONSUMER_RUN_KINDS].sort()).toEqual(["consumer-adopt", "consumer-backup", "consumer-migrate", "consumer-nightly-backup", "consumer-offboard", "consumer-onboard", "consumer-purge", "consumer-restart-workloads", "consumer-restore", "consumer-resume", "consumer-set-domain", "consumer-set-release", "consumer-set-secrets", "consumer-set-size", "consumer-suspend"]);
   });
 
   it("keeps onboard — the run that targets a cluster, not the app (would vanish under a targetId filter)", () => {
@@ -33,8 +33,8 @@ describe("CONSUMER_RUN_KINDS", () => {
 // the CLUSTER (targetKind "cluster"), so a targetId filter would silently drop every create-tenant run.
 
 describe("TENANT_RUN_KINDS", () => {
-  it("is exactly the tenant lifecycle kinds (create + add/remove-app + the apps repository + suspend/resume/offboard + purge + backup/restore/migrate + the administrator check)", () => {
-    expect([...TENANT_RUN_KINDS].sort()).toEqual(["tenant-add-app", "tenant-apps-repo", "tenant-backup", "tenant-check", "tenant-create", "tenant-migrate", "tenant-offboard", "tenant-purge", "tenant-refresh-members", "tenant-remove-app", "tenant-restart-workloads", "tenant-restore", "tenant-resume", "tenant-set-own-domain", "tenant-set-routing", "tenant-set-sender-domain", "tenant-set-size", "tenant-set-website-domain", "tenant-suspend"]);
+  it("is exactly the tenant lifecycle kinds (create + add/remove-app + the apps repository + suspend/resume/offboard + purge + backup/restore/migrate + the nightly backup + the administrator check)", () => {
+    expect([...TENANT_RUN_KINDS].sort()).toEqual(["tenant-add-app", "tenant-apps-repo", "tenant-backup", "tenant-check", "tenant-create", "tenant-migrate", "tenant-nightly-backup", "tenant-offboard", "tenant-purge", "tenant-refresh-members", "tenant-remove-app", "tenant-restart-workloads", "tenant-restore", "tenant-resume", "tenant-set-own-domain", "tenant-set-routing", "tenant-set-sender-domain", "tenant-set-size", "tenant-set-website-domain", "tenant-suspend"]);
   });
 
   it("keeps check-tenants — it targets no tenant row, so only a kind filter surfaces it", () => {

@@ -11,8 +11,8 @@ const now = sql`(unixepoch('subsec') * 1000)`;
 // through db/unit-backups.ts only (hostyour-cloud#254).
 //
 // `run_id` is a loose reference by convention, NOT a Drizzle FK, for the reason schema/dns-writes.ts
-// states: the boundary law "only the executor touches the runs schema" stays intact. A nightly
-// generation is taken by no run, so the column is nullable.
+// states: the boundary law "only the executor touches the runs schema" stays intact. Every writer
+// names the run that takes the generation: a Backup, a move, or the nightly pass.
 export const unitBackups = sqliteTable("unit_backups", {
   kind: text("kind").$type<"tenant" | "consumer">().notNull(),
   unit: text("unit").notNull(), // the tenant guid or the consumer name

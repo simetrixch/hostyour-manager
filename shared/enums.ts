@@ -475,6 +475,9 @@ export const RUN_KIND = [
   // The tenant three are the same mechanism over the whole member bracket.
   "consumer-backup", "consumer-restore", "consumer-migrate",
   "tenant-backup", "tenant-restore", "tenant-migrate",
+  // The nightly pass of each family (hostyour-cloud#254): every standing unit backed up online into a
+  // new generation, retention after it, started by the manager itself each night.
+  "consumer-nightly-backup", "tenant-nightly-backup",
   "tenant-create", "tenant-add-app", "tenant-remove-app",       // tenant (multi-app) onboarding
   // The tenant's OWN apps repository: created in the customer's owner from the deploy repository's
   // apps bundle with the chosen apps, registered build-only and built once — before create-tenant
@@ -513,8 +516,8 @@ export const RUN_FAMILY = {
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
     "mail-dns-publish", "dns-remove", "mail-dns-unpublish",
   ],
-  consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate"],
-  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-refresh-members", "tenant-set-sender-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
+  consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate", "consumer-nightly-backup"],
+  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-refresh-members", "tenant-set-sender-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;
 

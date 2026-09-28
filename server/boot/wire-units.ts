@@ -43,6 +43,7 @@ import type { UnitPorts } from "#unit/server/plugin.ts";
 import type { RelocationPorts } from "#unit/server/relocation.ts";
 import type { ConsumerRelocationPorts } from "../domains/units/relocation-world-consumer.ts";
 import { makeBackupDef } from "../domains/units/backup.run.ts";
+import { makeConsumerNightlyBackupDef } from "../domains/units/nightly-backup.run.ts";
 import { makeRestoreDef } from "../domains/units/restore.run.ts";
 import { makeMigrateDef } from "../domains/units/migrate.run.ts";
 import { errValidation } from "../kernel/errors.ts";
@@ -94,6 +95,8 @@ const DOMAIN_WAIT_MS = 30 * 60_000;
 const DOMAIN_POLL_MS = 15_000;
 export interface UnitsWiring {
   defs: AnyRunDefinition[];
+  /** A Storage Box is wired, so backups can be taken; the unit pages say so where it is not. */
+  backupsWired: boolean;
   /** Consumer onboarding routes go live (gate-runner + platform repo both configured). */
   enabled: boolean;
   /** Tenant onboarding routes go live (DEPLOY_REPO and the platform repository are configured). */
@@ -210,7 +213,7 @@ export function buildUnits(
    *  is built while PLUGINS does not name it. */
   unit: UnitPorts | undefined,
 ): UnitsWiring {
-  if (!unit) return { defs: [], enabled: false, tenantEnabled: false };
+  if (!unit) return { defs: [], backupsWired: false, enabled: false, tenantEnabled: false };
   // ONE activation client and ONE seeder for the whole manager, the unit plugin's: both families'
   // invite steps call a unit's own public ingress through the same client, and there is one Vault and
   // one Manager identity, so the consumer's ceremony secrets and a tenant's crypto entry are written
@@ -276,6 +279,7 @@ export function buildUnits(
   // target cluster + ArgoCD (undefined when consumer onboarding is not configured).
   return {
     defs: [...consumer.defs, ...tenant.defs],
+    backupsWired: relocation.storageBox !== undefined,
     enabled: consumer.enabled,
     tenantEnabled: tenant.enabled,
     ...(consumer.resolver ? { resolver: consumer.resolver } : {}),
@@ -519,6 +523,7 @@ function buildConsumerOnboarding(
     makeBackupDef(consumerRelocationPorts),
     makeRestoreDef(consumerRelocationPorts),
     makeMigrateDef(consumerRelocationPorts),
+    makeConsumerNightlyBackupDef(consumerRelocationPorts),
   ].map((d) => d as unknown as AnyRunDefinition);
 
   // The resolver rides out so the consumer routes' live reconciliation read can resolve per-cluster

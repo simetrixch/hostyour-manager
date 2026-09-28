@@ -6,6 +6,7 @@ import { openDb, type DbHandle } from "../db/client.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf, type CheckResult } from "./selfchecks.ts";
 import { bootPhases } from "./boot-phases.ts";
 import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
+import { scheduleNightlyBackup } from "./nightly-backup-schedule.ts";
 import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
 import { unitPlugin, unitPorts } from "#unit/server/plugin.ts";
 import { CloudflareDns } from "../adapters/dns/cloudflare-dns.ts";
@@ -260,6 +261,7 @@ export async function wire(): Promise<Wired> {
   // CronJob because it must write into THIS database, which is a ReadWriteOnce volume held by a
   // single replica — the same dependency seed-master.ts states for its own reconcile.
   scheduleTenantCheck(executor, logger);
+  scheduleNightlyBackup(executor, db.db, logger);
   await seedMaster(db.db, store, config, logger);
   phase("master seed");
   // The deploy repository's books branch, brought into being and up to the deploy trunk by boot —
@@ -345,7 +347,7 @@ export async function wire(): Promise<Wired> {
       // store: the onboard POST seals the operator's raw repo PAT into the credential store BEFORE
       // the run exists — only the sealed reference enters the executor.
       // What sizes ONE unit and puts it on a size; the size table itself is the unit plugin's.
-      registerBackupRoutes(a, { db: db.db });
+      registerBackupRoutes(a, { db: db.db, backupsWired: units.backupsWired });
       registerSetSizeRoutes(a, { db: db.db, executor, ...(units.registrations ? { registrations: units.registrations } : {}), onboardingEnabled: units.enabled, tenantEnabled: units.tenantEnabled });
       registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });
       registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });

@@ -21,7 +21,7 @@
 import type { Step } from "#core/server/executor/types.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 import { parseDbLines } from "./relocation-jobs.ts";
-import { requireDbtoolsImage, runRelocationJob, type RelocationPorts, type WorldOf } from "./relocation.ts";
+import { backupUnitOf, requireDbtoolsImage, runRelocationJob, type RelocationPorts, type WorldOf } from "./relocation.ts";
 import { findBackupOfRun } from "#core/server/db/unit-backups.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "#core/server/adapters/kube/port.ts";
 
@@ -50,7 +50,7 @@ export function verifySourceReleasedStep(ports: RelocationPorts, worldOf: WorldO
           `the source no longer holds any database of ${w.kindWord} ${w.unit} — the release DESTROYED the source data instead of letting it go` +
             ` (the ${CLAIM_RELOCATING_ANNOTATION} mark did not make the service-provisioner keep the databases when the repoint pruned the ServiceClaims` +
             (w.kindWord === "tenant" ? `, or the relocating annotation did not make the operator skip its delete branch on the Tenant CR)` : `)`) +
-            `; aborting BEFORE restore and BEFORE clear-source — the generation ${findBackupOfRun(ctx.db, ctx.runId)?.folder ?? "this run took"} on the storage box is now the only complete copy, keep it`,
+            `; aborting BEFORE restore and BEFORE clear-source — the generation ${findBackupOfRun(ctx.db, ctx.runId, backupUnitOf(w))?.folder ?? "this run took"} on the storage box is now the only complete copy, keep it`,
         );
       }
       ctx.checkpoint({ sourceDatabases: dbs });

@@ -17,7 +17,7 @@ import type { ServerReachView } from "../../shared/api-types-reach.ts";
 // The onboard wizard's two read views: the channel table (served literally from the platform repo's
 // clusters/platform/values-common.yaml) and what the prefill answers, identity included.
 import type { ChannelStagesView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
-import type { UnitBackupView } from "../../shared/api-types-backups.ts";
+import type { LatestBackupsView, UnitBackupView } from "../../shared/api-types-backups.ts";
 import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
@@ -416,6 +416,8 @@ export const setConsumerSize = (appId: string, size: string): Promise<{ runId: s
 /** Backup: close access, dump every store into a new generation on the Storage Box, verify it,
  *  reopen — the generation stays and the consumer keeps running where it is. */
 export const backupConsumer = (appId: string): Promise<{ runId: string }> => post(`/api/consumers/${appId}/backup`);
+/** Each unit's most recent backup generation, and whether this manager can take backups at all. */
+export const getLatestBackups = (): Promise<LatestBackupsView> => req<LatestBackupsView>("/api/backups/latest");
 /** The generations of the consumer's backup, newest first. */
 export const listConsumerBackups = (appId: string): Promise<UnitBackupView[]> => req<UnitBackupView[]>(`/api/consumers/${appId}/backups`);
 /** Restore the consumer from the named generation onto the named cluster — the disaster-recovery

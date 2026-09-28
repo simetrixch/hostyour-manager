@@ -9,6 +9,7 @@ import { TENANT_RUN_KINDS } from "../runKinds.ts";
 import { splitTenantRows, tenantRowOffer } from "../tenantRows.ts";
 import { adminBadge, neverChecked, withoutAnAdministrator } from "../tenantAdmin.ts";
 import { CheckChip } from "../components/CheckChip.tsx";
+import { BackupChip, useLatestBackups } from "../components/BackupChip.tsx";
 import { SectionRuns } from "../components/SectionRuns.tsx";
 import { InviteAdminDialog } from "../components/InviteAdminDialog.tsx";
 import { PurgeTenantDialog } from "../components/PurgeTenantDialog.tsx";
@@ -163,6 +164,7 @@ function TenantLive({ tenantId }: { tenantId: string }) {
  *  decision, made once in the shared rule, rather than a row quietly falling out of a predicate. */
 export function Tenants() {
   const nav = useNavigate();
+  const latestBackups = useLatestBackups();
   const [rows, setRows] = useState<TenantView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"live" | "runs">("live");
@@ -367,7 +369,7 @@ export function Tenants() {
                         </span>
                       );
                     })()}
-                    <CheckChip check={t.check} />
+                    <CheckChip check={t.check} /> <BackupChip latest={latestBackups} kind="tenant" unit={t.guid} stage={t.stage} />
                   </div>
 
                   {unfinished && (

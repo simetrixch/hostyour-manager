@@ -9,15 +9,15 @@ beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
 const unit = { kind: "tenant" as const, unit: "zsjs023ctne0", stage: "prod" as const };
-const start = (generation: string, runId: string | null) =>
-  recordBackupStarted(db.db, { ...unit, generation, folder: `master.example/prod/tenants/zsjs023ctne0/${generation}`, trigger: runId ? "manual" : "nightly", runId });
+const start = (generation: string, runId: string) =>
+  recordBackupStarted(db.db, { ...unit, generation, folder: `master.example/prod/tenants/zsjs023ctne0/${generation}`, trigger: runId === "run_1" ? "manual" : "nightly", runId });
 
 describe("the book of backups", () => {
   it("lists a unit's generations newest first, each as it was settled, and keeps other units apart", () => {
-    start("20260927T030000Z", null);
-    start("20260928T030000Z", null);
+    start("20260927T030000Z", "run_n27");
+    start("20260928T030000Z", "run_n28");
     start("20260928T101500Z", "run_1");
-    recordBackupStarted(db.db, { ...unit, stage: "test", generation: "20260928T030000Z", folder: "x", trigger: "nightly", runId: null });
+    recordBackupStarted(db.db, { ...unit, stage: "test", generation: "20260928T030000Z", folder: "x", trigger: "nightly", runId: "run_n28" });
     recordBackupFinished(db.db, { ...unit, generation: "20260927T030000Z" }, { state: "ok" });
     recordBackupFinished(db.db, { ...unit, generation: "20260928T030000Z" }, { state: "failed", detail: "job reloc-dump-mongo did not succeed" });
     recordBackupPruned(db.db, { ...unit, generation: "20260927T030000Z" });
@@ -32,8 +32,9 @@ describe("the book of backups", () => {
 
   it("finds a generation by itself and by the run that took it", () => {
     start("20260928T101500Z", "run_1");
-    expect(findBackupOfRun(db.db, "run_1")?.generation).toBe("20260928T101500Z");
-    expect(findBackupOfRun(db.db, "run_2")).toBeUndefined();
+    expect(findBackupOfRun(db.db, "run_1", unit)?.generation).toBe("20260928T101500Z");
+    expect(findBackupOfRun(db.db, "run_1", { ...unit, unit: "other0000000" })).toBeUndefined();
+    expect(findBackupOfRun(db.db, "run_2", unit)).toBeUndefined();
     expect(findBackup(db.db, { ...unit, generation: "20260928T101500Z" })?.folder).toBe("master.example/prod/tenants/zsjs023ctne0/20260928T101500Z");
     expect(findBackup(db.db, { ...unit, generation: "20260101T000000Z" })).toBeUndefined();
   });

@@ -53,6 +53,7 @@ import { makeTenantPurgeDef } from "../domains/units/tenant-purge.run.ts";
 import type { RelocationPorts } from "#unit/server/relocation.ts";
 import type { TenantRelocationPorts } from "../domains/units/relocation-world-tenant.ts";
 import { makeTenantBackupDef } from "../domains/units/backup.run.ts";
+import { makeTenantNightlyBackupDef } from "../domains/units/nightly-backup.run.ts";
 import { makeTenantRestoreDef } from "../domains/units/restore.run.ts";
 import { makeTenantMigrateDef } from "../domains/units/migrate.run.ts";
 
@@ -355,6 +356,7 @@ export function buildTenantOnboarding(
     makeTenantBackupDef(tenantRelocationPorts),
     makeTenantRestoreDef(tenantRelocationPorts),
     makeTenantMigrateDef(tenantRelocationPorts),
+    makeTenantNightlyBackupDef(tenantRelocationPorts),
   ].map((d) => d as unknown as AnyRunDefinition);
 
   // appCatalog + resolver + the repo URL + the registrations ride out so registerTenantRoutes can serve GET

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { UnitBackupView } from "../../shared/api-types-backups.ts";
-import { chosenGeneration, generationLabel, restorableGenerations } from "./backups.ts";
+import { backupChip, chosenGeneration, generationLabel, restorableGenerations } from "./backups.ts";
 
 // What the Restore dialog offers of a unit's backup (hostyour-cloud#254).
 
@@ -19,5 +19,24 @@ describe("the generations a restore offers", () => {
   it("refuses a restore confirmed without a generation", () => {
     expect(chosenGeneration("20260928T030000Z")).toBe("20260928T030000Z");
     expect(() => chosenGeneration(null)).toThrow(/without a backup generation/);
+  });
+});
+
+describe("what a unit's row says about its backup", () => {
+  const unit = { kind: "consumer" as const, unit: "acme", stage: "prod" };
+  const latestOf = (over: Partial<UnitBackupView>) => ({ wired: true, latest: [{ ...gen("20260928T030512Z", over), kind: "consumer" as const, unit: "acme", stage: "prod" as const }] });
+
+  it("names the day of the last good generation, and a failed one with its reason", () => {
+    expect(backupChip(latestOf({}), unit)).toEqual({ label: "backup 2026-09-28", modifier: "chip--ok", detail: "2026-09-28 03:05 UTC · nightly" });
+    expect(backupChip(latestOf({ state: "failed", detail: "job reloc-dump-mongo-acme did not succeed" }), unit)).toEqual({
+      label: "backup failed", modifier: "chip--warn", detail: "2026-09-28 03:05 UTC · nightly: job reloc-dump-mongo-acme did not succeed",
+    });
+  });
+
+  it("says none yet, that backups are off without a Storage Box, or that the book could not be read", () => {
+    expect(backupChip({ wired: true, latest: [] }, unit)?.label).toBe("no backup yet");
+    expect(backupChip({ wired: false, latest: [] }, unit)).toMatchObject({ label: "backups off", modifier: "chip--warn" });
+    expect(backupChip({ error: "HTTP 500" }, unit)).toMatchObject({ label: "backup unknown", detail: "The latest backups could not be read: HTTP 500" });
+    expect(backupChip(null, unit)).toBeNull();
   });
 });

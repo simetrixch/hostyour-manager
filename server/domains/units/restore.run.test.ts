@@ -111,7 +111,7 @@ describe("tenant-restore", () => {
     const ports = tenantPorts(makeFakes());
     const plan = (generation: string) => makeTenantRestoreDef(ports).plan({ tenantId: "tnt_1", targetClusterId: TARGET.clusterId, generation }, { db: db.db });
     await expect(plan("20260101T000000Z")).rejects.toThrow(/has no backup generation 20260101T000000Z/);
-    recordBackupStarted(db.db, { kind: "tenant", unit: GUID, stage: "prod", generation: "20260928T030000Z", folder: "x", trigger: "nightly", runId: null });
+    recordBackupStarted(db.db, { kind: "tenant", unit: GUID, stage: "prod", generation: "20260928T030000Z", folder: "x", trigger: "nightly", runId: "run_nightly" });
     await expect(plan("20260928T030000Z")).rejects.toThrow(/is taking — only a written and verified generation is restored/);
   });
 

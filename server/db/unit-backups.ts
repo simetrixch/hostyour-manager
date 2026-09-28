@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, like, ne } from "drizzle-orm";
 import type { Db } from "./client.ts";
 import { unitBackups } from "./schema/unit-backups.ts";
 import type { BackupState, BackupTrigger, Stage } from "../../shared/enums.ts";
@@ -32,7 +32,7 @@ const keyOf = (g: GenerationKey) =>
   and(eq(unitBackups.kind, g.kind), eq(unitBackups.unit, g.unit), eq(unitBackups.stage, g.stage), eq(unitBackups.generation, g.generation));
 
 /** Enter a generation that is being taken. */
-export function recordBackupStarted(db: Db, g: GenerationKey & { folder: string; trigger: BackupTrigger; runId: string | null }): void {
+export function recordBackupStarted(db: Db, g: GenerationKey & { folder: string; trigger: BackupTrigger; runId: string }): void {
   db.insert(unitBackups).values({ ...g, state: "taking", takenAt: new Date() }).run();
 }
 
@@ -59,12 +59,35 @@ export function listBackups(db: Db, u: BackupUnit): UnitBackup[] {
     .all();
 }
 
+/** Every unit's most recent generation that is not pruned, one per unit. */
+export function latestBackups(db: Db): UnitBackup[] {
+  const latest = new Map<string, UnitBackup>();
+  for (const b of db.select().from(unitBackups).where(ne(unitBackups.state, "pruned")).orderBy(desc(unitBackups.generation)).all()) {
+    const key = `${b.kind}/${b.unit}/${b.stage}`;
+    if (!latest.has(key)) latest.set(key, b);
+  }
+  return [...latest.values()];
+}
+
+/** Does any unit of `kind` hold a nightly generation taken on the UTC day `day` (YYYYMMDD)? */
+export function hasNightlyGenerationOn(db: Db, kind: BackupUnit["kind"], day: string): boolean {
+  return db
+    .select({ generation: unitBackups.generation })
+    .from(unitBackups)
+    .where(and(eq(unitBackups.kind, kind), eq(unitBackups.trigger, "nightly"), like(unitBackups.generation, `${day}T%`)))
+    .get() !== undefined;
+}
+
 /** One generation of a unit, or undefined. */
 export function findBackup(db: Db, g: GenerationKey): UnitBackup | undefined {
   return db.select().from(unitBackups).where(keyOf(g)).get();
 }
 
-/** The generation a run took or is taking — a run takes at most one. */
-export function findBackupOfRun(db: Db, runId: string): UnitBackup | undefined {
-  return db.select().from(unitBackups).where(eq(unitBackups.runId, runId)).get();
+/** The generation a run took or is taking of one unit — a run takes at most one per unit. */
+export function findBackupOfRun(db: Db, runId: string, u: BackupUnit): UnitBackup | undefined {
+  return db
+    .select()
+    .from(unitBackups)
+    .where(and(eq(unitBackups.runId, runId), eq(unitBackups.kind, u.kind), eq(unitBackups.unit, u.unit), eq(unitBackups.stage, u.stage)))
+    .get();
 }

@@ -12,7 +12,7 @@ import type { PublicProbe } from "./adapters/http-probe/port.ts";
 import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
 import type { BackupTrigger, Stage } from "#core/shared/enums.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
-import { findBackup, findBackupOfRun, recordBackupFinished, recordBackupStarted, type UnitBackup } from "#core/server/db/unit-backups.ts";
+import { findBackup, findBackupOfRun, recordBackupFinished, recordBackupStarted, type BackupUnit, type UnitBackup } from "#core/server/db/unit-backups.ts";
 import {
   boxSecretData, boxSecretName, generationFolder, generationId, generationManifest, jobReadsBoxSecret, parseSha256Lines,
   purgeGenerationJob, verifyDumpJob, writeManifestJob, MONGO_NAMESPACE, type RelocationJob, type StorageBoxAccess,
@@ -121,10 +121,13 @@ export type WorldOf = (ctx: StepCtx) => Promise<RelocationWorld>;
  *  picked (a restore). */
 export type GenerationOf = (ctx: StepCtx, w: RelocationWorld) => UnitBackup;
 
-/** The generation this run took — what a move restores from. */
-export const generationOfThisRun: GenerationOf = (ctx) => {
-  const g = findBackupOfRun(ctx.db, ctx.runId);
-  if (!g) throw errValidation(`run ${ctx.runId} took no backup generation — its dump step opens one before anything reads it`);
+/** The unit a world is, as the book of backups keys it. */
+export const backupUnitOf = (w: RelocationWorld): BackupUnit => ({ kind: w.kindWord, unit: w.unit, stage: w.stage });
+
+/** The generation this run took of the world's unit — what a move restores from. */
+export const generationOfThisRun: GenerationOf = (ctx, w) => {
+  const g = findBackupOfRun(ctx.db, ctx.runId, backupUnitOf(w));
+  if (!g) throw errValidation(`run ${ctx.runId} took no backup generation of ${w.kindWord} ${w.unit} — its dump opens one before anything reads it`);
   return g;
 };
 
@@ -240,16 +243,50 @@ export function verifyQuiescedStep(ports: RelocationPorts, worldOf: WorldOf): St
   };
 }
 
-/** The generation this run writes: entered in the book of backups the first time, the same one again
- *  when the step resumes. The inverse that deletes an unfinished one is armed with it. */
-function openGeneration(ctx: StepCtx, w: RelocationWorld, trigger: BackupTrigger, inverse: Cleanup): UnitBackup {
-  const taken = findBackupOfRun(ctx.db, ctx.runId);
+/** The generation this run writes of the world's unit: entered in the book of backups the first time,
+ *  the same one again when the step resumes. A Backup or a move arms the inverse that deletes an
+ *  unfinished one; the nightly pass deletes it itself. */
+function openGeneration(ctx: StepCtx, w: RelocationWorld, trigger: BackupTrigger, inverse?: Cleanup): UnitBackup {
+  const taken = findBackupOfRun(ctx.db, ctx.runId, backupUnitOf(w));
   if (taken) return taken;
   const generation = generationId(new Date());
   const folder = generationFolder({ installation: w.installation(), stage: w.stage, kind: w.kindWord, unit: w.unit, generation });
-  recordBackupStarted(ctx.db, { kind: w.kindWord, unit: w.unit, stage: w.stage, generation, folder, trigger, runId: ctx.runId });
-  ctx.registerCleanup(inverse);
+  recordBackupStarted(ctx.db, { ...backupUnitOf(w), generation, folder, trigger, runId: ctx.runId });
+  if (inverse) ctx.registerCleanup(inverse);
   return generationOfThisRun(ctx, w);
+}
+
+/** Dump every store of the unit into the generation, the manifest with its checksums last. */
+async function dumpInto(ports: RelocationPorts, ctx: StepCtx, w: RelocationWorld, g: UnitBackup, image: string): Promise<{ jobs: string[]; sums: number }> {
+  const registrationYaml = await w.readRegistrationYaml();
+  const jobs = await w.dumpJobs(g.folder, registrationYaml, ctx);
+  const sums: string[] = [];
+  for (const job of jobs) sums.push(...parseSha256Lines(await runRelocationJob(ports, ctx, w.sourceClusterId, job)));
+  const manifest = generationManifest({ ...g, kind: w.kindWord, installation: w.installation(), stores: await w.expectedDumpEntries(ctx) }, sums);
+  await runRelocationJob(ports, ctx, w.sourceClusterId, writeManifestJob({ unit: w.unit, folder: g.folder, namespace: w.homeNamespace, manifest, image }));
+  return { jobs: jobs.map((j) => j.spec.name), sums: sums.length };
+}
+
+/** Prove every expected entry stands in the generation, the manifest included, and only then enter
+ *  it as restorable. */
+async function verifyInto(ports: RelocationPorts, ctx: StepCtx, w: RelocationWorld, g: UnitBackup, image: string): Promise<string[]> {
+  const expected = [...(await w.expectedDumpEntries(ctx)), "manifest.txt"];
+  await runRelocationJob(ports, ctx, w.sourceClusterId, verifyDumpJob({ unit: w.unit, folder: g.folder, namespace: w.homeNamespace, expected, image }));
+  recordBackupFinished(ctx.db, g, { state: "ok" });
+  return expected;
+}
+
+/** Delete an unfinished generation from the box and mark it failed with `detail`. A delete that fails
+ *  is said in the book as well and thrown, because the folder then still stands on the box. */
+async function discardGeneration(ports: RelocationPorts, ctx: StepCtx, w: RelocationWorld, g: UnitBackup, detail: string): Promise<void> {
+  const image = requireDbtoolsImage(ports, DISCARD_GENERATION);
+  try {
+    await runRelocationJob(ports, ctx, w.sourceClusterId, purgeGenerationJob({ unit: w.unit, folder: g.folder, namespace: MONGO_NAMESPACE, image }));
+  } catch (e) {
+    recordBackupFinished(ctx.db, g, { state: "failed", detail: `${detail} — and the folder ${g.folder}/ could not be deleted: ${e instanceof Error ? e.message : String(e)}` });
+    throw e;
+  }
+  recordBackupFinished(ctx.db, g, { state: "failed", detail });
 }
 
 /** Dump EVERY store of the unit into a NEW generation on the box — the registration, the databases,
@@ -264,14 +301,9 @@ export function dumpStep(ports: RelocationPorts, worldOf: WorldOf, trigger: Back
       requireStorageBox(ports, "dump");
       const image = requireDbtoolsImage(ports, "dump");
       const g = openGeneration(ctx, w, trigger, discardGenerationCleanup(ports, worldOf));
-      const registrationYaml = await w.readRegistrationYaml();
-      const jobs = await w.dumpJobs(g.folder, registrationYaml, ctx);
-      const sums: string[] = [];
-      for (const job of jobs) sums.push(...parseSha256Lines(await runRelocationJob(ports, ctx, w.sourceClusterId, job)));
-      const manifest = generationManifest({ ...g, kind: w.kindWord, installation: w.installation(), stores: await w.expectedDumpEntries(ctx) }, sums);
-      await runRelocationJob(ports, ctx, w.sourceClusterId, writeManifestJob({ unit: w.unit, folder: g.folder, namespace: w.homeNamespace, manifest, image }));
-      ctx.checkpoint({ generation: g.generation, jobs: jobs.map((j) => j.spec.name) });
-      ctx.log("meta", `${w.kindWord} ${w.unit} dumped — ${jobs.length} job(s) filled the generation ${g.folder}/ on the storage box, and its manifest carries ${sums.length} checksum(s)`);
+      const done = await dumpInto(ports, ctx, w, g, image);
+      ctx.checkpoint({ generation: g.generation, jobs: done.jobs });
+      ctx.log("meta", `${w.kindWord} ${w.unit} dumped — ${done.jobs.length} job(s) filled the generation ${g.folder}/ on the storage box, and its manifest carries ${done.sums} checksum(s)`);
     },
   };
 }
@@ -288,13 +320,30 @@ export function verifyDumpStep(ports: RelocationPorts, worldOf: WorldOf): Step {
       requireStorageBox(ports, "verify-dump");
       const image = requireDbtoolsImage(ports, "verify-dump");
       const g = generationOfThisRun(ctx, w);
-      const expected = [...(await w.expectedDumpEntries(ctx)), "manifest.txt"];
-      await runRelocationJob(ports, ctx, w.sourceClusterId, verifyDumpJob({ unit: w.unit, folder: g.folder, namespace: w.homeNamespace, expected, image }));
-      recordBackupFinished(ctx.db, g, { state: "ok" });
+      const expected = await verifyInto(ports, ctx, w, g, image);
       ctx.checkpoint({ expected, generation: g.generation });
       ctx.log("meta", `generation ${g.generation} of ${w.unit} verified — ${expected.join(", ")} all stand in ${g.folder}/, and it is a restorable backup from now on`);
     },
   };
+}
+
+/** Take ONE generation of the unit while it keeps serving — the dump of a Backup without closing
+ *  access, its manifest and its verification — and settle it in the book either way. A write that
+ *  lands during the dump may or may not be in it; the Backup run is the frozen copy. A failed
+ *  generation is deleted from the box before the failure is thrown. */
+export async function takeOnlineGeneration(ports: RelocationPorts, ctx: StepCtx, w: RelocationWorld): Promise<UnitBackup> {
+  requireStorageBox(ports, "the nightly backup");
+  const image = requireDbtoolsImage(ports, "the nightly backup");
+  const g = openGeneration(ctx, w, "nightly");
+  try {
+    await dumpInto(ports, ctx, w, g, image);
+    await verifyInto(ports, ctx, w, g, image);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    await discardGeneration(ports, ctx, w, g, detail).catch((d: unknown) => ctx.log("meta", `the failed generation ${g.folder}/ of ${w.unit} could not be deleted — delete it by hand: ${d instanceof Error ? d.message : String(d)}`));
+    throw e;
+  }
+  return generationOfThisRun(ctx, w);
 }
 
 /** The name the dump step arms its inverse under; the run definition supplies the cleanup itself. */
@@ -308,15 +357,13 @@ export function discardGenerationCleanup(ports: RelocationPorts, worldOf: WorldO
     name: DISCARD_GENERATION,
     title: "Delete the unfinished backup generation from the Storage Box",
     run: async (ctx) => {
-      const g = findBackupOfRun(ctx.db, ctx.runId);
+      const w = await worldOf(ctx);
+      const g = findBackupOfRun(ctx.db, ctx.runId, backupUnitOf(w));
       if (!g || g.state !== "taking") {
         ctx.log("meta", g ? `generation ${g.generation} is ${g.state} — it stays` : "this run opened no generation — nothing to delete");
         return;
       }
-      const w = await worldOf(ctx);
-      const image = requireDbtoolsImage(ports, DISCARD_GENERATION);
-      await runRelocationJob(ports, ctx, w.sourceClusterId, purgeGenerationJob({ unit: w.unit, folder: g.folder, namespace: MONGO_NAMESPACE, image }));
-      recordBackupFinished(ctx.db, g, { state: "failed", detail: `run ${ctx.runId} was aborted before the generation was verified` });
+      await discardGeneration(ports, ctx, w, g, `run ${ctx.runId} was aborted before the generation was verified`);
       ctx.log("meta", `unfinished generation ${g.folder}/ deleted from the storage box and marked failed`);
     },
   };

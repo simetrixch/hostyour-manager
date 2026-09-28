@@ -1,4 +1,5 @@
 import { CheckChip } from "../components/CheckChip.tsx";
+import { BackupChip, useLatestBackups } from "../components/BackupChip.tsx";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { DetectedConsumerView, DetectedScanView, RunView } from "../../../shared/api-types.ts";
@@ -80,6 +81,7 @@ function ConsumerLive({ appId }: { appId: string }) {
  *  Run screen; a settled row is kept even after offboard. */
 export function Consumers() {
   const nav = useNavigate();
+  const latestBackups = useLatestBackups();
   const [rows, setRows] = useState<ConsumerView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"live" | "runs">("live");
@@ -299,7 +301,7 @@ export function Consumers() {
                     it arrives with the live payload below. */}
                 <div className="servercard__chips">
                   <span className="chip">{c.provenance}</span>
-                  {c.repoUrl && <span className="chip">{c.repoUrl.replace(/^https:\/\//, "").replace(/\.git$/, "")}</span>} <CheckChip check={c.check} />
+                  {c.repoUrl && <span className="chip">{c.repoUrl.replace(/^https:\/\//, "").replace(/\.git$/, "")}</span>} <CheckChip check={c.check} /> <BackupChip latest={latestBackups} kind="consumer" unit={c.name} stage={c.stage} />
                 </div>
 
                 <ConsumerLive appId={c.id} />
