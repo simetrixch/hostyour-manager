@@ -146,6 +146,16 @@ describe("HttpRegistryProbe.listTags", () => {
 describe("HttpRegistryMaintenance", () => {
   const cfg = (file: string) => ({ registryHost: HOST, dockerConfigPath: file });
 
+  it("listRepos and listTags give up within their budget on a registry that sends the headers and stalls the body", async () => {
+    const file = writeDockerConfig({ [HOST]: { auth: AUTH } });
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => new Response(new ReadableStream({
+      start(controller) { init?.signal?.addEventListener("abort", () => controller.error(init.signal!.reason)); },
+    }), { status: 200 })));
+    const reaper = new HttpRegistryMaintenance({ ...cfg(file), timeoutMs: 50 });
+    await expect(reaper.listRepos()).rejects.toMatchObject({ code: "UPSTREAM" });
+    await expect(reaper.listTags("example-engine")).rejects.toMatchObject({ code: "UPSTREAM" });
+  });
+
   it("listRepos reads /v2/_catalog with the push basic auth and returns repositories[]", async () => {
     const file = writeDockerConfig({ [HOST]: { auth: AUTH } });
     const { seen } = stubRouted({ "GET /v2/_catalog": { status: 200, json: { repositories: ["manager", "library/redis"] } } });

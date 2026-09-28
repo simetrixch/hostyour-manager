@@ -274,24 +274,33 @@ export interface HttpRegistryMaintenanceConfig {
  * running pod). Every method fails CLOSED — an undecidable outcome throws UPSTREAM — so the reaper
  * aborts with nothing deleted rather than acting on a partial read.
  */
+/** One answer of the registry: its status, its headers, and its body read whole. */
+interface RegistryAnswer {
+  status: number;
+  headers: Headers;
+  body: string;
+}
+
 export class HttpRegistryMaintenance implements RegistryMaintenance {
   constructor(private readonly cfg: HttpRegistryMaintenanceConfig) {}
 
   /** One authenticated request. Reads the push auth fresh, composes the timeout+cancel signal, and
-   *  NEVER interprets status here (the caller decides which statuses are answers vs failures). An
-   *  unreachable registry (fetch throw) becomes UPSTREAM. */
-  private async request(method: string, path: string, headers: Record<string, string>, outer: AbortSignal | undefined): Promise<Response> {
+   *  NEVER interprets status here (the caller decides which statuses are answers vs failures). The body
+   *  is read inside the budget too, so a registry that sends the headers and then stalls fails like
+   *  one that never answers: UPSTREAM. */
+  private async request(method: string, path: string, headers: Record<string, string>, outer: AbortSignal | undefined): Promise<RegistryAnswer> {
     const auth = await readDockerConfigAuth(this.cfg.dockerConfigPath, this.cfg.registryHost, "the mounted registry push dockerconfigjson (the push credential)");
     const { signal, done } = composeAbort(this.cfg.timeoutMs ?? 30_000, outer);
     try {
-      return await fetch(`https://${this.cfg.registryHost}${path}`, {
+      const res = await fetch(`https://${this.cfg.registryHost}${path}`, {
         method,
         headers: { ...headers, authorization: `Basic ${auth}` },
         signal,
         redirect: "manual", // never follow a redirect off the central registry (the credential is a header)
       });
+      return { status: res.status, headers: res.headers, body: await res.text() };
     } catch (e) {
-      throw upstream(`${this.cfg.registryHost} is unreachable for ${method} ${path}: ${errMsg(e)}`);
+      throw upstream(`${this.cfg.registryHost} did not answer ${method} ${path}: ${errMsg(e)}`);
     } finally {
       done();
     }
@@ -303,13 +312,12 @@ export class HttpRegistryMaintenance implements RegistryMaintenance {
     for (let page = 0; page < 100_000; page++) {
       const res = await this.request("GET", path, { accept: "application/json" }, opts.signal);
       const link = res.headers.get("link");
-      if (!res.ok) {
-        await res.arrayBuffer().catch(() => undefined);
+      if (res.status < 200 || res.status > 299) {
         throw upstream(`the catalog GET ${path} answered HTTP ${res.status} — the catalog cannot be trusted as complete`);
       }
       let body: { repositories?: unknown };
       try {
-        body = (await res.json()) as { repositories?: unknown };
+        body = JSON.parse(res.body) as { repositories?: unknown };
       } catch (e) {
         throw upstream(`the catalog GET ${path} returned unparseable JSON: ${errMsg(e)}`);
       }
@@ -325,14 +333,13 @@ export class HttpRegistryMaintenance implements RegistryMaintenance {
   async listTags(repo: string, opts: { signal?: AbortSignal } = {}): Promise<string[]> {
     return listTagPages(async (path) => {
       const res = await this.request("GET", path, { accept: "application/json" }, opts.signal);
-      return { status: res.status, link: res.headers.get("link"), body: await res.text() };
+      return { status: res.status, link: res.headers.get("link"), body: res.body };
     }, repo);
   }
 
   async resolveDigest(repo: string, tag: string, opts: { signal?: AbortSignal } = {}): Promise<ManifestDigest> {
     const res = await this.request("HEAD", `/v2/${repo}/manifests/${tag}`, { accept: MANIFEST_ACCEPT }, opts.signal);
-    await res.arrayBuffer().catch(() => undefined);
-    if (!res.ok) {
+    if (res.status < 200 || res.status > 299) {
       // 404 included ON PURPOSE: we resolve a tag we just listed, so its absence here is a race, not a
       // normal answer — fail closed rather than treat an unknown digest as "nothing to guard".
       throw upstream(`the manifest HEAD for ${repo}:${tag} answered HTTP ${res.status} — the digest cannot be resolved`);
@@ -344,7 +351,6 @@ export class HttpRegistryMaintenance implements RegistryMaintenance {
 
   async deleteManifest(repo: string, digest: ManifestDigest, opts: { signal?: AbortSignal } = {}): Promise<void> {
     const res = await this.request("DELETE", `/v2/${repo}/manifests/${digest}`, {}, opts.signal);
-    await res.arrayBuffer().catch(() => undefined);
     // 202 Accepted is the spec success; 200 tolerated; 404 = already gone (idempotent).
     if (res.status === 202 || res.status === 200 || res.status === 404) return;
     throw upstream(`the manifest DELETE for ${repo}@${digest} answered HTTP ${res.status} — the deletion outcome is unclear`);
