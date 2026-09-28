@@ -285,7 +285,10 @@ function checkExternalSecret(
           `${q(expectedKey)}`,
       );
       evidence.push(pin(doc, `${base}.key`, key));
+      return;
     }
+    // An extract takes every key the entry holds, so it reads every declared key.
+    for (const declared of declaredKeys) referenced.add(declared);
   });
 }
 

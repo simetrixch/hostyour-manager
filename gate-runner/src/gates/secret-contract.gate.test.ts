@@ -101,7 +101,7 @@ function serviceAccount(over?: { unit?: string | null; stage?: string | null }):
   };
 }
 
-function externalSecret(over?: { key?: string; property?: string; refreshPolicy?: string | null }): RenderedDoc {
+function externalSecret(over?: { key?: string; property?: string; refreshPolicy?: string | null; extract?: boolean }): RenderedDoc {
   const key = over?.key ?? EXPECTED_KEY;
   // A well-formed document carries the platform's delivery rule. `refreshPolicy: null` takes it
   // away entirely, which is the DANGEROUS shape — absent means the controller's Periodic default.
@@ -124,7 +124,7 @@ function externalSecret(over?: { key?: string; property?: string; refreshPolicy?
           { secretKey: "DB_PASSWORD", remoteRef: { key, property: over?.property ?? "DB_PASSWORD" } },
           { secretKey: "API_TOKEN", remoteRef: { key, property: "API_TOKEN" } },
         ],
-        dataFrom: [{ extract: { key } }],
+        ...(over?.extract === false ? {} : { dataFrom: [{ extract: { key } }] }),
       },
     },
   };
@@ -219,7 +219,8 @@ describe("G7 secret contract", () => {
   it("notes declared-but-unreferenced manifest keys as advisory, still passing", () => {
     const manifest = baseManifest();
     manifest.secrets.push({ key: "UNUSED_KEY", required: true });
-    const r = secretContractGate.check(makeCtx({ manifest }));
+    // Named properties only: an extract of the entry would read UNUSED_KEY too.
+    const r = secretContractGate.check(makeCtx({ manifest, rendered: [secretStore(), externalSecret({ extract: false }), serviceAccount()] }));
     expect(r.status).toBe("pass");
     expect(r.found).toContain("UNUSED_KEY");
   });
@@ -347,6 +348,25 @@ describe("G7 secret contract", () => {
     expect(r.status).toBe("pass");
     expect(r.reason).toBeNull();
     expect(r.severity).toBe("hard");
+  });
+
+  describe("an ExternalSecret that reads the entry only through dataFrom.extract (#318)", () => {
+    const extractOnly = (key: string): RenderedDoc => {
+      const doc = externalSecret({ key });
+      return { ...doc, raw: { ...doc.raw, spec: { refreshPolicy: "OnChange", refreshInterval: "0", dataFrom: [{ extract: { key } }] } } };
+    };
+
+    it("counts an extract of the expected entry as reading every declared key", () => {
+      const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), extractOnly(EXPECTED_KEY), serviceAccount()] }));
+      expect(r.status).toBe("pass");
+      expect(r.found).not.toMatch(/not read by any ExternalSecret/);
+    });
+
+    it("counts an extract of another entry as reading nothing, and fails it", () => {
+      const r = secretContractGate.check(makeCtx({ rendered: [secretStore(), extractOnly("test/consumer/other/app"), serviceAccount()] }));
+      expect(r.status).toBe("fail");
+      expect(r.found).toMatch(/2 declared manifest secret key\(s\) are not read by any ExternalSecret/);
+    });
   });
 
   it("does not crash on a hostile malformed rendered doc (string where an object is expected)", () => {
