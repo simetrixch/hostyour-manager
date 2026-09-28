@@ -9,7 +9,10 @@ const FOREIGN = "name: Publish packages\non:\n  push:\n    tags:\n      - 'v*.*.
 const SAME_NAMES_OWN_FILTER = "name: Release\non:\n  push:\n    tags: ['v*']\n  workflow_dispatch:\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps: []\n";
 
 // Every kit before the publish job: a manual dispatch and nothing else.
-const KIT_BEFORE_PUBLISH = "name: Release\non:\n  workflow_dispatch:\n    inputs:\n      version:\n        type: string\npermissions:\n  contents: write\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps: []\n";
+const KIT_BEFORE_PUBLISH = "name: Release\non:\n  workflow_dispatch:\n    inputs:\n      version:\n        type: string\n      channel:\n        type: choice\n        options: [stable, beta, alpha]\n      stage:\n        type: choice\n        options: [dev, test, prod]\npermissions:\n  contents: write\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n      - run: bash release/release.sh \"$VERSION\" \"$CHANNEL\" \"$STAGE\"\n";
+
+// A manual workflow of a unit's own: started by hand like every older kit, with inputs of its own.
+const OWN_MANUAL = "name: Deploy docs\non:\n  workflow_dispatch:\n    inputs:\n      target:\n        type: string\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps: []\n";
 
 describe("G28 release workflow (hard)", () => {
   it("passes an absent file and the kit's own bytes", () => {
@@ -37,6 +40,21 @@ describe("G28 release workflow (hard)", () => {
     const g = gateReleaseWorkflow({ found: SAME_NAMES_OWN_FILTER });
     expect(g.status).toBe("fail");
     expect(g.found).toContain("the unit's own workflow (on: push, workflow_dispatch)");
+  });
+
+  it("PLANTED DEFECT: refuses a manual workflow of the unit's own, which carries the older kits' one trigger", () => {
+    // Without the input comparison this workflow would pass as an older kit and be replaced, at an
+    // onboarding and, for a library, at every boot without an operator looking.
+    expect(workflowTriggers(OWN_MANUAL)).toEqual(["workflow_dispatch"]);
+    const g = gateReleaseWorkflow({ found: OWN_MANUAL });
+    expect(g.status).toBe("fail");
+    expect(g.found).toContain("the unit's own workflow (on: workflow_dispatch)");
+  });
+
+  it("refuses a manual workflow with the kit's three inputs that runs no release/release.sh", () => {
+    const lookalike = KIT_BEFORE_PUBLISH.replace("bash release/release.sh", "bash deploy.sh");
+    expect(lookalike).not.toContain("release/release.sh");
+    expect(gateReleaseWorkflow({ found: lookalike }).status).toBe("fail");
   });
 
   it("refuses a workflow the unit owns, naming the path, its triggers and the way out", () => {

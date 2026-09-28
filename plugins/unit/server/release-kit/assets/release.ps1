@@ -65,15 +65,16 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true, Position = 0)][string]$Version,
-  [Parameter(Mandatory = $true, Position = 1)][ValidateSet('stable', 'beta', 'alpha')][string]$Channel,
-  # Validated below and not by ValidateSet: the attribute stays on the variable and refuses the
-  # empty value `none` is turned into, and the refusal is the bash twin's sentence.
+  # The channel and the stage are validated below and not by ValidateSet: the attribute ignores case,
+  # where the bash twin refuses `Beta`, it stays on the variable and refuses the empty value `none` is
+  # turned into, and its refusal is not the bash twin's sentence.
+  [Parameter(Mandatory = $true, Position = 1)][string]$Channel,
   [Parameter(Position = 2)][string]$Stage = '',
   [switch]$Existing
 )
 $ErrorActionPreference = 'Stop'
 # `none` is how a form that must send a value says "no stage" (the Release workflow's choice input).
-if ($Stage -eq 'none') { $Stage = '' }
+if ($Stage -ceq 'none') { $Stage = '' }
 # git's output is read, and this script's own is written, as UTF-8 — what the bash spelling reads and
 # writes — so a path with a non-ASCII byte is the same bytes on both sides.
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -281,7 +282,7 @@ function Publish-BranchPin {
 # matches a prerelease, so a consumer on ^0.3.0 is not moved onto a beta.
 function Set-ManifestVersion($Root, $Version, $Tag) {
   $packageVersion = $Version -replace '\.0*(\d+)$', '.$1'
-  if ($Channel -ne 'stable') { $packageVersion = "$packageVersion-$Channel" }
+  if ($Channel -cne 'stable') { $packageVersion = "$packageVersion-$Channel" }
   $manifests = @(git -c core.quotePath=false -C $Root ls-files -- 'package.json' '*/package.json')
   if ($manifests.Count -eq 0) {
     Say 'this repository carries no package.json - no version manifest to stamp'
@@ -319,6 +320,7 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.([0-9]{3}|0|[1-9][0-9]*)$') {
   Die "version must be x.y.z, the third position three digits such as 000 (got '$Version')"
 }
+if (@('stable', 'beta', 'alpha') -cnotcontains $Channel) { Die "channel must be stable|beta|alpha (got '$Channel')" }
 if (@('', 'dev', 'test', 'prod') -cnotcontains $Stage) { Die "stage must be dev|test|prod, or none for a library (got '$Stage')" }
 
 # The courtesy ceiling check. It WARNS and continues on purpose — see the description. A release
@@ -354,8 +356,8 @@ if (Test-Path -LiteralPath $manifest) {
   # writes the list.
   $inBuilds = $false
   foreach ($manifestLine in ($manifestText -split "`n")) {
-    if ($manifestLine -match '^[^\s#]') { $inBuilds = $manifestLine -match '^builds:' }
-    elseif ($inBuilds -and $manifestLine -match '^\s*-\s*name:\s*(\S+)') { $buildNames += $Matches[1] }
+    if ($manifestLine -cmatch '^[^\s#]') { $inBuilds = $manifestLine -cmatch '^builds:' }
+    elseif ($inBuilds -and $manifestLine -cmatch '^\s*-\s*name:\s*(\S+)') { $buildNames += $Matches[1] }
   }
 }
 if (-not $name) { Die "the manifest $manifest states no name - it is what the release line and any pin are written under" }
@@ -363,7 +365,7 @@ if (-not $name) { Die "the manifest $manifest states no name - it is what the re
 # A LIBRARY DEPLOYS NOTHING, so it takes no stage, and everything else is put on one. The test is the
 # release pipeline's own: a manifest with no builds, no chart and no tenant block deploys nothing.
 # Both mismatches are refused here, before anything is minted or pushed.
-$library = $buildNames.Count -eq 0 -and $manifestText -notmatch '(?m)^chart:' -and $manifestText -notmatch '(?m)^tenant:'
+$library = $buildNames.Count -eq 0 -and $manifestText -cnotmatch '(?m)^chart:' -and $manifestText -cnotmatch '(?m)^tenant:'
 if ($library) {
   if ($Stage) { Die "$name declares no builds, no chart and no tenant block, so a release of it deploys nothing and takes no stage - release it without one. Nothing was pushed." }
   if ($Existing) { Die "--existing puts a release that stands on origin on a stage again, and $name deploys nothing. Nothing was pushed." }

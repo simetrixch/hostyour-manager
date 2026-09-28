@@ -41,9 +41,17 @@ function fixture(files: Record<string, string>): { cwd: string; temp: string; ou
   return { cwd, temp, output: join(base, "github-output"), home };
 }
 
-/** One step's script under bash, with the runner's variables and an optional PATH in front. */
-function perform(f: ReturnType<typeof fixture>, body: string, pathFront?: string): { status: number | null; stdout: string; stderr: string } {
-  const env = { RUNNER_TEMP: f.temp, GITHUB_OUTPUT: f.output, HOME: f.home, PATH: pathFront ? `${pathFront}:${process.env.PATH}` : process.env.PATH };
+/** A git call in the fixture that has to succeed. */
+function git(cwd: string, ...args: string[]): string {
+  const r = run("git", ["-c", "user.email=t@e.invalid", "-c", "user.name=T", ...args], cwd);
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+/** One step's script under bash, with the runner's variables, the step's own `env`, and an optional
+ *  PATH in front. */
+function perform(f: ReturnType<typeof fixture>, body: string, pathFront?: string, stepEnv: Record<string, string> = {}): { status: number | null; stdout: string; stderr: string } {
+  const env = { RUNNER_TEMP: f.temp, GITHUB_OUTPUT: f.output, HOME: f.home, PATH: pathFront ? `${pathFront}:${process.env.PATH}` : process.env.PATH, ...stepEnv };
   const file = join(f.temp, "step.sh");
   writeFileSync(file, `set -e\n${body}`);
   return run("env", [...Object.entries(env).map(([k, v]) => `${k}=${v}`), "bash", file], f.cwd);
@@ -95,6 +103,15 @@ describe.skipIf(!JQ)("the publish job's shell, run", () => {
     expect(readFileSync(join(f.temp, "publishable.tsv"), "utf8")).toBe(`minimal\t@x/minimal\t${REGISTRY}\n`);
   });
 
+  it("finds a package in a folder whose name git would quote", () => {
+    // PLANTED DEFECT: without core.quotePath=false git prints "caf\\303\\251/package.json", jq
+    // cannot open that, and the only package to publish is dropped with a green job.
+    const f = fixture({ "café/package.json": pkg({ name: "@x/cafe", version: "0.3.1", publishConfig: { registry: REGISTRY } }) });
+    expect(perform(f, script("Find the packages to publish")).status).toBe(0);
+    expect(readFileSync(f.output, "utf8")).toBe("found=true\n");
+    expect(readFileSync(join(f.temp, "publishable.tsv"), "utf8")).toBe(`café\t@x/cafe\t${REGISTRY}\n`);
+  });
+
   it("finds nothing in a repository without any package.json", () => {
     const f = fixture({ "README.md": "no packages\n" });
     const r = perform(f, script("Find the packages to publish"));
@@ -137,5 +154,74 @@ describe.skipIf(!JQ)("the publish job's shell, run", () => {
     writeFileSync(log, "");
     expect(perform(f, script("Publish what is not yet published"), bin).status).toBe(0);
     expect(readFileSync(log, "utf8")).toContain("held: pnpm publish --no-git-checks --tag latest");
+  });
+
+  it("checks out the newest release tag of the version and channel a dispatched run names, and the pushed tag on a push", () => {
+    const f = fixture({ "README.md": "x\n" });
+    git(f.cwd, "tag", "1.2.3-stable-20200101000000");
+    git(f.cwd, "commit", "-q", "--allow-empty", "-m", "later");
+    git(f.cwd, "tag", "1.2.3-stable-20210101000000");
+    git(f.cwd, "tag", "1.2.3-beta-20220101000000");
+    const newest = git(f.cwd, "rev-parse", "1.2.3-stable-20210101000000^{commit}");
+    const dispatched = perform(f, script("Check out the release tag"), undefined, { GITHUB_EVENT_NAME: "workflow_dispatch", VERSION: "1.2.3", CHANNEL: "stable" });
+    expect(dispatched.status).toBe(0);
+    expect(dispatched.stdout).toContain("publish: publishing from 1.2.3-stable-20210101000000");
+    expect(git(f.cwd, "rev-parse", "HEAD")).toBe(newest);
+    const pushed = perform(f, script("Check out the release tag"), undefined, { GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "1.2.3-stable-20200101000000" });
+    expect(pushed.stdout).toContain("publish: publishing from 1.2.3-stable-20200101000000");
+    const missing = perform(f, script("Check out the release tag"), undefined, { GITHUB_EVENT_NAME: "workflow_dispatch", VERSION: "9.9.9", CHANNEL: "stable" });
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain("publish: no release tag 9.9.9-stable-* stands on origin");
+  });
+
+  it("refuses a release commit that is not on the default branch, and passes one that is", () => {
+    // A clone of a bare origin, as the runner's checkout is, so refs/remotes/origin/master exists.
+    const f = fixture({ "README.md": "x\n" });
+    const origin = join(f.temp, "origin.git");
+    git(f.temp, "init", "-q", "--bare", origin);
+    git(f.cwd, "remote", "add", "origin", origin);
+    git(f.cwd, "push", "-q", "origin", "HEAD:master");
+    git(f.cwd, "fetch", "-q", "origin");
+    const step = script("Refuse a release commit that is not on the default branch");
+    expect(perform(f, step, undefined, { DEFAULT_BRANCH: "master" }).status).toBe(0);
+    // A dispatched run: the job `release` pushed a stamp commit, and actions/checkout set
+    // origin/master back to the commit the run started at. PLANTED DEFECT: without the step's own
+    // fetch, the release commit reads as not on master and nothing is published.
+    const started = git(f.cwd, "rev-parse", "HEAD");
+    git(f.cwd, "commit", "-q", "--allow-empty", "-m", "release: 1.2.3-stable-20260101000000");
+    git(f.cwd, "push", "-q", "origin", "HEAD:master");
+    git(f.cwd, "update-ref", "refs/remotes/origin/master", started);
+    expect(perform(f, step, undefined, { DEFAULT_BRANCH: "master" }).status).toBe(0);
+    const unreadable = perform(f, step, undefined, { DEFAULT_BRANCH: "no-such-branch" });
+    expect(unreadable.status).toBe(1);
+    expect(unreadable.stderr).toContain("publish: no-such-branch could not be read from origin");
+    git(f.cwd, "checkout", "-q", "-b", "side");
+    git(f.cwd, "commit", "-q", "--allow-empty", "-m", "never merged");
+    const refused = perform(f, step, undefined, { DEFAULT_BRANCH: "master" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/publish: the release commit [0-9a-f]{7} is not on master, so nothing of it is published/);
+  });
+
+  it("builds the packages with their workspace dependencies, and refuses one outside the workspace", () => {
+    const f = fixture({ "README.md": "x\n" });
+    mkdirSync(join(f.cwd, "a"));
+    mkdirSync(join(f.cwd, "loose"));
+    const bin = join(f.temp, "bin");
+    mkdirSync(bin);
+    const log = join(f.temp, "calls.log");
+    // pnpm answers `ls` with the workspace it would have installed: the root and the folder a/.
+    const members = JSON.stringify([{ path: f.cwd }, { path: join(f.cwd, "a") }]);
+    writeFileSync(join(bin, "pnpm"), `#!/bin/sh\ncase "$1" in\n  ls) printf '%s\\n' '${members}' ;;\n  *) echo "pnpm $*" >> "${log}" ;;\nesac\n`);
+    chmodSync(join(bin, "pnpm"), 0o755);
+    const step = script("Install and build the packages");
+    writeFileSync(join(f.temp, "publishable.tsv"), `a\t@x/a\t${REGISTRY}\n`);
+    expect(perform(f, step, bin).status).toBe(0);
+    expect(readFileSync(log, "utf8")).toBe("pnpm install --frozen-lockfile\npnpm --filter @x/a... run --if-present build\n");
+    writeFileSync(log, "");
+    writeFileSync(join(f.temp, "publishable.tsv"), `a\t@x/a\t${REGISTRY}\nloose\t@x/loose\t${REGISTRY}\n`);
+    const refused = perform(f, step, bin);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("publish: @x/loose (loose) is no package of this pnpm workspace, so nothing here builds it");
+    expect(readFileSync(log, "utf8")).toBe("pnpm install --frozen-lockfile\n");
   });
 });

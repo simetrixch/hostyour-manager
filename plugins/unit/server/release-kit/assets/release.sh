@@ -207,13 +207,20 @@ pin_branch() {
 USAGE="usage: release/release.sh <x.y.z> <stable|beta|alpha> [<dev|test|prod>] [--existing]"
 VERSION="${1:-}"
 CHANNEL="${2:-}"
-STAGE="${3:-}"
+STAGE=""
 EXISTING_ONLY=""
-case "${4:-}" in
-  "") ;;
-  --existing) EXISTING_ONLY=yes ;;
-  *) die "$USAGE" ;;
-esac
+# --existing stands before or after the stage, as the twin's switch does, and a release without a
+# stage has nothing to put before it. Guarded by the count because bash 3.2 calls an empty "$@"
+# unbound under set -u.
+if [ $# -gt 2 ]; then
+  STAGE_GIVEN=""
+  for arg in "${@:3}"; do
+    case "$arg" in
+      --existing) EXISTING_ONLY=yes ;;
+      *) [ -z "$STAGE_GIVEN" ] || die "$USAGE"; STAGE="$arg"; STAGE_GIVEN=yes ;;
+    esac
+  done
+fi
 # `none` is how a form that must send a value says "no stage" (the Release workflow's choice input).
 [ "$STAGE" = "none" ] && STAGE=""
 

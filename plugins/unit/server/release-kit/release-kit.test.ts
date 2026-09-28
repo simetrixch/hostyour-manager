@@ -46,10 +46,10 @@ describe("release-kit embedded assets", () => {
     const byPath = Object.fromEntries(RELEASE_KIT_FILES.map((f) => [f.path, f.content]));
 
     expect(byPath["release/release.sh"]!).toContain("usage: release/release.sh <x.y.z> <stable|beta|alpha> [<dev|test|prod>] [--existing]");
-    expect(byPath["release/release.sh"]!).toContain('STAGE="${3:-}"');
+    expect(byPath["release/release.sh"]!).toContain('for arg in "${@:3}"; do');
     expect(byPath["release/release.sh"]!).toContain('[ "$STAGE" = "none" ] && STAGE=""');
     expect(byPath["release/release.ps1"]!).toContain("[Parameter(Position = 2)][string]$Stage = ''");
-    expect(byPath["release/release.ps1"]!).toContain("if ($Stage -eq 'none') { $Stage = '' }");
+    expect(byPath["release/release.ps1"]!).toContain("if ($Stage -ceq 'none') { $Stage = '' }");
     // The workflow's third dispatch input, the three stages it offers, and `none` for a library.
     expect(byPath[".github/workflows/release.yml"]!).toMatch(/stage:\s*\n\s*description:/);
     expect(byPath[".github/workflows/release.yml"]!).toMatch(/- dev\n\s+- test\n\s+- prod\n\s+- none/);

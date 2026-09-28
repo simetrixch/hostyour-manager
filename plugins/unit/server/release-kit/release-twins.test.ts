@@ -312,6 +312,28 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     expect(stdout).not.toContain("release: package.json declares 1.2.3\n");
   });
 
+  it("refuses a channel and a stage spelled in another case identically", RUNS, async () => {
+    // PLANTED DEFECT: PowerShell compares without case by default, and `Beta` or `None` taken for the
+    // real word mints a tag the bash twin refuses.
+    const channel = await bothSpellings(() => bareDir(), ["1.2.3", "Beta", "dev"]);
+    expect(expectSameBytes(channel).stderr).toBe("release: channel must be stable|beta|alpha (got 'Beta')\n");
+    const stage = await bothSpellings(() => bareDir(), ["1.2.3", "stable", "None"]);
+    expect(expectSameBytes(stage).stderr).toBe("release: stage must be dev|test|prod, or none for a library (got 'None')\n");
+  });
+
+  it("reads the chart, tenant and builds keys only as YAML spells them, identically", RUNS, async () => {
+    // `Chart:` is no chart key, so this manifest deploys nothing: both twins take it for a library.
+    const o = await bothSpellings(() => fixtureRepo({ manifest: "name: probe-case\nChart:\n  path: deploy/chart\nBuilds:\n  - name: x\n" }), ["1.2.3", "stable", "dev"]);
+    expect(o.sh.status).toBe(1);
+    expect(expectSameBytes(o).stderr).toBe("release: probe-case declares no builds, no chart and no tenant block, so a release of it deploys nothing and takes no stage - release it without one. Nothing was pushed.\n");
+  });
+
+  it("takes --existing before the stage as after it, as the twin's switch does", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST }), ["1.2.3", "stable", "--existing"], ["1.2.3", "stable", "-Existing"]);
+    expect(o.sh.status).toBe(1);
+    expect(expectSameBytes(o).stderr).toBe("release: --existing puts a release that stands on origin on a stage again, and probe-lib deploys nothing. Nothing was pushed.\n");
+  });
+
   it("COUNTER-PROBE: the comparison sees a difference when there is one", RUNS, () => {
     // Two runs of the SAME spelling with different arguments must not compare equal, or every
     // assertion above would be comparing something to itself.

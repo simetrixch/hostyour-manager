@@ -17,7 +17,12 @@
 # starts no workflow: inside a dispatched run, after the job `release`; and
 # alone, on a release tag a person pushed by running release.sh on a machine.
 # A repository with nothing to publish ends the job at its scan. A repository
-# that publishes declares `packageManager` (pnpm) in its root package.json.
+# that publishes declares `packageManager` (pnpm) in its root package.json and
+# keeps every package it publishes inside its pnpm workspace. Only a release
+# commit on the default branch is published, so a tag pushed onto a commit of
+# another branch publishes nothing. The token is the repository's GITHUB_TOKEN,
+# so the registries served are GitHub Packages; a package that names another
+# registry fails at its publish.
 name: Release
 
 # Show the release in the Actions run list (otherwise every run reads
@@ -124,6 +129,25 @@ jobs:
           git checkout --quiet "refs/tags/${tag}"
           echo "publish: publishing from ${tag}"
 
+      # A tag is pushed by anybody who may push, onto any commit; the default
+      # branch is what a repository reviews, so nothing else is published. The
+      # branch is read again because actions/checkout sets it, in a dispatched
+      # run, to the commit the run started at, which is behind the release
+      # commit the job `release` pushed.
+      - name: Refuse a release commit that is not on the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if ! git fetch --quiet origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"; then
+            echo "publish: ${DEFAULT_BRANCH} could not be read from origin, so whether the release commit is on it is unknown - nothing is published" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD "refs/remotes/origin/${DEFAULT_BRANCH}"; then
+            echo "publish: the release commit $(git rev-parse --short=7 HEAD) is not on ${DEFAULT_BRANCH}, so nothing of it is published" >&2
+            exit 1
+          fi
+
       # Before any tool is set up, because most repositories publish nothing and
       # some of them declare no packageManager, which pnpm/action-setup refuses.
       - name: Find the packages to publish
@@ -132,7 +156,7 @@ jobs:
           set -euo pipefail
           list="$RUNNER_TEMP/publishable.tsv"
           : > "$list"
-          git ls-files -- 'package.json' '*/package.json' | while IFS= read -r file; do
+          git -c core.quotePath=false ls-files -- 'package.json' '*/package.json' | while IFS= read -r file; do
             jq -e '(.private // false) == false and (.publishConfig.registry // "") != ""' "$file" >/dev/null || continue
             printf '%s\t%s\t%s\n' "$(dirname "$file")" "$(jq -r .name "$file")" "$(jq -r .publishConfig.registry "$file")" >> "$list"
           done
@@ -170,9 +194,18 @@ jobs:
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
+          # A package outside the workspace is one no filter selects, so it
+          # would be published unbuilt; it is refused instead.
+          members="$(pnpm ls -r --depth -1 --json | jq -r '.[].path')"
           filters=()
-          while IFS=$'\t' read -r dir name registry; do filters+=(--filter "${name}..."); done < "$RUNNER_TEMP/publishable.tsv"
-          pnpm "${filters[@]}" run build
+          while IFS=$'\t' read -r dir name registry; do
+            if ! printf '%s\n' "$members" | grep -qxF "$(cd "$dir" && pwd)"; then
+              echo "publish: ${name} (${dir}) is no package of this pnpm workspace, so nothing here builds it - list its folder in pnpm-workspace.yaml" >&2
+              exit 1
+            fi
+            filters+=(--filter "${name}...")
+          done < "$RUNNER_TEMP/publishable.tsv"
+          pnpm "${filters[@]}" run --if-present build
 
       # A version the registry already holds is skipped, so a rerun publishes
       # nothing twice. The dist-tag is the prerelease id (beta, alpha) or latest.
