@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import type { RunDefinition, Step, Cleanup, Plan } from "../../executor/types.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { STAGE } from "../../../shared/enums.ts";
-import { approvedImageTag, guid as guidSchema, isOlderRelease, TenantMemberRecordSchema, type TenantMemberRecord } from "../../../shared/tenant.ts";
+import { approvedImageTag, guid as guidSchema, isOlderRelease, TenantAppSchema, TenantMemberRecordSchema, type TenantMemberRecord } from "../../../shared/tenant.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
@@ -80,7 +80,7 @@ export const TenantRefreshMembersParams = z.object({
   /** What the image steps render the fan-out with again after a build: the tenant's own facts. */
   subdomain: z.string().min(1),
   owner: z.string().min(1),
-  apps: z.array(z.object({ name: z.string(), seedReference: z.boolean(), seedDemo: z.boolean(), selections: z.record(z.string(), z.boolean()) })),
+  apps: z.array(TenantAppSchema),
   seedUsers: z.boolean(),
   /** The tenant's own apps bundle and the tag it stands at ("" where it has none). */
   appsImage: z.string(),

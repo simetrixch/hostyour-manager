@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { tenants } from "../../db/schema/inventory.ts";
-import { makeTenantRefreshMembersDef, rendersEntry } from "./tenant-refresh-members.run.ts";
+import { makeTenantRefreshMembersDef, rendersEntry, TenantRefreshMembersParams } from "./tenant-refresh-members.run.ts";
 import type { TenantMemberRecord } from "../../../shared/tenant.ts";
 import type { Cleanup } from "../../executor/types.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
@@ -256,6 +256,14 @@ describe("tenant-refresh-members", () => {
     await prt.registrations.setMembers("prod", GUID, other, "run_other");
     const write = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-members")!;
     await expect(write.run(stepCtx(p, [], []))).rejects.toThrow(/changed since this run was planned/);
+  });
+});
+
+describe("the Versions run's params", () => {
+  it("keep a website's folder, site and domain, so the render after the builds finds the website's folder", () => {
+    const website = { name: "example-ch", folder: "web", site: "main", domain: "example.ch", seedReference: false, seedDemo: false, selections: {} };
+    const erp = { name: "erp", seedReference: true, seedDemo: false, selections: {} };
+    expect(TenantRefreshMembersParams.shape.apps.parse([erp, website])).toEqual([erp, website]);
   });
 });
 
