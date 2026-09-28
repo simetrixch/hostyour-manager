@@ -54,7 +54,7 @@
     "eslint": "^9",
     "react": "^19",
     "react-dom": "^19",
-    "react-router": "^7",
+    "react-router": "^7.18.4",
     "stylelint": "^16",
     "stylelint-config-standard": "^36",
     "tsx": "^4",
