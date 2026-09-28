@@ -13,7 +13,7 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema, type TenantAppsRepoRuntime } from "./tenant-apps-steps.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
-import { builtBundleEngine, engineLineRefusal } from "./engine-line.ts";
+import { builtBundleEngine, bundleReleaseRefusal, engineLineRefusal, stepLog, throwEngineLineRefusal } from "./engine-line.ts";
 
 // The "tenant-apps-repo" Run: the tenant's OWN apps repository for a STANDING tenant — the same
 // three steps tenant-create runs on the way (tenant-apps-steps.ts), between the build plane's
@@ -84,6 +84,10 @@ export function recordAppsRepoStep(ports: TenantOnboardPorts, p: { subdomain: st
         ctx.log("meta", `tenant ${p.guid} has no registration at ${p.stage} yet — appsRepo ${url}, appsImage ${unit} and appsImageTag ${appsImageTag} ride this run's record; a tenant-create writes them`);
         return;
       }
+      // The bundle this pass built, judged against every version the tenant runs before the registration
+      // names it: the plan judged the catalog's engine where no unit stood registered, and a repository an
+      // earlier pass left standing keeps its own apps.yaml (engine-line.ts).
+      throwEngineLineRefusal(await bundleReleaseRefusal(ports, { appsRepo: url, appsImageTag }, {}, current.entry.approvedTags, stepLog(ctx)), `tenant ${p.guid} cannot mount ${unit}:${appsImageTag}`);
       if (current.entry.appsRepo === url && current.entry.appsImage === unit && current.entry.appsImageTag === appsImageTag) {
         ctx.log("meta", `tenant ${p.guid}'s registration already names ${url} and ${unit}:${appsImageTag} — nothing to commit`);
         return;

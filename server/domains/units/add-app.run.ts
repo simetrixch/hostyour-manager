@@ -27,13 +27,13 @@ import { readTenantSpec, recordAppsRepoStep } from "./tenant-apps-repo.run.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { BuildUnitSchema, buildUnitStep, planBuildUnits, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { probeBuildUnit } from "./tenant-probes.ts";
-import { stagePinsOf } from "./tenant-versions.ts";
+import { addedMemberVersions, newMembersRefusal } from "./tenant-versions.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { customerHostProblem, replacementSentence, ReplacedRecord } from "./own-domain-records.ts";
 import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace, type WebsiteDomainPorts } from "./website-domain.ts";
-import { builtBundleEngine, newMembersRefusal, throwEngineLineRefusal } from "./engine-line.ts";
+import { builtBundleEngine, throwEngineLineRefusal } from "./engine-line.ts";
 
 // The "tenant-add-app" Run. The subset sibling of
 // create-tenant: it fans ONE new app into a LIVE tenant. It shares create-tenant's streaming-plan
@@ -314,8 +314,9 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
           ctx.log("meta", `app "${p.app}" already present in tenant ${p.guid} — append already committed, skipping`);
           return;
         }
-        // The app starts on the newest available version of every build, fixed as its own (#296).
-        const approved = (await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), [p.member]))[p.app] ?? {};
+        // The app starts on the newest available version of every build, fixed as its own (#296), beside
+        // the bundle the registration names, which record-apps-repo moved to this pass's build.
+        const approved = await addedMemberVersions(ports, p.stage, current.entry, p.app, p.member, ctx);
         const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, ...(p.website ? { website: p.website } : {}), member: p.member, approved, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, runId: ctx.runId });
         ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit, app: p.app });

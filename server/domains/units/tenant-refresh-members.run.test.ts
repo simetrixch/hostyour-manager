@@ -70,28 +70,51 @@ describe("tenant-refresh-members", () => {
     expect((await prt.registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual({ erp: { "example-engine": OLD } });
   });
 
-  // The bundle the tenant runs is read off its own repository at the release it was built from, and
-  // the engines a run puts the tenant on have to be of the line that bundle declares (engine-line.ts).
+  // The bundle the tenant runs is read off its own repository at the release it was built from, where a
+  // version moves a line, and the engines a run puts the tenant on have to be of the line that bundle
+  // declares (engine-line.ts). NEXT_LINE is a release of the engine on the line after the one held.
+  const BUNDLE_REPO = "https://github.com/acme-org/example-apps-acme.git";
+  const NEXT_LINE = "0.2.000-stable-20260927120000-1234abc";
+  const RELEASED_NEXT_LINE = { "charts/example-engine/pins-prod.yaml": `builds:\n  - { name: example-engine, image: example-engine, tag: "${NEXT_LINE}" }\n` };
   const bundleWith = (prt: TenantOnboardPorts, line: string): TenantOnboardPorts => {
-    (prt.repo as FakeRepoReader).scriptFor("https://github.com/acme-org/example-apps-acme.git", { resolvedSha: SHA, files: { "apps.yaml": `apps:\n  - name: erp\n    title: ERP\nengine:\n  build: example-engine\n  line: "${line}"\n` } });
+    (prt.repo as FakeRepoReader).scriptFor(BUNDLE_REPO, { resolvedSha: SHA, files: { "apps.yaml": `apps:\n  - name: erp\n    title: ERP\nengine:\n  build: example-engine\n  line: "${line}"\n` } });
     return prt;
   };
+  const bundleClones = (prt: TenantOnboardPorts): string[] => (prt.repo as FakeRepoReader).clones.filter((c) => c.repoURL === BUNDLE_REPO).map((c) => c.ref);
 
-  it("plans versions on the line the running bundle declares, reading it off the bundle's own release", async () => {
+  it("reads the running bundle off its own release where a version moves a line, and plans versions of the bundle's line", async () => {
     seedTenant();
     const resolved = await planned(ports(staleMembers()));
-    const prt = bundleWith(ports(resolved.members, { files: RELEASED }), "0.1");
-    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEW } }, planCtx());
+    const prt = bundleWith(ports(resolved.members, { files: RELEASED_NEXT_LINE }), "0.2");
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEXT_LINE } }, planCtx());
     expect(out.outcome).toBe("planned");
-    expect((prt.repo as FakeRepoReader).clones.map((c) => `${c.repoURL}@${c.ref}`)).toContain("https://github.com/acme-org/example-apps-acme.git@0.1.0-stable-20260101000000");
+    expect(bundleClones(prt)).toEqual(["0.1.0-stable-20260101000000"]);
   });
 
-  it("PLANTED DEFECT: refuses versions that would put the tenant's engine on another line than its bundle", async () => {
+  it("PLANTED DEFECT: refuses a version that moves the tenant's engine off the line of its bundle", async () => {
     seedTenant();
     const resolved = await planned(ports(staleMembers()));
-    const prt = bundleWith(ports(resolved.members, { files: RELEASED }), "0.2");
-    await expect(makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEW } }, planCtx()))
-      .rejects.toThrow(`tenant acme cannot run these versions: the apps bundle is written for example-engine 0.2, and erp would run example-engine ${NEW}, of another line`);
+    const prt = bundleWith(ports(resolved.members, { files: RELEASED_NEXT_LINE }), "0.1");
+    await expect(makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEXT_LINE } }, planCtx()))
+      .rejects.toThrow(`tenant acme cannot run these versions: the apps bundle is written for example-engine 0.1, and erp would run example-engine ${NEXT_LINE}, of another line`);
+  });
+
+  it("keeps every line without reading the tenant's own repository at all", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    const prt = bundleWith(ports(resolved.members, { files: { "charts/example-engine/pins-prod.yaml": RELEASED["charts/example-engine/pins-prod.yaml"]! } }), "0.2");
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEW } }, planCtx());
+    expect(out.outcome).toBe("planned");
+    expect(bundleClones(prt)).toEqual([]);
+  });
+
+  it("PLANTED DEFECT: write-versions judges the versions as it writes them, and writes none off the bundle's line", async () => {
+    seedTenant();
+    const p = { ...(await planned(ports(staleMembers()))), chosenVersions: { "example-engine": NEXT_LINE } };
+    const prt = bundleWith(ports(p.members, { files: RELEASED_NEXT_LINE }), "0.1");
+    await expect(makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-versions")!.run(stepCtx(p, [], [])))
+      .rejects.toThrow(`tenant ${GUID} cannot run these versions: the apps bundle is written for example-engine 0.1, and erp would run example-engine ${NEXT_LINE}, of another line`);
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual(HELD);
   });
 
   it("moves a tenant whose held images are gone onto the versions chosen: the versions are written before any wait", async () => {

@@ -1,10 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { builtBundleEngine, bundleReleaseTag, declaredEngine, engineLineRefusal, ENGINE_NOT_CHECKED, newMembersRefusal, repositoryEngine, throwEngineLineRefusal, versionLine } from "./engine-line.ts";
+import { builtBundleEngine, bundleReleaseRefusal, bundleReleaseTag, declaredEngine, engineLineRefusal, ENGINE_NOT_CHECKED, movesLine, repositoryEngine, throwEngineLineRefusal, versionLine } from "./engine-line.ts";
+import { newMembersRefusal } from "./tenant-versions.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import type { TenantMemberRecord } from "../../../shared/tenant.ts";
 
 const ENGINE = { build: "example-engine", line: "0.3" };
 const APPS = (engine: string): string => `apps:\n  - name: erp\n    title: ERP\n${engine}`;
+const ON_03 = "0.3.004-stable-20260928080242-a1b2c3d";
+const ON_03_NEXT = "0.3.005-stable-20260929080242-b2c3d4e";
+const ON_04 = "0.4.000-stable-20261001000000-abc1234";
+const BUNDLE_REPO = "https://github.com/acme-org/example-apps-acme.git";
+const BUNDLE_TAG = "0.3.002-stable-20260927000000-1234abc";
+/** A reader that fails every clone, the way a renamed repository or a withdrawn App answers. */
+const unreadable = { repo: { cloneAtRef: async (): Promise<never> => { throw new Error("git fetch failed: repository not found"); }, readFile: async () => null, dispose: async () => undefined } };
 
 describe("the engine line a bundle is written for", () => {
   it("reads a tag's line as its first two numbers", () => {
@@ -73,5 +81,36 @@ describe("the engine line a bundle is written for", () => {
     expect(await newMembersRefusal({ engine: undefined, held: {}, newMembers: [member], pinned })).toBeNull();
     expect(() => throwEngineLineRefusal(refusal, "app \"crm\" cannot be added")).toThrow(/app "crm" cannot be added: the apps bundle is written for/);
     expect(() => throwEngineLineRefusal(null, "nothing")).not.toThrow();
+  });
+
+  it("moves a line only where a version changes its line or is one the tenant held none of", () => {
+    expect(movesLine({ erp: { "example-engine": ON_03 } }, { erp: { "example-engine": ON_03_NEXT } })).toBe(false);
+    expect(movesLine({ erp: { "example-engine": ON_03 } }, { erp: { "example-engine": ON_04 } })).toBe(true);
+    expect(movesLine({ erp: { "example-engine": ON_03 } }, { erp: { "example-engine": ON_03 }, crm: { "example-engine": ON_03 } })).toBe(true);
+    expect(movesLine({}, {})).toBe(false);
+  });
+
+  it("reads the bundle release only where a version moves a line, so a run within its lines needs no repository", async () => {
+    const ctx = { log: () => undefined, signal: new AbortController().signal };
+    const held = { erp: { "example-engine": ON_03 } };
+    const bundle = { appsRepo: BUNDLE_REPO, appsImageTag: BUNDLE_TAG };
+    expect(await bundleReleaseRefusal(unreadable, bundle, held, { erp: { "example-engine": ON_03_NEXT } }, ctx)).toBeNull();
+    expect(await bundleReleaseRefusal(unreadable, {}, held, { erp: { "example-engine": ON_04 } }, ctx)).toBeNull();
+    const repo = new FakeRepoReader({ files: {} });
+    repo.scriptFor(BUNDLE_REPO, { files: { "apps.yaml": APPS('engine:\n  build: example-engine\n  line: "0.3"\n') } });
+    expect(await bundleReleaseRefusal({ repo }, bundle, held, { erp: { "example-engine": ON_04 } }, ctx)).toContain(`erp would run example-engine ${ON_04}, of another line`);
+    expect(repo.clones).toEqual([{ repoURL: BUNDLE_REPO, ref: "0.3.002-stable-20260927000000" }]);
+  });
+
+  it("PLANTED DEFECT: names the repository and the release where the bundle cannot be read, instead of the reader's bare error", async () => {
+    const ctx = { log: () => undefined, signal: new AbortController().signal };
+    await expect(bundleReleaseRefusal(unreadable, { appsRepo: BUNDLE_REPO, appsImageTag: BUNDLE_TAG }, {}, { erp: { "example-engine": ON_04 } }, ctx))
+      .rejects.toThrow(`${BUNDLE_REPO} could not be read at 0.3.002-stable-20260927000000, so the engine the apps bundle there is written for cannot be judged: git fetch failed: repository not found`);
+  });
+
+  it("refuses a bundle whose registration names no image tag, before any read", async () => {
+    const ctx = { log: () => undefined, signal: new AbortController().signal };
+    expect(await bundleReleaseRefusal(unreadable, { appsRepo: BUNDLE_REPO, appsImageTag: "0.0.0-placeholder" }, {}, { erp: { "example-engine": ON_04 } }, ctx))
+      .toContain('the apps bundle stands at "0.0.0-placeholder", which is no image tag');
   });
 });

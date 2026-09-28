@@ -17,6 +17,7 @@ import { errInternal, errValidation } from "../../kernel/errors.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { probeDeploy } from "./tenant-probes.ts";
 import { stagePinsOf } from "./tenant-versions.ts";
+import { bundleReleaseRefusal, stepLog, throwEngineLineRefusal } from "./engine-line.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 
 /** The reset nonce a fresh tenant starts at, in its registration. Nothing acts on a change to it: no
@@ -42,6 +43,9 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
       // The tenant starts on the newest available version of every build, fixed as its own: a later
       // release moves the stage pin and leaves this tenant where it is (#296).
       const approvedTags = await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), p.members);
+      // The bundle this pass built, judged against every version the tenant starts on (none held before):
+      // a build unit of this run may have pinned a version the plan could not judge (engine-line.ts).
+      throwEngineLineRefusal(await bundleReleaseRefusal(ports, { appsRepo: p.appsRepo, appsImageTag }, {}, approvedTags, stepLog(ctx)), `tenant ${p.subdomain} cannot start on these versions`);
       const registration: TenantRegistration = TenantRegistrationSchema.parse({
         cluster: p.cluster,
         subdomain: p.subdomain,

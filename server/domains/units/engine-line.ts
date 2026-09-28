@@ -5,15 +5,20 @@
 // create-tenant, add-app and tenant-apps-repo. The release pipeline asks the same question in shell
 // before it moves a tenant onto a bundle it just built (hostyour-cloud pipeline-release.yaml, class (d)).
 //
+// A plan answers early, from the bundle the run is going to build. The step that writes a pairing
+// (a tenant's versions, or the bundle tag on its registration) judges again before it writes, from the
+// bundle release that was built: a build unit of the same run may have moved a pin the plan could not
+// judge, and a repository an earlier pass left standing keeps its own apps.yaml.
+//
 // A move to a new line needs the bundle and the engines to move together, and nothing here does that:
 // a pairing across lines is refused, and the refusal says so.
 import type { AppsEngine } from "../../../shared/apps-manifest.ts";
 import { parseAppsManifest, APPS_MANIFEST_PATH } from "../../../shared/apps-manifest.ts";
-import type { TenantMemberRecord } from "../../../shared/tenant.ts";
+import { approvedImageTag } from "../../../shared/tenant.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
-import { errValidation } from "../../kernel/errors.ts";
+import type { StepCtx } from "../../executor/types.ts";
+import { errUpstream, errValidation } from "../../kernel/errors.ts";
 import { DEFAULT_BRANCH_HEAD } from "#unit/server/build-chain.ts";
-import { stagePinsOf, withMissingPins } from "./tenant-versions.ts";
 
 /** The versions a tenant's members run, member -> build -> image tag (tenant.approvedTags). */
 type MemberVersions = Readonly<Record<string, Readonly<Record<string, string>>>>;
@@ -23,6 +28,9 @@ type MemberVersions = Readonly<Record<string, Readonly<Record<string, string>>>>
 type RepositoryRead = { repo: Pick<RepoReader, "cloneAtRef" | "readFile" | "dispose">; deployCredentialId?: string | undefined };
 
 type PlanLog = { log: (line: string) => void; signal: AbortSignal };
+
+/** A step's log in the shape the readers here take: every line as meta. */
+export const stepLog = (ctx: Pick<StepCtx, "log" | "signal">): PlanLog => ({ log: (line) => ctx.log("meta", line), signal: ctx.signal });
 
 /** The version line of an image tag `<x.y.z>-<channel>-<ts14>-<sha7>`: its first two numbers. */
 export function versionLine(tag: string): string {
@@ -43,9 +51,13 @@ export function engineLineRefusal(engine: AppsEngine | undefined, versions: Memb
   return `the apps bundle is written for ${engine.build} ${engine.line}, and ${off.join(", ")}, of another line. A bundle and an engine on different lines are refused; moving a tenant to a new line needs its bundle and its engines to move together, which the Manager does not do`;
 }
 
-/** The refusal of members that start at their stage pins beside the ones `held` keeps, or null. */
-export async function newMembersRefusal(input: { engine: AppsEngine | undefined; held: MemberVersions; newMembers: readonly TenantMemberRecord[]; pinned: (chart: string) => Promise<{ name: string; tag: string }[]> }): Promise<string | null> {
-  return input.engine === undefined ? null : engineLineRefusal(input.engine, withMissingPins({ ...input.held }, await stagePinsOf(input.pinned, input.newMembers)));
+/** Whether `next` holds a version the tenant may not run today: a build moved to another line, or one
+ *  `held` has no version of. Only such a version can make a bundle that fitted stop fitting. */
+export function movesLine(held: MemberVersions, next: MemberVersions): boolean {
+  return Object.entries(next).some(([member, builds]) => Object.entries(builds).some(([build, tag]) => {
+    const was = held[member]?.[build];
+    return was === undefined || versionLine(was) !== versionLine(tag);
+  }));
 }
 
 /** Throws a refusal as the plan's answer, naming what was refused. */
@@ -62,9 +74,15 @@ export function declaredEngine(appsYaml: string | null): AppsEngine | undefined 
 /** What a plan logs where a bundle's fit is judged by nobody, so it is never read as a fit that passed. */
 export const ENGINE_NOT_CHECKED = `the apps bundle's ${APPS_MANIFEST_PATH} declares no engine, so whether it fits the engine is not checked`;
 
-/** The engine of a tenant's own repository at `ref`, logging where it declares none. */
+/** The engine of a tenant's own repository at `ref`, logging where it declares none. A repository that
+ *  cannot be read fails naming it and why it was read, which the reader's own error does not say. */
 export async function repositoryEngine(ports: RepositoryRead, source: { repoURL: string; ref: string }, ctx: PlanLog): Promise<AppsEngine | undefined> {
-  const cloned = await ports.repo.cloneAtRef({ ...source, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), signal: ctx.signal });
+  let cloned: { workdir: string };
+  try {
+    cloned = await ports.repo.cloneAtRef({ ...source, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), signal: ctx.signal });
+  } catch (err) {
+    throw errUpstream(`${source.repoURL} could not be read at ${source.ref}, so the engine the apps bundle there is written for cannot be judged: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
   let engine: AppsEngine | undefined;
   try {
     engine = declaredEngine(await ports.repo.readFile(cloned.workdir, APPS_MANIFEST_PATH));
@@ -81,6 +99,18 @@ export async function builtBundleEngine(ports: RepositoryRead, standingRepoURL: 
   if (standingRepoURL !== undefined) return repositoryEngine(ports, { repoURL: standingRepoURL, ref: DEFAULT_BRANCH_HEAD }, ctx);
   if (catalog === undefined) ctx.log(ENGINE_NOT_CHECKED);
   return catalog;
+}
+
+/** Why members on `next` cannot run beside a bundle release, or null. The bundle is read off the tenant's
+ *  own repository at the release its image tag was built from, and only where `next` holds a version
+ *  `held` does not (movesLine): within the lines a tenant runs its pairing stays what it was, so a run
+ *  that keeps every line never depends on that repository being readable. */
+export async function bundleReleaseRefusal(ports: RepositoryRead, bundle: { appsRepo?: string | undefined; appsImageTag?: string | undefined }, held: MemberVersions, next: MemberVersions, ctx: PlanLog): Promise<string | null> {
+  if (!bundle.appsRepo || !bundle.appsImageTag || !movesLine(held, next)) return null;
+  if (!approvedImageTag.safeParse(bundle.appsImageTag).success) {
+    return `the apps bundle stands at "${bundle.appsImageTag}", which is no image tag <x.y.z>-<channel>-<ts14>-<sha7>, so the release it was built from, and the engine it is written for, cannot be read`;
+  }
+  return engineLineRefusal(await repositoryEngine(ports, { repoURL: bundle.appsRepo, ref: bundleReleaseTag(bundle.appsImageTag) }, ctx), next);
 }
 
 /** The release tag a bundle's image tag was built from: `<release tag>-<sha7>`. */

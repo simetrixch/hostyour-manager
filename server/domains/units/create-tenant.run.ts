@@ -36,7 +36,8 @@ import { provisionUnitDns, standingHostFrom, tenantRecordName } from "#unit/serv
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { tenantActivateStep } from "./create-tenant-activate.ts";
 import { mintFreeGuid, writeRegistrationStep } from "./create-tenant-registration.ts";
-import { builtBundleEngine, newMembersRefusal } from "./engine-line.ts";
+import { builtBundleEngine } from "./engine-line.ts";
+import { newMembersRefusal } from "./tenant-versions.ts";
 import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tenant-abort.ts";
 import { assertReplacesOnTargetCluster, ensureSubdomainFreeStep, resolveReplaceTargets, ReplaceTargetSchema } from "./tenant-replace.ts";
 import { probeTenantTarget, probeTenantDns, probeBuildUnit } from "./tenant-probes.ts";

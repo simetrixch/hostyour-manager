@@ -21,7 +21,7 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { isDeepStrictEqual } from "node:util";
-import { bundleReleaseTag, engineLineRefusal, repositoryEngine, throwEngineLineRefusal } from "./engine-line.ts";
+import { bundleReleaseRefusal, throwEngineLineRefusal } from "./engine-line.ts";
 import {
   restoreVersionsCleanup, sameApprovals, stagePinsOf, tenantVersionParts, versionRefusal, watchVersionsStep, withChosenVersions, writeVersionsStep,
   type Approvals, type TenantVersionPart,
@@ -359,11 +359,9 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       // A build the tenant does not hold yet starts at its stage pin; write-versions reads the pins again when it runs.
       const approved = withChosenVersions(current.entry.approvedTags, await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(tc.stage, chart), members), chosenVersions);
       // The engines this run puts the tenant on have to fit the bundle it runs, read off the tenant's
-      // own repository at the release the bundle was built from (engine-line.ts).
-      if (current.entry.appsRepo && current.entry.appsImageTag) {
-        const bundleEngine = await repositoryEngine(ports, { repoURL: current.entry.appsRepo, ref: bundleReleaseTag(current.entry.appsImageTag) }, ctx);
-        throwEngineLineRefusal(engineLineRefusal(bundleEngine, approved), `tenant ${tc.subdomain} cannot run these versions`);
-      }
+      // own repository at the release the bundle was built from where a version moves a line
+      // (engine-line.ts); write-versions judges again with the pins as they stand then.
+      throwEngineLineRefusal(await bundleReleaseRefusal(ports, current.entry, current.entry.approvedTags, approved, ctx), `tenant ${tc.subdomain} cannot run these versions`);
       const moves = versionMoves(parts, approved);
       // A build the tenant held no version of renders its stage pin; recording it changes nothing that runs.
       const recorded = Object.entries(approved).flatMap(([m, builds]) =>

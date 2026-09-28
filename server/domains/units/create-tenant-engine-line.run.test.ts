@@ -1,7 +1,9 @@
 // The engine line at create-tenant's PLAN: the tenant's bundle is built from the catalog, and every
 // engine starts at its stage pin (create-tenant-registration.ts writes the pins as the tenant's
 // versions), so the catalog's `engine` is held against those pins before anything is created
-// (engine-line.ts). Kept apart from create-tenant.run.test.ts, which stands at the line budget.
+// (engine-line.ts). write-registration judges again with the pins as they stand when it writes, against
+// the bundle release the run built. Kept apart from create-tenant.run.test.ts, which stands at the line
+// budget.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
@@ -14,7 +16,8 @@ import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import type { PlanStreamCtx } from "../../executor/types.ts";
+import type { PlanStreamCtx, StepCtx } from "../../executor/types.ts";
+import { writeRegistrationStep } from "./create-tenant-registration.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import { APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_APPS_YAML, TEMPLATE_SPEC, recordTestOwners, withAppsTemplate } from "./tenant-apps-repo.fixture.ts";
@@ -41,6 +44,8 @@ const DOCS: RenderedDoc[] = [
   { apiVersion: "apps/v1", kind: "Deployment", name: "d", namespace: "x", raw: { kind: "Deployment" } },
 ];
 const ENGINE_PIN = "0.3.004-stable-20260928080242-a1b2c3d";
+const NEXT_LINE = "0.4.000-stable-20261001000000-abc1234";
+const ENGINE_03 = 'engine:\n  build: example-engine\n  line: "0.3"\n';
 
 let db: DbHandle;
 beforeEach(() => {
@@ -51,8 +56,7 @@ beforeEach(() => {
 afterEach(() => { db.sqlite.close(); });
 
 /** A deploy repository whose engine chart is pinned at ENGINE_PIN, and a catalog whose apps.yaml carries `engine`. */
-function ports(engine: string): TenantOnboardPorts {
-  const books = new FakePlatformRepo();
+function ports(engine: string, books = new FakePlatformRepo()): TenantOnboardPorts {
   books.seed(books.booksBranch, "charts/example-engine/pins-prod.yaml", `builds:\n  - { name: example-engine, image: example-engine, tag: "${ENGINE_PIN}" }\n`);
   return withAppsTemplate({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
@@ -72,7 +76,7 @@ const plan = (prt: TenantOnboardPorts, logs: string[] = []) =>
 
 describe("create-tenant holds the catalog's engine line against the engine stage pin", () => {
   it("plans a tenant whose catalog bundle is written for the line its engines start on", async () => {
-    expect((await plan(ports('engine:\n  build: example-engine\n  line: "0.3"\n'))).outcome).toBe("planned");
+    expect((await plan(ports(ENGINE_03))).outcome).toBe("planned");
   });
 
   it("PLANTED DEFECT: rejects a tenant whose catalog bundle is written for another line than the engine stage pin", async () => {
@@ -80,6 +84,21 @@ describe("create-tenant holds the catalog's engine line against the engine stage
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
     expect(result.summary).toContain(`the apps bundle is written for example-engine 0.4, and erp would run example-engine ${ENGINE_PIN}, of another line`);
+  });
+
+  it("PLANTED DEFECT: write-registration judges the pins as it writes them, and registers no tenant off the bundle's line", async () => {
+    const books = new FakePlatformRepo();
+    const prt = ports(ENGINE_03, books);
+    const result = await plan(prt);
+    if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
+    const p = result.params;
+    // After the plan judged the pins, a build unit of the run pinned the engine on the next line.
+    books.seed(books.booksBranch, "charts/example-engine/pins-prod.yaml", `builds:\n  - { name: example-engine, image: example-engine, tag: "${NEXT_LINE}" }\n`);
+    (prt.repo as FakeRepoReader).scriptFor(p.appsRepo!, { resolvedSha: SHA, files: { "apps.yaml": `${TEMPLATE_APPS_YAML}${ENGINE_03}` } });
+    const step = writeRegistrationStep(prt, p, { appsImageTag: "0.3.002-stable-20260927000000-1234abc" });
+    await expect(step.run({ log: () => undefined, signal: new AbortController().signal } as unknown as StepCtx))
+      .rejects.toThrow(`tenant acme cannot start on these versions: the apps bundle is written for example-engine 0.3, and erp would run example-engine ${NEXT_LINE}, of another line`);
+    expect((prt.repo as FakeRepoReader).clones.at(-1)).toMatchObject({ repoURL: p.appsRepo, ref: "0.3.002-stable-20260927000000" });
   });
 
   it("plans a catalog that declares no engine, and says the pairing is not checked", async () => {

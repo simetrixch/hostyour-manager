@@ -11,7 +11,7 @@
 import { eq } from "drizzle-orm";
 import type { Cleanup, Step, StepCtx } from "../../executor/types.ts";
 import type { Stage } from "../../../shared/enums.ts";
-import { approvedImageTag, isOlderRelease, type TenantMemberRecord } from "../../../shared/tenant.ts";
+import { approvedImageTag, isOlderRelease, type TenantMemberRecord, type TenantRegistration } from "../../../shared/tenant.ts";
 import type { ReleaseChannel } from "../../../shared/release.ts";
 import type { VersionsView } from "../../../shared/api-types.ts";
 import type { Db } from "../../db/client.ts";
@@ -24,6 +24,8 @@ import { loadTenantCluster } from "./lifecycle.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
+import type { AppsEngine } from "../../../shared/apps-manifest.ts";
+import { bundleReleaseRefusal, engineLineRefusal, stepLog, throwEngineLineRefusal } from "./engine-line.ts";
 
 export type Approvals = Record<string, Record<string, string>>;
 
@@ -153,6 +155,20 @@ export function withMissingPins(current: Approvals, pins: Approvals): Approvals 
   return next;
 }
 
+/** Why members that start at their stage pins beside the ones `held` keeps cannot run beside a bundle
+ *  written for `engine`, or null (engine-line.ts). */
+export async function newMembersRefusal(input: { engine: AppsEngine | undefined; held: Approvals; newMembers: readonly TenantMemberRecord[]; pinned: (chart: string) => Promise<{ name: string; tag: string }[]> }): Promise<string | null> {
+  return input.engine === undefined ? null : engineLineRefusal(input.engine, withMissingPins(input.held, await stagePinsOf(input.pinned, input.newMembers)));
+}
+
+/** The versions an app added to a standing tenant starts on, every build of its member at the stage pin
+ *  as it stands when the step runs, judged against the bundle the registration names (engine-line.ts). */
+export async function addedMemberVersions(ports: TenantOnboardPorts, stage: Stage, entry: TenantRegistration, app: string, member: TenantMemberRecord, ctx: Pick<StepCtx, "log" | "signal">): Promise<Record<string, string>> {
+  const approved = (await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(stage, chart), [member]))[app] ?? {};
+  throwEngineLineRefusal(await bundleReleaseRefusal(ports, entry, entry.approvedTags, { ...entry.approvedTags, [app]: approved }, stepLog(ctx)), `app "${app}" cannot be added to tenant ${entry.subdomain}`);
+  return approved;
+}
+
 /** `current` with every build of `pins` it does not hold yet added at the pin, and every build `chosen`
  *  names (build -> tag) moved onto its chosen version; any other build keeps what it holds. */
 export function withChosenVersions(current: Approvals, pins: Approvals, chosen: Readonly<Record<string, string>>): Approvals {
@@ -207,7 +223,8 @@ export function restoreVersionsCleanup(ports: TenantOnboardPorts, p: TenantVersi
 
 /** Write the chosen versions as the tenant's own, on the registration and the row. A build the members
  *  render and the tenant does not hold yet takes the stage pin as it stands when the step runs, so a
- *  build unit this run released first is among them. */
+ *  build unit this run released first is among them, and the versions are judged against the bundle the
+ *  tenant runs again here, as they are written (engine-line.ts). */
 export function writeVersionsStep(ports: TenantOnboardPorts, p: TenantVersionsParams): Step {
   return {
     name: "write-versions",
@@ -217,6 +234,7 @@ export function writeVersionsStep(ports: TenantOnboardPorts, p: TenantVersionsPa
       const read = await ports.registrations.readTenant(p.stage, p.guid);
       if (!read) throw errValidation(`tenant ${p.guid} is not onboarded (no registration at ${p.stage})`);
       const approved = withChosenVersions(read.entry.approvedTags, await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), p.members), p.chosenVersions);
+      throwEngineLineRefusal(await bundleReleaseRefusal(ports, read.entry, read.entry.approvedTags, approved, stepLog(ctx)), `tenant ${p.guid} cannot run these versions`);
       const { commit } = await ports.registrations.setApprovedTags(p.stage, p.guid, approved, ctx.runId);
       ctx.db.update(tenants).set({ approvedTags: approved, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
       ctx.checkpoint({ commit });

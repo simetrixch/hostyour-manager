@@ -152,6 +152,16 @@ describe("add-app streaming planner", () => {
     expect((prt.repo as FakeRepoReader).clones.map((c) => `${c.repoURL}@${c.ref}`)).toContain(`${TEST_BUNDLE.appsRepo}@HEAD`);
   });
 
+  it("PLANTED DEFECT: append-app judges the new app's versions as it writes them, and appends no app off the bundle's line", async () => {
+    seedClusters();
+    const prt = withEngineAt("0.2");
+    const p = params();
+    await expect(makeAddAppDef(prt).steps(p).find((s) => s.name === "append-app")!.run(ctx(p, "append-app", [])))
+      .rejects.toThrow(`app "${p.app}" cannot be added to tenant acme: the apps bundle is written for example-engine 0.2, and ${p.app} would run example-engine 0.1.12-stable-20260925120000-abc1234, of another line`);
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.apps.map((a: { name: string }) => a.name)).toEqual(["erp"]);
+    expect((prt.repo as FakeRepoReader).clones.at(-1)).toMatchObject({ repoURL: TEST_BUNDLE.appsRepo, ref: "0.1.0-stable-20260101000000" });
+  });
+
   it("PLANTED DEFECT: refuses an app whose engine would start on another line than the tenant's bundle", async () => {
     seedClusters();
     await expect(makeAddAppDef(withEngineAt("0.2")).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx()))
