@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { RELEASE_KIT_FILES } from "./release-kit.ts";
-import { BASH, BOTH, MANIFEST, RUNS, SCRIPTS, USABLE, bareDir, bashCandidates, bothSpellings, expectSameBytes, fixtureRepo, head, normalise, originRefs, owedPushRepo, releaseTags, releasedRepo, removeTempDirs, residueRepo, run, tempDir } from "./release-twins.fixture.ts";
+import { BASH, BOTH, LIBRARY_MANIFEST, MANIFEST, RUNS, SCRIPTS, USABLE, bareDir, bashCandidates, bothSpellings, expectSameBytes, fixtureRepo, head, normalise, originRefs, owedPushRepo, releaseTags, releasedRepo, removeTempDirs, residueRepo, run, runAsync, tempDir, type Fixture } from "./release-twins.fixture.ts";
 
 // The two spellings of the release kit run against each other: the normaliser and the printers the
 // comparison rests on, the refusals, the whole success path, and the reruns of a version that stands
@@ -234,6 +234,82 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
       expect(originRefs(f)).toContain("refs/tags/deploy/dev/1.2.3-stable-20200101000000\n");
       expect(originRefs(f)).not.toContain("refs/heads/deploy/");
     }
+  });
+
+  // A LIBRARY: a manifest with no builds, no chart and no tenant block deploys nothing, so its release
+  // takes no stage and pushes no deploy ref. Everything else is put on a stage.
+
+  it("releases a library without a stage identically, and pushes no deploy ref", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, packageJson: true, origin: true }), ["1.2.3", "stable"]);
+    const { stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(0);
+    expect(stdout).toBe([
+      "release: package.json declares 1.2.3",
+      "release: minted 1.2.3-stable-<ts14>",
+      "release: probe-lib 1.2.3-stable-<ts14> (commit <sha7>) is released; nothing is deployed",
+      "",
+    ].join("\n"));
+    for (const f of [o.sh, o.ps1]) {
+      expect(releaseTags(f)).toHaveLength(1);
+      expect(originRefs(f)).toContain(`refs/tags/${releaseTags(f)[0]}\n`);
+      expect(originRefs(f)).not.toContain("deploy/");
+    }
+  });
+
+  it("PLANTED DEFECT: the deploy-ref check above goes red on a unit, which does push one", RUNS, async () => {
+    const f = fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true });
+    expect((await runAsync(BASH, [SCRIPTS.sh, "1.2.3", "stable", "dev"], f.cwd)).status).toBe(0);
+    expect(originRefs(f)).toContain("deploy/");
+  });
+
+  it("releases a library with the stage `none` exactly as without one", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, origin: true }), ["1.2.3", "stable", "none"]);
+    const { stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(0);
+    expect(stdout).toContain("release: probe-lib 1.2.3-stable-<ts14> (commit <sha7>) is released; nothing is deployed\n");
+  });
+
+  it("refuses a stage, and --existing, for a library identically, before any push", RUNS, async () => {
+    const before = new Map<string, string>();
+    const build = (): Fixture => {
+      const f = fixtureRepo({ manifest: LIBRARY_MANIFEST, packageJson: true, origin: true });
+      before.set(f.cwd, originRefs(f));
+      return f;
+    };
+    const staged = await bothSpellings(build, ["1.2.3", "stable", "dev"]);
+    const { stderr } = expectSameBytes(staged);
+    expect(staged.sh.status).toBe(1);
+    expect(stderr).toBe("release: probe-lib declares no builds, no chart and no tenant block, so a release of it deploys nothing and takes no stage - release it without one. Nothing was pushed.\n");
+    const existing = await bothSpellings(build, ["1.2.3", "stable", "none", "--existing"], ["1.2.3", "stable", "none", "-Existing"]);
+    expect(expectSameBytes(existing).stderr).toBe("release: --existing puts a release that stands on origin on a stage again, and probe-lib deploys nothing. Nothing was pushed.\n");
+    for (const f of [staged.sh, staged.ps1, existing.sh, existing.ps1]) expect(originRefs(f)).toBe(before.get(f.cwd));
+  });
+
+  it("refuses a chart-only unit without a stage identically: a chart deploys, even with no builds", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: "name: probe-chart\nchart:\n  path: deploy/chart\n", origin: true }), ["1.2.3", "stable"]);
+    const { stderr } = expectSameBytes(o);
+    expect(o.sh.status).toBe(1);
+    expect(stderr).toBe("release: probe-chart declares builds, a chart or a tenant block, so a release of it is put on a stage - name dev, test or prod. Nothing was pushed.\n");
+  });
+
+  it("names only the top-level builds as images: a tenant block's members are none", RUNS, async () => {
+    // PLANTED DEFECT: a reader of every `- name:` line would print `auth` as an image this release builds.
+    const fanOut = "name: probe-fanout\ntenant:\n  members:\n    - name: auth\n      chart: charts/auth\n";
+    const o = await bothSpellings(() => fixtureRepo({ manifest: fanOut, origin: true }), ["1.2.3", "stable", "dev"]);
+    const { stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(0);
+    expect(stdout).toContain("release: probe-fanout 1.2.3-stable-<ts14> (commit <sha7>) is on its way to dev\n");
+    expect(stdout).not.toContain("auth");
+  });
+
+  it("stamps a beta with its channel as the prerelease part identically: 1.2.3-beta", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true }), ["1.2.3", "beta", "dev"]);
+    const { stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(0);
+    expect(stdout).toContain("release: package.json declares 1.2.3-beta\n");
+    // PLANTED DEFECT: the stable success path above stamps the plain version; a beta that did too would
+    // publish the number a later stable of the same version needs.
+    expect(stdout).not.toContain("release: package.json declares 1.2.3\n");
   });
 
   it("COUNTER-PROBE: the comparison sees a difference when there is one", RUNS, () => {

@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-  release.ps1 - put a release of this repo on ONE stage. Lives in release/; copied here by the
-  platform at onboarding. Bash twin: release.sh (same folder). The two are held to answering
-  identically.
+  release.ps1 - put a release of this repo on ONE stage, or release a library, which deploys
+  nothing. Lives in release/; copied here by the platform. Bash twin: release.sh (same folder). The
+  two are held to answering identically.
 
 .DESCRIPTION
   The three inputs are the version (x.y.z), the channel - the maturity CEILING of the release: alpha
   may reach dev only, beta dev and test, stable anywhere - and the stage this run puts the release
-  on. The channel is part of the release tag; the stage is not.
+  on. The channel is part of the release tag; the stage is not. A library takes no stage; `none`
+  says so where a value has to be given, as in the Release workflow's form.
 
   -Existing puts a release that already stands on origin on the stage and mints nothing: the deploy
   ref is pushed at that release's own commit, whatever is checked out. It is how a unit goes back to
@@ -37,13 +38,16 @@
        a name and not a release until the images exist, and then writes the image pin into that tree,
        on the trunk and on every install branch whose cluster RUNS this unit.
 
-  THE TWO SHAPES THIS ONE SCRIPT SERVES, and what tells them apart. A unit whose manifest declares NO
-  platformRepo is built and pinned by the platform's build plane, which the deploy ref above reaches.
-  Steps 4 and 7 never run for it: no gh, no network beyond its own origin. A unit whose manifest DOES
-  declare platformRepo builds its own images in its own repository and its pins live in a tree only a
-  machine is logged in to for writing, so this script waits and writes them itself. The manifest
-  names that tree, so no person has to remember one, and a copy of this script in another repository
-  names its own there and can reach no other.
+  THE THREE SHAPES THIS ONE SCRIPT SERVES, and what tells them apart. A unit whose manifest declares
+  NO platformRepo is built and pinned by the platform's build plane, which the deploy ref above
+  reaches. Steps 4 and 7 never run for it: no gh, no network beyond its own origin. A unit whose
+  manifest DOES declare platformRepo builds its own images in its own repository and its pins live in
+  a tree only a machine is logged in to for writing, so this script waits and writes them itself. The
+  manifest names that tree, so no person has to remember one, and a copy of this script in another
+  repository names its own there and can reach no other. A LIBRARY is a manifest with no builds, no
+  chart and no tenant: block, the one shape the release pipeline refuses as deploying nothing. No
+  build plane reads a deploy ref of it, so it takes no stage and step 6 does not run: the tag is the
+  release, and the Release workflow publishes its packages.
 
   The ceiling is checked LOCALLY as a courtesy so a mistake is visible here, but it does NOT stop
   the push: the pipeline is the only thing that can write, and its refusal - naming channel, stage
@@ -54,15 +58,22 @@
 
 .EXAMPLE
   ./release/release.ps1 0.5.0 stable prod -Existing
+
+.EXAMPLE
+  ./release/release.ps1 0.3.001 stable
 #>
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true, Position = 0)][string]$Version,
   [Parameter(Mandatory = $true, Position = 1)][ValidateSet('stable', 'beta', 'alpha')][string]$Channel,
-  [Parameter(Mandatory = $true, Position = 2)][ValidateSet('dev', 'test', 'prod')][string]$Stage,
+  # Validated below and not by ValidateSet: the attribute stays on the variable and refuses the
+  # empty value `none` is turned into, and the refusal is the bash twin's sentence.
+  [Parameter(Position = 2)][string]$Stage = '',
   [switch]$Existing
 )
 $ErrorActionPreference = 'Stop'
+# `none` is how a form that must send a value says "no stage" (the Release workflow's choice input).
+if ($Stage -eq 'none') { $Stage = '' }
 # git's output is read, and this script's own is written, as UTF-8 — what the bash spelling reads and
 # writes — so a path with a non-ASCII byte is the same bytes on both sides.
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -264,8 +275,13 @@ function Publish-BranchPin {
 # publish a version with a leading zero, and pnpm matches no workspace:* dependency to a package
 # that declares one (pnpm deploy fails on it), so 0.3.000 is written 0.3.0 and 0.3.001 is written
 # 0.3.1. The tag and the images keep the release version as it is.
+# A beta or an alpha carries its channel as the prerelease part, 0.3.1-beta: mint-once allows one
+# release per version AND channel, so a beta and a stable of one version are two commits, and a
+# registry that holds 0.3.1 for the first would skip the second as published. A caret range never
+# matches a prerelease, so a consumer on ^0.3.0 is not moved onto a beta.
 function Set-ManifestVersion($Root, $Version, $Tag) {
   $packageVersion = $Version -replace '\.0*(\d+)$', '.$1'
+  if ($Channel -ne 'stable') { $packageVersion = "$packageVersion-$Channel" }
   $manifests = @(git -c core.quotePath=false -C $Root ls-files -- 'package.json' '*/package.json')
   if ($manifests.Count -eq 0) {
     Say 'this repository carries no package.json - no version manifest to stamp'
@@ -303,11 +319,15 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.([0-9]{3}|0|[1-9][0-9]*)$') {
   Die "version must be x.y.z, the third position three digits such as 000 (got '$Version')"
 }
+if (@('', 'dev', 'test', 'prod') -cnotcontains $Stage) { Die "stage must be dev|test|prod, or none for a library (got '$Stage')" }
 
-# The courtesy ceiling check. It WARNS and continues on purpose — see the description.
-$admits = @{ alpha = @('dev'); beta = @('dev', 'test'); stable = @('dev', 'test', 'prod') }[$Channel]
-if ($admits -notcontains $Stage) {
-  Warn "WARNING - channel $Channel admits only: $($admits -join ' '). Stage $Stage is above its ceiling, so the platform will refuse this run. Pushing anyway; the refusal comes from the pipeline."
+# The courtesy ceiling check. It WARNS and continues on purpose — see the description. A release
+# without a stage reaches none, so there is no ceiling to hold it against.
+if ($Stage) {
+  $admits = @{ alpha = @('dev'); beta = @('dev', 'test'); stable = @('dev', 'test', 'prod') }[$Channel]
+  if ($admits -notcontains $Stage) {
+    Warn "WARNING - channel $Channel admits only: $($admits -join ' '). Stage $Stage is above its ceiling, so the platform will refuse this run. Pushing anyway; the refusal comes from the pipeline."
+  }
 }
 
 git rev-parse --is-inside-work-tree 2>$null | Out-Null
@@ -329,9 +349,28 @@ if (Test-Path -LiteralPath $manifest) {
   if ($nameLine.Success) { $name = $nameLine.Groups[1].Value }
   $repoLine = [regex]::Match($manifestText, '(?m)^platformRepo:[ \t]*(\S+)')
   if ($repoLine.Success) { $platformRepo = $repoLine.Groups[1].Value }
-  $buildNames = @([regex]::Matches($manifestText, '(?m)^\s*-\s*name:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value })
+  # The build names of the top-level `builds:` block and of nothing else: a tenant block lists its
+  # members with `- name:` lines too, and those are no images. Read in block style, as every manifest
+  # writes the list.
+  $inBuilds = $false
+  foreach ($manifestLine in ($manifestText -split "`n")) {
+    if ($manifestLine -match '^[^\s#]') { $inBuilds = $manifestLine -match '^builds:' }
+    elseif ($inBuilds -and $manifestLine -match '^\s*-\s*name:\s*(\S+)') { $buildNames += $Matches[1] }
+  }
 }
 if (-not $name) { Die "the manifest $manifest states no name - it is what the release line and any pin are written under" }
+
+# A LIBRARY DEPLOYS NOTHING, so it takes no stage, and everything else is put on one. The test is the
+# release pipeline's own: a manifest with no builds, no chart and no tenant block deploys nothing.
+# Both mismatches are refused here, before anything is minted or pushed.
+$library = $buildNames.Count -eq 0 -and $manifestText -notmatch '(?m)^chart:' -and $manifestText -notmatch '(?m)^tenant:'
+if ($library) {
+  if ($Stage) { Die "$name declares no builds, no chart and no tenant block, so a release of it deploys nothing and takes no stage - release it without one. Nothing was pushed." }
+  if ($Existing) { Die "--existing puts a release that stands on origin on a stage again, and $name deploys nothing. Nothing was pushed." }
+}
+elseif (-not $Stage) {
+  Die "$name declares builds, a chart or a tenant block, so a release of it is put on a stage - name dev, test or prod. Nothing was pushed."
+}
 
 # ── The pin pre-flight ────────────────────────────────────────────────────────────────────────
 #
@@ -468,7 +507,12 @@ try {
       git push origin HEAD
       git push origin "refs/tags/$tag"
     }
-    Say "reusing the existing release $tag - one release per version+channel, so putting it on $Stage rebuilds nothing"
+    if ($library) {
+      Say "reusing the existing release $tag - one release per version+channel, so nothing is minted"
+    }
+    else {
+      Say "reusing the existing release $tag - one release per version+channel, so putting it on $Stage rebuilds nothing"
+    }
   }
   else {
     $ts14 = (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss')
@@ -484,6 +528,13 @@ try {
   # what is checked out - except under -Existing, where the deploy ref names the release's own commit.
   $sha = (git rev-list -n 1 $tag).Trim()
   $sha7 = $sha.Substring(0, 7)
+
+  # A LIBRARY IS RELEASED BY ITS TAG. No build plane reads a deploy ref of it and nothing is pinned, so
+  # the run ends here; the Release workflow's publish job reads the tag.
+  if ($library) {
+    Say "$name $tag (commit $sha7) is released; nothing is deployed"
+    return
+  }
 
   # THE DELIVERY BRANCH IS NOT MOVED HERE. The unit's Application follows deploy/<stage>, and the
   # platform's release pipeline places it on the release commit plus the pin commit once every image

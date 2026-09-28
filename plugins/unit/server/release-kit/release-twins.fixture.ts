@@ -184,6 +184,9 @@ export function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; pr
 
 export const MANIFEST = "name: probe-unit\nbuilds:\n  - name: probe\n";
 
+/** A library: no builds, no chart and no tenant block, so nothing of it deploys. */
+export const LIBRARY_MANIFEST = "name: probe-lib\n";
+
 /** One more commit on the fixture's master, pushed to origin: the tree has moved past whatever was
  *  released before it, the way a fix landing after a refused release moves it. */
 export function moveMaster(f: Fixture): void {

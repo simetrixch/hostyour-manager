@@ -4,18 +4,39 @@ import { RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
 
 const FOREIGN = "name: Publish packages\non:\n  push:\n    tags:\n      - 'v*.*.*'\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps: []\n";
 
+// A unit's own package publish with the kit's two trigger names and a tag filter of its own, which a
+// comparison of the names alone passes as an older kit.
+const SAME_NAMES_OWN_FILTER = "name: Release\non:\n  push:\n    tags: ['v*']\n  workflow_dispatch:\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps: []\n";
+
+// Every kit before the publish job: a manual dispatch and nothing else.
+const KIT_BEFORE_PUBLISH = "name: Release\non:\n  workflow_dispatch:\n    inputs:\n      version:\n        type: string\npermissions:\n  contents: write\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps: []\n";
+
 describe("G28 release workflow (hard)", () => {
   it("passes an absent file and the kit's own bytes", () => {
     expect(gateReleaseWorkflow({ found: null })).toMatchObject({ id: "G28", severity: "hard", status: "pass", reason: null });
     expect(gateReleaseWorkflow({ found: RELEASE_KIT_WORKFLOW.content })).toMatchObject({ status: "pass", reason: null });
   });
 
-  it("passes an older kit — the same triggers, other bytes — because the replace brings it forward", () => {
+  it("passes an older kit — the same triggers and tag filter, other bytes — because the replace brings it forward", () => {
     const older = RELEASE_KIT_WORKFLOW.content.replace("name: Release", "name: Release (old)");
     expect(older).not.toBe(RELEASE_KIT_WORKFLOW.content);
     const g = gateReleaseWorkflow({ found: older });
     expect(g.status).toBe("pass");
     expect(g.found).toContain("older release kit");
+  });
+
+  it("passes a kit from before the publish job, which carried workflow_dispatch alone", () => {
+    const g = gateReleaseWorkflow({ found: KIT_BEFORE_PUBLISH });
+    expect(g.status).toBe("pass");
+    expect(g.found).toContain("older release kit (on: workflow_dispatch)");
+  });
+
+  it("PLANTED DEFECT: refuses a workflow with the kit's trigger names and a push filter of its own", () => {
+    // Without the filter comparison this is the one foreign workflow the gate would replace in silence.
+    expect(workflowTriggers(SAME_NAMES_OWN_FILTER)).toEqual(workflowTriggers(RELEASE_KIT_WORKFLOW.content));
+    const g = gateReleaseWorkflow({ found: SAME_NAMES_OWN_FILTER });
+    expect(g.status).toBe("fail");
+    expect(g.found).toContain("the unit's own workflow (on: push, workflow_dispatch)");
   });
 
   it("refuses a workflow the unit owns, naming the path, its triggers and the way out", () => {
@@ -27,7 +48,7 @@ describe("G28 release workflow (hard)", () => {
     expect(g.evidence?.[0]).toMatchObject({ source: "repo", file: RELEASE_KIT_WORKFLOW.path, value: "push" });
   });
 
-  it("refuses a file it cannot read as a workflow, and one that adds a trigger to the kit's", () => {
+  it("refuses a file it cannot read as a workflow, and the kit's trigger names without the kit's tag filter", () => {
     expect(gateReleaseWorkflow({ found: "on: [\n" }).status).toBe("fail");
     expect(gateReleaseWorkflow({ found: "on: [workflow_dispatch, push]\n" }).status).toBe("fail");
   });
@@ -37,6 +58,6 @@ describe("G28 release workflow (hard)", () => {
     expect(workflowTriggers("on: [push, workflow_dispatch]\n")).toEqual(["push", "workflow_dispatch"]);
     expect(workflowTriggers("on:\n  workflow_dispatch: {}\n  push: {}\n")).toEqual(["push", "workflow_dispatch"]);
     expect(workflowTriggers("name: x\n")).toBeNull();
-    expect(workflowTriggers(RELEASE_KIT_WORKFLOW.content)).toEqual(["workflow_dispatch"]);
+    expect(workflowTriggers(RELEASE_KIT_WORKFLOW.content)).toEqual(["push", "workflow_dispatch"]);
   });
 });

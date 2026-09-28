@@ -33,23 +33,26 @@ describe("release-kit embedded assets", () => {
 
     const yml = byPath[".github/workflows/release.yml"]!;
     expect(yml.length).toBeGreaterThan(0);
-    // The GitHub ${{ }} expression + the bot identity survived verbatim.
-    expect(yml).toContain('bash release/release.sh "${{ inputs.version }}" "${{ inputs.channel }}" "${{ inputs.stage }}"');
+    // The GitHub ${{ }} expression, the shell's own $VAR and the bot identity survived verbatim.
+    expect(yml).toContain("VERSION: ${{ inputs.version }}");
+    expect(yml).toContain('run: bash release/release.sh "$VERSION" "$CHANNEL" "$STAGE" $EXISTING');
     expect(yml).toContain('git config user.name  "example-release[bot]"');
-    // De-personalized to "this consumer" — the example-auth lead comment must be gone.
-    expect(yml).toContain("on one stage, from the GitHub UI");
+    // De-personalized to "this repository" — the example-auth lead comment must be gone.
+    expect(yml).toContain("put a release of this repository on one stage, or release a library");
     expect(yml).not.toContain("example-auth");
   });
 
-  it("takes THREE arguments — version, channel and the stage the release is put on", () => {
+  it("takes the version, the channel and the stage the release is put on — which a library leaves out", () => {
     const byPath = Object.fromEntries(RELEASE_KIT_FILES.map((f) => [f.path, f.content]));
 
-    expect(byPath["release/release.sh"]!).toContain("usage: release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod>");
+    expect(byPath["release/release.sh"]!).toContain("usage: release/release.sh <x.y.z> <stable|beta|alpha> [<dev|test|prod>] [--existing]");
     expect(byPath["release/release.sh"]!).toContain('STAGE="${3:-}"');
-    expect(byPath["release/release.ps1"]!).toContain("[ValidateSet('dev', 'test', 'prod')][string]$Stage");
-    // The workflow's third dispatch input, and the three stages it offers.
+    expect(byPath["release/release.sh"]!).toContain('[ "$STAGE" = "none" ] && STAGE=""');
+    expect(byPath["release/release.ps1"]!).toContain("[Parameter(Position = 2)][string]$Stage = ''");
+    expect(byPath["release/release.ps1"]!).toContain("if ($Stage -eq 'none') { $Stage = '' }");
+    // The workflow's third dispatch input, the three stages it offers, and `none` for a library.
     expect(byPath[".github/workflows/release.yml"]!).toMatch(/stage:\s*\n\s*description:/);
-    expect(byPath[".github/workflows/release.yml"]!).toMatch(/- dev\n\s+- test\n\s+- prod/);
+    expect(byPath[".github/workflows/release.yml"]!).toMatch(/- dev\n\s+- test\n\s+- prod\n\s+- none/);
   });
 
   it("pushes the deploy ref by DELETING it first — re-pushing a ref that already stands fires no webhook", () => {

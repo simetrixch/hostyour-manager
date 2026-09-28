@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# release.sh — put a release of this repo on ONE stage. Lives in release/;
-# copied here by the platform at onboarding. PowerShell twin: release.ps1
-# (same folder). The two are held byte-for-byte equivalent in behaviour.
+# release.sh — put a release of this repo on ONE stage, or release a library,
+# which deploys nothing. Lives in release/; copied here by the platform.
+# PowerShell twin: release.ps1 (same folder). The two are held byte-for-byte
+# equivalent in behaviour.
 #
 # USAGE (run from the repo root)
 #   ./release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod> [--existing]
+#   ./release/release.sh <x.y.z> <stable|beta|alpha>     (a library)
 #
 # --existing puts a release that already stands on origin on the stage and
 # mints nothing: the deploy ref is pushed at that release's own commit,
@@ -19,7 +21,8 @@
 #              beta dev and test, stable anywhere. The channel is part of the
 #              release tag; the stage is NOT.
 #   stage    — WHERE this run puts the release. One release, one image, any
-#              number of stages.
+#              number of stages. A library takes none; `none` says so where a
+#              value has to be given, as in the Release workflow's form.
 #
 # WHAT IT DOES
 #   1. Validates version, channel and stage.
@@ -49,7 +52,7 @@
 #      release-images run and writes the image pin into that tree, on the
 #      trunk and on every install branch whose cluster RUNS this unit.
 #
-# THE TWO SHAPES THIS ONE SCRIPT SERVES, and what tells them apart
+# THE THREE SHAPES THIS ONE SCRIPT SERVES, and what tells them apart
 #   A unit whose manifest declares NO platformRepo is built and pinned by the
 #   platform's build plane, which the deploy ref above reaches. Steps 4 and 7
 #   never run for it: no gh, no python3, no network beyond its own origin.
@@ -58,6 +61,10 @@
 #   to for writing, so this script waits and writes them itself. The manifest
 #   names that tree, so no person has to remember one, and a copy of this
 #   script in another repository names its own there and can reach no other.
+#   A LIBRARY is a manifest with no builds, no chart and no tenant: block, the
+#   one shape the release pipeline refuses as deploying nothing. No build plane
+#   reads a deploy ref of it, so it takes no stage and step 6 does not run: the
+#   tag is the release, and the Release workflow publishes its packages.
 #
 # The stage is never in the release tag — the same image reaches further stages
 # by the deploy ref alone. The ceiling below is checked LOCALLY as a courtesy so
@@ -100,8 +107,13 @@ die() { warn "$*"; exit 1; }
 # publish a version with a leading zero, and pnpm matches no workspace:* dependency to a package
 # that declares one (pnpm deploy fails on it), so 0.3.000 is written 0.3.0 and 0.3.001 is written
 # 0.3.1. The tag and the images keep the release version as it is.
+# A beta or an alpha carries its channel as the prerelease part, 0.3.1-beta: mint-once allows one
+# release per version AND channel, so a beta and a stable of one version are two commits, and a
+# registry that holds 0.3.1 for the first would skip the second as published. A caret range never
+# matches a prerelease, so a consumer on ^0.3.0 is not moved onto a beta.
 stamp_manifest_version() {
   PACKAGE_VERSION="${VERSION%.*}.$((10#${VERSION##*.}))"
+  [ "$CHANNEL" = "stable" ] || PACKAGE_VERSION="${PACKAGE_VERSION}-${CHANNEL}"
   manifests=$(git -c core.quotePath=false -C "$ROOT" ls-files -- 'package.json' '*/package.json')
   if [ -z "$manifests" ]; then
     say "this repository carries no package.json - no version manifest to stamp"
@@ -192,6 +204,7 @@ pin_branch() {
   die "the pin of ${STAGE} to ${TAG}-${SHA7} could not be pushed to ${branch} of ${PLATFORM_REPO} in 5 attempts"
 }
 
+USAGE="usage: release/release.sh <x.y.z> <stable|beta|alpha> [<dev|test|prod>] [--existing]"
 VERSION="${1:-}"
 CHANNEL="${2:-}"
 STAGE="${3:-}"
@@ -199,26 +212,30 @@ EXISTING_ONLY=""
 case "${4:-}" in
   "") ;;
   --existing) EXISTING_ONLY=yes ;;
-  *) die "usage: release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod> [--existing]" ;;
+  *) die "$USAGE" ;;
 esac
+# `none` is how a form that must send a value says "no stage" (the Release workflow's choice input).
+[ "$STAGE" = "none" ] && STAGE=""
 
-[ -n "$VERSION" ] && [ -n "$CHANNEL" ] && [ -n "$STAGE" ] \
-  || die "usage: release/release.sh <x.y.z> <stable|beta|alpha> <dev|test|prod> [--existing]"
+[ -n "$VERSION" ] && [ -n "$CHANNEL" ] || die "$USAGE"
 [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.([0-9]{3}|0|[1-9][0-9]*)$ ]] \
   || die "version must be x.y.z, the third position three digits such as 000 (got '$VERSION')"
 case "$CHANNEL" in stable|beta|alpha) ;; *) die "channel must be stable|beta|alpha (got '$CHANNEL')" ;; esac
-case "$STAGE" in dev|test|prod) ;; *) die "stage must be dev|test|prod (got '$STAGE')" ;; esac
+case "$STAGE" in ""|dev|test|prod) ;; *) die "stage must be dev|test|prod, or none for a library (got '$STAGE')" ;; esac
 
-# The courtesy ceiling check. It WARNS and continues on purpose — see the header.
-case "$CHANNEL" in
-  alpha) ADMITS="dev" ;;
-  beta) ADMITS="dev test" ;;
-  stable) ADMITS="dev test prod" ;;
-esac
-case " $ADMITS " in
-  *" $STAGE "*) ;;
-  *) warn "WARNING - channel ${CHANNEL} admits only: ${ADMITS}. Stage ${STAGE} is above its ceiling, so the platform will refuse this run. Pushing anyway; the refusal comes from the pipeline." ;;
-esac
+# The courtesy ceiling check. It WARNS and continues on purpose — see the header. A release without
+# a stage reaches none, so there is no ceiling to hold it against.
+if [ -n "$STAGE" ]; then
+  case "$CHANNEL" in
+    alpha) ADMITS="dev" ;;
+    beta) ADMITS="dev test" ;;
+    stable) ADMITS="dev test prod" ;;
+  esac
+  case " $ADMITS " in
+    *" $STAGE "*) ;;
+    *) warn "WARNING - channel ${CHANNEL} admits only: ${ADMITS}. Stage ${STAGE} is above its ceiling, so the platform will refuse this run. Pushing anyway; the refusal comes from the pipeline." ;;
+  esac
+fi
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not inside a git repository"
 [ -z "$(git status --porcelain)" ] || die "worktree is dirty - commit or stash before releasing"
@@ -235,6 +252,25 @@ manifest_value() { sed -nE "s/^$1:[[:space:]]*([^[:space:]]+).*\$/\\1/p" "$MANIF
 NAME="$(manifest_value name || true)"
 [ -n "$NAME" ] || die "the manifest ${MANIFEST} states no name - it is what the release line and any pin are written under"
 PLATFORM_REPO="$(manifest_value platformRepo || true)"
+# Is the top-level key $1 declared at all? A chart or a tenant block is a map, so its value stands on
+# the lines below the key and manifest_value reads nothing for it.
+manifest_has() { [ -n "$(sed -nE "/^$1:/p" "$MANIFEST" 2>/dev/null | head -1)" ]; }
+# The build names of the top-level `builds:` block and of nothing else: a tenant block lists its
+# members with `- name:` lines too, and those are no images. Read in block style, as every manifest
+# writes the list.
+BUILDS="$(awk '/^[^[:space:]#]/ { inside = ($0 ~ /^builds:/) } inside && /^[[:space:]]*-[[:space:]]*name:/ { sub(/^[[:space:]]*-[[:space:]]*name:[[:space:]]*/, ""); sub(/[[:space:]].*$/, ""); print }' "$MANIFEST" 2>/dev/null || true)"
+
+# A LIBRARY DEPLOYS NOTHING, so it takes no stage, and everything else is put on one. The test is the
+# release pipeline's own: a manifest with no builds, no chart and no tenant block deploys nothing.
+# Both mismatches are refused here, before anything is minted or pushed.
+LIBRARY=""
+if [ -z "$BUILDS" ] && ! manifest_has chart && ! manifest_has tenant; then LIBRARY=yes; fi
+if [ -n "$LIBRARY" ]; then
+  [ -z "$STAGE" ] || die "${NAME} declares no builds, no chart and no tenant block, so a release of it deploys nothing and takes no stage - release it without one. Nothing was pushed."
+  [ -z "$EXISTING_ONLY" ] || die "--existing puts a release that stands on origin on a stage again, and ${NAME} deploys nothing. Nothing was pushed."
+else
+  [ -n "$STAGE" ] || die "${NAME} declares builds, a chart or a tenant block, so a release of it is put on a stage - name dev, test or prod. Nothing was pushed."
+fi
 
 # ── The pin pre-flight ────────────────────────────────────────────────────────────────────────
 #
@@ -345,7 +381,11 @@ if [ -n "$EXISTING" ]; then
     git push origin HEAD
     git push origin "refs/tags/${TAG}"
   fi
-  say "reusing the existing release ${TAG} - one release per version+channel, so putting it on ${STAGE} rebuilds nothing"
+  if [ -n "$LIBRARY" ]; then
+    say "reusing the existing release ${TAG} - one release per version+channel, so nothing is minted"
+  else
+    say "reusing the existing release ${TAG} - one release per version+channel, so putting it on ${STAGE} rebuilds nothing"
+  fi
 else
   TS14="$(date -u +%Y%m%d%H%M%S)"
   TAG="${VERSION}-${CHANNEL}-${TS14}"
@@ -360,6 +400,13 @@ fi
 # what is checked out - except under --existing, where the deploy ref names the release's own commit.
 SHA="$(git rev-list -n 1 "$TAG")"
 SHA7="${SHA:0:7}"
+
+# A LIBRARY IS RELEASED BY ITS TAG. No build plane reads a deploy ref of it and nothing is pinned, so
+# the run ends here; the Release workflow's publish job reads the tag.
+if [ -n "$LIBRARY" ]; then
+  say "${NAME} ${TAG} (commit ${SHA7}) is released; nothing is deployed"
+  exit 0
+fi
 
 # THE DELIVERY BRANCH IS NOT MOVED HERE. The unit's Application follows `deploy/<stage>`, and the
 # platform's release pipeline places it on the release commit plus the pin commit once every image of
@@ -535,10 +582,6 @@ PIN
 fi
 
 say "${NAME} ${TAG} (commit ${SHA7}) is on its way to ${STAGE}"
-# Read with sed and not grep: under `set -o pipefail` a manifest that declares no builds — a
-# chart-only or fan-out unit — would make the pipeline's exit status 1 and end a release that had
-# already succeeded. `sed -n ... p` answers nothing and exits 0.
-BUILDS="$(sed -nE 's/^[[:space:]]*-[[:space:]]*name:[[:space:]]*([^[:space:]]+).*$/\1/p' "$MANIFEST")"
 if [ -n "$BUILDS" ]; then
   say "the platform builds these image tags, or skips the build when they already exist:"
   printf '%s\n' "$BUILDS" | while read -r b; do line "    ${b}:${TAG}-${SHA7}"; done

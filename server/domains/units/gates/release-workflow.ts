@@ -5,9 +5,12 @@
 // write of this kind is judged before the first write: this gate reads the file at the plan and
 // refuses the onboarding while a workflow that is not the kit's stands there.
 //
-// What passes: no file, the kit's own bytes, or a workflow with the kit's triggers — an older kit
-// carries the same `on:` and is what the replace exists to bring forward. What fails: a file with
-// other triggers, and a file that is not readable as YAML, because nothing can say what it is.
+// What passes: no file, the kit's own bytes, and an older kit, which the replace exists to bring
+// forward — one with the kit's triggers AND the kit's release-tag filter, or one with
+// `workflow_dispatch` alone, the one trigger every kit before the publish job carried. What fails:
+// every other file, and a file that is not readable as YAML, because nothing can say what it is.
+// Trigger NAMES alone no longer tell the kit apart, because the kit triggers on `push` too: a unit's
+// own package publish on `push: tags` beside `workflow_dispatch` carries the same two names.
 import { parse as parseYaml } from "yaml";
 import type { GateResult } from "../../../../shared/gates.ts";
 import { RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
@@ -28,7 +31,20 @@ export function workflowTriggers(text: string): string[] | null {
   return null;
 }
 
+/** The `on.push` filter of a workflow file as one comparable string, or null where it declares none
+ *  or is not YAML. */
+function pushFilter(text: string): string | null {
+  try {
+    const on = (parseYaml(text) as { on?: unknown } | null)?.on;
+    return on !== null && typeof on === "object" && !Array.isArray(on) && "push" in on ? JSON.stringify((on as { push: unknown }).push) : null;
+  } catch {
+    return null;
+  }
+}
+
 const KIT_TRIGGERS = workflowTriggers(RELEASE_KIT_WORKFLOW.content);
+const KIT_PUSH_FILTER = pushFilter(RELEASE_KIT_WORKFLOW.content);
+const OLDER_KIT_TRIGGERS = ["workflow_dispatch"];
 const same = (a: readonly string[] | null, b: readonly string[] | null): boolean => a !== null && b !== null && a.join(",") === b.join(",");
 
 export function gateReleaseWorkflow(input: { found: string | null }): GateResult {
@@ -37,7 +53,7 @@ export function gateReleaseWorkflow(input: { found: string | null }): GateResult
     id: "G28",
     title: "release workflow",
     severity: "hard" as const,
-    expected: `${path} is absent, or it is the release kit's own workflow (on: ${KIT_TRIGGERS?.join(", ")}) — the onboarding writes the kit there and may replace nothing else`,
+    expected: `${path} is absent, or it is the release kit's own workflow (on: ${KIT_TRIGGERS?.join(", ")}, the push on the kit's release tags) or an older kit (on: ${OLDER_KIT_TRIGGERS.join(", ")}) — the onboarding writes the kit there and may replace nothing else`,
   };
   if (input.found === null) {
     return { ...base, status: "pass", found: `${path} is absent — the kit will be written there`, reason: null, detail: "no release workflow yet" };
@@ -46,7 +62,7 @@ export function gateReleaseWorkflow(input: { found: string | null }): GateResult
     return { ...base, status: "pass", found: `${path} carries the current release kit`, reason: null, detail: "release workflow is the kit's" };
   }
   const triggers = workflowTriggers(input.found);
-  if (same(triggers, KIT_TRIGGERS)) {
+  if ((same(triggers, KIT_TRIGGERS) && pushFilter(input.found) === KIT_PUSH_FILTER) || same(triggers, OLDER_KIT_TRIGGERS)) {
     return { ...base, status: "pass", found: `${path} carries an older release kit (on: ${triggers?.join(", ")}) — the onboarding brings it forward`, reason: null, detail: "release workflow is an older kit" };
   }
   return {

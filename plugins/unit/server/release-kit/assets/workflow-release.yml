@@ -1,28 +1,28 @@
-# Release — put a release of this consumer on one stage, from the GitHub UI.
+# Release — put a release of this repository on one stage, or release a library,
+# from the GitHub UI; and publish its npm packages from the release tag.
 #
-# This workflow is a thin wrapper around release/release.sh: it checks out the
-# repo, sets a bot git identity, and runs the same dumb client an operator would
-# run locally. It does NOT build anything.
+# The job `release` is a thin wrapper around release/release.sh: it checks out
+# the repo, sets a bot git identity, and runs the same dumb client an operator
+# would run locally. It does NOT build anything.
 #
 # The ACTUAL build trigger is the deploy ref release.sh pushes
 # (refs/tags/deploy/<stage>/<release-tag>), not this workflow: that push fires
 # this repo's external push webhook (Settings -> Webhooks -> build.<domain>)
-# into the platform's build plane, which runs the release build. This job only
-# mints the release tag and pushes the deploy ref.
+# into the platform's build plane, which runs the release build. A library
+# (stage `none`) pushes no deploy ref: its release tag is the release.
 #
-# CI AFTER A RELEASE. The release commit is pushed with GITHUB_TOKEN, and GitHub
-# starts no workflow from such a push. A repository whose CI must run after a
-# release (for example to publish its packages) subscribes to this workflow:
-#   on:
-#     workflow_run:
-#       workflows: [Release]
-#       types: [completed]
-# and runs its job only where github.event.workflow_run.conclusion is success.
+# THE JOB `publish` publishes every tracked package.json that is not private and
+# names publishConfig.registry, at the version release.sh stamped into it, from
+# the release tag. It runs in two ways, because a push made with GITHUB_TOKEN
+# starts no workflow: inside a dispatched run, after the job `release`; and
+# alone, on a release tag a person pushed by running release.sh on a machine.
+# A repository with nothing to publish ends the job at its scan. A repository
+# that publishes declares `packageManager` (pnpm) in its root package.json.
 name: Release
 
-# Show the released version+channel in the Actions run list (otherwise every run
-# reads "Release #N: Manually run by <user>" with no context on WHICH release).
-run-name: "Release ${{ inputs.version }}-${{ inputs.channel }}"
+# Show the release in the Actions run list (otherwise every run reads
+# "Release #N: Manually run by <user>" with no context on WHICH release).
+run-name: "Release ${{ github.event_name == 'push' && github.ref_name || format('{0}-{1}', inputs.version, inputs.channel) }}"
 
 on:
   workflow_dispatch:
@@ -41,7 +41,7 @@ on:
           - beta
           - alpha
       stage:
-        description: "Where this run puts the release. Must be at or below the channel's ceiling."
+        description: "Where this run puts the release, at or below the channel's ceiling; none for a library, which deploys nothing."
         required: true
         type: choice
         default: dev
@@ -49,18 +49,27 @@ on:
           - dev
           - test
           - prod
+          - none
       existing:
         description: "Put the release version-channel that already stands on origin on the stage, minting nothing (going back to an earlier release)"
         required: false
         type: boolean
         default: false
-
-permissions:
-  contents: write
+  # The release tag alone, and not the deploy ref: `*` matches no `/`, so
+  # deploy/<stage>/<tag> never matches, and the fourteen digit classes admit no
+  # suffix. One pattern per channel, because a filter pattern has no alternation.
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+-alpha-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+      - '[0-9]+.[0-9]+.[0-9]+-beta-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+      - '[0-9]+.[0-9]+.[0-9]+-stable-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
 
 jobs:
   release:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout (full history + tags)
         uses: actions/checkout@v4
@@ -72,5 +81,115 @@ jobs:
           git config user.name  "example-release[bot]"
           git config user.email "218061504+example-release[bot]@users.noreply.github.com"
 
+      # The inputs reach the shell as ENVIRONMENT values: an input written into
+      # the script text would be script source whoever dispatches the run writes.
       - name: Mint the release tag and push the deploy ref
-        run: bash release/release.sh "${{ inputs.version }}" "${{ inputs.channel }}" "${{ inputs.stage }}" ${{ inputs.existing && '--existing' || '' }}
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+          STAGE: ${{ inputs.stage }}
+          EXISTING: ${{ inputs.existing && '--existing' || '' }}
+        run: bash release/release.sh "$VERSION" "$CHANNEL" "$STAGE" $EXISTING
+
+  publish:
+    needs: release
+    # `!cancelled()` because the job `release` is skipped on a tag push, and a
+    # skipped need skips this job too unless the condition says otherwise. A
+    # dispatched --existing run puts a published release on a stage again.
+    if: ${{ !cancelled() && (github.event_name == 'push' || (needs.release.result == 'success' && !inputs.existing)) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # A dispatched run names its release by version and channel; the tag is
+      # the one release.sh minted or reused, the newest of that pair.
+      - name: Check out the release tag
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="$(git tag -l "${VERSION}-${CHANNEL}-*" | sort | tail -1)"
+          fi
+          [ -n "$tag" ] || { echo "publish: no release tag ${VERSION}-${CHANNEL}-* stands on origin, so there is nothing to publish from" >&2; exit 1; }
+          git checkout --quiet "refs/tags/${tag}"
+          echo "publish: publishing from ${tag}"
+
+      # Before any tool is set up, because most repositories publish nothing and
+      # some of them declare no packageManager, which pnpm/action-setup refuses.
+      - name: Find the packages to publish
+        id: scan
+        run: |
+          set -euo pipefail
+          list="$RUNNER_TEMP/publishable.tsv"
+          : > "$list"
+          git ls-files -- 'package.json' '*/package.json' | while IFS= read -r file; do
+            jq -e '(.private // false) == false and (.publishConfig.registry // "") != ""' "$file" >/dev/null || continue
+            printf '%s\t%s\t%s\n' "$(dirname "$file")" "$(jq -r .name "$file")" "$(jq -r .publishConfig.registry "$file")" >> "$list"
+          done
+          if [ ! -s "$list" ]; then
+            echo "publish: no package.json here is publishable (not private, with publishConfig.registry) - nothing to publish"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            cut -f2 "$list" | sed 's/^/publish: publishable /'
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.scan.outputs.found == 'true'
+        uses: pnpm/action-setup@v4
+
+      - if: steps.scan.outputs.found == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The token for every registry a package names, and no scope: which scope
+      # a registry serves is the repository's own .npmrc, and npm reads the
+      # token variable when it runs.
+      - name: Log in to the package registries
+        if: steps.scan.outputs.found == 'true'
+        run: |
+          set -euo pipefail
+          cut -f3 "$RUNNER_TEMP/publishable.tsv" | sed -E 's#^https?://##; s#/*$##' | sort -u | while IFS= read -r host; do
+            printf '//%s/:_authToken=${NODE_AUTH_TOKEN}\n' "$host" >> "$HOME/.npmrc"
+          done
+
+      - name: Install and build the packages
+        if: steps.scan.outputs.found == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          filters=()
+          while IFS=$'\t' read -r dir name registry; do filters+=(--filter "${name}..."); done < "$RUNNER_TEMP/publishable.tsv"
+          pnpm "${filters[@]}" run build
+
+      # A version the registry already holds is skipped, so a rerun publishes
+      # nothing twice. The dist-tag is the prerelease id (beta, alpha) or latest.
+      - name: Publish what is not yet published
+        if: steps.scan.outputs.found == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r dir name registry; do
+            version="$(jq -r .version "$dir/package.json")"
+            if npm view "${name}@${version}" version --registry "$registry" >/dev/null 2>&1; then
+              echo "publish: ${name}@${version} is published already"
+              continue
+            fi
+            tag=latest
+            case "$version" in *-*) tag="${version#*-}"; tag="${tag%%.*}" ;; esac
+            echo "publish: ${name}@${version} with dist-tag ${tag}"
+            (cd "$dir" && pnpm publish --no-git-checks --tag "$tag")
+          done < "$RUNNER_TEMP/publishable.tsv"
