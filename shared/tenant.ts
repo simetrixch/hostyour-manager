@@ -34,10 +34,27 @@ export const appName = z.string().regex(/^[a-z][a-z0-9-]{0,28}[a-z0-9]$/);
 /** A site of a website app folder: the id its content carries (a WebSite's `_id`, a WebPage's `site`). */
 export const siteId = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/);
 
-/** The app name of a website served at `domain`: the domain with `-` for every `.`, because a
- *  namespace and an Application name carry no dot (`example.ch` becomes `example-ch`). */
+/** The app name of a website served at `domain`, an app name for every domain: the domain with `-`
+ *  for every `.`, because a namespace and an Application name carry no dot (`example.ch` becomes
+ *  `example-ch`). A domain that starts with a digit gets `web-` ahead (`1und1.de` becomes
+ *  `web-1und1-de`). A name longer than an app name allows keeps its first 23 characters and ends in
+ *  six hex digits of the domain's hash, so two long domains that begin alike get two names. */
 export function websiteAppName(domain: string): string {
-  return domain.split(".").join("-");
+  const dashed = domain.split(".").join("-");
+  const named = /^[0-9]/.test(dashed) ? `web-${dashed}` : dashed;
+  if (named.length <= 30) return named;
+  return `${named.slice(0, 23).replace(/-+$/, "")}-${fnv1a(domain).slice(0, 6)}`;
+}
+
+/** FNV-1a over the text, as eight hex digits. The browser and the server derive a website's name
+ *  alike, and the browser has no synchronous hash of its own. */
+function fnv1a(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 /** What makes an apps[] entry a website: the folder it runs, the site it serves, the domain it is

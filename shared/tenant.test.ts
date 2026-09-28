@@ -171,6 +171,16 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
       .toEqual({ name: "example-ch", folder: "web", site: "main", domain: "example.ch", seedReference: false, seedDemo: false, selections: {} });
     expect(TenantAppSchema.parse({ name: "erp" })).toEqual({ name: "erp", seedReference: false, seedDemo: false, selections: {} });
     expect(websiteAppName("example.com")).toBe("example-com");
+    // Every domain gets an app name: a digit first gets web- ahead, and a long name ends in a hash of
+    // its domain, so two long domains that share their first 30 characters stay two names.
+    expect(websiteAppName("1und1.de")).toBe("web-1und1-de");
+    const ch = websiteAppName("my-very-long-company-name-shop.ch");
+    const de = websiteAppName("my-very-long-company-name-shop.de");
+    expect(ch).toMatch(/^my-very-long-company-na-[0-9a-f]{6}$/);
+    expect(de).not.toBe(ch);
+    for (const name of [ch, de, websiteAppName("24-7-service-for-every-customer.example.com"), websiteAppName("ab.cd")]) {
+      expect(appName.safeParse(name).success).toBe(true);
+    }
     // Two websites run one folder, so their bundle carries it once.
     expect(appFolders([{ name: "erp" }, { name: "example-ch", folder: "web" }, { name: "example-com", folder: "web" }])).toEqual(["erp", "web"]);
     expect(TenantAppSchema.safeParse({ name: "example-ch", folder: "web", site: "main", domain: "Example.ch" }).success).toBe(false);

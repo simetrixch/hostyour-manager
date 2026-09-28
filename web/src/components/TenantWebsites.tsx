@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/apps-manifest.ts";
-import { appName, websiteAppName } from "../../../shared/tenant.ts";
+import { websiteAppName } from "../../../shared/tenant.ts";
 import { websiteFolder } from "../tenantAppRows.ts";
 import { addTenantWebsite, setTenantWebsiteDomain } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
@@ -27,9 +27,7 @@ export function TenantWebsites(props: {
   const [next, setNext] = useState("");
   const typed = domain.trim().toLowerCase();
   const nextTyped = next.trim().toLowerCase();
-  // The name a website gets from its domain must be an app name; a domain that gives none is said here.
   const named = typed ? websiteAppName(typed) : "";
-  const unnamed = named !== "" && !appName.safeParse(named).success;
   // The bundle installs private packages with the owner's reader, asked where none is recorded yet.
   const reader = catalog?.packagesReader;
   const readerMissing = reader !== undefined && reader.recorded === null;
@@ -75,13 +73,8 @@ export function TenantWebsites(props: {
           </label>
           <span className="field__hint">
             The domain without www: the site is served at www.{typed || "<domain>"}, and {typed || "<domain>"} redirects there.
-            {named && !unnamed ? ` The website is named ${named}.` : ""}
+            {named ? ` The website is named ${named}.` : ""}
           </span>
-          {unnamed && (
-            <span className="field__hint" role="alert">
-              {typed} gives the name {named}, which is no app name: it must start with a letter and have at most 30 characters.
-            </span>
-          )}
           <input id="tenant-add-website" className="input" placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} disabled={busy} />
           <select className="input" value={site} onChange={(e) => setSite(e.target.value)} disabled={busy} aria-label="Site">
             <option value="" disabled>
@@ -94,7 +87,7 @@ export function TenantWebsites(props: {
             ))}
           </select>
           <div className="actions">
-            <button type="submit" className="btn btn--primary" disabled={busy || !typed || !site || unnamed || readerMissing}>
+            <button type="submit" className="btn btn--primary" disabled={busy || !typed || !site || readerMissing}>
               Add website
             </button>
           </div>
