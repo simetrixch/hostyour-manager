@@ -258,7 +258,7 @@ export interface JobPvcMount {
   readOnly?: boolean;
 }
 
-/** The user and group a Job's container runs as. Pod security `restricted`, which the unit
+/** The user and group a Job's container runs as. Pod security `restricted`, which the consumer
  *  namespaces enforce, admits only a non-root user, and a job that reads a volume has to run as the
  *  user its files belong to. */
 export interface JobIdentity {
@@ -291,10 +291,12 @@ export interface JobResult {
   ended?: string;
 }
 
-/** A claim and the identity of a running pod's container that mounts it: the user its files belong
- *  to, and the group they are shared with. */
+/** A claim and the identity of a workload container that mounts it: the user its files belong to,
+ *  and the group they are shared with. */
 export interface ClaimUser {
+  /** The claim's name, or with `ordinals` the stem every pod of a StatefulSet adds `-<n>` to. */
   claim: string;
+  ordinals: boolean;
   user: number;
   group: number;
 }
@@ -313,8 +315,9 @@ export interface ClusterReader {
   /** Every PersistentVolumeClaim name in `namespace` — what the consumer dump mounts for the tar
    *  (PVC names are chart-chosen, so only the cluster can answer which exist). */
   listPersistentVolumeClaims(namespace: string): Promise<string[]>;
-  /** One row per claim and identity: every running pod's container in `namespace` that mounts a
-   *  claim and states the user it runs as. A claim no such container mounts has no row. */
+  /** One row per workload container in `namespace` that mounts a claim and states the user it runs
+   *  as, read off the pod templates so a workload scaled to zero still answers. A claim no such
+   *  container mounts has no row. */
   listClaimUsers(namespace: string): Promise<ClaimUser[]>;
   /** Create-or-replace the unit's ValidatingAdmissionPolicy + its Binding on the TARGET cluster, as
    *  one unit: the policy alone enforces nothing (a policy without a binding is inert) and a binding

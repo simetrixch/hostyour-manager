@@ -32,20 +32,28 @@ describe("mapArgoStatus, the rendered side", () => {
   });
 });
 
-describe("claimUsersOf (who a claim's files belong to)", () => {
-  const pod = (securityContext: object, container: object) => ({
-    spec: { securityContext, volumes: [{ name: "data", persistentVolumeClaim: { claimName: "postgres-data" } }, { name: "tmp" }], containers: [{ volumeMounts: [{ name: "data" }, { name: "tmp" }], ...container }] },
+describe("claimUsersOf (who a claim's files belong to, off the workload templates)", () => {
+  const deployment = (securityContext: object, container: object) => ({
+    metadata: { name: "postgres" },
+    spec: { template: { spec: { securityContext, volumes: [{ name: "data", persistentVolumeClaim: { claimName: "postgres-data" } }, { name: "tmp" }], containers: [{ volumeMounts: [{ name: "data" }, { name: "tmp" }], ...container }] } } },
   });
 
   it("takes the pod's user and its fsGroup where no group is stated", () => {
-    expect(claimUsersOf([pod({ runAsUser: 999, fsGroup: 999 }, {})])).toEqual([{ claim: "postgres-data", user: 999, group: 999 }]);
+    expect(claimUsersOf([deployment({ runAsUser: 999, fsGroup: 999 }, {})])).toEqual([{ claim: "postgres-data", ordinals: false, user: 999, group: 999 }]);
   });
 
   it("the container's own user and group come before the pod's", () => {
-    expect(claimUsersOf([pod({ runAsUser: 1, fsGroup: 2 }, { securityContext: { runAsUser: 1000, runAsGroup: 1001 } })])).toEqual([{ claim: "postgres-data", user: 1000, group: 1001 }]);
+    expect(claimUsersOf([deployment({ runAsUser: 1, fsGroup: 2 }, { securityContext: { runAsUser: 1000, runAsGroup: 1001 } })])).toEqual([{ claim: "postgres-data", ordinals: false, user: 1000, group: 1001 }]);
+  });
+
+  it("a StatefulSet's claim template names the stem its pods' claims number from", () => {
+    // queue-digita-post-mta-0 comes from the claim template `queue` of the StatefulSet `digita-post-mta`,
+    // and a quiesced StatefulSet has no pod left to read it from.
+    const mta = { metadata: { name: "digita-post-mta" }, spec: { volumeClaimTemplates: [{ metadata: { name: "queue" } }], template: { spec: { securityContext: { runAsUser: 1000, fsGroup: 1000 }, initContainers: [{ volumeMounts: [{ name: "queue" }] }], containers: [] } } } };
+    expect(claimUsersOf([mta])).toEqual([{ claim: "queue-digita-post-mta", ordinals: true, user: 1000, group: 1000 }]);
   });
 
   it("THE INNOCENT NEIGHBOUR: a container stating no user gives no row, rather than a guessed one", () => {
-    expect(claimUsersOf([pod({ fsGroup: 999 }, {})])).toEqual([]);
+    expect(claimUsersOf([deployment({ fsGroup: 999 }, {})])).toEqual([]);
   });
 });

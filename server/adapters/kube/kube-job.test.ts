@@ -44,17 +44,21 @@ interface CreatedJob {
 
 /** A world whose Job settles FAILED or never settles, with the pods and events the cluster holds, and
  *  the created body kept so a test can read the pod the Job asked for. */
-function failingWorld(opts: { pods?: unknown[]; events?: unknown[]; failed?: boolean } = {}): { c: JobClients; created: () => CreatedJob } {
+function failingWorld(opts: { pods?: unknown[]; events?: unknown[]; failed?: boolean; logStatus?: number } = {}): { c: JobClients; created: () => CreatedJob; eventSelectors: string[]; deleted: () => boolean } {
   let body = {} as CreatedJob;
+  const eventSelectors: string[] = [];
+  let deletes = 0;
   let exists = false;
   const batch = {
     async deleteNamespacedJob(): Promise<void> {
+      deletes++;
       if (!exists) throw notFound();
       exists = false;
     },
-    async createNamespacedJob(req: { body: CreatedJob }): Promise<void> {
+    async createNamespacedJob(req: { body: CreatedJob }): Promise<{ metadata: { uid: string } }> {
       body = req.body;
       exists = true;
+      return { metadata: { uid: "uid-1" } };
     },
     async readNamespacedJob(): Promise<{ status: { failed?: number } }> {
       if (!exists) throw notFound();
@@ -66,13 +70,15 @@ function failingWorld(opts: { pods?: unknown[]; events?: unknown[]; failed?: boo
       return { items: opts.pods ?? [] };
     },
     async readNamespacedPodLog(): Promise<string> {
+      if (opts.logStatus !== undefined) throw Object.assign(new Error("container is waiting to start"), { code: opts.logStatus });
       return "";
     },
-    async listNamespacedEvent(): Promise<{ items: unknown[] }> {
+    async listNamespacedEvent(req: { fieldSelector: string }): Promise<{ items: unknown[] }> {
+      eventSelectors.push(req.fieldSelector);
       return { items: opts.events ?? [] };
     },
   } as unknown as CoreV1Api;
-  return { c: { batch, core, pollMs: 1, deleteWaitMs: 25 }, created: () => body };
+  return { c: { batch, core, pollMs: 1, deleteWaitMs: 25 }, created: () => body, eventSelectors, deleted: () => deletes > 1 };
 }
 
 describe("runKubeJob under pod security restricted", () => {
@@ -99,7 +105,7 @@ describe("runKubeJob under pod security restricted", () => {
     const { c } = failingWorld({ events: [{ reason: "Scheduled" }, { reason: "FailedCreate", message: refusal }] });
     const result = await runKubeJob(c, "ns", spec, { timeoutMs: 20 });
     expect(result.succeeded).toBe(false);
-    expect(result.ended).toBe(`no pod was created for the Job — ${refusal}`);
+    expect(result.ended).toBe(`the Manager stopped waiting for it after 0 s; no pod was created for the Job — ${refusal}`);
   });
 
   it("a container that was killed names its reason and exit code", async () => {
@@ -107,6 +113,30 @@ describe("runKubeJob under pod security restricted", () => {
     const { c } = failingWorld({ failed: true, pods: [pod] });
     const result = await runKubeJob(c, "ns", spec, { timeoutMs: 1000 });
     expect(result.ended).toBe("the container ended with OOMKilled, exit code 137");
+  });
+
+  it("reads the refusal of THIS Job by its uid, not of an earlier Job of the same name", async () => {
+    const { c, eventSelectors } = failingWorld();
+    await runKubeJob(c, "ns", spec, { timeoutMs: 20 });
+    expect(eventSelectors).toEqual(["involvedObject.uid=uid-1"]);
+  });
+
+  it("a container that never started says why, although its log answers 400, and the Job is still reaped", async () => {
+    // The log of a container waiting to start is a 400; read first, it used to throw before the end
+    // reason was read and before the unsettled Job was deleted.
+    const pod = { metadata: { name: "dump-x-abc" }, status: { phase: "Pending", containerStatuses: [{ state: { waiting: { reason: "CreateContainerConfigError", message: 'secret "box" not found' } } }] } };
+    const { c, deleted } = failingWorld({ pods: [pod], logStatus: 400 });
+    const result = await runKubeJob(c, "ns", spec, { timeoutMs: 20 });
+    expect(result.logs).toBe("");
+    expect(result.ended).toBe('the Manager stopped waiting for it after 0 s; the container never started: CreateContainerConfigError — secret "box" not found');
+    expect(deleted()).toBe(true);
+  });
+
+  it("an evicted pod names the eviction", async () => {
+    const pod = { metadata: { name: "dump-x-abc" }, status: { phase: "Failed", reason: "Evicted", message: "The node was low on resource: ephemeral-storage." } };
+    const { c } = failingWorld({ failed: true, pods: [pod] });
+    const result = await runKubeJob(c, "ns", spec, { timeoutMs: 1000 });
+    expect(result.ended).toBe("the pod was Evicted — The node was low on resource: ephemeral-storage.");
   });
 
   it("THE INNOCENT NEIGHBOUR: a job that succeeded carries no end reason", async () => {

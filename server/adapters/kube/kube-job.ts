@@ -4,7 +4,7 @@
 // every non-404 failure surfaced as UPSTREAM with the API server's own message.
 import type { BatchV1Api, CoreV1Api } from "@kubernetes/client-node";
 import type { JobSpec, JobResult, JobIdentity } from "./port.ts";
-import { isNotFound, upstream } from "./kube.ts";
+import { isNotFound, statusOf, upstream } from "./kube.ts";
 
 /** Abortable sleep — resolves early (never rejects) on abort, mirroring kube.ts's. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -96,8 +96,9 @@ export async function runKubeJob(c: JobClients, namespace: string, spec: JobSpec
       },
     },
   };
+  let uid: string | undefined;
   try {
-    await c.batch.createNamespacedJob({ namespace, body });
+    uid = (await c.batch.createNamespacedJob({ namespace, body }))?.metadata?.uid;
   } catch (e) {
     throw upstream(`create Job ${namespace}/${spec.name}`, e);
   }
@@ -124,15 +125,21 @@ export async function runKubeJob(c: JobClients, namespace: string, spec: JobSpec
     if (remaining <= 0 || opts.signal?.aborted) break;
     await sleep(Math.min(c.pollMs, remaining), opts.signal);
   }
-  const logs = await readJobLog(c, namespace, spec.name);
-  // Read before the delete below, which takes the pod and its status with it.
-  const ended = succeeded ? undefined : await readJobEnd(c, namespace, spec.name);
-  if (!settled) {
-    // Timeout or abort left the Job RUNNING. The TTL only reaps a finished Job, so without this
-    // delete it keeps writing (a relocation dump keeps copying) after the run has already failed
-    // — and the next retry's leftover-replace would then delete it mid-write instead of
-    // replacing a settled trace. Log first: the foreground delete reaps the pod the log lives in.
-    await deleteJobIfPresent(c, namespace, spec.name, opts.signal);
+  let logs: string;
+  let ended: string | undefined;
+  try {
+    // Read before the delete below, which takes the pod and its status with it.
+    const stoppedAfterMs = !settled && !opts.signal?.aborted ? opts.timeoutMs : undefined;
+    ended = succeeded ? undefined : await readJobEnd(c, namespace, spec.name, uid, stoppedAfterMs);
+    logs = await readJobLog(c, namespace, spec.name);
+  } finally {
+    if (!settled) {
+      // Timeout or abort left the Job RUNNING. The TTL only reaps a finished Job, so without this
+      // delete it keeps writing (a relocation dump keeps copying) after the run has already failed
+      // — and the next retry's leftover-replace would then delete it mid-write instead of
+      // replacing a settled trace. The reads come first: the foreground delete reaps the pod.
+      await deleteJobIfPresent(c, namespace, spec.name, opts.signal);
+    }
   }
   return { succeeded, logs, ...(ended !== undefined ? { ended } : {}) };
 }
@@ -169,36 +176,43 @@ async function deleteJobIfPresent(c: JobClients, namespace: string, name: string
 }
 
 /** Why the Job's pod ended, or why there is none: what the log cannot say, because a pod that was
- *  refused, never started or was killed writes no line about it. Undefined where the cluster says
- *  nothing; a reading that fails is named rather than thrown, so the job's own failure stays the
- *  error an operator reads. */
-async function readJobEnd(c: JobClients, namespace: string, jobName: string): Promise<string | undefined> {
+ *  refused, never started, evicted or stopped by the Manager's own deadline writes no line about it.
+ *  Undefined where nothing says why; a reading that fails is named rather than thrown, so the job's
+ *  own failure stays the error an operator reads. */
+async function readJobEnd(c: JobClients, namespace: string, jobName: string, uid: string | undefined, stoppedAfterMs: number | undefined): Promise<string | undefined> {
+  const parts: string[] = [];
+  if (stoppedAfterMs !== undefined) parts.push(`the Manager stopped waiting for it after ${Math.round(stoppedAfterMs / 1000)} s`);
   try {
     const pods = await c.core.listNamespacedPod({ namespace, labelSelector: `job-name=${jobName}` });
     const pod = pods.items[0];
     if (pod === undefined) {
-      return `no pod was created for the Job${await readPodRefusal(c, namespace, jobName)}`;
+      parts.push(`no pod was created for the Job${await readPodRefusal(c, namespace, jobName, uid)}`);
+    } else {
+      if (pod.status?.reason) parts.push(`the pod was ${pod.status.reason}${pod.status.message ? ` — ${pod.status.message}` : ""}`);
+      const state = pod.status?.containerStatuses?.[0]?.state;
+      if (state?.terminated) {
+        const t = state.terminated;
+        parts.push(`the container ended with ${t.reason ?? "no reason"}, exit code ${t.exitCode}${t.message ? ` — ${t.message}` : ""}`);
+      } else if (state?.waiting) {
+        parts.push(`the container never started: ${state.waiting.reason ?? "no reason"}${state.waiting.message ? ` — ${state.waiting.message}` : ""}`);
+      } else if (pod.status?.phase === "Pending") {
+        const unscheduled = pod.status.conditions?.find((cond) => cond.type === "PodScheduled" && cond.status === "False");
+        parts.push(`the pod was still Pending${unscheduled?.message ? ` — ${unscheduled.message}` : ""}`);
+      }
     }
-    const state = pod.status?.containerStatuses?.[0]?.state;
-    if (state?.terminated) {
-      const t = state.terminated;
-      return `the container ended with ${t.reason ?? "no reason"}, exit code ${t.exitCode}${t.message ? ` — ${t.message}` : ""}`;
-    }
-    if (state?.waiting) {
-      return `the container never started: ${state.waiting.reason ?? "no reason"}${state.waiting.message ? ` — ${state.waiting.message}` : ""}`;
-    }
-    return pod.status?.phase === "Pending" ? "the pod was still Pending" : undefined;
   } catch (e) {
-    return `why it ended could not be read: ${e instanceof Error ? e.message : String(e)}`;
+    parts.push(`why it ended could not be read: ${e instanceof Error ? e.message : String(e)}`);
   }
+  return parts.length > 0 ? parts.join("; ") : undefined;
 }
 
-/** The event in which the Job's controller was refused a pod — the pod security verdict, for one —
+/** The event in which this Job's controller was refused a pod — the pod security verdict, for one —
  *  as ` — <message>`; "" where there is none, and the reading's own failure where the events cannot
- *  be read. */
-async function readPodRefusal(c: JobClients, namespace: string, jobName: string): Promise<string> {
+ *  be read. Selected by the Job's uid where it is known, because a Job of the same name an earlier
+ *  run created leaves events of its own for an hour. */
+async function readPodRefusal(c: JobClients, namespace: string, jobName: string, uid: string | undefined): Promise<string> {
   try {
-    const events = await c.core.listNamespacedEvent({ namespace, fieldSelector: `involvedObject.kind=Job,involvedObject.name=${jobName}` });
+    const events = await c.core.listNamespacedEvent({ namespace, fieldSelector: uid !== undefined ? `involvedObject.uid=${uid}` : `involvedObject.kind=Job,involvedObject.name=${jobName}` });
     const refused = events.items.filter((e) => e.reason === "FailedCreate").at(-1);
     return refused?.message ? ` — ${refused.message}` : "";
   } catch (e) {
@@ -215,7 +229,9 @@ async function readJobLog(c: JobClients, namespace: string, jobName: string): Pr
     if (pod === undefined) return "";
     return await c.core.readNamespacedPodLog({ name: pod, namespace });
   } catch (e) {
-    if (isNotFound(e)) return "";
+    // 400 is the log of a container that never started, or of a pod no node took: there is none,
+    // and why is what readJobEnd says.
+    if (isNotFound(e) || statusOf(e) === 400) return "";
     throw upstream(`read Job log ${namespace}/${jobName}`, e);
   }
 }

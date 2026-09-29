@@ -123,7 +123,7 @@ export function buildKubeConfig(input: MasterKubeInput | ClusterKubeInput): Kube
 /** The 1.x fetch client throws ApiException with `.code`; be liberal and also accept the older
  *  `.statusCode` / `.response.statusCode` shapes so 404 handling never depends on the client's
  *  vintage. Node system errors carry a STRING `.code` ("ECONNREFUSED") — filtered by typeof. */
-function statusOf(e: unknown): number | undefined {
+export function statusOf(e: unknown): number | undefined {
   if (e instanceof ApiException) return e.code;
   if (typeof e !== "object" || e === null) return undefined;
   const o = e as { statusCode?: unknown; code?: unknown; response?: { statusCode?: unknown } };
@@ -490,9 +490,14 @@ export class KubeClusterReader implements ClusterReader {
     }
   }
 
-  /** Who mounts which claim among the running pods — see claimUsersOf. NEEDS a live cluster. */
+  /** Who mounts which claim, off the Deployments' and StatefulSets' pod templates — see
+   *  claimUsersOf. NEEDS a live cluster. */
   async listClaimUsers(namespace: string): Promise<ClaimUser[]> {
-    return claimUsersOf((await this.list("Pods", namespace, () => this.core.listNamespacedPod({ namespace, fieldSelector: "status.phase=Running" }))).items);
+    const [deployments, statefulSets] = await Promise.all([
+      this.list("Deployments", namespace, () => this.apps.listNamespacedDeployment({ namespace })),
+      this.list("StatefulSets", namespace, () => this.apps.listNamespacedStatefulSet({ namespace })),
+    ]);
+    return claimUsersOf([...deployments.items, ...statefulSets.items]);
   }
 
   /** Roll every Deployment and StatefulSet of the namespace by stamping the pod TEMPLATE's

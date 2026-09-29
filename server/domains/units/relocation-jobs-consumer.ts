@@ -41,16 +41,16 @@ export interface ConsumerJobInputs {
 }
 
 
-/** The one identity that can read every claim in `claims`: the user and group of the running pods
- *  that mount them. A claim no running pod mounts, or claims whose pods run as different users, are
- *  refused by name, because a job reading the files as any other user fails on the first one its
+/** The one identity that can read every claim in `claims`: the user and group of the workload
+ *  containers that mount them. A claim no workload mounts, or claims used as different identities,
+ *  are refused by name, because a job reading the files as any other user fails on the first one its
  *  owner alone may read. */
 export function claimsIdentity(namespace: string, claims: readonly string[], users: readonly ClaimUser[]): JobIdentity {
   const identities = new Map<string, JobIdentity>();
   for (const claim of claims) {
-    const mounted = users.filter((u) => u.claim === claim);
+    const mounted = users.filter((u) => u.claim === claim || (u.ordinals && claim.startsWith(`${u.claim}-`) && /^[0-9]+$/.test(claim.slice(u.claim.length + 1))));
     if (mounted.length === 0) {
-      throw errValidation(`claim ${claim} in ${namespace} is mounted by no running pod that states its user, so nothing says whose files it holds and the dump could not read them`);
+      throw errValidation(`claim ${claim} in ${namespace} is mounted by no workload that states its user, so nothing says whose files it holds and the dump could not read them`);
     }
     for (const u of mounted) identities.set(`${u.user}:${u.group}`, { user: u.user, group: u.group });
   }
@@ -116,7 +116,9 @@ ${hashLine("/tmp/postgres-all.sql", "postgres/all.sql")}rclone copyto /tmp/postg
         pvcMounts: i.pvcs.map((claim) => ({ claimName: claim, mountPath: `/pvc/${claim}`, readOnly: true })),
         script:
           BOX_REMOTE +
-          i.pvcs.map((claim) => `tar czf "/tmp/${claim}.tar.gz" -C "/pvc/${claim}" .\n${hashLine(`/tmp/${claim}.tar.gz`, `pvc/${claim}.tar.gz`)}rclone copyto "/tmp/${claim}.tar.gz" "box:${i.folder}/pvc/${claim}.tar.gz"\nrm -f "/tmp/${claim}.tar.gz"\n`).join(""),
+          // tar exits 1 when a file changed while it read it, which a live claim does, and the
+          // archive is written all the same; any other exit is a failure.
+          i.pvcs.map((claim) => `tar czf "/tmp/${claim}.tar.gz" -C "/pvc/${claim}" . || { s=$?; [ "$s" -eq 1 ] || exit "$s"; echo "CHANGED pvc/${claim}: files changed while tar read them"; }\n${hashLine(`/tmp/${claim}.tar.gz`, `pvc/${claim}.tar.gz`)}rclone copyto "/tmp/${claim}.tar.gz" "box:${i.folder}/pvc/${claim}.tar.gz"\nrm -f "/tmp/${claim}.tar.gz"\n`).join(""),
       },
     });
   }

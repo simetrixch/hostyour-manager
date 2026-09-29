@@ -203,18 +203,29 @@ describe("the nightly backup under pod security restricted (hostyour-manager#333
   it("a claim is dumped as the user of the pod that mounts it", () => {
     // queue-digita-post-mta-0 is mounted by a pod running as 1000, postgres-data of swissbookai by one
     // running as 999; a job running as anyone else cannot read what only they may read.
-    const identity = claimsIdentity(`${CONSUMER}-prod`, ["data"], [{ claim: "data", user: 999, group: 999 }]);
+    const identity = claimsIdentity(`${CONSUMER}-prod`, ["data"], [{ claim: "data", ordinals: false, user: 999, group: 999 }]);
     expect(identity).toEqual({ user: 999, group: 999 });
     expect(pvcJob(consumerDumpJobs({ ...consumer, pvcUser: identity, registrationYaml: "name: acme\n" })).spec.runAs).toEqual({ user: 999, group: 999 });
   });
 
   it("a claim no running pod mounts is refused by name", () => {
-    expect(() => claimsIdentity(`${CONSUMER}-prod`, ["data"], [{ claim: "other", user: 1000, group: 1000 }])).toThrow(/claim data in .* is mounted by no running pod/);
+    expect(() => claimsIdentity(`${CONSUMER}-prod`, ["data"], [{ claim: "other", ordinals: false, user: 1000, group: 1000 }])).toThrow(/claim data in .* is mounted by no workload/);
   });
 
   it("claims used as two different users are refused, because one job reads as one user", () => {
-    const users = [{ claim: "a", user: 1000, group: 1000 }, { claim: "b", user: 999, group: 999 }];
+    const users = [{ claim: "a", ordinals: false, user: 1000, group: 1000 }, { claim: "b", ordinals: false, user: 999, group: 999 }];
     expect(() => claimsIdentity(`${CONSUMER}-prod`, ["a", "b"], users)).toThrow(/1000:1000 and 999:999/);
+  });
+
+  it("a StatefulSet pod's claim is matched by its ordinal, and a look-alike name is not", () => {
+    const stem = [{ claim: "queue-digita-post-mta", ordinals: true, user: 1000, group: 1000 }];
+    expect(claimsIdentity("ns", ["queue-digita-post-mta-0"], stem)).toEqual({ user: 1000, group: 1000 });
+    expect(() => claimsIdentity("ns", ["queue-digita-post-mta-old"], stem)).toThrow(/mounted by no workload/);
+  });
+
+  it("a live claim that changed while tar read it is reported, and any other tar failure still fails", () => {
+    const script = pvcJob(consumerDumpJobs({ ...consumer, pvcUser: { user: 999, group: 999 }, registrationYaml: "name: acme\n" })).spec.script;
+    expect(script).toContain('|| { s=$?; [ "$s" -eq 1 ] || exit "$s"; echo "CHANGED pvc/data: files changed while tar read them"; }');
   });
 
   it("THE INNOCENT NEIGHBOUR: the other dump jobs keep the runner's default identity", () => {

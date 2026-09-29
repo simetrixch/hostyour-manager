@@ -119,6 +119,35 @@ describe("migrate (consumer)", () => {
   });
 });
 
+describe("the consumer dump (hostyour-manager#333)", () => {
+  it("dumps the claims as the user of the workload that mounts them", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations);
+    f.source.reader.setClaims(`${CONSUMER}-prod`, ["queue-mta-0"], [{ claim: "queue-mta", ordinals: true, user: 1000, group: 1000 }]);
+
+    const ctx = stepCtx(db, "dump", {}, []);
+    const jobs = await (await consumerWorld(ports, "app_1")(ctx)).dumpJobs("gen", "name: acme\n", ctx);
+    expect(jobs.find((j) => j.spec.name.startsWith("reloc-dump-pvc"))?.spec.runAs).toEqual({ user: 1000, group: 1000 });
+  });
+
+  it("refuses the dump of a claim no workload mounts, before any job runs", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations);
+    f.source.reader.setClaims(`${CONSUMER}-prod`, ["orphan"], []);
+
+    const ctx = stepCtx(db, "dump", {}, []);
+    await expect((await consumerWorld(ports, "app_1")(ctx)).dumpJobs("gen", "name: acme\n", ctx)).rejects.toThrow(/claim orphan .* is mounted by no workload/);
+  });
+});
+
 describe("repoint (the claim mark)", () => {
   it("marks the source namespace BEFORE it flips the registration — an unmarkable namespace stops the repoint with the unit still on the source", async () => {
     seedClusters(db);

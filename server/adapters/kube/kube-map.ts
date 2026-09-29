@@ -344,34 +344,52 @@ export function isManagerOwned(raw: unknown): boolean {
   return MANAGER_PROJECT_LABELS.some((l) => labels[l.key] === l.value);
 }
 
-/** The part of a pod that says who mounts which claim. */
-export interface RawClaimPod {
+/** The part of a Deployment or StatefulSet that says who mounts which claim: its pod template, and
+ *  for a StatefulSet the claim templates every pod gets its own claim from. */
+export interface RawClaimWorkload {
+  metadata?: { name?: string };
   spec?: {
-    securityContext?: { runAsUser?: number; runAsGroup?: number; fsGroup?: number };
-    volumes?: { name: string; persistentVolumeClaim?: { claimName: string } }[];
-    containers?: { securityContext?: { runAsUser?: number; runAsGroup?: number }; volumeMounts?: { name: string }[] }[];
+    volumeClaimTemplates?: { metadata?: { name?: string } }[];
+    template?: {
+      spec?: {
+        securityContext?: { runAsUser?: number; runAsGroup?: number; fsGroup?: number };
+        volumes?: { name: string; persistentVolumeClaim?: { claimName: string } }[];
+        containers?: RawClaimContainer[];
+        initContainers?: RawClaimContainer[];
+      };
+    };
   };
 }
 
-/** One row per container that mounts a claim and states its user: the container's own user and group
- *  before the pod's, and the pod's fsGroup where no group is stated, because that is the group the
- *  claim's files are shared with. A container that states no user runs as its image's user, which no
- *  pod field names, so it has no row. */
-export function claimUsersOf(pods: readonly RawClaimPod[]): ClaimUser[] {
+interface RawClaimContainer {
+  securityContext?: { runAsUser?: number; runAsGroup?: number };
+  volumeMounts?: { name: string }[];
+}
+
+/** One row per container of a workload's pod template that mounts a claim and states its user: the
+ *  container's own user and group before the pod's, and the pod's fsGroup where no group is stated,
+ *  because that is the group the claim's files are shared with. Read off the TEMPLATE, so a workload
+ *  scaled to zero, as a quiesced or suspended unit is, still says whose files its claims hold. A
+ *  StatefulSet's claim template gives the row `ordinals`, its pods' claims being `<claim>-<n>`. A
+ *  container that states no user runs as its image's user, which no field names, so it has no row. */
+export function claimUsersOf(workloads: readonly RawClaimWorkload[]): ClaimUser[] {
   const rows: ClaimUser[] = [];
-  for (const pod of pods) {
-    const claims = new Map<string, string>();
-    for (const v of pod.spec?.volumes ?? []) {
-      if (v.persistentVolumeClaim?.claimName) claims.set(v.name, v.persistentVolumeClaim.claimName);
+  for (const w of workloads) {
+    const pod = w.spec?.template?.spec;
+    const claims = new Map<string, { claim: string; ordinals: boolean }>();
+    for (const v of pod?.volumes ?? []) {
+      if (v.persistentVolumeClaim?.claimName) claims.set(v.name, { claim: v.persistentVolumeClaim.claimName, ordinals: false });
     }
-    const podContext = pod.spec?.securityContext;
-    for (const container of pod.spec?.containers ?? []) {
-      const user = container.securityContext?.runAsUser ?? podContext?.runAsUser;
-      const group = container.securityContext?.runAsGroup ?? podContext?.runAsGroup ?? podContext?.fsGroup;
+    for (const t of w.spec?.volumeClaimTemplates ?? []) {
+      if (t.metadata?.name && w.metadata?.name) claims.set(t.metadata.name, { claim: `${t.metadata.name}-${w.metadata.name}`, ordinals: true });
+    }
+    for (const container of [...(pod?.initContainers ?? []), ...(pod?.containers ?? [])]) {
+      const user = container.securityContext?.runAsUser ?? pod?.securityContext?.runAsUser;
+      const group = container.securityContext?.runAsGroup ?? pod?.securityContext?.runAsGroup ?? pod?.securityContext?.fsGroup;
       if (user === undefined || group === undefined) continue;
       for (const m of container.volumeMounts ?? []) {
-        const claim = claims.get(m.name);
-        if (claim !== undefined) rows.push({ claim, user, group });
+        const mounted = claims.get(m.name);
+        if (mounted !== undefined) rows.push({ ...mounted, user, group });
       }
     }
   }

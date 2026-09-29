@@ -337,6 +337,15 @@ export class FakeClusterReader implements ClusterReader {
   readonly jobs: { namespace: string; spec: JobSpec; secretsAtRun: Map<string, Record<string, string>> }[] = [];
 
   /** Script one job outcome by name prefix (see `jobResults`). */
+  /** Script the claims of `namespace` and the workload containers that mount them. */
+  setClaims(namespace: string, claims: readonly string[], users: readonly ClaimUser[]): void {
+    this.scripted = {
+      ...this.scripted,
+      pvcsByNamespace: { ...this.scripted.pvcsByNamespace, [namespace]: claims },
+      claimUsersByNamespace: { ...this.scripted.claimUsersByNamespace, [namespace]: users },
+    };
+  }
+
   setJobResult(namePrefix: string, result: JobResult): void {
     this.scripted = { ...this.scripted, jobResults: { ...this.scripted.jobResults, [namePrefix]: result } };
   }
