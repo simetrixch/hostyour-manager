@@ -21,6 +21,8 @@ import { masterKubeInput } from "./master-kube.ts";
 import { HttpRegistryProbe, REGISTRY_PULL_DOCKERCONFIG_PATH } from "../adapters/registry/registry-http.ts";
 import { readChannelStages } from "../domains/inventory/channel-stages.ts";
 import { readTenantVersions } from "../domains/units/tenant-versions.ts";
+import { makeTenantFollower, type TenantFollower } from "../domains/units/tenant-follow.ts";
+import type { Executor } from "../executor/executor.ts";
 import type { VersionsView } from "../../shared/api-types.ts";
 import type { Db } from "../db/client.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
@@ -100,6 +102,16 @@ export interface TenantFamily {
   /** The deploy repository's `tenant.libraryRepos` off the books branch, which the boot's kit sync
    *  writes the release kit into. Undefined when the family is not configured. */
   libraryRepos?: () => Promise<string[]>;
+  /** The tenants that follow releases (hostyour-manager#328), built once the executor stands, which
+   *  plans and approves their Versions runs. Undefined when the family is not configured. */
+  follow?: (executor: Executor, db: Db) => TenantFollowWiring;
+}
+
+export interface TenantFollowWiring {
+  follower: TenantFollower;
+  /** Watch the release runs of every build unit, and check once for what a release while the Manager
+   *  was down left behind. Never rejects: a failure is logged. */
+  start: () => Promise<void>;
 }
 
 // ---- Tenant (multi-app) onboarding: the deploy repository + the manager-side HelmRenderer ----
@@ -370,5 +382,24 @@ export function buildTenantOnboarding(
   // repoURL the appsets are rendered from) the runs use, never a second one.
   const versions = (db: Db, tenantId: string, signal?: AbortSignal): Promise<VersionsView> => readTenantVersions(onboardPorts, db, tenantId, signal);
   const libraryRepos = async (): Promise<string[]> => (await readTenantSpec(onboardPorts, {}))?.libraryRepos ?? [];
-  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, versions, carryTrunkToBooksBranch, libraryRepos };
+  // A unit registered after the start is watched from the next start; a release of it before then is
+  // caught by that start's check.
+  const follow = (executor: Executor, db: Db): TenantFollowWiring => {
+    const follower = makeTenantFollower({ db, executor, ports: onboardPorts, logger });
+    const start = async (): Promise<void> => {
+      try {
+        // Handed late, like the build steps take it: the consumer family is wired after this one.
+        const buildPlane = onboard()?.ports.buildPlane;
+        if (!buildPlane) throw new Error("the consumer onboarding is not wired, so no build plane can be watched");
+        const units = [...new Set((await onboardPorts.attestedBuilds()).map((a) => a.unit))];
+        buildPlane.watchReleaseRuns(units, (run) => void follower.releaseSucceeded(run), (unit, err) => logger.warn({ err, unit }, "a release watch failed and starts again"));
+        logger.info({ units }, "watching the release runs of the build units for the tenants that follow releases");
+        await follower.checkAll();
+      } catch (err) {
+        logger.error({ err }, "the tenants that follow releases are not watched");
+      }
+    };
+    return { follower, start };
+  };
+  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, versions, carryTrunkToBooksBranch, libraryRepos, follow };
 }

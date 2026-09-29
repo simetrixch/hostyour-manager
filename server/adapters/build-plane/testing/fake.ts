@@ -1,7 +1,7 @@
 // In-memory BuildPlane fake for the onboarding domain tests — no cluster. The release watch
 // (awaitReleaseRun) is scripted per unit: a test seeds the run the EventListener would have
 // created, with the full release tag its param carries.
-import type { BuildPlane, ReleaseRunQuery, ReleaseRunOutcome } from "../port.ts";
+import type { BuildPlane, ReleaseRunQuery, ReleaseRunOutcome, ReleaseRunSucceeded } from "../port.ts";
 
 export class FakeBuildPlane implements BuildPlane {
   /** Every release watch, in order — a test asserts the namespace-per-unit query shape. */
@@ -28,6 +28,20 @@ export class FakeBuildPlane implements BuildPlane {
 
   async listReleaseRuns(query: ReleaseRunQuery): Promise<string[]> {
     return this.matching(query).map((r) => r.runName);
+  }
+
+  /** The watches standing now, with the units each one names. */
+  readonly releaseRunWatches = new Set<{ units: readonly string[]; onSucceeded: (run: ReleaseRunSucceeded) => void }>();
+
+  watchReleaseRuns(units: readonly string[], onSucceeded: (run: ReleaseRunSucceeded) => void): () => void {
+    const watch = { units, onSucceeded };
+    this.releaseRunWatches.add(watch);
+    return () => this.releaseRunWatches.delete(watch);
+  }
+
+  /** A release run of `run.unit` turning Succeeded, delivered to every standing watch that names the unit. */
+  emitReleaseRunSucceeded(run: ReleaseRunSucceeded): void {
+    for (const w of this.releaseRunWatches) if (w.units.includes(run.unit)) w.onSucceeded(run);
   }
 
   private matching(query: ReleaseRunQuery): (ReleaseRunOutcome & { stage?: string })[] {

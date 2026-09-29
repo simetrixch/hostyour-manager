@@ -226,6 +226,10 @@ export const tenants = sqliteTable("tenants", {
   // is what the charts read); recorded here as the platform's own trace of what was asked for.
   seedUsers: integer("seed_users", { mode: "boolean" }).notNull().default(false),
   suspended: integer("suspended", { mode: "boolean" }).notNull().default(false), // tenant-wide pause
+  // Whether a release moves this tenant by itself (hostyour-manager#328): the Manager starts the
+  // tenant's Versions run when a release run of a part it renders succeeds at its stage. A Manager
+  // behaviour and no deployment fact, so it stands here alone and not on the registration.
+  followReleases: integer("follow_releases", { mode: "boolean" }).notNull().default(false),
   owner: text("owner"),
   provenance: text("provenance", { enum: APP_PROVENANCE }).notNull().default("manager"),
   lastRunId: text("last_run_id"),                                 // loose ref to runs(id)

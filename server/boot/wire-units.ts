@@ -47,7 +47,8 @@ import { makeConsumerNightlyBackupDef } from "../domains/units/nightly-backup.ru
 import { makeRestoreDef } from "../domains/units/restore.run.ts";
 import { makeMigrateDef } from "../domains/units/migrate.run.ts";
 import { errValidation } from "../kernel/errors.ts";
-import { buildTenantOnboarding } from "./wire-tenants.ts";
+import { buildTenantOnboarding, type TenantFollowWiring } from "./wire-tenants.ts";
+import type { Executor } from "../executor/executor.ts";
 import { consumerUnitProbes } from "../domains/units/consumer-unit-probes.ts";
 import type { UnitProbes } from "#unit/server/check-units.ts";
 
@@ -135,6 +136,9 @@ export interface UnitsWiring {
   tenantRegistrations?: TenantRegistrations;
   /** What the Versions dialog offers for one tenant. Undefined when the tenant family is not configured. */
   tenantVersions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
+  /** The tenants that follow releases, built once the executor stands. Undefined when the tenant family
+   *  is not configured. */
+  tenantFollow?: (executor: Executor, db: Db) => TenantFollowWiring;
   /** Bring the deploy repository's books branch into being, and to its trunk, at boot. The tenant
    *  ApplicationSet's git generator reads that branch from the moment the installation is deployed,
    *  and every member Application reads its chart there too, so without this the ApplicationSet has
@@ -296,6 +300,7 @@ export function buildUnits(
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
     ...(tenant.versions ? { tenantVersions: tenant.versions } : {}),
+    ...(tenant.follow ? { tenantFollow: tenant.follow } : {}),
     ...(tenant.carryTrunkToBooksBranch ? { carryTrunkToBooksBranch: tenant.carryTrunkToBooksBranch } : {}),
     ...(tenant.libraryRepos ? { libraryRepos: tenant.libraryRepos } : {}),
     // The unit plugin's activation client, surfaced for the tenant invite route.

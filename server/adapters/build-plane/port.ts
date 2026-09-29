@@ -38,6 +38,15 @@ export interface ReleaseRunOutcome {
   imageTag?: string;
 }
 
+/** A release run that turned Succeeded: its unit, the stage its bump pinned it at, and its tags. */
+export interface ReleaseRunSucceeded {
+  unit: string;
+  stage: string;
+  runName: string;
+  releaseTag: string;
+  imageTag?: string;
+}
+
 export interface BuildPlane {
   /** Find the unit's release PipelineRun (ReleaseRunQuery) and await its Succeeded condition. The
    *  namespace is resolved PER UNIT (`<unit>-build`) — the run was created by the EventListener,
@@ -48,4 +57,9 @@ export interface BuildPlane {
   /** The names of the release runs matching the query that stand now — what a trigger records as
    *  `standing` before it fires a run the watch must tell apart from them. */
   listReleaseRuns(query: ReleaseRunQuery): Promise<string[]>;
+  /** Report every release run of `units` that turns Succeeded after this call, once, with the stage
+   *  its `stage` param names; a run with no stage (a library's) is not reported. A pure watch, one
+   *  per `<unit>-build` namespace: it lists and watches again by itself when the connection drops,
+   *  and starts again after an error it reports to `onError`. Answers the function that stops it. */
+  watchReleaseRuns(units: readonly string[], onSucceeded: (run: ReleaseRunSucceeded) => void, onError: (unit: string, err: unknown) => void): () => void;
 }

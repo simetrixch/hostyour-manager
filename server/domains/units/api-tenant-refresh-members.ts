@@ -4,6 +4,7 @@
 // version chosen per part, through the streaming planner, because it renders and gates the fan-out as
 // add-app does. Approve via the Runs API.
 import type { Hono } from "hono";
+import { eq } from "drizzle-orm";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { Db } from "../../db/client.ts";
 import type { VersionsView } from "../../../shared/api-types.ts";
@@ -11,6 +12,9 @@ import { errNotConfigured, errValidation } from "../../kernel/errors.ts";
 import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";
 import { TenantRefreshMembersRequest } from "./tenant-refresh-members.run.ts";
 import type { Executor } from "../../executor/executor.ts";
+import { tenants } from "../../db/schema/inventory.ts";
+import { writeAudit } from "../../db/audit-writer.ts";
+import type { TenantFollower } from "./tenant-follow.ts";
 
 export interface TenantRefreshMembersApiDeps {
   db: Db;
@@ -18,10 +22,12 @@ export interface TenantRefreshMembersApiDeps {
   tenantEnabled: boolean;
   /** What the Versions dialog offers (tenant-versions.ts readTenantVersions). */
   versions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
+  /** Moves the tenants that follow releases (tenant-follow.ts). */
+  follower?: TenantFollower;
 }
 
 export function registerTenantRefreshMembersRoutes(app: Hono<AppEnv>, deps: TenantRefreshMembersApiDeps): void {
-  const { db, executor, tenantEnabled, versions } = deps;
+  const { db, executor, tenantEnabled, versions, follower } = deps;
   app.get("/api/tenants/:id/versions", async (c) => {
     if (!tenantEnabled || !versions) throw errNotConfigured("tenant onboarding is not configured on this manager");
     return c.json(await versions(db, c.req.param("id"), c.req.raw.signal));
@@ -34,5 +40,19 @@ export function registerTenantRefreshMembersRoutes(app: Hono<AppEnv>, deps: Tena
     const parsed = TenantRefreshMembersRequest.safeParse({ tenantId, versions: body.versions });
     if (!parsed.success) throw errValidation(`invalid versions request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     return c.json(await executor.planStreamed("tenant-refresh-members", parsed.data), 201);
+  });
+  // The switch of hostyour-manager#328: whether a release moves this tenant by itself. A Manager
+  // behaviour and no deployment, so it is set on the row and recorded in the audit, and a tenant it
+  // turns on is checked at once, so it catches up with its stage pins.
+  app.put("/api/tenants/:id/follow-releases", async (c) => {
+    if (!tenantEnabled || !follower) throw errNotConfigured("tenant onboarding is not configured on this manager");
+    const tenantId = c.req.param("id");
+    assertTenantProvisioned(loadTenantStatus(db, tenantId), "letting it follow releases");
+    const body = (await c.req.json().catch(() => ({}))) as { followReleases?: unknown };
+    if (typeof body.followReleases !== "boolean") throw errValidation("followReleases must be true or false");
+    db.update(tenants).set({ followReleases: body.followReleases, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
+    writeAudit(db, { actor: c.get("operator").sub, action: "tenant.follow-releases.set", targetKind: "tenant", targetId: tenantId, detail: { followReleases: body.followReleases } });
+    if (body.followReleases) void follower.checkTenant(tenantId);
+    return c.json({ followReleases: body.followReleases });
   });
 }

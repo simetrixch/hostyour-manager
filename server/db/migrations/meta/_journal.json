@@ -127,6 +127,13 @@
       "when": 1790597380923,
       "tag": "0017_unit-backups",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1790671192567,
+      "tag": "0018_tenant-follow-releases",
+      "breakpoints": true
     }
   ]
 }

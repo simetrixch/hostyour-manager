@@ -42,6 +42,7 @@ import { tenantSelector } from "./tenant-lifecycle.run.ts";
 import type { AppCatalogProvider } from "./app-catalog.ts";
 import type { Activator } from "#unit/server/adapters/activation/port.ts";
 import { TENANT_COLUMNS } from "./tenant-columns.ts";
+import type { TenantFollower } from "./tenant-follow.ts";
 import { inviteOrResendTenantAdmin, BOOTSTRAP_TOKEN_KEY, InviteAdminRequest } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import { tenantMemberUrl } from "#unit/server/unit-dns.ts";
@@ -409,6 +410,8 @@ export interface TenantApiDeps extends ConsumerApiDeps {
   /** What the Versions dialog offers for one tenant (tenant-versions.ts readTenantVersions). Absent with
    *  the tenant family unwired; the route then answers 501. */
   versions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
+  /** Moves the tenants that follow releases (tenant-follow.ts). Absent without the tenant family. */
+  follower?: TenantFollower;
   /** The public apex (global.unitApex) of a cluster, read off its values chain on the platform repo —
    *  the SAME resolver the tenant runs carry (create-tenant.run.ts TenantOnboardPorts). The invite
    *  route needs it because a tenant member is addressed at `<member>.<subdomain>.<unitApex>` and the
@@ -440,7 +443,7 @@ function rollupFanoutStatus(statuses: readonly ArgoAppStatus[]): { sync: ArgoSyn
 export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): void {
   const { executor, db, onboardingEnabled, appCatalog, resolver, deployRepoUrl, activator, registrations, versions, resolveUnitApex } = deps;
   // The routing move — a route file of its own, the way the resize is.
-  registerTenantActionRoutes(app, { db, executor, tenantEnabled: onboardingEnabled, ...(versions ? { versions } : {}) });
+  registerTenantActionRoutes(app, { db, executor, tenantEnabled: onboardingEnabled, ...(versions ? { versions } : {}), ...(deps.follower ? { follower: deps.follower } : {}) });
 
   // The tenant inventory: every onboarded tenant + which cluster it fans out on (JOIN clusters for
   // domain/stage). Always live — the read path never degrades on missing config.

@@ -498,6 +498,8 @@ export interface TenantView {
   senderDomain: string;
   seedUsers: boolean;
   suspended: boolean;
+  /** Whether a release moves this tenant by itself (hostyour-manager#328). */
+  followReleases: boolean;
   owner: string | null;
   /** The same server enum ConsumerView carries, taken from shared/enums.ts rather than restated as a
    *  union here: a literal that leaves that list must break THIS build, not survive as a word the
@@ -674,6 +676,8 @@ export const getTenantVersions = (tenantId: string): Promise<VersionsView> => re
 
 /** Plan tenant-refresh-members: the parts named put on the version chosen for each, and every member
  *  entry resolved again off the product's manifest. */
+export const setTenantFollowReleases = (tenantId: string, followReleases: boolean): Promise<{ followReleases: boolean }> =>
+  put<{ followReleases: boolean }>(`/api/tenants/${tenantId}/follow-releases`, { followReleases });
 export const setTenantVersions = (tenantId: string, versions: Record<string, string>): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/refresh-members`, { versions });
 

@@ -49,6 +49,9 @@ export async function boot(): Promise<void> {
   // behind the listener, and after the carry, because the libraries are read off the books branch the
   // carry brings to the deploy repository's trunk. Neither rejects.
   void wired.carryDeployTrunk().then(() => wired.syncReleaseKits());
+  // The tenants that follow releases (#328): the release runs watched from now on, and one check for
+  // what a release while the Manager was down left behind.
+  void wired.startTenantFollow();
   // ... and again every ten minutes, so a change on the deploy trunk reaches a standing tenant
   // without a boot or a plan (#169).
   scheduleDeployCarry(wired.carryDeployTrunk, logger);

@@ -4,14 +4,20 @@ import { VersionsDialog } from "./VersionsDialog.tsx";
 
 /** The action-bar button that opens a tenant's Versions dialog. Confirming only PLANS the run: the parts
  *  named move to the version chosen for each, and the member entries are resolved again off the
- *  product's manifest. */
-export function TenantVersionsAction(props: { tenantId: string; subdomain: string; busy: boolean; onSet: (versions: Record<string, string>) => void }) {
+ *  product's manifest. Beside it, the switch that lets every release move the tenant by itself: the
+ *  Manager then starts this same run when a release of a part the tenant renders succeeds at its
+ *  stage (hostyour-manager#328). */
+export function TenantVersionsAction(props: { tenantId: string; subdomain: string; busy: boolean; onSet: (versions: Record<string, string>) => void; following: boolean; onFollow: (on: boolean) => void }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <button type="button" className="btn" disabled={props.busy} onClick={() => setOpen(true)}>
         Versions…
       </button>
+      <label className="checkbox-field" title="Every release of a part this tenant runs moves it by itself, through the Versions run">
+        <input type="checkbox" checked={props.following} disabled={props.busy} onChange={(e) => props.onFollow(e.target.checked)} />
+        <span className="field__label">Follow releases</span>
+      </label>
       {open && (
         <VersionsDialog
           title={`Versions of tenant "${props.subdomain}"`}

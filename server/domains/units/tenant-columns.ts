@@ -26,6 +26,7 @@ export const TENANT_COLUMNS = {
   senderDomain: tenants.senderDomain,
   seedUsers: tenants.seedUsers,
   suspended: tenants.suspended,
+  followReleases: tenants.followReleases,
   owner: tenants.owner,
   provenance: tenants.provenance,
   status: tenants.status,

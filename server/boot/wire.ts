@@ -102,6 +102,10 @@ export interface Wired {
    *  image a tenant holds. boot.ts schedules it daily at REGISTRY_REAPER_HOUR. Undefined where the
    *  reaper is not configured. Never rejects. */
   reapRegistry: (() => Promise<void>) | undefined;
+  /** Watch the release runs for the tenants that follow releases, and move the ones a release while
+   *  the Manager was down left behind (server/domains/units/tenant-follow.ts). boot.ts starts it once
+   *  behind the listening server. Never rejects. */
+  startTenantFollow: () => Promise<void>;
 }
 
 /** The carry as boot runs it: LOG AND CONTINUE on failure — a deploy repository that is unreachable at
@@ -264,6 +268,8 @@ export async function wire(): Promise<Wired> {
   // CronJob because it must write into THIS database, which is a ReadWriteOnce volume held by a
   // single replica — the same dependency seed-master.ts states for its own reconcile.
   scheduleTenantCheck(executor, logger);
+  // The tenants that follow releases: their Versions runs are planned and approved by this executor.
+  const tenantFollow = units.tenantFollow?.(executor, db.db);
   scheduleNightlyBackup(executor, db.db, logger);
   await seedMaster(db.db, store, config, logger);
   phase("master seed");
@@ -357,7 +363,7 @@ export async function wire(): Promise<Wired> {
       // Tenant (multi-app) onboarding routes — the SAME thin shape, gated on the tenant family's own
       // flag (DEPLOY_REPO). Registered right after the consumer routes; the read
       // path (tenant list/detail) stays live, the mutating triggers answer 501 until tenantEnabled.
-      registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: units.tenantEnabled, ...(units.tenantResolver ? { resolver: units.tenantResolver } : {}), ...(units.deployRepoUrl ? { deployRepoUrl: units.deployRepoUrl } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.activator ? { activator: units.activator } : {}), ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.tenantVersions ? { versions: units.tenantVersions } : {}), ...(units.resolveUnitApex ? { resolveUnitApex: units.resolveUnitApex } : {}) });
+      registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: units.tenantEnabled, ...(units.tenantResolver ? { resolver: units.tenantResolver } : {}), ...(units.deployRepoUrl ? { deployRepoUrl: units.deployRepoUrl } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.activator ? { activator: units.activator } : {}), ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.tenantVersions ? { versions: units.tenantVersions } : {}), ...(tenantFollow ? { follower: tenantFollow.follower } : {}), ...(units.resolveUnitApex ? { resolveUnitApex: units.resolveUnitApex } : {}) });
       // The tenant's own apps repository: the run that creates and builds it, gated like the tenant routes.
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
       // The secrets of a standing consumer (#245) — gated like the other consumer triggers.
@@ -419,5 +425,6 @@ export async function wire(): Promise<Wired> {
       })
       : async (): Promise<void> => undefined,
     reapRegistry: reapRegistryLater,
+    startTenantFollow: tenantFollow?.start ?? (async (): Promise<void> => undefined),
   };
 }

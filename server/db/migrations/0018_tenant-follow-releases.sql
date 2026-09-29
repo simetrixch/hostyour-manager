@@ -1,0 +1,1 @@
+ALTER TABLE `tenants` ADD `follow_releases` integer DEFAULT false NOT NULL;

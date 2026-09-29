@@ -7,6 +7,9 @@ import type { Executor } from "../../executor/executor.ts";
 import type { VersionsView } from "../../../shared/api-types.ts";
 import { registerTenantRefreshMembersRoutes } from "./api-tenant-refresh-members.ts";
 import { toApiError } from "../../http/middleware/error-shape.ts";
+import { eq } from "drizzle-orm";
+import type { OperatorSession } from "../access/session.ts";
+import type { TenantFollower } from "./tenant-follow.ts";
 
 // The Versions dialog's routes: the GET answers what the reader answers, and the POST plans the run with
 // the version chosen per part, refusing a body whose versions are no image tags before anything runs.
@@ -25,11 +28,15 @@ describe("the Versions routes of a tenant", () => {
     h.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", status: "active" }).run();
     const planned: unknown[] = [];
     const executor = { planStreamed: async (_kind: string, params: unknown) => { planned.push(params); return { runId: "run_1" }; } } as unknown as Executor;
+    const checked: string[] = [];
+    const follower = { checkTenant: async (id: string) => { checked.push(id); } } as unknown as TenantFollower;
     const app = new Hono<AppEnv>();
     app.onError((err, c) => { const { status, body } = toApiError(err); return c.json(body, status as 400); });
-    registerTenantRefreshMembersRoutes(app, { db: h.db, executor, tenantEnabled: true, ...(versions ? { versions } : {}) });
+    app.use(async (c, next) => { c.set("operator", { sub: "op_1" } as OperatorSession); await next(); });
+    registerTenantRefreshMembersRoutes(app, { db: h.db, executor, tenantEnabled: true, follower, ...(versions ? { versions } : {}) });
     const post = async (body: unknown): Promise<Response> => app.request("/api/tenants/tnt_1/refresh-members", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    return { app, post, planned };
+    const follow = async (body: unknown): Promise<Response> => app.request("/api/tenants/tnt_1/follow-releases", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { app, post, follow, planned, checked };
   }
 
   it("answers the versions the reader reads for the tenant, and 501 where no reader is wired", async () => {
@@ -52,5 +59,21 @@ describe("the Versions routes of a tenant", () => {
     expect(bad.status).toBe(400);
     expect(await bad.text()).toContain("invalid versions request");
     expect(r.planned).toHaveLength(2);
+  });
+
+  it("turns following releases on and off on the row, records who did in the audit, and checks the tenant at once when on (#328)", async () => {
+    const r = route();
+    const on = await r.follow({ followReleases: true });
+    expect(on.status).toBe(200);
+    expect(h.db.select({ f: tenants.followReleases }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.f).toBe(true);
+    expect(r.checked).toEqual(["tnt_1"]);
+    expect((await r.follow({ followReleases: false })).status).toBe(200);
+    expect(h.db.select({ f: tenants.followReleases }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.f).toBe(false);
+    expect(r.checked).toEqual(["tnt_1"]); // turned off: nothing to catch up with
+    expect(h.sqlite.prepare("SELECT actor, action, detail_json AS detail FROM audit ORDER BY rowid").all()).toEqual([
+      { actor: "op_1", action: "tenant.follow-releases.set", detail: JSON.stringify({ followReleases: true }) },
+      { actor: "op_1", action: "tenant.follow-releases.set", detail: JSON.stringify({ followReleases: false }) },
+    ]);
+    expect((await r.follow({ followReleases: "yes" })).status).toBe(400);
   });
 });

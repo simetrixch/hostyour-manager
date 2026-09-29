@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { TektonBuildPlane, type BuildPlaneCluster, type ListedPipelineRun, type PipelineRunOutcome, type TektonBuildPlaneConfig } from "./build-plane-tekton.ts";
+import { TektonBuildPlane, type BuildPlaneCluster, type ListedPipelineRun, type PipelineRunOutcome, type TektonBuildPlaneConfig, type WatchedPipelineRun } from "./build-plane-tekton.ts";
+import type { ReleaseRunSucceeded } from "./port.ts";
 
 // The Tekton BuildPlane over a scripted cluster seam — no cluster, no network (the same test
 // shape as gate-runner-tekton.test.ts). The load-bearing assertions: the release watch finds the
@@ -25,6 +26,15 @@ class FakeCluster implements BuildPlaneCluster {
   async pipelineRunOutcome(): Promise<PipelineRunOutcome | null> {
     // Consume the scripted outcome sequence; the last entry repeats (models a settled run).
     return this.outcomes.length > 1 ? (this.outcomes.shift() ?? null) : (this.outcomes[0] ?? null);
+  }
+  /** The standing watches by namespace; `see` hands one a run the way the informer would. */
+  readonly watches = new Map<string, { selector: string; onRun: (run: WatchedPipelineRun) => void }>();
+  watchPipelineRuns(namespace: string, labelSelector: string, onRun: (run: WatchedPipelineRun) => void): () => void {
+    this.watches.set(namespace, { selector: labelSelector, onRun });
+    return () => this.watches.delete(namespace);
+  }
+  see(namespace: string, run: WatchedPipelineRun): void {
+    this.watches.get(namespace)?.onRun(run);
   }
 }
 
@@ -92,5 +102,39 @@ describe("TektonBuildPlane", () => {
     const plane = new TektonBuildPlane(cfg(), new FakeCluster({ runs: [...again(), fired], outcomes: [{ succeeded: true }] }));
     expect(await plane.awaitReleaseRun({ ...RELEASE_100, stage: "prod", standing: ["acme-release-7"] }, { appearMs: 100 }))
       .toEqual({ runName: "acme-release-12", releaseTag: "1.0.0-stable-20260728100000", succeeded: true });
+  });
+
+  describe("watchReleaseRuns", () => {
+    const later = (): string => new Date(Date.now() + 60_000).toISOString();
+    const succeeded = (name: string, params: Record<string, string>, over: Partial<WatchedPipelineRun> = {}): WatchedPipelineRun =>
+      ({ name, params, succeeded: true, completionTime: later(), imageTag: `${params["release-tag"]}-abc1234`, ...over });
+
+    it("watches every unit in its own namespace by the ownership label, and reports a run that succeeds with a stage once", () => {
+      const c = new FakeCluster();
+      const seen: ReleaseRunSucceeded[] = [];
+      const stop = new TektonBuildPlane(cfg(), c).watchReleaseRuns(["digita-jobs", "digita-auth"], (r) => seen.push(r), () => undefined);
+      expect([...c.watches.entries()].map(([ns, w]) => [ns, w.selector])).toEqual([
+        ["digita-jobs-build", "image-builder.io/consumer=digita-jobs"],
+        ["digita-auth-build", "image-builder.io/consumer=digita-auth"],
+      ]);
+      const run = succeeded("digita-jobs-release-1", { "release-tag": "0.3.004-stable-20260929083025", stage: "prod" });
+      c.see("digita-jobs-build", run);
+      c.see("digita-jobs-build", run); // the same run changing again is no second release
+      expect(seen).toEqual([{ unit: "digita-jobs", stage: "prod", runName: "digita-jobs-release-1", releaseTag: "0.3.004-stable-20260929083025", imageTag: "0.3.004-stable-20260929083025-abc1234" }]);
+      stop();
+      expect(c.watches.size).toBe(0);
+    });
+
+    it("PLANTED DEFECT: reports no run still running, failed, without a stage, or settled before the watch began", () => {
+      const c = new FakeCluster();
+      const seen: ReleaseRunSucceeded[] = [];
+      new TektonBuildPlane(cfg(), c).watchReleaseRuns(["digita-jobs"], (r) => seen.push(r), () => undefined);
+      const tag = { "release-tag": "0.3.004-stable-20260929083025" };
+      c.see("digita-jobs-build", succeeded("running", { ...tag, stage: "prod" }, { succeeded: null }));
+      c.see("digita-jobs-build", succeeded("failed", { ...tag, stage: "prod" }, { succeeded: false }));
+      c.see("digita-jobs-build", succeeded("no-stage", tag));
+      c.see("digita-jobs-build", succeeded("before", { ...tag, stage: "prod" }, { completionTime: "2026-01-01T00:00:00Z" }));
+      expect(seen).toEqual([]);
+    });
   });
 });

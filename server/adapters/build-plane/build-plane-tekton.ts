@@ -3,12 +3,15 @@
 // tests, KubeBuildPlaneCluster in production) under a small adapter that owns the watch policy.
 // Read-only against tekton.dev over the pod SA: it lists and reads PipelineRuns in a unit's own
 // `<unit>-build` namespace, and creates nothing.
-import { KubeConfig, CustomObjectsApi } from "@kubernetes/client-node";
-import type { BuildPlane, ReleaseRunQuery, ReleaseRunOutcome } from "./port.ts";
+import { ADD, ERROR, UPDATE, KubeConfig, CustomObjectsApi, makeInformer, type KubernetesListObject, type KubernetesObject } from "@kubernetes/client-node";
+import type { BuildPlane, ReleaseRunQuery, ReleaseRunOutcome, ReleaseRunSucceeded } from "./port.ts";
 import { AppError, errUpstream } from "../../kernel/errors.ts";
 
 const TEKTON = { group: "tekton.dev", version: "v1", plural: "pipelineruns" } as const;
 const DEFAULT_POLL_MS = 10_000; // a release run takes minutes — a 10s tick is plenty and easy on the API server
+/** How long a release watch that ended on an error waits before it starts again. The informer lists
+ *  and watches again by itself after a watch that simply ended, and stops on any other error. */
+const WATCH_RETRY_MS = 30_000;
 
 function upstream(msg: string): AppError {
   return errUpstream(`build-plane (tekton): ${msg}`);
@@ -46,6 +49,17 @@ export interface PipelineRunOutcome {
   imageTag?: string;
 }
 
+/** One PipelineRun as a watch sees it: its params and, once it settled, how and when. */
+export interface WatchedPipelineRun {
+  name: string;
+  params: Record<string, string>;
+  /** null while the run runs; its Succeeded condition once it settled. */
+  succeeded: boolean | null;
+  /** status.completionTime, once the run settled. */
+  completionTime?: string;
+  imageTag?: string;
+}
+
 /** The narrow cluster seam the build plane needs — a fake in tests, KubeBuildPlaneCluster in
  *  production. Every call names the unit's OWN `<unit>-build` namespace; there is no default. */
 export interface BuildPlaneCluster {
@@ -53,13 +67,35 @@ export interface BuildPlaneCluster {
   /** null while the PipelineRun is still running; {succeeded, imageTag} once its Succeeded condition
    *  settles — imageTag is the run's `image-tag` result, absent when the run states none. */
   pipelineRunOutcome(name: string, namespace: string): Promise<PipelineRunOutcome | null>;
+  /** Hand every PipelineRun under the selector in `namespace` to `onRun` as it is listed, added or
+   *  changed, until the answered function is called; an error goes to `onError`. */
+  watchPipelineRuns(namespace: string, labelSelector: string, onRun: (run: WatchedPipelineRun) => void, onError: (err: unknown) => void): () => void;
+}
+
+type RawPipelineRun = KubernetesObject & {
+  spec?: { params?: Array<{ name?: string; value?: unknown }> };
+  status?: { conditions?: Array<{ type?: string; status?: string }>; completionTime?: string; results?: Array<{ name?: string; value?: unknown }> };
+};
+
+function watchedRun(raw: RawPipelineRun): WatchedPipelineRun {
+  const cond = (raw.status?.conditions ?? []).find((c) => c.type === "Succeeded");
+  const imageTag = (raw.status?.results ?? []).find((r) => r.name === "image-tag")?.value;
+  return {
+    name: raw.metadata?.name ?? "",
+    params: Object.fromEntries((raw.spec?.params ?? []).filter((p): p is { name: string; value: unknown } => typeof p.name === "string").map((p) => [p.name, typeof p.value === "string" ? p.value : String(p.value ?? "")])),
+    succeeded: !cond || cond.status === undefined || cond.status === "Unknown" ? null : cond.status === "True",
+    ...(raw.status?.completionTime ? { completionTime: raw.status.completionTime } : {}),
+    ...(typeof imageTag === "string" && imageTag.length > 0 ? { imageTag } : {}),
+  };
 }
 
 /** The production cluster seam over @kubernetes/client-node. */
 export class KubeBuildPlaneCluster implements BuildPlaneCluster {
   private readonly custom: CustomObjectsApi;
+  private readonly kc: KubeConfig;
   constructor(kubeconfigPath?: string) {
     const kc = new KubeConfig();
+    this.kc = kc;
     // EXPLICIT dispatch (mirrors kube.ts buildKubeConfig, never loadFromDefault): a set path is the
     // dev/test file override; absent ⇒ the pod ServiceAccount's in-cluster credentials — the
     // production mode (the build cluster IS the Manager's own cluster).
@@ -98,6 +134,29 @@ export class KubeBuildPlaneCluster implements BuildPlaneCluster {
     // was pushed and pinned under (consumer-build pipeline-release.yaml, results).
     const imageTag = (raw.status?.results ?? []).find((r) => r.name === "image-tag")?.value;
     return { succeeded: cond.status === "True", ...(typeof imageTag === "string" && imageTag.length > 0 ? { imageTag } : {}) };
+  }
+
+  watchPipelineRuns(namespace: string, labelSelector: string, onRun: (run: WatchedPipelineRun) => void, onError: (err: unknown) => void): () => void {
+    const path = `/apis/${TEKTON.group}/${TEKTON.version}/namespaces/${namespace}/${TEKTON.plural}`;
+    const list = () => this.custom.listNamespacedCustomObject({ ...TEKTON, namespace, labelSelector }) as Promise<KubernetesListObject<RawPipelineRun>>;
+    const informer = makeInformer<RawPipelineRun>(this.kc, path, list, labelSelector);
+    let stopped = false;
+    let retry: NodeJS.Timeout | undefined;
+    const seen = (raw: RawPipelineRun): void => onRun(watchedRun(raw));
+    informer.on(ADD, seen);
+    informer.on(UPDATE, seen);
+    informer.on(ERROR, (err: unknown) => {
+      onError(err);
+      if (stopped) return;
+      retry = setTimeout(() => void informer.start().catch(onError), WATCH_RETRY_MS);
+      retry.unref();
+    });
+    void informer.start().catch(onError);
+    return () => {
+      stopped = true;
+      if (retry) clearTimeout(retry);
+      void informer.stop().catch(onError);
+    };
   }
 }
 
@@ -151,6 +210,27 @@ export class TektonBuildPlane implements BuildPlane {
 
   async listReleaseRuns(query: ReleaseRunQuery): Promise<string[]> {
     return (await this.releaseRuns(query)).runs.map((r) => r.name);
+  }
+
+  watchReleaseRuns(units: readonly string[], onSucceeded: (run: ReleaseRunSucceeded) => void, onError: (unit: string, err: unknown) => void): () => void {
+    // The first list of every watch replays each run that stands; one that settled before the watch
+    // began is not an event, and whoever starts the watch checks once for what it missed. A run is
+    // reported once, however often its object changes afterwards.
+    const since = Date.now();
+    const reported = new Set<string>();
+    const stops = units.map((unit) =>
+      this.cluster.watchPipelineRuns(`${unit}-build`, `image-builder.io/consumer=${unit}`, (run) => {
+        const stage = run.params["stage"] ?? "";
+        const key = `${unit}/${run.name}`;
+        if (run.succeeded !== true || stage === "" || reported.has(key)) return;
+        reported.add(key);
+        if (run.completionTime === undefined || Date.parse(run.completionTime) < since) return;
+        onSucceeded({ unit, stage, runName: run.name, releaseTag: run.params["release-tag"] ?? "", ...(run.imageTag ? { imageTag: run.imageTag } : {}) });
+      }, (err) => onError(unit, err)),
+    );
+    return () => {
+      for (const stop of stops) stop();
+    };
   }
 
   /** The runs of the queried release in its own build namespace: the release tag's
