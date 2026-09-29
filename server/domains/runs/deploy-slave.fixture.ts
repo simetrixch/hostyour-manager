@@ -102,7 +102,7 @@ export const STEP_NAMES = [
   "mark-slave",
   "place-ansiwise", "run-deploy-host", "run-deploy-cluster", "run-deploy-platform-services",
   "place-ansiwise-master", "rejoin", "read-membership", "declare-tailnet-address", "create-mgmt",
-  "gitops-handoff", "verify-slave", "register",
+  "gitops-handoff", "verify-slave", "register", "headlamp-contexts",
 ];
 /** The redeploy slave arm: the SAME list, with the outright join in the MEASURED form that reads the
  *  machine's membership and puts a machine holding none back on the network (`join-if-absent`).

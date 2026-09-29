@@ -611,6 +611,28 @@ export interface RepoCredentialWriter {
   repoCredentialExists(namespace: string, name: string): Promise<boolean>;
 }
 
+// ---- HeadlampKubeconfig (the shared dashboard's slave contexts) ------------------------------
+
+/** Headlamp's own sign-in, which every slave context signs the person in through. */
+export interface HeadlampSignIn {
+  issuerUrl: string;
+  clientId: string;
+  clientSecret: string;
+  /** Comma-separated, as Headlamp is given them and as a kubeconfig auth-provider takes them. */
+  scopes: string;
+}
+
+/** The shared Headlamp on the master (hostyour-cloud clusters/bootstrap/headlamp): the kubeconfig it
+ *  reads its slave contexts from, and the sign-in those contexts use. */
+export interface HeadlampKubeconfig {
+  /** The issuer, client and scopes Headlamp's Deployment is given, and its client secret. */
+  readSignIn(): Promise<HeadlampSignIn>;
+  /** The kubeconfig Headlamp reads its slave contexts from, or null where none stands. */
+  readKubeconfig(): Promise<string | null>;
+  /** Write the kubeconfig and restart Headlamp, which reads it at start alone. */
+  writeKubeconfig(kubeconfig: string): Promise<void>;
+}
+
 // ---- ClusterKubeResolver (per-cluster client selection) ------------------------------------
 
 /** The kube clients a Run needs to act on ONE target cluster, plus the ArgoCD namespace its

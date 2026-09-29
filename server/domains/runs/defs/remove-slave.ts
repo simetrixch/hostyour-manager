@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { headlampContextsStep } from "./headlamp-contexts.step.ts";
 import { eq } from "drizzle-orm";
 import type { Cleanup, Plan, RunDefinition, Step, StepCtx } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
@@ -250,6 +251,8 @@ export function removeSlaveSteps(serverId: string, ports: RemoveSlavePorts): Ste
     machineSideStep(removeManagerKeyCleanup),
     dropClusterMapStep(serverId, ports),
     retireRowsStep(serverId),
+    // SOFT: the shared Headlamp stops offering the slave, now that its row is removed.
+    headlampContextsStep(ports),
   ];
 }
 

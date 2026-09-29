@@ -1,4 +1,5 @@
 import { eq, inArray } from "drizzle-orm";
+import type { HeadlampKubeconfig } from "../../../adapters/kube/port.ts";
 import { createHash } from "node:crypto";
 import type { Db } from "../../../db/client.ts";
 import type { StepCtx, Cleanup } from "../../../executor/types.ts";
@@ -50,6 +51,9 @@ export interface DeploySlavePorts {
    *  different fact from an address that answered nothing and must never be reported as the same
    *  one. Every other check in that step, and every other run kind, is untouched by it. */
   metricsQuery?: MetricsQuery;
+  /** The shared Headlamp on the master, whose slave contexts the run's last step writes. Absent where
+   *  the Manager has no in-cluster access; the step then says so and the run goes on. */
+  headlamp?: HeadlampKubeconfig;
   /** How long a slave that has just been built is given to push its first series, in milliseconds.
    *
    *  A machine deployed seconds ago has not pushed yet, so the check waits before it calls silence

@@ -1,16 +1,17 @@
 // The per-slave management-plane schema, stored as JSON in clusters.plane_json, together with the
 // reader that narrows on its version. `v` is a contract only where a reader refuses a body it was
-// not written for; readClusterPlane at the bottom of this file is that reader, and the one reader of
-// the column goes through it: cluster-kube.ts, for the version alone, ahead of the permissive subset
-// it needs for a plane written before caData was sealed.
+// not written for; readClusterPlane at the bottom of this file is that reader, and both readers of
+// the column go through it: cluster-kube.ts, for the version alone, ahead of the permissive subset
+// it needs for a plane written before caData was sealed, and headlamp-contexts.ts.
 import { z } from "zod";
 
 /**
  * ClusterPlane **v0** — the Run-written identity of a slave's management plane, stored in
  * clusters.plane_json (mode "json"). TWO deploy-slave steps write it: `create-mgmt` folds in the
- * harvested kube access, `register` writes the whole plane over it. The per-cluster kube client
- * resolver (server/domains/inventory/cluster-kube.ts) is the only code that reads the column, and
- * it dials three fields: `kube`, `argo.namespace` and `credentialIds.clusterBearer`. The remaining
+ * harvested kube access, `register` writes the whole plane over it. Two readers read the column: the
+ * per-cluster kube client resolver (server/domains/inventory/cluster-kube.ts), which dials three
+ * fields, `kube`, `argo.namespace` and `credentialIds.clusterBearer`, and the shared Headlamp's slave
+ * contexts (server/domains/inventory/headlamp-contexts.ts), which dial `kube`. The remaining
  * fields are the run's written account of the plane it provisioned — no screen renders them, and
  * they are read by a person going to the row. Everything here is a stable fact of the slave, and
  * every per-slave resource is named by the slave NAME <name> (never the internal ordinal):

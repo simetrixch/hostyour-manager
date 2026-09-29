@@ -35,6 +35,7 @@ import { resolveClusterMarking, writeClusterMarking, projectClusterMarking, type
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
+import { headlampContextsStep } from "./headlamp-contexts.step.ts";
 
 // "cluster-deploy-slave" — the Run that gives a server the SLAVE PART, over the deployment PROGRAMS
 // of the machine's own programs checkout (hostyour-deploy ansiwise/programs/), each driven over
@@ -675,6 +676,8 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // register (local tx, overwrite-idempotent): cluster→active + provisionedAt + planeState
     // ready + planeJson (ClusterPlaneV0, shared/plane.ts); server→healthy; plane facts logged.
     registerStep(target),
+    // SOFT: the shared Headlamp offers the slave, now that its row stands active.
+    headlampContextsStep(ports),
   ];
 }
 

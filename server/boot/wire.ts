@@ -53,6 +53,8 @@ import { ensureAppIdentityRow } from "../security/app-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { refreshAppTokens } from "#unit/server/app-token-refresh.ts";
 import { syncReleaseKits } from "#unit/server/inject-release-kit.ts";
+import { KubeHeadlampKubeconfig } from "../adapters/kube/kube-headlamp.ts";
+import { syncHeadlampContexts } from "../domains/inventory/headlamp-contexts.ts";
 import { gateReleaseWorkflow } from "../domains/units/gates/release-workflow.ts";
 import { reapRegistry } from "./registry-reap.ts";
 import { tenantHeldPins } from "../domains/units/tenant-pins.ts";
@@ -102,6 +104,10 @@ export interface Wired {
    *  image a tenant holds. boot.ts schedules it daily at REGISTRY_REAPER_HOUR. Undefined where the
    *  reaper is not configured. Never rejects. */
   reapRegistry: (() => Promise<void>) | undefined;
+  /** The shared Headlamp's slave contexts brought to the installation's active slaves
+   *  (server/domains/inventory/headlamp-contexts.ts). boot.ts runs it once behind the listening
+   *  server, so the slaves a Manager release finds standing are offered. Never rejects. */
+  syncHeadlampContexts: () => Promise<void>;
   /** Watch the release runs for the tenants that follow releases, and move the ones a release while
    *  the Manager was down left behind (server/domains/units/tenant-follow.ts). boot.ts starts it once
    *  behind the listening server. Never rejects. */
@@ -169,6 +175,8 @@ export async function wire(): Promise<Wired> {
   // family: a cluster deployment must not depend on consumer onboarding being configured.
   const masterKube = core.kube.master;
   const resolver = core.kube.resolver;
+  // The shared Headlamp's slave contexts, written by the runs that add and remove a slave and at boot.
+  const headlamp = new KubeHeadlampKubeconfig(core.kube.input);
   // The DNS provider — ONE Cloudflare client for the core's own runs (the mail DNS, the records a
   // renamed slave's units carry) and both families' provision-dns and remove-dns steps. Absent (no
   // token) ⇒ those steps fail loud (DNS is a mandatory part of the run kinds), never a silent skip.
@@ -246,6 +254,7 @@ export async function wire(): Promise<Wired> {
     // given no metrics query address" — a manager built with a client pointing nowhere would report
     // the same skip as an unreachable address, and those are two different faults.
     ...(config.metricsQueryUrl ? { metricsQuery: new HttpMetricsQuery(config.metricsQueryUrl) } : {}),
+    headlamp,
   }, [...units.defs, ...active.flatMap((p) => p.wiring.definitions)]);
   const executor = new Executor({
     db: db.db,
@@ -425,6 +434,11 @@ export async function wire(): Promise<Wired> {
       })
       : async (): Promise<void> => undefined,
     reapRegistry: reapRegistryLater,
+    syncHeadlampContexts: () =>
+      syncHeadlampContexts({ db: db.db, headlamp }).then(
+        (said) => logger.info(said),
+        (err: unknown) => logger.error({ err }, "the shared Headlamp's slave contexts could not be written"),
+      ),
     startTenantFollow: tenantFollow?.start ?? (async (): Promise<void> => undefined),
   };
 }

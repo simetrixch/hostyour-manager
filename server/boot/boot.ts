@@ -49,6 +49,8 @@ export async function boot(): Promise<void> {
   // behind the listener, and after the carry, because the libraries are read off the books branch the
   // carry brings to the deploy repository's trunk. Neither rejects.
   void wired.carryDeployTrunk().then(() => wired.syncReleaseKits());
+  // The shared Headlamp offers every active slave this Manager finds standing (hostyour-cloud#255).
+  void wired.syncHeadlampContexts();
   // The tenants that follow releases (#328): the release runs watched from now on, and one check for
   // what a release while the Manager was down left behind.
   void wired.startTenantFollow();
