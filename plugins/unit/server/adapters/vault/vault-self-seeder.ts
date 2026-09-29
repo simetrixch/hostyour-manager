@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput } from "./seeder-port.ts";
+import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput } from "./seeder-port.ts";
+import { appName } from "#core/shared/tenant.ts";
 import { KV_MOUNT, VaultError } from "#core/server/adapters/vault/port.ts";
 
 // The concrete VaultSeeder: write-only KV-v2 seed of a consumer's ceremony
@@ -233,6 +234,51 @@ export class VaultSelfSeeder implements VaultSeeder {
     }
   }
 
+  async seedTenantAppKey(input: TenantAppKeySeedInput): Promise<VaultSeedOutcome> {
+    // The app name is a path segment here, so it is held to the rule every app name is created under
+    // (shared/tenant.ts appName): a name carrying a slash would write another app's leaf.
+    if (!appName.safeParse(input.app).success) throw new VaultError(`"${input.app}" is no tenant app name, so no key path is composed from it`, 400);
+    const { addr, token } = await this.login();
+    try {
+      const path = tenantAppKeyPath(input.stage, input.guid, input.app);
+      const res = await fetch(`${addr}/v1/${KV_MOUNT}/data/${path}`, {
+        method: "POST",
+        headers: { "x-vault-token": token, "content-type": "application/json" },
+        body: JSON.stringify({ data: input.data, options: { cas: 0 } }),
+      });
+      if (res.ok) return { created: true };
+      const detail = await res.text().catch(() => "");
+      if (res.status === 400 && detail.includes("check-and-set")) return { created: false };
+      throw new VaultError(`vault tenant app key seed put failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
+  async deleteTenantAppKeys(input: TenantCryptoDeleteInput): Promise<{ deleted: string[] }> {
+    // LISTED, not taken from the inventory: an app removed from the tenant keeps its key (its data
+    // and backups may still hold values encrypted with it), so the manager's rows no longer name
+    // every key that stands. Listing answers names and no value. METADATA delete for the reason
+    // deleteTenantCrypto gives: a tenant minted later with this guid must not inherit a key.
+    const { addr, token } = await this.login();
+    try {
+      const folder = `${input.stage}/tenants/${input.guid}/password-field-key`;
+      const listed = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${folder}?list=true`, { headers: { "x-vault-token": token } });
+      if (listed.status === 404) return { deleted: [] };
+      if (!listed.ok) throw new VaultError(`vault tenant app key list failed for ${KV_MOUNT}/${folder} (${listed.status})`, listed.status);
+      const keys = ((await listed.json()) as { data?: { keys?: string[] } }).data?.keys ?? [];
+      const deleted: string[] = [];
+      for (const key of keys) {
+        const res = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${folder}/${key}`, { method: "DELETE", headers: { "x-vault-token": token } });
+        if (!res.ok && res.status !== 404) throw new VaultError(`vault tenant app key delete failed for ${KV_MOUNT}/${folder}/${key} (${res.status})`, res.status);
+        deleted.push(key);
+      }
+      return { deleted };
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
   /** The Manager's OWN kubernetes-auth login against ITS Vault — the identity of every write
    *  here. Fail-closed when the Manager carries no Vault login. */
   private async login(): Promise<{ addr: string; token: string }> {
@@ -327,4 +373,10 @@ export class VaultSelfSeeder implements VaultSeeder {
     const res = await fetch(`${addr}/v1/auth/token/revoke-self`, { method: "POST", headers: { "x-vault-token": token } });
     if (!res.ok) throw new VaultError(`vault token revoke-self failed (${res.status})`, res.status);
   }
+}
+
+/** Where one tenant app's Password field key stands: one level below the tenant's entry, which is
+ *  written create-only and takes no property later (hostyour-manager#329). */
+export function tenantAppKeyPath(stage: string, guid: string, app: string): string {
+  return `${stage}/tenants/${guid}/password-field-key/${app}`;
 }

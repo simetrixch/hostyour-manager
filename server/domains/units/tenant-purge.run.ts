@@ -341,13 +341,19 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
         if (!ports.seeder) {
           ctx.log(
             "meta",
-            `no Vault seeder is wired, so the crypto entry ${c.stage}/tenants/${c.guid} is NOT destroyed — if this tenant was ever seeded, its JWT signing key, TOTP key, bootstrap token and engine key stand in Vault after this purge and must be removed by hand`,
+            `no Vault seeder is wired, so the crypto entry ${c.stage}/tenants/${c.guid} and its apps' Password field keys are NOT destroyed — if this tenant was ever seeded, its JWT signing key, TOTP key, bootstrap token, engine key and app keys stand in Vault after this purge and must be removed by hand`,
           );
           return;
         }
         await ports.seeder.deleteTenantCrypto({ stage: c.stage, guid: c.guid });
-        ctx.checkpoint({ tenantCrypto: c.guid, deleted: true });
+        // And every app's Password field key below it, found by listing, so the key of an app removed
+        // earlier goes too (tenant-app-keys.ts).
+        const { deleted: appKeys } = await ports.seeder.deleteTenantAppKeys({ stage: c.stage, guid: c.guid });
+        ctx.checkpoint({ tenantCrypto: c.guid, deleted: true, appKeys });
         ctx.log("meta", `crypto entry ${c.stage}/tenants/${c.guid} destroyed (all versions) — the tenant's identity is gone, and a future tenant of this guid gets a fresh one`);
+        ctx.log("meta", appKeys.length > 0
+          ? `Password field keys destroyed (all versions) for ${appKeys.join(", ")} under ${c.stage}/tenants/${c.guid}/password-field-key/`
+          : `no Password field key stood under ${c.stage}/tenants/${c.guid}/password-field-key/`);
       },
     },
     {

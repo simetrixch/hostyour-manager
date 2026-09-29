@@ -118,6 +118,8 @@ class FakeSeeder implements VaultSeeder {
   async deletePostgres(i: PostgresSecretDeleteInput): Promise<void> { this.deletedPostgres.push(i); }
   async deleteMongodb(): Promise<void> {}
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
+  async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
   async deleteTenantCrypto(): Promise<void> {}
 }
 

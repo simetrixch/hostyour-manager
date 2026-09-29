@@ -195,6 +195,19 @@ export interface TenantCryptoDeleteInput {
   guid: string;
 }
 
+/** One tenant app's Password field key: ONE entry per app, one level below the tenant's entry,
+ *  because that entry is written create-only and takes no property later (hostyour-manager#329).
+ *  The tenant's members read it through the same templated policy as the entry above it. */
+export interface TenantAppKeySeedInput {
+  stage: Stage;
+  guid: string;
+  /** The app's name as `tenant_apps.name` spells it — the leaf name, and the `tenant.appName` the
+   *  engine's chart reads it under. */
+  app: string;
+  /** property -> value, written under <stage>/tenants/<guid>/password-field-key/<app>. */
+  data: Record<string, string>;
+}
+
 export interface VaultSeeder {
   /** Create the consumer's app entry — ONCE. An existing entry is never overwritten (`created:
    *  false`); rotating or extending it is a separate, explicit action, never a side effect of
@@ -257,4 +270,10 @@ export interface VaultSeeder {
    *  NORMAL case and not only a crash-retry: a tenant whose create-tenant died before the seed step
    *  has none. Every other non-2xx fails the run; a 403 is a missing grant, never "already gone". */
   deleteTenantCrypto(input: TenantCryptoDeleteInput): Promise<void>;
+  /** Create one tenant app's Password field key — ONCE (cas=0), for the reason the tenant entry is:
+   *  every stored Password value of the app decrypts with it alone, so it is never overwritten. */
+  seedTenantAppKey(input: TenantAppKeySeedInput): Promise<VaultSeedOutcome>;
+  /** Remove every tenant app key of one tenant (purge), found by listing the key names under it,
+   *  so the key of an app this manager no longer knows goes too. Answers the names it removed. */
+  deleteTenantAppKeys(input: TenantCryptoDeleteInput): Promise<{ deleted: string[] }>;
 }

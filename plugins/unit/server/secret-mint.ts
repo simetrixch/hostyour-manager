@@ -24,6 +24,12 @@ export function mintSecretValue(kind: "hex32" | "hex16" | "uuid"): string {
   }
 }
 
+/** The key one tenant app's engine encrypts a Password field's value with (AES-256-GCM,
+ *  hostyour-manager#329): 32 random bytes as base64, the only length the engine accepts. */
+export function mintAes256Key(): string {
+  return randomBytes(32).toString("base64");
+}
+
 /** The instance-superuser password for a per-consumer PostgreSQL.
  *  NOT a manifest `secrets[]` value — the consumer never declares it — so it is neither a mint kind nor
  *  part of buildConsumerSecretData; it is minted service-side (iff `services` claims postgresql) and

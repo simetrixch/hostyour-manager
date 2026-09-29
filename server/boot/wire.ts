@@ -52,6 +52,7 @@ import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-c
 import { ensureAppIdentityRow } from "../security/app-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { refreshAppTokens } from "#unit/server/app-token-refresh.ts";
+import { ensureTenantAppKeys } from "../domains/units/tenant-app-keys.ts";
 import { syncReleaseKits } from "#unit/server/inject-release-kit.ts";
 import { KubeHeadlampKubeconfig } from "../adapters/kube/kube-headlamp.ts";
 import { syncHeadlampContexts } from "../domains/inventory/headlamp-contexts.ts";
@@ -92,6 +93,11 @@ export interface Wired {
    *  and then every 45 minutes. Never rejects — every failure is logged per unit. A no-op where the
    *  consumer family is not wired: there are then no build registrations. */
   refreshAppTokens: () => Promise<void>;
+  /** The Password field key of every tenant app that has none, written create-only
+   *  (server/domains/units/tenant-app-keys.ts ensureTenantAppKeys): the forward step for the apps that
+   *  joined before keys were minted. boot.ts runs it once behind the listening server. Never rejects.
+   *  A no-op where the unit family and its seeder are not wired. */
+  mintTenantAppKeys: () => Promise<void>;
   /** The current release kit written into the repository of every registered unit and of every library
    *  the deploy repository names, where it differs (plugins/unit/server/inject-release-kit.ts
    *  syncReleaseKits): a release made there by hand runs the kit this Manager ships. boot.ts runs it
@@ -422,6 +428,11 @@ export async function wire(): Promise<Wired> {
     checks,
     carryDeployTrunk,
     refreshAppTokens: refreshAppTokensLater,
+    mintTenantAppKeys: unit
+      ? async () => {
+        await ensureTenantAppKeys({ db: db.db, seeder: unit.seeder, logger });
+      }
+      : async () => undefined,
     syncReleaseKits: registrations && consumerRepo
       ? () => syncReleaseKits({
         registrations, writer: consumerRepo, version: config.version, logger,

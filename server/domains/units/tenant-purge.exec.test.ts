@@ -83,6 +83,9 @@ class FakePurgeSeeder implements VaultSeeder {
   async seedBuildRepoPat(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds a repo pat"); }
   async refreshBuildRepoPat(): Promise<void> { throw new Error("purge never refreshes a repo pat"); }
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds tenant crypto"); }
+  async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
+  async deleteTenantAppKeys(i: TenantCryptoDeleteInput): Promise<{ deleted: string[] }> { this.deletedAppKeys.push(i); return { deleted: ["erp"] }; }
+  readonly deletedAppKeys: TenantCryptoDeleteInput[] = [];
   async deleteTenantCrypto(i: TenantCryptoDeleteInput): Promise<void> { this.deletedCrypto.push(i); }
   async deleteBuildRepoPat(): Promise<void> {}
   async deleteApp(): Promise<void> {}
@@ -375,6 +378,8 @@ describe("tenant-purge execution", () => {
     await runAll(prt, params, logs); // nothing skipped — the run completes on its own
 
     expect(seeder.deletedCrypto).toEqual([{ stage: "prod", guid: GUID }]);
+    // And every app's Password field key below it (hostyour-manager#329).
+    expect(seeder.deletedAppKeys).toEqual([{ stage: "prod", guid: GUID }]);
     expect(await reg.readTenant("prod", GUID)).toBeNull();
     expect(cluster.deletedNamespaces).toEqual(NAMESPACES);
     expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()?.status).toBe("purged");

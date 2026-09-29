@@ -20,5 +20,7 @@ export class RecordingTeardownSeeder implements VaultSeeder {
   async deletePostgres(i: PostgresSecretDeleteInput): Promise<void> { this.deletedPostgres.push(i); }
   async deleteMongodb(i: MongodbSecretDeleteInput): Promise<void> { this.deletedMongodb.push(i); }
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
+  async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
   async deleteTenantCrypto(): Promise<void> {}
 }

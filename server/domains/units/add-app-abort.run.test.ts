@@ -140,6 +140,8 @@ function harness(): Harness {
     channelStages: async () => TEST_CHANNEL_STAGES,
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
+    // The new app's Password field key (seed-password-field-key), written as a first write.
+    seeder: { seedTenantAppKey: async () => ({ created: true }) } as unknown as NonNullable<AddAppPorts["seeder"]>,
   };
   // The template's catalog names the new app with no selection — the plan judges against it.
   const def = makeAddAppDef(withAppsTemplate(ports, { "apps.yaml": `apps:\n  - name: ${NEW_APP}\n    title: ${NEW_APP}\n`, [`${NEW_APP}/package.json`]: "{}\n" })) as unknown as AnyRunDefinition;

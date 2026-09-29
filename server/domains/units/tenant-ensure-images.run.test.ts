@@ -97,6 +97,8 @@ function fakeTenantSeeder(): VaultSeeder {
     deleteApp: async () => {},
     deletePostgres: async () => {}, deleteMongodb: async () => {},
     seedTenantCrypto: async () => ({ created: true }),
+    seedTenantAppKey: async () => ({ created: true }),
+    deleteTenantAppKeys: async () => ({ deleted: [] }),
     deleteTenantCrypto: async () => {},
   };
 }

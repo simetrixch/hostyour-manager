@@ -59,6 +59,8 @@ function seederWith(over: Partial<VaultSeeder>): VaultSeeder {
     deleteBuildRepoPat: async () => {},
     deleteApp: async () => {},
     deletePostgres: async () => {}, deleteMongodb: async () => {},
+    seedTenantAppKey: async () => ({ created: true }),
+    deleteTenantAppKeys: async () => ({ deleted: [] }),
     deleteTenantCrypto: async () => {},
     ...over,
   };

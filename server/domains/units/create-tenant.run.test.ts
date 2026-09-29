@@ -27,6 +27,7 @@ import type { VaultSeeder, TenantCryptoSeedInput } from "#unit/server/adapters/v
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { TENANT_CRYPTO_PROPERTIES, TENANT_STORAGE_PROPERTIES } from "./tenant-crypto-mint.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { fakeTenantSeeder } from "./tenant-seeder.fixture.ts";
 
 
 const SHA = "a".repeat(40);
@@ -102,24 +103,6 @@ function repoWithManifest(resolvedSha = SHA): FakeRepoReader {
 // projects) into a FakeClusterKubeResolver whose master path resolves to argoNamespace "argocd".
 type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter };
 
-/** A VaultSeeder for the tenant runs: create-tenant seeds the crypto entry through it, and nothing
- *  else here touches Vault. `created: true` models the normal first run; the consumer-side methods
- *  throw, because a tenant run reaching one of them would be a wiring mistake, not a pass. */
-function fakeTenantSeeder(): VaultSeeder {
-  return {
-    seed: () => Promise.reject(new Error("a tenant run never seeds a consumer entry")),
-    patchApp: async () => undefined,
-    seedPostgres: () => Promise.reject(new Error("a tenant run never seeds postgres")),
-    seedMongodb: () => Promise.reject(new Error("a tenant run never seeds mongodb")),
-    seedBuildRepoPat: () => Promise.reject(new Error("a tenant run never seeds a repo pat")),
-    refreshBuildRepoPat: () => Promise.reject(new Error("a tenant run never refreshes a repo pat")),
-    deleteBuildRepoPat: async () => {},
-    deleteApp: async () => {},
-    deletePostgres: async () => {}, deleteMongodb: async () => {},
-    seedTenantCrypto: async () => ({ created: true }),
-    deleteTenantCrypto: async () => {},
-  };
-}
 
 function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboardPorts {
   const { argo, cluster, projects, ...portOver } = over;
@@ -443,6 +426,13 @@ describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
     await step.run(ctx(p, step.name, logs));
     return { seen, logs, store };
   }
+
+  it("writes one Password field key per app into the app's own entry, in the same step", async () => {
+    // Before the registration fans out into engines that read it (hostyour-manager#329).
+    const keyed: string[] = [];
+    await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.app}`); return { created: true }; } });
+    expect(keyed).toEqual(APPS.map((a) => `prod/${GUID}/${a.name}`));
+  });
 
   it("writes the tenant's own leaf with every property its members read", async () => {
     const { seen } = await seedStep();

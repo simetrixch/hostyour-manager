@@ -149,6 +149,9 @@ export function ports(over: Partial<AddAppPorts> & FakeKube = {}, template: Reco
       { unit: "swissbookai", build: "swissbookai-api" },
     ],
     consumerHostLabels: async () => ["example-platform", "swissbookai"],
+    // The Password field key the new app's engine reads (seed-password-field-key); every write is
+    // a first one here, as it is for an app that never stood in the tenant.
+    seeder: { seedTenantAppKey: async () => ({ created: true }) } as unknown as NonNullable<AddAppPorts["seeder"]>,
     ...portOver,
   }, template);
 }
