@@ -20,13 +20,17 @@ const releaseSh = readFileSync(new URL("./assets/release.sh", import.meta.url), 
 const workflowReleaseYml = readFileSync(new URL("./assets/workflow-release.yml", import.meta.url), "utf8");
 
 /** One release-kit file: the CONSUMER-repo-relative target path, its verbatim content, and whether git
- *  records it as executable. The mode is declared here, from the file's `#!` line, and never read off
- *  this process's filesystem, which may keep no executable bits. */
+ *  records it as executable. */
 export interface ReleaseKitFile {
   path: string;
   content: string;
   executable: boolean;
 }
+
+/** A kit file is executable exactly when it starts with `#!`, so `./release/release.sh` runs as its
+ *  usage line says. The mode is derived from the bytes and never read off this process's filesystem,
+ *  which may keep no executable bits. */
+const kitFile = (path: string, content: string): ReleaseKitFile => ({ path, content, executable: content.startsWith("#!") });
 
 /** The directory the kit owns WHOLLY. Everything under it was written by an onboarding, so a file
  *  there that the current asset set no longer carries is a stale leftover of an older kit and the
@@ -36,15 +40,15 @@ export const RELEASE_KIT_DIR = "release";
 
 /** The one kit file outside RELEASE_KIT_DIR, at a path the consumer may already own for a workflow
  *  of its own. The release-workflow gate reads the repository there before the kit is written. */
-export const RELEASE_KIT_WORKFLOW: ReleaseKitFile = { path: ".github/workflows/release.yml", content: workflowReleaseYml, executable: false };
+export const RELEASE_KIT_WORKFLOW: ReleaseKitFile = kitFile(".github/workflows/release.yml", workflowReleaseYml);
 
 /** The three files the release-kit places in a consumer repo, at their consumer-repo target paths.
  *  onboard's inject-release-kit REPLACES them: each file is written to exactly this content
  *  whenever the repo's copy differs — the kit is platform-owned tooling, and an onboarding must
  *  leave the repo in the state a fresh one would. */
 export const RELEASE_KIT_FILES: readonly ReleaseKitFile[] = [
-  { path: `${RELEASE_KIT_DIR}/release.ps1`, content: releasePs1, executable: false },
-  { path: `${RELEASE_KIT_DIR}/release.sh`, content: releaseSh, executable: true },
+  kitFile(`${RELEASE_KIT_DIR}/release.ps1`, releasePs1),
+  kitFile(`${RELEASE_KIT_DIR}/release.sh`, releaseSh),
   RELEASE_KIT_WORKFLOW,
 ];
 
