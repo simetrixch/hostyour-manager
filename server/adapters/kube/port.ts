@@ -623,14 +623,16 @@ export interface HeadlampSignIn {
 }
 
 /** The shared Headlamp on the master (hostyour-cloud clusters/bootstrap/headlamp): the kubeconfig it
- *  reads its slave contexts from, and the sign-in those contexts use. */
+ *  reads its slave contexts from, and the sign-in those contexts use. The kubeconfig is written and
+ *  never read back: what Headlamp runs with is recorded as a hash on its pod template instead. */
 export interface HeadlampKubeconfig {
   /** The issuer, client and scopes Headlamp's Deployment is given, and its client secret. */
   readSignIn(): Promise<HeadlampSignIn>;
-  /** The kubeconfig Headlamp reads its slave contexts from, or null where none stands. */
-  readKubeconfig(): Promise<string | null>;
-  /** Write the kubeconfig and restart Headlamp, which reads it at start alone. */
-  writeKubeconfig(kubeconfig: string): Promise<void>;
+  /** The hash of the kubeconfig Headlamp's pods were last started with, or null where none is recorded. */
+  readKubeconfigHash(): Promise<string | null>;
+  /** Write the kubeconfig, then record its hash on the pod template, which restarts Headlamp: it reads
+   *  the file at start alone. A write whose restart failed leaves the old hash, so it is done again. */
+  writeKubeconfig(kubeconfig: string, hash: string): Promise<void>;
 }
 
 // ---- ClusterKubeResolver (per-cluster client selection) ------------------------------------

@@ -5,6 +5,7 @@
 // through Headlamp's own client: every cluster's API server accepts that sign-in and binds the group
 // admins to cluster-admin (hostyour-deploy ansiwise/programs/deploy-cluster.yaml). So no credential of
 // a slave lands in Headlamp; what a person may do there is what their own sign-in may do.
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { stringify } from "yaml";
 import type { Db } from "../../db/client.ts";
@@ -56,13 +57,15 @@ export function headlampKubeconfig(slaves: readonly SlaveContext[], signIn: Head
 }
 
 /** Bring Headlamp's slave contexts to the installation's active slaves, answered as a sentence for the
- *  record. Writes, and so restarts Headlamp, only where the kubeconfig differs. */
+ *  record. Writes, and so restarts Headlamp, only where the pods did not start with this kubeconfig:
+ *  its hash on the pod template says what they started with, so a restart that failed is done again. */
 export async function syncHeadlampContexts(deps: { db: Db; headlamp: HeadlampKubeconfig }): Promise<string> {
   const { slaves, unreachable } = activeSlaves(deps.db);
   const next = headlampKubeconfig(slaves, await deps.headlamp.readSignIn());
+  const hash = createHash("sha256").update(next).digest("hex");
   const names = slaves.map((s) => s.name).join(", ") || "no slave";
   const missing = unreachable.length > 0 ? `; ${unreachable.join(", ")} sealed no API address at deployment and cannot be offered` : "";
-  if ((await deps.headlamp.readKubeconfig()) === next) return `Headlamp offers ${names} beside the master already${missing}`;
-  await deps.headlamp.writeKubeconfig(next);
+  if ((await deps.headlamp.readKubeconfigHash()) === hash) return `Headlamp offers ${names} beside the master already${missing}`;
+  await deps.headlamp.writeKubeconfig(next, hash);
   return `Headlamp offers ${names} beside the master, and restarts to read them${missing}`;
 }

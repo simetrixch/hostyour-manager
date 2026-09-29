@@ -14,8 +14,9 @@ const DEPLOYMENT = "headlamp";
 const KUBECONFIG_SECRET = "kube-slaves-kubeconfig";
 const KUBECONFIG_KEY = "kubeconfig";
 const SIGN_IN_SECRET = "headlamp-oidc";
-/** The annotation `kubectl rollout restart` stamps on a pod template, which replaces the pods. */
-const RESTARTED_AT = "kubectl.kubernetes.io/restartedAt";
+/** The pod-template annotation carrying the hash of the kubeconfig the pods start with: changing it
+ *  replaces the pods, as `kubectl rollout restart` does with its own annotation. */
+const KUBECONFIG_HASH = "hostyour.cloud/slaves-kubeconfig-sha256";
 
 const decoded = (b64: string | undefined): string | undefined => (b64 === undefined ? undefined : Buffer.from(b64, "base64").toString("utf8"));
 
@@ -51,22 +52,28 @@ export class KubeHeadlampKubeconfig implements HeadlampKubeconfig {
     };
   }
 
-  async readKubeconfig(): Promise<string | null> {
+  async readKubeconfigHash(): Promise<string | null> {
     try {
-      return decoded((await this.core.readNamespacedSecret({ name: KUBECONFIG_SECRET, namespace: NAMESPACE })).data?.[KUBECONFIG_KEY]) ?? null;
+      const deployment = await this.apps.readNamespacedDeployment({ name: DEPLOYMENT, namespace: NAMESPACE });
+      return deployment.spec?.template.metadata?.annotations?.[KUBECONFIG_HASH] ?? null;
     } catch (e) {
-      if (isNotFound(e)) return null;
-      throw upstream(`read the Secret ${NAMESPACE}/${KUBECONFIG_SECRET}`, e);
+      throw upstream(`read the Deployment ${NAMESPACE}/${DEPLOYMENT}`, e);
     }
   }
 
-  async writeKubeconfig(kubeconfig: string): Promise<void> {
+  async writeKubeconfig(kubeconfig: string, hash: string): Promise<void> {
     const body = { metadata: { name: KUBECONFIG_SECRET, namespace: NAMESPACE }, type: "Opaque", stringData: { [KUBECONFIG_KEY]: kubeconfig } };
     try {
-      if ((await this.readKubeconfig()) === null) await this.core.createNamespacedSecret({ namespace: NAMESPACE, body });
-      else await this.core.replaceNamespacedSecret({ name: KUBECONFIG_SECRET, namespace: NAMESPACE, body });
+      // Replaced where it stands and created where it does not, without reading it: the grant holds no
+      // read of this Secret, so a Secret of another type created under its name could not be read back.
+      try {
+        await this.core.replaceNamespacedSecret({ name: KUBECONFIG_SECRET, namespace: NAMESPACE, body });
+      } catch (e) {
+        if (!isNotFound(e)) throw e;
+        await this.core.createNamespacedSecret({ namespace: NAMESPACE, body });
+      }
       await this.apps.patchNamespacedDeployment(
-        { name: DEPLOYMENT, namespace: NAMESPACE, body: { spec: { template: { metadata: { annotations: { [RESTARTED_AT]: new Date().toISOString() } } } } } },
+        { name: DEPLOYMENT, namespace: NAMESPACE, body: { spec: { template: { metadata: { annotations: { [KUBECONFIG_HASH]: hash } } } } } },
         setHeaderOptions("Content-Type", PatchStrategy.MergePatch),
       );
     } catch (e) {

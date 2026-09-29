@@ -12,12 +12,19 @@ import { activeSlaves, headlampKubeconfig, syncHeadlampContexts } from "./headla
 const SIGN_IN: HeadlampSignIn = { issuerUrl: "https://idp.m1.example/application/o/headlamp/", clientId: "headlamp", clientSecret: "s3cret", scopes: "openid,profile,email,groups" };
 const plane = (server: string): Record<string, unknown> => ({ v: 0, kube: { server, caData: "Q0E=" } });
 
+/** Headlamp as the Manager sees it: the Secret it cannot read, and the hash on the pod template.
+ *  `restartFails` makes the next restart fail after the Secret was written, as a refused patch would. */
 class FakeHeadlamp implements HeadlampKubeconfig {
   written: string[] = [];
-  constructor(private standing: string | null = null) {}
+  hash: string | null = null;
+  restartFails = false;
   async readSignIn(): Promise<HeadlampSignIn> { return SIGN_IN; }
-  async readKubeconfig(): Promise<string | null> { return this.standing; }
-  async writeKubeconfig(kubeconfig: string): Promise<void> { this.written.push(kubeconfig); this.standing = kubeconfig; }
+  async readKubeconfigHash(): Promise<string | null> { return this.hash; }
+  async writeKubeconfig(kubeconfig: string, hash: string): Promise<void> {
+    this.written.push(kubeconfig);
+    if (this.restartFails) { this.restartFails = false; throw new Error("the patch was refused"); }
+    this.hash = hash;
+  }
 }
 
 let h: DbHandle;
@@ -60,6 +67,14 @@ describe("the shared Headlamp's slave contexts", () => {
     expect(await syncHeadlampContexts({ db: h.db, headlamp })).toBe("Headlamp offers apps1, apps2 beside the master, and restarts to read them; apps4 sealed no API address at deployment and cannot be offered");
     expect(await syncHeadlampContexts({ db: h.db, headlamp })).toBe("Headlamp offers apps1, apps2 beside the master already; apps4 sealed no API address at deployment and cannot be offered");
     expect(headlamp.written).toHaveLength(1);
+  });
+
+  it("PLANTED DEFECT: writes and restarts again after a restart that failed, where the pods kept the old contexts", async () => {
+    const headlamp = new FakeHeadlamp();
+    headlamp.restartFails = true;
+    await expect(syncHeadlampContexts({ db: h.db, headlamp })).rejects.toThrow("the patch was refused");
+    expect(await syncHeadlampContexts({ db: h.db, headlamp })).toContain("and restarts to read them");
+    expect(headlamp.written).toHaveLength(2);
   });
 
   it("takes a removed slave's context out", async () => {
