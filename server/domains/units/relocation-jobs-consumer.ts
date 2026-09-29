@@ -2,10 +2,11 @@
 // (plugins/unit/server/relocation-jobs.ts). Same design: pure JobSpec composition, one job per Secret
 // home, `DB`/`MISSING` lines as the wire format.
 import type { ConsumerService } from "../../../shared/consumer.ts";
-import type { JobEnvVar } from "../../adapters/kube/port.ts";
+import type { JobEnvVar, JobIdentity, ClaimUser } from "../../adapters/kube/port.ts";
+import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import {
-  boxSpec, BOX_REMOTE, MONGO_FLAGS, mongoEnv, writeFile, quoted, relocationJobName, hashLine,
+  boxSpec, BOX_REMOTE, MONGO_FLAGS, mongodumpLine, mongoEnv, writeFile, quoted, relocationJobName, hashLine,
   MONGO_NAMESPACE,
   type RelocationJob,
 } from "#unit/server/relocation-jobs.ts";
@@ -34,9 +35,30 @@ export interface ConsumerJobInputs {
   services: readonly ConsumerService[];
   /** The PVC names of the consumer namespace, listed off the cluster at step time. */
   pvcs: readonly string[];
+  /** Who the PVC dump runs as: the user the claims' files belong to (claimsIdentity). */
+  pvcUser?: JobIdentity;
   image: string;
 }
 
+
+/** The one identity that can read every claim in `claims`: the user and group of the running pods
+ *  that mount them. A claim no running pod mounts, or claims whose pods run as different users, are
+ *  refused by name, because a job reading the files as any other user fails on the first one its
+ *  owner alone may read. */
+export function claimsIdentity(namespace: string, claims: readonly string[], users: readonly ClaimUser[]): JobIdentity {
+  const identities = new Map<string, JobIdentity>();
+  for (const claim of claims) {
+    const mounted = users.filter((u) => u.claim === claim);
+    if (mounted.length === 0) {
+      throw errValidation(`claim ${claim} in ${namespace} is mounted by no running pod that states its user, so nothing says whose files it holds and the dump could not read them`);
+    }
+    for (const u of mounted) identities.set(`${u.user}:${u.group}`, { user: u.user, group: u.group });
+  }
+  if (identities.size !== 1) {
+    throw errValidation(`the claims in ${namespace} are used as ${[...identities.keys()].join(" and ")}, and one dump job reads as one user`);
+  }
+  return [...identities.values()][0]!;
+}
 
 /** The complete consumer dump: the registration, its Mongo databases[], the whole per-consumer
  *  PostgreSQL, the claim bucket, and every PVC as a tar — each job where its Secret lives. */
@@ -61,8 +83,7 @@ export function consumerDumpJobs(i: ConsumerJobInputs & { registrationYaml: stri
         script:
           BOX_REMOTE +
           `for db in ${quoted(i.databases)}; do
-  mongodump ${MONGO_FLAGS} --db "$db" --archive="/tmp/$db.archive" --quiet
-  ${hashLine("/tmp/$db.archive", "mongo/$db.archive")}  rclone copyto "/tmp/$db.archive" "box:${i.folder}/mongo/$db.archive"
+  ${mongodumpLine("$db", "/tmp/$db.archive")}  ${hashLine("/tmp/$db.archive", "mongo/$db.archive")}  rclone copyto "/tmp/$db.archive" "box:${i.folder}/mongo/$db.archive"
   rm -f "/tmp/$db.archive"
 done
 `,
@@ -91,6 +112,7 @@ ${hashLine("/tmp/postgres-all.sql", "postgres/all.sql")}rclone copyto /tmp/postg
       spec: {
         ...boxSpec("dump-pvc", i.name),
         image: i.image,
+        ...(i.pvcUser !== undefined ? { runAs: i.pvcUser } : {}),
         pvcMounts: i.pvcs.map((claim) => ({ claimName: claim, mountPath: `/pvc/${claim}`, readOnly: true })),
         script:
           BOX_REMOTE +

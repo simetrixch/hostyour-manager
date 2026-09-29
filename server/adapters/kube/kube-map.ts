@@ -4,7 +4,7 @@
 // live clusters). The Raw* shapes are structural subsets of the @kubernetes/client-node models
 // (every field optional), so the live code passes V1Deployment & friends straight in.
 import type {
-  ArgoAppStatus, ArgoApplicationRow, ArgoSyncSource, ArgoTargetSource, ExternalSecretRow, WorkloadStatus, DeployState,
+  ArgoAppStatus, ArgoApplicationRow, ArgoSyncSource, ArgoTargetSource, ExternalSecretRow, WorkloadStatus, DeployState, ClaimUser,
 } from "./port.ts";
 import { MANAGER_PROJECT_LABELS, RESERVED_PROJECT_NAMES } from "./port.ts";
 import { ARGO_SYNC, ARGO_HEALTH } from "../../../shared/enums.ts";
@@ -342,4 +342,38 @@ export function assertWritableProjectName(name: string): void {
 export function isManagerOwned(raw: unknown): boolean {
   const labels = asObject<{ metadata?: { labels?: Record<string, string> } }>(raw).metadata?.labels ?? {};
   return MANAGER_PROJECT_LABELS.some((l) => labels[l.key] === l.value);
+}
+
+/** The part of a pod that says who mounts which claim. */
+export interface RawClaimPod {
+  spec?: {
+    securityContext?: { runAsUser?: number; runAsGroup?: number; fsGroup?: number };
+    volumes?: { name: string; persistentVolumeClaim?: { claimName: string } }[];
+    containers?: { securityContext?: { runAsUser?: number; runAsGroup?: number }; volumeMounts?: { name: string }[] }[];
+  };
+}
+
+/** One row per container that mounts a claim and states its user: the container's own user and group
+ *  before the pod's, and the pod's fsGroup where no group is stated, because that is the group the
+ *  claim's files are shared with. A container that states no user runs as its image's user, which no
+ *  pod field names, so it has no row. */
+export function claimUsersOf(pods: readonly RawClaimPod[]): ClaimUser[] {
+  const rows: ClaimUser[] = [];
+  for (const pod of pods) {
+    const claims = new Map<string, string>();
+    for (const v of pod.spec?.volumes ?? []) {
+      if (v.persistentVolumeClaim?.claimName) claims.set(v.name, v.persistentVolumeClaim.claimName);
+    }
+    const podContext = pod.spec?.securityContext;
+    for (const container of pod.spec?.containers ?? []) {
+      const user = container.securityContext?.runAsUser ?? podContext?.runAsUser;
+      const group = container.securityContext?.runAsGroup ?? podContext?.runAsGroup ?? podContext?.fsGroup;
+      if (user === undefined || group === undefined) continue;
+      for (const m of container.volumeMounts ?? []) {
+        const claim = claims.get(m.name);
+        if (claim !== undefined) rows.push({ claim, user, group });
+      }
+    }
+  }
+  return rows;
 }

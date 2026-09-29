@@ -258,6 +258,14 @@ export interface JobPvcMount {
   readOnly?: boolean;
 }
 
+/** The user and group a Job's container runs as. Pod security `restricted`, which the unit
+ *  namespaces enforce, admits only a non-root user, and a job that reads a volume has to run as the
+ *  user its files belong to. */
+export interface JobIdentity {
+  user: number;
+  group: number;
+}
+
 /** What ClusterReader.runJob creates: one batch/v1 Job running ONE container of the pinned dbtools
  *  image, whose whole work is `script` under `sh -ec`. The Manager composes these and never runs a
  *  database client itself — the clients live in the image, on the cluster where the databases are. */
@@ -268,6 +276,8 @@ export interface JobSpec {
   script: string;
   env?: JobEnvVar[];
   pvcMounts?: JobPvcMount[];
+  /** Who the container runs as; unset, the runner's own non-root default. */
+  runAs?: JobIdentity;
 }
 
 /** What one Job run observed: whether the Job SUCCEEDED, and the container's collected log — the
@@ -276,6 +286,17 @@ export interface JobSpec {
 export interface JobResult {
   succeeded: boolean;
   logs: string;
+  /** Why a job that did not succeed ended, or why it never ran, in the cluster's own words: a pod
+   *  the namespace refused writes no log line at all. Unset where the cluster said nothing. */
+  ended?: string;
+}
+
+/** A claim and the identity of a running pod's container that mounts it: the user its files belong
+ *  to, and the group they are shared with. */
+export interface ClaimUser {
+  claim: string;
+  user: number;
+  group: number;
 }
 
 export interface ClusterReader {
@@ -292,6 +313,9 @@ export interface ClusterReader {
   /** Every PersistentVolumeClaim name in `namespace` — what the consumer dump mounts for the tar
    *  (PVC names are chart-chosen, so only the cluster can answer which exist). */
   listPersistentVolumeClaims(namespace: string): Promise<string[]>;
+  /** One row per claim and identity: every running pod's container in `namespace` that mounts a
+   *  claim and states the user it runs as. A claim no such container mounts has no row. */
+  listClaimUsers(namespace: string): Promise<ClaimUser[]>;
   /** Create-or-replace the unit's ValidatingAdmissionPolicy + its Binding on the TARGET cluster, as
    *  one unit: the policy alone enforces nothing (a policy without a binding is inert) and a binding
    *  alone is a dangling reference, so they are written together or not at all. Idempotent — a

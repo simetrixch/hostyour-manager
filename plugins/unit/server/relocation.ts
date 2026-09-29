@@ -189,7 +189,8 @@ export async function runRelocationJob(ports: RelocationPorts, ctx: StepCtx, clu
   }
   if (!result.succeeded) {
     const tail = result.logs.trim().split("\n").slice(-5).join(" | ");
-    throw errValidation(`job ${job.spec.name} in ${job.namespace} did not succeed${tail ? ` — ${tail}` : " (no log collected)"}`);
+    const ended = result.ended !== undefined ? `: ${result.ended}` : "";
+    throw errValidation(`job ${job.spec.name} in ${job.namespace} did not succeed${ended}${tail ? ` — its last lines: ${tail}` : " (no log collected)"}`);
   }
   return result.logs;
 }

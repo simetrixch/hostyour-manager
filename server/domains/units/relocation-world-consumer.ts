@@ -25,7 +25,7 @@ import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import type { RelocationPorts, RelocationWorld, WorldOf } from "#unit/server/relocation.ts";
 import {
-  consumerDumpJobs,
+  consumerDumpJobs, claimsIdentity,
   consumerRestoreJobs,
   consumerVerifyCompletenessJobs,
   consumerSourceDbListJob,
@@ -97,7 +97,13 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         }
         c.log("meta", `Application ${appName} is Synced + Healthy — the consumer render is ${intent}`);
       },
-      dumpJobs: async (folder, registrationYaml) => consumerDumpJobs({ ...(await jobInputs()), folder, registrationYaml }),
+      dumpJobs: async (folder, registrationYaml) => {
+        const inputs = await jobInputs();
+        const pvcUser = inputs.pvcs.length > 0
+          ? claimsIdentity(namespace, inputs.pvcs, await (await ports.resolver.resolve(ac.clusterId)).clusterReader.listClaimUsers(namespace))
+          : undefined;
+        return consumerDumpJobs({ ...inputs, ...(pvcUser !== undefined ? { pvcUser } : {}), folder, registrationYaml });
+      },
       expectedDumpEntries: async () => consumerExpectedDumpEntries(await jobInputs()),
       restoreJobs: async (folder) => consumerRestoreJobs({ ...(await jobInputs()), folder }),
       verifyCompletenessJobs: async (folder) => consumerVerifyCompletenessJobs({ ...(await jobInputs()), folder }),

@@ -5,7 +5,7 @@ import type { JobEnvVar } from "../../adapters/kube/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
 import { TENANT_SECRET, TENANT_S3_SECRET } from "./tenant-secrets.ts";
-import { type RelocationJob, MONGO_NAMESPACE, boxSpec, mongoEnv, BOX_REMOTE, writeFile, listMongoDbs, MONGO_FLAGS, relocationJobName, hashLine } from "#unit/server/relocation-jobs.ts";
+import { type RelocationJob, MONGO_NAMESPACE, boxSpec, mongoEnv, BOX_REMOTE, writeFile, listMongoDbs, MONGO_FLAGS, mongodumpLine, relocationJobName, hashLine } from "#unit/server/relocation-jobs.ts";
 
 /** What the S3_REMOTE block needs in a tenant app member namespace. EVERY value comes off the
  *  tenant's own bucket Secret, the endpoint included — there is no cluster constant to fall back on
@@ -88,8 +88,7 @@ export function tenantDumpJobs(i: TenantJobInputs & { registrationYaml: string }
 ${listMongoDbs(`${i.guid}_`)} > /tmp/dbs
 cat /tmp/dbs
 sed 's/^DB //' /tmp/dbs | while read -r db; do
-  mongodump ${MONGO_FLAGS} --db "$db" --archive="/tmp/$db.archive" --quiet
-  ${hashLine("/tmp/$db.archive", "mongo/$db.archive")}  rclone copyto "/tmp/$db.archive" "box:${i.folder}/mongo/$db.archive"
+  ${mongodumpLine("$db", "/tmp/$db.archive")}  ${hashLine("/tmp/$db.archive", "mongo/$db.archive")}  rclone copyto "/tmp/$db.archive" "box:${i.folder}/mongo/$db.archive"
   rm -f "/tmp/$db.archive"
 done
 `,

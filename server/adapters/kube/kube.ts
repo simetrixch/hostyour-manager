@@ -11,7 +11,7 @@
 import { KubeConfig, CoreV1Api, AppsV1Api, BatchV1Api, CustomObjectsApi, ApiException, setHeaderOptions, PatchStrategy } from "@kubernetes/client-node";
 import type {
   MasterArgoReader, ClusterReader, ArgoAppStatus, ArgoAppStatusMap, ArgoApplicationRow, ExternalSecretRow,
-  SmokeResult, DeployState, WorkloadStatus, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, JobSpec, JobResult,
+  SmokeResult, DeployState, WorkloadStatus, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, JobSpec, JobResult, ClaimUser,
 } from "./port.ts";
 import { RESTART_ANNOTATION } from "./port.ts";
 import { runKubeJob } from "./kube-job.ts";
@@ -31,6 +31,7 @@ import {
   mapApplications,
   mapExternalSecrets,
   mapDeployState,
+  claimUsersOf,
 } from "./kube-map.ts";
 
 const ARGO = { group: "argoproj.io", version: "v1alpha1", plural: "applications" } as const;
@@ -487,6 +488,11 @@ export class KubeClusterReader implements ClusterReader {
     } catch (e) {
       throw upstream(`list PersistentVolumeClaims in ${namespace}`, e);
     }
+  }
+
+  /** Who mounts which claim among the running pods — see claimUsersOf. NEEDS a live cluster. */
+  async listClaimUsers(namespace: string): Promise<ClaimUser[]> {
+    return claimUsersOf((await this.list("Pods", namespace, () => this.core.listNamespacedPod({ namespace, fieldSelector: "status.phase=Running" }))).items);
   }
 
   /** Roll every Deployment and StatefulSet of the namespace by stamping the pod TEMPLATE's

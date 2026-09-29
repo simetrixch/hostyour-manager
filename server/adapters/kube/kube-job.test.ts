@@ -37,6 +37,85 @@ function fakeWorld(opts: { leftover?: boolean; stuckTerminating?: boolean; settl
   return { c: { batch, core, pollMs: 1, deleteWaitMs: 25 }, calls };
 }
 
+/** The part of a created Job a test reads: the pod it asks for. */
+interface CreatedJob {
+  spec: { template: { spec: { securityContext?: object; containers: { securityContext?: object; env: object[] }[] } } };
+}
+
+/** A world whose Job settles FAILED or never settles, with the pods and events the cluster holds, and
+ *  the created body kept so a test can read the pod the Job asked for. */
+function failingWorld(opts: { pods?: unknown[]; events?: unknown[]; failed?: boolean } = {}): { c: JobClients; created: () => CreatedJob } {
+  let body = {} as CreatedJob;
+  let exists = false;
+  const batch = {
+    async deleteNamespacedJob(): Promise<void> {
+      if (!exists) throw notFound();
+      exists = false;
+    },
+    async createNamespacedJob(req: { body: CreatedJob }): Promise<void> {
+      body = req.body;
+      exists = true;
+    },
+    async readNamespacedJob(): Promise<{ status: { failed?: number } }> {
+      if (!exists) throw notFound();
+      return { status: opts.failed ? { failed: 1 } : {} };
+    },
+  } as unknown as BatchV1Api;
+  const core = {
+    async listNamespacedPod(): Promise<{ items: unknown[] }> {
+      return { items: opts.pods ?? [] };
+    },
+    async readNamespacedPodLog(): Promise<string> {
+      return "";
+    },
+    async listNamespacedEvent(): Promise<{ items: unknown[] }> {
+      return { items: opts.events ?? [] };
+    },
+  } as unknown as CoreV1Api;
+  return { c: { batch, core, pollMs: 1, deleteWaitMs: 25 }, created: () => body };
+}
+
+describe("runKubeJob under pod security restricted", () => {
+  it("asks for a pod `restricted` admits: non-root, RuntimeDefault seccomp, no escalation, no capabilities", async () => {
+    // The unit namespaces enforce `restricted`, and the dbtools image runs as root. A pod without
+    // these fields is refused there, and the Job then never has a pod to run.
+    const { c, created } = failingWorld({ failed: true });
+    await runKubeJob(c, "ns", spec, { timeoutMs: 1000 });
+    const pod = created().spec.template.spec;
+    const container = pod.containers[0]!;
+    expect(pod.securityContext).toEqual({ runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, seccompProfile: { type: "RuntimeDefault" } });
+    expect(container.securityContext).toEqual({ allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } });
+    expect(container.env[0]).toEqual({ name: "HOME", value: "/tmp" });
+  });
+
+  it("runs as the identity the spec names", async () => {
+    const { c, created } = failingWorld({ failed: true });
+    await runKubeJob(c, "ns", { ...spec, runAs: { user: 999, group: 999 } }, { timeoutMs: 1000 });
+    expect(created().spec.template.spec.securityContext).toMatchObject({ runAsUser: 999, runAsGroup: 999 });
+  });
+
+  it("a Job that never got a pod says so, with the refusal its events name", async () => {
+    const refusal = 'pods "dump-x-abc" is forbidden: violates PodSecurity "restricted:latest": runAsNonRoot != true';
+    const { c } = failingWorld({ events: [{ reason: "Scheduled" }, { reason: "FailedCreate", message: refusal }] });
+    const result = await runKubeJob(c, "ns", spec, { timeoutMs: 20 });
+    expect(result.succeeded).toBe(false);
+    expect(result.ended).toBe(`no pod was created for the Job — ${refusal}`);
+  });
+
+  it("a container that was killed names its reason and exit code", async () => {
+    const pod = { metadata: { name: "dump-x-abc" }, status: { phase: "Failed", containerStatuses: [{ state: { terminated: { reason: "OOMKilled", exitCode: 137 } } }] } };
+    const { c } = failingWorld({ failed: true, pods: [pod] });
+    const result = await runKubeJob(c, "ns", spec, { timeoutMs: 1000 });
+    expect(result.ended).toBe("the container ended with OOMKilled, exit code 137");
+  });
+
+  it("THE INNOCENT NEIGHBOUR: a job that succeeded carries no end reason", async () => {
+    const { c } = fakeWorld({ settles: true });
+    const result = await runKubeJob(c, "ns", spec, { timeoutMs: 1000 });
+    expect(result.ended).toBeUndefined();
+  });
+});
+
 describe("runKubeJob", () => {
   it("deletes a Job the poll walked away from on TIMEOUT — the Job must not outlive its run", async () => {
     // The Job never settles, so ttlSecondsAfterFinished never starts counting: without the

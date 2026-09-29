@@ -1,6 +1,6 @@
 // In-memory kube fakes for the onboarding domain tests — no cluster, no network. Script the
 // Application status the master watch observes, and the smoke/deploy-state a cluster read returns.
-import type { MasterArgoReader, ArgoAppStatus, ArgoAppStatusMap, ArgoApplicationRow, ExternalSecretRow, ClusterReader, SmokeResult, DeployState, MasterProjectWriter, AppProjectManifest, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, ClusterKubeResolver, ResolvedClusterKube, BuildRbacWriter, BuildRbacGrant, BuildRbacObject, RoleManifest, RoleBindingManifest, RepoCredentialWriter, RepoCredentialManifest, JobSpec, JobResult } from "../port.ts";
+import type { MasterArgoReader, ArgoAppStatus, ArgoAppStatusMap, ArgoApplicationRow, ExternalSecretRow, ClusterReader, SmokeResult, DeployState, MasterProjectWriter, AppProjectManifest, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, ClusterKubeResolver, ResolvedClusterKube, BuildRbacWriter, BuildRbacGrant, BuildRbacObject, RoleManifest, RoleBindingManifest, RepoCredentialWriter, RepoCredentialManifest, JobSpec, JobResult, ClaimUser } from "../port.ts";
 import { assertWritableProjectName, isManagerOwned, MISSING_APP_STATUS } from "../kube-map.ts";
 import { errValidation, errNotFound } from "../../../kernel/errors.ts";
 
@@ -143,6 +143,8 @@ export class FakeClusterReader implements ClusterReader {
       jobResults?: Record<string, JobResult>;
       /** The PVC names of a namespace — what listPersistentVolumeClaims answers; unlisted reads []. */
       pvcsByNamespace?: Record<string, readonly string[]>;
+      /** Who mounts which claim in a namespace — what listClaimUsers answers; unlisted reads []. */
+      claimUsersByNamespace?: Record<string, readonly ClaimUser[]>;
       /** The ExternalSecrets a namespace holds — what listExternalSecrets answers; unlisted reads [],
        *  which is the "the sync has not applied them yet" case a gate retries on. */
       externalSecretsByNamespace?: Record<string, readonly ExternalSecretRow[]>;
@@ -354,6 +356,11 @@ export class FakeClusterReader implements ClusterReader {
   /** The PVC names scripted for this namespace, else [] (a namespace holding none). */
   async listPersistentVolumeClaims(namespace: string): Promise<string[]> {
     return [...(this.scripted.pvcsByNamespace?.[namespace] ?? [])];
+  }
+
+  /** The claim users scripted for this namespace, else [] (no running pod mounts a claim). */
+  async listClaimUsers(namespace: string): Promise<ClaimUser[]> {
+    return [...(this.scripted.claimUsersByNamespace?.[namespace] ?? [])];
   }
 
 }

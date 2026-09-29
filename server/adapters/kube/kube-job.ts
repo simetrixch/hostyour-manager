@@ -3,7 +3,7 @@
 // machine the reader only delegates to. Same IO discipline as kube.ts: thin shells over the client,
 // every non-404 failure surfaced as UPSTREAM with the API server's own message.
 import type { BatchV1Api, CoreV1Api } from "@kubernetes/client-node";
-import type { JobSpec, JobResult } from "./port.ts";
+import type { JobSpec, JobResult, JobIdentity } from "./port.ts";
 import { isNotFound, upstream } from "./kube.ts";
 
 /** Abortable sleep — resolves early (never rejects) on abort, mirroring kube.ts's. */
@@ -39,6 +39,10 @@ export interface JobClients {
  *  run_locks, with no way out but a cancel. */
 const DELETE_WAIT_MS = 60_000;
 
+/** Who a job runs as where its spec names nobody: `nobody`, a non-root user that pod security
+ *  `restricted` admits and that owns nothing a job could damage. */
+export const DEFAULT_JOB_IDENTITY: JobIdentity = { user: 65534, group: 65534 };
+
 /** Run ONE Job to completion: replace any leftover of the same name (the resumed-step case), create,
  *  poll until succeeded/failed/timeout/abort, then collect the pod log. A FINISHED Job is left behind
  *  under a TTL so the cluster keeps a short-lived trace and reaps it itself; a Job the poll walked
@@ -49,6 +53,7 @@ export async function runKubeJob(c: JobClients, namespace: string, spec: JobSpec
   // terminating — creating the new one now would 409 against it. The caller reads the abort
   // off its own signal; this result only says no Job ran.
   if (opts.signal?.aborted) return { succeeded: false, logs: "" };
+  const identity = spec.runAs ?? DEFAULT_JOB_IDENTITY;
   const body = {
     apiVersion: "batch/v1",
     kind: "Job",
@@ -59,16 +64,30 @@ export async function runKubeJob(c: JobClients, namespace: string, spec: JobSpec
       template: {
         spec: {
           restartPolicy: "Never" as const,
+          // What pod security `restricted` asks of a pod, so the unit namespaces admit it: a
+          // namespace that refuses a pod leaves the Job without one, and the run waits out its
+          // timeout for a log that never comes. The image itself runs as root.
+          securityContext: {
+            runAsNonRoot: true,
+            runAsUser: identity.user,
+            runAsGroup: identity.group,
+            seccompProfile: { type: "RuntimeDefault" },
+          },
           containers: [
             {
               name: "job",
               image: spec.image,
               command: ["/bin/sh", "-ec", spec.script],
-              env: (spec.env ?? []).map((e) => ({
-                name: e.name,
-                ...(e.value !== undefined ? { value: e.value } : {}),
-                ...(e.secretKeyRef !== undefined ? { valueFrom: { secretKeyRef: e.secretKeyRef } } : {}),
-              })),
+              securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+              // The image's HOME is root's, which the job's user cannot write.
+              env: [
+                { name: "HOME", value: "/tmp" },
+                ...(spec.env ?? []).map((e) => ({
+                  name: e.name,
+                  ...(e.value !== undefined ? { value: e.value } : {}),
+                  ...(e.secretKeyRef !== undefined ? { valueFrom: { secretKeyRef: e.secretKeyRef } } : {}),
+                })),
+              ],
               volumeMounts: (spec.pvcMounts ?? []).map((m) => ({ name: m.claimName, mountPath: m.mountPath, ...(m.readOnly !== undefined ? { readOnly: m.readOnly } : {}) })),
             },
           ],
@@ -106,6 +125,8 @@ export async function runKubeJob(c: JobClients, namespace: string, spec: JobSpec
     await sleep(Math.min(c.pollMs, remaining), opts.signal);
   }
   const logs = await readJobLog(c, namespace, spec.name);
+  // Read before the delete below, which takes the pod and its status with it.
+  const ended = succeeded ? undefined : await readJobEnd(c, namespace, spec.name);
   if (!settled) {
     // Timeout or abort left the Job RUNNING. The TTL only reaps a finished Job, so without this
     // delete it keeps writing (a relocation dump keeps copying) after the run has already failed
@@ -113,7 +134,7 @@ export async function runKubeJob(c: JobClients, namespace: string, spec: JobSpec
     // replacing a settled trace. Log first: the foreground delete reaps the pod the log lives in.
     await deleteJobIfPresent(c, namespace, spec.name, opts.signal);
   }
-  return { succeeded, logs };
+  return { succeeded, logs, ...(ended !== undefined ? { ended } : {}) };
 }
 
 /** Delete a leftover Job of this name and wait for it to be gone, so the re-create never 409s.
@@ -144,6 +165,44 @@ async function deleteJobIfPresent(c: JobClients, namespace: string, name: string
       );
     }
     await sleep(Math.min(c.pollMs, deadline - Date.now()), signal);
+  }
+}
+
+/** Why the Job's pod ended, or why there is none: what the log cannot say, because a pod that was
+ *  refused, never started or was killed writes no line about it. Undefined where the cluster says
+ *  nothing; a reading that fails is named rather than thrown, so the job's own failure stays the
+ *  error an operator reads. */
+async function readJobEnd(c: JobClients, namespace: string, jobName: string): Promise<string | undefined> {
+  try {
+    const pods = await c.core.listNamespacedPod({ namespace, labelSelector: `job-name=${jobName}` });
+    const pod = pods.items[0];
+    if (pod === undefined) {
+      return `no pod was created for the Job${await readPodRefusal(c, namespace, jobName)}`;
+    }
+    const state = pod.status?.containerStatuses?.[0]?.state;
+    if (state?.terminated) {
+      const t = state.terminated;
+      return `the container ended with ${t.reason ?? "no reason"}, exit code ${t.exitCode}${t.message ? ` — ${t.message}` : ""}`;
+    }
+    if (state?.waiting) {
+      return `the container never started: ${state.waiting.reason ?? "no reason"}${state.waiting.message ? ` — ${state.waiting.message}` : ""}`;
+    }
+    return pod.status?.phase === "Pending" ? "the pod was still Pending" : undefined;
+  } catch (e) {
+    return `why it ended could not be read: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+/** The event in which the Job's controller was refused a pod — the pod security verdict, for one —
+ *  as ` — <message>`; "" where there is none, and the reading's own failure where the events cannot
+ *  be read. */
+async function readPodRefusal(c: JobClients, namespace: string, jobName: string): Promise<string> {
+  try {
+    const events = await c.core.listNamespacedEvent({ namespace, fieldSelector: `involvedObject.kind=Job,involvedObject.name=${jobName}` });
+    const refused = events.items.filter((e) => e.reason === "FailedCreate").at(-1);
+    return refused?.message ? ` — ${refused.message}` : "";
+  } catch (e) {
+    return ` (its events could not be read: ${e instanceof Error ? e.message : String(e)})`;
   }
 }
 

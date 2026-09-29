@@ -11,7 +11,7 @@ import {
   tenantDumpJobs, tenantRestoreJobs, tenantVerifyCompletenessJobs, tenantClearSourceJobs, tenantSourceDbListJob,
 } from "./relocation-jobs-tenant.ts";
 import {
-  consumerDumpJobs, consumerRestoreJobs, consumerVerifyCompletenessJobs, consumerClearSourceJobs, consumerSourceDbListJob,
+  consumerDumpJobs, consumerRestoreJobs, consumerVerifyCompletenessJobs, consumerClearSourceJobs, consumerSourceDbListJob, claimsIdentity,
 } from "./relocation-jobs-consumer.ts";
 import type { ConsumerService } from "../../../shared/consumer.ts";
 import { openFixtureDb, makeFakes, consumerPorts, stepCtx, SOURCE } from "./relocation.fixture.ts";
@@ -193,5 +193,51 @@ describe("runRelocationJob places and reaps the box credential", () => {
 
     expect(f.source.reader.secretWrites).toEqual([]);
     expect(f.source.reader.jobs[0]?.secretsAtRun.size).toBe(0);
+  });
+});
+
+describe("the nightly backup under pod security restricted (hostyour-manager#333)", () => {
+  const consumer = { name: CONSUMER, folder: CONSUMER_FOLDER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, pvcs: ["data"], image: IMAGE };
+  const pvcJob = (jobs: RelocationJob[]): RelocationJob => jobs.find((j) => j.spec.name.startsWith("reloc-dump-pvc"))!;
+
+  it("a claim is dumped as the user of the pod that mounts it", () => {
+    // queue-digita-post-mta-0 is mounted by a pod running as 1000, postgres-data of swissbookai by one
+    // running as 999; a job running as anyone else cannot read what only they may read.
+    const identity = claimsIdentity(`${CONSUMER}-prod`, ["data"], [{ claim: "data", user: 999, group: 999 }]);
+    expect(identity).toEqual({ user: 999, group: 999 });
+    expect(pvcJob(consumerDumpJobs({ ...consumer, pvcUser: identity, registrationYaml: "name: acme\n" })).spec.runAs).toEqual({ user: 999, group: 999 });
+  });
+
+  it("a claim no running pod mounts is refused by name", () => {
+    expect(() => claimsIdentity(`${CONSUMER}-prod`, ["data"], [{ claim: "other", user: 1000, group: 1000 }])).toThrow(/claim data in .* is mounted by no running pod/);
+  });
+
+  it("claims used as two different users are refused, because one job reads as one user", () => {
+    const users = [{ claim: "a", user: 1000, group: 1000 }, { claim: "b", user: 999, group: 999 }];
+    expect(() => claimsIdentity(`${CONSUMER}-prod`, ["a", "b"], users)).toThrow(/1000:1000 and 999:999/);
+  });
+
+  it("THE INNOCENT NEIGHBOUR: the other dump jobs keep the runner's default identity", () => {
+    const jobs = consumerDumpJobs({ ...consumer, pvcUser: { user: 999, group: 999 }, registrationYaml: "name: acme\n" });
+    expect(jobs.filter((j) => j !== pvcJob(jobs)).every((j) => j.spec.runAs === undefined)).toBe(true);
+  });
+
+  it("the Mongo dump names each database before it dumps it, and a failed dump leaves its exit code", () => {
+    // A dump that stopped after 20 of 37 databases left no line saying which one it stopped on.
+    const tenantMongo = tenantDumpJobs({ guid: GUID, folder: TENANT_FOLDER, stage: "prod", apps: ["web"], image: IMAGE, identityProvider: "auth", registrationYaml: "guid: x\n" })
+      .find((j) => j.spec.name.startsWith("reloc-dump-mongo"))!;
+    expect(tenantMongo.spec.script).toContain('echo "DUMP $db"');
+    expect(tenantMongo.spec.script).toContain('echo "FAILED mongodump $db, exit $s"; exit $s;');
+  });
+
+  it("a failed job's error names why its pod ended", async () => {
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    const job = verifyDumpJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: CONSUMER, expected: ["registration.yaml"], image: IMAGE });
+    f.source.reader.setJobResult(job.spec.name, { succeeded: false, logs: "", ended: "no pod was created for the Job — violates PodSecurity" });
+
+    await expect(runRelocationJob(ports, stepCtx(db, "verify-dump", {}, []), SOURCE.clusterId, job)).rejects.toThrow(
+      /did not succeed: no pod was created for the Job — violates PodSecurity \(no log collected\)/,
+    );
   });
 });
