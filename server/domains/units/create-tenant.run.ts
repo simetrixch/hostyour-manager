@@ -55,8 +55,8 @@ import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 // its OWN apps bundle `<bundle>-<subdomain>`: this run creates that repository from the deploy repository's
 // template, writes the chosen apps into it and builds its first image (tenant-apps-steps.ts) after
 // the platform build units and before its own writes, and the registration carries the three
-// facts. The STAGE is the tenant's own, an input of the request, and it is the target cluster's
-// stage: the tenant's Vault policies and the tenant-eso role are bound to the platform's stage
+// facts. The STAGE is the tenant's own, an input of the request, and one the target cluster carries:
+// its own, and test on a prod cluster, the stages its Vault holds a tenant role for
 // (resolveTenantCluster). Everything not per-member — the tenant's Vault path, its databases, its
 // crypto — is either claimed by the member chart that needs it (ServiceClaims) or written by this
 // run itself (the tenant's crypto entry in Vault).

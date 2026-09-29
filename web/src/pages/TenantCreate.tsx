@@ -1,6 +1,7 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import type { Stage } from "../../../shared/enums.ts";
+import { tenantStagesOn } from "../../../shared/tenant.ts";
 import { HOST_LABEL_RE } from "#unit/shared/unit-host.ts";
 import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "#unit/shared/unit-size.ts";
 import { listTenantTargets, createTenant, type TenantTargetView } from "../api.ts";
@@ -9,7 +10,7 @@ import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts"
 /** Onboard-tenant wizard — the tenant analogue of
  *  ConsumerOnboard. Unlike a consumer it does NOT point at an external repo: a tenant's charts
  *  always live in the fixed deploy repository, so the operator only declares WHAT to fan out —
- *  a subdomain, an owner, the target cluster (any active one, whose stage the tenant takes), the
+ *  a subdomain, an owner, the target cluster (any active one) and a stage it carries, the
  *  size and the first administrator's mailbox. THE PLATFORM ALONE (hostyour-manager#211): the
  *  standing members auth, jobs and report, always those three and no app. Apps are added
  *  afterwards from the tenant's page, where the first one creates the tenant's own repository
@@ -32,12 +33,15 @@ export function TenantCreate() {
   }, []);
 
   const set = (k: keyof typeof form) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  // The stage is the cluster's and no other is offered: the tenant's Vault policies and its
-  // tenant-eso role are bound to the platform's stage, and the server refuses a mismatch
-  // (create-tenant.run.ts resolveTenantCluster). Sent with the body so that refusal can be made.
+  // Only the stages the chosen cluster carries are offered (tenantStagesOn: its own, and test on a
+  // prod cluster), its own first; the server refuses any other (resolveTenantCluster).
+  const stagesOf = (clusterId: string): readonly Stage[] => {
+    const target = (targets ?? []).find((t) => t.id === clusterId);
+    return target ? tenantStagesOn(target.stage as Stage) : [];
+  };
   const chooseCluster = (e: ChangeEvent<HTMLSelectElement>) => {
     const clusterId = e.target.value;
-    setForm((f) => ({ ...f, clusterId, stage: (targets ?? []).find((t) => t.id === clusterId)?.stage ?? "" }));
+    setForm((f) => ({ ...f, clusterId, stage: stagesOf(clusterId)[0] ?? "" }));
   };
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
@@ -124,11 +128,21 @@ export function TenantCreate() {
                 </option>
               ))}
             </select>
+            <span className="field__hint">Any active cluster; the domain is taken from it.</span>
+          </label>
+          <label className="field">
+            <span className="field__label">Stage</span>
+            <select value={form.stage} onChange={set("stage")} required disabled={form.clusterId === ""}>
+              {stagesOf(form.clusterId).map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
             <span className="field__hint">
-              Any active cluster; the domain is taken from it. The tenant&apos;s stage is the cluster&apos;s
-              {form.stage ? <> — <code>{form.stage}</code></> : ""}: every member namespace, the registration file and the Vault path{" "}
-              <code>&lt;stage&gt;/tenants/&lt;guid&gt;</code> carry it, and the Vault policies that admit that path are bound to the
-              platform&apos;s stage, so no other stage is offered.
+              The tenant&apos;s own stage: every member namespace, the registration file, the Vault path{" "}
+              <code>&lt;stage&gt;/tenants/&lt;guid&gt;</code> and the zone carry it. A prod cluster also carries a
+              customer&apos;s test stage, at <code>&lt;subdomain&gt;.test.&lt;apex&gt;</code>.
             </span>
           </label>
 

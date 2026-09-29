@@ -29,7 +29,7 @@ describe("registryHostFromChain", () => {
   });
 });
 
-describe("resolveTenantCluster — the tenant's stage is the cluster's", () => {
+describe("resolveTenantCluster — the tenant's stage is one the cluster carries", () => {
   let db: DbHandle;
   beforeEach(() => {
     db = openDb(":memory:");
@@ -42,10 +42,16 @@ describe("resolveTenantCluster — the tenant's stage is the cluster's", () => {
     expect(resolveTenantCluster(db.db, "cls_1", "prod")).toEqual({ clusterId: "cls_1", domain: "s1.example.com", cluster: "s1", stage: "prod" });
   });
 
-  it("refuses another stage than the cluster's, naming why the seed would die", () => {
-    // The Vault policies and the tenant-eso role are bound to the platform's stage: a dev tenant on
-    // a prod cluster seeds into a path no policy admits, and its SecretStore names a role that is not there.
-    expect(() => resolveTenantCluster(db.db, "cls_1", "dev")).toThrow(/tenant at dev cannot be created on s1\.example\.com, a prod cluster.*tenant-eso-prod.*create it at prod/);
+  it("places a customer's test stage on a prod cluster, which holds tenant-eso-test beside tenant-eso-prod (#295)", () => {
+    expect(resolveTenantCluster(db.db, "cls_1", "test")).toEqual({ clusterId: "cls_1", domain: "s1.example.com", cluster: "s1", stage: "prod" });
+  });
+
+  it("PLANTED DEFECT: refuses a stage the cluster carries no tenant role for, naming the roles it holds", () => {
+    // A dev tenant on a prod cluster would log in with tenant-eso-dev, a role the cluster does not hold.
+    expect(() => resolveTenantCluster(db.db, "cls_1", "dev")).toThrow(/tenant at dev cannot be created on s1\.example\.com, a prod cluster.*tenant-eso-prod and tenant-eso-test alone.*create it at prod or test/);
+    // A test cluster carries its own stage alone: a prod tenant there is refused.
+    db.db.update(clusters).set({ stage: "test" }).run();
+    expect(() => resolveTenantCluster(db.db, "cls_1", "prod")).toThrow(/tenant at prod cannot be created on s1\.example\.com, a test cluster.*tenant-eso-test alone.*create it at test$/);
   });
 
   it("refuses a cluster that is not active, and an unknown one", () => {

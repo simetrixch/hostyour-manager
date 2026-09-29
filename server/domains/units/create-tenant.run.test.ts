@@ -341,11 +341,11 @@ describe("create-tenant streaming planner", () => {
     expect(result.plan.steps.map((s) => s.name)).toEqual(def.steps(result.params).map((s) => s.name));
   });
 
-  it("REFUSES a tenant at test on a cluster marked prod before anything is read — the Vault policies are bound to the platform's stage", async () => {
-    seedClusters(); // cls_1 is marked prod
+  it("REFUSES a tenant at a stage the cluster carries no tenant role for before anything is read — dev on a cluster marked prod", async () => {
+    seedClusters(); // cls_1 is marked prod: it carries tenants at prod and test (#295), never at dev
     const reader = repoWithManifest();
-    await expect(makeCreateTenantDef(ports({ repo: reader })).planStream!({ clusterId: "cls_1", stage: "test", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx()))
-      .rejects.toThrow(/tenant at test cannot be created on s1\.example, a prod cluster/);
+    await expect(makeCreateTenantDef(ports({ repo: reader })).planStream!({ clusterId: "cls_1", stage: "dev", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx()))
+      .rejects.toThrow(/tenant at dev cannot be created on s1\.example, a prod cluster/);
     expect(reader.clones).toEqual([]); // refused before the deploy repository was even cloned
   });
 
