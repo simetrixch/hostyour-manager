@@ -4,7 +4,7 @@ import type { RunView, ServerView } from "../../../shared/api-types.ts";
 import { isMasterRole } from "../../../shared/enums.ts";
 import type { ServerStatus } from "../../../shared/enums.ts";
 import {
-  listServers, listRuns, createServer, deleteServerById, deploySlave, redeploySlave, removeSlave, renameSlave,
+  listServers, listRuns, createServer, deleteServerById, deploySlave, redeploySlave, redeployAllSlaves, removeSlave, renameSlave,
   disconnectTailnet, reconnectTailnet, rejoinTailnet, readTailnet, disablePasswordLogin, enablePasswordLogin,
   readAuthorizedKeys, restateMachineIdentity,
 } from "../api.ts";
@@ -240,6 +240,22 @@ export function Servers() {
           <p>No servers yet — add one above.</p>
         </div>
       ) : (
+        <>
+        {/* EVERY LIVE SLAVE IN ONE RUN. The machines are rebuilt at the same time and what writes the
+            master runs one slave after the other (cluster-redeploy-slaves); offered once there is more
+            than one slave to rebuild, beside the per-card Redeploy that stays for one machine. */}
+        {servers.filter((s) => !isMasterRole(s.role) && LIFECYCLE[s.status].next === "clusters").length > 1 && (
+          <div className="page__actions">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void planServerRunKind(redeployAllSlaves)}
+              title="Rebuild the machine layer of every live slave in one run: the machines at once, the writes to the master one slave after the other."
+            >
+              Redeploy all slaves
+            </button>
+          </div>
+        )}
         <ul className="cards">
           {servers.map((s) => {
             // The ONE run that concerns this server (serverRuns.ts), read per CARD and not inside
@@ -427,6 +443,7 @@ export function Servers() {
             );
           })}
         </ul>
+        </>
       )}
 
       <p className="note">

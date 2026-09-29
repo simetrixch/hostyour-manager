@@ -157,6 +157,7 @@ export const deploySlave = (serverId: string, opts: { stage: string; domain: str
  *  the FQDN and the stage are what that server's active cluster row already says, so there is nothing
  *  for the operator to re-state and nothing to get wrong. */
 export const redeploySlave = (serverId: string): Promise<{ runId: string }> => planRun("cluster-redeploy", { serverId });
+export const redeployAllSlaves = (): Promise<{ runId: string }> => planRun("cluster-redeploy-slaves", {});
 /** The installation's mail DNS as receivers see it, measured now at public resolvers (the Mail page). */
 export const getMailDns = (): Promise<MailDnsView> => req("/api/mail/dns");
 /** The mail DNS of ONE sender domain, published from the master (the Mail page offers one run per domain). */

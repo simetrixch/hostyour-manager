@@ -4,6 +4,7 @@ import { noopDef } from "./defs/noop.run.ts";
 import { makeDeploySlaveDef, type DeploySlavePorts } from "./defs/deploy-slave.ts";
 import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
+import { makeRedeploySlavesDef } from "./defs/redeploy-slaves.ts";
 import { makeMailDnsPublishDef } from "./defs/mail-dns-publish.ts";
 import { makeDnsRemoveDef } from "#unit/server/dns/dns-remove.ts";
 import { makeMailDnsUnpublishDef } from "./defs/mail-dns-unpublish.ts";
@@ -57,6 +58,7 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // machine layer of a cluster that is already live.
   register(runDefinitions, makeDeploySlaveDef(ports));
   register(runDefinitions, makeRedeployDef(ports));
+  register(runDefinitions, makeRedeploySlavesDef(ports));
   // The mail DNS of one sender domain, published by running the programs checkout's publish-mail-dns on the
   // master — a master-side act like redeploy's master arm, so it takes the same ports.
   register(runDefinitions, makeMailDnsPublishDef(ports));
