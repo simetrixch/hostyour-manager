@@ -11,6 +11,9 @@ const TEKTON = { group: "tekton.dev", version: "v1", plural: "pipelineruns" } as
 const DEFAULT_POLL_MS = 10_000; // a release run takes minutes — a 10s tick is plenty and easy on the API server
 /** How long a release watch that failed waits before it lists and watches again. */
 const WATCH_RETRY_MS = 30_000;
+/** The shortest pass a watch loop makes before it lists again: a connection a proxy closes at once
+ *  would otherwise have it list in a tight loop. */
+const WATCH_MIN_PASS_MS = 1_000;
 
 function upstream(msg: string): AppError {
   return errUpstream(`build-plane (tekton): ${msg}`);
@@ -87,7 +90,7 @@ export interface WatchSource<T> {
  *  watch after a while, and a list replays each object that stands, which the caller has to take
  *  more than once. EVERY failure is caught here, reported and waited out, a throwing `onObject`
  *  included: a rejection nobody awaits ends the process. Answers the function that stops the loop. */
-export function watchLoop<T>(source: WatchSource<T>, onObject: (obj: T) => void, onError: (err: unknown) => void, retryMs = WATCH_RETRY_MS): () => void {
+export function watchLoop<T>(source: WatchSource<T>, onObject: (obj: T) => void, onError: (err: unknown) => void, retryMs = WATCH_RETRY_MS, minPassMs = WATCH_MIN_PASS_MS): () => void {
   let stopped = false;
   let abort: (() => void) | undefined;
   let wake: (() => void) | undefined;
@@ -98,8 +101,18 @@ export function watchLoop<T>(source: WatchSource<T>, onObject: (obj: T) => void,
       onError(err);
     }
   };
+  const pause = (ms: number): Promise<void> =>
+    new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, ms);
+      t.unref?.();
+      wake = () => {
+        clearTimeout(t);
+        resolve();
+      };
+    });
   const loop = async (): Promise<void> => {
     while (!stopped) {
+      const began = Date.now();
       try {
         const listed = await source.list();
         for (const item of listed.items) see(item);
@@ -107,17 +120,12 @@ export function watchLoop<T>(source: WatchSource<T>, onObject: (obj: T) => void,
         const watching = source.watch(listed.resourceVersion, see);
         abort = watching.abort;
         await watching.done;
+        const took = Date.now() - began;
+        if (took < minPassMs && !stopped) await pause(minPassMs - took);
       } catch (err) {
         if (stopped) return;
         onError(err);
-        await new Promise<void>((resolve) => {
-          const t = setTimeout(resolve, retryMs);
-          t.unref?.();
-          wake = () => {
-            clearTimeout(t);
-            resolve();
-          };
-        });
+        await pause(retryMs);
       }
     }
   };

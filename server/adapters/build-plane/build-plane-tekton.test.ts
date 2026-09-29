@@ -165,7 +165,7 @@ describe("watchLoop — list, watch, and again, whatever fails", () => {
   it("hands on what each list and each watch delivers, watching from the version the list saw, and lists again when a watch ends", async () => {
     const s = source([{ items: ["a"], version: "10", events: ["b"] }, { items: ["a", "b"], version: "11", events: [] }]);
     const seen: string[] = [];
-    const stop = watchLoop(s.src, (o) => seen.push(o), () => undefined, 1);
+    const stop = watchLoop(s.src, (o) => seen.push(o), () => undefined, 1, 1);
     await vi.waitFor(() => expect(s.lists()).toBeGreaterThanOrEqual(2));
     stop();
     expect(seen.slice(0, 4)).toEqual(["a", "b", "a", "b"]);
@@ -181,6 +181,14 @@ describe("watchLoop — list, watch, and again, whatever fails", () => {
     stop();
     expect(errors.slice(0, 2)).toEqual(["forbidden", "receiver threw"]);
     expect(seen.slice(0, 2)).toEqual(["x", "y"]);
+  });
+
+  it("PLANTED DEFECT: pauses before it lists again after a watch that ended at once, instead of listing in a tight loop", async () => {
+    const s = source([{ items: [], version: "1", events: [] }]);
+    const stop = watchLoop({ ...s.src, watch: (v, on) => ({ ...s.src.watch(v, on), done: Promise.resolve() }) }, () => undefined, () => undefined, 1, 200);
+    await new Promise((r) => setTimeout(r, 100));
+    stop();
+    expect(s.lists()).toBe(1);
   });
 
   it("lists no more once stopped", async () => {
