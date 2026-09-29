@@ -3,14 +3,13 @@
 // tests, KubeBuildPlaneCluster in production) under a small adapter that owns the watch policy.
 // Read-only against tekton.dev over the pod SA: it lists and reads PipelineRuns in a unit's own
 // `<unit>-build` namespace, and creates nothing.
-import { ADD, ERROR, UPDATE, KubeConfig, CustomObjectsApi, makeInformer, type KubernetesListObject, type KubernetesObject } from "@kubernetes/client-node";
+import { KubeConfig, CustomObjectsApi, Watch, type KubernetesObject } from "@kubernetes/client-node";
 import type { BuildPlane, ReleaseRunQuery, ReleaseRunOutcome, ReleaseRunSucceeded } from "./port.ts";
 import { AppError, errUpstream } from "../../kernel/errors.ts";
 
 const TEKTON = { group: "tekton.dev", version: "v1", plural: "pipelineruns" } as const;
 const DEFAULT_POLL_MS = 10_000; // a release run takes minutes — a 10s tick is plenty and easy on the API server
-/** How long a release watch that ended on an error waits before it starts again. The informer lists
- *  and watches again by itself after a watch that simply ended, and stops on any other error. */
+/** How long a release watch that failed waits before it lists and watches again. */
 const WATCH_RETRY_MS = 30_000;
 
 function upstream(msg: string): AppError {
@@ -77,6 +76,59 @@ type RawPipelineRun = KubernetesObject & {
   status?: { conditions?: Array<{ type?: string; status?: string }>; completionTime?: string; results?: Array<{ name?: string; value?: unknown }> };
 };
 
+/** What one pass of a watch loop needs: a list of what stands, and a watch from the version that
+ *  list saw, which settles when the server ends it or it fails. */
+export interface WatchSource<T> {
+  list(): Promise<{ items: T[]; resourceVersion: string | undefined }>;
+  watch(resourceVersion: string | undefined, onObject: (obj: T) => void): { done: Promise<void>; abort: () => void };
+}
+
+/** List, then watch from what the list saw, and again when the watch ends: the API server ends every
+ *  watch after a while, and a list replays each object that stands, which the caller has to take
+ *  more than once. EVERY failure is caught here, reported and waited out, a throwing `onObject`
+ *  included: a rejection nobody awaits ends the process. Answers the function that stops the loop. */
+export function watchLoop<T>(source: WatchSource<T>, onObject: (obj: T) => void, onError: (err: unknown) => void, retryMs = WATCH_RETRY_MS): () => void {
+  let stopped = false;
+  let abort: (() => void) | undefined;
+  let wake: (() => void) | undefined;
+  const see = (obj: T): void => {
+    try {
+      onObject(obj);
+    } catch (err) {
+      onError(err);
+    }
+  };
+  const loop = async (): Promise<void> => {
+    while (!stopped) {
+      try {
+        const listed = await source.list();
+        for (const item of listed.items) see(item);
+        if (stopped) return;
+        const watching = source.watch(listed.resourceVersion, see);
+        abort = watching.abort;
+        await watching.done;
+      } catch (err) {
+        if (stopped) return;
+        onError(err);
+        await new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, retryMs);
+          t.unref?.();
+          wake = () => {
+            clearTimeout(t);
+            resolve();
+          };
+        });
+      }
+    }
+  };
+  void loop();
+  return () => {
+    stopped = true;
+    abort?.();
+    wake?.();
+  };
+}
+
 function watchedRun(raw: RawPipelineRun): WatchedPipelineRun {
   const cond = (raw.status?.conditions ?? []).find((c) => c.type === "Succeeded");
   const imageTag = (raw.status?.results ?? []).find((r) => r.name === "image-tag")?.value;
@@ -138,25 +190,29 @@ export class KubeBuildPlaneCluster implements BuildPlaneCluster {
 
   watchPipelineRuns(namespace: string, labelSelector: string, onRun: (run: WatchedPipelineRun) => void, onError: (err: unknown) => void): () => void {
     const path = `/apis/${TEKTON.group}/${TEKTON.version}/namespaces/${namespace}/${TEKTON.plural}`;
-    const list = () => this.custom.listNamespacedCustomObject({ ...TEKTON, namespace, labelSelector }) as Promise<KubernetesListObject<RawPipelineRun>>;
-    const informer = makeInformer<RawPipelineRun>(this.kc, path, list, labelSelector);
-    let stopped = false;
-    let retry: NodeJS.Timeout | undefined;
-    const seen = (raw: RawPipelineRun): void => onRun(watchedRun(raw));
-    informer.on(ADD, seen);
-    informer.on(UPDATE, seen);
-    informer.on(ERROR, (err: unknown) => {
-      onError(err);
-      if (stopped) return;
-      retry = setTimeout(() => void informer.start().catch(onError), WATCH_RETRY_MS);
-      retry.unref();
-    });
-    void informer.start().catch(onError);
-    return () => {
-      stopped = true;
-      if (retry) clearTimeout(retry);
-      void informer.stop().catch(onError);
+    const watcher = new Watch(this.kc);
+    const source: WatchSource<RawPipelineRun> = {
+      list: async () => {
+        const raw = (await this.custom.listNamespacedCustomObject({ ...TEKTON, namespace, labelSelector })) as { items?: RawPipelineRun[]; metadata?: { resourceVersion?: string } };
+        return { items: raw.items ?? [], resourceVersion: raw.metadata?.resourceVersion };
+      },
+      watch: (resourceVersion, onObject) => {
+        let request: AbortController | undefined;
+        let aborted = false;
+        const done = new Promise<void>((resolve, reject) => {
+          // An ERROR event (a version too old, 410) is followed by the end of the stream, and the
+          // loop lists again; nothing but ADDED and MODIFIED carries a run.
+          watcher.watch(path, { labelSelector, ...(resourceVersion ? { resourceVersion } : {}) }, (phase: string, obj: RawPipelineRun) => {
+            if (phase === "ADDED" || phase === "MODIFIED") onObject(obj);
+          }, (err: unknown) => (err ? reject(err) : resolve())).then((r) => {
+            request = r;
+            if (aborted) r.abort();
+          }, reject);
+        });
+        return { done, abort: () => { aborted = true; request?.abort(); } };
+      },
     };
+    return watchLoop(source, (raw) => onRun(watchedRun(raw)), onError);
   }
 }
 

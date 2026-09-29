@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
@@ -39,7 +39,7 @@ function books(engine: string): TenantRegistrations {
 /** An executor that records what the follower asks of it. A plan it settles as failed refuses the
  *  approve, as the executor refuses a failed run; its first approve is refused as busy where
  *  `busyHolder` names the run holding the lock. */
-function fakeExecutor(opts: { planStatus?: "planned" | "failed"; busyHolder?: string } = {}) {
+function fakeExecutor(opts: { planStatus?: "planned" | "failed"; busyHolder?: string; approveError?: Error } = {}) {
   const asked: string[] = [];
   const planned: unknown[] = [];
   let refused = false;
@@ -53,9 +53,11 @@ function fakeExecutor(opts: { planStatus?: "planned" | "failed"; busyHolder?: st
       return { runId };
     },
     settle: async (runId: string): Promise<void> => { asked.push(`settle ${runId}`); },
+    discard: async (runId: string): Promise<void> => { asked.push(`discard ${runId}`); },
     approve: async (runId: string): Promise<void> => {
       asked.push(`approve ${runId}`);
       if (opts.planStatus === "failed") throw errIllegalTransition("run status failed → approved");
+      if (opts.approveError) throw opts.approveError;
       if (opts.busyHolder && !refused) {
         refused = true;
         throw errResourceBusy("Resource busy", { resource: "git-branch", key: "deploy@books", holderRunId: opts.busyHolder });
@@ -117,9 +119,31 @@ describe("followTenant — one check of one tenant", () => {
     expect(executor.asked).toEqual(["plan run_1", "settle run_1", "approve run_1", "settle run_9", "approve run_1", "settle run_1"]);
   });
 
+  it("PLANTED DEFECT: discards a planned run it cannot approve for another reason, and reports that reason", async () => {
+    const executor = fakeExecutor({ approveError: new Error("the run needs a secret the Manager cannot give") });
+    await expect(followTenant(deps(executor), "tnt_1")).rejects.toThrow("the run needs a secret the Manager cannot give");
+    expect(executor.asked).toEqual(["plan run_1", "settle run_1", "approve run_1", "discard run_1"]);
+  });
+
+  it("says in the log when a check has waited 30 minutes for a run, since every later check waits behind it", async () => {
+    vi.useFakeTimers();
+    try {
+      const warned: string[] = [];
+      const executor = { ...fakeExecutor(), settle: () => new Promise<void>(() => undefined) }; // a run that never settles
+      const logger = { warn: (_o: unknown, m: string) => { warned.push(m); }, info: () => undefined, error: () => undefined };
+      void followTenant({ ...deps(executor), logger } as unknown as TenantFollowDeps, "tnt_1");
+      await vi.advanceTimersByTimeAsync(29 * 60_000);
+      expect(warned).toEqual([]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(warned).toEqual(["a check of the tenants that follow releases has waited 30 minutes for run run_1, and every later check waits behind it"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("approves no Versions run whose plan was refused, and says where the reason stands", async () => {
     const executor = fakeExecutor({ planStatus: "failed" });
-    expect(await followTenant(deps(executor), "tnt_1")).toBe(`tenant acme at prod: the Versions run run_1 moving example-platform to ${NEW} was not planned, and its record says why`);
+    expect(await followTenant(deps(executor), "tnt_1")).toBe(`tenant acme at prod: the Versions run run_1 moving example-platform to ${NEW} was not approved: its plan was refused or the run was cancelled, and its record says which`);
     expect(executor.asked).toEqual(["plan run_1", "settle run_1", "approve run_1"]);
   });
 });

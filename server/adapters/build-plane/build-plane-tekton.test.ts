@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { TektonBuildPlane, type BuildPlaneCluster, type ListedPipelineRun, type PipelineRunOutcome, type TektonBuildPlaneConfig, type WatchedPipelineRun } from "./build-plane-tekton.ts";
+import { describe, it, expect, vi } from "vitest";
+import { TektonBuildPlane, watchLoop, type BuildPlaneCluster, type ListedPipelineRun, type PipelineRunOutcome, type TektonBuildPlaneConfig, type WatchedPipelineRun, type WatchSource } from "./build-plane-tekton.ts";
 import type { ReleaseRunSucceeded } from "./port.ts";
 
 // The Tekton BuildPlane over a scripted cluster seam — no cluster, no network (the same test
@@ -136,5 +136,59 @@ describe("TektonBuildPlane", () => {
       c.see("digita-jobs-build", succeeded("before", { ...tag, stage: "prod" }, { completionTime: "2026-01-01T00:00:00Z" }));
       expect(seen).toEqual([]);
     });
+  });
+
+});
+
+describe("watchLoop — list, watch, and again, whatever fails", () => {
+  /** A source whose lists answer in turn (an Error fails one), each watch delivering `events` and then
+   *  ending, and whose watches start from the version the list before it saw. */
+  function source(lists: Array<Error | { items: string[]; version: string; events: string[] }>) {
+    const watchedFrom: Array<string | undefined> = [];
+    let listed = 0;
+    const src: WatchSource<string> = {
+      list: async () => {
+        const next = lists[Math.min(listed++, lists.length - 1)]!;
+        if (next instanceof Error) throw next;
+        return { items: next.items, resourceVersion: next.version };
+      },
+      watch: (version, onObject) => {
+        watchedFrom.push(version);
+        const current = lists[Math.min(listed - 1, lists.length - 1)] as { events: string[] };
+        for (const e of current.events) onObject(e);
+        return { done: new Promise<void>((resolve) => setTimeout(resolve, 5)), abort: () => undefined };
+      },
+    };
+    return { src, watchedFrom, lists: () => listed };
+  }
+
+  it("hands on what each list and each watch delivers, watching from the version the list saw, and lists again when a watch ends", async () => {
+    const s = source([{ items: ["a"], version: "10", events: ["b"] }, { items: ["a", "b"], version: "11", events: [] }]);
+    const seen: string[] = [];
+    const stop = watchLoop(s.src, (o) => seen.push(o), () => undefined, 1);
+    await vi.waitFor(() => expect(s.lists()).toBeGreaterThanOrEqual(2));
+    stop();
+    expect(seen.slice(0, 4)).toEqual(["a", "b", "a", "b"]);
+    expect(s.watchedFrom.slice(0, 2)).toEqual(["10", "11"]);
+  });
+
+  it("PLANTED DEFECT: reports a failed list and a throwing receiver, and goes on", async () => {
+    const s = source([new Error("forbidden"), { items: ["x", "boom", "y"], version: "5", events: [] }]);
+    const seen: string[] = [];
+    const errors: string[] = [];
+    const stop = watchLoop(s.src, (o) => { if (o === "boom") throw new Error("receiver threw"); seen.push(o); }, (e) => errors.push((e as Error).message), 1);
+    await vi.waitFor(() => expect(seen).toContain("y"));
+    stop();
+    expect(errors.slice(0, 2)).toEqual(["forbidden", "receiver threw"]);
+    expect(seen.slice(0, 2)).toEqual(["x", "y"]);
+  });
+
+  it("lists no more once stopped", async () => {
+    const s = source([new Error("down")]);
+    const stop = watchLoop(s.src, () => undefined, () => undefined, 60_000);
+    await vi.waitFor(() => expect(s.lists()).toBe(1));
+    stop();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(s.lists()).toBe(1);
   });
 });

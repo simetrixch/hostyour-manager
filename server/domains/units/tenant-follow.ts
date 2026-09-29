@@ -19,9 +19,12 @@ import { loadTenantCluster } from "./lifecycle.ts";
 import { tenantVersionParts, type TenantVersionPart } from "./tenant-versions.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 
+/** How long one wait of a check may last before the log says that every later check waits behind it. */
+const LONG_WAIT_MS = 30 * 60_000;
+
 export interface TenantFollowDeps {
   db: Db;
-  executor: Pick<Executor, "planStreamed" | "settle" | "approve">;
+  executor: Pick<Executor, "planStreamed" | "settle" | "approve" | "discard">;
   ports: Pick<TenantOnboardPorts, "registrations" | "attestedBuilds">;
   logger: Logger;
 }
@@ -47,13 +50,25 @@ function busyHolder(err: unknown): string | null {
   return e.code === "RESOURCE_BUSY" && typeof e.detail?.holderRunId === "string" ? e.detail.holderRunId : null;
 }
 
+/** Wait until `runId` settles. The checks wait one after another, so a run that never settles holds
+ *  every later check back: past LONG_WAIT_MS the log says so. */
+async function settle(deps: TenantFollowDeps, runId: string): Promise<void> {
+  const warn = setTimeout(() => deps.logger.warn({ runId }, `a check of the tenants that follow releases has waited ${LONG_WAIT_MS / 60_000} minutes for run ${runId}, and every later check waits behind it`), LONG_WAIT_MS);
+  warn.unref?.();
+  try {
+    await deps.executor.settle(runId);
+  } finally {
+    clearTimeout(warn);
+  }
+}
+
 /** Approve `runId` once no other run holds its locks. Every tenant run takes the books branch, so a
  *  second one waits for the run that holds it to end, however long that takes. */
-async function approveWhenFree(executor: TenantFollowDeps["executor"], runId: string): Promise<void> {
+async function approveWhenFree(deps: TenantFollowDeps, runId: string): Promise<void> {
   let waitedFor: string | null = null;
   for (;;) {
     try {
-      await executor.approve(runId);
+      await deps.executor.approve(runId);
       return;
     } catch (err) {
       const holder = busyHolder(err);
@@ -61,7 +76,7 @@ async function approveWhenFree(executor: TenantFollowDeps["executor"], runId: st
       // waiting on it again would spin.
       if (holder === null || holder === waitedFor) throw err;
       waitedFor = holder;
-      await executor.settle(holder);
+      await settle(deps, holder);
     }
   }
 }
@@ -78,15 +93,21 @@ export async function followTenant(deps: TenantFollowDeps, tenantId: string): Pr
   const moves = Object.entries(versions).map(([part, tag]) => `${part} to ${tag}`).join(", ");
   if (moves === "") return `tenant ${tc.subdomain} at ${tc.stage} runs every part at its stage pin`;
   const { runId } = await deps.executor.planStreamed("tenant-refresh-members", { tenantId, versions });
-  await deps.executor.settle(runId);
+  await settle(deps, runId);
   try {
-    await approveWhenFree(deps.executor, runId);
+    await approveWhenFree(deps, runId);
   } catch (err) {
-    // A plan its gates refused settles its run as failed, and a failed run is no run to approve.
-    if ((err as { code?: unknown }).code !== "ILLEGAL_TRANSITION") throw err;
-    return `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} moving ${moves} was not planned, and its record says why`;
+    // A plan its gates refused settles its run as failed, and an operator may have cancelled it: in
+    // both it is no run to approve, and its record says which.
+    if ((err as { code?: unknown }).code === "ILLEGAL_TRANSITION") {
+      return `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} moving ${moves} was not approved: its plan was refused or the run was cancelled, and its record says which`;
+    }
+    // Any other refusal leaves a planned run nobody will approve; it is discarded, so the next event
+    // plans afresh instead of adding to a pile.
+    await deps.executor.discard(runId).catch((discardErr: unknown) => deps.logger.error({ err: discardErr, runId }, "a planned Versions run could not be discarded"));
+    throw err;
   }
-  await deps.executor.settle(runId);
+  await settle(deps, runId);
   return `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} moved ${moves}`;
 }
 
