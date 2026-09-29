@@ -61,6 +61,7 @@ export const SLAVE_MARKING_YAML = [
   "      host: zot.m1.example.com",
   "    vault:",
   "      url: https://vault.m1.example.com",
+  "      privateAddress: 100.64.0.1",
   "    idp:",
   "      url: https://idp.m1.example.com",
   "    tailnet:",
@@ -116,6 +117,9 @@ export const MASTER_MARKING_YAML = [
   // global key a slave must not inherit — the fence the gate sandbox draws would otherwise be drawn
   // around this machine while the slave's own address stood outside it.
   "  nodeCidrs: [203.0.113.7/32]",
+  // ITS ADDRESS ON THE TAILNET, which tailnet-record-address writes once the master has joined. A
+  // slave reaches the secret store there, so mark-slave refuses a master whose map lacks it.
+  "  apiHost: 100.64.0.1",
   // ALL FIVE, as the map template writes them. Three of them follow the books-keeping cluster and
   // one the build plane, so a slave inherits every one unchanged — and a fixture carrying only the
   // one a single step happened to read cannot fail when the next step's address goes missing.

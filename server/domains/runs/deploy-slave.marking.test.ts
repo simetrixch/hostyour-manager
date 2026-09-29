@@ -119,6 +119,33 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     expect(map).toContain("url: https://idp.m1.example.com");
   });
 
+  it("tells a slave where it reaches the secret store privately: at the master's tailnet address", async () => {
+    // The master's Vault admits the tailnet and nothing public, so the slave's CoreDNS answers the
+    // Vault name with the master's apiHost. The master's own map carries no such key.
+    const h = await makeHarness({ marking: false });
+    h.db.db.insert(clusters).values({
+      id: "cls_s7", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
+    }).run();
+    await stepOf(h, "mark-slave").run(hostedStepCtx(h));
+
+    const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)) ?? "";
+    expect(map).toContain("privateAddress: 100.64.0.1");
+    expect(MASTER_MARKING_YAML).not.toContain("privateAddress");
+    // The rest of the endpoint stays as the master's map states it.
+    expect(map).toContain("url: https://vault.m1.example.com");
+  });
+
+  it("STOPS rather than write a slave map whose secret store has no private address", async () => {
+    const h = await makeHarness({ marking: false });
+    h.platformRepo.seed(h.platformRepo.booksBranch, clusterMapPath("m1.example.com"), MASTER_MARKING_YAML.replace("  apiHost: 100.64.0.1\n", ""));
+    h.db.db.insert(clusters).values({
+      id: "cls_s8", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
+    }).run();
+
+    await expect(stepOf(h, "mark-slave").run(hostedStepCtx(h))).rejects.toThrow(/records no global\.apiHost/);
+    expect(h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)), "and writes nothing").toBeNull();
+  });
+
   it("draws the fence around THIS machine, from this machine's own addresses", async () => {
     // `global.nodeCidrs` is the one global key that is a fact about the box rather than about the
     // installation, and inherited with the rest a slave's map named the MASTER's machine. Its only

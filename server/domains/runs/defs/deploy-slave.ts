@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import type { Step, Cleanup, RunDefinition } from "../../../executor/types.ts";
@@ -497,6 +498,18 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
             `${domain} lists no address of its own (\`${HOST_ADDRESS_COMMAND}\`), and global.nodeCidrs is what the gate sandbox draws its fence from — a map written without it would fence nothing`,
           );
         }
+        // WHERE THIS CLUSTER REACHES THE SECRET STORE: at the master's address on the tailnet. The
+        // master's Vault route admits the tailnet, the pods and the master's own node addresses and
+        // nothing else (hostyour-cloud clusters/bootstrap/vault/ingressroute.tpl), so the public
+        // name reached over the internet is refused. This slave's CoreDNS answers the Vault name
+        // with this address, in a hosts block that takes an address and nothing else.
+        const vaultPrivateAddress = masterMarking.apiHost;
+        if (vaultPrivateAddress === undefined || isIP(vaultPrivateAddress) === 0) {
+          throw errValidation(
+            `${clusterMapPath(masterFqdn)} records ${vaultPrivateAddress === undefined ? "no global.apiHost" : `global.apiHost "${vaultPrivateAddress}", which is no IP address`} — a slave reaches the secret store at the master's tailnet address, and tailnet-record-address on the master writes it there`,
+          );
+        }
+        const inheritedEndpoints = recordOf(inherited["endpoints"]);
         // The machine is a slave and nothing else: the plan refused the master as a target, so the
         // word written here never demotes the books-keeping cluster in its own map.
         const role = "slave" as const;
@@ -521,6 +534,10 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
             vaultKubernetesAuthPath: `kubernetes-${shortName}`,
             // Measured above, never inherited.
             nodeCidrs,
+            endpoints: {
+              ...inheritedEndpoints,
+              vault: { ...recordOf(inheritedEndpoints["vault"]), privateAddress: vaultPrivateAddress },
+            },
             // WHICH OF THE SHARED SERVICES STAND HERE. Two of the three follow from who keeps the
             // books, and a slave keeps none: one installation has ONE Vault and ONE observability
             // stack, both on the books-keeping cluster. Inherited from a master both said `true`,
@@ -530,9 +547,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
             // not run, and the key exists so a chart can decide from it where to dial. The third
             // follows from where the build plane is, which may be this machine.
             servicesLocal: {
-              ...(typeof inherited["servicesLocal"] === "object" && inherited["servicesLocal"] !== null
-                ? (inherited["servicesLocal"] as Record<string, unknown>)
-                : {}),
+              ...recordOf(inherited["servicesLocal"]),
               registry: holdsBuildPlane,
               vault: false,
               observability: false,
@@ -689,6 +704,11 @@ function installInput(params: DeploySlaveParams): SlaveInstallInput {
     mode: "deploy",
     slaveId: params.slaveId,
   };
+}
+
+/** A block of an inherited map as the object it is, or an empty one where the map has none. */
+function recordOf(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
 /** The master is refused as a target BY THE PLAN: it carries the slave part from its own

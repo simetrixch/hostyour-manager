@@ -93,6 +93,8 @@ describe("the relay target of a stage follows its mail sender, in the commit tha
 
   it("refuses to move the sender onto a cluster whose map carries no apiHost, and commits nothing", async () => {
     const { repo, reg } = books();
+    // A master before tailnet-record-address ran, so the address the fixture records is taken out.
+    repo.seed(repo.booksBranch, clusterMapPath(MASTER_FQDN), MASTER_MARKING_YAML.replace("  apiHost: 100.64.0.1\n", ""));
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ smtpEntry: entry }), runId: "run_1" });
     const before = repo.commits.length;
     await expect(reg.setCluster("prod", "acme", "m1", "run_2")).rejects.toThrow(/clusters\/active\/m1\.example\.com\.yaml carries no global\.apiHost.*deploy-slave for a slave and by tailnet-record-address for a master/);
