@@ -357,6 +357,7 @@ describe("validateTenant", () => {
       cloneAtRef: async () => { throw errValidation("clone failed: authentication required"); },
       readFile: async () => null,
       listDir: async () => [],
+      isExecutable: async () => false,
       dispose: async () => {},
     };
     const helm = new FakeHelmRenderer();

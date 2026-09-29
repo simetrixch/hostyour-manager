@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { injectReleaseKitStep, removeReleaseKit, syncReleaseKits } from "#unit/server/inject-release-kit.ts";
+import { injectReleaseKitStep, removeReleaseKit, syncReleaseKits, syncReleaseKit } from "#unit/server/inject-release-kit.ts";
 import { DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS, RELEASE_KIT_WORKFLOW } from "#unit/server/release-kit/release-kit.ts";
 import { gateReleaseWorkflow } from "./gates/release-workflow.ts";
@@ -76,7 +76,7 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
 
   it("is a NO-OP on a repo already carrying the current kit: no commit, no error", async () => {
     const consumerRepo = new FakeRepoWriter();
-    for (const f of RELEASE_KIT_FILES) consumerRepo.seed(REPO_URL, f.path, f.content); // present + current
+    for (const f of RELEASE_KIT_FILES) consumerRepo.seed(REPO_URL, f.path, f.content, { executable: f.executable }); // present + current
     const logs: string[] = [];
     await step({ consumerRepo }).run(ctx(logs)); // resolves — a re-onboard is legitimate
 
@@ -127,7 +127,7 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
 
   it("REPLACES a divergent copy with the current asset bytes — the kit is platform-owned, and the trigger runs exactly these bytes", async () => {
     const consumerRepo = new FakeRepoWriter();
-    for (const f of RELEASE_KIT_FILES) consumerRepo.seed(REPO_URL, f.path, f.content);
+    for (const f of RELEASE_KIT_FILES) consumerRepo.seed(REPO_URL, f.path, f.content, { executable: f.executable });
     consumerRepo.seed(REPO_URL, ".github/workflows/release.yml", "name: OldKitRelease\n"); // an older kit's workflow
     const logs: string[] = [];
     await step({ consumerRepo }).run(ctx(logs));
@@ -142,7 +142,7 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
 
   it("REMOVES a stale file of an older kit under release/ in the same commit; consumer-owned paths are untouched", async () => {
     const consumerRepo = new FakeRepoWriter();
-    for (const f of RELEASE_KIT_FILES) consumerRepo.seed(REPO_URL, f.path, f.content);
+    for (const f of RELEASE_KIT_FILES) consumerRepo.seed(REPO_URL, f.path, f.content, { executable: f.executable });
     consumerRepo.seed(REPO_URL, "release/release-legacy.sh", "old kit helper\n"); // stale — the current set no longer carries it
     consumerRepo.seed(REPO_URL, "src/app.ts", "consumer code\n"); // consumer-owned — never touched
     const logs: string[] = [];
@@ -203,6 +203,28 @@ describe("removeReleaseKit (shared offboard/purge teardown)", () => {
   });
 });
 
+describe("syncReleaseKit keeps release/release.sh executable", () => {
+  const REPO = "https://github.com/x/modes.git";
+  const RELEASE_SH = RELEASE_KIT_FILES.find((f) => f.path === "release/release.sh")!;
+  const sync = (writer: FakeRepoWriter) => syncReleaseKit(writer, { repoURL: REPO, credentialId: "cred_x", message: "sync" });
+
+  it("writes the kit into a fresh repository with release/release.sh as the one executable file", async () => {
+    const writer = new FakeRepoWriter();
+    await sync(writer);
+    expect(writer.executableFor(REPO)).toEqual(["release/release.sh"]);
+  });
+
+  it("PLANTED DEFECT: rewrites a release.sh of the right bytes and the wrong mode, and a second sync writes nothing", async () => {
+    const writer = new FakeRepoWriter();
+    for (const f of RELEASE_KIT_FILES) writer.seed(REPO, f.path, f.content); // an older kit wrote every file 100644
+    expect(await sync(writer)).toMatchObject({ changed: true, written: ["release/release.sh"], replaced: ["release/release.sh"], removed: [] });
+    expect(writer.commits.at(-1)!.write).toEqual([{ path: "release/release.sh", content: RELEASE_SH.content, executable: true }]);
+    expect(writer.executableFor(REPO)).toEqual(["release/release.sh"]);
+    expect(await sync(writer)).toMatchObject({ changed: false, written: [] });
+    expect(writer.commits).toHaveLength(1);
+  });
+});
+
 describe("syncReleaseKits at boot (a unit released by hand runs the kit that stands in its repository)", () => {
   it("writes the current kit where it differs, commits nothing where it stands, and goes on past a unit it cannot reach", async () => {
     const OLD = "https://github.com/x/old-kit.git";
@@ -211,7 +233,7 @@ describe("syncReleaseKits at boot (a unit released by hand runs the kit that sta
     const writer = new FakeRepoWriter();
     writer.seed(OLD, "release/release.sh", "#!/usr/bin/env bash\n# an older kit\n");
     writer.seed(OLD, "release/stale.sh", "#!/usr/bin/env bash\n");
-    for (const f of RELEASE_KIT_FILES) writer.seed(CURRENT, f.path, f.content);
+    for (const f of RELEASE_KIT_FILES) writer.seed(CURRENT, f.path, f.content, { executable: f.executable });
     const registered = [OLD, LOST, CURRENT].map((repoURL) => ({ unit: repoURL.split("/").pop()!.replace(".git", ""), entry: { repoURL } }));
     const failed: string[] = [];
     const logger = { info: () => undefined, error: (o: { unit?: string }) => failed.push(o.unit ?? "") } as unknown as Logger;

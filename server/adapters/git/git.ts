@@ -13,14 +13,14 @@
 //    domain.)
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { errValidation } from "../../kernel/errors.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
-import type { BranchScope, ClonedRepo, CommitInput, RepoWriter, RepoCheckout, PlatformRepo, RepoReader } from "./port.ts";
+import type { BranchScope, ClonedRepo, CommitInput, RepoFileWrite, RepoWriter, RepoCheckout, PlatformRepo, RepoReader } from "./port.ts";
 import { runGit, withAskpass } from "./git-exec.ts";
-import { listWorkdirDir, readWorkdirFile, readWorkdirFileHistory, safePath } from "./git-workdir.ts";
+import { isWorkdirFileExecutable, listWorkdirDir, readWorkdirFile, readWorkdirFileHistory, stageWorkdirChanges } from "./git-workdir.ts";
 
 const SHA40 = /^[0-9a-f]{40}$/;
 const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
@@ -119,6 +119,10 @@ export class GitRepoReader implements RepoReader {
 
   async listDir(workdir: string, relPath: string): Promise<string[]> {
     return listWorkdirDir(workdir, relPath);
+  }
+
+  async isExecutable(workdir: string, relPath: string): Promise<boolean> {
+    return isWorkdirFileExecutable(workdir, relPath);
   }
 
   async dispose(workdir: string): Promise<void> {
@@ -411,23 +415,7 @@ export class GitPlatformRepo implements PlatformRepo {
   }
 
   private async commitPushIn(dir: string, branch: string, input: CommitInput): Promise<{ commit: string }> {
-    const writes = input.write ?? [];
-    // De-overlap write/remove: a path staged for BOTH (e.g. an offboard re-run where
-    // fromPath === toPath) would git-add the identical bytes and then git-rm the same path, committing
-    // a spurious DELETE that self-destructs the pointer. A written path always wins over a remove.
-    const writePaths = new Set(writes.map((w) => w.path));
-    const removes = (input.remove ?? []).filter((p) => !writePaths.has(p));
-    for (const w of writes) {
-      const abs = safePath(dir, w.path);
-      if (abs === resolve(dir)) throw errValidation(`invalid write path: "${w.path}"`);
-      await mkdir(dirname(abs), { recursive: true });
-      await writeFile(abs, w.content, "utf8");
-    }
-    if (writes.length > 0) await this.run(dir, ["add", "--", ...writes.map((w) => w.path)]);
-    if (removes.length > 0) {
-      for (const p of removes) safePath(dir, p);
-      await this.run(dir, ["rm", "-q", "-r", "--ignore-unmatch", "--", ...removes]);
-    }
+    await stageWorkdirChanges(dir, input, (args) => this.run(dir, args));
     // No-op idempotency: fetchResetBranch hard-resets to origin, so re-running a step that already
     // landed (crash-resume, a same-value suspend flip, a redundant rewrite) stages bytes identical
     // to HEAD. A plain `git commit` would exit non-zero ("nothing to commit") and throw; instead detect
@@ -572,12 +560,16 @@ export class GitRepoWriter implements RepoWriter {
     return listWorkdirDir(workdir, relPath);
   }
 
+  async isExecutable(workdir: string, relPath: string): Promise<boolean> {
+    return isWorkdirFileExecutable(workdir, relPath);
+  }
+
   async commitPush(input: {
     workdir: string;
     branch: string;
     credentialId: string;
     message: string;
-    write?: { path: string; content: string }[];
+    write?: RepoFileWrite[];
     remove?: string[];
     signal?: AbortSignal;
   }): Promise<{ commit: string; changed: boolean }> {
@@ -587,21 +579,7 @@ export class GitRepoWriter implements RepoWriter {
       runGit(args, { cwd: dir, ...(env ? { env } : {}), ...(input.signal ? { signal: input.signal } : {}) });
     const withCred = <T>(fn: (env: Record<string, string>) => Promise<T>): Promise<T> =>
       withAskpass(input.credentialId, this.deps.openCredential, fn);
-    const writes = input.write ?? [];
-    // A path staged for BOTH write + remove: the write wins (same de-overlap law as GitPlatformRepo).
-    const writePaths = new Set(writes.map((w) => w.path));
-    const removes = (input.remove ?? []).filter((p) => !writePaths.has(p));
-    for (const w of writes) {
-      const abs = safePath(dir, w.path);
-      if (abs === resolve(dir)) throw errValidation(`invalid write path: "${w.path}"`);
-      await mkdir(dirname(abs), { recursive: true });
-      await writeFile(abs, w.content, "utf8");
-    }
-    if (writes.length > 0) await run(["add", "--", ...writes.map((w) => w.path)]);
-    if (removes.length > 0) {
-      for (const p of removes) safePath(dir, p);
-      await run(["rm", "-q", "-r", "--ignore-unmatch", "--", ...removes]);
-    }
+    await stageWorkdirChanges(dir, input, run);
     // No-op idempotency (a crash-resume / a create-only re-run that finds everything present): a
     // byte-identical worktree stages nothing → return HEAD, no commit, no push, changed:false.
     const staged = (await run(["diff", "--cached", "--name-only"])).trim();

@@ -31,6 +31,8 @@ export function tenantAppsRepoURL(org: string, bundle: string, subdomain: string
 export interface TreeFile {
   path: string;
   content: string;
+  /** Whether the template's git records the file as executable, which the copy keeps. */
+  executable: boolean;
 }
 
 /** Every file of the template that belongs in a tenant's repository, read through the reader. Left
@@ -55,7 +57,7 @@ export async function readTemplateTree(repo: RepoReader, workdir: string, input:
       // and would be written back changed — refused by name rather than copied wrong. A binary asset
       // in the bundle needs a git-native copy on the RepoWriter port.
       if (content.includes("�")) throw errValidation(`${path} of the template is not UTF-8 text — this run copies text files only and would corrupt it`);
-      out.push({ path, content });
+      out.push({ path, content, executable: await repo.isExecutable(workdir, path) });
     }
   };
   await walk("");

@@ -145,7 +145,7 @@ describe("readAppCatalog (the manifest of the apps template, else the stand-in)"
   it("THROWS when the clone of the apps repository fails — the plan records a preflight rejection, the route falls soft", async () => {
     const repo: RepoReader = {
       cloneAtRef: async () => { throw new Error("clone failed: authentication required"); },
-      readFile: async () => null, listDir: async () => [], dispose: async () => {},
+      readFile: async () => null, listDir: async () => [], isExecutable: async () => false, dispose: async () => {},
     };
     await expect(catalogOf(repo)).rejects.toThrow(/clone failed/);
   });
@@ -191,6 +191,9 @@ class ToggleRepoReader implements RepoReader {
       if (seg) names.add(seg);
     }
     return [...names];
+  }
+  async isExecutable(): Promise<boolean> {
+    return false;
   }
   async dispose(): Promise<void> {}
 }

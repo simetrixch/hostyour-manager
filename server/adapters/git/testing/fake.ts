@@ -3,7 +3,7 @@
 // keeps a branch<->files map so a test can assert the exact pointer/report writes; FakeRepoWriter
 // (the release-kit writer) keeps a per-repoURL file map + a commit recorder.
 import { errNotFound } from "../../../kernel/errors.ts";
-import type { RepoReader, ClonedRepo, PlatformRepo, BranchScope, CommitInput, RepoWriter, RepoCheckout } from "../port.ts";
+import type { RepoReader, ClonedRepo, PlatformRepo, BranchScope, CommitInput, RepoFileWrite, RepoWriter, RepoCheckout } from "../port.ts";
 import { CLUSTER_MAP_DIR, PLATFORM_VALUES_COMMON, PLATFORM_VALUES_DIR } from "../../../../shared/cluster-values.ts";
 import { STAGE } from "../../../../shared/enums.ts";
 
@@ -17,6 +17,8 @@ function dirPrefix(relPath: string): string {
 export interface FakeRepoReaderScript {
   resolvedSha?: string;
   files?: Record<string, string>;
+  /** The paths git records as executable (100755); every other file reads as 100644. */
+  executable?: readonly string[];
 }
 
 export class FakeRepoReader implements RepoReader {
@@ -67,6 +69,10 @@ export class FakeRepoReader implements RepoReader {
       if (seg) names.add(seg);
     }
     return [...names];
+  }
+
+  async isExecutable(workdir: string, relPath: string): Promise<boolean> {
+    return this.scriptOf(workdir).executable?.includes(relPath) ?? false;
   }
 
   async dispose(_workdir: string): Promise<void> {}
@@ -221,7 +227,7 @@ export interface FakeRepoWriterCommit {
   repoURL: string;
   branch: string;
   message: string;
-  write?: { path: string; content: string }[];
+  write?: RepoFileWrite[];
   remove?: string[];
 }
 
@@ -236,6 +242,8 @@ export class FakeRepoWriter implements RepoWriter {
   readonly commits: FakeRepoWriterCommit[] = [];
   // "repoURL\0path" -> content
   private readonly store = new Map<string, string>();
+  // "repoURL\0path" of every file git would record as executable (100755)
+  private readonly executables = new Set<string>();
   private readonly branch: string;
   private openError: Error | null = null;
   private commitError: Error | null = null;
@@ -245,9 +253,17 @@ export class FakeRepoWriter implements RepoWriter {
     this.branch = opts.branch ?? "main";
   }
 
-  /** Pre-seed a file already present on a repo (e.g. a divergent, consumer-edited release.yml). */
-  seed(repoURL: string, path: string, content: string): void {
+  /** Pre-seed a file already present on a repo (e.g. a divergent, consumer-edited release.yml), with
+   *  the mode git records for it. */
+  seed(repoURL: string, path: string, content: string, opts: { executable?: boolean } = {}): void {
     this.store.set(`${repoURL}\0${path}`, content);
+    if (opts.executable) this.executables.add(`${repoURL}\0${path}`);
+    else this.executables.delete(`${repoURL}\0${path}`);
+  }
+
+  /** The paths of a repo that git records as executable (test assertion helper). */
+  executableFor(repoURL: string): string[] {
+    return [...this.executables].filter((k) => k.startsWith(`${repoURL}\0`)).map((k) => k.slice(repoURL.length + 1)).sort();
   }
 
   /** Simulate a repo the writer cannot clone (a revoked PAT): open throws. */
@@ -299,12 +315,16 @@ export class FakeRepoWriter implements RepoWriter {
     return [...names];
   }
 
+  async isExecutable(workdir: string, relPath: string): Promise<boolean> {
+    return this.executables.has(`${this.repoOf(workdir)}\0${relPath}`);
+  }
+
   async commitPush(input: {
     workdir: string;
     branch: string;
     credentialId: string;
     message: string;
-    write?: { path: string; content: string }[];
+    write?: RepoFileWrite[];
     remove?: string[];
     signal?: AbortSignal;
   }): Promise<{ commit: string; changed: boolean }> {
@@ -316,8 +336,12 @@ export class FakeRepoWriter implements RepoWriter {
     let changed = false;
     for (const w of input.write ?? []) {
       const key = `${repoURL}\0${w.path}`;
-      if (this.store.get(key) !== w.content) {
+      // Left out, the mode stays what the file had (the real adapter's git add), and a new file is 100644.
+      const executable = w.executable ?? this.executables.has(key);
+      if (this.store.get(key) !== w.content || this.executables.has(key) !== executable) {
         this.store.set(key, w.content);
+        if (executable) this.executables.add(key);
+        else this.executables.delete(key);
         changed = true;
       }
     }
@@ -326,12 +350,14 @@ export class FakeRepoWriter implements RepoWriter {
       const key = `${repoURL}\0${p}`;
       if (this.store.has(key)) {
         this.store.delete(key);
+        this.executables.delete(key);
         changed = true;
       }
       // The real adapter removes with `git rm -r`, so a directory path takes its files with it.
       for (const k of [...this.store.keys()]) {
         if (k.startsWith(`${key}/`) && !writePaths.has(k.slice(repoURL.length + 1))) {
           this.store.delete(k);
+          this.executables.delete(k);
           changed = true;
         }
       }

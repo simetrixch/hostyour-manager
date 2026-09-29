@@ -22,17 +22,17 @@
 // deploy repository names (syncReleaseKits).
 import type { Step, StepCtx } from "#core/server/executor/types.ts";
 import type { BuildPorts, BuildParams } from "./build-chain.ts";
-import type { RepoWriter } from "#core/server/adapters/git/port.ts";
+import type { RepoFileWrite, RepoWriter } from "#core/server/adapters/git/port.ts";
 import type { Logger } from "#core/server/kernel/logger.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 import type { Registrations } from "./registrations.ts";
 import { RELEASE_KIT_DIR, RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS, RELEASE_KIT_WORKFLOW } from "./release-kit/release-kit.ts";
 
-/** The current kit into one repository's default branch, by comparison: a file whose copy differs is
- *  written, a file under the kit's own directory that the current set no longer carries is removed in
- *  the same commit, and a repository already on the current kit commits nothing. `refuse` judges what
- *  stands at the workflow path before anything is written, in the same clone; a reason leaves the
- *  repository as it is and comes back as `refused`. */
+/** The current kit into one repository's default branch, by comparison: a file whose bytes or whose
+ *  mode differ is written, a file under the kit's own directory that the current set no longer carries
+ *  is removed in the same commit, and a repository already on the current kit commits nothing.
+ *  `refuse` judges what stands at the workflow path before anything is written, in the same clone; a
+ *  reason leaves the repository as it is and comes back as `refused`. */
 export async function syncReleaseKit(
   writer: RepoWriter,
   input: { repoURL: string; credentialId: string; message: string; signal?: AbortSignal; refuse?: (workflow: string | null) => string | null },
@@ -42,12 +42,15 @@ export async function syncReleaseKit(
   try {
     const refused = input.refuse?.(await writer.readFile(session.workdir, RELEASE_KIT_WORKFLOW.path)) ?? null;
     if (refused !== null) return { branch: session.branch, changed: false, written: [], replaced: [], removed: [], refused };
-    const toWrite: { path: string; content: string }[] = [];
+    const toWrite: RepoFileWrite[] = [];
     const replaced: string[] = [];
     for (const f of RELEASE_KIT_FILES) {
       const existing = await writer.readFile(session.workdir, f.path);
-      if (existing === f.content) continue;
-      toWrite.push({ path: f.path, content: f.content });
+      // A file of the right bytes and the wrong mode is written too, so a boot corrects a release.sh
+      // an older kit left without its executable bit; git's own record of the mode is read, so a
+      // repository already right commits nothing.
+      if (existing === f.content && (await writer.isExecutable(session.workdir, f.path)) === f.executable) continue;
+      toWrite.push({ path: f.path, content: f.content, executable: f.executable });
       if (existing !== null) replaced.push(f.path);
     }
     const current = new Set(RELEASE_KIT_PATHS);

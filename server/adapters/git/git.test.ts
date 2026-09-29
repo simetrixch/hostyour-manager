@@ -269,6 +269,32 @@ describe("GitRepoWriter", () => {
     return { originDir, originURL: pathToFileURL(originDir).href };
   }
 
+  it("PLANTED DEFECT: writes a file's executable bit, commits a mode-only change, and reads the mode git records", async () => {
+    // `clean` is what a push retry's `pull --rebase` needs: a mode set only in the index leaves the
+    // file on disk differing from it, an unstaged change the rebase refuses to run over.
+    const { originDir, originURL } = makeConsumerOrigin("master");
+    const path = "release/release.sh";
+    const body = "#!/usr/bin/env bash\necho release\n";
+    const modeOnOrigin = (): string => git(originDir, "ls-tree", "master", "--", path).split(" ")[0]!;
+    const repo = makeConsumer();
+    const push = async (executable: boolean | undefined): Promise<{ changed: boolean; executable: boolean; clean: boolean }> => {
+      const s = await repo.open({ repoURL: originURL, credentialId: "cred_x" });
+      try {
+        const write = executable === undefined ? { path, content: body } : { path, content: body, executable };
+        const { changed } = await repo.commitPush({ workdir: s.workdir, branch: s.branch, credentialId: "cred_x", message: "mode", write: [write] });
+        return { changed, executable: await repo.isExecutable(s.workdir, path), clean: git(s.workdir, "status", "--porcelain") === "" };
+      } finally {
+        await repo.dispose(s.workdir);
+      }
+    };
+    expect(await push(true)).toEqual({ changed: true, executable: true, clean: true });
+    expect(modeOnOrigin()).toBe("100755");
+    expect(await push(true)).toEqual({ changed: false, executable: true, clean: true }); // the same bytes and mode: no commit
+    expect(await push(undefined)).toEqual({ changed: false, executable: true, clean: true }); // left out, the mode stays
+    expect(await push(false)).toEqual({ changed: true, executable: false, clean: true }); // the same bytes, only the mode changes
+    expect(modeOnOrigin()).toBe("100644");
+  });
+
   it(
     "resolves the default branch (not hardcoded main), create-only writes, is empty-diff no-op, and removes",
     async () => {

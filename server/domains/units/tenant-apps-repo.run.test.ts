@@ -12,7 +12,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeTenantAppsRepoDef, type TenantAppsRepoParams } from "./tenant-apps-repo.run.ts";
 import { mergeAppsManifest } from "./tenant-apps-tree.ts";
-import { DEPLOY_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, TEMPLATE_FILES, TEMPLATE_MANIFEST, TEMPLATE_URL, TENANT_URL, UNIT, deployManifest, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
+import { DEPLOY_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, TEMPLATE_EXECUTABLE, TEMPLATE_FILES, TEMPLATE_MANIFEST, TEMPLATE_URL, TENANT_URL, UNIT, deployManifest, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -64,7 +64,7 @@ function harness(over: { manifest?: string; ports?: Partial<TenantOnboardPorts>;
   githubApp.org = ORG;
   const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
   const deployReader = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.manifest ?? deployManifest() } });
-  deployReader.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: TEMPLATE_FILES });
+  deployReader.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: TEMPLATE_FILES, executable: TEMPLATE_EXECUTABLE });
   const consumerRepo = new FakeRepoWriter();
   const github = new FakeGitHubConsumer();
   const buildPlane = new FakeBuildPlane();
@@ -271,8 +271,9 @@ describe("write-tree — the tree from the template into the tenant's repository
     const logs: string[] = [];
     await step(h, p, "write-tree").run(ctx(p, logs, creds.store));
     const files = h.consumerRepo.filesFor(TENANT_URL);
-    expect(Object.keys(files).sort()).toEqual([".dockerignore", ".github/CODEOWNERS", "apps.yaml", "deploy/platform.yaml", "docker/Dockerfile", "erp/package.json", "erp/seeds/roles.json", "package.json"]);
+    expect(Object.keys(files).sort()).toEqual([".dockerignore", ".githooks/pre-push", ".github/CODEOWNERS", "apps.yaml", "deploy/platform.yaml", "docker/Dockerfile", "erp/package.json", "erp/seeds/roles.json", "package.json"]);
     expect(files["package.json"]).toBe(TEMPLATE_FILES["package.json"]);
+    expect(h.consumerRepo.executableFor(TENANT_URL)).toEqual([".githooks/pre-push"]); // the template's modes, without the kit
     // The manifest: a build-only unit named after the tenant, one build, the template's envs and containerfile.
     const manifest = ConsumerManifestSchema.parse(parseYaml(files["deploy/platform.yaml"]!));
     expect(manifest).toMatchObject({ name: UNIT, owner: SUBDOMAIN, envs: ["dev", "test", "prod"], builds: [{ name: UNIT, containerfile: "docker/Dockerfile" }], appsBundle: UNIT });
@@ -289,7 +290,7 @@ describe("write-tree — the tree from the template into the tenant's repository
     // token and carries the App identity's fingerprint.
     expect(creds.seals).toEqual([]); // no row per unit (#226)
     expect(h.consumerRepo.opened).toEqual([{ repoURL: TENANT_URL, credentialId: "cred_app" }]);
-    expect(logs.some((l) => l.includes(`8 file(s) committed to ${TENANT_URL}`))).toBe(true);
+    expect(logs.some((l) => l.includes(`9 file(s) committed to ${TENANT_URL}`))).toBe(true);
   });
   it("a second run adds the missing app folder and entry, deletes nothing, overwrites nothing, and commits nothing when nothing changed", async () => {
     const h = harness();

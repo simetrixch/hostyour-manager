@@ -253,6 +253,7 @@ describe("validateOnboard", () => {
       cloneAtRef: async () => { throw errValidation("clone failed: authentication required"); },
       readFile: async () => null,
       listDir: async () => [],
+      isExecutable: async () => false,
       dispose: async () => {},
     };
     const runner = new FakeGateRunner({ report: report(g1Pass, "pass") });

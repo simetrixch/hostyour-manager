@@ -74,12 +74,15 @@ export const TEMPLATE_FILES: Record<string, string> = {
   ".dockerignore": ".git\n",
   "docker/Dockerfile": "FROM busybox\n",
   ".github/CODEOWNERS": "* @acme\n",
+  ".githooks/pre-push": "#!/bin/sh\nexec npm run check\n",
   ".github/workflows/release.yml": "name: an old kit\n",
   "release/release.sh": "#!/bin/sh\necho old kit\n",
   "erp/package.json": '{ "name": "erp" }\n',
   "erp/seeds/roles.json": "[]\n",
   "web/site.json": "{}\n",
 };
+/** The template files git records as executable (100755). */
+export const TEMPLATE_EXECUTABLE: readonly string[] = [".githooks/pre-push", "release/release.sh"];
 
 /** The three lines a test deploy repository's `tenant:` block carries so a tenant WITH apps can be planned:
  *  the owner the App is installed in, the template's build name and its repository. */
@@ -93,7 +96,7 @@ export const PLACEHOLDER_TAG = "0.0.0-placeholder";
  *  the placeholder tag on the chain. The deploy repository manifest itself carries TEMPLATE_SPEC. */
 export function withAppsTemplate<P extends TenantOnboardPorts>(ports: P, files: Record<string, string> = {}): P & { githubApp: FakeGitHubApp } {
   if (!(ports.repo instanceof FakeRepoReader)) throw new Error("withAppsTemplate scripts the template on a FakeRepoReader");
-  ports.repo.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: { ...TEMPLATE_FILES, ...files } });
+  ports.repo.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: { ...TEMPLATE_FILES, ...files }, executable: TEMPLATE_EXECUTABLE });
   const githubApp = new FakeGitHubApp();
   githubApp.org = ORG;
   const chain = ports.resolveClusterValueFiles;

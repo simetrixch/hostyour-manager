@@ -32,7 +32,8 @@ import { channelReaching } from "./tenant-builds.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
 import { recordBuildOnlyStep } from "#unit/server/build-registration.ts";
 import { refreshRepoPatStep } from "#unit/server/seed-repo-pat.ts";
-import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
+import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit, type TreeFile } from "./tenant-apps-tree.ts";
+import type { RepoFileWrite } from "../../adapters/git/port.ts";
 import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "#unit/server/repo-identity.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
 import { probeAppsRepository } from "./tenant-probes.ts";
@@ -100,7 +101,7 @@ async function appCredentialId(ctx: StepCtx, runtime: TenantAppsRepoRuntime): Pr
  *  (how its bundle is built). Cloned the way the catalog reads it (app-catalog.ts readAppsManifest):
  *  at its default branch head, with the deploy repository's own credential — the template is no unit and has
  *  no credential of its own. */
-async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[]) => Promise<{ path: string; content: string }[]>; dispose: () => Promise<void> }> {
+async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[]) => Promise<TreeFile[]>; dispose: () => Promise<void> }> {
   const repo = ports.repo;
   const cloned = await repo.cloneAtRef({ repoURL: templateRepoURL, ref: DEFAULT_BRANCH_HEAD, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), signal });
   try {
@@ -193,7 +194,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
         if (!writer) throw errValidation(`${unit} needs the consumer repository writer to commit its tree, and the consumer onboarding is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
         const credentialId = await appCredentialId(ctx, runtime);
         const template = await readTemplate(ports, p.templateRepoURL, ctx.signal);
-        let files: { path: string; content: string }[];
+        let files: TreeFile[];
         try {
           files = await template.tree(chosen);
         } finally {
@@ -205,7 +206,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
         try {
           // A path that stands is left as it stands, whatever it says: this run ADDS what the
           // repository lacks and never overwrites or removes — the repository is the tenant's.
-          const write: { path: string; content: string }[] = [];
+          const write: RepoFileWrite[] = [];
           for (const f of files) if ((await writer.readFile(session.workdir, f.path)) === null) write.push(f);
           if ((await writer.readFile(session.workdir, CONSUMER_MANIFEST_PATH)) === null) {
             write.push({ path: CONSUMER_MANIFEST_PATH, content: tenantAppsManifest({ unit, owner: p.owner, envs: template.manifest.envs, containerfile: build.containerfile, context: build.context }) });

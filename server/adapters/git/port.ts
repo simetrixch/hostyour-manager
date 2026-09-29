@@ -22,6 +22,9 @@ export interface RepoReader {
    *  (charts/example-engine/values-<app>.yaml — app-catalog.ts): the name filtering/exclusion logic
    *  lives in the domain, never here — this stays a dumb, non-recursive git/fs read (boundary). */
   listDir(workdir: string, relPath: string): Promise<string[]>;
+  /** Whether git records the file as executable (mode 100755) in the clone. Read from git and never
+   *  from the filesystem, which says nothing on a checkout without executable bits. */
+  isExecutable(workdir: string, relPath: string): Promise<boolean>;
   dispose(workdir: string): Promise<void>;
 }
 
@@ -100,6 +103,10 @@ export interface RepoCheckout {
   branch: string; // the resolved default branch (main/master/…) — the ref commitPush pushes to
 }
 
+/** One file a RepoWriter commit writes. `executable` sets its mode: true is 100755, false is
+ *  100644; left out, git keeps the mode of the file as it stands, and a new file lands as 100644. */
+export type RepoFileWrite = { path: string; content: string; executable?: boolean };
+
 /** The Manager's writer of a repository it does not own: the release-kit lifecycle
  *  (onboarding commits release/ + the workflow into the repository, removal git-rm's them).
  *  Distinct from PlatformRepo — that owns the ONE platform repo (a persistent per-branch worktree);
@@ -116,15 +123,18 @@ export interface RepoWriter {
    *  stale-file delete list from it (everything under release/ the current asset set no longer
    *  carries). */
   listDir(workdir: string, relPath: string): Promise<string[]>;
-  /** Stage the writes/removes on `branch`, commit, and push to refs/heads/<branch>. A byte-identical
-   *  worktree (nothing staged) is a no-op: no commit, no push, `changed:false` + the current HEAD. A
-   *  push the credential is not authorized for (a PAT without contents:write) fails LOUD (UPSTREAM). */
+  /** Whether git records the file as executable (mode 100755) on the checked-out branch. */
+  isExecutable(workdir: string, relPath: string): Promise<boolean>;
+  /** Stage the writes/removes on `branch`, commit, and push to refs/heads/<branch>. A worktree with
+   *  nothing staged, the same bytes and modes, is a no-op: no commit, no push, `changed:false` + the
+   *  current HEAD. A push the credential is not authorized for (a PAT without contents:write) fails
+   *  LOUD (UPSTREAM). */
   commitPush(input: {
     workdir: string;
     branch: string;
     credentialId: string;
     message: string;
-    write?: { path: string; content: string }[];
+    write?: RepoFileWrite[];
     remove?: string[];
     signal?: AbortSignal;
   }): Promise<{ commit: string; changed: boolean }>;

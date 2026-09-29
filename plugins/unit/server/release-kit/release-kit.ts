@@ -19,10 +19,13 @@ const releasePs1 = readFileSync(new URL("./assets/release.ps1", import.meta.url)
 const releaseSh = readFileSync(new URL("./assets/release.sh", import.meta.url), "utf8");
 const workflowReleaseYml = readFileSync(new URL("./assets/workflow-release.yml", import.meta.url), "utf8");
 
-/** One release-kit file: the CONSUMER-repo-relative target path + its verbatim content. */
+/** One release-kit file: the CONSUMER-repo-relative target path, its verbatim content, and whether git
+ *  records it as executable. The mode is declared here, from the file's `#!` line, and never read off
+ *  this process's filesystem, which may keep no executable bits. */
 export interface ReleaseKitFile {
   path: string;
   content: string;
+  executable: boolean;
 }
 
 /** The directory the kit owns WHOLLY. Everything under it was written by an onboarding, so a file
@@ -33,15 +36,15 @@ export const RELEASE_KIT_DIR = "release";
 
 /** The one kit file outside RELEASE_KIT_DIR, at a path the consumer may already own for a workflow
  *  of its own. The release-workflow gate reads the repository there before the kit is written. */
-export const RELEASE_KIT_WORKFLOW: ReleaseKitFile = { path: ".github/workflows/release.yml", content: workflowReleaseYml };
+export const RELEASE_KIT_WORKFLOW: ReleaseKitFile = { path: ".github/workflows/release.yml", content: workflowReleaseYml, executable: false };
 
 /** The three files the release-kit places in a consumer repo, at their consumer-repo target paths.
  *  onboard's inject-release-kit REPLACES them: each file is written to exactly this content
  *  whenever the repo's copy differs — the kit is platform-owned tooling, and an onboarding must
  *  leave the repo in the state a fresh one would. */
 export const RELEASE_KIT_FILES: readonly ReleaseKitFile[] = [
-  { path: `${RELEASE_KIT_DIR}/release.ps1`, content: releasePs1 },
-  { path: `${RELEASE_KIT_DIR}/release.sh`, content: releaseSh },
+  { path: `${RELEASE_KIT_DIR}/release.ps1`, content: releasePs1, executable: false },
+  { path: `${RELEASE_KIT_DIR}/release.sh`, content: releaseSh, executable: true },
   RELEASE_KIT_WORKFLOW,
 ];
 
