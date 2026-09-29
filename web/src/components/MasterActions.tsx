@@ -30,15 +30,28 @@ export function MasterActions(props: {
   onDisconnect: () => void;
   onReconnect: () => void;
   onRejoin: () => void;
+  // Handed only where the master carries a live cluster: `cluster-redeploy` rebuilds a live
+  // cluster's machine layer and has an arm for the master (server/domains/runs/defs/redeploy.ts).
+  onRedeploy?: () => void;
 }) {
-  const { parts, offer, onRead, onDisconnect, onReconnect, onRejoin } = props;
-  const anyAction = offer.read || offer.disconnect || offer.reconnect || offer.rejoin;
+  const { parts, offer, onRead, onDisconnect, onReconnect, onRejoin, onRedeploy } = props;
+  const anyAction = offer.read || offer.disconnect || offer.reconnect || offer.rejoin || onRedeploy !== undefined;
   if (!parts && !anyAction) return null;
   return (
     <>
       {parts && <p className="servercard__state">{parts}</p>}
       {anyAction && (
         <div className="actions">
+          {onRedeploy && (
+            <button
+              type="button"
+              className="btn"
+              onClick={onRedeploy}
+              title="Rebuild this machine's layer in place (idempotent) — the engine, the programs and the three deployment programs; no version change. Brief kube-apiserver blip while kubelite restarts."
+            >
+              Redeploy
+            </button>
+          )}
           <TailnetActions
             offer={offer}
             onRead={onRead}

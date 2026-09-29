@@ -320,6 +320,7 @@ export function Servers() {
                     onDisconnect={() => void planServerRunKind(() => disconnectTailnet(s.id))}
                     onReconnect={() => void planServerRunKind(() => reconnectTailnet(s.id))}
                     onRejoin={() => void planServerRunKind(() => rejoinTailnet(s.id))}
+                    {...(LIFECYCLE[s.status].next === "clusters" ? { onRedeploy: () => void planServerRunKind(() => redeploySlave(s.id)) } : {})}
                   />
                 )}
                 {!isMasterRole(s.role) &&
