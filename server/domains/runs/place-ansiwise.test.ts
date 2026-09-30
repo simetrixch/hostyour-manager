@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { createHash } from "node:crypto";
 import {
   makeHarness, disposeHarnesses, scriptedHosts, hostsFactory, ELEVATION_PASSWORD,
-  ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, type HostsScript,
+  ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, ansiwiseDigestMap, ansiwiseDigests, type HostsScript,
 } from "./deploy-slave.fixture.ts";
 import { assetBytes, ScriptedReleases, SCRIPTED_HOME } from "./deploy-slave.placement.fixture.ts";
 import { ports, placeCtx, target, transferred, onPath, commands } from "./place-ansiwise.fixture.ts";
@@ -99,7 +100,11 @@ describe("place-ansiwise", () => {
 
   it("takes the pin from the platform repo, so a moved pin moves what is placed", async () => {
     const hosts = scriptedHosts();
-    const h = await makeHarness({ hosts, versionsYaml: 'cliTools:\n  ansiwise:\n    version: "9.9.9"\n' });
+    const h = await makeHarness({
+      hosts,
+      versionsYaml: 'cliTools:\n  ansiwise:\n    version: "9.9.9"\n',
+      ansiwiseDigests: ansiwiseDigests("9.9.9"),
+    });
     await placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place4", []));
     for (const f of transferred(hosts)) expect(f.content).toContain("9.9.9");
     for (const url of h.releases.read) expect(url).toContain("/9.9.9/");
@@ -145,12 +150,19 @@ describe("place-ansiwise", () => {
 
   it("reads its verdict off the machine — a release asset that is not the executable is refused", async () => {
     // What the transfer claimed is never the answer, the second reading is. The address here serves
-    // something that is not the executable it names — an error page, a redirect notice, a build for
-    // another architecture — and only asking the file can see it.
+    // something that is not the executable it names, and the release RECORDED it as such, so its
+    // digest holds — a build for another architecture is exactly that — and only asking the file
+    // can see it.
     const hosts = scriptedHosts();
-    const h = await makeHarness({ hosts });
+    const page = Buffer.from("<html>404 Not Found</html>", "utf8");
+    const recorded = ansiwiseDigestMap(ANSIWISE_PIN);
+    recorded.set(`${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`, createHash("sha256").update(page).digest("hex"));
+    const h = await makeHarness({
+      hosts,
+      ansiwiseDigests: [...recorded].map(([asset, digest]) => `${digest}  ${asset}`).join("\n") + "\n",
+    });
     const wrong = `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`;
-    h.releases.serves.set(wrong, Buffer.from("<html>404 Not Found</html>", "utf8"));
+    h.releases.serves.set(wrong, page);
     await expect(placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place7", [])))
       .rejects.toThrow(new RegExp(`${BOOTSTRAP_HOME}${ANSIWISE_TOOL} on s1 answers nothing after the transfer, not the pinned ${ANSIWISE_PIN}`));
   });
@@ -183,6 +195,39 @@ describe("place-ansiwise", () => {
     };
     await expect(placeAnsiwiseStep(target, { ...ports(h), releaseDownloads: releases }).run(placeCtx(h, hosts, "run_place_404", [])))
       .rejects.toThrow(new RegExp(`could not read ${gone.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  });
+  // THE PIN SAYS WHICH RELEASE IS FETCHED, AND NOT WHICH BYTES ARRIVE. The asset planted here answers
+  // --version with the pin, exactly as a replaced one built to pass would, so the read-back above
+  // cannot see it: only the digest the platform repository states can. Run twice, planted and not,
+  // so the refusal is shown to come from the digest and from nothing else about the run.
+  for (const planted of [true, false]) {
+    it(`places an asset that answers the pin only at the digest the platform repository states — ${planted ? "a planted asset" : "the released asset"}`, async () => {
+      const hosts = scriptedHosts();
+      const h = await makeHarness({ hosts });
+      const url = `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`;
+      if (planted) h.releases.serves.set(url, Buffer.from(`#!ansiwise\n${ANSIWISE_TOOL} ${ANSIWISE_PIN}\n# swapped\n`, "utf8"));
+      const run = placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, planted ? "run_place_swapped" : "run_place_released", []));
+      if (planted) {
+        await expect(run).rejects.toThrow(
+          new RegExp(`served bytes whose SHA-256 is [0-9a-f]{64}, and the platform repository states ${ansiwiseDigestMap(ANSIWISE_PIN).get(`${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`)} for ${ANSIWISE_TOOL}-`),
+        );
+        expect(transferred(hosts), "a swapped asset reached the machine").toHaveLength(0);
+      } else {
+        await run;
+        expect(transferred(hosts).map((f) => f.path)).toEqual([ANSIWISE_TOOL, ANSIWISE_REST_TOOL]);
+      }
+    });
+  }
+
+  it("refuses a pin the digest file states nothing for, before fetching anything", async () => {
+    // The digests of another release: the file and the pin came apart, which is what a pin written
+    // without its release leaves behind. Nothing is fetched, because nothing fetched could be held.
+    const hosts = scriptedHosts();
+    const h = await makeHarness({ hosts, ansiwiseDigests: ansiwiseDigests("0.4.1") });
+    await expect(placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place_undigested", [])))
+      .rejects.toThrow(new RegExp(`states no SHA-256 for ${ANSIWISE_TOOL}-${ANSIWISE_PIN.replace(/\./g, "\\.")}-linux-x64`));
+    expect(h.releases.read, "an asset was fetched that no digest could hold").toEqual([]);
+    expect(transferred(hosts)).toHaveLength(0);
   });
 });
 
@@ -270,7 +315,7 @@ describe("the bootstrap with no manager behind it", () => {
   it("places both on a machine no inventory carries, and places nothing the second time", async () => {
     const hosts = scriptedHosts();
     const releases = new ScriptedReleases();
-    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION_PASSWORD };
+    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, digests: ansiwiseDigestMap(ANSIWISE_PIN), elevationPassword: ELEVATION_PASSWORD };
     const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
 
     const first: string[] = [];
@@ -296,7 +341,7 @@ describe("the bootstrap with no manager behind it", () => {
     await placeAnsiwise(
       await sessionMachine(hosts, []),
       { read: (url) => releases.get(url, { signal: new AbortController().signal }) },
-      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION_PASSWORD },
+      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, digests: ansiwiseDigestMap(ANSIWISE_PIN), elevationPassword: ELEVATION_PASSWORD },
     );
     for (const f of transferred(hosts)) expect(f.path.startsWith("/")).toBe(false);
     expect(commands(hosts)).toContain(`${BOOTSTRAP_HOME}${ANSIWISE_TOOL} --version`);
@@ -314,7 +359,7 @@ describe("the bootstrap with no manager behind it", () => {
     await placeAnsiwise(
       await sessionMachine(hosts, []),
       { read: (url) => releases.get(url, { signal: new AbortController().signal }) },
-      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION_PASSWORD },
+      { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, digests: ansiwiseDigestMap(ANSIWISE_PIN), elevationPassword: ELEVATION_PASSWORD },
     );
 
     for (const act of hosts.log) {
@@ -334,7 +379,7 @@ describe("the bootstrap with no manager behind it", () => {
     const hosts = scriptedHosts();
     const releases = new ScriptedReleases();
     const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
-    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION_PASSWORD };
+    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, digests: ansiwiseDigestMap(ANSIWISE_PIN), elevationPassword: ELEVATION_PASSWORD };
 
     const machine = await sessionMachine(hosts, []);
     for (const name of ANSIWISE_EXECUTABLES) {
@@ -361,7 +406,7 @@ describe("the bootstrap with no manager behind it", () => {
     const hosts = scriptedHosts();
     const releases = new ScriptedReleases();
     const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
-    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, elevationPassword: ELEVATION_PASSWORD };
+    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, digests: ansiwiseDigestMap(ANSIWISE_PIN), elevationPassword: ELEVATION_PASSWORD };
 
     await placeAnsiwise(await sessionMachine(hosts, []), read, request);
     const settled = hosts.files.length;

@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,13 +15,14 @@ import { buildRunDefinitions, type RunDefinitionsPorts } from "./run-definitions
 import type { AnyRunDefinition, Step } from "../../executor/types.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { ANSIWISE_PIN_PATH } from "../inventory/ansiwise-pin.ts";
+import { ANSIWISE_DIGESTS_PATH, ANSIWISE_PIN_PATH } from "../inventory/ansiwise-pin.ts";
+import { ANSIWISE_EXECUTABLES } from "./defs/place-ansiwise.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { meta } from "../../db/schema/meta.ts";
 import { AuthFailedError, ExecFailedError } from "../../adapters/ssh/port.ts";
 import type { SshFactory, SshSession, SshTarget, ExecOptions, ExecResult } from "../../adapters/ssh/port.ts";
-import { answerPlacementCommand, ScriptedReleases } from "./deploy-slave.placement.fixture.ts";
+import { answerPlacementCommand, assetBytes, ScriptedReleases } from "./deploy-slave.placement.fixture.ts";
 import { FakeMetricsQuery } from "../../adapters/metrics/testing/fake.ts";
 import type { FakeMasterArgoReader, FakeClusterReader, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 // What the master's ArgoCD holds, beside the harness rather than inside it — a suite that drives a
@@ -477,6 +479,21 @@ export const VERSIONS_YAML = [
   '    version: "v4.53.3"',
 ].join("\n") + "\n";
 
+/** The SHA-256 of each asset the scripted release serves for [version], by the asset's file name —
+ *  what clusters/platform/ansiwise.sha256 states for that pin. A placement fed those bytes holds, and
+ *  one fed any other bytes is refused before anything reaches the machine. */
+export function ansiwiseDigestMap(version: string): Map<string, string> {
+  return new Map(ANSIWISE_EXECUTABLES.map((name) => [
+    `${name}-${version}-linux-x64`,
+    createHash("sha256").update(assetBytes(name, version)).digest("hex"),
+  ]));
+}
+
+/** The same digests as the file the release writes: one `sha256sum` line per asset. */
+export function ansiwiseDigests(version: string): string {
+  return [...ansiwiseDigestMap(version)].map(([asset, digest]) => `${digest}  ${asset}`).join("\n") + "\n";
+}
+
 /** Where the scripted installation fetches that version from. `<version>` is what the step fills in,
  *  so the address in the placing script names the pin above and nothing else. */
 export const ANSIWISE_DOWNLOAD_URL = "https://downloads.example.invalid/ansiwise/<version>/<name>-<version>-linux-x64";
@@ -498,7 +515,7 @@ export function disposeHarnesses(): void {
 // FK-safe seeding (clusters.server_id → servers.id): servers + their ssh keys first.
 // keystore: which mode the meta row is seeded with, for a case that reads what the Clusters page
 // reports about the keystore. No plan is decided by it.
-export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string; versionsYaml?: string; metrics?: FakeMetricsQuery | false; withoutCarriedValues?: boolean } = {}): Promise<Harness> {
+export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string; master?: boolean; marking?: string | false; ansiwiseServeCommand?: string; versionsYaml?: string; ansiwiseDigests?: string; metrics?: FakeMetricsQuery | false; withoutCarriedValues?: boolean } = {}): Promise<Harness> {
   const hosts = opts.hosts ?? scriptedHosts();
   const dir = mkdtempSync(join(tmpdir(), "mgr-ds-"));
   dirs.push(dir);
@@ -514,6 +531,8 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   // The pin both executables are placed at, on the trunk where the bootstrap reads it. A test about a
   // pin that is missing or malformed seeds over this.
   platformRepo.seed(PRODUCT_BRANCH, ANSIWISE_PIN_PATH, opts.versionsYaml ?? VERSIONS_YAML);
+  // And the digests the release wrote beside it, of the bytes the scripted release serves for the pin.
+  platformRepo.seed(PRODUCT_BRANCH, ANSIWISE_DIGESTS_PATH, opts.ansiwiseDigests ?? ansiwiseDigests(ANSIWISE_PIN));
   const releases = new ScriptedReleases();
   // What the master's ArgoCD and its ExternalSecrets hold, beside the harness (the file-size
   // doctrine, and the same shape the placement and first-contact halves take).

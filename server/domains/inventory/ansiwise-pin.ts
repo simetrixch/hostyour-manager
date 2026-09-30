@@ -31,6 +31,11 @@ export const ANSIWISE_PIN_BRANCH = PRODUCT_BRANCH;
  *  the entry to write off the message instead of going to look for it. */
 export const ANSIWISE_PIN_KEY = "cliTools.ansiwise.version";
 
+/** The file the release writes the engine's digests into, beside the pin and in the same commit: one
+ *  `sha256sum` line per release asset of the pinned tag. It stands beside versions.yaml rather than
+ *  in it because one pin names two files, and the versions grammar's sha256 holds one digest. */
+export const ANSIWISE_DIGESTS_PATH = "clusters/platform/ansiwise.sha256";
+
 /** The slice of clusters/platform/versions.yaml this reader takes. Everything else in the file — every other
  *  component, every stamp site, every upstream — is ignored. */
 const VersionsFile = z.object({
@@ -57,6 +62,28 @@ export async function readAnsiwisePin(repo: PlatformRepo): Promise<string> {
     );
   }
   return parsed.data.cliTools.ansiwise.version;
+}
+
+/** The SHA-256 the platform repository states for each release asset of the engine, by the asset's
+ *  file name, or a typed error naming the file. A line that is not `<64 lowercase hex>  <asset>` is
+ *  refused rather than passed over: a digest that could not be read is an asset placed unchecked. */
+export async function readAnsiwiseDigests(repo: PlatformRepo): Promise<ReadonlyMap<string, string>> {
+  const raw = await repo.withBranch(ANSIWISE_PIN_BRANCH, (trunk) => trunk.readFile(ANSIWISE_DIGESTS_PATH));
+  if (raw === null) throw errNotFound(`${ANSIWISE_DIGESTS_PATH} on the platform repo's ${ANSIWISE_PIN_BRANCH} branch`);
+  const digests = new Map<string, string>();
+  for (const line of raw.split("\n")) {
+    if (line === "") continue;
+    const found = /^([0-9a-f]{64}) {2}(\S+)$/.exec(line);
+    const digest = found?.[1];
+    const asset = found?.[2];
+    if (digest === undefined || asset === undefined) {
+      throw errValidation(
+        `${ANSIWISE_DIGESTS_PATH} on ${ANSIWISE_PIN_BRANCH} carries a line that is not "<sha256>  <asset>": ${line}`,
+      );
+    }
+    digests.set(asset, digest);
+  }
+  return digests;
 }
 
 /** The engine's own repository (`cliTools.ansiwise.upstream.project`, "owner/repo"), or null when the

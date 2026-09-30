@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { readAnsiwisePin, ANSIWISE_PIN_PATH, ANSIWISE_PIN_BRANCH } from "./ansiwise-pin.ts";
+import { readAnsiwiseDigests, readAnsiwisePin, ANSIWISE_DIGESTS_PATH, ANSIWISE_PIN_PATH, ANSIWISE_PIN_BRANCH } from "./ansiwise-pin.ts";
 
 // The version of the binary a machine is given has ONE source and it is not in this repo: it is
 // cliTools.ansiwise.version in the platform repo's clusters/platform/versions.yaml. What these tests hold
@@ -56,5 +56,54 @@ describe("readAnsiwisePin", () => {
       .rejects.toThrow(/no readable cliTools\.ansiwise\.version/);
     await expect(readAnsiwisePin(repoWith('cliTools:\n  ansiwise:\n    version: ""\n')))
       .rejects.toThrow(/no readable cliTools\.ansiwise\.version/);
+  });
+});
+
+/** Where the release writes the digests, as a literal for the same reason as the pin file above:
+ *  a fixture seeded from the constant agrees with the reader whatever the platform repository
+ *  holds. Measured in the platform repository: `master:clusters/platform/ansiwise.sha256`. */
+const DIGEST_FILE_ON_THE_PLATFORM_REPO = "clusters/platform/ansiwise.sha256";
+
+const ENGINE = "a1".repeat(32);
+const SERVING = "b2".repeat(32);
+
+function repoWithDigests(text: string | null): FakePlatformRepo {
+  const repo = new FakePlatformRepo();
+  if (text !== null) repo.seed(ANSIWISE_PIN_BRANCH, DIGEST_FILE_ON_THE_PLATFORM_REPO, text);
+  return repo;
+}
+
+describe("readAnsiwiseDigests", () => {
+  it("looks where the release writes them", () => {
+    expect(ANSIWISE_DIGESTS_PATH).toBe(DIGEST_FILE_ON_THE_PLATFORM_REPO);
+  });
+
+  it("serves one digest per release asset, by the asset's file name", async () => {
+    const digests = await readAnsiwiseDigests(repoWithDigests(
+      `${ENGINE}  ansiwise-0.4.2-linux-x64\n${SERVING}  ansiwise-rest-0.4.2-linux-x64\n`,
+    ));
+    expect([...digests]).toEqual([
+      ["ansiwise-0.4.2-linux-x64", ENGINE],
+      ["ansiwise-rest-0.4.2-linux-x64", SERVING],
+    ]);
+  });
+
+  it("refuses a line that is not a digest and an asset, rather than placing that asset unchecked", async () => {
+    // The planted defects: a digest in capitals, one cut short, a line with no asset, and the
+    // binary-mode marker sha256sum writes with -b. Each would leave an asset no line could hold.
+    for (const line of [
+      `${ENGINE.toUpperCase()}  ansiwise-0.4.2-linux-x64`,
+      `${ENGINE.slice(1)}  ansiwise-0.4.2-linux-x64`,
+      ENGINE,
+      `${ENGINE} *ansiwise-0.4.2-linux-x64`,
+    ]) {
+      await expect(readAnsiwiseDigests(repoWithDigests(`${line}\n`)), line)
+        .rejects.toThrow(/carries a line that is not "<sha256>  <asset>"/);
+    }
+  });
+
+  it("fails loud when the file is not there at all, naming the file and the branch", async () => {
+    await expect(readAnsiwiseDigests(repoWithDigests(null)))
+      .rejects.toThrow(/clusters\/platform\/ansiwise\.sha256 on the platform repo's master branch/);
   });
 });

@@ -1,7 +1,7 @@
 import type { Step, StepCtx } from "../../../executor/types.ts";
 import type { servers } from "../../../db/schema/inventory.ts";
 import { errNotConfigured, errValidation } from "../../../kernel/errors.ts";
-import { readAnsiwisePin } from "../../inventory/ansiwise-pin.ts";
+import { readAnsiwiseDigests, readAnsiwisePin } from "../../inventory/ansiwise-pin.ts";
 import { loadMaster, loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
 import { requireElevationPassword, type AnsiwisePorts } from "./ansiwise-run.kit.ts";
 import {
@@ -157,6 +157,7 @@ async function runBootstrap(
   const request = {
     version: await readAnsiwisePin(requirePlatformRepo(ports)),
     downloadUrl: requireDownloadUrl(ports),
+    digests: await readAnsiwiseDigests(requirePlatformRepo(ports)),
     // What raises the copy into /usr/local/bin, where everything that asks about the engine asks.
     // Both steps that call this carry it: the run's approve requires it for the programs anyway.
     elevationPassword: requireElevationPassword(ctx),

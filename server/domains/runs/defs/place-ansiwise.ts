@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { errValidation } from "../../../kernel/errors.ts";
 import { ANSIWISE_RUN_ROOT, MANAGER_HANDS_OVER } from "./machine-state.ts";
 
@@ -357,6 +358,11 @@ export interface BootstrapRequest {
   /** WHERE a released executable is fetched from, carrying NAME_PLACEHOLDER and VERSION_PLACEHOLDER.
    *  Filled in here, so the address, the pin and the placed file can never state three things. */
   downloadUrl: string;
+  /** The SHA-256 the platform repository states for each release asset, by its file name
+   *  (clusters/platform/ansiwise.sha256, inventory/ansiwise-pin.ts). An asset is written to the
+   *  machine only where its bytes hash to its line: the pin says which release is fetched and not
+   *  which bytes arrive, and an asset replaced after the release answers the pin like the real one. */
+  digests: ReadonlyMap<string, string>;
   /** What raises the copy into [PATH_HOME] to root. That directory belongs to root and the account
    *  this run authenticated as cannot write it, so without a password the machine keeps whatever
    *  version stood there — which is the state this placement exists to end. */
@@ -414,11 +420,28 @@ export async function placeAnsiwise(
         "it stands",
       );
     }
+    // The asset's own file name, as the release and the digest file both spell it. Asked BEFORE the
+    // fetch, so a pin whose digests were never written costs no download and says so by name.
+    const asset = new URL(from).pathname.split("/").at(-1) ?? from;
+    const stated = req.digests.get(asset);
+    if (stated === undefined) {
+      throw errValidation(
+        `the platform repository states no SHA-256 for ${asset}, so it is not placed on ${machine.name} unchecked — ` +
+        "the release that pinned it writes its digests beside the pin, in clusters/platform/ansiwise.sha256",
+      );
+    }
     const bytes = await assets.read(from);
     if (bytes.length === 0) {
       throw errValidation(
         `${from} served nothing — an empty file placed as ${name} on ${machine.name} would be a machine that answers ` +
         "every command with a shell error. Check the release carries an asset under that name",
+      );
+    }
+    const fetched = createHash("sha256").update(bytes).digest("hex");
+    if (fetched !== stated) {
+      throw errValidation(
+        `${from} served bytes whose SHA-256 is ${fetched}, and the platform repository states ${stated} for ${asset} — ` +
+        `nothing of it was written to ${machine.name}. An asset of the release changed after it was built`,
       );
     }
     await machine.putFile(name, bytes, EXECUTABLE_MODE);
