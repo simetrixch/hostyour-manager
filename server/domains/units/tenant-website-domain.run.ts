@@ -13,6 +13,8 @@ import { customerHostProblem, removeOwnDomainRecord, replacementSentence, Replac
 import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace } from "./website-domain.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { WEBSITE_NEEDS_PATH, type AddAppPorts } from "./add-app.run.ts";
+import { tenantBundleManifest } from "./engine-line.ts";
+import { standingAppDatabases } from "./tenant-app-databases.ts";
 
 // `tenant-set-website-domain` — move one website of a standing tenant to another domain.
 //
@@ -131,14 +133,16 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       if (!previousMember) throw errValidation(`website ${req.app} has no member entry in tenant ${tc.guid}'s registration`);
       // The member resolved again with the new domain, by the same validation add-app renders the
       // website with, at the tenant's own bundle as it stands.
+      const appDatabases = await standingAppDatabases((bundle, signal) => tenantBundleManifest(ports, bundle, signal), current.entry, ctx);
       const outcome = await validateTenant(
         {
           repoURL: ports.deployRepoUrl,
           ref: ports.registrations.branch,
           stage: tc.stage,
           apps: [{ name: req.app, folder: entry.folder, site: entry.site, domain: req.domain, seedReference: entry.seedReference, seedDemo: entry.seedDemo, selections: entry.selections }],
-          // A standing website: its site may stand in the tenant's own repository alone.
+          // A standing website: its site, and its database list, may stand in the tenant's own repository alone.
           isStandingTenant: true,
+          appDatabases,
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           seedUsers: current.entry.seedUsers,

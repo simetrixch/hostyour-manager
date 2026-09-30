@@ -21,7 +21,8 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { isDeepStrictEqual } from "node:util";
-import { bundleReleaseRefusal, throwEngineLineRefusal } from "./engine-line.ts";
+import { bundleReleaseRefusal, tenantBundleManifest, throwEngineLineRefusal } from "./engine-line.ts";
+import { standingAppDatabases } from "./tenant-app-databases.ts";
 import {
   restoreVersionsCleanup, sameApprovals, stagePinsOf, tenantVersionParts, versionRefusal, watchVersionsStep, withChosenVersions, writeVersionsStep,
   type Approvals, type TenantVersionPart,
@@ -301,6 +302,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       const { apps, appsImage, appsImageTag, seedUsers, subdomain } = current.entry;
+      const appDatabases = await standingAppDatabases((bundle, signal) => tenantBundleManifest(ports, bundle, signal), current.entry, ctx);
       const outcome = await validateTenant(
         {
           repoURL: ports.deployRepoUrl,
@@ -309,6 +311,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           stage: tc.stage,
           apps,
           isStandingTenant: true,
+          appDatabases,
           probeGuid: tc.guid,
           subdomain,
           seedUsers,
@@ -375,7 +378,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
       // Nothing to do is a result, not an error: the run passes through every step and changes nothing.
-      // Each app with the database list its catalog entry declares now, which every member reads.
+      // Each app with the database list the tenant's own repository declares now, which every member reads.
       const listedApps = withAppDatabases(apps, outcome.appDatabases);
       const relisted = listedApps.filter((a, i) => JSON.stringify(a.databases ?? []) !== JSON.stringify(apps[i]?.databases ?? [])).map((a) => a.name);
       const isCurrent = changed.length === 0 && relisted.length === 0 && sameApprovals(approved, current.entry.approvedTags) && planned.builds.units.length === 0;
@@ -406,7 +409,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `Versions of tenant ${tc.guid} on ${tc.domain} (${tc.stage}), its member entries resolved again off the product's manifest at ${outcome.resolvedSha.slice(0, 7)}: ` +
           `${isCurrent ? "nothing changes — every member entry matches the product's manifest and every part runs the version asked for. " : ""}` +
           `${changed.length ? `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` : "the member entries are unchanged. "}` +
-          `${relisted.length ? `The database lists of ${relisted.join(", ")} are written into tenant.apps as their catalog entries declare them. ` : ""}` +
+          `${relisted.length ? `The database lists of ${relisted.join(", ")} are written into tenant.apps as the tenant's own repository declares them. ` : ""}` +
           `${moves.forward.length ? `Versions: ${moves.forward.join("; ")}. ` : ""}` +
           `${moves.back.length ? `Downgrade: ${moves.back.join("; ")}, older than what runs now. ` : ""}` +
           `${recorded.length ? `Recorded as the tenant's own at the stage pin it renders now: ${recorded.join("; ")}. ` : ""}` +

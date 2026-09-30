@@ -8,10 +8,10 @@ import type { TenantRegistration } from "../../../shared/tenant.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
-import { ensureTenantAppDatabases } from "./tenant-app-databases.ts";
+import { ensureTenantAppDatabases, standingAppDatabases } from "./tenant-app-databases.ts";
 
-// The boot's forward step: every standing tenant's apps[] entries get the database list the catalog
-// entry of each app's folder declares, and nothing else of the registration changes.
+// A standing tenant's database lists come from its own repository: the boot pass writes them into its
+// apps[] entries and changes nothing else, and a repository that cannot be read drops no list.
 
 const STALE = "zsjs023ctne0"; // registered before the lists were carried, one list stale
 const CURRENT = "q2w3e4r5t6y7"; // every list already stands
@@ -31,13 +31,19 @@ const erp = { name: "erp", seedReference: true, seedDemo: false, selections: { e
 const crm = { name: "crm", seedReference: false, seedDemo: false, selections: {} };
 const site = { name: "simetrix-ch", folder: "web", site: "simetrix-ch", domain: "simetrix.ch", seedReference: false, seedDemo: false, selections: {} };
 
-function registration(apps: TenantRegistration["apps"]): TenantRegistration {
+function registration(apps: TenantRegistration["apps"], appsRepo = "https://github.com/acme/catalog-acme.git"): TenantRegistration {
   return {
     cluster: "s1", subdomain: "acme", members: testMembers(apps.map((a) => a.name)), identityProvider: "auth", routing: "host",
     ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", apps, seedUsers: false, quota: seedQuota("small"),
-    resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
+    resetNonce: "1", suspended: false, quiesced: false, appsRepo, appsImage: "catalog-acme", appsImageTag: "0.3.001-stable-20260930120000-abc1234",
   };
 }
+
+/** The tenant's own bundle manifest: CATALOG, except for a repository named unreadable. */
+const readOwn = async (bundle: { appsRepo?: string | undefined }): Promise<AppsManifest | null> => {
+  if (bundle.appsRepo?.includes("unreadable")) throw new Error(`${bundle.appsRepo} could not be read at 0.3.001-stable-20260930120000, so the apps the tenant runs cannot be read`);
+  return CATALOG;
+};
 
 const silent = { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} } as unknown as Logger;
 
@@ -73,7 +79,7 @@ describe("the boot pass over every standing tenant's app database lists", () => 
 
   it("writes each app's list by its folder, drops one the catalog no longer declares, and changes nothing else", async () => {
     const before = await registrations.readTenant("prod", STALE);
-    const result = await ensureTenantAppDatabases({ db: db.db, registrations, readCatalog: async () => CATALOG, logger: silent });
+    const result = await ensureTenantAppDatabases({ db: db.db, registrations, readTenantManifest: readOwn, logger: silent });
     expect(result).toEqual({ written: [`prod/${STALE}`], failed: [`prod/${BROKEN}`] });
     expect(await appsOf(STALE)).toEqual([{ ...erp, databases: ["core", "sales"] }, crm, { ...site, databases: ["content"] }]);
     const after = await registrations.readTenant("prod", STALE);
@@ -81,18 +87,39 @@ describe("the boot pass over every standing tenant's app database lists", () => 
   });
 
   it("commits once per tenant whose lists differ: none for a tenant already current, an unregistered one or an offboarded one", async () => {
-    await ensureTenantAppDatabases({ db: db.db, registrations, readCatalog: async () => CATALOG, logger: silent });
+    await ensureTenantAppDatabases({ db: db.db, registrations, readTenantManifest: readOwn, logger: silent });
     expect(repo.commits.map((c) => c.message)).toEqual([`app-databases(${STALE}): erp [core, sales], crm [], simetrix-ch [content] [boot]`]);
     expect(await appsOf(GONE)).toEqual([erp]);
     // A second boot finds every list standing.
-    expect(await ensureTenantAppDatabases({ db: db.db, registrations, readCatalog: async () => CATALOG, logger: silent })).toEqual({ written: [], failed: [`prod/${BROKEN}`] });
+    expect(await ensureTenantAppDatabases({ db: db.db, registrations, readTenantManifest: readOwn, logger: silent })).toEqual({ written: [], failed: [`prod/${BROKEN}`] });
     expect(repo.commits).toHaveLength(1);
   });
 
-  it("PLANTED DEFECT: writes nothing where the catalog cannot be read, rather than dropping every list", async () => {
-    const result = await ensureTenantAppDatabases({ db: db.db, registrations, readCatalog: async () => { throw new Error("clone failed"); }, logger: silent });
-    expect(result).toBeNull();
+  it("PLANTED DEFECT: leaves a tenant whose repository cannot be read as it stands, names it, and goes on", async () => {
+    seed(STALE, registration([erp, { ...crm, databases: ["kept"] }, site], "https://github.com/acme/unreadable.git"));
+    const result = await ensureTenantAppDatabases({ db: db.db, registrations, readTenantManifest: readOwn, logger: silent });
+    expect(result.failed).toEqual([`prod/${BROKEN}`, `prod/${STALE}`]);
+    expect(await appsOf(STALE)).toEqual([erp, { ...crm, databases: ["kept"] }, site]);
     expect(repo.commits).toEqual([]);
-    expect(await appsOf(CURRENT)).toEqual([{ ...erp, databases: ["core", "sales"] }]);
+  });
+});
+
+describe("a standing tenant's database lists, for its Versions run", () => {
+  const entry = (appsRepo: string) => registration([{ ...erp, databases: ["held"] }, { name: "workshop", seedReference: false, seedDemo: false, selections: {} }], appsRepo);
+  const own: AppsManifest = { apps: [...CATALOG.apps, { name: "workshop", title: "Workshop", description: "", selections: {}, databases: ["core", "bikes"] }] };
+
+  it("reads each app's list off the tenant's own repository, also for an app the template never offered", async () => {
+    const logs: string[] = [];
+    expect(await standingAppDatabases(async () => own, entry("https://github.com/acme/catalog-acme.git"), { log: (l) => logs.push(l), signal: new AbortController().signal })).toEqual({ erp: ["core", "sales"], workshop: ["core", "bikes"] });
+    expect(logs).toEqual([]);
+  });
+
+  it("PLANTED DEFECT: keeps the registration's lists and says why where the repository cannot be read or there is no bundle", async () => {
+    const logs: string[] = [];
+    const ctx = { log: (l: string) => logs.push(l), signal: new AbortController().signal };
+    expect(await standingAppDatabases(readOwn, entry("https://github.com/acme/unreadable.git"), ctx)).toEqual({ erp: ["held"] });
+    expect(logs[0]).toMatch(/unreadable\.git could not be read .*; the apps' database lists stay as the registration holds them$/);
+    expect(await standingAppDatabases(async () => null, entry(""), ctx)).toEqual({ erp: ["held"] });
+    expect(logs[1]).toBe("the tenant runs no apps bundle; the apps' database lists stay as the registration holds them");
   });
 });

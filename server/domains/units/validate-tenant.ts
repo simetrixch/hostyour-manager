@@ -60,6 +60,9 @@ export interface ValidateTenantRequest {
   /** The apps are a standing tenant's, resolved again by its Versions run: T4 does not hold them against
    *  the app catalog, which is the offer to a new tenant and to add-app. */
   isStandingTenant?: boolean;
+  /** Each app's database list as the caller read it off the tenant's own repository (a standing tenant,
+   *  tenant-app-databases.ts standingAppDatabases); absent, the template catalog's list of its folder. */
+  appDatabases?: Readonly<Record<string, readonly string[]>>;
   probeGuid: string; // the throwaway guid the fan-out is rendered at
   /** The subdomain the tenant stands on — the members render at `<member>.<subdomain>.<stage apex>`
    *  (tenant.zone), so the validation holds the hosts the deploy will serve. */
@@ -227,7 +230,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       });
       // An app the catalog does not name gets no list: T4 refuses it below, and until then it renders
       // as the chart's own files say.
-      appDatabases = catalogDatabases(req.apps, catalog);
+      appDatabases = req.appDatabases ? Object.fromEntries(Object.entries(req.appDatabases).map(([app, list]) => [app, [...list]])) : catalogDatabases(req.apps, catalog);
       // What every member reads in `tenant.apps` at render, as the ApplicationSet will hand it over.
       const apps = withAppDatabases(req.apps, appDatabases);
       memberRecords = await layerExistingValueFiles(resolveMembers(t1.spec, apps), deps, cloned.workdir);

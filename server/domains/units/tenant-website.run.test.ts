@@ -217,8 +217,11 @@ describe("tenant-set-website-domain", () => {
     seedWebsiteTenant();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const noSites = { "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n  - name: web\n    title: Website\n" };
-    const result = await makeTenantSetWebsiteDomainDef(ports({ registrations, repo: withDomain() }, noSites)).planStream!(MOVE, planCtx());
+    const logs: string[] = [];
+    const result = await makeTenantSetWebsiteDomainDef(ports({ registrations, repo: withDomain() }, noSites)).planStream!(MOVE, { ...planCtx(), log: (l) => logs.push(l) });
     expect(result.outcome === "planned" ? "planned" : result.summary).toBe("planned");
+    // Its database list is read off the tenant's own bundle, which this fixture's release does not carry.
+    expect(logs.some((l) => l.endsWith("the apps' database lists stay as the registration holds them"))).toBe(true);
   });
 
   it("refuses an app that is no website, the domain it already has, a domain another website serves, and a domain typed with www", async () => {

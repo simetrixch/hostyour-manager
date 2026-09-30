@@ -12,7 +12,7 @@
 //
 // A move to a new line needs the bundle and the engines to move together, and nothing here does that:
 // a pairing across lines is refused, and the refusal says so.
-import type { AppsEngine } from "../../../shared/apps-manifest.ts";
+import type { AppsEngine, AppsManifest } from "../../../shared/apps-manifest.ts";
 import { parseAppsManifest, APPS_MANIFEST_PATH } from "../../../shared/apps-manifest.ts";
 import { approvedImageTag } from "../../../shared/tenant.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
@@ -74,23 +74,41 @@ export function declaredEngine(appsYaml: string | null): AppsEngine | undefined 
 /** What a plan logs where a bundle's fit is judged by nobody, so it is never read as a fit that passed. */
 export const ENGINE_NOT_CHECKED = `the apps bundle's ${APPS_MANIFEST_PATH} declares no engine, so whether it fits the engine is not checked`;
 
-/** The engine of a tenant's own repository at `ref`, logging where it declares none. A repository that
- *  cannot be read fails naming it and why it was read, which the reader's own error does not say. */
-export async function repositoryEngine(ports: RepositoryRead, source: { repoURL: string; ref: string }, ctx: PlanLog): Promise<AppsEngine | undefined> {
+/** The apps.yaml of a tenant's own repository at `ref`, or null where it carries none. A repository
+ *  that cannot be read fails naming it and `purpose`, which the reader's own error does not say. */
+async function repositoryAppsYaml(ports: RepositoryRead, source: { repoURL: string; ref: string }, purpose: string, signal?: AbortSignal): Promise<string | null> {
   let cloned: { workdir: string };
   try {
-    cloned = await ports.repo.cloneAtRef({ ...source, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), signal: ctx.signal });
+    cloned = await ports.repo.cloneAtRef({ ...source, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), ...(signal ? { signal } : {}) });
   } catch (err) {
-    throw errUpstream(`${source.repoURL} could not be read at ${source.ref}, so the engine the apps bundle there is written for cannot be judged: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw errUpstream(`${source.repoURL} could not be read at ${source.ref}, so ${purpose}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
-  let engine: AppsEngine | undefined;
   try {
-    engine = declaredEngine(await ports.repo.readFile(cloned.workdir, APPS_MANIFEST_PATH));
+    return await ports.repo.readFile(cloned.workdir, APPS_MANIFEST_PATH);
   } finally {
     await ports.repo.dispose(cloned.workdir);
   }
+}
+
+/** The engine of a tenant's own repository at `ref`, logging where it declares none. */
+export async function repositoryEngine(ports: RepositoryRead, source: { repoURL: string; ref: string }, ctx: PlanLog): Promise<AppsEngine | undefined> {
+  const engine = declaredEngine(await repositoryAppsYaml(ports, source, "the engine the apps bundle there is written for cannot be judged", ctx.signal));
   if (engine === undefined) ctx.log(`${source.repoURL} at ${source.ref}: ${ENGINE_NOT_CHECKED}`);
   return engine;
+}
+
+/** The apps manifest of a tenant's own bundle at the release its image tag was built from: what the
+ *  tenant runs, which may name apps and sites the template never offered. Null where the tenant runs
+ *  no bundle. THROWS where its tag is no image tag, or its repository or manifest cannot be read. */
+export async function tenantBundleManifest(ports: RepositoryRead, bundle: { appsRepo?: string | undefined; appsImageTag?: string | undefined }, signal?: AbortSignal): Promise<AppsManifest | null> {
+  if (!bundle.appsRepo || !bundle.appsImageTag) return null;
+  if (!approvedImageTag.safeParse(bundle.appsImageTag).success) {
+    throw errValidation(`the apps bundle stands at "${bundle.appsImageTag}", which is no image tag <x.y.z>-<channel>-<ts14>-<sha7>, so the release it was built from cannot be read`);
+  }
+  const ref = bundleReleaseTag(bundle.appsImageTag);
+  const text = await repositoryAppsYaml(ports, { repoURL: bundle.appsRepo, ref }, "the apps the tenant runs cannot be read", signal);
+  if (text === null) throw errValidation(`${bundle.appsRepo} carries no ${APPS_MANIFEST_PATH} at ${ref}, so the apps the tenant runs cannot be read`);
+  return parseAppsManifest(text);
 }
 
 /** The engine of the bundle a run builds: the tenant's own repository at its head where one stands,

@@ -43,7 +43,8 @@ import { makeCheckTenantsDef } from "../domains/units/check-tenants.run.ts";
 import { tenantUnitProbes } from "../domains/units/tenant-unit-probes.ts";
 import type { UnitProbes } from "#unit/server/check-units.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
-import { listTenantAppCatalog, makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
+import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
+import { tenantBundleManifest } from "../domains/units/engine-line.ts";
 import { ensureTenantAppDatabases } from "../domains/units/tenant-app-databases.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantSetWebsiteDomainDef } from "../domains/units/tenant-website-domain.run.ts";
@@ -386,12 +387,12 @@ export function buildTenantOnboarding(
   // repoURL the appsets are rendered from) the runs use, never a second one.
   const versions = (db: Db, tenantId: string, signal?: AbortSignal): Promise<VersionsView> => readTenantVersions(onboardPorts, db, tenantId, signal);
   const libraryRepos = async (): Promise<string[]> => (await readTenantSpec(onboardPorts, {}))?.libraryRepos ?? [];
-  // The catalog the wizard offers, read the same way but never through its fail-soft provider: that
-  // answers a failed read with no apps, and the forward step would drop every list off it.
+  // Each standing tenant's lists off its own bundle, read with the deploy repository's credential as the
+  // engine line is (engine-line.ts tenantBundleManifest).
   const writeTenantAppDatabases = async (db: Db): Promise<void> => {
     await ensureTenantAppDatabases({
       db, registrations: tenantRegistrations, logger,
-      readCatalog: () => listTenantAppCatalog({ repo, repoURL, ref: books, ...(onboardPorts.deployCredentialId ? { credentialId: onboardPorts.deployCredentialId } : {}), warn: (msg) => logger.warn({ repoURL, ref: books }, msg) }),
+      readTenantManifest: (bundle, signal) => tenantBundleManifest({ repo, deployCredentialId: onboardPorts.deployCredentialId }, bundle, signal),
     });
   };
   // A unit registered after the start is watched from the next start; a release of it before then is
