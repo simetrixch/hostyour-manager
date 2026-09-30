@@ -337,6 +337,8 @@ export interface RefreshImagesParams {
   stage: Stage;
   subdomain: string;
   apps: ValidateTenantRequest["apps"];
+  /** The apps are a standing tenant's (its Versions run): the catalog does not judge them. */
+  isStandingTenant?: boolean;
   seedUsers: boolean;
   registryHost: string;
   requiredImages: readonly RequiredImage[];
@@ -367,6 +369,7 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
           ref: ports.registrations.branch,
           stage: p.stage,
           apps: p.apps,
+          ...(p.isStandingTenant ? { isStandingTenant: true } : {}),
           probeGuid: p.guid,
           subdomain: p.subdomain,
           seedUsers: p.seedUsers,

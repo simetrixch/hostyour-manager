@@ -198,7 +198,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
     // Every image the new render pulls stands in the registry before a single entry changes; after a
     // build, the render is taken again at the pins the build wrote.
     ...tenantImageSteps(ports, {
-      guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: p.apps, seedUsers: p.seedUsers,
+      guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: p.apps, isStandingTenant: true, seedUsers: p.seedUsers,
       registryHost: p.registryHost, requiredImages: p.requiredImages, buildUnits: p.buildUnits,
       ...(p.appsImage ? { appsImage: p.appsImage } : {}),
     }, runtime),
@@ -308,6 +308,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           ref: ports.registrations.branch,
           stage: tc.stage,
           apps,
+          isStandingTenant: true,
           probeGuid: tc.guid,
           subdomain,
           seedUsers,

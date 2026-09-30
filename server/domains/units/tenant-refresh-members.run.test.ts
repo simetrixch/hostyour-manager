@@ -8,6 +8,7 @@ import { buildUnitStepName } from "./tenant-builds.ts";
 import { DEPLOY_URL, GUID, HELD, HeldImagesGoneArgo, MANIFEST_YAML, NEW, OLD, OLDER, RELEASED, RELEASED_BEFORE, SHA, db, planCtx, planned, ports, rendering, resolved, seedTenant, staleMembers, stepCtx, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import { TEMPLATE_FILES, TEMPLATE_URL } from "./tenant-apps-repo.fixture.ts";
 
 // tenant-refresh-members: the plan resolves the members again off the product's manifest and names
 // what changes, refuses a tenant with nothing to change or a changed member set, and the steps write
@@ -61,6 +62,15 @@ describe("tenant-refresh-members", () => {
     const after = await prt.registrations.readTenant("prod", GUID);
     expect(after?.entry.apps.map((a) => [a.name, a.databases])).toEqual([["erp", ["core", "sales"]]]);
     expect(after?.entry.members).toEqual(resolved.members);
+  });
+
+  it("plans a tenant whose apps the template catalog no longer names: the catalog does not judge a standing tenant", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    const prt = ports(resolved.members);
+    (prt.repo as FakeRepoReader).scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: { ...TEMPLATE_FILES, "apps.yaml": "apps:\n  - name: web\n    title: Website\n" } });
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx());
+    expect(out.outcome === "planned" ? "planned" : out.summary).toBe("planned");
   });
 
   it("puts a part on the version chosen, starts a build the tenant lacks at its pin, waits until every member renders them, and an abort writes the previous ones back", async () => {

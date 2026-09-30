@@ -145,6 +145,27 @@ describe("gateT4Apps", () => {
     expect(judge([site({ folder: "erp" })]).found).toBe(`app "example-ch" carries a site or a domain, but its folder "erp" lists no sites in the app catalog.`);
     expect(judge([site({ folder: "shop" })]).found).toBe(`the folder "shop" of app "example-ch" is not in the app catalog (erp, crm, web).`);
   });
+
+  // A standing tenant's Versions run. The catalog of today names only the folder web, with no sites:
+  // erp, crm and the website the tenant runs stand in its own repository alone.
+  const TODAY: AppsManifest = { apps: [{ name: "web", title: "Website", description: "", selections: {} }] };
+  const runs: (AppRef & { selections?: Record<string, boolean> })[] = [app("erp"), { name: "crm", selections: { seedPrices: true } }, { name: "example-ch", folder: "web", site: "main", domain: "example.ch" }];
+  const judgeToday = (apps: (AppRef & { selections?: Record<string, boolean> })[], over: { isStandingTenant?: boolean; renderedMembers?: string[] } = {}) =>
+    gateT4Apps({ apps, members: membersFor(apps), renderedMembers: over.renderedMembers ?? renderedNames(apps), standingMembers: STANDING, catalog: TODAY, ...(over.isStandingTenant ? { isStandingTenant: true } : {}) });
+
+  it("passes the apps, sites and selections the catalog no longer names, and says the catalog did not judge them", () => {
+    const g = judgeToday(runs, { isStandingTenant: true });
+    expect(g.status).toBe("pass");
+    expect(g.found).toContain("the app catalog did not judge them, because they are a standing tenant's");
+  });
+
+  it("PLANTED DEFECT: still refuses a standing app whose member did not render, and a request that is no standing tenant's by the catalog", () => {
+    const g = judgeToday([app("erp")], { isStandingTenant: true, renderedMembers: ["erp-1"] });
+    expect(g.status).toBe("fail");
+    expect(g.found).toMatch(/erp-2/);
+    expect(g.expected).toContain("the app catalog does not judge a standing tenant's apps");
+    expect(judgeToday(runs).found).toBe(`app "erp" is not in the app catalog (web).`);
+  });
 });
 
 describe("validateTenant — the app catalog", () => {

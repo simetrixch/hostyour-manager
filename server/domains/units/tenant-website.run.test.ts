@@ -213,6 +213,14 @@ describe("tenant-set-website-domain", () => {
     expect(result.plan.steps.map((s) => s.name)).toEqual(["attest-target", "provision-website-records", "write-website-domain", "retire-previous-website-domain"]);
   });
 
+  it("moves a website whose site the template catalog no longer lists: the catalog does not judge a standing website", async () => {
+    seedWebsiteTenant();
+    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
+    const noSites = { "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n  - name: web\n    title: Website\n" };
+    const result = await makeTenantSetWebsiteDomainDef(ports({ registrations, repo: withDomain() }, noSites)).planStream!(MOVE, planCtx());
+    expect(result.outcome === "planned" ? "planned" : result.summary).toBe("planned");
+  });
+
   it("refuses an app that is no website, the domain it already has, a domain another website serves, and a domain typed with www", async () => {
     seedWebsiteTenant();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }, { name: "shop", folder: "web", site: "shop", domain: "example.net" }]);

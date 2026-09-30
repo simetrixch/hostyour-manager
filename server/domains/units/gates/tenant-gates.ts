@@ -370,6 +370,10 @@ export interface AppsCheckInput {
   /** The app catalog the apps and their selections are held against (app-catalog.ts): the apps
    *  manifest of the apps repository, or the overlay stand-in where none stands. */
   catalog: AppsManifest;
+  /** The apps are a standing tenant's, resolved again by its Versions run. The catalog is the offer to
+   *  a new tenant and to add-app; it does not judge what a tenant already runs, whose own repository
+   *  may carry apps and sites the catalog never names. */
+  isStandingTenant?: boolean;
 }
 
 const T4_EXPECTED =
@@ -379,9 +383,14 @@ const T4_EXPECTED =
   `resolves to its own member's engine+front renders and both render, with no standing-member ` +
   `collision and no duplicate app name.`;
 
-function t4Reject(found: string, reason: string): GateResult {
+/** What T4 holds a standing tenant's apps to in its Versions run: everything but the catalog. */
+const T4_EXPECTED_STANDING =
+  `every app the tenant runs resolves to its own member's engine+front renders and both render, with no ` +
+  `standing-member collision and no duplicate app name; the app catalog does not judge a standing tenant's apps.`;
+
+function t4Reject(found: string, reason: string, isStandingTenant = false): GateResult {
   return {
-    id: "T4", title: "apps", severity: "hard", status: "fail", expected: T4_EXPECTED,
+    id: "T4", title: "apps", severity: "hard", status: "fail", expected: isStandingTenant ? T4_EXPECTED_STANDING : T4_EXPECTED,
     found, reason, detail: "apps did not resolve", evidence: [{ source: "manager", value: clip(found) }],
   };
 }
@@ -400,6 +409,36 @@ function websiteProblem(app: AppChoice, entry: AppEntry): string | null {
   return null;
 }
 
+/** Why the catalog refuses one app of a request, or null: its folder is no entry, it breaks the
+ *  website rules, or it chooses a selection its entry does not declare. */
+function catalogRejection(app: AppChoice, known: ReadonlyMap<string, AppEntry>): GateResult | null {
+  const folder = appFolder(app);
+  const entry = known.get(folder);
+  if (entry === undefined) {
+    const names = [...known.keys()].join(", ") || "which is empty";
+    const what = app.folder === undefined ? `app "${cap(app.name)}"` : `the folder "${cap(folder)}" of app "${cap(app.name)}"`;
+    return t4Reject(
+      `${what} is not in the app catalog (${names}).`,
+      `the catalog names every app the bundle carries; an app it does not name has no folder to mount and no selections to offer, so the plan is rejected.`,
+    );
+  }
+  const website = websiteProblem(app, entry);
+  if (website !== null) {
+    return t4Reject(
+      website,
+      `a website loads one site of its folder and is served at <domain>; an entry that breaks this serves the wrong content or none, so the plan is rejected.`,
+    );
+  }
+  const unknown = chosenSelections(app).filter((s) => !(s in entry.selections));
+  if (unknown.length > 0) {
+    return t4Reject(
+      `app "${cap(app.name)}" chooses ${unknown.map((s) => `"${cap(s)}"`).join(", ")}, which the catalog does not declare for it (declared: ${Object.keys(entry.selections).join(", ") || "none"}).`,
+      `a selection is read by the engine off the app's registration entry; one the catalog does not declare is read by nothing and would be recorded as chosen, so the plan is rejected.`,
+    );
+  }
+  return null;
+}
+
 /** T4 — every apps[] entry is named by the catalog with only the selections it declares, resolved
  *  to a rendered engine+front render set, standing-member names never collide, and no app name
  *  repeats. A belt behind TenantRegistrationSchema's refine: validation renders exactly the guid ×
@@ -410,40 +449,19 @@ export function gateT4Apps(input: AppsCheckInput): GateResult {
   const rendered = new Set(input.renderedMembers);
   const known = new Map(input.catalog.apps.map((a) => [a.name, a]));
   const seen = new Set<string>();
+  const reject = (found: string, reason: string): GateResult => t4Reject(found, reason, input.isStandingTenant);
   for (const app of input.apps) {
-    const folder = appFolder(app);
-    const entry = known.get(folder);
-    if (entry === undefined) {
-      const names = [...known.keys()].join(", ") || "which is empty";
-      const what = app.folder === undefined ? `app "${cap(app.name)}"` : `the folder "${cap(folder)}" of app "${cap(app.name)}"`;
-      return t4Reject(
-        `${what} is not in the app catalog (${names}).`,
-        `the catalog names every app the bundle carries; an app it does not name has no folder to mount and no selections to offer, so the plan is rejected.`,
-      );
-    }
-    const website = websiteProblem(app, entry);
-    if (website !== null) {
-      return t4Reject(
-        website,
-        `a website loads one site of its folder and is served at <domain>; an entry that breaks this serves the wrong content or none, so the plan is rejected.`,
-      );
-    }
-    const unknown = chosenSelections(app).filter((s) => !(s in entry.selections));
-    if (unknown.length > 0) {
-      return t4Reject(
-        `app "${cap(app.name)}" chooses ${unknown.map((s) => `"${cap(s)}"`).join(", ")}, which the catalog does not declare for it (declared: ${Object.keys(entry.selections).join(", ") || "none"}).`,
-        `a selection is read by the engine off the app's registration entry; one the catalog does not declare is read by nothing and would be recorded as chosen, so the plan is rejected.`,
-      );
-    }
+    const catalogProblem = input.isStandingTenant ? null : catalogRejection(app, known);
+    if (catalogProblem) return catalogProblem;
     // Against the standing members THIS product declares, never a constant set of names.
     if (input.standingMembers.includes(app.name)) {
-      return t4Reject(
+      return reject(
         `app "${cap(app.name)}" is also a standing member of this tenant.`,
         `the standing member and the app are both named <guid>-${cap(app.name)}-<stage>, so the app would claim the member's own namespace and its Application and silently overwrite it; the plan is rejected.`,
       );
     }
     if (seen.has(app.name)) {
-      return t4Reject(
+      return reject(
         `app "${cap(app.name)}" appears more than once in apps[].`,
         `each member is keyed by app name; a duplicate would collide on the namespace <guid>-${cap(app.name)}-<stage>, so the plan is rejected.`,
       );
@@ -451,14 +469,14 @@ export function gateT4Apps(input: AppsCheckInput): GateResult {
     seen.add(app.name);
     const perApp = input.members.filter((m) => m.member === app.name).map((m) => m.name);
     if (perApp.length === 0) {
-      return t4Reject(
+      return reject(
         `app "${cap(app.name)}" resolved to no fan-out renders.`,
         `an app must resolve to its engine + front renders to be deployable; with none there is nothing to render or deploy, so the plan is rejected.`,
       );
     }
     for (const memberName of perApp) {
       if (!rendered.has(memberName)) {
-        return t4Reject(
+        return reject(
           `app "${cap(app.name)}" render "${cap(memberName)}" did not render.`,
           `every resolved per-app render must succeed for the app to be validated; one that did not leaves the app half-deployed, so the plan is rejected.`,
         );
@@ -466,8 +484,10 @@ export function gateT4Apps(input: AppsCheckInput): GateResult {
     }
   }
   return {
-    id: "T4", title: "apps", severity: "hard", status: "pass", expected: T4_EXPECTED,
-    found: `all ${input.apps.length} requested app(s) are in the app catalog with declared selections only, and resolved to their rendered engine+front renders with no standing-member collision and no duplicate.`,
+    id: "T4", title: "apps", severity: "hard", status: "pass", expected: input.isStandingTenant ? T4_EXPECTED_STANDING : T4_EXPECTED,
+    found: input.isStandingTenant
+      ? `all ${input.apps.length} app(s) the tenant runs resolved to their rendered engine+front renders with no standing-member collision and no duplicate; the app catalog did not judge them, because they are a standing tenant's.`
+      : `all ${input.apps.length} requested app(s) are in the app catalog with declared selections only, and resolved to their rendered engine+front renders with no standing-member collision and no duplicate.`,
     reason: null, detail: "apps resolved",
   };
 }

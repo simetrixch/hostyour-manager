@@ -137,6 +137,8 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
           ref: ports.registrations.branch,
           stage: tc.stage,
           apps: [{ name: req.app, folder: entry.folder, site: entry.site, domain: req.domain, seedReference: entry.seedReference, seedDemo: entry.seedDemo, selections: entry.selections }],
+          // A standing website: its site may stand in the tenant's own repository alone.
+          isStandingTenant: true,
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           seedUsers: current.entry.seedUsers,

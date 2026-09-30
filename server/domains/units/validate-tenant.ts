@@ -57,6 +57,9 @@ export interface ValidateTenantRequest {
   stage: Stage;
   /** The apps and the selections each chose — T4 holds both against the app catalog. */
   apps: AppChoice[];
+  /** The apps are a standing tenant's, resolved again by its Versions run: T4 does not hold them against
+   *  the app catalog, which is the offer to a new tenant and to add-app. */
+  isStandingTenant?: boolean;
   probeGuid: string; // the throwaway guid the fan-out is rendered at
   /** The subdomain the tenant stands on — the members render at `<member>.<subdomain>.<stage apex>`
    *  (tenant.zone), so the validation holds the hosts the deploy will serve. */
@@ -304,7 +307,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       images = collectContainerImages(docsByMember.flatMap((m) => m.docs));
       const t2 = gateT2Render(renders);
       const t3 = gateT3Isolation(docsByMember);
-      const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: t1.spec.members.map((m) => m.name), catalog });
+      const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: t1.spec.members.map((m) => m.name), catalog, ...(req.isStandingTenant ? { isStandingTenant: true } : {}) });
       for (const g of [t2, t3, t4]) {
         gates.push(g);
         streamGate(deps, g);
