@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput } from "./seeder-port.ts";
+import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput, TenantAppKeyKind } from "./seeder-port.ts";
+import { TENANT_APP_KEY_KINDS } from "./seeder-port.ts";
 import { appName } from "#core/shared/tenant.ts";
 import { KV_MOUNT, VaultError } from "#core/server/adapters/vault/port.ts";
 
@@ -240,7 +241,7 @@ export class VaultSelfSeeder implements VaultSeeder {
     if (!appName.safeParse(input.app).success) throw new VaultError(`"${input.app}" is no tenant app name, so no key path is composed from it`, 400);
     const { addr, token } = await this.login();
     try {
-      const path = tenantAppKeyPath(input.stage, input.guid, input.app);
+      const path = tenantAppKeyPath(input.stage, input.guid, input.kind, input.app);
       const res = await fetch(`${addr}/v1/${KV_MOUNT}/data/${path}`, {
         method: "POST",
         headers: { "x-vault-token": token, "content-type": "application/json" },
@@ -262,16 +263,18 @@ export class VaultSelfSeeder implements VaultSeeder {
     // deleteTenantCrypto gives: a tenant minted later with this guid must not inherit a key.
     const { addr, token } = await this.login();
     try {
-      const folder = `${input.stage}/tenants/${input.guid}/password-field-key`;
-      const listed = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${folder}?list=true`, { headers: { "x-vault-token": token } });
-      if (listed.status === 404) return { deleted: [] };
-      if (!listed.ok) throw new VaultError(`vault tenant app key list failed for ${KV_MOUNT}/${folder} (${listed.status})`, listed.status);
-      const keys = ((await listed.json()) as { data?: { keys?: string[] } }).data?.keys ?? [];
       const deleted: string[] = [];
-      for (const key of keys) {
-        const res = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${folder}/${key}`, { method: "DELETE", headers: { "x-vault-token": token } });
-        if (!res.ok && res.status !== 404) throw new VaultError(`vault tenant app key delete failed for ${KV_MOUNT}/${folder}/${key} (${res.status})`, res.status);
-        deleted.push(key);
+      for (const kind of TENANT_APP_KEY_KINDS) {
+        const folder = `${input.stage}/tenants/${input.guid}/${kind}`;
+        const listed = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${folder}?list=true`, { headers: { "x-vault-token": token } });
+        if (listed.status === 404) continue;
+        if (!listed.ok) throw new VaultError(`vault tenant app key list failed for ${KV_MOUNT}/${folder} (${listed.status})`, listed.status);
+        const keys = ((await listed.json()) as { data?: { keys?: string[] } }).data?.keys ?? [];
+        for (const key of keys) {
+          const res = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${folder}/${key}`, { method: "DELETE", headers: { "x-vault-token": token } });
+          if (!res.ok && res.status !== 404) throw new VaultError(`vault tenant app key delete failed for ${KV_MOUNT}/${folder}/${key} (${res.status})`, res.status);
+          deleted.push(`${kind}/${key}`);
+        }
       }
       return { deleted };
     } finally {
@@ -375,8 +378,8 @@ export class VaultSelfSeeder implements VaultSeeder {
   }
 }
 
-/** Where one tenant app's Password field key stands: one level below the tenant's entry, which is
- *  written create-only and takes no property later (hostyour-manager#329). */
-export function tenantAppKeyPath(stage: string, guid: string, app: string): string {
-  return `${stage}/tenants/${guid}/password-field-key/${app}`;
+/** Where one tenant app's key of one kind stands: one level below the tenant's entry, which is
+ *  written create-only and takes no property later. */
+export function tenantAppKeyPath(stage: string, guid: string, kind: TenantAppKeyKind, app: string): string {
+  return `${stage}/tenants/${guid}/${kind}/${app}`;
 }

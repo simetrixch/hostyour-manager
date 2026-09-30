@@ -1,31 +1,38 @@
-// tenant-app-keys.ts — the Password field key of every tenant app (hostyour-manager#329).
+// tenant-app-keys.ts — the keys of every tenant app, one Vault entry per app and kind.
 //
-// WHAT IT IS. A digita engine encrypts a stored Password field value with AES-256-GCM, and every app
-// of every tenant has its own key: a database or a backup of one app cannot be decrypted with another
-// app's or another tenant's key. An engine whose catalog has a Password field refuses to start
+// WHAT THEY ARE. A digita engine encrypts a stored Password field value with AES-256-GCM, and every
+// app of every tenant has its own key: a database or a backup of one app cannot be decrypted with
+// another app's or another tenant's key. An engine whose catalog has a Password field refuses to
+// start without it. A website's engine also tells its renderer to drop its cache after a save, and
+// signs that call with a revalidate secret the renderer checks; a website engine refuses to start
 // without it.
 //
-// WHERE IT STANDS. One Vault entry per app, <stage>/tenants/<guid>/password-field-key/<app>, one
-// level below the tenant's entry: that entry is written create-only and takes no property later, so
-// an app joining a standing tenant could never be given its key there. The tenant's members read the
-// subpath through the same templated policy as the entry above it.
+// WHERE THEY STAND. One Vault entry per app and kind, <stage>/tenants/<guid>/<kind>/<app>, one level
+// below the tenant's entry: that entry is written create-only and takes no property later, so an app
+// joining a standing tenant could never be given its key there. The tenant's members read the
+// subpaths through the same templated policy as the entry above them.
 //
-// WRITTEN CREATE-ONLY AND NEVER READ. Every stored value of the app decrypts with this key alone, so
-// the write refuses to replace one that stands, and the manager holds no read grant on it. That is
-// also what lets the boot pass below ask for every app on every start: an app that has its key
-// answers "exists", and nothing about the key is learned.
+// WRITTEN CREATE-ONLY AND NEVER READ. Every stored value of the app decrypts with its Password field
+// key alone, and an engine and its renderer agree only while their secret stays the same, so the
+// write refuses to replace a key that stands, and the manager holds no read grant on it. That is also
+// what lets the boot pass below ask for every app on every start: an app that has its key answers
+// "exists", and nothing about the key is learned.
 import { and, eq, notInArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { TENANT_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
+import type { TenantAppKeyKind, VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
+import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { mintAes256Key } from "#unit/server/secret-mint.ts";
 import type { Step } from "../../executor/types.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
-/** The property an app's key stands under in its own entry, as the engine's chart reads it. */
-export const TENANT_APP_KEY_PROPERTY = "password-field-key";
+/** What a person reads about each kind of key: its name, and what an app lacks without it. */
+const KEY_KIND_TEXT: Record<TenantAppKeyKind, { keys: string; key: string; lacking: string }> = {
+  "password-field-key": { keys: "Password field keys", key: "Password field key", lacking: "an engine without its key cannot encrypt a Password field" },
+  "revalidate-secret": { keys: "Revalidate secrets", key: "revalidate secret", lacking: "a website engine without its secret does not start" },
+};
 
 export interface TenantAppKeysOutcome {
   /** The apps whose key this call wrote. */
@@ -34,45 +41,49 @@ export interface TenantAppKeysOutcome {
   existing: string[];
 }
 
-/** Writes a fresh key for each of [apps] of one tenant, create-only. */
-export async function seedTenantAppKeys(seeder: VaultSeeder, stage: Stage, guid: string, apps: readonly string[]): Promise<TenantAppKeysOutcome> {
+/** Writes a fresh key of [kind] for each of [apps] of one tenant, create-only: 32 random bytes as
+ *  base64, under the property its kind names, as the app's charts read it. */
+export async function seedTenantAppKeys(seeder: VaultSeeder, kind: TenantAppKeyKind, stage: Stage, guid: string, apps: readonly string[]): Promise<TenantAppKeysOutcome> {
   const outcome: TenantAppKeysOutcome = { created: [], existing: [] };
   for (const app of apps) {
-    const { created } = await seeder.seedTenantAppKey({ stage, guid, app, data: { [TENANT_APP_KEY_PROPERTY]: mintAes256Key() } });
+    const { created } = await seeder.seedTenantAppKey({ stage, guid, kind, app, data: { [kind]: mintAes256Key() } });
     (created ? outcome.created : outcome.existing).push(app);
   }
   return outcome;
 }
 
 /** One line for a run's log, naming what was written and what already stood. */
-export function tenantAppKeysLine(stage: Stage, guid: string, outcome: TenantAppKeysOutcome): string {
+export function tenantAppKeysLine(kind: TenantAppKeyKind, stage: Stage, guid: string, outcome: TenantAppKeysOutcome): string {
   const parts = [
     outcome.created.length > 0 ? `written for ${outcome.created.join(", ")}` : null,
     outcome.existing.length > 0 ? `already standing for ${outcome.existing.join(", ")} and left untouched` : null,
   ].filter((p): p is string => p !== null);
-  return `Password field keys under ${stage}/tenants/${guid}/password-field-key/: ${parts.length > 0 ? parts.join("; ") : "no app to key"}`;
+  return `${KEY_KIND_TEXT[kind].keys} under ${stage}/tenants/${guid}/${kind}/: ${parts.length > 0 ? parts.join("; ") : "no app to key"}`;
 }
 
-/** The step that writes one app's key as it joins a standing tenant (add-app). It stands before the
- *  step that appends the app to the registration, because the append is what makes the master's
- *  ArgoCD generate the app's engine, and that engine reads the key. */
-export function seedPasswordFieldKeyStep(seeder: VaultSeeder | undefined, stage: Stage, guid: string, app: string): Step {
+/** The step that writes one app's key of [kind] as it joins a standing tenant (add-app). It stands
+ *  before the step that appends the app to the registration, because the append is what makes the
+ *  master's ArgoCD generate the app's engine, and that engine reads the key. */
+export function seedTenantAppKeyStep(seeder: VaultSeeder | undefined, kind: TenantAppKeyKind, stage: Stage, guid: string, app: string): Step {
+  const text = KEY_KIND_TEXT[kind];
   return {
-    name: "seed-password-field-key",
-    title: "Write the new app's Password field key",
+    name: `seed-${kind}`,
+    title: `Write the new app's ${text.key}`,
     run: async (ctx) => {
-      if (!seeder) throw errValidation("no Vault seeder is wired — the new app's Password field key cannot be written, and its engine cannot encrypt a Password field without it");
-      const appKeys = await seedTenantAppKeys(seeder, stage, guid, [app]);
+      if (!seeder) throw errValidation(`no Vault seeder is wired — the new app's ${text.key} cannot be written, and ${text.lacking}`);
+      const appKeys = await seedTenantAppKeys(seeder, kind, stage, guid, [app]);
       ctx.checkpoint({ appKeys });
-      ctx.log("meta", tenantAppKeysLine(stage, guid, appKeys));
+      ctx.log("meta", tenantAppKeysLine(kind, stage, guid, appKeys));
     },
   };
 }
 
-/** Every tenant app of every tenant that is not offboarded or purged, given its key where it has
- *  none. The forward step for the apps that joined before keys were minted, run once at every boot.
- *  Never rejects: a tenant whose write fails is named in the log, and the others go on. */
-export async function ensureTenantAppKeys(deps: { db: Db; seeder: VaultSeeder; logger: Logger }): Promise<{ created: number; existing: number; failed: string[] }> {
+/** Every tenant app of every tenant that is not offboarded or purged, given its Password field key
+ *  where it has none, and every website among them its revalidate secret. The forward step for the
+ *  apps that joined before these keys were minted, run once at every boot. Which apps are websites is
+ *  read off the tenant's registration: an apps[] entry that names a domain. Never rejects: a kind of
+ *  key a tenant could not be given is named in the log, and the others go on. */
+export async function ensureTenantAppKeys(deps: { db: Db; seeder: VaultSeeder; registrations: Pick<TenantRegistrations, "readTenant">; logger: Logger }): Promise<{ created: number; existing: number; failed: string[] }> {
   const rows = deps.db
     .select({ guid: tenants.guid, stage: tenants.stage, app: tenantApps.name })
     .from(tenantApps)
@@ -89,19 +100,24 @@ export async function ensureTenantAppKeys(deps: { db: Db; seeder: VaultSeeder; l
   let created = 0;
   let existing = 0;
   const failed: string[] = [];
-  for (const { stage, guid, apps } of byTenant.values()) {
+  // Each kind on its own: a grant missing for one kind leaves the other written.
+  const ensure = async (kind: TenantAppKeyKind, stage: Stage, guid: string, appsOf: () => Promise<string[]>): Promise<void> => {
     try {
-      const outcome = await seedTenantAppKeys(deps.seeder, stage, guid, apps);
+      const outcome = await seedTenantAppKeys(deps.seeder, kind, stage, guid, await appsOf());
       created += outcome.created.length;
       existing += outcome.existing.length;
       // A running engine read its environment at its start, so a key written now reaches it only at
       // its next restart; the line says so where the person reading it decides.
-      if (outcome.created.length > 0) deps.logger.info({ stage, guid, apps: outcome.created }, `${tenantAppKeysLine(stage, guid, outcome)} — an engine of these apps that is already running takes its key at its next restart (tenant-restart-workloads)`);
+      if (outcome.created.length > 0) deps.logger.info({ stage, guid, kind, apps: outcome.created }, `${tenantAppKeysLine(kind, stage, guid, outcome)} — an engine of these apps that is already running takes its key at its next restart (tenant-restart-workloads)`);
     } catch (err) {
-      failed.push(`${stage}/${guid}`);
-      deps.logger.error({ stage, guid, err: err instanceof Error ? err.message : String(err) }, `the Password field keys of tenant ${stage}/${guid} could not be written; its apps' engines cannot encrypt a Password field until they are`);
+      failed.push(`${stage}/${guid}/${kind}`);
+      deps.logger.error({ stage, guid, kind, err: err instanceof Error ? err.message : String(err) }, `the ${KEY_KIND_TEXT[kind].keys} of tenant ${stage}/${guid} could not be written, and ${KEY_KIND_TEXT[kind].lacking}; the next boot tries again`);
     }
+  };
+  for (const { stage, guid, apps } of byTenant.values()) {
+    await ensure("password-field-key", stage, guid, async () => apps);
+    await ensure("revalidate-secret", stage, guid, async () => ((await deps.registrations.readTenant(stage, guid))?.entry.apps ?? []).filter((a) => a.domain && apps.includes(a.name)).map((a) => a.name));
   }
-  deps.logger.info({ created, existing, failed }, `tenant app keys: ${created} written, ${existing} already standing, ${failed.length} tenant(s) failed`);
+  deps.logger.info({ created, existing, failed }, `tenant app keys: ${created} written, ${existing} already standing, ${failed.length} failed`);
   return { created, existing, failed };
 }

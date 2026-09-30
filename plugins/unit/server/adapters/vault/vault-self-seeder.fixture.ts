@@ -19,7 +19,8 @@ export let server: Server;
 /** What the fake Vault answers and what it was asked, reset by every start. A test sets a field to
  *  replay a status: `dataPut` is what the KV-v2 data write answers (200: the entry did not exist and
  *  was created; a test replays Vault's cas-conflict with 400), `metaList` what a metadata LIST answers
- *  (404: no key stands under the folder). */
+ *  (404: no key stands under the folder), and `metaLists` what the LIST of one folder answers
+ *  instead, by the folder's path below the mount. */
 export const vault = {
   base: "",
   recorded: [] as Recorded[],
@@ -27,10 +28,11 @@ export const vault = {
   metaDeleteStatus: 200,
   dataPut: { status: 200, body: "{}" },
   metaList: { status: 404, body: "{}" },
+  metaLists: {} as Record<string, { status: number; body: string }>,
 };
 
 export function startVault(): Promise<void> {
-  Object.assign(vault, { base: "", recorded: [], loginStatus: 200, metaDeleteStatus: 200, dataPut: { status: 200, body: "{}" }, metaList: { status: 404, body: "{}" } });
+  Object.assign(vault, { base: "", recorded: [], loginStatus: 200, metaDeleteStatus: 200, dataPut: { status: 200, body: "{}" }, metaList: { status: 404, body: "{}" }, metaLists: {} });
   server = createServer((req, res) => {
     let raw = "";
     req.on("data", (c) => (raw += c));
@@ -57,8 +59,9 @@ export function startVault(): Promise<void> {
         return;
       }
       if (req.method === "GET" && req.url?.includes("/metadata/") && req.url.endsWith("?list=true")) {
-        res.writeHead(vault.metaList.status, { "content-type": "application/json" });
-        res.end(vault.metaList.body);
+        const answer = vault.metaLists[req.url.replace(/^\/v1\/secret\/metadata\//, "").replace(/\?list=true$/, "")] ?? vault.metaList;
+        res.writeHead(answer.status, { "content-type": "application/json" });
+        res.end(answer.body);
         return;
       }
       if (req.method === "DELETE" && req.url?.includes("/metadata/")) {

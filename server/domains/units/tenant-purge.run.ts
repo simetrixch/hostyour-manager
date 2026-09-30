@@ -346,14 +346,14 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
           return;
         }
         await ports.seeder.deleteTenantCrypto({ stage: c.stage, guid: c.guid });
-        // And every app's Password field key below it, found by listing, so the key of an app removed
+        // And every app's keys below it, of every kind, found by listing, so the key of an app removed
         // earlier goes too (tenant-app-keys.ts).
         const { deleted: appKeys } = await ports.seeder.deleteTenantAppKeys({ stage: c.stage, guid: c.guid });
         ctx.checkpoint({ tenantCrypto: c.guid, deleted: true, appKeys });
         ctx.log("meta", `crypto entry ${c.stage}/tenants/${c.guid} destroyed (all versions) — the tenant's identity is gone, and a future tenant of this guid gets a fresh one`);
         ctx.log("meta", appKeys.length > 0
-          ? `Password field keys destroyed (all versions) for ${appKeys.join(", ")} under ${c.stage}/tenants/${c.guid}/password-field-key/`
-          : `no Password field key stood under ${c.stage}/tenants/${c.guid}/password-field-key/`);
+          ? `tenant app keys destroyed (all versions) under ${c.stage}/tenants/${c.guid}/: ${appKeys.join(", ")}`
+          : `no tenant app key stood under ${c.stage}/tenants/${c.guid}/`);
       },
     },
     {

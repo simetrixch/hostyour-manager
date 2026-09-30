@@ -195,16 +195,24 @@ export interface TenantCryptoDeleteInput {
   guid: string;
 }
 
-/** One tenant app's Password field key: ONE entry per app, one level below the tenant's entry,
- *  because that entry is written create-only and takes no property later (hostyour-manager#329).
- *  The tenant's members read it through the same templated policy as the entry above it. */
+/** The kinds of key a tenant app has, each ONE entry per app one level below the tenant's entry,
+ *  because that entry is written create-only and takes no property later. The kind is the folder
+ *  below the tenant's entry and the property the value stands under:
+ *  - `password-field-key`: what the app's engine encrypts a Password field's value with.
+ *  - `revalidate-secret`: what a website's engine signs a cache purge of its renderer with, and the
+ *    renderer checks it by.
+ *  The tenant's members read every one through the same templated policy as the entry above it. */
+export const TENANT_APP_KEY_KINDS = ["password-field-key", "revalidate-secret"] as const;
+export type TenantAppKeyKind = (typeof TENANT_APP_KEY_KINDS)[number];
+
 export interface TenantAppKeySeedInput {
   stage: Stage;
   guid: string;
+  kind: TenantAppKeyKind;
   /** The app's name as `tenant_apps.name` spells it — the leaf name, and the `tenant.appName` the
-   *  engine's chart reads it under. */
+   *  app's charts read it under. */
   app: string;
-  /** property -> value, written under <stage>/tenants/<guid>/password-field-key/<app>. */
+  /** property -> value, written under <stage>/tenants/<guid>/<kind>/<app>. */
   data: Record<string, string>;
 }
 
@@ -270,10 +278,12 @@ export interface VaultSeeder {
    *  NORMAL case and not only a crash-retry: a tenant whose create-tenant died before the seed step
    *  has none. Every other non-2xx fails the run; a 403 is a missing grant, never "already gone". */
   deleteTenantCrypto(input: TenantCryptoDeleteInput): Promise<void>;
-  /** Create one tenant app's Password field key — ONCE (cas=0), for the reason the tenant entry is:
-   *  every stored Password value of the app decrypts with it alone, so it is never overwritten. */
+  /** Create one tenant app's key — ONCE (cas=0): every stored Password value of the app decrypts
+   *  with its Password field key alone, and a renderer and its engine agree only while their revalidate
+   *  secret stays the same, so neither is ever overwritten. */
   seedTenantAppKey(input: TenantAppKeySeedInput): Promise<VaultSeedOutcome>;
-  /** Remove every tenant app key of one tenant (purge), found by listing the key names under it,
-   *  so the key of an app this manager no longer knows goes too. Answers the names it removed. */
+  /** Remove every tenant app key of one tenant, of every kind (purge), found by listing the key names
+   *  under it, so the key of an app this manager no longer knows goes too. Answers what it removed,
+   *  each as <kind>/<app>. */
   deleteTenantAppKeys(input: TenantCryptoDeleteInput): Promise<{ deleted: string[] }>;
 }

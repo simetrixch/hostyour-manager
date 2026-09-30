@@ -33,7 +33,7 @@ import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { customerHostProblem, replacementSentence, ReplacedRecord } from "./own-domain-records.ts";
 import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace, type WebsiteDomainPorts } from "./website-domain.ts";
 import { builtBundleEngine, throwEngineLineRefusal } from "./engine-line.ts";
-import { seedPasswordFieldKeyStep } from "./tenant-app-keys.ts";
+import { seedTenantAppKeyStep } from "./tenant-app-keys.ts";
 import { assertAddAppAbortable, revertAppendCleanup } from "./add-app-abort.ts";
 
 // The "tenant-add-app" Run. The subset sibling of
@@ -232,7 +232,9 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
         ctx.log("meta", `argo-sync grant ${syncGrant.role.metadata.name} now names ${applications.length} Application(s) of tenant ${p.guid}, "${p.app}" included`);
       },
     },
-    seedPasswordFieldKeyStep(ports.seeder, p.stage, p.guid, p.app), // before the append generates the engine that reads it
+    // Before the append generates the engine that reads them.
+    seedTenantAppKeyStep(ports.seeder, "password-field-key", p.stage, p.guid, p.app),
+    ...(p.website ? [seedTenantAppKeyStep(ports.seeder, "revalidate-secret", p.stage, p.guid, p.app)] : []),
     {
       name: "append-app",
       title: "Append the new app to the tenant registration",
