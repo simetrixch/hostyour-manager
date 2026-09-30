@@ -35,18 +35,32 @@ export interface TreeFile {
   executable: boolean;
 }
 
+/** The sites a run serves, per app folder: the site of each website it adds. A folder it names no
+ *  sites for is copied whole, and its entry as the template spells it. */
+export type ServedSites = Readonly<Record<string, readonly string[]>>;
+
+/** Where the content of a folder's sites stands, one directory per site, as the catalog's apps.yaml
+ *  states it: the engine of a site loads `<folder>/content/sites/<id>/`. */
+function siteContentDir(folder: string): string {
+  return `${folder}/content/sites`;
+}
+
 /** Every file of the template that belongs in a tenant's repository, read through the reader. Left
  *  out: the git directory; the release kit (inject-release-kit writes the current kit, and a copied
  *  one would be replaced a step later); the two files this run composes (the manifest, apps.yaml);
- *  and the folder of every app of the template the tenant did not choose. */
-export async function readTemplateTree(repo: RepoReader, workdir: string, input: { templateApps: readonly string[]; chosen: readonly string[] }): Promise<TreeFile[]> {
+ *  the folder of every app of the template the tenant did not choose; and in a folder the run serves
+ *  sites of, the content of every other site. */
+export async function readTemplateTree(repo: RepoReader, workdir: string, input: { templateApps: readonly string[]; chosen: readonly string[]; sites: ServedSites }): Promise<TreeFile[]> {
   const unchosen = new Set(input.templateApps.filter((a) => !input.chosen.includes(a)));
   const skipped = new Set([".git", RELEASE_KIT_DIR, RELEASE_KIT_WORKFLOW.path, APPS_MANIFEST_PATH, CONSUMER_MANIFEST_PATH, ...unchosen]);
+  // A folder the run serves sites of carries only their content: another site's is no tenant's own.
+  const servedIn = new Map(Object.entries(input.sites).map(([folder, ids]) => [siteContentDir(folder), new Set(ids)]));
   const out: TreeFile[] = [];
   const walk = async (dir: string): Promise<void> => {
     for (const name of await repo.listDir(workdir, dir)) {
       const path = dir === "" ? name : `${dir}/${name}`;
       if (skipped.has(path)) continue;
+      if (servedIn.has(dir) && !servedIn.get(dir)!.has(name)) continue;
       const content = await repo.readFile(workdir, path);
       if (content === null) {
         // A name the reader cannot read as a file is a directory (the reader answers null for one).
@@ -90,12 +104,20 @@ function entryName(item: unknown): string | undefined {
   return typeof name === "string" ? name : undefined;
 }
 
+/** The sites an apps.yaml entry lists, or none. */
+function listedSites(item: unknown): string[] {
+  const sites = isMap(item) ? item.get("sites") : undefined;
+  return isSeq(sites) ? (sites.toJSON() as unknown[]).map(String) : [];
+}
+
 /** The apps.yaml the tenant's repository carries after this run: the entries it carries today (none
  *  on a fresh repository, where the template's file with its header stands in) plus every chosen
- *  entry of the template it lacks, copied as the template spells it — comments included. NEVER
- *  removes an entry: an app the tenant added by hand, or chose in an earlier run, stays. `added`
- *  names what was appended, in template order; empty means the file is left as it stands. */
-export function mergeAppsManifest(template: string, current: string | null, chosen: readonly string[]): { content: string; added: string[] } {
+ *  entry of the template it lacks, copied as the template spells it — comments included. An entry of
+ *  a folder the run serves sites of lists those sites only; one that stands gains the sites served
+ *  now. NEVER removes an entry or a site: what the tenant added by hand, or chose in an earlier run,
+ *  stays. `added` names the entries appended and `sitesAdded` the sites a standing entry gained, as
+ *  `<entry>/<site>`, in template order; both empty means the file is left as it stands. */
+export function mergeAppsManifest(template: string, current: string | null, chosen: readonly string[], sites: ServedSites = {}): { content: string; added: string[]; sitesAdded: string[] } {
   const templateDoc = parseDocument(template);
   const templateApps = templateDoc.get("apps");
   if (!isSeq(templateApps)) throw errValidation(`${APPS_MANIFEST_PATH} of the template carries no apps list`);
@@ -104,13 +126,31 @@ export function mergeAppsManifest(template: string, current: string | null, chos
   const apps = doc.get("apps");
   if (!isSeq(apps)) throw errValidation(`${APPS_MANIFEST_PATH} of the repository carries no apps list — refusing to rewrite a file this run did not shape`);
   if (current === null) apps.items = [];
-  const have = new Set(apps.items.map(entryName));
+  const setSites = (item: unknown, list: readonly string[]): void => {
+    if (!isMap(item)) return;
+    const node = doc.createNode([...list]);
+    node.flow = true;
+    item.set("sites", node);
+  };
   const added: string[] = [];
+  const sitesAdded: string[] = [];
   for (const item of templateItems) {
     const name = entryName(item);
-    if (name === undefined || !chosen.includes(name) || have.has(name)) continue;
-    apps.items.push(item);
-    added.push(name);
+    if (name === undefined || !chosen.includes(name)) continue;
+    const served = sites[name];
+    const standing = apps.items.find((i) => entryName(i) === name);
+    if (standing === undefined) {
+      if (served) setSites(item, listedSites(item).filter((s) => served.includes(s)));
+      apps.items.push(item);
+      added.push(name);
+      continue;
+    }
+    if (!served) continue;
+    const listed = listedSites(standing);
+    const missing = served.filter((s) => !listed.includes(s));
+    if (missing.length === 0) continue;
+    setSites(standing, [...listed, ...missing]);
+    sitesAdded.push(...missing.map((s) => `${name}/${s}`));
   }
-  return { content: doc.toString(), added };
+  return { content: doc.toString(), added, sitesAdded };
 }

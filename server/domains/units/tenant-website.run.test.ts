@@ -12,7 +12,10 @@ import { makeTenantSetWebsiteDomainDef } from "./tenant-website-domain.run.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { recordDnsWrite } from "../../db/dns-writes.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
-import { FakePlatformRepo, FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import { FakePlatformRepo, FakeRepoReader, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
+import { tenantAppsRepoURL } from "./tenant-apps-tree.ts";
+import { parseAppsManifest } from "../../../shared/apps-manifest.ts";
+import type { CredentialStore } from "../../security/store.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
@@ -73,6 +76,22 @@ describe("add-app for a website", () => {
     expect(names.slice(names.indexOf("seed-password-field-key"), names.indexOf("append-app") + 1)).toEqual(["seed-password-field-key", "seed-revalidate-secret", "append-app"]);
     expect(names.slice(names.indexOf("watch-sync-set"))).toEqual(["watch-sync-set", "provision-website-records", "wait-website", "smoke", "record-inventory"]);
     expect(result.plan.summary).toContain("website of site main, served at example.ch, and www.example.ch redirects there");
+  });
+
+  it("carries only the site it serves into the tenant's bundle, and lists only that site", async () => {
+    seedWebsiteTenant();
+    const sites = { "web/content/sites/main/website.json": "{}\n", "web/content/sites/shop/website.json": "{}\n" };
+    const prt = ports({ dns: new FakeDnsProvider() }, { ...WEBSITE_APPS, ...sites });
+    const result = await makeAddAppDef(prt).planStream!(WEBSITE, planCtx());
+    if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
+    const p = result.params;
+    const writer = new FakeRepoWriter();
+    prt.onboard = () => ({ ports: { consumerRepo: writer } }) as unknown as ReturnType<NonNullable<typeof prt.onboard>>;
+    const creds = { list: async () => [{ id: "cred_app", subject: { kind: "owner" } }] } as unknown as CredentialStore;
+    await makeAddAppDef(prt).steps(p).find((s) => s.name === "write-tree")!.run({ ...ctx(p, "write-tree", []), creds });
+    const files = writer.filesFor(tenantAppsRepoURL(p.appsUnit!.org, p.appsUnit!.templateBuild, p.subdomain));
+    expect(Object.keys(files).filter((f) => f.startsWith("web/content/sites/"))).toEqual(["web/content/sites/main/website.json"]);
+    expect(parseAppsManifest(files["apps.yaml"]!).apps.find((a) => a.name === "web")?.sites).toEqual(["main"]);
   });
 
   it("refuses a website not named by its domain, a domain typed with www, and a domain another website serves", async () => {

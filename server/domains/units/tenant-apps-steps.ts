@@ -32,7 +32,7 @@ import { channelReaching } from "./tenant-builds.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
 import { recordBuildOnlyStep } from "#unit/server/build-registration.ts";
 import { refreshRepoPatStep } from "#unit/server/seed-repo-pat.ts";
-import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit, type TreeFile } from "./tenant-apps-tree.ts";
+import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit, type ServedSites, type TreeFile } from "./tenant-apps-tree.ts";
 import type { RepoFileWrite } from "../../adapters/git/port.ts";
 import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "#unit/server/repo-identity.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
@@ -69,6 +69,8 @@ export interface TenantAppsStepParams extends TenantAppsUnit {
   owner: string;
   /** The chosen apps' NAMES: only the names shape the repository. */
   apps: readonly string[];
+  /** The sites the run serves per folder: add-app names the site of the website it adds. */
+  sites?: ServedSites;
 }
 
 /** In-run memory of one execute() pass: the id of the `github-app` credential sealed for the unit,
@@ -101,7 +103,7 @@ async function appCredentialId(ctx: StepCtx, runtime: TenantAppsRepoRuntime): Pr
  *  (how its bundle is built). Cloned the way the catalog reads it (app-catalog.ts readAppsManifest):
  *  at its default branch head, with the deploy repository's own credential — the template is no unit and has
  *  no credential of its own. */
-async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[]) => Promise<TreeFile[]>; dispose: () => Promise<void> }> {
+async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[], sites: ServedSites) => Promise<TreeFile[]>; dispose: () => Promise<void> }> {
   const repo = ports.repo;
   const cloned = await repo.cloneAtRef({ repoURL: templateRepoURL, ref: DEFAULT_BRANCH_HEAD, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), signal });
   try {
@@ -117,7 +119,7 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
       npmrc: await repo.readFile(cloned.workdir, ".npmrc"),
       manifest: manifest.data,
       folders: async (app) => (await repo.listDir(cloned.workdir, app)).length > 0,
-      tree: (chosen) => readTemplateTree(repo, cloned.workdir, { templateApps, chosen }),
+      tree: (chosen, sites) => readTemplateTree(repo, cloned.workdir, { templateApps, chosen, sites }),
       dispose: () => repo.dispose(cloned.workdir),
     };
   } catch (e) {
@@ -174,6 +176,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
   const unit = tenantAppsUnit(p.templateBuild ?? "", p.subdomain ?? "");
   const url = tenantAppsRepoURL(p.org ?? "", p.templateBuild ?? "", p.subdomain ?? "");
   const chosen = p.apps ?? [];
+  const sites = p.sites ?? {};
   return [
     {
       name: "create-repository",
@@ -196,7 +199,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
         const template = await readTemplate(ports, p.templateRepoURL, ctx.signal);
         let files: TreeFile[];
         try {
-          files = await template.tree(chosen);
+          files = await template.tree(chosen, sites);
         } finally {
           await template.dispose();
         }
@@ -212,17 +215,18 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
             write.push({ path: CONSUMER_MANIFEST_PATH, content: tenantAppsManifest({ unit, owner: p.owner, envs: template.manifest.envs, containerfile: build.containerfile, context: build.context }) });
           }
           const current = await writer.readFile(session.workdir, APPS_MANIFEST_PATH);
-          const merged = mergeAppsManifest(template.appsYaml, current, chosen);
-          if (current === null || merged.added.length > 0) write.push({ path: APPS_MANIFEST_PATH, content: merged.content });
+          const merged = mergeAppsManifest(template.appsYaml, current, chosen, sites);
+          const additions = [...merged.added, ...merged.sitesAdded.map((s) => `site ${s}`)];
+          if (current === null || additions.length > 0) write.push({ path: APPS_MANIFEST_PATH, content: merged.content });
           if (write.length === 0) {
             ctx.checkpoint({ repoURL: url, branch: session.branch, files: 0, added: [] });
             ctx.log("meta", `${url} already carries every file of the template and every chosen entry (${chosen.join(", ")}) — nothing to commit`);
             return;
           }
-          const message = current === null ? `Create ${unit} from the catalog` : `Add ${merged.added.join(", ")} to ${unit} from the catalog`;
+          const message = current === null ? `Create ${unit} from the catalog` : `Add ${additions.join(", ") || "the missing files"} to ${unit} from the catalog`;
           const { commit } = await writer.commitPush({ workdir: session.workdir, branch: session.branch, credentialId, message, write, signal: ctx.signal });
-          ctx.checkpoint({ repoURL: url, branch: session.branch, commit, files: write.length, added: merged.added });
-          ctx.log("meta", `${write.length} file(s) committed to ${url} on ${session.branch} (${commit}) — apps ${merged.added.join(", ") || "(none added)"}; the release kit follows with the onboarding`);
+          ctx.checkpoint({ repoURL: url, branch: session.branch, commit, files: write.length, added: merged.added, sitesAdded: merged.sitesAdded });
+          ctx.log("meta", `${write.length} file(s) committed to ${url} on ${session.branch} (${commit}) — ${additions.join(", ") || "no app or site added"}; the release kit follows with the onboarding`);
         } finally {
           await writer.dispose(session.workdir);
         }

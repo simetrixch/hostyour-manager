@@ -175,7 +175,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
     // steps, composed here).
     ...(p.appsUnit
       ? [
-        ...tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: [appFolder(app)] }, runtime),
+        ...tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: [appFolder(app)], ...(p.website ? { sites: { [p.website.folder]: [p.website.site] } } : {}) }, runtime),
         recordAppsRepoStep(ports, { subdomain: p.subdomain, guid: p.guid, stage: p.stage, org: p.appsUnit.org, bundle: p.appsUnit.templateBuild }, runtime),
       ]
       : []),
