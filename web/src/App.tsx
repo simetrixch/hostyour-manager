@@ -1,23 +1,26 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route } from "react-router";
 import { NavRail } from "./components/NavRail.tsx";
 import { TabBar } from "./components/TabBar.tsx";
 import { LogoMark } from "./components/icons.tsx";
-import { Dashboard } from "./pages/Dashboard.tsx";
-import { Servers } from "./pages/Servers.tsx";
-import { OperatorKeys } from "./pages/OperatorKeys.tsx";
-import { RunDetail } from "./pages/RunDetail.tsx";
-import { Branches } from "./pages/Branches.tsx";
-import { Mail } from "./pages/Mail.tsx";
-import { ResetWizard } from "./pages/ResetWizard.tsx";
-import { Consumers } from "./pages/Consumers.tsx";
-import { ConsumerOnboard } from "./pages/ConsumerOnboard.tsx";
-import { Tenants } from "./pages/Tenants.tsx";
-import { TenantCreate } from "./pages/TenantCreate.tsx";
-import { TenantDetail } from "./pages/TenantDetail.tsx";
 import { getPlugins } from "./api.ts";
 import { activeWebPlugins, navFor } from "./nav.ts";
 import { compiledPlugins } from "./plugins.ts";
+
+// EACH PAGE IS ITS OWN CHUNK, loaded when its route is first opened. Imported statically, every page
+// landed in one bundle the first screen had to load whole, and the build warned that it passed 500 kB.
+const Dashboard = lazy(() => import("./pages/Dashboard.tsx").then((m) => ({ default: m.Dashboard })));
+const Servers = lazy(() => import("./pages/Servers.tsx").then((m) => ({ default: m.Servers })));
+const OperatorKeys = lazy(() => import("./pages/OperatorKeys.tsx").then((m) => ({ default: m.OperatorKeys })));
+const RunDetail = lazy(() => import("./pages/RunDetail.tsx").then((m) => ({ default: m.RunDetail })));
+const Branches = lazy(() => import("./pages/Branches.tsx").then((m) => ({ default: m.Branches })));
+const Mail = lazy(() => import("./pages/Mail.tsx").then((m) => ({ default: m.Mail })));
+const ResetWizard = lazy(() => import("./pages/ResetWizard.tsx").then((m) => ({ default: m.ResetWizard })));
+const Consumers = lazy(() => import("./pages/Consumers.tsx").then((m) => ({ default: m.Consumers })));
+const ConsumerOnboard = lazy(() => import("./pages/ConsumerOnboard.tsx").then((m) => ({ default: m.ConsumerOnboard })));
+const Tenants = lazy(() => import("./pages/Tenants.tsx").then((m) => ({ default: m.Tenants })));
+const TenantCreate = lazy(() => import("./pages/TenantCreate.tsx").then((m) => ({ default: m.TenantCreate })));
+const TenantDetail = lazy(() => import("./pages/TenantDetail.tsx").then((m) => ({ default: m.TenantDetail })));
 
 /**
  * The authenticated shell. NavRail (desktop) and TabBar (mobile) both render the one menu navFor
@@ -55,6 +58,7 @@ export function App() {
             </a>
           </header>
           <main className="content">
+            <Suspense fallback={<div className="loading"><span className="spinner" aria-hidden="true" />Loading…</div>}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/servers" element={<Servers />} />
@@ -76,6 +80,7 @@ export function App() {
                 <Route key={r.path} path={r.path} element={r.element} />
               ))}
             </Routes>
+            </Suspense>
           </main>
         </div>
         <TabBar items={menu} />

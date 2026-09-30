@@ -94,7 +94,9 @@ export async function ensureTenantAppKeys(deps: { db: Db; seeder: VaultSeeder; l
       const outcome = await seedTenantAppKeys(deps.seeder, stage, guid, apps);
       created += outcome.created.length;
       existing += outcome.existing.length;
-      if (outcome.created.length > 0) deps.logger.info({ stage, guid, apps: outcome.created }, tenantAppKeysLine(stage, guid, outcome));
+      // A running engine read its environment at its start, so a key written now reaches it only at
+      // its next restart; the line says so where the person reading it decides.
+      if (outcome.created.length > 0) deps.logger.info({ stage, guid, apps: outcome.created }, `${tenantAppKeysLine(stage, guid, outcome)} — an engine of these apps that is already running takes its key at its next restart (tenant-restart-workloads)`);
     } catch (err) {
       failed.push(`${stage}/${guid}`);
       deps.logger.error({ stage, guid, err: err instanceof Error ? err.message : String(err) }, `the Password field keys of tenant ${stage}/${guid} could not be written; its apps' engines cannot encrypt a Password field until they are`);
