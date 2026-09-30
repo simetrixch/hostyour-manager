@@ -226,6 +226,26 @@ export function owedPushRepo(): Fixture {
   return f;
 }
 
+/** A repository released from the branch `issue-7-fix`, which an issue worktree carries: with
+ *  `tracking`, it tracks origin/master under its other name. With `owed`, it holds a commit origin
+ *  lacks and a release tag on it, what a run cut after its mint leaves behind. */
+export function issueBranchRepo(opts: { tracking: boolean; owed?: boolean }): Fixture {
+  const f = fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true });
+  const git = (...args: string[]): void => {
+    const r = run("git", args, f.cwd);
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  git("checkout", "-q", "-b", "issue-7-fix");
+  if (opts.tracking) git("branch", "-q", "--set-upstream-to=origin/master");
+  if (opts.owed) {
+    writeFileSync(join(f.cwd, "stamp.txt"), "the release commit whose push was cut\n");
+    git("add", "stamp.txt");
+    git("commit", "-qm", "release: 1.2.3-stable-20200101000000");
+    git("tag", "-a", "1.2.3-stable-20200101000000", "-m", "owed");
+  }
+  return f;
+}
+
 /** Every ref origin holds, with its commit — the whole of what a release may move. */
 export const originRefs = (f: Fixture): string => run("git", ["ls-remote", "origin"], f.cwd).stdout;
 export const head = (f: Fixture): string => run("git", ["rev-parse", "HEAD"], f.cwd).stdout.trim();

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { RELEASE_KIT_FILES } from "./release-kit.ts";
-import { BASH, BOTH, LIBRARY_MANIFEST, MANIFEST, RUNS, SCRIPTS, USABLE, bareDir, bashCandidates, bothSpellings, expectSameBytes, fixtureRepo, head, normalise, originRefs, owedPushRepo, releaseTags, releasedRepo, removeTempDirs, residueRepo, run, runAsync, tempDir, type Fixture } from "./release-twins.fixture.ts";
+import { BASH, BOTH, LIBRARY_MANIFEST, MANIFEST, RUNS, SCRIPTS, USABLE, bareDir, bashCandidates, bothSpellings, expectSameBytes, fixtureRepo, head, normalise, originRefs, owedPushRepo, releaseTags, releasedRepo, removeTempDirs, residueRepo, run, runAsync, tempDir, type Fixture, issueBranchRepo } from "./release-twins.fixture.ts";
 
 // The two spellings of the release kit run against each other: the normaliser and the printers the
 // comparison rests on, the refusals, the whole success path, and the reruns of a version that stands
@@ -233,6 +233,40 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
       expect(originRefs(f)).toContain("refs/tags/1.2.3-stable-20200101000000\n");
       expect(originRefs(f)).toContain("refs/tags/deploy/dev/1.2.3-stable-20200101000000\n");
       expect(originRefs(f)).not.toContain("refs/heads/deploy/");
+    }
+  });
+
+  // THE RELEASE COMMIT GOES WHERE THE BRANCH TRACKS: a branch that tracks origin/master under another
+  // name, as an issue worktree's does, puts it on master; a branch that tracks nothing pushes to its
+  // own name, as before.
+
+  it("puts the release commit of a branch tracking origin/master under another name on master, and makes no branch of its name", RUNS, async () => {
+    const o = await bothSpellings(() => issueBranchRepo({ tracking: true }), ["1.2.3", "stable", "dev"]);
+    expectSameBytes(o);
+    for (const f of [o.sh, o.ps1]) {
+      expect(f.status).toBe(0);
+      expect(originRefs(f)).toContain(`${head(f)}\trefs/heads/master\n`);
+      expect(originRefs(f)).not.toContain("refs/heads/issue-7-fix");
+    }
+  });
+
+  it("puts the release commit a cut run still owed on master too, from a branch tracking it under another name", RUNS, async () => {
+    const o = await bothSpellings(() => issueBranchRepo({ tracking: true, owed: true }), ["1.2.3", "stable", "dev"]);
+    expect(expectSameBytes(o).stdout).toContain("its push never reached origin; pushed now\n");
+    for (const f of [o.sh, o.ps1]) {
+      expect(f.status).toBe(0);
+      expect(originRefs(f)).toContain(`${head(f)}\trefs/heads/master\n`);
+      expect(originRefs(f)).not.toContain("refs/heads/issue-7-fix");
+    }
+  });
+
+  it("PLANTED INNOCENT: pushes a branch that tracks nothing to its own name, and leaves master where it stood", RUNS, async () => {
+    const o = await bothSpellings(() => issueBranchRepo({ tracking: false }), ["1.2.3", "stable", "dev"]);
+    expectSameBytes(o);
+    for (const f of [o.sh, o.ps1]) {
+      expect(f.status).toBe(0);
+      expect(originRefs(f)).toContain(`${head(f)}\trefs/heads/issue-7-fix\n`);
+      expect(originRefs(f)).not.toContain(`${head(f)}\trefs/heads/master\n`);
     }
   });
 

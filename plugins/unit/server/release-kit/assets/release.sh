@@ -336,6 +336,16 @@ PREFIX="${VERSION}-${CHANNEL}-"
 EXISTING="$(git tag -l "${PREFIX}*" | sort | tail -1)"
 HEAD_SHA="$(git rev-parse --verify HEAD)"
 
+# THE RELEASE COMMIT GOES WHERE THE BRANCH TRACKS. A bare `git push origin HEAD` pushes to the remote
+# branch of the local branch's own name, so a branch that tracks origin/master under another name, as
+# an issue worktree's does, would put the release commit on a new branch and never on master. A branch
+# that tracks nothing on origin keeps its own name.
+UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+case "$UPSTREAM" in
+  origin/*) RELEASE_PUSH="HEAD:refs/heads/${UPSTREAM#origin/}" ;;
+  *) RELEASE_PUSH="HEAD" ;;
+esac
+
 # A TAG THAT NEVER REACHED ORIGIN AND NAMES ANOTHER COMMIT IS RESIDUE, and reusing it aims every
 # retry at the commit a refused push left behind. The tag is minted before it is pushed, so a push
 # the pre-push hook refuses leaves it standing here and nowhere else; the next run finds it, reuses
@@ -385,7 +395,7 @@ if [ -n "$EXISTING" ]; then
   # no build and pin nothing; it is pushed now, and the rest of the run proceeds as a reuse.
   if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
     say "${TAG} stands on this machine only, on the commit being released - its push never reached origin; pushed now"
-    git push origin HEAD
+    git push origin "$RELEASE_PUSH"
     git push origin "refs/tags/${TAG}"
   fi
   if [ -n "$LIBRARY" ]; then
@@ -398,7 +408,7 @@ else
   TAG="${VERSION}-${CHANNEL}-${TS14}"
   stamp_manifest_version
   git tag -a "$TAG" -m "release $TAG"
-  git push origin HEAD
+  git push origin "$RELEASE_PUSH"
   git push origin "refs/tags/${TAG}"
   say "minted ${TAG}"
 fi
