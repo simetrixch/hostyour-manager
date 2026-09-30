@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tenantAppRows, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
+import { newWebsiteName, tenantAppRows, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
 import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 
 // The tenant page's Apps list: the bundle's apps folded with the inventory's rows. Pure, so it is
@@ -39,6 +39,15 @@ describe("undeployedApps", () => {
     expect(rows.map((r) => r.name)).toEqual(["erp"]);
     expect(undeployedApps([entry("crm", false), web]).map((a) => a.name)).toEqual(["crm"]);
     expect(websiteFolder([entry("erp", true), web])?.name).toBe("web");
+  });
+
+  it("names a new website after its site, clear of the tenant's members and of the apps its catalog offers", () => {
+    const catalog = { apps: [entry("workshop", false), { ...entry("web", false), sites: ["veloluck", "auth"] }], members: ["auth", "jobs", "report", "veloluck"] };
+    expect(newWebsiteName(catalog, "show")).toBe("show");
+    // A standing member and an earlier website, then an app the tenant has not added yet.
+    expect(newWebsiteName(catalog, "auth")).toBe("auth-2");
+    expect(newWebsiteName(catalog, "veloluck")).toBe("veloluck-2");
+    expect(newWebsiteName(catalog, "workshop")).toBe("workshop-2");
   });
 
   it("offers only the bundle's undeployed apps, in catalog order", () => {

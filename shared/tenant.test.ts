@@ -11,6 +11,7 @@ import {
   isOlderRelease,
   approvedImageTag,
   websiteAppName,
+  isWebsiteAppNameOf,
   appFolders,
   TenantAppSchema,
 } from "./tenant.ts";
@@ -166,24 +167,41 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
     ]);
   });
 
-  it("carries a website's folder, site and domain, names it by its domain, and refuses a domain outside the grammar", () => {
+  it("carries a website's folder, site and domain, and refuses a domain outside the grammar", () => {
+    // A website added before names followed the site keeps its name, so any app name stands.
     expect(TenantAppSchema.parse({ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }))
       .toEqual({ name: "example-ch", folder: "web", site: "main", domain: "example.ch", seedReference: false, seedDemo: false, selections: {} });
     expect(TenantAppSchema.parse({ name: "erp" })).toEqual({ name: "erp", seedReference: false, seedDemo: false, selections: {} });
-    expect(websiteAppName("example.com")).toBe("example-com");
-    // Every domain gets an app name: a digit first gets web- ahead, and a long name ends in a hash of
-    // its domain, so two long domains that share their first 30 characters stay two names.
-    expect(websiteAppName("1und1.de")).toBe("web-1und1-de");
-    const ch = websiteAppName("my-very-long-company-name-shop.ch");
-    const de = websiteAppName("my-very-long-company-name-shop.de");
-    expect(ch).toMatch(/^my-very-long-company-na-[0-9a-f]{6}$/);
-    expect(de).not.toBe(ch);
-    for (const name of [ch, de, websiteAppName("24-7-service-for-every-customer.example.com"), websiteAppName("ab.cd")]) {
-      expect(appName.safeParse(name).success).toBe(true);
-    }
     // Two websites run one folder, so their bundle carries it once.
     expect(appFolders([{ name: "erp" }, { name: "example-ch", folder: "web" }, { name: "example-com", folder: "web" }])).toEqual(["erp", "web"]);
     expect(TenantAppSchema.safeParse({ name: "example-ch", folder: "web", site: "main", domain: "Example.ch" }).success).toBe(false);
+  });
+
+  it("names a new website after its site, numbered where a member or a catalog app holds that name", () => {
+    const taken = new Set(["auth", "jobs", "report", "web", "workshop"]);
+    expect(websiteAppName("veloluck", taken)).toBe("veloluck");
+    // A standing member, a catalog app and an earlier website each push the name to the next number.
+    expect(websiteAppName("auth", taken)).toBe("auth-2");
+    expect(websiteAppName("workshop", taken)).toBe("workshop-2");
+    expect(websiteAppName("veloluck", new Set([...taken, "veloluck", "veloluck-2"]))).toBe("veloluck-3");
+    // A one-letter id is no app name. A long id is cut to 30 characters, and no dash stands before the number.
+    expect(websiteAppName("a", taken)).toBe("a-2");
+    const long = `${"a".repeat(27)}-${"b".repeat(10)}`;
+    expect(websiteAppName(long, taken)).toBe(`${"a".repeat(27)}-bb`);
+    expect(websiteAppName(long, new Set([`${"a".repeat(27)}-bb`]))).toBe(`${"a".repeat(27)}-2`);
+    for (const name of [websiteAppName("a", taken), websiteAppName(long, taken), websiteAppName(`x${"-".repeat(40)}y`, taken)]) {
+      expect(appName.safeParse(name).success).toBe(true);
+    }
+  });
+
+  it("holds a website's name to its site: the id or one of its numbered forms, never another name", () => {
+    for (const [name, site] of [["veloluck", "veloluck"], ["veloluck-2", "veloluck"], ["veloluck-12", "veloluck"], ["a-2", "a"], [`${"a".repeat(27)}-2`, `${"a".repeat(27)}-${"b".repeat(10)}`], ["shop-2", "shop-2"]]) {
+      expect(isWebsiteAppNameOf(name!, site!), `${name} for site ${site}`).toBe(true);
+    }
+    for (const name of ["veloluck-1", "veloluck-02", "veloluck-2x", "velo", "veloluck-show-digitapla-a9665c", "example-ch"]) {
+      expect(isWebsiteAppNameOf(name, "veloluck"), name).toBe(false);
+    }
+    expect(isWebsiteAppNameOf("a", "a")).toBe(false);
   });
 
   it("carries every further selection under selections, and refuses the two seed selections there — one selection has one place", () => {

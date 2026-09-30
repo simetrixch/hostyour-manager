@@ -1,15 +1,14 @@
 import { useState, type FormEvent } from "react";
 import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/apps-manifest.ts";
-import { websiteAppName } from "../../../shared/tenant.ts";
-import { websiteFolder } from "../tenantAppRows.ts";
+import { newWebsiteName, websiteFolder } from "../tenantAppRows.ts";
 import { addTenantWebsite, setTenantWebsiteDomain } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 
 /** The Websites section of the tenant page: every website of the tenant with its address and
  *  its site, the form that adds one, and the dialog that moves one to another domain. A website is
- *  typed without `www.`: it is served at `<domain>`, `www.<domain>` redirects there, and it is named
- *  by the domain it is added with. Every action only PLANS its run and hands off to the Run screen. */
+ *  typed without `www.`: it is served at `<domain>`, and `www.<domain>` redirects there. It is named
+ *  after its site when it is added. Every action only PLANS its run and hands off to the Run screen. */
 export function TenantWebsites(props: {
   tenantId: string;
   catalog: TenantAppCatalogView | null;
@@ -27,13 +26,13 @@ export function TenantWebsites(props: {
   const [next, setNext] = useState("");
   const typed = domain.trim().toLowerCase();
   const nextTyped = next.trim().toLowerCase();
-  const named = typed ? websiteAppName(typed) : "";
+  const named = catalog && site ? newWebsiteName(catalog, site) : "";
   // The bundle installs private packages with the owner's reader, asked where none is recorded yet.
   const reader = catalog?.packagesReader;
   const readerMissing = reader !== undefined && reader.recorded === null;
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (folder && typed && site) void act(() => addTenantWebsite(tenantId, { domain: typed, site, folder: folder.name }));
+    if (folder && typed && site) void act(() => addTenantWebsite(tenantId, { app: named, domain: typed, site, folder: folder.name }));
   };
   if (!folder && websites.length === 0) return null;
   return (

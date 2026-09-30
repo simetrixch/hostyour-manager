@@ -21,7 +21,7 @@ import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
 
-// A website of a live tenant, added, moved and removed: named by its domain, running the bundle's
+// A website of a live tenant, added, moved and removed: named after its site, running the bundle's
 // folder `web`, served at <domain> with www.<domain> redirecting there, its hosts pointed at the
 // tenant's zone while it stands.
 
@@ -31,7 +31,7 @@ useMemoryDb();
 const WEBSITE_APPS = {
   "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n  - name: web\n    title: Website\n    sites: [main, shop]\n",
 };
-const WEBSITE = { tenantId: "tnt_1", app: "example-ch", folder: "web", site: "main", domain: "example.ch" };
+const WEBSITE = { tenantId: "tnt_1", app: "main", folder: "web", site: "main", domain: "example.ch" };
 const OK = { reachable: true, status: 200, detail: "HTTP 200" };
 const REDIRECTS = { reachable: true, status: 307, detail: "HTTP 307" };
 
@@ -63,12 +63,13 @@ function tenantWith(apps: readonly { name: string; [field: string]: string }[], 
 }
 
 describe("add-app for a website", () => {
-  it("plans a website named by its domain, running the web folder, with the records of both its hosts", async () => {
+  it("plans a website named after its site, running the web folder, with the records of both its hosts", async () => {
     seedWebsiteTenant();
     const def = makeAddAppDef(ports({ dns: new FakeDnsProvider() }, WEBSITE_APPS));
     const result = await def.planStream!(WEBSITE, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
+    expect(result.params.app).toBe("main");
     expect(result.params.website).toEqual({ folder: "web", site: "main", domain: "example.ch" });
     expect(result.params.websiteRecordHosts).toEqual(["example.ch", "www.example.ch"]);
     const names = result.plan.steps.map((s) => s.name);
@@ -94,14 +95,24 @@ describe("add-app for a website", () => {
     expect(parseAppsManifest(files["apps.yaml"]!).apps.find((a) => a.name === "web")?.sites).toEqual(["main"]);
   });
 
-  it("refuses a website not named by its domain, a domain typed with www, and a domain another website serves", async () => {
+  it("refuses a website not named after its site, a domain typed with www, and a domain another website serves", async () => {
     seedWebsiteTenant();
     const def = makeAddAppDef(ports({}, WEBSITE_APPS));
-    await expect(def.planStream!({ ...WEBSITE, app: "example" }, planCtx())).rejects.toThrow(/is named example-ch/);
-    await expect(def.planStream!({ ...WEBSITE, app: "www-example-ch", domain: "www.example.ch" }, planCtx())).rejects.toThrow(/type the domain without \\"www\.\\"/);
+    // The name a website got from its domain before is no name for a new one.
+    await expect(def.planStream!({ ...WEBSITE, app: "example-ch" }, planCtx())).rejects.toThrow(/a website of site main is named main, or that name with -2, -3 and on where it is taken, never example-ch/);
+    await expect(def.planStream!({ ...WEBSITE, domain: "www.example.ch" }, planCtx())).rejects.toThrow(/type the domain without \\"www\.\\"/);
     // A moved website keeps its name, so the domain is held on its own.
     const moved = tenantWith([{ name: "old-site", folder: "web", site: "shop", domain: "example.ch" }]);
     await expect(makeAddAppDef(ports({ registrations: moved }, WEBSITE_APPS)).planStream!(WEBSITE, planCtx())).rejects.toThrow(/example\.ch is already the domain of website "old-site"/);
+  });
+
+  it("takes the numbered name of a site whose id the tenant already carries, and refuses the id itself", async () => {
+    seedWebsiteTenant();
+    const registrations = tenantWith([{ name: "main", folder: "web", site: "main", domain: "example.net" }]);
+    const def = makeAddAppDef(ports({ registrations, dns: new FakeDnsProvider() }, WEBSITE_APPS));
+    await expect(def.planStream!(WEBSITE, planCtx())).rejects.toThrow(/app "main" already exists/);
+    const result = await def.planStream!({ ...WEBSITE, app: "main-2" }, planCtx());
+    expect(result.outcome === "planned" && result.params.app).toBe("main-2");
   });
 
   it("lists an address record at a website host in the plan, replaces it with the CNAME, and writes it back on abort", async () => {

@@ -1,4 +1,5 @@
-import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
+import type { TenantAppCatalogView, TenantCatalogAppView } from "../../shared/apps-manifest.ts";
+import { websiteAppName } from "../../shared/tenant.ts";
 
 // The Apps list of the tenant page, stated once and out of the component: the tenant's own catalog
 // (its bundle's apps.yaml, each marked deployed off the registration) folded with the inventory's
@@ -48,4 +49,11 @@ export function undeployedApps(catalog: readonly TenantCatalogAppView[]): Tenant
 /** The bundle's website folder, the one entry that lists sites, or null where it has none. */
 export function websiteFolder(catalog: readonly TenantCatalogAppView[]): TenantCatalogAppView | null {
   return catalog.find((a) => a.sites !== undefined) ?? null;
+}
+
+/** The name a new website of `site` gets: clear of every member the tenant has and every app its
+ *  catalog offers. An app is named by its folder, so a website holding that name would block the app
+ *  for good. */
+export function newWebsiteName(catalog: Pick<TenantAppCatalogView, "apps" | "members">, site: string): string {
+  return websiteAppName(site, new Set([...(catalog.members ?? []), ...catalog.apps.map((a) => a.name)]));
 }

@@ -17,7 +17,7 @@ import { CredentialStore } from "../../security/store.ts";
 import { registerTenantAppCatalogRoute, type TenantAppCatalogApiDeps } from "./api-tenant-app-catalog.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { testMembers, STANDING_MEMBER_NAMES, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
 // GET /api/tenants/:id/app-catalog — one tenant's catalog over HTTP: the apps the deploy repository's
@@ -84,20 +84,22 @@ describe("GET /api/tenants/:id/app-catalog", () => {
     const { app, cookie } = await serve({ registrations: registrationsWith(), appCatalog: template });
     const { status, body } = await read(app, cookie);
     expect(status).toBe(200);
-    expect(body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }] });
+    expect(body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], members: [...STANDING_MEMBER_NAMES, "erp"] });
     // A tenant onboarded as its platform alone (#211) has no bundle yet: the same template, nothing deployed.
     const noBundle = await serve({ registrations: registrationsWith({ appsImage: "", appsImageTag: "" }), appCatalog: template });
-    expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }] });
+    expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], members: [...STANDING_MEMBER_NAMES, "erp"] });
   });
 
-  it("names the tenant's websites off its registration, each with its site and domain", async () => {
+  it("names the tenant's websites off its registration, each with its site and domain, and every member name a new website stays clear of", async () => {
     const repo = new FakePlatformRepo();
     const apps = [{ name: "erp" }, { name: "example-ch", folder: "web", site: "main", domain: "example.ch" }];
     const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE });
     const w = tenantRegistrationWrite("prod", GUID, registration);
     repo.seed(repo.booksBranch, w.path, w.content);
     const { app, cookie } = await serve({ registrations: new TenantRegistrations(repo), appCatalog: { list: async () => CATALOG } });
-    expect((await read(app, cookie)).body.websites).toEqual([{ name: "example-ch", site: "main", domain: "example.ch" }]);
+    const { body } = await read(app, cookie);
+    expect(body.websites).toEqual([{ name: "example-ch", site: "main", domain: "example.ch" }]);
+    expect(body.members).toEqual([...STANDING_MEMBER_NAMES, "erp", "example-ch"]);
   });
 
   // THE FIRST TENANT ONBOARDING ASKS FOR THE PACKAGES READER, NONE AFTER (#233): the template's

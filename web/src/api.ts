@@ -33,7 +33,6 @@ import type { DnsInventoryView, DnsRemoveInput, DnsWritesView } from "../../shar
 // for the same fact — a hand-written union here is what let the two cards disagree about it.
 import type { AppProvenance, MemberRouting, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
 import type { UnitSize } from "#unit/shared/unit-size.ts";
-import { websiteAppName } from "../../shared/tenant.ts";
 
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
  *  e.g. the Reset wizard renders a DB-only form on NOT_CONFIGURED instead of a dead end. */
@@ -691,9 +690,9 @@ export const setTenantVersions = (tenantId: string, versions: Record<string, str
  *  and www.<domain> redirects there ("" returns it to its zone). */
 export const setTenantOwnDomain = (tenantId: string, domain: string, nestsUnder = ""): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { domain, ...(nestsUnder ? { nestsUnder } : {}) });
-/** Plan add-app for a website: named by its domain, running the bundle's website folder. */
-export const addTenantWebsite = (tenantId: string, website: { domain: string; site: string; folder: string }): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/apps`, { app: websiteAppName(website.domain), ...website });
+/** Plan add-app for a website: named after its site (websiteAppName), running the bundle's website folder. */
+export const addTenantWebsite = (tenantId: string, website: { app: string; domain: string; site: string; folder: string }): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/apps`, website);
 /** Plan tenant-set-website-domain: the website moves to another domain and keeps its name. */
 export const setTenantWebsiteDomain = (tenantId: string, app: string, domain: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/websites/${encodeURIComponent(app)}/domain`, { domain });

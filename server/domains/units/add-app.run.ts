@@ -4,7 +4,7 @@ import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
 import { STAGE } from "../../../shared/enums.ts";
-import { guid as guidSchema, appName, appDatabases, appFolder, siteId, websiteAppName, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
+import { guid as guidSchema, appName, appDatabases, appFolder, siteId, isWebsiteAppNameOf, websiteAppName, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
 import { ownDomainEntryProblem } from "#unit/shared/unit-host.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
@@ -132,18 +132,20 @@ export const AddAppRequest = z.object({
   seedReference: z.boolean().default(false),
   seedDemo: z.boolean().default(false),
   selections: z.record(z.string(), z.boolean()).default({}),
-  // A website names all three (TenantAppSchema): the folder it runs, the site it serves, and the
-  // domain, typed without `www.`, that it is served at and named by.
+  // A website names all three (TenantAppSchema): the folder it runs, the site it serves and is named
+  // after, and the domain, typed without `www.`, that it is served at.
   folder: appName.optional(),
   site: siteId.optional(),
   domain: publicFqdn.optional(),
 }).superRefine((r, ctx) => {
   const given = [r.folder, r.site, r.domain].filter((v) => v !== undefined).length;
   if (given !== 0 && given !== 3) ctx.addIssue({ code: "custom", path: ["domain"], message: "a website names its folder, its site and its domain" });
+  if (r.site !== undefined && !isWebsiteAppNameOf(r.app, r.site)) {
+    ctx.addIssue({ code: "custom", path: ["app"], message: `a website of site ${r.site} is named ${websiteAppName(r.site, new Set())}, or that name with -2, -3 and on where it is taken, never ${r.app}` });
+  }
   if (r.domain === undefined) return;
   const typed = ownDomainEntryProblem(r.domain);
   if (typed !== null) ctx.addIssue({ code: "custom", path: ["domain"], message: typed });
-  else if (r.app !== websiteAppName(r.domain)) ctx.addIssue({ code: "custom", path: ["app"], message: `a website served at ${r.domain} is named ${websiteAppName(r.domain)}` });
 });
 export type AddAppRequest = z.infer<typeof AddAppRequest>;
 

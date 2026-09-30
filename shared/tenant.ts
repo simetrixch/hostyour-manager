@@ -48,27 +48,30 @@ export const appDatabases = z.array(z.string().regex(/^[a-z][a-z0-9_-]*$/)).min(
 /** A site of a website app folder: the id its content carries (a WebSite's `_id`, a WebPage's `site`). */
 export const siteId = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/);
 
-/** The app name of a website served at `domain`, an app name for every domain: the domain with `-`
- *  for every `.`, because a namespace and an Application name carry no dot (`example.ch` becomes
- *  `example-ch`). A domain that starts with a digit gets `web-` ahead (`1und1.de` becomes
- *  `web-1und1-de`). A name longer than an app name allows keeps its first 23 characters and ends in
- *  six hex digits of the domain's hash, so two long domains that begin alike get two names. */
-export function websiteAppName(domain: string): string {
-  const dashed = domain.split(".").join("-");
-  const named = /^[0-9]/.test(dashed) ? `web-${dashed}` : dashed;
-  if (named.length <= 30) return named;
-  return `${named.slice(0, 23).replace(/-+$/, "")}-${fnv1a(domain).slice(0, 6)}`;
+/** The app name of a new website serving `site`, clear of every name in `taken`: the site id, or,
+ *  where that is taken or no app name (a one-letter id), the id with `-2`, `-3` and on, whichever is
+ *  free first. `taken` holds the tenant's member names and its catalog's app names, because an app is
+ *  named by its folder and cannot move aside. The name is chosen once: a website keeps it when its
+ *  domain moves. */
+export function websiteAppName(site: string, taken: ReadonlySet<string>): string {
+  for (let n = 1; ; n++) {
+    const name = numberedSiteName(site, n);
+    if (appName.safeParse(name).success && !taken.has(name)) return name;
+  }
 }
 
-/** FNV-1a over the text, as eight hex digits. The browser and the server derive a website's name
- *  alike, and the browser has no synchronous hash of its own. */
-function fnv1a(text: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+/** Whether `name` is one websiteAppName gives a website of `site`, whatever the tenant carried when it
+ *  was chosen: the site id or one of its numbered forms. */
+export function isWebsiteAppNameOf(name: string, site: string): boolean {
+  const n = Number(/-([2-9]|[1-9][0-9]+)$/.exec(name)?.[1] ?? 1);
+  return appName.safeParse(name).success && (name === numberedSiteName(site, 1) || name === numberedSiteName(site, n));
+}
+
+/** The `n`th name of a site's website: the id itself for 1, else the id with `-<n>`. The id is cut so
+ *  the whole fits the 30 characters of an app name, and no dash stands before the suffix. */
+function numberedSiteName(site: string, n: number): string {
+  const suffix = n === 1 ? "" : `-${n}`;
+  return `${site.slice(0, 30 - suffix.length).replace(/-+$/, "")}${suffix}`;
 }
 
 /** What makes an apps[] entry a website: the folder it runs, the site it serves, the domain it is
@@ -164,9 +167,10 @@ export type TenantMemberRecord = z.infer<typeof TenantMemberRecordSchema>;
  *  has one place. Imported everywhere the apps element is validated.
  *
  *  A WEBSITE is an app whose folder's catalog entry lists `sites`. It carries the folder it runs, the
- *  site it serves and the domain it is served at (`<domain>`, which `www.<domain>` redirects to), and it is named by that domain
- *  (websiteAppName), so one folder serves as many websites as there are domains. An entry
- *  without a folder runs the folder of its own name. */
+ *  site it serves and the domain it is served at (`<domain>`, which `www.<domain>` redirects to). It is
+ *  named after its site when it is added, and numbered where that name is taken (websiteAppName), so
+ *  one folder serves as many websites as there are domains. An entry without a folder runs the folder
+ *  of its own name. */
 export const TenantAppSchema = z
   .object({
     name: appName,
