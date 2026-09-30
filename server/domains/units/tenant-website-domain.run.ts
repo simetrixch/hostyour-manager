@@ -146,6 +146,7 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           seedUsers: current.entry.seedUsers,
+          demo: current.entry.demo === true,
           appsImage: current.entry.appsImage,
           appsImageTag: current.entry.appsImageTag,
           clusterValueFiles: await ports.resolveClusterValueFiles(tc.domain, tc.stage),

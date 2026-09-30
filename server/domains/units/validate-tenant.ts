@@ -69,6 +69,8 @@ export interface ValidateTenantRequest {
   subdomain: string;
   /** The IdP's user boot-seed flag the registration will carry; delivered to the members like the deploy does. */
   seedUsers?: boolean;
+  /** A demo tenant: delivered as tenant.demo, as the ApplicationSet delivers it, only where true. */
+  demo?: boolean;
   /** The tenant's own apps bundle as the registration will carry it: the flat build name the engines
    *  mount and the immutable image tag of its last release. Delivered under `tenant:` like the
    *  deploy does, so the render yields the bundle's image ref and ensure-images probes it. Absent
@@ -268,6 +270,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           suspended: false,
           quiesced: false,
           seedUsers: req.seedUsers ?? false,
+          ...(req.demo ? { demo: true } : {}),
           apps,
           // The tenant's own bundle, or the empty pair — always both keys, as the registration
           // always carries both and the appset reads them bare.

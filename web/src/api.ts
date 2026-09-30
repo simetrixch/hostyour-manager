@@ -554,6 +554,8 @@ export interface TenantCreateForm {
    *  selections. */
   apps: TenantAppRequest[];
   seedUsers: boolean;
+  /** A demo tenant: its members get tenant.demo (a one-click demo login and a nightly reset). */
+  demo: boolean;
   /** OPTIONAL first-admin email. Empty ⇒ omitted from the body (no first-admin invite). */
   adminEmail?: string;
 }
@@ -576,6 +578,7 @@ export interface CreateTenantBody {
   size: UnitSize;
   apps: TenantAppRequest[]; // the chosen apps with their selections; default off
   seedUsers: boolean; // flips the tenant IdP's user boot-seed
+  demo: boolean; // a demo tenant: tenant.demo on every member
   adminEmail?: string; // OPTIONAL — omitted when the operator left the field blank
 }
 
@@ -599,6 +602,7 @@ export function buildCreateTenantBody(f: TenantCreateForm): CreateTenantBody {
     size: f.size,
     apps,
     seedUsers: f.seedUsers,
+    demo: f.demo,
     // Omit the field entirely when blank (never send adminEmail: "" — the server treats absent as "no invite").
     ...(adminEmail ? { adminEmail } : {}),
   };

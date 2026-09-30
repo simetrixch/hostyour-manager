@@ -383,6 +383,18 @@ describe("validateTenant — what every member is rendered with", () => {
     expect(filesOf("jobs")).toEqual(["values.yaml", "values-prod.yaml"]);
   });
 
+  it("hands every member of a demo tenant tenant.demo, and no such key to any other tenant", async () => {
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [] } });
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...OVERLAYS } });
+    const tenantOf = (r: { valuesObject?: unknown }) => ((r.valuesObject ?? {}) as { tenant?: Record<string, unknown> }).tenant ?? {};
+    await validateTenant(req({ demo: true }), deps(repo, helm));
+    expect(helm.requests.length).toBeGreaterThan(0);
+    expect(helm.requests.every((r) => tenantOf(r).demo === true)).toBe(true);
+    helm.requests.length = 0;
+    await validateTenant(req(), deps(repo, helm));
+    expect(helm.requests.some((r) => "demo" in tenantOf(r))).toBe(false);
+  });
+
   it("layers the values the tenants ApplicationSet delivers over the folded chain: the tenant's facts and its zone", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [] } });
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...OVERLAYS } });

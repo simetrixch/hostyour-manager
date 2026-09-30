@@ -104,6 +104,7 @@ export const AddAppParams = z.object({
   subdomain: z.string().default(""),
   owner: z.string().default(""),
   seedUsers: z.boolean().default(false),
+  demo: z.boolean().default(false), // the tenant is a demo: the new member renders with tenant.demo
   // A website's folder, site and domain, written into its apps[] entry.
   website: z.object({ folder: appName, site: siteId, domain: publicFqdn }).optional(),
   // The website's hosts whose records this run writes: none where the tenant's own domain holds them.
@@ -183,7 +184,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
     // bundle was just built at, then the new app's pinned images must EXIST in the tenant cluster's
     // registrations before the pointer append fans it out. A probe — an image no build unit above
     // produced fails the run naming every absent tag.
-    ...tenantImageSteps(ports, { guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: [app], seedUsers: p.seedUsers, registryHost: p.registryHost, requiredImages: p.requiredImages, ...(p.appsImage !== undefined ? { appsImage: p.appsImage } : {}) }, runtime),
+    ...tenantImageSteps(ports, { guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: [app], seedUsers: p.seedUsers, demo: p.demo, registryHost: p.registryHost, requiredImages: p.requiredImages, ...(p.appsImage !== undefined ? { appsImage: p.appsImage } : {}) }, runtime),
     {
       name: "apply-appproject",
       title: "Apply the new member's isolation AppProject and admission policy",
@@ -404,6 +405,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           seedUsers: current.entry.seedUsers,
+          demo: current.entry.demo === true,
           // The tenant's own bundle, as the appset delivers it: the new app's engine renders with it
           // and ensure-images probes it.
           appsImage,
@@ -469,6 +471,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
         subdomain: current.entry.subdomain,
         owner: tc.owner,
         seedUsers: current.entry.seedUsers,
+        demo: current.entry.demo === true,
         ...(website ? { website } : {}),
         websiteRecordHosts: website ? websiteRecordHosts(website.domain, current.entry) : [],
         websiteReplacing: website ? await websiteRecordsToReplace(ctx.db, ports, tc, websiteRecordHosts(website.domain, current.entry), ctx.signal) : [],

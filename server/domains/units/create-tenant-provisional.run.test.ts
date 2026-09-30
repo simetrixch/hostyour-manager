@@ -300,6 +300,18 @@ describe("record-provisional — the row exists BEFORE anything is deployed", ()
 // invite never rolls back a live deployment — and an HTTP 503 from a freshly started tenant example-auth
 // is a known live condition. The failed run's screen therefore has to resolve the tenants ROW, not
 // conclude "failed create-tenant ⇒ orphan" and hold out the one run kind that deprovisions the tenant.
+describe("write-registration — a demo tenant", () => {
+  it("writes demo: true into a demo tenant's registration, and no demo key into any other", async () => {
+    seedClusters();
+    const prt = ports();
+    for (const demo of [true, false]) {
+      const p = params({ demo });
+      await stepNamed(prt, p, "write-registration").run(ctx(p, "write-registration"));
+      expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBe(demo ? true : undefined);
+    }
+  });
+});
+
 describe("a create-tenant that fails only at `activate` leaves a LIVE tenant", () => {
   const TOKEN_PATH = `${memberNamespace(GUID, "auth", "prod")}/hostyour-app-secrets/AUTH_BOOTSTRAP_TOKEN`;
 

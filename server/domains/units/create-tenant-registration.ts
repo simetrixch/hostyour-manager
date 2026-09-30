@@ -68,6 +68,7 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
           postgresql: false, mongodb: "shared",
         }),
         seedUsers: p.seedUsers,
+        ...(p.demo ? { demo: true as const } : {}),
         approvedTags,
         resetNonce: INITIAL_RESET_NONCE,
         suspended: false,

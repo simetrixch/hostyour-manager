@@ -315,6 +315,10 @@ export const TenantRegistrationSchema = z
     // gets rather than a word to look up.
     quota: UnitQuotaSchema,
     seedUsers: z.boolean().default(false), // flips the IdP's user boot-seed
+    // A demo tenant: present, and true, only for one. Every member receives it as tenant.demo, which the
+    // product's charts turn into a one-click demo login and a nightly reset. Absent everywhere else,
+    // and the tenant ApplicationSet reads it tolerantly, so a registration without it renders as before.
+    demo: z.literal(true).optional(),
     resetNonce: z.string().min(1).default("1"), // bump + commit triggers a tenant reset (Tenant CR annotation)
     suspended: z.boolean().default(false), // tenant-wide pause: replicas 0, no Ingress
     quiesced: z.boolean().default(false), // the deeper pause a removal-in-flight holds a tenant in

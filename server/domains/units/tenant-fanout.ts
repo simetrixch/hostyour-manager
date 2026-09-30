@@ -29,7 +29,7 @@
 //      member namespace;
 //   2. the set-watch (adapters/kube watchApplicationSet) waits on each tenantApplicationSet name to
 //      reach Synced/Healthy — a name ArgoCD never creates hangs the watch forever;
-//   3. create-tenant's TWO inventory writes (create-tenant.run.ts upsertTenantInventory) write one
+//   3. create-tenant's TWO inventory writes (create-tenant-inventory.ts upsertTenantInventory) write one
 //      tenant_apps row per app, keyed by <app>: record-provisional inserts them as "provisioning"
 //      before anything is deployed, record-inventory settles them to "active".
 //

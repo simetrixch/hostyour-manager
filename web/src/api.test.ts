@@ -16,6 +16,7 @@ const base: TenantCreateForm = {
   size: "small",
   apps: [],
   seedUsers: false,
+  demo: false,
 };
 
 describe("buildCreateTenantBody", () => {
@@ -25,6 +26,11 @@ describe("buildCreateTenantBody", () => {
     expect(body.owner).toBe("team-acme");
     expect(body.clusterId).toBe("cls_abc");
     expect(body.apps).toEqual([]);
+  });
+
+  it("carries the Demo tenant box as it stands", () => {
+    expect(buildCreateTenantBody(base).demo).toBe(false);
+    expect(buildCreateTenantBody({ ...base, demo: true }).demo).toBe(true);
   });
 
   it("drops blank app rows and de-duplicates by trimmed name (first occurrence wins)", () => {
@@ -73,7 +79,7 @@ describe("buildCreateTenantBody", () => {
     expect(buildCreateTenantBody({ ...base, seedUsers: true }).seedUsers).toBe(true);
     const body = buildCreateTenantBody(base);
     expect(body.seedUsers).toBe(false);
-    expect(Object.keys(body).sort()).toEqual(["apps", "clusterId", "owner", "seedUsers", "size", "stage", "subdomain"]);
+    expect(Object.keys(body).sort()).toEqual(["apps", "clusterId", "demo", "owner", "seedUsers", "size", "stage", "subdomain"]);
   });
 
   it("sends the size the operator picked — the run used to take the default whatever the wizard showed", () => {

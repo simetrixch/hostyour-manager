@@ -8,6 +8,7 @@ import { buildUnitStepName } from "./tenant-builds.ts";
 import { DEPLOY_URL, GUID, HELD, HeldImagesGoneArgo, MANIFEST_YAML, NEW, OLD, OLDER, RELEASED, RELEASED_BEFORE, SHA, db, planCtx, planned, ports, rendering, resolved, seedTenant, staleMembers, stepCtx, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import type { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { TEMPLATE_FILES, TEMPLATE_URL } from "./tenant-apps-repo.fixture.ts";
 
 // tenant-refresh-members: the plan resolves the members again off the product's manifest and names
@@ -73,6 +74,19 @@ describe("tenant-refresh-members", () => {
     (prt.repo as FakeRepoReader).scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: { ...TEMPLATE_FILES, "apps.yaml": "apps:\n  - name: web\n    title: Website\n" } });
     const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx());
     expect(out.outcome === "planned" ? "planned" : out.summary).toBe("planned");
+  });
+
+  it("renders a demo tenant's members with tenant.demo, as the ApplicationSet delivers it", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    const prt = ports(resolved.members);
+    const current = await prt.registrations.readTenant("prod", GUID);
+    await prt.registrations.commitTenant({ stage: "prod", guid: GUID, registration: { ...current!.entry, demo: true }, runId: "run_demo" });
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx());
+    if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
+    expect(out.params.demo).toBe(true);
+    const tenantOf = (r: { valuesObject?: unknown }) => ((r.valuesObject ?? {}) as { tenant?: Record<string, unknown> }).tenant ?? {};
+    expect((prt.helm as FakeHelmRenderer).requests.filter((r) => tenantOf(r).demo === true).length).toBeGreaterThan(0);
   });
 
   it("puts a part on the version chosen, starts a build the tenant lacks at its pin, waits until every member renders them, and an abort writes the previous ones back", async () => {

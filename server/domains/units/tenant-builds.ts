@@ -340,6 +340,7 @@ export interface RefreshImagesParams {
   /** The apps are a standing tenant's (its Versions run): the catalog does not judge them. */
   isStandingTenant?: boolean;
   seedUsers: boolean;
+  demo?: boolean;
   registryHost: string;
   requiredImages: readonly RequiredImage[];
   /** The tenant's own apps bundle, rendered at the tag the apps-repo steps read off its release. */
@@ -373,6 +374,7 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
           probeGuid: p.guid,
           subdomain: p.subdomain,
           seedUsers: p.seedUsers,
+          ...(p.demo ? { demo: true } : {}),
           clusterValueFiles,
           ...(p.appsImage !== undefined ? { appsImage: p.appsImage } : {}),
           ...(appsImageTag !== undefined ? { appsImageTag } : {}),

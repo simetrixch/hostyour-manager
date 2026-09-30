@@ -1,13 +1,10 @@
 import { z } from "zod";
 import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
-import { and, eq } from "drizzle-orm";
-import type { RunDefinition, Step, StepCtx, Plan } from "../../executor/types.ts";
-import { tenants, tenantApps } from "../../db/schema/inventory.ts";
-import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
-import { MEMBER_ROUTING, STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
+import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
+import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
 import { appFolders, appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { errValidation, errInternal } from "../../kernel/errors.ts";
-import { localTx } from "../../executor/stepkit.ts";
+import { upsertTenantInventory } from "./create-tenant-inventory.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provisionArgoSyncStep, type TenantBuildDeps, type TenantBuildRuntime, type RegisteredUnit } from "./tenant-builds.ts";
@@ -192,6 +189,7 @@ export const CreateTenantParams = z.object({
   // validation — frozen like the members, and written to the registration, the row and the DNS record.
   routing: z.enum(MEMBER_ROUTING).default("host"),
   seedUsers: z.boolean().default(false), // flips the tenant IdP's user boot-seed; a registration field
+  demo: z.boolean().default(false), // a demo tenant: tenant.demo on every member; a registration field
   // The tenant's SIZE — the ceiling EVERY member namespace of it is bounded by. A NAME here, resolved
   // to figures as the registration is written, so a plan that waited for approval across a table edit
   // lands on the figures standing at that moment. Defaulted to the frugal preset like the consumer
@@ -248,6 +246,9 @@ export const CreateTenantRequest = z.object({
   // the zone and waits for it; an entry that carries a folder, a site or a domain is refused here.
   apps: z.array(TenantAppSchema).default([]).refine((apps) => apps.every((a) => a.folder === undefined && a.site === undefined && a.domain === undefined), { message: "a website is added to a standing tenant with Add website, never when the tenant is created" }),
   seedUsers: z.boolean().default(false),
+  // A demo tenant (the wizard's "Demo tenant" box): its members get tenant.demo, a one-click demo
+  // login and a nightly reset in the product's charts.
+  demo: z.boolean().default(false),
   // The tenant's size — the ceiling each of its member namespaces gets. From the OPERATOR creating
   // the tenant, the same way the consumer form takes it from the operator onboarding the unit.
   size: UnitSizeSchema.default(DEFAULT_UNIT_SIZE),
@@ -259,60 +260,6 @@ export const CreateTenantRequest = z.object({
 });
 export type CreateTenantRequest = z.infer<typeof CreateTenantRequest>;
 
-/** WHICH of create-tenant's two inventory writes is running. Named once, as one value, so it can never
- *  degenerate into a pair of booleans a caller could combine into a nonsense state:
- *   - "provisional" — record-provisional, BEFORE any mutation: records INTENT (status "provisioning").
- *   - "settled"     — record-inventory, after the fan-out is live: records SUCCESS (status "active"). */
-type TenantRecordPhase = "provisional" | "settled";
-
-/** The ONE writer of the tenants + tenant_apps rows, shared by both record steps so "what the run
- *  intends" and "what the run achieved" can never drift into two different row shapes. Overwrite-
- *  idempotent on (guid, stage) and (tenantId, name), in ONE tx so a crash leaves it resumable: every
- *  DESCRIPTIVE column (the subdomain, the seed flag, the owner) is rewritten in both phases, because a
- *  resume must converge the row onto the params it is actually running.
- *
- *  The row's LIFECYCLE STATE is the deliberate exception — `status` plus `suspended`, which is its flat
- *  projection for the appset selector and which tenant-suspend/-resume move in lock-step with it, so the
- *  two are written as ONE unit and never separately. That unit is written on INSERT in both phases, but
- *  on UPDATE only when SETTLING. A resumed run re-runs record-provisional against a row record-inventory
- *  may ALREADY have lifted to "active" (or a later tenant-suspend moved to "suspended"), and demoting a
- *  live tenant back to "provisioning" would paint it as unfinished, hide its live actions behind the
- *  provisional refusals and pull it out of the reconciliation view. Insert-only is therefore not an
- *  optimisation, it is the correctness rule.
- *  Returns the tenants row id (the caller logs it — it is the handle every removal run kind needs). */
-function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase: TenantRecordPhase): string {
-  const settle = phase === "settled";
-  const status: TenantStatus = settle ? "active" : "provisioning";
-  const lifecycle = { status, suspended: false }; // the unit above — a fresh tenant is never suspended
-  return localTx(ctx, (tx) => {
-    const existing = tx.select().from(tenants).where(and(eq(tenants.guid, p.guid), eq(tenants.stage, p.stage))).get();
-    const values = {
-      clusterId: p.clusterId, guid: p.guid, subdomain: p.subdomain, stage: p.stage,
-      // Every later path that reaches the IdP holds a row, not the manifest.
-      //
-      // The row records the STANDING members only, which is why the app names are filtered out: an
-      // app's presence is the tenant_apps row and its status, and a member list that also carried the
-      // apps would drift the moment one was offboarded. Every reader unions the two (tenantWatchSet,
-      // the tenant card, the relocation world), so the app names are never lost — they are just kept
-      // where their status lives. Derived from the two fields rather than carried as a third, which
-      // could drift out of step with them.
-      identityProvider: p.identityProvider, members: p.members.map((m) => m.name).filter((n) => !p.apps.some((a) => a.name === n)),
-      routing: p.routing,
-      seedUsers: p.seedUsers,
-      owner: p.owner, provenance: "manager" as const,
-      lastRunId: ctx.runId, updatedAt: new Date(),
-    };
-    const rowId = existing?.id ?? mintTenantRowId();
-    if (existing) tx.update(tenants).set({ ...values, ...(settle ? lifecycle : {}) }).where(eq(tenants.id, existing.id)).run();
-    else tx.insert(tenants).values({ id: rowId, ...values, ...lifecycle }).run();
-    for (const a of p.apps) {
-      const ex = tx.select().from(tenantApps).where(and(eq(tenantApps.tenantId, rowId), eq(tenantApps.name, a.name))).get();
-      if (ex) tx.update(tenantApps).set({ lastRunId: ctx.runId, ...(settle ? { status } : {}) }).where(eq(tenantApps.id, ex.id)).run();
-      else tx.insert(tenantApps).values({ id: mintTenantAppId(), tenantId: rowId, name: a.name, status, lastRunId: ctx.runId }).run();
-    }
-    return rowId;
-  });
-}
 
 function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): Step[] {
   // What the build units hand the steps after them: the image set and the sync units as they stand
@@ -630,6 +577,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
           probeGuid: guid,
           subdomain: req.subdomain,
           seedUsers: req.seedUsers,
+          demo: req.demo,
           ...(appsImage !== undefined ? { appsImage, appsImageTag } : {}),
           clusterValueFiles,
           clusterFqdn: rc.domain, // G27 judges the wildcard's zone here, before seed-tenant-crypto writes
@@ -685,6 +633,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         registryHost,
         apps: withAppDatabases(req.apps, outcome.appDatabases), // each with its catalog database list, read by every member
         seedUsers: req.seedUsers,
+        demo: req.demo,
         size: req.size,
         owner: req.owner,
         report: outcome.report,

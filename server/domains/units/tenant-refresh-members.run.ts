@@ -84,6 +84,7 @@ export const TenantRefreshMembersParams = z.object({
   owner: z.string().min(1),
   apps: z.array(TenantAppSchema),
   seedUsers: z.boolean(),
+  demo: z.boolean().default(false),
   /** The tenant's own apps bundle and the tag it stands at ("" where it has none). */
   appsImage: z.string(),
   appsImageTag: z.string(),
@@ -199,7 +200,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
     // Every image the new render pulls stands in the registry before a single entry changes; after a
     // build, the render is taken again at the pins the build wrote.
     ...tenantImageSteps(ports, {
-      guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: p.apps, isStandingTenant: true, seedUsers: p.seedUsers,
+      guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: p.apps, isStandingTenant: true, seedUsers: p.seedUsers, demo: p.demo,
       registryHost: p.registryHost, requiredImages: p.requiredImages, buildUnits: p.buildUnits,
       ...(p.appsImage ? { appsImage: p.appsImage } : {}),
     }, runtime),
@@ -302,6 +303,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       const { apps, appsImage, appsImageTag, seedUsers, subdomain } = current.entry;
+      const demo = current.entry.demo === true;
       const appDatabases = await standingAppDatabases((bundle, signal) => tenantBundleManifest(ports, bundle, signal), current.entry, ctx);
       const outcome = await validateTenant(
         {
@@ -315,6 +317,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           probeGuid: tc.guid,
           subdomain,
           seedUsers,
+          demo,
           ...(appsImage ? { appsImage, appsImageTag } : {}),
           clusterValueFiles,
           ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}),
@@ -395,7 +398,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         expectedApps: members.map((m) => memberApplication(tc.guid, m.name, tc.stage)),
         requiredImages,
         syncUnits: tenantSyncUnits(requiredImages, await ports.attestedBuilds()),
-        subdomain, owner: tc.owner, apps: listedApps, seedUsers, appsImage, appsImageTag: appsImageTag ?? "",
+        subdomain, owner: tc.owner, apps: listedApps, seedUsers, demo, appsImage, appsImageTag: appsImageTag ?? "",
         buildUnits: planned.builds.units,
         previousApproved: current.entry.approvedTags,
         chosenVersions,

@@ -22,6 +22,7 @@ import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts"
 export function TenantCreate() {
   const nav = useNavigate();
   const [form, setForm] = useState({ subdomain: "", owner: "", stage: "", clusterId: "", adminEmail: "", size: DEFAULT_UNIT_SIZE as string });
+  const [demo, setDemo] = useState(false);
   const [targets, setTargets] = useState<TenantTargetView[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +57,7 @@ export function TenantCreate() {
         size: form.size as UnitSize,
         apps: [], // the platform alone; apps are added from the tenant's page (#211)
         seedUsers: false,
+        demo,
         adminEmail: form.adminEmail.trim(), // empty ⇒ buildCreateTenantBody omits it (no first-admin invite)
       });
       nav(`/runs/${runId}`); // the Run screen streams the live T1..T4 gate report + the approve card
@@ -198,6 +200,14 @@ export function TenantCreate() {
               link is shown once on the run screen and stored nowhere. Leave blank to invite an admin later.
             </span>
           </label>
+          <label className="checkbox-field">
+            <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} />
+            <span className="field__label">Demo tenant</span>
+          </label>
+          <span className="field__hint">
+            Its members get tenant.demo: the product's charts offer a one-click demo login and reset the demo data every
+            night. Set only here, when the tenant is created.
+          </span>
         </div>
 
         <div className="form-foot">
