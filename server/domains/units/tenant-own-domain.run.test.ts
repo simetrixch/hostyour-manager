@@ -208,6 +208,22 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(await refusal("www.other.test", ["app.s1.example"])).toMatch(/under the cluster name s1.example/);
   });
 
+  it("sets a domain under another tenant's host where the operator confirms it: the plan says so, and the row records it", async () => {
+    const h = await make({ answers: [OWN] });
+    h.db.db.insert(tenants).values({
+      id: "tnt_2", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "beta", stage: "prod",
+      members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: BARE, suspended: false, status: "active",
+    }).run();
+    expect((await plan(h, { ownDomain: OWN, previous: "" })).error).toMatch(/overlaps a host of tenant beta \(customer.test\) — where both tenants are one owner's/);
+    expect((await plan(h, { ownDomain: OWN, previous: "", nestsUnder: "nobody" })).error).toMatch(/no other live tenant has the subdomain "nobody"/);
+    const planned = await plan(h, { ownDomain: OWN, previous: "", nestsUnder: "beta" });
+    expect(planned.summary).toContain("www.customer.test lies under customer.test of tenant beta, as the operator confirms here");
+    await h.executor.approve(planned.runId);
+    await h.executor.settle(planned.runId);
+    expect(getRun(h.db.db, planned.runId)?.status).toBe("succeeded");
+    expect(h.db.db.select({ n: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.n).toBe("tnt_2");
+  });
+
   it("REFUSES a request whose previous redirect hosts are not the tenant's any more", async () => {
     const h = await make({ ownDomain: OWN, ownDomainRedirects: [BARE] });
     expect((await plan(h, { ownDomain: OWN, previous: OWN })).error).toMatch(/moved since/);

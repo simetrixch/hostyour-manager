@@ -4,7 +4,7 @@
 // An address record, or a CNAME this installation did not write, standing at such a host is replaced:
 // the plan lists it, the run deletes it, and an abort writes it back.
 import { z } from "zod";
-import { and, ne, notInArray } from "drizzle-orm";
+import { and, eq, ne, notInArray } from "drizzle-orm";
 import type { StepCtx } from "../../executor/types.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { errValidation } from "../../kernel/errors.ts";
@@ -32,22 +32,38 @@ export interface AnswerWaitPorts {
 /** Why `host` cannot be a customer's host of this tenant, or null: it lies in the platform's own name
  *  space or under a cluster's name, or it is, or overlaps, a host of another live tenant (one host
  *  carries one record, so it serves one tenant, and a session cookie scoped to an outer host would
- *  reach the inner one). An offboarded or purged tenant's hosts are free again. */
-export function customerHostProblem(db: Db, tenantId: string, host: string, apex: string, websites: readonly { host: string; subdomain: string }[] = []): string | null {
+ *  reach the inner one). An offboarded or purged tenant's hosts are free again.
+ *
+ *  THE ONE EXCEPTION IS CONFIRMED NESTING: a host may lie strictly below a host of the tenant this
+ *  tenant nests under (tenants.nests_under, which the operator confirms in tenant-set-own-domain),
+ *  and a host of a tenant nesting under this one may lie below this tenant's host. The operator accepts
+ *  the cookie reach for two tenants of one owner; the exact same host stays refused. `nestsUnder`
+ *  stands in for the recorded value while tenant-set-own-domain plans a new one. */
+export function customerHostProblem(db: Db, tenantId: string, host: string, apex: string, websites: readonly { host: string; subdomain: string; guid: string }[] = [], nestsUnder?: string | null): string | null {
   if (host === apex || host.endsWith(`.${apex}`)) return `${host} lies in the platform's own name space (${apex}) — a customer's domain is one the customer brings`;
   const cluster = db.select({ domain: clusters.domain }).from(clusters).all().map((c) => c.domain).find((d) => host === d || host.endsWith(`.${d}`));
   if (cluster) return `${host} lies under the cluster name ${cluster} — a customer's domain is one the customer brings`;
+  const parent = nestsUnder !== undefined ? nestsUnder : (db.select({ nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, tenantId)).get()?.nestsUnder ?? null);
   const others = db
-    .select({ subdomain: tenants.subdomain, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects })
+    .select({ id: tenants.id, guid: tenants.guid, subdomain: tenants.subdomain, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects, nestsUnder: tenants.nestsUnder })
     .from(tenants)
-    .where(and(ne(tenants.id, tenantId), ne(tenants.ownDomain, ""), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
+    .where(and(ne(tenants.id, tenantId), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
     .all();
+  const overlaps = (theirs: string): boolean => theirs === host || theirs.endsWith(`.${host}`) || host.endsWith(`.${theirs}`);
+  const confirmed = (other: { id: string; nestsUnder: string | null }, theirs: string): boolean =>
+    (host.endsWith(`.${theirs}`) && parent === other.id) || (theirs.endsWith(`.${host}`) && other.nestsUnder === tenantId);
+  const refusal = (what: string, other: string, theirs: string): string =>
+    `${host} ${theirs === host ? "is already" : "overlaps"} ${what} of tenant ${other} (${theirs})` +
+    (host.endsWith(`.${theirs}`) ? ` — where both tenants are one owner's, confirm in Set own domain that this tenant's domain lies under tenant ${other}` : "");
   for (const o of others) {
-    const theirs = ownHosts(o.ownDomain, o.ownDomainRedirects).find((h) => h === host || h.endsWith(`.${host}`) || host.endsWith(`.${h}`));
-    if (theirs) return `${host} ${theirs === host ? "is already" : "overlaps"} a host of tenant ${o.subdomain} (${theirs})`;
+    const theirs = ownHosts(o.ownDomain, o.ownDomainRedirects).find(overlaps);
+    if (theirs && !confirmed(o, theirs)) return refusal("a host", o.subdomain, theirs);
   }
-  const website = websites.find((w) => w.host === host || w.host.endsWith(`.${host}`) || host.endsWith(`.${w.host}`));
-  if (website) return `${host} ${website.host === host ? "is already" : "overlaps"} a website host of tenant ${website.subdomain} (${website.host})`;
+  for (const w of websites) {
+    if (!overlaps(w.host)) continue;
+    const owner = others.find((o) => o.guid === w.guid);
+    if (!owner || !confirmed(owner, w.host)) return refusal("a website host", w.subdomain, w.host);
+  }
   return null;
 }
 

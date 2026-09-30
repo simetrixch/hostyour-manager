@@ -10,7 +10,7 @@ export function TenantDomainActions(props: { t: TenantDetailView; busy: boolean;
   const { t, busy, act } = props;
   return (
     <>
-      {t.routing === "path" && <SetOwnDomainAction subdomain={t.subdomain} ownDomain={t.ownDomain} busy={busy} onSet={(domain) => void act(() => setTenantOwnDomain(t.id, domain))} />}
+      {t.routing === "path" && <SetOwnDomainAction subdomain={t.subdomain} ownDomain={t.ownDomain} busy={busy} onSet={(domain, nestsUnder) => void act(() => setTenantOwnDomain(t.id, domain, nestsUnder))} />}
       <SetSenderDomainAction subdomain={t.subdomain} senderDomain={t.senderDomain} busy={busy} onSet={(domain) => void act(() => setTenantSenderDomain(t.id, domain))} />
     </>
   );

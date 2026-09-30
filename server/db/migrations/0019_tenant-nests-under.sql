@@ -1,0 +1,1 @@
+ALTER TABLE `tenants` ADD `nests_under` text;

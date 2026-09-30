@@ -37,13 +37,17 @@ describe("POST /api/tenants/:id/own-domain", () => {
     expect((await r.post({ domain: " Shop.Test " })).status).toBe(201);
     expect(r.planned).toEqual([{
       tenantId: "tnt_1", ownDomain: "shop.test", ownDomainRedirects: ["www.shop.test"], previous: "www.customer.test", previousRedirects: ["customer.test"], replacing: [],
+      nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null,
     }]);
+    // The operator's confirmation that the domain lies under another tenant's, as that tenant's subdomain.
+    expect((await r.post({ domain: "shop.test", nestsUnder: " Simetrix " })).status).toBe(201);
+    expect(r.planned[1]).toMatchObject({ nestsUnder: "simetrix" });
   });
 
   it("returns the tenant to its zone for an empty domain", async () => {
     const r = route();
     expect((await r.post({ domain: "" })).status).toBe(201);
-    expect(r.planned).toEqual([{ tenantId: "tnt_1", ownDomain: "", ownDomainRedirects: [], previous: "www.customer.test", previousRedirects: ["customer.test"], replacing: [] }]);
+    expect(r.planned).toEqual([{ tenantId: "tnt_1", ownDomain: "", ownDomainRedirects: [], previous: "www.customer.test", previousRedirects: ["customer.test"], replacing: [], nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null }]);
   });
 
   it("refuses a domain typed with www, and a body without a domain", async () => {

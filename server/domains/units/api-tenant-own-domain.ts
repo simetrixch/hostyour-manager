@@ -25,7 +25,8 @@ export function registerTenantOwnDomainRoutes(app: Hono<AppEnv>, deps: TenantOwn
     if (!tenantEnabled || !executor) throw errNotConfigured("tenant onboarding is not configured on this manager");
     const id = c.req.param("id");
     assertTenantProvisioned(loadTenantStatus(db, id), "setting its own domain");
-    const body = (await c.req.json().catch(() => ({}))) as { domain?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as { domain?: unknown; nestsUnder?: unknown };
+    if (body.nestsUnder !== undefined && typeof body.nestsUnder !== "string") throw errValidation("invalid own-domain request: nestsUnder: the subdomain of a tenant, or absent");
     if (typeof body.domain !== "string") throw errValidation("invalid own-domain request: domain: a string is required (\"\" returns the tenant to its zone)");
     const domain = body.domain.trim().toLowerCase();
     const problem = ownDomainEntryProblem(domain);
@@ -35,6 +36,7 @@ export function registerTenantOwnDomainRoutes(app: Hono<AppEnv>, deps: TenantOwn
     const now = db.select({ ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects }).from(tenants).where(eq(tenants.id, id)).get();
     const parsed = TenantSetOwnDomainParams.safeParse({
       tenantId: id, ...hosts, previous: now?.ownDomain, previousRedirects: now?.ownDomainRedirects,
+      nestsUnder: typeof body.nestsUnder === "string" ? body.nestsUnder.trim().toLowerCase() : "",
     });
     if (!parsed.success) throw errValidation(`invalid own-domain request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     return c.json(await executor.planStreamed("tenant-set-own-domain", parsed.data), 201);

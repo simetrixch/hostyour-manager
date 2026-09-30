@@ -12,16 +12,17 @@ export function SetOwnDomainAction(props: {
   subdomain: string;
   ownDomain: string;
   busy: boolean;
-  onSet: (domain: string) => void;
+  onSet: (domain: string, nestsUnder: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const standing = props.ownDomain.replace(/^www\./, "");
   const [next, setNext] = useState(standing);
+  const [under, setUnder] = useState("");
   const value = next.trim().toLowerCase();
   const hosts = ownDomainHosts(value);
   return (
     <>
-      <button type="button" className="btn" disabled={props.busy} onClick={() => { setNext(standing); setOpen(true); }}>
+      <button type="button" className="btn" disabled={props.busy} onClick={() => { setNext(standing); setUnder(""); setOpen(true); }}>
         Own domain…
       </button>
       {open && (
@@ -29,7 +30,7 @@ export function SetOwnDomainAction(props: {
           title={`Own domain of tenant "${props.subdomain}"`}
           confirmLabel={value === "" ? "Return to the zone" : `Serve at ${hosts.ownDomain}`}
           onCancel={() => setOpen(false)}
-          onConfirm={() => { setOpen(false); props.onSet(value); }}
+          onConfirm={() => { setOpen(false); props.onSet(value, under.trim().toLowerCase()); }}
         >
           <p>
             <label>
@@ -40,6 +41,18 @@ export function SetOwnDomainAction(props: {
           {value !== "" && (
             <p>
               The tenant is served at <strong>{hosts.ownDomain}</strong>, and <strong>{hosts.ownDomainRedirects.join(", ")}</strong> redirects there.
+            </p>
+          )}
+          {value !== "" && (
+            <p>
+              <label>
+                Lies under the domain of tenant (optional){" "}
+                <input className="input" value={under} onChange={(e) => setUnder(e.target.value)} placeholder="subdomain of that tenant" />
+              </label>
+              <span className="field__hint">
+                Only where this domain lies under another tenant&apos;s domain and both tenants are one owner&apos;s: a
+                session cookie that tenant scopes to its domain then reaches this tenant too.
+              </span>
             </p>
           )}
           <p>

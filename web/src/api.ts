@@ -689,8 +689,8 @@ export const setTenantVersions = (tenantId: string, versions: Record<string, str
 /** Plan setting, switching or clearing ("") the tenant's own domain. */
 /** Plan tenant-set-own-domain for a domain typed without www: the tenant is served at <domain>,
  *  and www.<domain> redirects there ("" returns it to its zone). */
-export const setTenantOwnDomain = (tenantId: string, domain: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { domain });
+export const setTenantOwnDomain = (tenantId: string, domain: string, nestsUnder = ""): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { domain, ...(nestsUnder ? { nestsUnder } : {}) });
 /** Plan add-app for a website: named by its domain, running the bundle's website folder. */
 export const addTenantWebsite = (tenantId: string, website: { domain: string; site: string; folder: string }): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/apps`, { app: websiteAppName(website.domain), ...website });

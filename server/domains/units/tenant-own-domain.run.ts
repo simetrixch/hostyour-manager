@@ -1,9 +1,11 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, ne, notInArray } from "drizzle-orm";
 import type { Cleanup, RunDefinition, Step } from "../../executor/types.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
 import { errInternal, errValidation } from "../../kernel/errors.ts";
 import { tenants } from "../../db/schema/inventory.ts";
+import type { Db } from "../../db/client.ts";
+import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
@@ -54,6 +56,13 @@ export const TenantSetOwnDomainParams = z
     /** The records standing at the new hosts that this run replaces, frozen by the plan; an abort
      *  writes them back. */
     replacing: z.array(ReplacedRecord).default([]),
+    /** The subdomain of the tenant the operator confirms the new own domain lies under ("" for none):
+     *  two tenants of one owner, where a cookie scoped to the outer host reaches the inner one. */
+    nestsUnder: z.string().default(""),
+    /** That tenant's id, resolved by the plan, and the one the row named before; the run records the
+     *  first, and an abort the second. */
+    nestsUnderTenantId: z.string().nullable().default(null),
+    previousNestsUnder: z.string().nullable().default(null),
   })
   .superRefine((p, ctx) => {
     if (p.ownDomain === "" && p.ownDomainRedirects.length > 0) ctx.addIssue({ code: "custom", path: ["ownDomainRedirects"], message: "redirect hosts need an own domain to redirect to" });
@@ -87,7 +96,7 @@ function restoreOwnDomainCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
       const { commit } = await ports.registrations.setOwnDomain(tc.stage, tc.guid, p.previous, p.previousRedirects, ctx.runId);
-      ctx.db.update(tenants).set({ ownDomain: p.previous, ownDomainRedirects: p.previousRedirects, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+      ctx.db.update(tenants).set({ ownDomain: p.previous, ownDomainRedirects: p.previousRedirects, nestsUnder: p.previousNestsUnder, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
       ctx.log("meta", `tenant ${tc.guid} own domain back to ${p.previous || "none"} (${commit})`);
     },
   };
@@ -142,7 +151,7 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
         if (p.ownDomain !== "" && tc.routing !== "path") throw errValidation(`tenant ${tc.subdomain} is on ${tc.routing} routing now — an own domain needs path routing; plan it again`);
         ctx.registerCleanup(restoreOwnDomainCleanup(ports, p));
         const { commit } = await ports.registrations.setOwnDomain(tc.stage, tc.guid, p.ownDomain, p.ownDomainRedirects, ctx.runId);
-        ctx.db.update(tenants).set({ ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        ctx.db.update(tenants).set({ ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects, nestsUnder: p.nestsUnderTenantId, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
         const via = p.ownDomainRedirects.length ? `, redirected from ${p.ownDomainRedirects.join(", ")}` : "";
         ctx.log("meta", `tenant ${tc.guid} own domain ${p.previous || "none"} → ${p.ownDomain || "none"}${via} (${commit}) — its charts serve it once the ArgoCD on ${tc.domain} syncs`);
@@ -173,6 +182,24 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
   ];
 }
 
+/** The tenant the operator confirms the new own domain lies under, with the host of it the domain lies
+ *  below; null where the request names none. Refused where the tenant is not a live other tenant, or
+ *  where the domain lies under none of its hosts, so a confirmation never stands for nothing. */
+function resolveNesting(db: Db, p: TenantSetOwnDomainParams, websites: readonly { host: string; guid: string }[]): { tenantId: string; host: string } | null {
+  if (p.nestsUnder === "") return null;
+  if (p.ownDomain === "") throw errValidation(`no own domain is set, so it can lie under no tenant — leave "lies under tenant" empty`);
+  const other = db
+    .select({ id: tenants.id, guid: tenants.guid, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects })
+    .from(tenants)
+    .where(and(eq(tenants.subdomain, p.nestsUnder), ne(tenants.id, p.tenantId), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
+    .get();
+  if (!other) throw errValidation(`no other live tenant has the subdomain "${p.nestsUnder}" — name the tenant whose domain this one lies under`);
+  const hosts = [...ownHosts(other.ownDomain, other.ownDomainRedirects), ...websites.filter((w) => w.guid === other.guid).map((w) => w.host)];
+  const host = hosts.find((h) => p.ownDomain.endsWith(`.${h}`));
+  if (!host) throw errValidation(`${p.ownDomain} lies under no host of tenant ${p.nestsUnder} (${hosts.join(", ") || "it has none"}), so there is nothing to confirm`);
+  return { tenantId: other.id, host };
+}
+
 export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDefinition<TenantSetOwnDomainParams> {
   return {
     kind: "tenant-set-own-domain",
@@ -186,7 +213,7 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       const params = TenantSetOwnDomainParams.parse(rawParams);
       const db = ctx.db;
       const tc = loadTenantCluster(db, params.tenantId);
-      const row = db.select({ suspended: tenants.suspended, status: tenants.status }).from(tenants).where(eq(tenants.id, params.tenantId)).get();
+      const row = db.select({ suspended: tenants.suspended, status: tenants.status, nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, params.tenantId)).get();
       if (row?.status === "provisioning") throw errValidation(`tenant ${tc.subdomain} is still provisioning — finish or remove its create-tenant run before setting its own domain`);
       if (row?.status === "offboarded" || row?.status === "purged") throw errValidation(`tenant ${tc.subdomain} is ${row.status} — nothing serves it, so there is no domain to set`);
       if (row?.suspended) throw errValidation(`tenant ${tc.subdomain} is suspended — its ingress is down, so its new host could never answer; resume it first`);
@@ -197,15 +224,16 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       const zone = tenantZone(tc.subdomain, tc.stage, apex);
       const websites = await otherTenantsWebsiteHosts(ports.registrations, tc.guid);
+      const nesting = resolveNesting(db, params, websites);
       for (const host of ownHosts(params.ownDomain, params.ownDomainRedirects)) {
-        const problem = customerHostProblem(db, params.tenantId, host, apex, websites);
+        const problem = customerHostProblem(db, params.tenantId, host, apex, websites, nesting?.tenantId ?? null);
         if (problem !== null) throw errValidation(problem);
       }
       const newHost = params.ownDomain || zone;
       const oldRecords = retiredHosts(params);
       const redirects = params.ownDomainRedirects;
       const replacing = await recordsToReplace(db, ports, tc.guid, zone, ownHosts(params.ownDomain, redirects), ctx.signal);
-      const frozen: TenantSetOwnDomainParams = { ...params, replacing };
+      const frozen: TenantSetOwnDomainParams = { ...params, replacing, nestsUnderTenantId: nesting?.tenantId ?? null, previousNestsUnder: row?.nestsUnder ?? null };
       const steps = tenantSetOwnDomainSteps(ports, frozen);
       return { outcome: "planned", params: frozen, plan: {
         kind: "tenant-set-own-domain",
@@ -217,7 +245,8 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
           `${redirects.length ? ` and ${redirects.map((h) => `https://${h}/`).join(", ")} with a redirect` : ""}` +
           `${oldRecords.length ? `, then remove the records of ${oldRecords.join(", ")}` : ""}. The product's charts must serve ${newHost}${redirects.length ? " and its redirect hosts" : ""}, with certificates, for the wait to end. ` +
           `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto ${zone}) BEFORE approving: from the moment the domain is recorded, the tenant answers only there.` +
-          `${params.previous === params.ownDomain ? "" : " Its identity provider moves with its host, so every user of the tenant signs in once more."}${replacementSentence(replacing)}`,
+          `${params.previous === params.ownDomain ? "" : " Its identity provider moves with its host, so every user of the tenant signs in once more."}${replacementSentence(replacing)}` +
+          `${nesting ? ` ${params.ownDomain} lies under ${nesting.host} of tenant ${params.nestsUnder}, as the operator confirms here: a session cookie that tenant scopes to ${nesting.host} reaches this tenant's hosts.` : ""}`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),

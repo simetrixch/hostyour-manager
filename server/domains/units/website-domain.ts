@@ -42,12 +42,12 @@ export async function tenantWebsiteHosts(registrations: Pick<TenantRegistrations
 
 /** Every host a website of ANOTHER tenant answers at, at every stage, off the registrations: a domain is
  *  one name in DNS whatever stage its tenant stands at, so it serves one website. */
-export async function otherTenantsWebsiteHosts(registrations: Pick<TenantRegistrations, "listTenantPointers">, guid: string): Promise<{ host: string; subdomain: string }[]> {
-  const hosts: { host: string; subdomain: string }[] = [];
+export async function otherTenantsWebsiteHosts(registrations: Pick<TenantRegistrations, "listTenantPointers">, guid: string): Promise<{ host: string; subdomain: string; guid: string }[]> {
+  const hosts: { host: string; subdomain: string; guid: string }[] = [];
   for (const stage of STAGE) {
     for (const t of (await registrations.listTenantPointers(stage)).pointers) {
       if (t.guid === guid) continue;
-      for (const a of t.apps) if (a.domain) hosts.push(...websiteHosts(a.domain).map((host) => ({ host, subdomain: t.subdomain })));
+      for (const a of t.apps) if (a.domain) hosts.push(...websiteHosts(a.domain).map((host) => ({ host, subdomain: t.subdomain, guid: t.guid })));
     }
   }
   return hosts;

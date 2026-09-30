@@ -230,6 +230,11 @@ export const tenants = sqliteTable("tenants", {
   // tenant's Versions run when a release run of a part it renders succeeds at its stage. A Manager
   // behaviour and no deployment fact, so it stands here alone and not on the registration.
   followReleases: integer("follow_releases", { mode: "boolean" }).notNull().default(false),
+  // The tenant whose hosts this tenant's own hosts may lie under (a tenants id), confirmed by the
+  // operator in tenant-set-own-domain. One host still serves one tenant; this only lets a host of this
+  // tenant stand below a host of that one, where a cookie scoped to the outer host reaches the inner
+  // one, which the operator accepts for two tenants of the same owner. Null for every other tenant.
+  nestsUnder: text("nests_under"),
   owner: text("owner"),
   provenance: text("provenance", { enum: APP_PROVENANCE }).notNull().default("manager"),
   lastRunId: text("last_run_id"),                                 // loose ref to runs(id)
