@@ -161,6 +161,33 @@ describe("TenantRegistrations", () => {
     expect(t?.entry.apps).toEqual([{ name: "web", seedReference: true, seedDemo: true, selections: {} }, { name: "crm", seedReference: false, seedDemo: false, selections: {} }]);
   });
 
+  it("append writes the app's catalog database list into its apps[] entry, and no key without one", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new TenantRegistrations(repo);
+    await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration({ apps: [], members: testMembers([]) }), runId: "run_1" });
+    await reg.updateTenantApps("dev", GUID, { op: "append", app: "web", member: testMembers(["web"])[3]!, databases: ["core", "logs"], runId: "run_2" });
+    await reg.updateTenantApps("dev", GUID, { op: "append", app: "crm", member: testMembers(["crm"])[3]!, runId: "run_3" });
+    const t = await reg.readTenant("dev", GUID);
+    expect(t?.entry.apps).toEqual([{ name: "web", seedReference: false, seedDemo: false, selections: {}, databases: ["core", "logs"] }, { name: "crm", seedReference: false, seedDemo: false, selections: {} }]);
+  });
+
+  it("setMembers takes only each app's database list off the refresh, and keeps what another run wrote into an app since", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new TenantRegistrations(repo);
+    const erp = { name: "erp", seedReference: false, seedDemo: false, selections: {} };
+    const web = { name: "web", folder: "web", site: "web", domain: "new.example", seedReference: false, seedDemo: false, selections: {}, databases: ["content"] };
+    await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration({ apps: [{ ...erp, databases: ["stale"] }, web], members: testMembers(["erp", "web"]) }), runId: "run_1" });
+    const members = testMembers(["erp", "web"]);
+    // The plan read web before its domain moved: the write keeps the new domain, and web's own list.
+    await reg.setMembers("dev", GUID, members, "run_2", [{ name: "erp", databases: ["core"] }]);
+    expect((await reg.readTenant("dev", GUID))?.entry.apps).toEqual([{ ...erp, databases: ["core"] }, web]);
+    // PLANTED DEFECT: a list the catalog no longer declares is dropped, not kept.
+    await reg.setMembers("dev", GUID, members, "run_3", [{ name: "erp" }]);
+    expect((await reg.readTenant("dev", GUID))?.entry.apps).toEqual([erp, web]);
+    await reg.setMembers("dev", GUID, members, "run_4");
+    expect((await reg.readTenant("dev", GUID))?.entry.apps).toEqual([erp, web]);
+  });
+
   it("legacy pointers fold unchanged: a raw {name} and a legacy {name, seed:true} both fold to canonical seed tiers", async () => {
     const repo = new FakePlatformRepo();
     const reg = new TenantRegistrations(repo);

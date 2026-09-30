@@ -21,10 +21,9 @@ import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
-import { appFolder, type TenantValidationReport } from "../../../shared/tenant.ts";
-import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, type AppRef, type FanoutMember } from "./tenant-fanout.ts";
+import type { TenantValidationReport } from "../../../shared/tenant.ts";
+import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, catalogDatabases, withAppDatabases, type FanoutMember } from "./tenant-fanout.ts";
 import { readAppCatalog } from "./app-catalog.ts";
-import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 import { stageApex, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
 import { deployPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
@@ -117,6 +116,10 @@ export interface TenantValidationOutcome {
   identityProvider: string;
   /** The fan-out spec T1 parsed — what the plan reads `buildRepos` off; null where T1 could not read one. */
   spec: TenantSpec | null;
+  /** The database list each requested app's catalog entry declares, by app name, for the plan to write
+   *  into the registration's apps[] entries (tenant-fanout.ts withAppDatabases). Empty where T1 could
+   *  not read a spec. */
+  appDatabases: Record<string, string[]>;
 }
 
 const abortError = (): Error => Object.assign(new Error("aborted"), { name: "AbortError" });
@@ -151,24 +154,6 @@ function foldChain(files: readonly ClusterValueFile[]): Record<string, unknown> 
 /** Stream a gate to the sink exactly like validate.ts's pollToDone does for the sandbox gates. */
 function streamGate(deps: ValidateTenantDeps, g: GateResult): void {
   deps.log(`${g.id} ${g.status} — ${g.detail}`);
-}
-
-/** The requested apps as the fan-out needs them: each with the database list the catalog entry of its
- *  folder declares, which fills the `{databases}` token, and a website with its folder, site and
- *  domain. An app the catalog does not name gets no list — T4 refuses it below, and until then it
- *  renders as the chart's own files say. */
-function withDatabases(apps: readonly AppChoice[], catalog: AppsManifest): AppRef[] {
-  const byFolder = new Map(catalog.apps.map((a) => [a.name, a]));
-  return apps.map((a) => {
-    const databases = byFolder.get(appFolder(a))?.databases;
-    return {
-      name: a.name,
-      ...(a.folder === undefined ? {} : { folder: a.folder }),
-      ...(a.site === undefined ? {} : { site: a.site }),
-      ...(a.domain === undefined ? {} : { domain: a.domain }),
-      ...(databases === undefined ? {} : { databases }),
-    };
-  });
 }
 
 /** Every source's extra value files held against the checkout: a file the chart directory does not
@@ -217,6 +202,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
     let resolvedMembers: string[] = [];
     let images: string[] = [];
     let memberRecords: TenantMemberRecord[] = [];
+    let appDatabases: Record<string, string[]> = {};
     let identityProvider = "";
 
     if (t1.spec) {
@@ -236,7 +222,12 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
         warn: deps.log,
         signal: deps.signal,
       });
-      memberRecords = await layerExistingValueFiles(resolveMembers(t1.spec, withDatabases(req.apps, catalog)), deps, cloned.workdir);
+      // An app the catalog does not name gets no list: T4 refuses it below, and until then it renders
+      // as the chart's own files say.
+      appDatabases = catalogDatabases(req.apps, catalog);
+      // What every member reads in `tenant.apps` at render, as the ApplicationSet will hand it over.
+      const apps = withAppDatabases(req.apps, appDatabases);
+      memberRecords = await layerExistingValueFiles(resolveMembers(t1.spec, apps), deps, cloned.workdir);
       identityProvider = identityProviderMember(t1.spec);
       const members = fanoutOf(memberRecords, req.stage);
       resolvedMembers = members.map((m) => m.name);
@@ -271,7 +262,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           suspended: false,
           quiesced: false,
           seedUsers: req.seedUsers ?? false,
-          apps: req.apps,
+          apps,
           // The tenant's own bundle, or the empty pair — always both keys, as the registration
           // always carries both and the appset reads them bare.
           appsImage: req.appsImage ?? "",
@@ -348,7 +339,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       manifest: t1.manifest,
       gates,
     });
-    return { verdict: report.verdict, resolvedSha: cloned.resolvedSha, report, images, memberRecords, identityProvider, spec: t1.spec ?? null };
+    return { verdict: report.verdict, resolvedSha: cloned.resolvedSha, report, images, memberRecords, identityProvider, spec: t1.spec ?? null, appDatabases };
   } finally {
     await deps.repo.dispose(cloned.workdir);
   }

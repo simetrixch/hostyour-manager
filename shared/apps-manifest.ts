@@ -7,7 +7,7 @@
 // Import boundary: shared/ is isomorphic. The web reads the TYPES here; the parser is the server's.
 import { z } from "zod";
 import { parse as parseYaml } from "yaml";
-import { appName, siteId } from "./tenant.ts";
+import { appDatabases, appName, siteId } from "./tenant.ts";
 
 /** WHERE an apps repository keeps its manifest — the root, so a bundle built from the repository
  *  and the repository itself describe the same apps. */
@@ -37,7 +37,7 @@ export const AppEntrySchema = z.object({
   title: z.string().min(1),
   description: z.string().default(""),
   selections: z.record(selectionName, AppSelectionSchema).default({}),
-  databases: z.array(z.string().regex(/^[a-z][a-z0-9_-]*$/)).min(1).optional(),
+  databases: appDatabases.optional(),
   sites: z.array(siteId).min(1).refine((s) => new Set(s).size === s.length, { message: "a site is listed once" }).optional(),
 });
 export type AppEntry = z.infer<typeof AppEntrySchema>;

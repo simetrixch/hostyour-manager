@@ -64,10 +64,13 @@ export function staleMembers(): TenantMemberRecord[] {
 }
 
 /** The books branch: `earlier` is what releases wrote before `files`, which stands now. */
-function platformRepo(members: TenantMemberRecord[], files: Record<string, string> = {}, earlier: Record<string, string> = {}): FakePlatformRepo {
+/** The registration's apps as create-tenant writes them: each with the database list its catalog entry declares. */
+const LISTED_APPS: { name: string; databases?: string[] }[] = [{ name: "erp", databases: ["core", "sales"] }];
+
+function platformRepo(members: TenantMemberRecord[], files: Record<string, string> = {}, earlier: Record<string, string> = {}, apps = LISTED_APPS): FakePlatformRepo {
   const repo = new FakePlatformRepo();
   const registration = TenantRegistrationSchema.parse({
-    cluster: "s1", subdomain: "acme", members, identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), approvedTags: HELD, ...TEST_BUNDLE,
+    cluster: "s1", subdomain: "acme", members, identityProvider: "auth", apps, quota: seedQuota("small"), approvedTags: HELD, ...TEST_BUNDLE,
   });
   const w = tenantRegistrationWrite("prod", GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
@@ -144,8 +147,8 @@ export class HeldImagesGoneArgo extends FakeMasterArgoReader {
 const IMAGE = `${REGISTRY_HOST}/example-app:1.0.0`;
 const DEPLOYMENT = { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "app", image: IMAGE }] } } } };
 
-export function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; argoReader?: (tenantRegistrations: TenantRegistrations) => FakeMasterArgoReader; carried?: string[]; carry?: () => Promise<void>; manifest?: string; files?: Record<string, string>; earlier?: Record<string, string> } = {}): TenantOnboardPorts {
-  const tenantRegistrations = new TenantRegistrations(platformRepo(members, over.files, over.earlier));
+export function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; argoReader?: (tenantRegistrations: TenantRegistrations) => FakeMasterArgoReader; carried?: string[]; carry?: () => Promise<void>; manifest?: string; files?: Record<string, string>; earlier?: Record<string, string>; apps?: { name: string; databases?: string[] }[] } = {}): TenantOnboardPorts {
+  const tenantRegistrations = new TenantRegistrations(platformRepo(members, over.files, over.earlier, over.apps));
   return withAppsTemplate({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.manifest ?? MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment", { raw: DEPLOYMENT })] } }),

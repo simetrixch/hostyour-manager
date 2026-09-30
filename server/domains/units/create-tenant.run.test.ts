@@ -311,6 +311,7 @@ describe("create-tenant streaming planner", () => {
     expect(result.params.guid).toMatch(/^[0-9a-hjkmnp-tv-z]{12}$/);
     expect(result.params.size).toBe("large"); // the wizard's size reaches the run, never the default in its place
     expect(result.params.chartsRef).toBe(SHA);
+    expect(result.params.apps.map((a) => [a.name, a.databases])).toEqual([["erp", ["core", "sales"]]]); // as the template catalog declares erp's databases
     expect(result.params.expectedApps).toEqual(tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], result.params.guid, "prod"));
     expect(result.plan.targetKind).toBe("cluster");
     expect(result.plan.targetId).toBe("cls_1");

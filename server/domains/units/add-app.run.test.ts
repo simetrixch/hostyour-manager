@@ -83,6 +83,23 @@ describe("add-app run definition", () => {
     ]);
   });
 
+  it("plans the new app with the database list its catalog entry declares, and appends it into its apps[] entry", async () => {
+    seedClusters();
+    const prt = ports({}, TEMPLATE_APPS("    databases: [core, logs]\n"));
+    const result = await makeAddAppDef(prt).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
+    expect(result.outcome).toBe("planned");
+    const planned = (result as { params: AddAppParams }).params;
+    expect(planned.databases).toEqual(["core", "logs"]);
+    await runAll(params({ databases: planned.databases }), prt, []);
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.apps.find((a) => a.name === NEW_APP)?.databases).toEqual(["core", "logs"]);
+  });
+
+  it("plans an app whose catalog entry declares no databases with no list", async () => {
+    seedClusters();
+    const result = await makeAddAppDef(ports()).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
+    expect((result as { params: AddAppParams }).params).not.toHaveProperty("databases");
+  });
+
   it("apply-appproject creates the NEW member's own AppProject and touches no sibling's (no delete cleanup registered)", async () => {
     seedClusters();
     const projects = new FakeMasterProjectWriter();

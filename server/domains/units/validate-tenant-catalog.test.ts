@@ -187,6 +187,23 @@ describe("validateTenant — the app catalog", () => {
     expect(erp?.valuesObject).toMatchObject({ tenant: { apps: [{ name: "erp", seedDemo: true }, { name: "crm" }] } });
   });
 
+  it("hands EVERY member each app's database list in tenant.apps, and answers the lists by app", async () => {
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC] } });
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: WITH_BUNDLE, [APPS_MANIFEST_PATH]: APPS_YAML } });
+    // PLANTED DEFECT: both entries carry a list of their own, and the catalog's replaces it — erp's
+    // with the list it declares, crm's with none, since its entry declares none.
+    const outcome = await validateTenant(req({ apps: [{ name: "erp", databases: ["stale"] }, { name: "crm", databases: ["stale"] }] }), deps(repo, helm));
+    expect(outcome.verdict).toBe("pass");
+    expect(outcome.appDatabases).toEqual({ erp: ["core", "logs"] });
+    // Every member, the product's own as much as the apps', renders with the same tenant.apps.
+    expect(helm.requests.length).toBeGreaterThan(2);
+    for (const r of helm.requests) {
+      const apps = (r.valuesObject as { tenant: { apps: { name: string; databases?: string[] }[] } }).tenant.apps;
+      expect(apps.find((a) => a.name === "erp")?.databases, r.releaseName).toEqual(["core", "logs"]);
+      expect(apps.find((a) => a.name === "crm"), r.releaseName).not.toHaveProperty("databases");
+    }
+  });
+
   it("T4 refuses an app the manifest does not name and a selection it does not declare, with the manifest's own words", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC] } });
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: WITH_BUNDLE, [APPS_MANIFEST_PATH]: APPS_YAML } });

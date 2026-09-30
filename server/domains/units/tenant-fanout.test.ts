@@ -10,6 +10,7 @@ import {
   tenantNamespaces,
   type AppRef,
   type FanoutMember,
+  withAppDatabases,
 } from "./tenant-fanout.ts";
 import { TenantSpecSchema, type TenantSpec } from "../../../shared/consumer.ts";
 
@@ -334,3 +335,11 @@ describe("single-source-of-truth invariant", () => {
     expect(renders.map((r) => r.chart)).toEqual(records.flatMap((m) => m.sources.map((s) => s.chart)));
   });
 });
+
+describe("withAppDatabases", () => {
+  it("sets each app's list as the catalog names it, and drops a list the catalog names none for", () => {
+    const apps = [{ name: "erp", databases: ["stale"] }, { name: "crm", databases: ["stale"] }, { name: "web" }];
+    expect(withAppDatabases(apps, { erp: ["core", "logs"] })).toEqual([{ name: "erp", databases: ["core", "logs"] }, { name: "crm" }, { name: "web" }]);
+  });
+});
+

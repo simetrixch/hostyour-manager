@@ -148,6 +148,9 @@ export interface UnitsWiring {
   /** The deploy repository's `tenant.libraryRepos`, which the boot's kit sync writes the release kit
    *  into. Undefined when tenant onboarding is not configured. */
   libraryRepos?: () => Promise<string[]>;
+  /** The boot's forward step for the app database lists of every standing tenant. Undefined when
+   *  tenant onboarding is not configured. */
+  writeTenantAppDatabases?: (db: Db) => Promise<void>;
   /** The CONSUMER family's registration registrations, threaded to registerConsumerRoutes so the
    *  operator-triggered DETECTED scan (GET /api/consumers/detected) can diff the
    *  LIVE registrations/** against the inventory — the consumer twin of tenantRegistrations above, and the
@@ -303,6 +306,7 @@ export function buildUnits(
     ...(tenant.follow ? { tenantFollow: tenant.follow } : {}),
     ...(tenant.carryTrunkToBooksBranch ? { carryTrunkToBooksBranch: tenant.carryTrunkToBooksBranch } : {}),
     ...(tenant.libraryRepos ? { libraryRepos: tenant.libraryRepos } : {}),
+    ...(tenant.writeTenantAppDatabases ? { writeTenantAppDatabases: tenant.writeTenantAppDatabases } : {}),
     // The unit plugin's activation client, surfaced for the tenant invite route.
     activator,
     ...(resolveUnitApex ? { resolveUnitApex } : {}),

@@ -48,6 +48,21 @@ describe("tenant-refresh-members", () => {
     expect(out.plan.summary).toMatch(/nothing changes — every member entry matches the product's manifest and every part runs the version asked for/);
   });
 
+  it("writes each app's catalog database list into a standing tenant's apps[] that carries none, with no change to its members", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    const prt = ports(resolved.members, { apps: [{ name: "erp" }] });
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx());
+    if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
+    expect(out.plan.summary).toContain("the member entries are unchanged. The database lists of erp are written into tenant.apps as their catalog entries declare them.");
+    expect(out.plan.summary).not.toMatch(/nothing changes/);
+    const p = out.params;
+    await makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-members")!.run(stepCtx(p, [], []));
+    const after = await prt.registrations.readTenant("prod", GUID);
+    expect(after?.entry.apps.map((a) => [a.name, a.databases])).toEqual([["erp", ["core", "sales"]]]);
+    expect(after?.entry.members).toEqual(resolved.members);
+  });
+
   it("puts a part on the version chosen, starts a build the tenant lacks at its pin, waits until every member renders them, and an abort writes the previous ones back", async () => {
     seedTenant();
     const resolved = await planned(ports(staleMembers()));

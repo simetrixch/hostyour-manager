@@ -37,6 +37,7 @@
 // no db, no node builtins.
 import type { Stage } from "../../../shared/enums.ts";
 import type { TenantSource, TenantSpec } from "../../../shared/consumer.ts";
+import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 import { appFolder, type TenantMemberRecord, type TenantSourceRecord } from "../../../shared/tenant.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
@@ -71,6 +72,28 @@ export interface AppRef {
   site?: string;
   domain?: string;
   databases?: readonly string[];
+}
+
+/** [apps] with the database list [lists] names for each, and no list where [lists] names none: the
+ *  catalog's list replaces whatever an entry carried, so a list the catalog dropped is dropped here
+ *  too. What every member reads in `tenant.apps` and what fills an app's `{databases}` token. */
+export function withAppDatabases<T extends AppRef>(apps: readonly T[], lists: Readonly<Record<string, readonly string[]>>): T[] {
+  return apps.map((a) => {
+    const { databases: _carried, ...rest } = a;
+    const listed = lists[a.name];
+    return (listed === undefined ? rest : { ...rest, databases: [...listed] }) as T;
+  });
+}
+
+/** The database list the catalog entry of each app's folder declares, by app name: what fills the
+ *  app's `{databases}` token and stands in its `tenant.apps` entry. An app the catalog does not name,
+ *  or whose entry declares none, has no list. */
+export function catalogDatabases(apps: readonly { name: string; folder?: string }[], catalog: AppsManifest): Record<string, string[]> {
+  const byFolder = new Map(catalog.apps.map((a) => [a.name, a]));
+  return Object.fromEntries(apps.flatMap((a) => {
+    const databases = byFolder.get(appFolder(a))?.databases;
+    return databases === undefined ? [] : [[a.name, [...databases]]];
+  }));
 }
 
 /** The tokens the manifest defines. `{app}` (the member name) and `{folder}` (the app folder, the

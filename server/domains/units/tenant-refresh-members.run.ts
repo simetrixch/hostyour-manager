@@ -11,7 +11,7 @@ import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { loadTenantCluster } from "./lifecycle.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { tenantSyncUnits } from "#unit/server/build-rbac.ts";
-import { memberApplication } from "./tenant-fanout.ts";
+import { memberApplication, withAppDatabases } from "./tenant-fanout.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { BuildUnitSchema, buildUnitStep, planBuildUnits, provisionArgoSyncStep, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { probeBuildUnit } from "./tenant-probes.ts";
@@ -153,7 +153,7 @@ function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMember
         return;
       }
       const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.previous, ctx.runId);
-      ctx.log("meta", `tenant ${p.guid} members back to the entries before this run (${commit})`);
+      ctx.log("meta", `tenant ${p.guid} members back to the entries before this run (${commit}); the apps' database lists stay as their catalog entries declare them`);
     },
   };
 }
@@ -217,7 +217,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
           throw errValidation(`tenant ${p.guid}'s member entries changed since this run was planned — plan it again`);
         }
         ctx.registerCleanup(restoreMembersCleanup(ports, p));
-        const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId);
+        const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId, p.apps);
         ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
         ctx.log("meta", `tenant ${p.guid} member entries written (${commit}) — the master ArgoCD renders them once its ApplicationSet regenerates the member Applications`);
@@ -374,7 +374,10 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
       // Nothing to do is a result, not an error: the run passes through every step and changes nothing.
-      const isCurrent = changed.length === 0 && sameApprovals(approved, current.entry.approvedTags) && planned.builds.units.length === 0;
+      // Each app with the database list its catalog entry declares now, which every member reads.
+      const listedApps = withAppDatabases(apps, outcome.appDatabases);
+      const relisted = listedApps.filter((a, i) => JSON.stringify(a.databases ?? []) !== JSON.stringify(apps[i]?.databases ?? [])).map((a) => a.name);
+      const isCurrent = changed.length === 0 && relisted.length === 0 && sameApprovals(approved, current.entry.approvedTags) && planned.builds.units.length === 0;
       const params: TenantRefreshMembersParams = {
         tenantId: tc.tenantId,
         guid: tc.guid,
@@ -388,7 +391,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         expectedApps: members.map((m) => memberApplication(tc.guid, m.name, tc.stage)),
         requiredImages,
         syncUnits: tenantSyncUnits(requiredImages, await ports.attestedBuilds()),
-        subdomain, owner: tc.owner, apps, seedUsers, appsImage, appsImageTag: appsImageTag ?? "",
+        subdomain, owner: tc.owner, apps: listedApps, seedUsers, appsImage, appsImageTag: appsImageTag ?? "",
         buildUnits: planned.builds.units,
         previousApproved: current.entry.approvedTags,
         chosenVersions,
@@ -402,6 +405,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `Versions of tenant ${tc.guid} on ${tc.domain} (${tc.stage}), its member entries resolved again off the product's manifest at ${outcome.resolvedSha.slice(0, 7)}: ` +
           `${isCurrent ? "nothing changes — every member entry matches the product's manifest and every part runs the version asked for. " : ""}` +
           `${changed.length ? `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` : "the member entries are unchanged. "}` +
+          `${relisted.length ? `The database lists of ${relisted.join(", ")} are written into tenant.apps as their catalog entries declare them. ` : ""}` +
           `${moves.forward.length ? `Versions: ${moves.forward.join("; ")}. ` : ""}` +
           `${moves.back.length ? `Downgrade: ${moves.back.join("; ")}, older than what runs now. ` : ""}` +
           `${recorded.length ? `Recorded as the tenant's own at the stage pin it renders now: ${recorded.join("; ")}. ` : ""}` +

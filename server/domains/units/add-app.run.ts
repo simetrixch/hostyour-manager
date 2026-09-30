@@ -4,7 +4,7 @@ import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
 import { STAGE } from "../../../shared/enums.ts";
-import { guid as guidSchema, appName, appFolder, siteId, websiteAppName, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
+import { guid as guidSchema, appName, appDatabases, appFolder, siteId, websiteAppName, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
 import { ownDomainEntryProblem } from "#unit/shared/unit-host.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
@@ -67,7 +67,8 @@ export const AddAppParams = z.object({
   // The registry host the new app's images are pulled from and probed against — the tenant
   // cluster's own chain (ports.resolveClusterValueFiles -> registryHostFromChain), frozen at plan time.
   registryHost: z.string().min(1),
-  app: appName, // the new app being fanned in
+  app: appName, // the new app being fanned in, with the database list its catalog entry declares
+  databases: appDatabases.optional(),
   // The new app's MEMBER, resolved from the product manifest at the revision this run validated. The
   // registration's members[] is what the ApplicationSet fans out over, so an appended app that added
   // no member would be recorded as owned and never deployed; frozen here so the append writes what
@@ -250,7 +251,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
         // The app starts on the newest available version of every build, fixed as its own (#296), beside
         // the bundle the registration names, which record-apps-repo moved to this pass's build.
         const approved = await addedMemberVersions(ports, p.stage, current.entry, p.app, p.member, ctx);
-        const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, ...(p.website ? { website: p.website } : {}), member: p.member, approved, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, runId: ctx.runId });
+        const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, ...(p.website ? { website: p.website } : {}), member: p.member, approved, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, ...(p.databases ? { databases: p.databases } : {}), runId: ctx.runId });
         ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit, app: p.app });
         ctx.log("meta", `app "${p.app}" appended to tenant ${p.guid} (${commit}) — the master ArgoCD will now generate the new Application`);
@@ -453,6 +454,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
         member: newMember,
         seedReference: req.seedReference, // reference tier for the appended apps[] entry
         seedDemo: req.seedDemo, // demo tier for the appended apps[] entry
+        ...(outcome.appDatabases[req.app] ? { databases: outcome.appDatabases[req.app] } : {}),
         selections: req.selections, // every further selection, as T4 held it against the catalog
         report: outcome.report,
         expectedApps,

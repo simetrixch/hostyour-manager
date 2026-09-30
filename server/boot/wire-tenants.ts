@@ -43,7 +43,8 @@ import { makeCheckTenantsDef } from "../domains/units/check-tenants.run.ts";
 import { tenantUnitProbes } from "../domains/units/tenant-unit-probes.ts";
 import type { UnitProbes } from "#unit/server/check-units.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
-import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
+import { listTenantAppCatalog, makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
+import { ensureTenantAppDatabases } from "../domains/units/tenant-app-databases.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantSetWebsiteDomainDef } from "../domains/units/tenant-website-domain.run.ts";
 import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-members.run.ts";
@@ -102,6 +103,9 @@ export interface TenantFamily {
   /** The deploy repository's `tenant.libraryRepos` off the books branch, which the boot's kit sync
    *  writes the release kit into. Undefined when the family is not configured. */
   libraryRepos?: () => Promise<string[]>;
+  /** The boot's forward step for the app database lists of every standing tenant
+   *  (tenant-app-databases.ts ensureTenantAppDatabases). Undefined when the family is not configured. */
+  writeTenantAppDatabases?: (db: Db) => Promise<void>;
   /** The tenants that follow releases (hostyour-manager#328), built once the executor stands, which
    *  plans and approves their Versions runs. Undefined when the family is not configured. */
   follow?: (executor: Executor, db: Db) => TenantFollowWiring;
@@ -382,6 +386,14 @@ export function buildTenantOnboarding(
   // repoURL the appsets are rendered from) the runs use, never a second one.
   const versions = (db: Db, tenantId: string, signal?: AbortSignal): Promise<VersionsView> => readTenantVersions(onboardPorts, db, tenantId, signal);
   const libraryRepos = async (): Promise<string[]> => (await readTenantSpec(onboardPorts, {}))?.libraryRepos ?? [];
+  // The catalog the wizard offers, read the same way but never through its fail-soft provider: that
+  // answers a failed read with no apps, and the forward step would drop every list off it.
+  const writeTenantAppDatabases = async (db: Db): Promise<void> => {
+    await ensureTenantAppDatabases({
+      db, registrations: tenantRegistrations, logger,
+      readCatalog: () => listTenantAppCatalog({ repo, repoURL, ref: books, ...(onboardPorts.deployCredentialId ? { credentialId: onboardPorts.deployCredentialId } : {}), warn: (msg) => logger.warn({ repoURL, ref: books }, msg) }),
+    });
+  };
   // A unit registered after the start is watched from the next start; a release of it before then is
   // caught by that start's check.
   const follow = (executor: Executor, db: Db): TenantFollowWiring => {
@@ -401,5 +413,5 @@ export function buildTenantOnboarding(
     };
     return { follower, start };
   };
-  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, versions, carryTrunkToBooksBranch, libraryRepos, follow };
+  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, versions, carryTrunkToBooksBranch, libraryRepos, writeTenantAppDatabases, follow };
 }

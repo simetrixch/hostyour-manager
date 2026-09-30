@@ -40,6 +40,11 @@ export const guid = z.string().regex(/^[0-9a-hjkmnp-tv-z]{12}$/);
  *  tenant: namespace <guid>-<name>, AppProject <guid>-<name>, Application <guid>-<name>-<stage>. */
 export const appName = z.string().regex(/^[a-z][a-z0-9-]{0,28}[a-z0-9]$/);
 
+/** The databases one app declares in its catalog entry (apps.yaml), by name. The same list fills the
+ *  `{databases}` token of the app's own member and stands in its `tenant.apps` entry, which every
+ *  member of the tenant reads. */
+export const appDatabases = z.array(z.string().regex(/^[a-z][a-z0-9_-]*$/)).min(1);
+
 /** A site of a website app folder: the id its content carries (a WebSite's `_id`, a WebPage's `site`). */
 export const siteId = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/);
 
@@ -171,12 +176,15 @@ export const TenantAppSchema = z
     seedReference: z.boolean().default(false),
     seedDemo: z.boolean().default(false),
     seed: z.boolean().optional(),
+    // Copied off the catalog entry of the app's folder by the Manager, never typed by a person: every
+    // member of the tenant reads it in `tenant.apps`, and the key is absent where the entry declares none.
+    databases: appDatabases.optional(),
     selections: z
       .record(z.string(), z.boolean())
       .default({})
       .refine((s) => !SEED_SELECTIONS.some((k) => k in s), { message: `${SEED_SELECTIONS.join(" and ")} are fields of the app entry, never keys of selections` }),
   })
-  .transform(({ name, folder, site, domain, seedReference, seedDemo, seed, selections }) => ({
+  .transform(({ name, folder, site, domain, seedReference, seedDemo, seed, databases, selections }) => ({
     name,
     ...(folder === undefined ? {} : { folder }),
     ...(site === undefined ? {} : { site }),
@@ -184,6 +192,7 @@ export const TenantAppSchema = z
     seedReference,
     seedDemo: seedDemo || (seed ?? false),
     selections,
+    ...(databases === undefined ? {} : { databases }),
   }));
 
 /** subdomain — ONE DNS label (zero PII). The tenant's zone is `<subdomain>.<stage apex>` and its

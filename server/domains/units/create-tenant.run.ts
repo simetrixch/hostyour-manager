@@ -16,7 +16,7 @@ import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { tenantSyncUnits } from "#unit/server/build-rbac.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
-import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
+import { memberNamespace, tenantApplicationSet, withAppDatabases } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { mintTenantCrypto, TENANT_CRYPTO_PROPERTIES } from "./tenant-crypto-mint.ts";
 import { provisionTenantStorage } from "./tenant-storage.ts";
@@ -683,7 +683,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         cluster: rc.cluster,
         chartsRef: outcome.resolvedSha,
         registryHost,
-        apps: req.apps,
+        apps: withAppDatabases(req.apps, outcome.appDatabases), // each with its catalog database list, read by every member
         seedUsers: req.seedUsers,
         size: req.size,
         owner: req.owner,

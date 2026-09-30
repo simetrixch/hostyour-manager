@@ -34,6 +34,7 @@ import type { SkippedTenantPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { errInternal, errValidation } from "../../kernel/errors.ts";
 import { serializePointer, makeRegistrationGuard, trailer, schemaWhy } from "#unit/server/registration-laws.ts";
+import { withAppDatabases } from "./tenant-fanout.ts";
 
 /** registrations/<guid>/<stage>.yaml — the ONE per-tenant-per-stage file. The guid segment mirrors
  *  shared/tenant.ts:guid (12 chars of Crockford base32 minus i/l/o/u). */
@@ -99,6 +100,19 @@ function pinnedBuildsIn(raw: string): { name: string; image: string; tag: string
   return builds.flatMap((b) => (typeof b.name === "string" && typeof b.image === "string" ? [{ name: b.name, image: b.image, tag: typeof b.tag === "string" ? b.tag : "" }] : []));
 }
 
+/** One registration file's body, strict: THROWS on a body that is no YAML or fails the schema. */
+function parseRegistration(path: string, raw: string): TenantRegistration {
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(raw);
+  } catch (e) {
+    throw errInternal(`tenant registration ${path} is not valid YAML: ${yamlWhy(e)}`);
+  }
+  const r = TenantRegistrationSchema.safeParse(parsed);
+  if (!r.success) throw errInternal(`tenant registration ${path} failed its schema: ${schemaWhy(r.error)}`);
+  return r.data;
+}
+
 export class TenantRegistrations {
   /** `repo` is the deploy repository, where the registrations live. */
   constructor(private readonly repo: PlatformRepo) {}
@@ -122,16 +136,7 @@ export class TenantRegistrations {
   async readTenant(stage: Stage, guid: string): Promise<TenantRead | null> {
     const path = registrationPath(stage, guid);
     const raw = await this.repo.withBranch(this.branch, (books) => books.readFile(path));
-    if (raw === null) return null;
-    let parsed: unknown;
-    try {
-      parsed = parseYaml(raw);
-    } catch (e) {
-      throw errInternal(`tenant registration ${path} is not valid YAML: ${yamlWhy(e)}`);
-    }
-    const r = TenantRegistrationSchema.safeParse(parsed);
-    if (!r.success) throw errInternal(`tenant registration ${path} failed its schema: ${schemaWhy(r.error)}`);
-    return { entry: r.data };
+    return raw === null ? null : { entry: parseRegistration(path, raw) };
   }
 
   /** The ONE read of ONE registrations/<guid>/<stage>.yaml — the single implementation behind BOTH the
@@ -247,10 +252,10 @@ export class TenantRegistrations {
    *  raised here so the operator sees it before a commit is attempted). add-app / remove-app. The app's
    *  versions move with it in the same commit: an append fixes `approved` as its own, a drop removes
    *  them. Returns the tenant's versions as written, for the row. */
-  async updateTenantApps(stage: Stage, guid: string, input: { op: "append" | "drop"; app: string; website?: TenantWebsite; member?: TenantMemberRecord; approved?: Record<string, string>; seedReference?: boolean; seedDemo?: boolean; selections?: Record<string, boolean>; runId: string }): Promise<{ commit: string; approvedTags: TenantRegistration["approvedTags"] }> {
+  async updateTenantApps(stage: Stage, guid: string, input: { op: "append" | "drop"; app: string; website?: TenantWebsite; member?: TenantMemberRecord; approved?: Record<string, string>; seedReference?: boolean; seedDemo?: boolean; selections?: Record<string, boolean>; databases?: readonly string[]; runId: string }): Promise<{ commit: string; approvedTags: TenantRegistration["approvedTags"] }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
-    const { op, app, website, member, approved = {}, seedReference = false, seedDemo = false, selections = {}, runId } = input;
+    const { op, app, website, member, approved = {}, seedReference = false, seedDemo = false, selections = {}, databases, runId } = input;
     const has = current.entry.apps.some((a) => a.name === app);
     if (op === "append" && has) throw errValidation(`app "${app}" already exists in tenant "${guid}"`);
     // Held against THIS tenant's own members, not against a constant: both are named
@@ -262,7 +267,7 @@ export class TenantRegistrations {
     if (op === "append" && !member) throw errValidation(`add-app for "${app}" carries no member record — the ApplicationSet fans out over members[], so the app would be recorded as owned and never deployed`);
     // A later-added app carries its selections too into the registration's apps[] entry, and its
     // MEMBER into members[] — the two lists move together, which the schema then holds them to.
-    const apps = op === "append" ? [...current.entry.apps, { name: app, ...website, seedReference, seedDemo, selections }] : current.entry.apps.filter((a) => a.name !== app);
+    const apps = op === "append" ? [...current.entry.apps, { name: app, ...website, seedReference, seedDemo, selections, ...(databases ? { databases: [...databases] } : {}) }] : current.entry.apps.filter((a) => a.name !== app);
     const members = op === "append" ? [...current.entry.members, member!] : current.entry.members.filter((m) => m.name !== app);
     const kept = Object.fromEntries(Object.entries(current.entry.approvedTags).filter(([m]) => m !== app));
     const approvedTags = op === "append" && Object.keys(approved).length > 0 ? { ...kept, [app]: approved } : kept;
@@ -342,11 +347,38 @@ export class TenantRegistrations {
   }
 
   /** Write the tenant's member entries whole, as resolved again off the product's manifest. The member
-   *  set stays; tenant-refresh-members refuses a plan that would change it. */
-  async setMembers(stage: Stage, guid: string, members: readonly TenantMemberRecord[], runId: string): Promise<{ commit: string }> {
+   *  set stays; tenant-refresh-members refuses a plan that would change it. `listedApps` carries each
+   *  app's database list as its catalog entry declares it now. Only that list is taken: every other
+   *  field of an app, and an app the list does not name, stays as the registration holds it at this
+   *  write, so a run that changed an app since the plan keeps what it wrote. */
+  async setMembers(stage: Stage, guid: string, members: readonly TenantMemberRecord[], runId: string, listedApps: readonly Pick<TenantRegistration["apps"][number], "name" | "databases">[] = []): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
-    return this.write(stage, guid, { ...current.entry, members: [...members] }, `refresh-members(${guid}): ${members.map((m) => m.name).join(", ")} ${trailer(runId)}`);
+    const lists = new Map(listedApps.map((a) => [a.name, a.databases]));
+    const apps = current.entry.apps.map((a) => {
+      if (!lists.has(a.name)) return a;
+      const { databases: _held, ...rest } = a;
+      const listed = lists.get(a.name);
+      return listed ? { ...rest, databases: [...listed] } : rest;
+    });
+    return this.write(stage, guid, { ...current.entry, members: [...members], apps }, `refresh-members(${guid}): ${members.map((m) => m.name).join(", ")} ${trailer(runId)}`);
+  }
+
+  /** Each app's database list, as `listsFor` answers it off the apps the registration holds, written
+   *  into its apps[] entries and nothing else: the forward step for a tenant registered before the
+   *  lists were carried (tenant-app-databases.ts). The read and the write are one turn on the books
+   *  branch, so no other write lands between them to be overwritten. Null where the tenant has no
+   *  registration at this stage, or every list already stands: nothing is committed. */
+  async setAppDatabases(stage: Stage, guid: string, listsFor: (apps: TenantRegistration["apps"]) => Readonly<Record<string, readonly string[]>>, writtenBy: string): Promise<{ commit: string } | null> {
+    const path = registrationPath(stage, guid);
+    return this.repo.withBranch(this.branch, async (books) => {
+      const raw = await books.readFile(path);
+      if (raw === null) return null;
+      const entry = parseRegistration(path, raw);
+      const apps = withAppDatabases(entry.apps, listsFor(entry.apps));
+      if (apps.every((a, i) => JSON.stringify(a.databases) === JSON.stringify(entry.apps[i]?.databases))) return null;
+      return books.commit({ message: `app-databases(${guid}): ${apps.map((a) => `${a.name} [${(a.databases ?? []).join(", ")}]`).join(", ")} ${trailer(writtenBy)}`, write: [tenantRegistrationWrite(stage, guid, { ...entry, apps })] });
+    });
   }
 
   /** The builds a chart's stage pin file names on the books branch (`<chart>/pins-<stage>.yaml`,
