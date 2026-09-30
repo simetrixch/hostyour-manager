@@ -394,19 +394,21 @@ export async function placeAnsiwise(
   // the transfer had nothing to do and the copy onto the path had never been made at all.
   const standing = await readVersions(machine, BOOTSTRAP_HOME);
   const onPath = await readVersions(machine, PATH_HOME);
-  const missing = ANSIWISE_EXECUTABLES.filter((name) => standing[name] !== version);
-  const stale = ANSIWISE_EXECUTABLES.filter((name) => onPath[name] !== version);
-  if (missing.length === 0 && stale.length === 0) {
+  // PLACED AGAIN WHERE EITHER COPY IS OFF THE PIN, and fetched again for it. A home copy that answers
+  // the pin is no proof the release built it: an earlier run's copy, or one the account itself wrote,
+  // answers the pin as readily, and what reaches the path is installed there as root.
+  const toPlace = ANSIWISE_EXECUTABLES.filter((name) => standing[name] !== version || onPath[name] !== version);
+  if (toPlace.length === 0) {
     machine.log(`${machine.name} already carries ${describeExecutables(version)} — nothing to place`);
     return { version, placed: false };
   }
-  if (missing.length > 0) {
-    machine.log(
-      `placing on ${machine.name}: ${missing.map((name) => `${name} ${version} (it carries ${standing[name] ?? "none"})`).join(", ")}`,
-    );
-  }
+  machine.log(
+    `placing on ${machine.name}: ${toPlace.map((name) => `${name} ${version} (it carries ${standing[name] ?? "none"})`).join(", ")}`,
+  );
 
-  for (const name of missing) {
+  // EVERY ASSET IS ADDRESSED, FETCHED AND HELD BEFORE ANY IS WRITTEN, so a refusal of one leaves the
+  // machine as it stood, and a pin whose digests were never written costs no download at all.
+  const addressed = toPlace.map((name) => {
     const from = downloadAddress(req.downloadUrl, name, version);
     // ANY slot and not only the two this fills. Nothing else fills one, so an address still carrying
     // `<arch>` or `<os>` would be sent to the release host with the angle brackets in it and whatever
@@ -420,16 +422,19 @@ export async function placeAnsiwise(
         "it stands",
       );
     }
-    // The asset's own file name, as the release and the digest file both spell it. Asked BEFORE the
-    // fetch, so a pin whose digests were never written costs no download and says so by name.
+    // The asset's own file name, as the release and the digest file both spell it.
     const asset = new URL(from).pathname.split("/").at(-1) ?? from;
     const stated = req.digests.get(asset);
     if (stated === undefined) {
       throw errValidation(
-        `the platform repository states no SHA-256 for ${asset}, so it is not placed on ${machine.name} unchecked — ` +
+        `the platform repository states no SHA-256 for ${asset}, so nothing is placed on ${machine.name} unchecked — ` +
         "the release that pinned it writes its digests beside the pin, in clusters/platform/ansiwise.sha256",
       );
     }
+    return { name, from, asset, stated };
+  });
+  const held: { name: string; from: string; bytes: Buffer }[] = [];
+  for (const { name, from, asset, stated } of addressed) {
     const bytes = await assets.read(from);
     if (bytes.length === 0) {
       throw errValidation(
@@ -441,9 +446,12 @@ export async function placeAnsiwise(
     if (fetched !== stated) {
       throw errValidation(
         `${from} served bytes whose SHA-256 is ${fetched}, and the platform repository states ${stated} for ${asset} — ` +
-        `nothing of it was written to ${machine.name}. An asset of the release changed after it was built`,
+        `nothing was written to ${machine.name}. An asset of the release changed after it was built`,
       );
     }
+    held.push({ name, from, bytes });
+  }
+  for (const { name, from, bytes } of held) {
     await machine.putFile(name, bytes, EXECUTABLE_MODE);
     machine.log(`${machine.name}: ${bytes.length} bytes of ${name} ${version} written from ${from}`);
   }
@@ -461,12 +469,12 @@ export async function placeAnsiwise(
     );
   }
 
-  // ONTO THE PATH, from the copy just proven rather than from the network a second time: the bytes
-  // that answered the pin are the bytes that go where everything else looks for them. `install`
-  // replaces a standing file by writing a new one and renaming it over, so a machine is never left
-  // with a half-written executable on its path.
+  // ONTO THE PATH, only what this run fetched and held against its digest: the bytes that answered
+  // the pin are the bytes that go where everything else looks for them, and a copy nobody here held
+  // never goes there. `install` replaces a standing file by writing a new one and renaming it over,
+  // so a machine is never left with a half-written executable on its path.
   const stdin = Buffer.from(req.elevationPassword + NEWLINE, "utf8");
-  for (const name of ANSIWISE_EXECUTABLES) {
+  for (const name of toPlace) {
     const done = await machine.run(
       ["sudo", "-S", "install", "-m", EXECUTABLE_MODE.toString(8), `${BOOTSTRAP_HOME}${name}`, `${PATH_HOME}${name}`],
       { timeoutMs: COMMAND_TIMEOUT_MS, stdin },

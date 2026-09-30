@@ -66,7 +66,9 @@ export async function readAnsiwisePin(repo: PlatformRepo): Promise<string> {
 
 /** The SHA-256 the platform repository states for each release asset of the engine, by the asset's
  *  file name, or a typed error naming the file. A line that is not `<64 lowercase hex>  <asset>` is
- *  refused rather than passed over: a digest that could not be read is an asset placed unchecked. */
+ *  refused rather than passed over, because a digest that could not be read is an asset placed
+ *  unchecked. So is an asset named twice, which the drivers refuse too, so the two cannot come to
+ *  accept different bytes out of one file. */
 export async function readAnsiwiseDigests(repo: PlatformRepo): Promise<ReadonlyMap<string, string>> {
   const raw = await repo.withBranch(ANSIWISE_PIN_BRANCH, (trunk) => trunk.readFile(ANSIWISE_DIGESTS_PATH));
   if (raw === null) throw errNotFound(`${ANSIWISE_DIGESTS_PATH} on the platform repo's ${ANSIWISE_PIN_BRANCH} branch`);
@@ -80,6 +82,9 @@ export async function readAnsiwiseDigests(repo: PlatformRepo): Promise<ReadonlyM
       throw errValidation(
         `${ANSIWISE_DIGESTS_PATH} on ${ANSIWISE_PIN_BRANCH} carries a line that is not "<sha256>  <asset>": ${line}`,
       );
+    }
+    if (digests.has(asset)) {
+      throw errValidation(`${ANSIWISE_DIGESTS_PATH} on ${ANSIWISE_PIN_BRANCH} names ${asset} twice`);
     }
     digests.set(asset, digest);
   }

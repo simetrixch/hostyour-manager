@@ -102,6 +102,12 @@ describe("readAnsiwiseDigests", () => {
     }
   });
 
+  it("refuses an asset named twice, which the drivers refuse too, so the two cannot accept different bytes", async () => {
+    await expect(readAnsiwiseDigests(repoWithDigests(
+      `${ENGINE}  ansiwise-0.4.2-linux-x64\n${SERVING}  ansiwise-0.4.2-linux-x64\n`,
+    ))).rejects.toThrow(/names ansiwise-0\.4\.2-linux-x64 twice/);
+  });
+
   it("fails loud when the file is not there at all, naming the file and the branch", async () => {
     await expect(readAnsiwiseDigests(repoWithDigests(null)))
       .rejects.toThrow(/clusters\/platform\/ansiwise\.sha256 on the platform repo's master branch/);
