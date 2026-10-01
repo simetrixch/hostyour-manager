@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
+import type { StepCtx } from "../../executor/types.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeTenantPurgeDef, type TenantPurgeParams, type TenantPurgeRequest } from "./tenant-purge.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
@@ -208,6 +209,22 @@ describe("tenant-purge plan", () => {
     // for whatever is standing, which is what actually finds them.
     expect(params.target).toEqual({ guid: GUID, subdomain: "", stage: "prod", clusterId: "cls_1", cluster: "s1", tenantId: null, watchNames: [], members: [] });
     expect(plan.steps.map((x) => x.name)).toEqual(STEP_ORDER); // the step list never shrinks
+  });
+
+  it("promises the DNS delete only where the target names a subdomain, and says why it removes none where it does not", async () => {
+    seedCluster(); // no row, and no pointer: the purge knows no subdomain of this tenant
+    const unnamed = await planned(ports(new TenantRegistrations(new FakePlatformRepo())));
+    expect(unnamed.plan.summary).not.toContain("remove the tenant's wildcard DNS record");
+    expect(unnamed.plan.summary).toContain("remove no DNS record");
+    const logs: string[] = [];
+    const removeDns = makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo()))).steps(unnamed.params).find((x) => x.name === "remove-dns")!;
+    await removeDns.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: (_s: string, t: string) => logs.push(t) } as unknown as StepCtx);
+    expect(logs.join("\n")).not.toContain("was ever provisioned");
+    expect(logs.join("\n")).toContain("no DNS record is removed");
+    // A pointer that names the subdomain: the record is the tenant's own and goes.
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
+    expect((await planned(ports(reg))).plan.summary).toContain("remove the tenant's wildcard DNS record");
   });
 
   it("mutating def starts with attest-target under empty params (the armed check does def.steps({}))", () => {

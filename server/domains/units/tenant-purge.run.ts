@@ -382,11 +382,11 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
         // The inverse of create-tenant's provision-dns (no address is left pointing nowhere
         // — without exception; purge runs after failed offboards, exactly where the leftover would
         // appear, so the step is fail-CLOSED). The record name needs the subdomain, which only the
-        // pointer or the inventory row carries — for a guid NEITHER source knew, the frozen target's
-        // subdomain is empty and there is no record to name: such a tenant never reached
-        // provision-dns (the pointer write follows it), so nothing stands and the step says so.
+        // pointer or the inventory row carries. Where the frozen target's subdomain is empty there is
+        // no record this purge may name: a settled tenant's offboard removed it, and a guid neither
+        // source knew never reached provision-dns (the pointer write follows it).
         if (p.target.subdomain === "") {
-          ctx.log("meta", `tenant ${p.guid} has no known subdomain (neither an inventory row nor a pointer named one) — no DNS record was ever provisioned for it, nothing to remove`);
+          ctx.log("meta", `tenant ${p.guid} has no subdomain this purge may name (no live inventory row or pointer carries one), so no DNS record is removed: an offboard removed the record of a settled tenant, a guid nothing knows never wrote one, and the subdomain may belong to a newer tenant by now`);
           return;
         }
         const c = loadPurgeCluster(ctx.db, p);
@@ -551,7 +551,10 @@ export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<T
           (target.tenantId ? "" : " (no inventory row — an orphaned partial create-tenant)") +
           ": remove its registration, best-effort wait for ArgoCD to prune the whole fan-out, delete every member's isolation AppProject, its admission policy and the argo-sync grant, " +
           `then delete every namespace labelled platform/tenant=${req.guid} as the backstop reap — which takes each member's ServiceClaim with it, and the service-provisioner drops that claim's databases together with its user — ` +
-          `then DESTROY the tenant's Vault crypto entry ${c.stage}/tenants/${req.guid} (its signing keypair, TOTP key, bootstrap token and engine key, every version), withdraw every object-storage key named ${tenantKeyName(req.guid, c.stage)}, then remove the tenant's wildcard DNS record` +
+          `then DESTROY the tenant's Vault crypto entry ${c.stage}/tenants/${req.guid} (its signing keypair, TOTP key, bootstrap token and engine key, every version), withdraw every object-storage key named ${tenantKeyName(req.guid, c.stage)}` +
+          (target.subdomain
+            ? ", then remove the tenant's wildcard DNS record"
+            : ", and remove no DNS record: no live inventory row or pointer names this tenant's subdomain, and a subdomain read off anything older may belong to a newer tenant by now") +
           (target.tenantId
             ? ", and only THEN mark the tenant + its app rows PURGED — a distinct state from the \"offboarded\" an offboard leaves, so this tenant reads as deprovisioned rather than merely un-deployed: it drops off the Tenants list and offers no further removal, while its rows are kept as the trace. The rows are settled LAST, so a delete that fails leaves the tenant visible and purgeable"
             : "") +
