@@ -42,8 +42,9 @@ function placement() {
 async function machineWith(
   hosts: HostsScript,
   wrap: (line: string, run: () => ReturnType<PlacementMachine["run"]>) => ReturnType<PlacementMachine["run"]>,
+  said: string[] = [],
 ): Promise<PlacementMachine> {
-  const honest = await sessionMachine(hosts, []);
+  const honest = await sessionMachine(hosts, said);
   return { ...honest, run: (argv, o) => wrap(argv.join(" "), () => honest.run(argv, o)) };
 }
 
@@ -249,6 +250,20 @@ describe("place-ansiwise: what root installed, read back off the path", () => {
     expect(refusal).toContain(`${PATH_HOME}${ANSIWISE_TOOL} on ${FIRST_INSTALL_FQDN} could not be read back after the install (sha256sum exit 127)`);
     expect(refusal).not.toMatch(/hashes to/);
     expect(lastOnPath(hosts, ANSIWISE_TOOL), "a copy nobody read stayed on the path").toBeUndefined();
+  });
+
+  it("records a copy that failed its digest even where the removal never returns", async () => {
+    const hosts = scriptedHosts();
+    const { read, request } = placement();
+    const swap = swapAtInstall(hosts, [ANSIWISE_TOOL]);
+    const said: string[] = [];
+    const machine = await machineWith(hosts, (line, run) => {
+      swap(line);
+      return line.startsWith("sudo -S rm -f ") ? Promise.reject(new Error("the session ended before the removal")) : run();
+    }, said);
+
+    await expect(placeAnsiwise(machine, read, request)).rejects.toThrow("the session ended before the removal");
+    expect(said.join("\n")).toMatch(new RegExp(`${PATH_HOME}${ANSIWISE_TOOL} on .* hashes to [0-9a-f]{64} after the install`));
   });
 
   it("says a copy that could not be taken off is still there, and the next run places over it", async () => {
