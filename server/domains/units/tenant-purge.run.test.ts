@@ -14,6 +14,7 @@ import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { FakePlatformRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
+import { recordDnsWrite } from "../../db/dns-writes.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import type { PlanStreamCtx } from "../../executor/types.ts";
 import type { TenantStatus } from "../../../shared/enums.ts";
@@ -211,16 +212,23 @@ describe("tenant-purge plan", () => {
     expect(plan.steps.map((x) => x.name)).toEqual(STEP_ORDER); // the step list never shrinks
   });
 
-  it("promises the DNS delete only where the target names a subdomain, and says why it removes none where it does not", async () => {
+  it("promises the wildcard delete only where the target names a subdomain, and removes the booked records either way", async () => {
     seedCluster(); // no row, and no pointer: the purge knows no subdomain of this tenant
     const unnamed = await planned(ports(new TenantRegistrations(new FakePlatformRepo())));
     expect(unnamed.plan.summary).not.toContain("remove the tenant's wildcard DNS record");
-    expect(unnamed.plan.summary).toContain("remove no DNS record");
+    expect(unnamed.plan.summary).toContain("remove only the DNS records the book of DNS writes names as this tenant's own");
+    // An earlier purge removed the registration and failed before remove-dns: the book still names the
+    // tenant's own-domain record, and it goes even though no subdomain names the wildcard.
+    recordDnsWrite(db.db, { name: "shop.acme.example", type: "CNAME", content: "s1.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_dom" });
+    const p = ports(new TenantRegistrations(new FakePlatformRepo()));
+    const dns = p.dns as FakeDnsProvider;
+    dns.seed("shop.acme.example", "CNAME", "s1.example");
     const logs: string[] = [];
-    const removeDns = makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo()))).steps(unnamed.params).find((x) => x.name === "remove-dns")!;
+    const removeDns = makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!;
     await removeDns.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: (_s: string, t: string) => logs.push(t) } as unknown as StepCtx);
-    expect(logs.join("\n")).not.toContain("was ever provisioned");
-    expect(logs.join("\n")).toContain("no DNS record is removed");
+    expect(dns.record("shop.acme.example", "CNAME")).toBeUndefined();
+    expect(logs.join("\n")).not.toContain("never wrote one");
+    expect(logs.join("\n")).toContain("its wildcard DNS record is not removed");
     // A pointer that names the subdomain: the record is the tenant's own and goes.
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
