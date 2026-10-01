@@ -45,6 +45,18 @@ describe("readTemplateTree — the apps a tenant chose and the sites a run serve
   });
 });
 
+describe("readTemplateTree — a catalog in another layout", () => {
+  it("refuses the copy of a catalog in the old layout before it reads anything, naming the folder it looked for", async () => {
+    const oldLayout = { "apps.yaml": TEMPLATE_APPS, "erp/package.json": "{}\n", "web/content/sites/show/website.json": "{}\n" };
+    await expect(tree(["erp"], {}, { files: oldLayout })).rejects.toThrow("the catalog carries no apps/erp/, so it is not in the layout this Manager copies");
+  });
+
+  it("refuses the copy where a served site has no folder under webs/", async () => {
+    const { "webs/show/website.json": _show, "webs/show/webpages.json": _pages, ...withoutShow } = TEMPLATE;
+    await expect(tree(["web"], { web: ["show"] }, { files: withoutShow })).rejects.toThrow("the catalog carries no webs/show/");
+  });
+});
+
 describe("readTemplateTree — the paths the catalog keeps for itself", () => {
   const WITH_HANDBOOK = { ...TEMPLATE, "package.json": "{}\n", "handbook/README.md": "# Handbook\n", "handbook/tools/check-app.mjs": "export {};\n" };
 

@@ -32,7 +32,7 @@ import { channelReaching } from "./tenant-builds.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
 import { recordBuildOnlyStep } from "#unit/server/build-registration.ts";
 import { refreshRepoPatStep } from "#unit/server/seed-repo-pat.ts";
-import { BUNDLE_APPS_DIR, mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit, type ServedSites, type TreeFile } from "./tenant-apps-tree.ts";
+import { mergeAppsManifest, missingBundleFolders, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit, type ServedSites, type TreeFile } from "./tenant-apps-tree.ts";
 import type { RepoFileWrite } from "../../adapters/git/port.ts";
 import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "#unit/server/repo-identity.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
@@ -103,7 +103,7 @@ async function appCredentialId(ctx: StepCtx, runtime: TenantAppsRepoRuntime): Pr
  *  (how its bundle is built). Cloned the way the catalog reads it (app-catalog.ts readAppsManifest):
  *  at its default branch head, with the deploy repository's own credential — the template is no unit and has
  *  no credential of its own. */
-async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[], sites: ServedSites) => Promise<TreeFile[]>; dispose: () => Promise<void> }> {
+async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; missing: (chosen: readonly string[], sites: ServedSites) => Promise<string[]>; tree: (chosen: readonly string[], sites: ServedSites) => Promise<TreeFile[]>; dispose: () => Promise<void> }> {
   const repo = ports.repo;
   const cloned = await repo.cloneAtRef({ repoURL: templateRepoURL, ref: DEFAULT_BRANCH_HEAD, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), signal });
   try {
@@ -118,7 +118,7 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
       appsYaml,
       npmrc: await repo.readFile(cloned.workdir, ".npmrc"),
       manifest: manifest.data,
-      folders: async (app) => (await repo.listDir(cloned.workdir, `${BUNDLE_APPS_DIR}/${app}`)).length > 0,
+      missing: (chosen, sites) => missingBundleFolders(repo, cloned.workdir, { chosen, sites }),
       tree: (chosen, sites) => readTemplateTree(repo, cloned.workdir, { templateApps: catalog.apps, catalogOnly: catalog.catalogOnly ?? [], chosen, sites }),
       dispose: () => repo.dispose(cloned.workdir),
     };
@@ -133,7 +133,7 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
  *  it (null where the deploy repository declares none) and has checked the App is wired. */
 export async function resolveTenantAppsUnit(
   ports: TenantOnboardPorts,
-  input: { subdomain: string; chosen: readonly string[]; spec: TenantSpec | null; owners: OwnerIdentityReader; signal: AbortSignal; log: (line: string) => void },
+  input: { subdomain: string; chosen: readonly string[]; sites?: ServedSites; spec: TenantSpec | null; owners: OwnerIdentityReader; signal: AbortSignal; log: (line: string) => void },
 ): Promise<{ outcome: "resolved"; unit: TenantAppsUnit } | { outcome: "refused"; why: string }> {
   const refuse = (why: string) => ({ outcome: "refused" as const, why });
   if (!input.spec) return refuse(`the deploy repository ${ports.deployRepoUrl} declares no tenant fan-out in ${TENANT_MANIFEST_PATH} on ${ports.registrations.branch}`);
@@ -147,7 +147,7 @@ export async function resolveTenantAppsUnit(
   const read = await readTemplate(ports, template.repo, input.signal);
   let offered: string[];
   let engine: AppsEngine | undefined;
-  const unfolded: string[] = [];
+  let unfolded: string[] = [];
   try {
     const catalog = parseAppsManifest(read.appsYaml);
     offered = catalog.apps.map((a) => a.name);
@@ -156,14 +156,14 @@ export async function resolveTenantAppsUnit(
     // owner's packages reader (#220, #221) — asked here, before anything is created.
     const scopes = npmrcPackageScopes(read.npmrc);
     if (scopes.length > 0 && !input.owners(org)?.packagesCredentialId) return refuse(packagesReaderMissing(org, unit, scopes, ADD_APP_FORM));
-    for (const app of input.chosen) if (offered.includes(app) && !(await read.folders(app))) unfolded.push(app);
+    unfolded = await read.missing(input.chosen.filter((a) => offered.includes(a)), input.sites ?? {});
     if (!read.manifest.builds.some((b) => b.name === template.name)) return refuse(`${template.repo} declares no build named ${template.name} in its ${CONSUMER_MANIFEST_PATH} — the tenant's build takes its containerfile from that entry`);
   } finally {
     await read.dispose();
   }
   const unknown = input.chosen.filter((a) => !offered.includes(a));
   if (unknown.length > 0) return refuse(`${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not in the template's ${APPS_MANIFEST_PATH} (it offers ${offered.join(", ") || "nothing"})`);
-  if (unfolded.length > 0) return refuse(`${unfolded.join(", ")} ${unfolded.length === 1 ? "has" : "have"} no folder in ${template.repo} (${unfolded.map((a) => `${BUNDLE_APPS_DIR}/${a}/`).join(", ")}) although its ${APPS_MANIFEST_PATH} names ${unfolded.length === 1 ? "it" : "them"} — the bundle would refuse to build`);
+  if (unfolded.length > 0) return refuse(`${template.repo} carries no ${unfolded.join(", ")} although its ${APPS_MANIFEST_PATH} names ${unfolded.length === 1 ? "it" : "them"} — a catalog in another layout than apps/<app>/ and webs/<site>/ is refused, and the bundle would refuse to build`);
   const registration = (await ports.buildUnitRegistration?.(unit)) ?? null;
   if (registration?.form === "deployable") return refuse(`the unit ${unit} is registered as DEPLOYABLE on this installation — a tenant's apps repository is a build-only unit; offboard that unit first`);
   return { outcome: "resolved", unit: { org, templateRepoURL: template.repo, templateBuild: template.name, registered: registration !== null, ...(engine ? { engine } : {}) } };

@@ -39,19 +39,35 @@ export interface TreeFile {
  *  sites for carries every site its entry lists, and its entry as the template spells it. */
 export type ServedSites = Readonly<Record<string, readonly string[]>>;
 
-/** Where a bundle keeps its apps and its websites' content: `apps/<app>/` and `webs/<site>/`. The
- *  image maps both into its `/apps` tree, so the engine reads the same paths as before the split. */
+/** Where a bundle keeps its apps and its websites' content: `apps/<app>/` and `webs/<site>/`. */
 export const BUNDLE_APPS_DIR = "apps";
 export const BUNDLE_WEBS_DIR = "webs";
+
+/** The folders a run needs and the catalog does not carry, each as `<path>/`: `apps/<app>/` of every
+ *  chosen app, and `webs/<site>/` of every site the run serves (an empty directory carries nothing).
+ *  A catalog in another layout lacks them, so the plan and the copy that ask this refuse it instead
+ *  of reading a tree of the wrong shape. */
+export async function missingBundleFolders(repo: RepoReader, workdir: string, input: { chosen: readonly string[]; sites: ServedSites }): Promise<string[]> {
+  const wanted = [
+    ...input.chosen.map((app) => `${BUNDLE_APPS_DIR}/${app}`),
+    ...Object.entries(input.sites).filter(([folder]) => input.chosen.includes(folder)).flatMap(([, ids]) => ids.map((id) => `${BUNDLE_WEBS_DIR}/${id}`)),
+  ];
+  const missing: string[] = [];
+  for (const path of wanted) if ((await repo.listDir(workdir, path)).length === 0) missing.push(`${path}/`);
+  return missing;
+}
 
 /** Every file of the template that belongs in a tenant's repository, read through the reader. Left
  *  out: the git directory; the release kit (inject-release-kit writes the current kit, and a copied
  *  one would be replaced a step later); the two files this run composes (the manifest, apps.yaml);
- *  the paths the catalog keeps for itself (its apps.yaml's `catalogOnly`, such as its handbook); the
- *  folder under `apps/` of every app the tenant did not choose; and the folder under `webs/` of every
- *  site no chosen app carries: a website folder the run serves sites of carries only those, one it
- *  names none for carries every site its entry lists. */
+ *  the paths the catalog keeps for itself (its apps.yaml's `catalogOnly`, such as its handbook);
+ *  under `apps/` everything but the folders of the chosen apps; and under `webs/` everything but the
+ *  folders of the sites a chosen app carries: a website folder the run serves sites of carries only
+ *  those, one it names none for carries every site its entry lists. A chosen app or a served site
+ *  whose folder the catalog lacks refuses the copy before anything is read. */
 export async function readTemplateTree(repo: RepoReader, workdir: string, input: { templateApps: readonly { name: string; sites?: readonly string[] | undefined }[]; catalogOnly: readonly string[]; chosen: readonly string[]; sites: ServedSites }): Promise<TreeFile[]> {
+  const missing = await missingBundleFolders(repo, workdir, input);
+  if (missing.length > 0) throw errValidation(`the catalog carries no ${missing.join(", ")}, so it is not in the layout this Manager copies (apps/<app>/ and webs/<site>/) and nothing is written into the tenant's repository`);
   const chosen = new Set(input.chosen);
   const carried = new Set(input.templateApps.filter((a) => chosen.has(a.name)).flatMap((a) => input.sites[a.name] ?? a.sites ?? []));
   const skipped = new Set([".git", RELEASE_KIT_DIR, RELEASE_KIT_WORKFLOW.path, APPS_MANIFEST_PATH, CONSUMER_MANIFEST_PATH, ...input.catalogOnly]);

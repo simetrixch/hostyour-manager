@@ -384,7 +384,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       if (!ports.githubApp) throw errValidation(NO_GITHUB_APP);
-      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [appFolder({ name: req.app, ...website })], spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
+      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [appFolder({ name: req.app, ...website })], ...(website ? { sites: { [website.folder]: [website.site] } } : {}), spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") throw errValidation(resolved.why);
       const appsUnit = resolved.unit;
       const appsImage = tenantAppsUnit(appsUnit.templateBuild, current.entry.subdomain);

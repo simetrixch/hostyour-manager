@@ -348,10 +348,10 @@ describe("add-app — the catalog's layout and the paths it keeps for itself", (
     expect(files).toEqual(expect.arrayContaining([`apps/${NEW_APP}/package.json`, "package.json"]));
   });
 
-  it("refuses an app the catalog names but carries no folder for under apps/, and names that folder", async () => {
+  it("refuses at its plan a catalog in the old layout, whose app folder stands at the root, and names the folder it looked for", async () => {
     seedClusters();
-    const withoutFolder = Object.fromEntries(Object.entries(TEMPLATE_APPS()).filter(([path]) => !path.startsWith(`apps/${NEW_APP}/`)));
-    await expect(makeAddAppDef(ports({}, withoutFolder)).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx())).rejects.toThrow(`${NEW_APP} has no folder in https://github.com/`);
-    await expect(makeAddAppDef(ports({}, withoutFolder)).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx())).rejects.toThrow(`(apps/${NEW_APP}/)`);
+    const oldLayout = Object.fromEntries(Object.entries(TEMPLATE_APPS()).map(([path, content]) => [path.replace(/^apps\//, ""), content]));
+    expect(Object.keys(oldLayout)).toContain(`${NEW_APP}/package.json`);
+    await expect(makeAddAppDef(ports({}, oldLayout)).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx())).rejects.toThrow(`carries no apps/${NEW_APP}/ although its apps.yaml names it`);
   });
 });

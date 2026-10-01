@@ -30,6 +30,8 @@ useMemoryDb();
 /** The template's catalog with a website folder: `web` carries the sites main and shop. */
 const WEBSITE_APPS = {
   "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n  - name: web\n    title: Website\n    sites: [main, shop]\n",
+  "webs/main/website.json": "{}\n",
+  "webs/shop/website.json": "{}\n",
 };
 const WEBSITE = { tenantId: "tnt_1", app: "main", folder: "web", site: "main", domain: "example.ch" };
 const OK = { reachable: true, status: 200, detail: "HTTP 200" };
@@ -113,6 +115,12 @@ describe("add-app for a website", () => {
     await expect(def.planStream!(WEBSITE, planCtx())).rejects.toThrow(/app "main" already exists/);
     const result = await def.planStream!({ ...WEBSITE, app: "main-2" }, planCtx());
     expect(result.outcome === "planned" && result.params.app).toBe("main-2");
+  });
+
+  it("refuses a website whose site the catalog carries no folder for under webs/, naming the folder", async () => {
+    seedWebsiteTenant();
+    const withoutSite = { "apps.yaml": WEBSITE_APPS["apps.yaml"], "webs/shop/website.json": "{}\n" };
+    await expect(makeAddAppDef(ports({}, withoutSite)).planStream!(WEBSITE, planCtx())).rejects.toThrow(/carries no webs\/main\/ although its apps\.yaml names it/);
   });
 
   it("lists an address record at a website host in the plan, replaces it with the CNAME, and writes it back on abort", async () => {
