@@ -128,6 +128,15 @@ describe("tenant-restore", () => {
   });
 });
 
+/** A consumer registration as a generation holds it, with `services` as the unit claimed them. */
+function dumpedConsumer(services: ("mongodb" | "postgresql")[]): string {
+  return serializePointer(ConsumerRegistrationSchema, {
+    name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false, removing: false,
+    chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services, size: "medium", mongodb: "shared",
+    quota: seedQuota("medium"),
+  });
+}
+
 describe("restore (consumer)", () => {
   it("reconstructs an offboarded consumer: registration re-committed at the target from the dumped bytes, stores replayed, row active on the target", async () => {
     seedClusters(db);
@@ -185,6 +194,20 @@ describe("restore (consumer)", () => {
     const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`);
     expect(restore?.spec.runAs).toEqual({ user: 1000, group: 1000 });
     expect(restore?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
+  });
+
+  it("REFUSES, by name and before any store is written, a claim the generation holds and the restore has nowhere to write", async () => {
+    seedClusters(db);
+    seedConsumerRow(db, "offboarded");
+    seedGeneration(db, "consumer", CONSUMER);
+    const f = makeFakes();
+    scriptDumpedRegistration(f.target.reader, CONSUMER, dumpedConsumer(["mongodb"]));
+    // The offboard deleted the namespace on the old cluster, so no claim stands there, while the
+    // generation still holds the claim's tar.
+    f.target.reader.setJobResult(`reloc-list-pvc-${CONSUMER}`, { succeeded: true, logs: "CLAIM queue-mta-0" });
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
+    await expect(driveSteps(db, makeRestoreDef(consumerPorts(f)).steps(params), params, [])).rejects.toThrow(/holds queue-mta-0/);
+    expect(jobNames(f.target).filter((n) => n.startsWith("reloc-restore-"))).toEqual([]);
   });
 
   it("carries the attested fqdn and the SMTP entry of the dump into the re-committed registration", async () => {

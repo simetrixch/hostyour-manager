@@ -15,7 +15,8 @@ import {
   tenantDumpJobs, tenantRestoreJobs, tenantVerifyCompletenessJobs, tenantClearSourceJobs, tenantSourceDbListJob,
 } from "./relocation-jobs-tenant.ts";
 import {
-  consumerDumpJobs, consumerRestoreJobs, consumerVerifyCompletenessJobs, consumerClearSourceJobs, consumerSourceDbListJob, claimsIdentity, consumerExpectedDumpEntries, extractClaimLine
+  consumerDumpJobs, consumerRestoreJobs, consumerVerifyCompletenessJobs, consumerClearSourceJobs, consumerSourceDbListJob, claimsIdentity, consumerExpectedDumpEntries, extractClaimLine,
+  consumerGenerationClaimsJob, parseClaimLines,
 } from "./relocation-jobs-consumer.ts";
 import type { ConsumerService } from "../../../shared/consumer.ts";
 import { openFixtureDb, makeFakes, consumerPorts, stepCtx, SOURCE } from "./relocation.fixture.ts";
@@ -319,3 +320,58 @@ describe("restoring a consumer's claims", () => {
   });
 });
 
+describe("listing the claims a generation holds", () => {
+  // The job's script, run by the same `sh -e` the pod runs it with, against an rclone stub that
+  // answers `lsf` off a local directory standing in for the box.
+  function listClaims(box: string): string {
+    const bin = mkdtempSync(join(tmpdir(), "rclone-bin-"));
+    writeFileSync(join(bin, "rclone"), `#!/bin/sh
+case "$1" in
+  obscure) echo obscured ;;
+  lsf) d="$BOX_ROOT/\${2#box:}"; [ -d "$d" ] || { echo "directory not found" >&2; exit 3; }
+       for e in "$d"/*; do [ -e "$e" ] || continue; if [ -d "$e" ]; then echo "$(basename "$e")/"; else basename "$e"; fi; done ;;
+esac
+`, { mode: 0o755 });
+    try {
+      const job = consumerGenerationClaimsJob({ name: "acme", namespace: "acme-prod", folder: "gen", image: "dbtools" });
+      return execFileSync("sh", ["-ec", job.spec.script], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, BOX_ROOT: box, STORAGE_BOX_PASSWORD: "x" }, stdio: "pipe" }).toString();
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  }
+  const generation = (entries: Record<string, string>): string => {
+    const box = mkdtempSync(join(tmpdir(), "claim-box-"));
+    for (const [path, body] of Object.entries(entries)) {
+      execFileSync("mkdir", ["-p", join(box, "gen", path, "..")]);
+      writeFileSync(join(box, "gen", path), body);
+    }
+    return box;
+  };
+
+  it("names every claim whose tar the generation holds, and nothing else in its pvc/ folder", () => {
+    const box = generation({ "registration.yaml": "", "pvc/queue-mta-0.tar.gz": "", "pvc/notes.txt": "" });
+    try {
+      expect(parseClaimLines(listClaims(box))).toEqual(["queue-mta-0"]);
+    } finally {
+      rmSync(box, { recursive: true, force: true });
+    }
+  });
+
+  it("PLANTED INNOCENT: a generation without a pvc/ folder holds no claim, and the job still succeeds", () => {
+    const box = generation({ "registration.yaml": "" });
+    try {
+      expect(parseClaimLines(listClaims(box))).toEqual([]);
+    } finally {
+      rmSync(box, { recursive: true, force: true });
+    }
+  });
+
+  it("fails where the box cannot be read, rather than reading it as a generation without claims", () => {
+    const box = mkdtempSync(join(tmpdir(), "claim-box-"));
+    try {
+      expect(() => listClaims(box)).toThrow();
+    } finally {
+      rmSync(box, { recursive: true, force: true });
+    }
+  });
+});

@@ -23,10 +23,10 @@ import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
 import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/port.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
-import type { RelocationPorts, RelocationWorld, WorldOf } from "#unit/server/relocation.ts";
+import { runRelocationJob, type RelocationPorts, type RelocationWorld, type WorldOf } from "#unit/server/relocation.ts";
 import {
   consumerDumpJobs, claimsIdentity, tarredClaims,
-  consumerRestoreJobs,
+  consumerRestoreJobs, consumerGenerationClaimsJob, parseClaimLines,
   consumerVerifyCompletenessJobs,
   consumerSourceDbListJob,
   consumerClearSourceJobs,
@@ -109,9 +109,18 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       },
       expectedDumpEntries: async () => consumerExpectedDumpEntries(await jobInputs()),
       // The restore writes the files as the workloads that will read them on the TARGET, which the
-      // target renders quiesced before any data is back, so their templates already stand.
-      restoreJobs: async (folder, _ctx, targetClusterId) => {
+      // target renders quiesced before any data is back, so their templates already stand. What the
+      // generation holds decides what must come back: a claim it holds that the restore does not
+      // extract is refused by name before any store is written, so a restore never settles green over
+      // data it left behind.
+      restoreJobs: async (folder, ctx, targetClusterId) => {
         const inputs = await jobInputs();
+        const held = parseClaimLines(await runRelocationJob(ports, ctx, targetClusterId, consumerGenerationClaimsJob({ name: ac.name, namespace, folder, image })));
+        const extracted = tarredClaims(inputs);
+        const unplaced = tarredClaims({ pvcs: held, services: inputs.services }).filter((claim) => !extracted.includes(claim));
+        if (unplaced.length > 0) {
+          throw errValidation(`the generation ${folder} holds ${unplaced.join(", ")}, and the restore has no claim of that name in ${namespace} to write into, so it stops before any store is written`);
+        }
         const pvcUser = await claimsIdentityOn(targetClusterId, inputs);
         return consumerRestoreJobs({ ...inputs, ...(pvcUser !== undefined ? { pvcUser } : {}), folder });
       },

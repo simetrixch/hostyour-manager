@@ -30,6 +30,33 @@ export function extractClaimLine(archive: string, root: string): string {
   return `tar xzf "${archive}" -C "${root}" --no-overwrite-dir`;
 }
 
+/** The job that lists the claims a generation holds: one `CLAIM <name>` line per `pvc/<name>.tar.gz`,
+ *  none where the generation has no pvc/ folder. Each listing lands in a file before it is read,
+ *  because `sh -e` misses a failure inside a pipe, and a box that cannot be read must fail the job
+ *  rather than read as a generation without claims. */
+export function consumerGenerationClaimsJob(i: Pick<ConsumerJobInputs, "name" | "namespace" | "folder" | "image">): RelocationJob {
+  return {
+    namespace: i.namespace,
+    spec: {
+      ...boxSpec("list-pvc", i.name),
+      image: i.image,
+      script:
+        BOX_REMOTE +
+        `rclone lsf "box:${i.folder}/" > /tmp/generation
+if grep -qx "pvc/" /tmp/generation; then
+  rclone lsf "box:${i.folder}/pvc/" > /tmp/claims
+  sed -n 's/^\\(.*\\)\\.tar\\.gz$/CLAIM \\1/p' /tmp/claims
+fi
+`,
+    },
+  };
+}
+
+/** The claim names a consumerGenerationClaimsJob printed. */
+export function parseClaimLines(logs: string): string[] {
+  return logs.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("CLAIM ")).map((l) => l.slice("CLAIM ".length));
+}
+
 /** The per-consumer PostgreSQL root password, off the instance's own Secret in the unit's namespace —
  *  the same one the dump and the restore dial with. */
 const consumerPostgresEnv = (): JobEnvVar[] => [{ name: "POSTGRES_PASSWORD", secretKeyRef: { name: CONSUMER_POSTGRES.secret, key: CONSUMER_POSTGRES.key } }];
