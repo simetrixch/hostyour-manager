@@ -122,6 +122,8 @@ export function makeFakes(): RelocationFakes {
     argo: new FakeMasterArgoReader({ status: synced, statuses: syncedSet(TENANT_WATCH) }),
     projects: new FakeMasterProjectWriter(),
   };
+  // Every generation below holds no claim unless a test scripts its own listing (the longer prefix wins).
+  for (const side of [source, target]) side.reader.setJobResult("reloc-list-pvc-", { succeeded: true, logs: "CLAIMS 0" });
   const resolver = new FakeClusterKubeResolver({ clusterReader: source.reader, argoReader: source.argo, projectWriter: source.projects, argoNamespace: SOURCE.cluster });
   resolver.set(TARGET.clusterId, { clusterReader: target.reader, argoReader: target.argo, projectWriter: target.projects, argoNamespace: TARGET.cluster });
   const dns = new FakeDnsProvider();

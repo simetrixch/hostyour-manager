@@ -33,9 +33,9 @@ export function extractClaimLine(archive: string, root: string): string {
 }
 
 /** The job that lists the claims a generation holds: one `CLAIM <name>` line per `pvc/<name>.tar.gz`,
- *  none where the generation has no pvc/ folder. Each listing lands in a file before it is read,
- *  because `sh -e` misses a failure inside a pipe, and a box that cannot be read must fail the job
- *  rather than read as a generation without claims. */
+ *  none where the generation has no pvc/ folder, then `CLAIMS <count>`. Each listing lands in a file
+ *  before it is read, because `sh -e` misses a failure inside a pipe, and a box that cannot be read
+ *  must fail the job rather than read as a generation without claims. */
 export function consumerGenerationClaimsJob(i: Pick<ConsumerJobInputs, "name" | "namespace" | "folder" | "image">): RelocationJob {
   return {
     namespace: i.namespace,
@@ -45,18 +45,30 @@ export function consumerGenerationClaimsJob(i: Pick<ConsumerJobInputs, "name" | 
       script:
         BOX_REMOTE +
         `rclone lsf "box:${i.folder}/" > /tmp/generation
+: > /tmp/claims
 if grep -qx "pvc/" /tmp/generation; then
-  rclone lsf "box:${i.folder}/pvc/" > /tmp/claims
-  sed -n 's/^\\(.*\\)\\.tar\\.gz$/CLAIM \\1/p' /tmp/claims
+  rclone lsf "box:${i.folder}/pvc/" > /tmp/pvc
+  sed -n 's/^\\(.*\\)\\.tar\\.gz$/\\1/p' /tmp/pvc > /tmp/claims
 fi
+n=0
+while read -r claim; do echo "CLAIM $claim"; n=$((n + 1)); done < /tmp/claims
+echo "CLAIMS $n"
 `,
     },
   };
 }
 
-/** The claim names a consumerGenerationClaimsJob printed. */
+/** The claim names a consumerGenerationClaimsJob printed. Its closing count is what tells a generation
+ *  without claims from a log that never arrived: a succeeded Job whose pod is gone answers no log at
+ *  all, and that must stop the restore, not read as nothing to put back. */
 export function parseClaimLines(logs: string): string[] {
-  return logs.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("CLAIM ")).map((l) => l.slice("CLAIM ".length));
+  const lines = logs.split("\n").map((l) => l.trim());
+  const claims = lines.filter((l) => l.startsWith("CLAIM ")).map((l) => l.slice("CLAIM ".length));
+  const count = lines.find((l) => l.startsWith("CLAIMS "))?.slice("CLAIMS ".length);
+  if (count === undefined || Number(count) !== claims.length) {
+    throw errValidation(`the listing of the generation's claims came back ${count === undefined ? "without its closing count" : `with ${claims.length} claim(s) under a count of ${count}`}, so nothing says which claims it holds, and the restore stops before any store is written`);
+  }
+  return claims;
 }
 
 /** The per-consumer PostgreSQL root password, off the instance's own Secret in the unit's namespace —

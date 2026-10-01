@@ -351,18 +351,18 @@ describe("restoring a consumer's claims", () => {
 describe("listing the claims a generation holds", () => {
   // The job's script, run by the same `sh -e` the pod runs it with, against an rclone stub that
   // answers `lsf` off a local directory standing in for the box.
-  function listClaims(box: string): string {
+  function listClaims(box: string, failOn = ""): string {
     const bin = mkdtempSync(join(tmpdir(), "rclone-bin-"));
     writeFileSync(join(bin, "rclone"), `#!/bin/sh
 case "$1" in
   obscure) echo obscured ;;
-  lsf) d="$BOX_ROOT/\${2#box:}"; [ -d "$d" ] || { echo "directory not found" >&2; exit 3; }
+  lsf) d="$BOX_ROOT/\${2#box:}"; [ -d "$d" ] && [ "\${2#box:}" != "$FAIL_ON" ] || { echo "directory not found" >&2; exit 3; }
        for e in "$d"/*; do [ -e "$e" ] || continue; if [ -d "$e" ]; then echo "$(basename "$e")/"; else basename "$e"; fi; done ;;
 esac
 `, { mode: 0o755 });
     try {
       const job = consumerGenerationClaimsJob({ name: "acme", namespace: "acme-prod", folder: "gen", image: "dbtools" });
-      return execFileSync("sh", ["-ec", job.spec.script], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, BOX_ROOT: box, STORAGE_BOX_PASSWORD: "x" }, stdio: "pipe" }).toString();
+      return execFileSync("sh", ["-ec", job.spec.script], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, BOX_ROOT: box, FAIL_ON: failOn, STORAGE_BOX_PASSWORD: "x" }, stdio: "pipe" }).toString();
     } finally {
       rmSync(bin, { recursive: true, force: true });
     }
@@ -395,11 +395,18 @@ esac
   });
 
   it("fails where the box cannot be read, rather than reading it as a generation without claims", () => {
-    const box = mkdtempSync(join(tmpdir(), "claim-box-"));
+    const box = generation({ "pvc/queue-mta-0.tar.gz": "" });
     try {
-      expect(() => listClaims(box)).toThrow();
+      expect(() => listClaims(box, "gen/")).toThrow();
+      expect(() => listClaims(box, "gen/pvc/")).toThrow();
     } finally {
       rmSync(box, { recursive: true, force: true });
     }
+  });
+
+  it("refuses a listing that came back without its closing count, or with another number of claims", () => {
+    expect(parseClaimLines("CLAIMS 0")).toEqual([]);
+    expect(() => parseClaimLines("")).toThrow(/without its closing count/);
+    expect(() => parseClaimLines("CLAIM queue-mta-0\nCLAIMS 2")).toThrow(/1 claim\(s\) under a count of 2/);
   });
 });
