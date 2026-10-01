@@ -160,11 +160,12 @@ export function tenantRestoreJobs(i: TenantJobInputs): RelocationJob[] {
         image: i.image,
         script:
           BOX_REMOTE +
-          `rclone lsf "box:${i.folder}/mongo/" | while read -r f; do
+          `rclone lsf "box:${i.folder}/mongo/" > /tmp/archives
+while read -r f; do
   rclone copyto "box:${i.folder}/mongo/$f" "/tmp/$f"
   mongorestore ${MONGO_FLAGS} --archive="/tmp/$f" --drop --quiet
   rm -f "/tmp/$f"
-done
+done < /tmp/archives
 `,
       },
     },
@@ -197,9 +198,11 @@ export function tenantVerifyCompletenessJobs(i: TenantJobInputs): RelocationJob[
         script:
           BOX_REMOTE +
           `${listMongoDbs(`${i.guid}_`)} | sed 's/^DB //' > /tmp/have
-rclone lsf "box:${i.folder}/mongo/" | sed 's/\\.archive$//' | while read -r want; do
+rclone lsf "box:${i.folder}/mongo/" > /tmp/archives
+sed 's/\\.archive$//' /tmp/archives > /tmp/want
+while read -r want; do
   grep -qx "$want" /tmp/have || { echo "MISSING database $want"; exit 1; }
-done
+done < /tmp/want
 echo "COMPLETE mongo"
 `,
       },
