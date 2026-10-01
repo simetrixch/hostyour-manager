@@ -630,7 +630,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
     // own `ansiwise-rest`, and the master's engine moves only when a run moves it (#133): every
     // slave deployed after a release of the engine would otherwise ask the master's OLD binary to
     // run a program row the new one was released for. Idempotent by measurement; on a current
-    // master it is two readings.
+    // master it is three readings.
     placeAnsiwiseOnMasterStep(ports),
     ...(redeploying
       ? [joinIfAbsentStep(target, sid, ports)]

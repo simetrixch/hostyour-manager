@@ -447,7 +447,7 @@ export function tailnetSteps(kind: TailnetKind, serverId: string, ports: Tailnet
   // THE ENGINE IS BROUGHT TO THE PIN BEFORE ANY PROGRAM IS JUDGED BY IT — on the host, and on the
   // master where the rejoin mints there — because the programs checkout those programs are read out of is
   // always master and the engine on an installed machine moves only when a run moves it (#133). Both
-  // placements are idempotent by measurement, so a current machine costs two readings each.
+  // placements are idempotent by measurement, so a current machine costs three readings each.
   if (kind === "cluster-tailnet-rejoin") {
     return [
       attestTargetStep(serverId),

@@ -286,20 +286,64 @@ describe("place-ansiwise: what root installed, read back off the path", () => {
     expect(lastOnPath(hosts, ANSIWISE_TOOL)).toBe(genuine(ANSIWISE_TOOL));
   });
 
-  it("places again over a path copy that answers the pin and is not the release's bytes, and says why", async () => {
-    const hosts = scriptedHosts();
-    const { releases, read, request } = placement();
+  /** A machine whose home and path both carry the release's bytes at the pin. */
+  async function placedMachine(hosts: HostsScript, onPathOf: (name: string) => string = genuine): Promise<void> {
     const machine = await sessionMachine(hosts, []);
     for (const name of ANSIWISE_EXECUTABLES) {
       await machine.putFile(name, assetBytes(name, ANSIWISE_PIN), EXECUTABLE_MODE);
-      const content = name === ANSIWISE_TOOL ? swappedCopy(name) : genuine(name);
-      hosts.files.push({ host: HOST, path: `${ON_PATH}${name}`, content, mode: EXECUTABLE_MODE });
+      hosts.files.push({ host: HOST, path: `${ON_PATH}${name}`, content: onPathOf(name), mode: EXECUTABLE_MODE });
     }
+  }
 
+  for (const swapped of ANSIWISE_EXECUTABLES) {
+    it(`places again over a path copy that answers the pin and is not the release's bytes, and says why — ${swapped}`, async () => {
+      const hosts = scriptedHosts();
+      const { releases, read, request } = placement();
+      await placedMachine(hosts, (name) => (name === swapped ? swappedCopy(name) : genuine(name)));
+
+      const said: string[] = [];
+      expect(await placeAnsiwise(await sessionMachine(hosts, said), read, request)).toEqual({ version: ANSIWISE_PIN, placed: true });
+      expect(said.join("\n")).toContain(`${PATH_HOME}${swapped} answers ${ANSIWISE_PIN} and does not hash to its stated SHA-256`);
+      expect(releases.read).toEqual([`https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${swapped}-${ANSIWISE_PIN}-linux-x64`]);
+      expect(lastOnPath(hosts, swapped)).toBe(genuine(swapped));
+    });
+  }
+
+  it("places again over a path copy with the release's bytes that does not answer the pin", async () => {
+    // The release's bytes that do not run from the path, as a copy that lost its execute bit answers.
+    // The digest alone would call it placed, so the version half of the decision is what places it.
+    const hosts = scriptedHosts();
+    const { read, request } = placement();
+    await placedMachine(hosts);
+    let asked = false;
     const said: string[] = [];
-    expect(await placeAnsiwise(await sessionMachine(hosts, said), read, request)).toEqual({ version: ANSIWISE_PIN, placed: true });
-    expect(said.join("\n")).toContain(`${PATH_HOME}${ANSIWISE_TOOL} answers ${ANSIWISE_PIN} and does not hash to its stated SHA-256`);
-    expect(releases.read).toEqual([`https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`]);
-    expect(lastOnPath(hosts, ANSIWISE_TOOL)).toBe(genuine(ANSIWISE_TOOL));
+    const honest = await sessionMachine(hosts, said);
+    const machine: PlacementMachine = {
+      ...honest,
+      run: (argv, o) => {
+        if (!asked && argv.join(" ") === `${PATH_HOME}${ANSIWISE_TOOL} --version`) {
+          asked = true;
+          return Promise.resolve({ code: 126, stdout: "" });
+        }
+        return honest.run(argv, o);
+      },
+    };
+
+    expect(await placeAnsiwise(machine, read, request)).toEqual({ version: ANSIWISE_PIN, placed: true });
+    expect(said.join("\n")).toContain(`${PATH_HOME}${ANSIWISE_TOOL} answers nothing)`);
+  });
+
+  it("refuses a path copy that runs and cannot be hashed, and places nothing over it", async () => {
+    const hosts = scriptedHosts();
+    const { read, request } = placement();
+    await placedMachine(hosts);
+    const machine = await machineWith(hosts, (line, run) =>
+      (line.startsWith("sha256sum ") ? Promise.resolve({ code: 127, stdout: "" }) : run()));
+
+    await expect(placeAnsiwise(machine, read, request)).rejects.toThrow(
+      `${PATH_HOME}${ANSIWISE_TOOL} on ${FIRST_INSTALL_FQDN} answers ${ANSIWISE_PIN}, and sha256sum could not read it (exit 127)`,
+    );
+    expect(hosts.log.some((act) => act.command.startsWith("sudo ")), "something was installed or removed").toBe(false);
+    for (const name of ANSIWISE_EXECUTABLES) expect(lastOnPath(hosts, name)).toBe(genuine(name));
   });
 });

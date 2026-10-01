@@ -385,12 +385,13 @@ export interface BootstrapVerdict {
  *  the machine answering the pin. Each copy root installs is read back off the path and held against
  *  its digest before the next one is installed.
  *
- *  WHAT THIS HOLDS: a file swapped in the account's home between the transfer and the install never
- *  stays on the path, and a later run places again over any path copy that is not the release's bytes.
- *  Two bounds remain.
+ *  WHAT THIS HOLDS: a file swapped in the account's home between the transfer and the install is
+ *  taken off the path before anything else is installed, and a later run places again over any path
+ *  copy that is not the release's bytes. Two bounds remain.
  *  - THE WINDOW. Between an install and its read-back, the installed copy stands unread under the
- *    name root runs. A swapped copy is executable there until the read-back removes it, and where the
- *    run ends before the read-back, until the next placement hashes it and places again.
+ *    name root runs. A swapped copy is executable there until the read-back removes it. Where the run
+ *    ends before the read-back, or the removal fails, it stays until the next placement hashes it and
+ *    places again.
  *  - THE SHELL. Every command here is answered by the operating account's own shell, which reads that
  *    account's start-up files. An account whose start-up answers in place of `sha256sum`, or reads the
  *    password piped to `sudo -S`, is stopped by nothing in this module. */
@@ -435,7 +436,19 @@ export async function placeAnsiwise(
     return { name, from, asset, stated };
   });
   const pathDigests: Record<string, string | undefined> = {};
-  for (const { name } of addressed) pathDigests[name] = (await readDigest(machine, `${PATH_HOME}${name}`)).digest;
+  for (const { name } of addressed) {
+    const read = await readDigest(machine, `${PATH_HOME}${name}`);
+    // A COPY THAT RUNS AND CANNOT BE HASHED is refused here, before anything is placed. Where the
+    // reading fails because sha256sum itself fails, a copy installed over it could not be read back
+    // either, and its removal would take a working engine off the path.
+    if (read.digest === undefined && onPath[name] !== undefined) {
+      throw errValidation(
+        `${PATH_HOME}${name} on ${machine.name} answers ${onPath[name]}, and sha256sum could not read it ` +
+        `(exit ${read.code}), so it cannot be held against its stated SHA-256 — nothing was placed`,
+      );
+    }
+    pathDigests[name] = read.digest;
+  }
 
   // PLACED AGAIN WHERE EITHER COPY IS OFF THE PIN, OR WHERE THE PATH COPY IS NOT THE RELEASE'S BYTES.
   // A copy that answers the pin is no proof the release built it: an earlier run's copy, one the
@@ -520,14 +533,17 @@ export async function placeAnsiwise(
     // needs no credential.
     const installed = await readDigest(machine, `${PATH_HOME}${name}`);
     if (installed.digest === stated) continue;
-    const removed = await machine.run(["sudo", "-S", "rm", "-f", `${PATH_HOME}${name}`], { timeoutMs: COMMAND_TIMEOUT_MS, stdin });
-    throw errValidation(
-      `${PATH_HOME}${name} on ${machine.name} ` +
+    const finding = `${PATH_HOME}${name} on ${machine.name} ` +
       (installed.digest === undefined
         ? `could not be read back after the install (sha256sum exit ${installed.code}), so it was not held against ` +
           `the ${stated} the platform repository states for ${asset}`
         : `hashes to ${installed.digest} after the install, and the platform repository states ${stated} for ${asset}, ` +
-          `the digest of the bytes this run wrote to ${BOOTSTRAP_HOME}${name}`) +
+          `the digest of the bytes this run wrote to ${BOOTSTRAP_HOME}${name}`);
+    // Logged before the removal, so the run record carries it even where the removal never returns.
+    machine.log(finding);
+    const removed = await machine.run(["sudo", "-S", "rm", "-f", `${PATH_HOME}${name}`], { timeoutMs: COMMAND_TIMEOUT_MS, stdin });
+    throw errValidation(
+      finding +
       " — " +
       (removed.code === 0
         ? `it was taken off the path again, and ${machine.name} has no ${name} on its path until the next placement`
@@ -543,7 +559,8 @@ export async function placeAnsiwise(
     if (onPathAfter[name] === version) continue;
     throw errValidation(
       `${PATH_HOME}${name} on ${machine.name} answers ${onPathAfter[name] ?? "nothing"} after being placed, not the ` +
-      `pinned ${version} — something else on this machine writes that path`,
+      `pinned ${version}, although it hashed to its stated SHA-256 — the release's bytes do not answer the pin from ` +
+      "that place",
     );
   }
   machine.log(`${machine.name} carries ${describeExecutables(version)}`);

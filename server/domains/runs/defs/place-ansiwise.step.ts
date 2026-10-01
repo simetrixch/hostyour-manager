@@ -87,7 +87,7 @@ export function placeAnsiwiseStep(target: SlaveTarget, ports: DeploySlavePorts &
  *  always master. A row that names a step the master's engine does not carry was refused in the run
  *  that needed it. The master is loaded at RUN time, as the mint loads it, and reached over the
  *  session the plan declares for it (`ctx.ssh(master.id)`, the aux target); the act is the
- *  placement above, idempotent by measurement, so a current master costs two readings. */
+ *  placement above, idempotent by measurement, so a current master costs three readings. */
 export function placeAnsiwiseOnMasterStep(ports: DeploySlavePorts & AnsiwisePorts, opts: { host?: string } = {}): Step {
   return {
     name: "place-ansiwise-master",
