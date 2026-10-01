@@ -157,6 +157,27 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
     expect(() => acquireLocks(db.db, "run_rejoin_s2", second)).toThrow("Resource busy");
   });
 
+  it("lets no reconnect of the master start while a rejoin may place the engine there, and holds no lock for a reading", async () => {
+    // A reconnect places the engine on its own target. Aimed at the master, it places there, and it
+    // owns the master where the rejoin of a slave only drives it, so the server lock alone keeps
+    // the two apart nowhere.
+    const db = setup();
+    db.sqlite.prepare("INSERT OR IGNORE INTO operators (id, username, display_name) VALUES ('op','op','op')").run();
+    const claimsOf = async (runId: string, kind: TailnetKind, serverId: string): Promise<LockClaim[]> => {
+      const plan = await DEFS[kind].plan({ serverId }, { db: db.db });
+      db.sqlite
+        .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
+        .run(runId, kind, "server", serverId, "{}", "{}", "approved", "op");
+      return [...deriveServerLocks(plan.targets ?? []), ...(plan.locks ?? [])];
+    };
+
+    acquireLocks(db.db, "run_rejoin_s1", await claimsOf("run_rejoin_s1", "cluster-tailnet-rejoin", SLAVE_ID));
+    const reconnect = await claimsOf("run_reconnect_m1", "cluster-tailnet-reconnect", MASTER_ID);
+    expect(() => acquireLocks(db.db, "run_reconnect_m1", reconnect)).toThrow("Resource busy");
+    const reading = await DEFS["cluster-tailnet-read"].plan({ serverId: MASTER_ID }, { db: db.db });
+    expect(reading.locks ?? []).toEqual([]);
+  });
+
   it("only a rejoin declares the master at all, and on its usual address — the other two touch one host", async () => {
     const db = setup();
     const rejoin = await DEFS["cluster-tailnet-rejoin"].plan({ serverId: SLAVE_ID }, { db: db.db });

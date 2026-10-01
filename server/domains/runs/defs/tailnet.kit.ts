@@ -556,10 +556,11 @@ export function tailnetPlan(kind: TailnetKind, serverId: string, db: Db, ports: 
       ...(master && !masterIsTarget ? [{ serverId: master.id, ownsHost: false, label: `${master.name} (master)` }] : []),
     ],
     warnings: WARNINGS[mode]({ masterIsTarget }),
-    // THE REJOIN PLACES THE ENGINE ON THE MASTER AND MINTS THERE, so it holds the lock every other run
-    // that does either holds. Two placements on the master at once can each read the other's copy in the
-    // middle of its install and take it off the path again.
-    ...(mode === "rejoin" ? { locks: [{ resource: "master-kube" as const, key: "m" }] } : {}),
+    // A PLAN THAT PLACES THE ENGINE ON THE MASTER holds the lock every other run that does so holds:
+    // the rejoin always places there, and a disconnect or reconnect places on its own target, which
+    // may be the master. Two placements on the master at once can each read the other's copy in the
+    // middle of its install and take it off the path again. The reading places nothing.
+    ...(mode === "rejoin" || (mode !== "read" && masterIsTarget) ? { locks: [{ resource: "master-kube" as const, key: "m" }] } : {}),
     // The programs raise their commands to root with a password the CALLER hands over per run
     // (the installation's ansiwise.yaml: password_from_caller) — collected at approve, held in
     // memory, sent with each POST /runs, persisted nowhere.
