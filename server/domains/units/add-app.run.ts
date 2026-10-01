@@ -237,7 +237,12 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
     },
     // Before the append generates the engine that reads them.
     seedTenantAppKeyStep(ports.seeder, "password-field-key", p.stage, p.guid, p.app),
-    ...(p.website ? [seedTenantAppKeyStep(ports.seeder, "revalidate-secret", p.stage, p.guid, p.app)] : []),
+    ...(p.website
+      ? [
+        seedTenantAppKeyStep(ports.seeder, "revalidate-secret", p.stage, p.guid, p.app),
+        seedTenantAppKeyStep(ports.seeder, "form-signing-key", p.stage, p.guid, p.app),
+      ]
+      : []),
     {
       name: "append-app",
       title: "Append the new app to the tenant registration",

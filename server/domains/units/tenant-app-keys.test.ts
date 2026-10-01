@@ -7,12 +7,13 @@ import type { TenantAppKeySeedInput, VaultSeeder } from "#unit/server/adapters/v
 import { ensureTenantAppKeys, seedTenantAppKeyStep, seedTenantAppKeys } from "./tenant-app-keys.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 
-// Every tenant app's Password field key, and every tenant website's revalidate secret: one per app
-// and kind, 32 random bytes as base64, written create-only into the app's own entry below the
-// tenant's.
+// Every tenant app's Password field key, and every tenant website's revalidate secret and form
+// signing key: one per app and kind, 32 random bytes as base64, written create-only into the app's own
+// entry below the tenant's.
 
-/** A seeder that remembers every key it was handed, answers "exists" for the apps in [standing], and
- *  fails for a guid, or a guid and kind, in [failFor]. */
+/** A seeder that remembers every key it was handed, answers "exists" for the apps in [standing] (a
+ *  guid and app for every kind, or a guid, kind and app for one), and fails for a guid, or a guid and
+ *  kind, in [failFor]. */
 function recordingSeeder(standing: string[] = [], failFor: string[] = []): VaultSeeder & { writes: TenantAppKeySeedInput[] } {
   const writes: TenantAppKeySeedInput[] = [];
   return {
@@ -20,7 +21,7 @@ function recordingSeeder(standing: string[] = [], failFor: string[] = []): Vault
     seedTenantAppKey: async (input: TenantAppKeySeedInput) => {
       if (failFor.includes(input.guid) || failFor.includes(`${input.guid}/${input.kind}`)) throw new Error("vault tenant app key seed put failed (403)");
       writes.push(input);
-      return { created: !standing.includes(`${input.guid}/${input.app}`) };
+      return { created: !standing.includes(`${input.guid}/${input.app}`) && !standing.includes(`${input.guid}/${input.kind}/${input.app}`) };
     },
   } as unknown as VaultSeeder & { writes: TenantAppKeySeedInput[] };
 }
@@ -83,6 +84,17 @@ describe("the step that keys an app joining a standing tenant", () => {
     expect(logs.join("\n")).toContain("Revalidate secrets under prod/tenants/g1/revalidate-secret/: written for simetrix-ch");
   });
 
+  it("writes a website's form signing key under its own step, as 32 random bytes under its own property", async () => {
+    const seeder = recordingSeeder();
+    const logs: string[] = [];
+    const step = seedTenantAppKeyStep(seeder, "form-signing-key", "prod", "g1", "simetrix-ch");
+    await step.run(ctx(logs));
+    expect(step.name).toBe("seed-form-signing-key");
+    expect(seeder.writes.map((w) => [w.kind, w.app, Object.keys(w.data)])).toEqual([["form-signing-key", "simetrix-ch", ["form-signing-key"]]]);
+    expect(Buffer.from(seeder.writes[0]!.data["form-signing-key"]!, "base64")).toHaveLength(32);
+    expect(logs.join("\n")).toContain("Form signing keys under prod/tenants/g1/form-signing-key/: written for simetrix-ch");
+  });
+
   it("refuses by name where no seeder is wired", async () => {
     await expect(seedTenantAppKeyStep(undefined, "password-field-key", "prod", "g1", "crm").run(ctx([]))).rejects.toThrow(/no Vault seeder is wired/);
   });
@@ -123,11 +135,33 @@ describe("the boot pass over every tenant app", () => {
     ]).run();
   });
 
-  it("keys every app of every tenant that is not gone, every website among them with its revalidate secret, and counts what already stood", async () => {
+  it("keys every app of every tenant that is not gone, every website among them with its revalidate secret and form signing key, and counts what already stood", async () => {
     const seeder = recordingSeeder(["gb/erp"]);
     const result = await ensureTenantAppKeys({ db: db.db, seeder, registrations: registrations(), logger: silent });
-    expect(written(seeder)).toEqual(["ga/password-field-key/erp", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/revalidate-secret/shop"]);
-    expect(result).toEqual({ created: 3, existing: 1, failed: [] });
+    expect(written(seeder)).toEqual(["ga/password-field-key/erp", "gb/form-signing-key/shop", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/revalidate-secret/shop"]);
+    expect(result).toEqual({ created: 4, existing: 1, failed: [] });
+  });
+
+  it("writes a website's form signing key only where none stands, and keeps the one that does", async () => {
+    const said: string[] = [];
+    const logger = { ...silent, info: (_fields: unknown, line: string) => said.push(line) } as unknown as Logger;
+    const result = await ensureTenantAppKeys({ db: db.db, seeder: recordingSeeder(["gb/form-signing-key/shop"]), registrations: registrations(), logger });
+    expect(result).toEqual({ created: 4, existing: 1, failed: [] });
+    expect(said.some((line) => line.startsWith("Form signing keys under prod/tenants/gb/form-signing-key/"))).toBe(false);
+    expect(said.at(-1)).toBe("tenant app keys: 4 written, 1 already standing, 0 failed");
+  });
+
+  it("never logs a key it writes, in the boot pass or in add-app's step", async () => {
+    const said: string[] = [];
+    const record = (...args: unknown[]): void => { said.push(JSON.stringify(args)); };
+    const logger = { info: record, error: record, warn: record, debug: record } as unknown as Logger;
+    const seeder = recordingSeeder();
+    await ensureTenantAppKeys({ db: db.db, seeder, registrations: registrations(), logger });
+    const step = seedTenantAppKeyStep(seeder, "form-signing-key", "prod", "gb", "shop");
+    await step.run({ checkpoint: (data: unknown) => said.push(JSON.stringify(data)), log: (_stream: string, text: string) => said.push(text) } as unknown as StepCtx);
+    const keys = seeder.writes.flatMap((w) => Object.values(w.data));
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) expect(said.join("\n")).not.toContain(key);
   });
 
   it("goes on past a tenant whose write fails, and names it", async () => {
@@ -137,12 +171,19 @@ describe("the boot pass over every tenant app", () => {
     expect([...new Set(seeder.writes.map((w) => w.guid))]).toEqual(["gb"]);
   });
 
+  it("PLANTED DEFECT: a form signing key that cannot be written leaves the website's other keys written", async () => {
+    const refused = recordingSeeder([], ["gb/form-signing-key"]);
+    expect((await ensureTenantAppKeys({ db: db.db, seeder: refused, registrations: registrations(), logger: silent })).failed).toEqual(["prod/gb/form-signing-key"]);
+    expect(written(refused)).toEqual(["ga/password-field-key/erp", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/revalidate-secret/shop"]);
+  });
+
   it("PLANTED DEFECT: a revalidate secret that cannot be written, or a registration that cannot be read, leaves the Password field keys written", async () => {
     const refused = recordingSeeder([], ["gb/revalidate-secret"]);
     expect((await ensureTenantAppKeys({ db: db.db, seeder: refused, registrations: registrations(), logger: silent })).failed).toEqual(["prod/gb/revalidate-secret"]);
-    expect(written(refused)).toEqual(["ga/password-field-key/erp", "gb/password-field-key/erp", "gb/password-field-key/shop"]);
+    expect(written(refused)).toEqual(["ga/password-field-key/erp", "gb/form-signing-key/shop", "gb/password-field-key/erp", "gb/password-field-key/shop"]);
     const unread = recordingSeeder();
-    expect((await ensureTenantAppKeys({ db: db.db, seeder: unread, registrations: registrations(["gb"]), logger: silent })).failed).toEqual(["prod/gb/revalidate-secret"]);
+    expect((await ensureTenantAppKeys({ db: db.db, seeder: unread, registrations: registrations(["gb"]), logger: silent })).failed)
+      .toEqual(["prod/gb/revalidate-secret", "prod/gb/form-signing-key"]);
     expect(written(unread)).toEqual(["ga/password-field-key/erp", "gb/password-field-key/erp", "gb/password-field-key/shop"]);
   });
 });

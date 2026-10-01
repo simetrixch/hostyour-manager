@@ -201,8 +201,10 @@ export interface TenantCryptoDeleteInput {
  *  - `password-field-key`: what the app's engine encrypts a Password field's value with.
  *  - `revalidate-secret`: what a website's engine signs a cache purge of its renderer with, and the
  *    renderer checks it by.
+ *  - `form-signing-key`: what a website's renderer signs each record form it places with, and checks
+ *    the form's post against.
  *  The tenant's members read every one through the same templated policy as the entry above it. */
-export const TENANT_APP_KEY_KINDS = ["password-field-key", "revalidate-secret"] as const;
+export const TENANT_APP_KEY_KINDS = ["password-field-key", "revalidate-secret", "form-signing-key"] as const;
 export type TenantAppKeyKind = (typeof TENANT_APP_KEY_KINDS)[number];
 
 export interface TenantAppKeySeedInput {

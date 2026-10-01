@@ -5,7 +5,8 @@
 // another app's or another tenant's key. An engine whose catalog has a Password field refuses to
 // start without it. A website's engine also tells its renderer to drop its cache after a save, and
 // signs that call with a revalidate secret the renderer checks; a website engine refuses to start
-// without it.
+// without it. A website's renderer signs each record form it places with a form signing key, and
+// refuses a post no such form could send; a page that places a record form answers 500 without it.
 //
 // WHERE THEY STAND. One Vault entry per app and kind, <stage>/tenants/<guid>/<kind>/<app>, one level
 // below the tenant's entry: that entry is written create-only and takes no property later, so an app
@@ -32,6 +33,7 @@ import { errValidation } from "../../kernel/errors.ts";
 const KEY_KIND_TEXT: Record<TenantAppKeyKind, { keys: string; key: string; lacking: string }> = {
   "password-field-key": { keys: "Password field keys", key: "Password field key", lacking: "an engine without its key cannot encrypt a Password field" },
   "revalidate-secret": { keys: "Revalidate secrets", key: "revalidate secret", lacking: "a website engine without its secret does not start" },
+  "form-signing-key": { keys: "Form signing keys", key: "form signing key", lacking: "a website page that places a record form answers 500 without its key" },
 };
 
 export interface TenantAppKeysOutcome {
@@ -79,10 +81,11 @@ export function seedTenantAppKeyStep(seeder: VaultSeeder | undefined, kind: Tena
 }
 
 /** Every tenant app of every tenant that is not offboarded or purged, given its Password field key
- *  where it has none, and every website among them its revalidate secret. The forward step for the
- *  apps that joined before these keys were minted, run once at every boot. Which apps are websites is
- *  read off the tenant's registration: an apps[] entry that names a domain. Never rejects: a kind of
- *  key a tenant could not be given is named in the log, and the others go on. */
+ *  where it has none, and every website among them its revalidate secret and its form signing key.
+ *  The forward step for the apps that joined before these keys were minted, run once at every boot.
+ *  Which apps are websites is read off the tenant's registration: an apps[] entry that names a
+ *  domain. Never rejects: a kind of key a tenant could not be given is named in the log, and the
+ *  others go on. */
 export async function ensureTenantAppKeys(deps: { db: Db; seeder: VaultSeeder; registrations: Pick<TenantRegistrations, "readTenant">; logger: Logger }): Promise<{ created: number; existing: number; failed: string[] }> {
   const rows = deps.db
     .select({ guid: tenants.guid, stage: tenants.stage, app: tenantApps.name })
@@ -116,7 +119,10 @@ export async function ensureTenantAppKeys(deps: { db: Db; seeder: VaultSeeder; r
   };
   for (const { stage, guid, apps } of byTenant.values()) {
     await ensure("password-field-key", stage, guid, async () => apps);
-    await ensure("revalidate-secret", stage, guid, async () => ((await deps.registrations.readTenant(stage, guid))?.entry.apps ?? []).filter((a) => a.domain && apps.includes(a.name)).map((a) => a.name));
+    const websites = async (): Promise<string[]> =>
+      ((await deps.registrations.readTenant(stage, guid))?.entry.apps ?? []).filter((a) => a.domain && apps.includes(a.name)).map((a) => a.name);
+    await ensure("revalidate-secret", stage, guid, websites);
+    await ensure("form-signing-key", stage, guid, websites);
   }
   deps.logger.info({ created, existing, failed }, `tenant app keys: ${created} written, ${existing} already standing, ${failed.length} failed`);
   return { created, existing, failed };
