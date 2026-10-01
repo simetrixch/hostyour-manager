@@ -2,7 +2,7 @@
 // (plugins/unit/server/relocation-jobs.ts). Same design: pure JobSpec composition, one job per Secret
 // home, `DB`/`MISSING` lines as the wire format.
 import type { ConsumerService } from "../../../shared/consumer.ts";
-import type { JobEnvVar, JobIdentity, ClaimUser } from "../../adapters/kube/port.ts";
+import { isOrdinalClaim, type JobEnvVar, type JobIdentity, type ClaimUser } from "../../adapters/kube/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import {
@@ -105,7 +105,7 @@ export interface ConsumerJobInputs {
 export function claimsIdentity(namespace: string, claims: readonly string[], users: readonly ClaimUser[]): JobIdentity {
   const identities = new Map<string, JobIdentity>();
   for (const claim of claims) {
-    const mounted = users.filter((u) => u.claim === claim || (u.ordinals && claim.startsWith(`${u.claim}-`) && /^[0-9]+$/.test(claim.slice(u.claim.length + 1))));
+    const mounted = users.filter((u) => u.claim === claim || (u.ordinals && isOrdinalClaim(u.claim, claim)));
     if (mounted.length === 0) {
       throw errValidation(`claim ${claim} in ${namespace} is mounted by no workload that states its user, so nothing says whose files it holds and a job reading or writing them would act as the wrong user`);
     }

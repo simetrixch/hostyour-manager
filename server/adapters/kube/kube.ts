@@ -15,6 +15,7 @@ import type {
 } from "./port.ts";
 import { REFRESH_REQUESTED_ANNOTATION, RESTART_ANNOTATION } from "./port.ts";
 import { runKubeJob } from "./kube-job.ts";
+import * as claims from "./kube-claims.ts";
 import * as ns from "./kube-namespace.ts";
 import { AppError, errUpstream } from "../../kernel/errors.ts";
 import { DEPLOY_STATE_CONFIGMAP } from "../../../shared/deploy-state.ts";
@@ -490,14 +491,9 @@ export class KubeClusterReader implements ClusterReader {
     return runKubeJob({ batch: this.batch, core: this.core, pollMs: this.pollMs }, namespace, spec, opts);
   }
 
-  /** Every PVC name in the namespace — what the consumer dump/restore mounts. NEEDS a live cluster. */
+  /** See kube-claims.ts. NEEDS a live cluster. */
   async listPersistentVolumeClaims(namespace: string): Promise<string[]> {
-    try {
-      const res = await this.core.listNamespacedPersistentVolumeClaim({ namespace });
-      return res.items.map((p) => p.metadata?.name).filter((n): n is string => typeof n === "string");
-    } catch (e) {
-      throw upstream(`list PersistentVolumeClaims in ${namespace}`, e);
-    }
+    return claims.listPersistentVolumeClaims(this.core, namespace);
   }
 
   /** Who mounts which claim, off the Deployments' and StatefulSets' pod templates — see
@@ -508,6 +504,11 @@ export class KubeClusterReader implements ClusterReader {
       this.list("StatefulSets", namespace, () => this.apps.listNamespacedStatefulSet({ namespace })),
     ]);
     return claimUsersOf([...deployments.items, ...statefulSets.items]);
+  }
+
+  /** See kube-claims.ts. NEEDS a live cluster. */
+  async createStatefulSetClaim(namespace: string, claim: string): Promise<boolean> {
+    return claims.createStatefulSetClaim({ apps: this.apps, core: this.core }, namespace, claim);
   }
 
   /** Roll every Deployment and StatefulSet of the namespace by stamping the pod TEMPLATE's

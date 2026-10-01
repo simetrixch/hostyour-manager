@@ -113,18 +113,24 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       expectedDumpEntries: async () => consumerExpectedDumpEntries(await jobInputs()),
       // What comes back is what the generation holds, written into the claims that stand on the TARGET:
       // the old cluster may have lost the namespace to an offboard, released it to a move, or be gone.
-      // A claim the generation holds and the target lacks is refused by name before any store is
-      // written, so a restore never settles green over data it left behind. The files are written as
-      // the workloads that will read them there, which the target renders quiesced before any data is
-      // back, so their templates already stand.
+      // The target renders quiesced, at replicas 0, so a StatefulSet there has made none of its claims;
+      // the restore makes each one it names from its template. A claim the generation holds that the
+      // target neither has nor names is refused by name before any store is written, so a restore never
+      // settles green over data it left behind. The files are written as the workloads that will read
+      // them there, whose templates already stand.
       restoreJobs: async (folder, ctx, targetClusterId) => {
         const inputs = await registrationInputs();
         const held = parseClaimLines(await runRelocationJob(ports, ctx, targetClusterId, consumerGenerationClaimsJob({ name: ac.name, namespace, folder, image })));
         const claims = tarredClaims({ pvcs: held, services: inputs.services });
-        const standing = await (await ports.resolver.resolve(targetClusterId)).clusterReader.listPersistentVolumeClaims(namespace);
-        const unplaced = claims.filter((claim) => !standing.includes(claim));
+        const { clusterReader } = await ports.resolver.resolve(targetClusterId);
+        const standing = await clusterReader.listPersistentVolumeClaims(namespace);
+        const unplaced: string[] = [];
+        for (const claim of claims.filter((c) => !standing.includes(c))) {
+          if (await clusterReader.createStatefulSetClaim(namespace, claim)) ctx.log("meta", `claim ${claim} made in ${namespace} from the template of the StatefulSet that names it, which the quiesced render had not made`);
+          else unplaced.push(claim);
+        }
         if (unplaced.length > 0) {
-          throw errValidation(`the generation ${folder} holds ${unplaced.join(", ")}, and no claim of that name stands in ${namespace} on ${targetOf(ctx, targetClusterId).cluster}, so the restore stops before any store is written`);
+          throw errValidation(`the generation ${folder} holds ${unplaced.join(", ")}, and no claim of that name stands in ${namespace} on ${targetOf(ctx, targetClusterId).cluster}, nor does a StatefulSet there name it, so the restore stops before any store is written`);
         }
         const pvcUser = await claimsIdentityOn(targetClusterId, { pvcs: claims, services: inputs.services });
         return consumerRestoreJobs({ ...inputs, pvcs: claims, ...(pvcUser !== undefined ? { pvcUser } : {}), folder });

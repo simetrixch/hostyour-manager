@@ -295,6 +295,12 @@ export interface JobResult {
   ended?: string;
 }
 
+/** Whether `claim` is one a StatefulSet makes for one of its pods from the claim stem `stem`
+ *  (`<template>-<statefulset>`): the stem, a dash, and the pod's ordinal. */
+export function isOrdinalClaim(stem: string, claim: string): boolean {
+  return claim.startsWith(`${stem}-`) && /^[0-9]+$/.test(claim.slice(stem.length + 1));
+}
+
 /** A claim and the identity of a workload container that mounts it: the user its files belong to,
  *  and the group they are shared with. */
 export interface ClaimUser {
@@ -323,6 +329,11 @@ export interface ClusterReader {
    *  as, read off the pod templates so a workload scaled to zero still answers. A claim no such
    *  container mounts has no row. */
   listClaimUsers(namespace: string): Promise<ClaimUser[]>;
+  /** Create `claim` in `namespace` the way the StatefulSet whose volumeClaimTemplate names it
+   *  (`<template>-<statefulset>-<ordinal>`) would make it for a pod it does not run yet: a consumer
+   *  restore writes a generation's claim into a target rendered at replicas 0, where the StatefulSet
+   *  has made none. Answers false, and creates nothing, where no StatefulSet there names the claim. */
+  createStatefulSetClaim(namespace: string, claim: string): Promise<boolean>;
   /** Create-or-replace the unit's ValidatingAdmissionPolicy + its Binding on the TARGET cluster, as
    *  one unit: the policy alone enforces nothing (a policy without a binding is inert) and a binding
    *  alone is a dangling reference, so they are written together or not at all. Idempotent — a

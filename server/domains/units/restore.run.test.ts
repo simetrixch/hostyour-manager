@@ -205,8 +205,24 @@ describe("restore (consumer)", () => {
     // generation still holds the claim's tar.
     f.target.reader.setJobResult(`reloc-list-pvc-${CONSUMER}`, { succeeded: true, logs: "CLAIM queue-mta-0\nCLAIMS 1" });
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await expect(driveSteps(db, makeRestoreDef(consumerPorts(f)).steps(params), params, [])).rejects.toThrow(/holds queue-mta-0, and no claim of that name stands in acme-prod on s2, so the restore stops/);
+    await expect(driveSteps(db, makeRestoreDef(consumerPorts(f)).steps(params), params, [])).rejects.toThrow(/holds queue-mta-0, and no claim of that name stands in acme-prod on s2, nor does a StatefulSet there name it, so the restore stops/);
     expect(jobNames(f.target).filter((n) => n.startsWith("reloc-restore-"))).toEqual([]);
+  });
+
+  it("creates a StatefulSet's claim the quiesced target has not made, from its template, and restores into it", async () => {
+    seedClusters(db);
+    seedConsumerRow(db, "offboarded");
+    seedGeneration(db, "consumer", CONSUMER);
+    const f = makeFakes();
+    scriptDumpedRegistration(f.target.reader, CONSUMER, dumpedConsumer(["mongodb"]));
+    f.target.reader.setJobResult(`reloc-list-pvc-${CONSUMER}`, { succeeded: true, logs: "CLAIM queue-mta-0\nCLAIMS 1" });
+    // Rendered at replicas 0, the MTA's StatefulSet has made no claim; its template names queue-mta-<n>.
+    f.target.reader.setClaims(`${CONSUMER}-prod`, [], [{ claim: "queue-mta", ordinals: true, user: 1000, group: 1000 }]);
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
+    await driveSteps(db, makeRestoreDef(consumerPorts(f)).steps(params), params, []);
+    expect(f.target.reader.createdClaims).toEqual([`${CONSUMER}-prod/queue-mta-0`]);
+    const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`);
+    expect(restore?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
   });
 
   it("carries the attested fqdn and the SMTP entry of the dump into the re-committed registration", async () => {

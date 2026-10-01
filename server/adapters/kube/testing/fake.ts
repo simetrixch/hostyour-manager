@@ -1,6 +1,7 @@
 // In-memory kube fakes for the onboarding domain tests — no cluster, no network. Script the
 // Application status the master watch observes, and the smoke/deploy-state a cluster read returns.
 import type { MasterArgoReader, ArgoAppStatus, ArgoAppStatusMap, ArgoApplicationRow, ExternalSecretRow, ClusterReader, SmokeResult, DeployState, MasterProjectWriter, AppProjectManifest, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, ClusterKubeResolver, ResolvedClusterKube, BuildRbacWriter, BuildRbacGrant, BuildRbacObject, RoleManifest, RoleBindingManifest, RepoCredentialWriter, RepoCredentialManifest, JobSpec, JobResult, ClaimUser } from "../port.ts";
+import { isOrdinalClaim } from "../port.ts";
 import { assertWritableProjectName, isManagerOwned, MISSING_APP_STATUS } from "../kube-map.ts";
 import { errValidation, errNotFound } from "../../../kernel/errors.ts";
 
@@ -382,6 +383,19 @@ export class FakeClusterReader implements ClusterReader {
   /** The claim users scripted for this namespace, else [] (no running pod mounts a claim). */
   async listClaimUsers(namespace: string): Promise<ClaimUser[]> {
     return [...(this.scripted.claimUsersByNamespace?.[namespace] ?? [])];
+  }
+
+  /** Every claim createStatefulSetClaim made, as `<namespace>/<claim>`. */
+  readonly createdClaims: string[] = [];
+
+  /** Makes `claim` where a scripted claim user with `ordinals` names its stem: that row is how the real
+   *  reader reports a StatefulSet's volumeClaimTemplate. The claim then stands in the namespace. */
+  async createStatefulSetClaim(namespace: string, claim: string): Promise<boolean> {
+    const stems = (this.scripted.claimUsersByNamespace?.[namespace] ?? []).filter((u) => u.ordinals).map((u) => u.claim);
+    if (!stems.some((stem) => isOrdinalClaim(stem, claim))) return false;
+    this.createdClaims.push(`${namespace}/${claim}`);
+    this.scripted = { ...this.scripted, pvcsByNamespace: { ...this.scripted.pvcsByNamespace, [namespace]: [...(this.scripted.pvcsByNamespace?.[namespace] ?? []), claim] } };
+    return true;
   }
 
 }
