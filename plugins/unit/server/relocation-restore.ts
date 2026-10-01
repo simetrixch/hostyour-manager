@@ -97,7 +97,7 @@ export function restoreStep(ports: RelocationPorts, worldOf: WorldOf, targetClus
       requireDbtoolsImage(ports, "restore");
       const target = targetOf(ctx, targetClusterId);
       const g = generationOf(ctx, w);
-      const jobs = await w.restoreJobs(g.folder, ctx);
+      const jobs = await w.restoreJobs(g.folder, ctx, target.clusterId);
       for (const job of jobs) await runRelocationJob(ports, ctx, target.clusterId, job);
       ctx.checkpoint({ generation: g.generation, jobs: jobs.map((j) => j.spec.name) });
       ctx.log("meta", `${w.kindWord} ${w.unit} restored on ${target.cluster} — ${jobs.length} job(s) replayed the generation ${g.folder}/`);

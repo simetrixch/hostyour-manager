@@ -12,8 +12,23 @@ import {
 } from "#unit/server/relocation-jobs.ts";
 
 /** The per-consumer PostgreSQL instance coordinates (service-provisioner naming:
- *  `<claim>-<service>` with the claim named after the unit). */
-export const CONSUMER_POSTGRES = { host: "postgres", secret: "postgresql-credentials", key: "postgres-password", user: "postgres" } as const;
+ *  `<claim>-<service>` with the claim named after the unit), and `claim`, the PVC its data directory
+ *  lives on (hostyour-cloud clusters/units/postgresql, `postgres-data.pvc.name`). */
+export const CONSUMER_POSTGRES = { host: "postgres", secret: "postgresql-credentials", key: "postgres-password", user: "postgres", claim: "postgres-data" } as const;
+
+/** The claims a consumer's dump tars and its restore extracts: every PVC of the namespace but the
+ *  per-consumer PostgreSQL's own, whose databases dump-pg takes whole with pg_dumpall. A tar of that
+ *  live data directory is no consistent copy, and extracting it would overwrite what restore-pg loads. */
+export function tarredClaims(i: Pick<ConsumerJobInputs, "pvcs" | "services">): string[] {
+  return i.services.includes("postgresql") ? i.pvcs.filter((claim) => claim !== CONSUMER_POSTGRES.claim) : [...i.pvcs];
+}
+
+/** The shell line that extracts one claim's archive into its mounted root. `--no-overwrite-dir` leaves
+ *  the root as the volume made it: as the workload's user, tar may not set the mode or the time of a
+ *  root-owned directory and would fail on it ("Cannot utime", exit 2). */
+export function extractClaimLine(archive: string, root: string): string {
+  return `tar xzf "${archive}" -C "${root}" --no-overwrite-dir`;
+}
 
 /** The per-consumer PostgreSQL root password, off the instance's own Secret in the unit's namespace —
  *  the same one the dump and the restore dial with. */
@@ -35,7 +50,8 @@ export interface ConsumerJobInputs {
   services: readonly ConsumerService[];
   /** The PVC names of the consumer namespace, listed off the cluster at step time. */
   pvcs: readonly string[];
-  /** Who the PVC dump runs as: the user the claims' files belong to (claimsIdentity). */
+  /** Who the PVC dump and the PVC restore run as: the user the claims' files belong to on the cluster
+   *  the job runs on, read off the workloads that mount them (claimsIdentity). */
   pvcUser?: JobIdentity;
   image: string;
 }
@@ -50,12 +66,12 @@ export function claimsIdentity(namespace: string, claims: readonly string[], use
   for (const claim of claims) {
     const mounted = users.filter((u) => u.claim === claim || (u.ordinals && claim.startsWith(`${u.claim}-`) && /^[0-9]+$/.test(claim.slice(u.claim.length + 1))));
     if (mounted.length === 0) {
-      throw errValidation(`claim ${claim} in ${namespace} is mounted by no workload that states its user, so nothing says whose files it holds and the dump could not read them`);
+      throw errValidation(`claim ${claim} in ${namespace} is mounted by no workload that states its user, so nothing says whose files it holds and a job reading or writing them would act as the wrong user`);
     }
     for (const u of mounted) identities.set(`${u.user}:${u.group}`, { user: u.user, group: u.group });
   }
   if (identities.size !== 1) {
-    throw errValidation(`the claims in ${namespace} are used as ${[...identities.keys()].join(" and ")}, and one dump job reads as one user`);
+    throw errValidation(`the claims in ${namespace} are used as ${[...identities.keys()].join(" and ")}, and one job reads and writes as one user`);
   }
   return [...identities.values()][0]!;
 }
@@ -106,19 +122,20 @@ ${hashLine("/tmp/postgres-all.sql", "postgres/all.sql")}rclone copyto /tmp/postg
       },
     });
   }
-  if (i.pvcs.length > 0) {
+  const claims = tarredClaims(i);
+  if (claims.length > 0) {
     jobs.push({
       namespace: i.namespace,
       spec: {
         ...boxSpec("dump-pvc", i.name),
         image: i.image,
         ...(i.pvcUser !== undefined ? { runAs: i.pvcUser } : {}),
-        pvcMounts: i.pvcs.map((claim) => ({ claimName: claim, mountPath: `/pvc/${claim}`, readOnly: true })),
+        pvcMounts: claims.map((claim) => ({ claimName: claim, mountPath: `/pvc/${claim}`, readOnly: true })),
         script:
           BOX_REMOTE +
           // tar exits 1 when a file changed while it read it, which a live claim does, and the
           // archive is written all the same; any other exit is a failure.
-          i.pvcs.map((claim) => `tar czf "/tmp/${claim}.tar.gz" -C "/pvc/${claim}" . || { s=$?; [ "$s" -eq 1 ] || exit "$s"; echo "CHANGED pvc/${claim}: files changed while tar read them"; }\n${hashLine(`/tmp/${claim}.tar.gz`, `pvc/${claim}.tar.gz`)}rclone copyto "/tmp/${claim}.tar.gz" "box:${i.folder}/pvc/${claim}.tar.gz"\nrm -f "/tmp/${claim}.tar.gz"\n`).join(""),
+          claims.map((claim) => `tar czf "/tmp/${claim}.tar.gz" -C "/pvc/${claim}" . || { s=$?; [ "$s" -eq 1 ] || exit "$s"; echo "CHANGED pvc/${claim}: files changed while tar read them"; }\n${hashLine(`/tmp/${claim}.tar.gz`, `pvc/${claim}.tar.gz`)}rclone copyto "/tmp/${claim}.tar.gz" "box:${i.folder}/pvc/${claim}.tar.gz"\nrm -f "/tmp/${claim}.tar.gz"\n`).join(""),
       },
     });
   }
@@ -131,7 +148,7 @@ export function consumerExpectedDumpEntries(i: Pick<ConsumerJobInputs, "database
     "registration.yaml",
     ...(i.services.includes("mongodb") && i.databases.length > 0 ? ["mongo"] : []),
     ...(i.services.includes("postgresql") ? ["postgres"] : []),
-    ...(i.pvcs.length > 0 ? ["pvc"] : []),
+    ...(tarredClaims(i).length > 0 ? ["pvc"] : []),
   ];
 }
 
@@ -170,16 +187,18 @@ PGPASSWORD="$POSTGRES_PASSWORD" psql -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_
       },
     });
   }
-  if (i.pvcs.length > 0) {
+  const claims = tarredClaims(i);
+  if (claims.length > 0) {
     jobs.push({
       namespace: i.namespace,
       spec: {
         ...boxSpec("restore-pvc", i.name),
         image: i.image,
-        pvcMounts: i.pvcs.map((claim) => ({ claimName: claim, mountPath: `/pvc/${claim}` })),
+        ...(i.pvcUser !== undefined ? { runAs: i.pvcUser } : {}),
+        pvcMounts: claims.map((claim) => ({ claimName: claim, mountPath: `/pvc/${claim}` })),
         script:
           BOX_REMOTE +
-          i.pvcs.map((claim) => `rclone copyto "box:${i.folder}/pvc/${claim}.tar.gz" "/tmp/${claim}.tar.gz"\ntar xzf "/tmp/${claim}.tar.gz" -C "/pvc/${claim}"\nrm -f "/tmp/${claim}.tar.gz"\n`).join(""),
+          claims.map((claim) => `rclone copyto "box:${i.folder}/pvc/${claim}.tar.gz" "/tmp/${claim}.tar.gz"\n${extractClaimLine(`/tmp/${claim}.tar.gz`, `/pvc/${claim}`)}\nrm -f "/tmp/${claim}.tar.gz"\n`).join(""),
       },
     });
   }

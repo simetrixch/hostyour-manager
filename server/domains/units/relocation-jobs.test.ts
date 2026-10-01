@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { DbHandle } from "../../db/client.ts";
 import { runRelocationJob } from "#unit/server/relocation.ts";
 import {
@@ -11,7 +15,7 @@ import {
   tenantDumpJobs, tenantRestoreJobs, tenantVerifyCompletenessJobs, tenantClearSourceJobs, tenantSourceDbListJob,
 } from "./relocation-jobs-tenant.ts";
 import {
-  consumerDumpJobs, consumerRestoreJobs, consumerVerifyCompletenessJobs, consumerClearSourceJobs, consumerSourceDbListJob, claimsIdentity,
+  consumerDumpJobs, consumerRestoreJobs, consumerVerifyCompletenessJobs, consumerClearSourceJobs, consumerSourceDbListJob, claimsIdentity, consumerExpectedDumpEntries, extractClaimLine
 } from "./relocation-jobs-consumer.ts";
 import type { ConsumerService } from "../../../shared/consumer.ts";
 import { openFixtureDb, makeFakes, consumerPorts, stepCtx, SOURCE } from "./relocation.fixture.ts";
@@ -252,3 +256,66 @@ describe("the nightly backup under pod security restricted (hostyour-manager#333
     );
   });
 });
+
+/** Whether `path` is a directory root owns that every user may write, like the root a hostpath volume
+ *  hands a pod, and this process is not root: the state the restore meets. */
+function rootOwnedAndWritable(path: string): boolean {
+  try {
+    const st = statSync(path);
+    return st.isDirectory() && st.uid === 0 && (st.mode & 0o777) === 0o777 && process.getuid?.() !== 0;
+  } catch {
+    return false;
+  }
+}
+
+describe("restoring a consumer's claims", () => {
+  const consumer = { name: CONSUMER, folder: CONSUMER_FOLDER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, pvcs: ["data"], image: IMAGE };
+  const named = (jobs: RelocationJob[], prefix: string): RelocationJob | undefined => jobs.find((j) => j.spec.name.startsWith(prefix));
+
+  it("leaves the per-consumer PostgreSQL's own claim out of the tars, because pg_dumpall takes its databases whole", () => {
+    const withPg = { ...consumer, pvcs: ["postgres-data", "queue-mta-0"], pvcUser: { user: 1000, group: 1000 } };
+    expect(ALL_SERVICES).toContain("postgresql");
+    expect(named(consumerDumpJobs({ ...withPg, registrationYaml: "name: acme\n" }), "reloc-dump-pvc")?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
+    expect(named(consumerRestoreJobs(withPg), "reloc-restore-pvc")?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
+    // Its claim alone: no tar is taken, and no pvc entry is demanded of the generation.
+    const onlyPg = { ...consumer, pvcs: ["postgres-data"] };
+    expect(named(consumerDumpJobs({ ...onlyPg, registrationYaml: "name: acme\n" }), "reloc-dump-pvc")).toBeUndefined();
+    expect(named(consumerRestoreJobs(onlyPg), "reloc-restore-pvc")).toBeUndefined();
+    expect(consumerExpectedDumpEntries(onlyPg)).not.toContain("pvc");
+  });
+
+  it("PLANTED INNOCENT: a unit without the per-consumer PostgreSQL tars a claim of that name like any other", () => {
+    const own = { ...consumer, services: ALL_SERVICES.filter((s) => s !== "postgresql"), pvcs: ["postgres-data"] };
+    expect(named(consumerDumpJobs({ ...own, registrationYaml: "name: acme\n" }), "reloc-dump-pvc")?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["postgres-data"]);
+    expect(consumerExpectedDumpEntries(own)).toContain("pvc");
+  });
+
+  it("restores a claim as the user it is handed, and leaves the claim root as the volume made it", () => {
+    const restore = named(consumerRestoreJobs({ ...consumer, pvcs: ["queue-mta-0"], pvcUser: { user: 1000, group: 1000 } }), "reloc-restore-pvc")!;
+    expect(restore.spec.runAs).toEqual({ user: 1000, group: 1000 });
+    expect(restore.spec.script).toContain(extractClaimLine("/tmp/queue-mta-0.tar.gz", "/pvc/queue-mta-0"));
+    expect(extractClaimLine("/tmp/a.tar.gz", "/pvc/a")).toBe('tar xzf "/tmp/a.tar.gz" -C "/pvc/a" --no-overwrite-dir');
+  });
+
+  it.skipIf(!rootOwnedAndWritable("/tmp"))("extracts into an existing root-owned claim root as the running user, where the extract without the flag fails", () => {
+    const source = mkdtempSync(join(tmpdir(), "claim-src-"));
+    const box = mkdtempSync(join(tmpdir(), "claim-box-"));
+    const name = `claim-probe-${process.pid}-${Date.now()}.txt`;
+    try {
+      writeFileSync(join(source, name), "a row\n");
+      const archive = join(box, "claim.tar.gz");
+      execFileSync("tar", ["czf", archive, "-C", source, "."]);
+      // The line as it stood: tar sets the mode and the time of the root it extracts into, and as a
+      // user that is not root's it may not.
+      expect(() => execFileSync("sh", ["-c", `tar xzf "${archive}" -C /tmp`], { stdio: "pipe" })).toThrow(/Cannot (utime|change mode)/);
+      rmSync(join("/tmp", name), { force: true });
+      execFileSync("sh", ["-c", extractClaimLine(archive, "/tmp")], { stdio: "pipe" });
+      expect(statSync(join("/tmp", name)).uid).toBe(process.getuid?.());
+    } finally {
+      rmSync(join("/tmp", name), { force: true });
+      rmSync(source, { recursive: true, force: true });
+      rmSync(box, { recursive: true, force: true });
+    }
+  });
+});
+

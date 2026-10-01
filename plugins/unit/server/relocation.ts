@@ -69,8 +69,9 @@ export interface RelocationWorld {
   dumpJobs(folder: string, registrationYaml: string, ctx: StepCtx): Promise<RelocationJob[]>;
   /** What a complete dump leaves in a generation — what verify-dump demands, the manifest aside. */
   expectedDumpEntries(ctx: StepCtx): Promise<string[]>;
-  /** The restore job set — the dump's mirror, reading the generation `folder` on the TARGET cluster. */
-  restoreJobs(folder: string, ctx: StepCtx): Promise<RelocationJob[]>;
+  /** The restore job set — the dump's mirror, reading the generation `folder` on the TARGET cluster,
+   *  whose id it is handed so it can read what stands there. */
+  restoreJobs(folder: string, ctx: StepCtx, targetClusterId: string): Promise<RelocationJob[]>;
   /** The completeness listings run on the TARGET before DNS — each job compares what it can see
    *  against the generation `folder` and fails naming what is missing. */
   verifyCompletenessJobs(folder: string, ctx: StepCtx): Promise<RelocationJob[]>;

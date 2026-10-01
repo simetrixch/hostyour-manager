@@ -163,6 +163,30 @@ describe("restore (consumer)", () => {
     expect(row?.clusterId).toBe(TARGET.clusterId);
   });
 
+  it("restores a claim as the user the TARGET's workloads run as, not the one the old cluster used", async () => {
+    seedClusters(db);
+    seedConsumerRow(db, "offboarded");
+    seedGeneration(db, "consumer", CONSUMER);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    const dumped = serializePointer(ConsumerRegistrationSchema, {
+      name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false, removing: false,
+      chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services: ["mongodb", "postgresql"], size: "medium", mongodb: "shared",
+      quota: seedQuota("medium"),
+    });
+    scriptDumpedRegistration(f.target.reader, CONSUMER, dumped);
+    // The chart moved its MTA from 2000 to 1000: the target renders the new user, quiesced, before any
+    // data is back. The per-consumer PostgreSQL's claim runs as 999 and is no tar, so it refuses nothing.
+    const pg = { claim: "postgres-data", ordinals: false, user: 999, group: 999 };
+    f.source.reader.setClaims(`${CONSUMER}-prod`, ["postgres-data", "queue-mta-0"], [pg, { claim: "queue-mta", ordinals: true, user: 2000, group: 2000 }]);
+    f.target.reader.setClaims(`${CONSUMER}-prod`, ["postgres-data", "queue-mta-0"], [pg, { claim: "queue-mta", ordinals: true, user: 1000, group: 1000 }]);
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
+    await driveSteps(db, makeRestoreDef(ports).steps(params), params, []);
+    const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`);
+    expect(restore?.spec.runAs).toEqual({ user: 1000, group: 1000 });
+    expect(restore?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
+  });
+
   it("carries the attested fqdn and the SMTP entry of the dump into the re-committed registration", async () => {
     seedClusters(db);
     seedConsumerRow(db, "offboarded");

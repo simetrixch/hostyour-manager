@@ -25,7 +25,7 @@ import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import type { RelocationPorts, RelocationWorld, WorldOf } from "#unit/server/relocation.ts";
 import {
-  consumerDumpJobs, claimsIdentity,
+  consumerDumpJobs, claimsIdentity, tarredClaims,
   consumerRestoreJobs,
   consumerVerifyCompletenessJobs,
   consumerSourceDbListJob,
@@ -74,6 +74,11 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       const pvcs = await clusterReader.listPersistentVolumeClaims(namespace);
       return { name: ac.name, namespace, stage: ac.stage, databases: reg.databases, services: reg.services, pvcs, image };
     };
+    // Whose files the tarred claims hold on `clusterId`: the user of the workloads mounting them there.
+    const claimsIdentityOn = async (clusterId: string, inputs: { pvcs: readonly string[]; services: ConsumerStageRegistration["services"] }) => {
+      const claims = tarredClaims(inputs);
+      return claims.length > 0 ? claimsIdentity(namespace, claims, await (await ports.resolver.resolve(clusterId)).clusterReader.listClaimUsers(namespace)) : undefined;
+    };
     const converged = (s: ArgoAppStatus): boolean => s.sync === "Synced" && s.health === "Healthy";
     const appName = consumerArgoAppName(ac.name, ac.stage);
     return {
@@ -99,13 +104,17 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       },
       dumpJobs: async (folder, registrationYaml) => {
         const inputs = await jobInputs();
-        const pvcUser = inputs.pvcs.length > 0
-          ? claimsIdentity(namespace, inputs.pvcs, await (await ports.resolver.resolve(ac.clusterId)).clusterReader.listClaimUsers(namespace))
-          : undefined;
+        const pvcUser = await claimsIdentityOn(ac.clusterId, inputs);
         return consumerDumpJobs({ ...inputs, ...(pvcUser !== undefined ? { pvcUser } : {}), folder, registrationYaml });
       },
       expectedDumpEntries: async () => consumerExpectedDumpEntries(await jobInputs()),
-      restoreJobs: async (folder) => consumerRestoreJobs({ ...(await jobInputs()), folder }),
+      // The restore writes the files as the workloads that will read them on the TARGET, which the
+      // target renders quiesced before any data is back, so their templates already stand.
+      restoreJobs: async (folder, _ctx, targetClusterId) => {
+        const inputs = await jobInputs();
+        const pvcUser = await claimsIdentityOn(targetClusterId, inputs);
+        return consumerRestoreJobs({ ...inputs, ...(pvcUser !== undefined ? { pvcUser } : {}), folder });
+      },
       verifyCompletenessJobs: async (folder) => consumerVerifyCompletenessJobs({ ...(await jobInputs()), folder }),
       sourceDbListJob: async () => {
         const i = await jobInputs();
