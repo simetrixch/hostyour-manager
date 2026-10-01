@@ -52,9 +52,19 @@ export const AppsEngineSchema = z.object({
 });
 export type AppsEngine = z.infer<typeof AppsEngineSchema>;
 
+/** A path inside the catalog, relative to its root (`handbook`, `docs/drafts`): segments of letters,
+ *  digits, `.`, `_` and `-`, none empty and none `.` or `..`, so it cannot name anything outside it. */
+const catalogPath = z
+  .string()
+  .regex(/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*$/, "a catalog path is relative to the catalog's root, such as handbook or docs/drafts")
+  .refine((path) => !path.split("/").some((segment) => segment === "." || segment === ".."), { message: "a catalog path has no . or .. segment" });
+
 export const AppsManifestSchema = z.object({
   apps: z.array(AppEntrySchema),
   engine: AppsEngineSchema.optional(),
+  /** The paths that stay in the catalog and never reach a tenant's repository, such as its handbook.
+   *  The run that writes a tenant's repository leaves each one out (tenant-apps-tree.ts). */
+  catalogOnly: z.array(catalogPath).optional(),
 }).superRefine((m, ctx) => {
   const names = m.apps.map((a) => a.name);
   const dup = names.find((n, i) => names.indexOf(n) !== i);
@@ -76,7 +86,7 @@ export function parseAppsManifest(text: string): AppsManifest {
   const parsed = AppsManifestSchema.safeParse(doc);
   if (!parsed.success) {
     const why = parsed.error.issues.slice(0, 6).map((i) => `${i.path.length > 0 ? i.path.map(String).join(".") : "(root)"}: ${i.message}`).join("; ");
-    throw new Error(`${APPS_MANIFEST_PATH} does not match the apps manifest shape (apps[]: name, title, description, selections{title, default}, databases?, sites?; engine?{build, line}): ${why}`);
+    throw new Error(`${APPS_MANIFEST_PATH} does not match the apps manifest shape (apps[]: name, title, description, selections{title, default}, databases?, sites?; engine?{build, line}; catalogOnly?[path]): ${why}`);
   }
   return parsed.data;
 }

@@ -42,6 +42,14 @@ describe("parseAppsManifest", () => {
     expect(() => parseAppsManifest("apps:\n  - { name: web, title: Website, sites: [Main] }\n")).toThrow(/apps\.0\.sites\.0/);
   });
 
+  it("reads the paths the catalog keeps for itself, and refuses one that could name anything outside it", () => {
+    expect(parseAppsManifest(`${GOOD}catalogOnly: [handbook, docs/drafts]\n`).catalogOnly).toEqual(["handbook", "docs/drafts"]);
+    expect(parseAppsManifest(GOOD).catalogOnly).toBeUndefined();
+    for (const path of ["/handbook", "../handbook", "docs/../handbook", "docs//drafts", ".", ""]) {
+      expect(() => parseAppsManifest(`${GOOD}catalogOnly: ["${path}"]\n`), path).toThrow(/catalogOnly\.0/);
+    }
+  });
+
   it("refuses two entries of one name — the name is the folder and the member", () => {
     expect(() => parseAppsManifest("apps:\n  - { name: erp, title: A }\n  - { name: erp, title: B }\n")).toThrow(/two entries are both named "erp"/);
   });

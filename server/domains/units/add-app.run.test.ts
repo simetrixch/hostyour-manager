@@ -5,7 +5,9 @@ import { makeAddAppDef, AddAppParams, type AddAppPorts } from "./add-app.run.ts"
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberApplication, memberAppProject } from "./tenant-fanout.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
-import { FakeRepoReader, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
+import { FakeRepoReader, FakeRepoWriter, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
+import type { CredentialStore } from "../../security/store.ts";
+import { tenantAppsRepoURL } from "./tenant-apps-tree.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
@@ -325,5 +327,24 @@ describe("add-app streaming planner", () => {
     if (result.outcome !== "rejected") return;
     expect(result.summary).toMatch(/T3/);
     expect((result.planJson as TenantValidationReport).verdict).toBe("fail");
+  });
+});
+
+describe("add-app — the paths the catalog keeps for itself", () => {
+  it("writes no file of a path the catalog lists under catalogOnly into the tenant's repository, such as its handbook", async () => {
+    seedClusters();
+    const template = TEMPLATE_APPS();
+    const catalog = { ...template, "apps.yaml": `${template["apps.yaml"]}catalogOnly: [handbook]\n`, "handbook/README.md": "# Handbook\n", "package.json": "{}\n" };
+    const prt = ports({}, catalog);
+    const result = await makeAddAppDef(prt).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
+    if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
+    const p = result.params;
+    const writer = new FakeRepoWriter();
+    prt.onboard = () => ({ ports: { consumerRepo: writer } }) as unknown as ReturnType<NonNullable<typeof prt.onboard>>;
+    const creds = { list: async () => [{ id: "cred_app", subject: { kind: "owner" } }] } as unknown as CredentialStore;
+    await makeAddAppDef(prt).steps(p).find((s) => s.name === "write-tree")!.run({ ...ctx(p, "write-tree", []), creds });
+    const files = Object.keys(writer.filesFor(tenantAppsRepoURL(p.appsUnit!.org, p.appsUnit!.templateBuild, p.subdomain)));
+    expect(files.filter((f) => f.startsWith("handbook/"))).toEqual([]);
+    expect(files).toEqual(expect.arrayContaining([`${NEW_APP}/package.json`, "package.json"]));
   });
 });

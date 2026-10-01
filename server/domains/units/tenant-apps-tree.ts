@@ -48,11 +48,12 @@ function siteContentDir(folder: string): string {
 /** Every file of the template that belongs in a tenant's repository, read through the reader. Left
  *  out: the git directory; the release kit (inject-release-kit writes the current kit, and a copied
  *  one would be replaced a step later); the two files this run composes (the manifest, apps.yaml);
- *  the folder of every app of the template the tenant did not choose; and in a folder the run serves
+ *  the paths the catalog keeps for itself (its apps.yaml's `catalogOnly`, such as its handbook); the
+ *  folder of every app of the template the tenant did not choose; and in a folder the run serves
  *  sites of, the content of every other site. */
-export async function readTemplateTree(repo: RepoReader, workdir: string, input: { templateApps: readonly string[]; chosen: readonly string[]; sites: ServedSites }): Promise<TreeFile[]> {
+export async function readTemplateTree(repo: RepoReader, workdir: string, input: { templateApps: readonly string[]; catalogOnly: readonly string[]; chosen: readonly string[]; sites: ServedSites }): Promise<TreeFile[]> {
   const unchosen = new Set(input.templateApps.filter((a) => !input.chosen.includes(a)));
-  const skipped = new Set([".git", RELEASE_KIT_DIR, RELEASE_KIT_WORKFLOW.path, APPS_MANIFEST_PATH, CONSUMER_MANIFEST_PATH, ...unchosen]);
+  const skipped = new Set([".git", RELEASE_KIT_DIR, RELEASE_KIT_WORKFLOW.path, APPS_MANIFEST_PATH, CONSUMER_MANIFEST_PATH, ...input.catalogOnly, ...unchosen]);
   // A folder the run serves sites of carries only their content: another site's is no tenant's own.
   const servedIn = new Map(Object.entries(input.sites).map(([folder, ids]) => [siteContentDir(folder), new Set(ids)]));
   const out: TreeFile[] = [];

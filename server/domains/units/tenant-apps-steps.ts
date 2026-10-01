@@ -113,13 +113,14 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
     if (manifestText === null) throw errValidation(`${templateRepoURL} carries no ${CONSUMER_MANIFEST_PATH} at its default branch — the tenant's manifest is composed from it`);
     const manifest = ConsumerManifestSchema.safeParse(parseYaml(manifestText));
     if (!manifest.success) throw errValidation(`${CONSUMER_MANIFEST_PATH} in ${templateRepoURL} is not a valid consumer manifest: ${manifest.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
-    const templateApps = parseAppsManifest(appsYaml).apps.map((a) => a.name);
+    const catalog = parseAppsManifest(appsYaml);
+    const templateApps = catalog.apps.map((a) => a.name);
     return {
       appsYaml,
       npmrc: await repo.readFile(cloned.workdir, ".npmrc"),
       manifest: manifest.data,
       folders: async (app) => (await repo.listDir(cloned.workdir, app)).length > 0,
-      tree: (chosen, sites) => readTemplateTree(repo, cloned.workdir, { templateApps, chosen, sites }),
+      tree: (chosen, sites) => readTemplateTree(repo, cloned.workdir, { templateApps, catalogOnly: catalog.catalogOnly ?? [], chosen, sites }),
       dispose: () => repo.dispose(cloned.workdir),
     };
   } catch (e) {

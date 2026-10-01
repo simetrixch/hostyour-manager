@@ -18,10 +18,10 @@ const TEMPLATE = {
   "erp/package.json": "{}\n",
 };
 
-async function tree(chosen: readonly string[], sites: Readonly<Record<string, readonly string[]>>): Promise<string[]> {
-  const repo = new FakeRepoReader({ files: TEMPLATE });
+async function tree(chosen: readonly string[], sites: Readonly<Record<string, readonly string[]>>, over: { files?: Record<string, string>; catalogOnly?: readonly string[] } = {}): Promise<string[]> {
+  const repo = new FakeRepoReader({ files: over.files ?? TEMPLATE });
   const { workdir } = await repo.cloneAtRef({ repoURL: "https://github.com/acme/template.git", ref: "HEAD" });
-  return (await readTemplateTree(repo, workdir, { templateApps: ["erp", "web"], chosen, sites })).map((f) => f.path).sort();
+  return (await readTemplateTree(repo, workdir, { templateApps: ["erp", "web"], catalogOnly: over.catalogOnly ?? [], chosen, sites })).map((f) => f.path).sort();
 }
 
 describe("readTemplateTree — the sites a run serves", () => {
@@ -34,6 +34,22 @@ describe("readTemplateTree — the sites a run serves", () => {
   it("PLANTED INNOCENT: copies a folder whole where the run names no sites for it, as before", async () => {
     expect(await tree(["web"], {})).toContain("web/content/sites/simetrix/website.json");
     expect(await tree(["erp", "web"], { web: ["show"] })).toContain("erp/package.json");
+  });
+});
+
+describe("readTemplateTree — the paths the catalog keeps for itself", () => {
+  const WITH_HANDBOOK = { ...TEMPLATE, "package.json": "{}\n", "handbook/README.md": "# Handbook\n", "handbook/tools/check-app.mjs": "export {};\n" };
+
+  it("leaves every path under catalogOnly out of the tenant's repository, and copies the rest", async () => {
+    const paths = await tree(["erp"], {}, { files: WITH_HANDBOOK, catalogOnly: ["handbook"] });
+    expect(paths.filter((p) => p.startsWith("handbook/"))).toEqual([]);
+    expect(paths).toEqual(["erp/package.json", "package.json"]);
+    // A path below the root leaves only that subtree out.
+    expect(await tree(["erp"], {}, { files: WITH_HANDBOOK, catalogOnly: ["handbook/tools"] })).toContain("handbook/README.md");
+  });
+
+  it("PLANTED INNOCENT: copies the handbook of a catalog that keeps nothing for itself, as before", async () => {
+    expect(await tree(["erp"], {}, { files: WITH_HANDBOOK })).toEqual(["erp/package.json", "handbook/README.md", "handbook/tools/check-app.mjs", "package.json"]);
   });
 });
 
