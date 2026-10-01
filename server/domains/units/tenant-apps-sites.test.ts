@@ -3,37 +3,45 @@ import { parseAppsManifest } from "../../../shared/apps-manifest.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { mergeAppsManifest, readTemplateTree } from "./tenant-apps-tree.ts";
 
-// A tenant's apps repository carries the content of the sites it serves and no other: the tree copies
-// `<folder>/content/sites/<id>/` only for the sites a run serves, and the apps.yaml entry lists them.
+// A tenant's apps repository carries the apps it chose and the sites it serves, and no other: the tree
+// copies `apps/<app>/` of the chosen apps and `webs/<site>/` of the served sites, and the apps.yaml
+// entry lists them.
 
 const TEMPLATE_APPS = "# The catalog.\napps:\n  - name: erp\n    title: ERP\n  - name: web\n    title: Website\n    sites: [digitaplatform, simetrix, show]\n";
 const TEMPLATE = {
   "apps.yaml": TEMPLATE_APPS,
-  "web/package.json": "{}\n",
-  "web/content/entities/webPage.entity.json": "{}\n",
-  "web/content/sites/digitaplatform/website.json": "{}\n",
-  "web/content/sites/simetrix/website.json": "{}\n",
-  "web/content/sites/show/website.json": "{}\n",
-  "web/content/sites/show/webpages.json": "[]\n",
-  "erp/package.json": "{}\n",
+  "apps/web/package.json": "{}\n",
+  "apps/web/content/entities/webPage.entity.json": "{}\n",
+  "apps/erp/package.json": "{}\n",
+  "webs/digitaplatform/website.json": "{}\n",
+  "webs/simetrix/website.json": "{}\n",
+  "webs/show/website.json": "{}\n",
+  "webs/show/webpages.json": "[]\n",
+  // A site no entry lists: no tenant carries it.
+  "webs/unlisted/website.json": "{}\n",
 };
 
 async function tree(chosen: readonly string[], sites: Readonly<Record<string, readonly string[]>>, over: { files?: Record<string, string>; catalogOnly?: readonly string[] } = {}): Promise<string[]> {
   const repo = new FakeRepoReader({ files: over.files ?? TEMPLATE });
   const { workdir } = await repo.cloneAtRef({ repoURL: "https://github.com/acme/template.git", ref: "HEAD" });
-  return (await readTemplateTree(repo, workdir, { templateApps: ["erp", "web"], catalogOnly: over.catalogOnly ?? [], chosen, sites })).map((f) => f.path).sort();
+  return (await readTemplateTree(repo, workdir, { templateApps: parseAppsManifest(TEMPLATE_APPS).apps, catalogOnly: over.catalogOnly ?? [], chosen, sites })).map((f) => f.path).sort();
 }
 
-describe("readTemplateTree — the sites a run serves", () => {
-  it("copies the content of the served site and none of the others, and the rest of the folder whole", async () => {
+describe("readTemplateTree — the apps a tenant chose and the sites a run serves", () => {
+  it("copies the chosen app's folder under apps/ whole, and under webs/ the served site only", async () => {
     expect(await tree(["web"], { web: ["show"] })).toEqual([
-      "web/content/entities/webPage.entity.json", "web/content/sites/show/webpages.json", "web/content/sites/show/website.json", "web/package.json",
+      "apps/web/content/entities/webPage.entity.json", "apps/web/package.json", "webs/show/webpages.json", "webs/show/website.json",
     ]);
   });
 
-  it("PLANTED INNOCENT: copies a folder whole where the run names no sites for it, as before", async () => {
-    expect(await tree(["web"], {})).toContain("web/content/sites/simetrix/website.json");
-    expect(await tree(["erp", "web"], { web: ["show"] })).toContain("erp/package.json");
+  it("copies no folder of an app the tenant did not choose, and no site of a website folder it did not choose", async () => {
+    expect(await tree(["erp"], {})).toEqual(["apps/erp/package.json"]);
+  });
+
+  it("PLANTED INNOCENT: a website folder the run names no sites for carries every site its entry lists, and no other", async () => {
+    const paths = await tree(["web"], {});
+    expect(paths.filter((p) => p.startsWith("webs/"))).toEqual(["webs/digitaplatform/website.json", "webs/show/webpages.json", "webs/show/website.json", "webs/simetrix/website.json"]);
+    expect(await tree(["erp", "web"], { web: ["show"] })).toContain("apps/erp/package.json");
   });
 });
 
@@ -43,13 +51,13 @@ describe("readTemplateTree — the paths the catalog keeps for itself", () => {
   it("leaves every path under catalogOnly out of the tenant's repository, and copies the rest", async () => {
     const paths = await tree(["erp"], {}, { files: WITH_HANDBOOK, catalogOnly: ["handbook"] });
     expect(paths.filter((p) => p.startsWith("handbook/"))).toEqual([]);
-    expect(paths).toEqual(["erp/package.json", "package.json"]);
+    expect(paths).toEqual(["apps/erp/package.json", "package.json"]);
     // A path below the root leaves only that subtree out.
     expect(await tree(["erp"], {}, { files: WITH_HANDBOOK, catalogOnly: ["handbook/tools"] })).toContain("handbook/README.md");
   });
 
   it("PLANTED INNOCENT: copies the handbook of a catalog that keeps nothing for itself, as before", async () => {
-    expect(await tree(["erp"], {}, { files: WITH_HANDBOOK })).toEqual(["erp/package.json", "handbook/README.md", "handbook/tools/check-app.mjs", "package.json"]);
+    expect(await tree(["erp"], {}, { files: WITH_HANDBOOK })).toEqual(["apps/erp/package.json", "handbook/README.md", "handbook/tools/check-app.mjs", "package.json"]);
   });
 });
 

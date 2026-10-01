@@ -96,7 +96,7 @@ function repoWithManifest(resolvedSha = SHA): FakeRepoReader {
  *  each with the two seed selections — what every tenant's "Add app" is judged against (#215). */
 export const TEMPLATE_APPS = (extra = ""): Record<string, string> => ({
   "apps.yaml": `apps:\n${["erp", "web", NEW_APP].map((name) => `  - name: ${name}\n    title: ${name.toUpperCase()}\n    selections:\n      seedReference: { title: "Reference data", default: false }\n      seedDemo: { title: "Demo data", default: false }\n${name === NEW_APP ? extra : ""}`).join("")}`,
-  [`${NEW_APP}/package.json`]: "{}\n",
+  [`apps/${NEW_APP}/package.json`]: "{}\n",
 });
 
 /** A FakePlatformRepo pre-seeded with a live tenant carrying one app ("erp") — the registration file a

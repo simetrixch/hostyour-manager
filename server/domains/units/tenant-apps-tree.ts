@@ -36,32 +36,32 @@ export interface TreeFile {
 }
 
 /** The sites a run serves, per app folder: the site of each website it adds. A folder it names no
- *  sites for is copied whole, and its entry as the template spells it. */
+ *  sites for carries every site its entry lists, and its entry as the template spells it. */
 export type ServedSites = Readonly<Record<string, readonly string[]>>;
 
-/** Where the content of a folder's sites stands, one directory per site, as the catalog's apps.yaml
- *  states it: the engine of a site loads `<folder>/content/sites/<id>/`. */
-function siteContentDir(folder: string): string {
-  return `${folder}/content/sites`;
-}
+/** Where a bundle keeps its apps and its websites' content: `apps/<app>/` and `webs/<site>/`. The
+ *  image maps both into its `/apps` tree, so the engine reads the same paths as before the split. */
+export const BUNDLE_APPS_DIR = "apps";
+export const BUNDLE_WEBS_DIR = "webs";
 
 /** Every file of the template that belongs in a tenant's repository, read through the reader. Left
  *  out: the git directory; the release kit (inject-release-kit writes the current kit, and a copied
  *  one would be replaced a step later); the two files this run composes (the manifest, apps.yaml);
  *  the paths the catalog keeps for itself (its apps.yaml's `catalogOnly`, such as its handbook); the
- *  folder of every app of the template the tenant did not choose; and in a folder the run serves
- *  sites of, the content of every other site. */
-export async function readTemplateTree(repo: RepoReader, workdir: string, input: { templateApps: readonly string[]; catalogOnly: readonly string[]; chosen: readonly string[]; sites: ServedSites }): Promise<TreeFile[]> {
-  const unchosen = new Set(input.templateApps.filter((a) => !input.chosen.includes(a)));
-  const skipped = new Set([".git", RELEASE_KIT_DIR, RELEASE_KIT_WORKFLOW.path, APPS_MANIFEST_PATH, CONSUMER_MANIFEST_PATH, ...input.catalogOnly, ...unchosen]);
-  // A folder the run serves sites of carries only their content: another site's is no tenant's own.
-  const servedIn = new Map(Object.entries(input.sites).map(([folder, ids]) => [siteContentDir(folder), new Set(ids)]));
+ *  folder under `apps/` of every app the tenant did not choose; and the folder under `webs/` of every
+ *  site no chosen app carries: a website folder the run serves sites of carries only those, one it
+ *  names none for carries every site its entry lists. */
+export async function readTemplateTree(repo: RepoReader, workdir: string, input: { templateApps: readonly { name: string; sites?: readonly string[] | undefined }[]; catalogOnly: readonly string[]; chosen: readonly string[]; sites: ServedSites }): Promise<TreeFile[]> {
+  const chosen = new Set(input.chosen);
+  const carried = new Set(input.templateApps.filter((a) => chosen.has(a.name)).flatMap((a) => input.sites[a.name] ?? a.sites ?? []));
+  const skipped = new Set([".git", RELEASE_KIT_DIR, RELEASE_KIT_WORKFLOW.path, APPS_MANIFEST_PATH, CONSUMER_MANIFEST_PATH, ...input.catalogOnly]);
   const out: TreeFile[] = [];
   const walk = async (dir: string): Promise<void> => {
     for (const name of await repo.listDir(workdir, dir)) {
       const path = dir === "" ? name : `${dir}/${name}`;
       if (skipped.has(path)) continue;
-      if (servedIn.has(dir) && !servedIn.get(dir)!.has(name)) continue;
+      if (dir === BUNDLE_APPS_DIR && !chosen.has(name)) continue;
+      if (dir === BUNDLE_WEBS_DIR && !carried.has(name)) continue;
       const content = await repo.readFile(workdir, path);
       if (content === null) {
         // A name the reader cannot read as a file is a directory (the reader answers null for one).

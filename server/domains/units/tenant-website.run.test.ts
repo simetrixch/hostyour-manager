@@ -81,7 +81,7 @@ describe("add-app for a website", () => {
 
   it("carries only the site it serves into the tenant's bundle, and lists only that site", async () => {
     seedWebsiteTenant();
-    const sites = { "web/content/sites/main/website.json": "{}\n", "web/content/sites/shop/website.json": "{}\n" };
+    const sites = { "webs/main/website.json": "{}\n", "webs/shop/website.json": "{}\n" };
     const prt = ports({ dns: new FakeDnsProvider() }, { ...WEBSITE_APPS, ...sites });
     const result = await makeAddAppDef(prt).planStream!(WEBSITE, planCtx());
     if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
@@ -91,7 +91,7 @@ describe("add-app for a website", () => {
     const creds = { list: async () => [{ id: "cred_app", subject: { kind: "owner" } }] } as unknown as CredentialStore;
     await makeAddAppDef(prt).steps(p).find((s) => s.name === "write-tree")!.run({ ...ctx(p, "write-tree", []), creds });
     const files = writer.filesFor(tenantAppsRepoURL(p.appsUnit!.org, p.appsUnit!.templateBuild, p.subdomain));
-    expect(Object.keys(files).filter((f) => f.startsWith("web/content/sites/"))).toEqual(["web/content/sites/main/website.json"]);
+    expect(Object.keys(files).filter((f) => f.startsWith("webs/"))).toEqual(["webs/main/website.json"]);
     expect(parseAppsManifest(files["apps.yaml"]!).apps.find((a) => a.name === "web")?.sites).toEqual(["main"]);
   });
 

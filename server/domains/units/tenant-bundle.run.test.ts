@@ -292,7 +292,7 @@ describe("tenant-create execute — one pass creates the repository, builds the 
     const entry = (await prt.registrations.readTenant("prod", result.params.guid))?.entry;
     expect(entry).toMatchObject({ appsRepo: TENANT_URL, appsImage: UNIT, appsImageTag: BUILT_TAG, apps: [{ name: "erp" }] });
     expect(prt.githubApp.created.map((c) => `${c.org}/${c.name}`)).toEqual([`${ORG}/${UNIT}`]);
-    expect(Object.keys(consumerRepo.filesFor(TENANT_URL))).toContain("erp/package.json");
+    expect(Object.keys(consumerRepo.filesFor(TENANT_URL))).toContain("apps/erp/package.json");
     // ONE github-app credential for the bundle, its id on the build registration; the seed, the
     // webhook and the dispatch each opened it to the token the App mints — nothing stored.
     expect(creds.seals).toEqual([]); // no row per unit (#226)

@@ -66,7 +66,7 @@ builds:
   - name: example-apps
     containerfile: docker/Dockerfile
 `;
-/** The template as the reader lists it: root files, the kit (never copied), two app folders. */
+/** The template as the reader lists it: root files, the kit (never copied), two app folders under apps/. */
 export const TEMPLATE_FILES: Record<string, string> = {
   "apps.yaml": TEMPLATE_APPS_YAML,
   "deploy/platform.yaml": TEMPLATE_MANIFEST,
@@ -77,9 +77,9 @@ export const TEMPLATE_FILES: Record<string, string> = {
   ".githooks/pre-push": "#!/bin/sh\nexec npm run check\n",
   ".github/workflows/release.yml": "name: an old kit\n",
   "release/release.sh": "#!/bin/sh\necho old kit\n",
-  "erp/package.json": '{ "name": "erp" }\n',
-  "erp/seeds/roles.json": "[]\n",
-  "web/site.json": "{}\n",
+  "apps/erp/package.json": '{ "name": "erp" }\n',
+  "apps/erp/seeds/roles.json": "[]\n",
+  "apps/web/site.json": "{}\n",
 };
 /** The template files git records as executable (100755). */
 export const TEMPLATE_EXECUTABLE: readonly string[] = [".githooks/pre-push", "release/release.sh"];

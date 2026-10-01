@@ -32,7 +32,7 @@ import { channelReaching } from "./tenant-builds.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
 import { recordBuildOnlyStep } from "#unit/server/build-registration.ts";
 import { refreshRepoPatStep } from "#unit/server/seed-repo-pat.ts";
-import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit, type ServedSites, type TreeFile } from "./tenant-apps-tree.ts";
+import { BUNDLE_APPS_DIR, mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit, type ServedSites, type TreeFile } from "./tenant-apps-tree.ts";
 import type { RepoFileWrite } from "../../adapters/git/port.ts";
 import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "#unit/server/repo-identity.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
@@ -114,13 +114,12 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
     const manifest = ConsumerManifestSchema.safeParse(parseYaml(manifestText));
     if (!manifest.success) throw errValidation(`${CONSUMER_MANIFEST_PATH} in ${templateRepoURL} is not a valid consumer manifest: ${manifest.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
     const catalog = parseAppsManifest(appsYaml);
-    const templateApps = catalog.apps.map((a) => a.name);
     return {
       appsYaml,
       npmrc: await repo.readFile(cloned.workdir, ".npmrc"),
       manifest: manifest.data,
-      folders: async (app) => (await repo.listDir(cloned.workdir, app)).length > 0,
-      tree: (chosen, sites) => readTemplateTree(repo, cloned.workdir, { templateApps, catalogOnly: catalog.catalogOnly ?? [], chosen, sites }),
+      folders: async (app) => (await repo.listDir(cloned.workdir, `${BUNDLE_APPS_DIR}/${app}`)).length > 0,
+      tree: (chosen, sites) => readTemplateTree(repo, cloned.workdir, { templateApps: catalog.apps, catalogOnly: catalog.catalogOnly ?? [], chosen, sites }),
       dispose: () => repo.dispose(cloned.workdir),
     };
   } catch (e) {
@@ -164,7 +163,7 @@ export async function resolveTenantAppsUnit(
   }
   const unknown = input.chosen.filter((a) => !offered.includes(a));
   if (unknown.length > 0) return refuse(`${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not in the template's ${APPS_MANIFEST_PATH} (it offers ${offered.join(", ") || "nothing"})`);
-  if (unfolded.length > 0) return refuse(`${unfolded.join(", ")} ${unfolded.length === 1 ? "has" : "have"} no folder in ${template.repo} although its ${APPS_MANIFEST_PATH} names ${unfolded.length === 1 ? "it" : "them"} — the bundle would refuse to build`);
+  if (unfolded.length > 0) return refuse(`${unfolded.join(", ")} ${unfolded.length === 1 ? "has" : "have"} no folder in ${template.repo} (${unfolded.map((a) => `${BUNDLE_APPS_DIR}/${a}/`).join(", ")}) although its ${APPS_MANIFEST_PATH} names ${unfolded.length === 1 ? "it" : "them"} — the bundle would refuse to build`);
   const registration = (await ports.buildUnitRegistration?.(unit)) ?? null;
   if (registration?.form === "deployable") return refuse(`the unit ${unit} is registered as DEPLOYABLE on this installation — a tenant's apps repository is a build-only unit; offboard that unit first`);
   return { outcome: "resolved", unit: { org, templateRepoURL: template.repo, templateBuild: template.name, registered: registration !== null, ...(engine ? { engine } : {}) } };

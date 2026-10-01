@@ -144,7 +144,7 @@ function harness(): Harness {
     seeder: { seedTenantAppKey: async () => ({ created: true }) } as unknown as NonNullable<AddAppPorts["seeder"]>,
   };
   // The template's catalog names the new app with no selection — the plan judges against it.
-  const def = makeAddAppDef(withAppsTemplate(ports, { "apps.yaml": `apps:\n  - name: ${NEW_APP}\n    title: ${NEW_APP}\n`, [`${NEW_APP}/package.json`]: "{}\n" })) as unknown as AnyRunDefinition;
+  const def = makeAddAppDef(withAppsTemplate(ports, { "apps.yaml": `apps:\n  - name: ${NEW_APP}\n    title: ${NEW_APP}\n`, [`apps/${NEW_APP}/package.json`]: "{}\n" })) as unknown as AnyRunDefinition;
   const executor = new Executor({ db: db.db, creds: fakeCreds, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh, actor: () => "op_system" });
   return { executor, registrations, argo };
 }

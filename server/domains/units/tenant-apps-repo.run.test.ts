@@ -271,7 +271,7 @@ describe("write-tree — the tree from the template into the tenant's repository
     const logs: string[] = [];
     await step(h, p, "write-tree").run(ctx(p, logs, creds.store));
     const files = h.consumerRepo.filesFor(TENANT_URL);
-    expect(Object.keys(files).sort()).toEqual([".dockerignore", ".githooks/pre-push", ".github/CODEOWNERS", "apps.yaml", "deploy/platform.yaml", "docker/Dockerfile", "erp/package.json", "erp/seeds/roles.json", "package.json"]);
+    expect(Object.keys(files).sort()).toEqual([".dockerignore", ".githooks/pre-push", ".github/CODEOWNERS", "apps.yaml", "apps/erp/package.json", "apps/erp/seeds/roles.json", "deploy/platform.yaml", "docker/Dockerfile", "package.json"]);
     expect(files["package.json"]).toBe(TEMPLATE_FILES["package.json"]);
     expect(h.consumerRepo.executableFor(TENANT_URL)).toEqual([".githooks/pre-push"]); // the template's modes, without the kit
     // The manifest: a build-only unit named after the tenant, one build, the template's envs and containerfile.
@@ -301,12 +301,12 @@ describe("write-tree — the tree from the template into the tenant's repository
     const p2 = await planned(h, { ...REQUEST, apps: [{ name: "erp" }, { name: "web" }] });
     await step(h, p2, "write-tree").run(ctx(p2, [], creds.store));
     const files = h.consumerRepo.filesFor(TENANT_URL);
-    expect(files["web/site.json"]).toBe("{}\n");
-    expect(files["erp/package.json"]).toBe(TEMPLATE_FILES["erp/package.json"]);
+    expect(files["apps/web/site.json"]).toBe("{}\n");
+    expect(files["apps/erp/package.json"]).toBe(TEMPLATE_FILES["apps/erp/package.json"]);
     expect(files["package.json"]).toBe('{ "name": "acme-apps", "edited": true }\n');
     expect(parseAppsManifest(files["apps.yaml"]!).apps.map((a) => a.name)).toEqual(["erp", "web"]);
     expect(h.consumerRepo.commits).toHaveLength(2);
-    expect(h.consumerRepo.commits[1]).toMatchObject({ message: `Add web to ${UNIT} from the catalog`, write: [{ path: "web/site.json", content: "{}\n" }, { path: "apps.yaml", content: files["apps.yaml"] }] });
+    expect(h.consumerRepo.commits[1]).toMatchObject({ message: `Add web to ${UNIT} from the catalog`, write: [{ path: "apps/web/site.json", content: "{}\n" }, { path: "apps.yaml", content: files["apps.yaml"] }] });
     expect(h.consumerRepo.commits[1]!.remove).toBeUndefined();
     // Nothing changed: no commit at all.
     const logs: string[] = [];

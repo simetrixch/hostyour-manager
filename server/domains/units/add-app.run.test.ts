@@ -330,7 +330,7 @@ describe("add-app streaming planner", () => {
   });
 });
 
-describe("add-app — the paths the catalog keeps for itself", () => {
+describe("add-app — the catalog's layout and the paths it keeps for itself", () => {
   it("writes no file of a path the catalog lists under catalogOnly into the tenant's repository, such as its handbook", async () => {
     seedClusters();
     const template = TEMPLATE_APPS();
@@ -345,6 +345,13 @@ describe("add-app — the paths the catalog keeps for itself", () => {
     await makeAddAppDef(prt).steps(p).find((s) => s.name === "write-tree")!.run({ ...ctx(p, "write-tree", []), creds });
     const files = Object.keys(writer.filesFor(tenantAppsRepoURL(p.appsUnit!.org, p.appsUnit!.templateBuild, p.subdomain)));
     expect(files.filter((f) => f.startsWith("handbook/"))).toEqual([]);
-    expect(files).toEqual(expect.arrayContaining([`${NEW_APP}/package.json`, "package.json"]));
+    expect(files).toEqual(expect.arrayContaining([`apps/${NEW_APP}/package.json`, "package.json"]));
+  });
+
+  it("refuses an app the catalog names but carries no folder for under apps/, and names that folder", async () => {
+    seedClusters();
+    const withoutFolder = Object.fromEntries(Object.entries(TEMPLATE_APPS()).filter(([path]) => !path.startsWith(`apps/${NEW_APP}/`)));
+    await expect(makeAddAppDef(ports({}, withoutFolder)).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx())).rejects.toThrow(`${NEW_APP} has no folder in https://github.com/`);
+    await expect(makeAddAppDef(ports({}, withoutFolder)).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx())).rejects.toThrow(`(apps/${NEW_APP}/)`);
   });
 });
