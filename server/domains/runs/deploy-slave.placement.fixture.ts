@@ -128,25 +128,31 @@ export function answerPlacementCommand(
   // question every time the prefix changed. What decides is the OPERANDS: every one of them has to
   // name a place an executable of this platform stands, so the `rm -f /tmp/dc-…` that follows every
   // uploaded script falls through to the rest of the table rather than being read as a removal.
+  //
+  // A PATH COPY IS ROOT'S, so a removal of one that is not raised is refused as a machine refuses
+  // it, and a step that dropped its `sudo` is caught here rather than on a machine.
   const rm = words.indexOf("rm");
   if (rm !== -1 && words[rm + 1] === "-f") {
     const named = words.slice(rm + 2).map((word) => executableNamed(word));
     if (named.length === 0 || named.some((name) => name === undefined)) return undefined;
+    const rootOwned = words.slice(rm + 2).find((word) => executableNamed(word)?.startsWith(ON_PATH));
+    if (words[0] !== "sudo" && rootOwned !== undefined) {
+      return { out: `rm: cannot remove '${rootOwned}': Permission denied`, code: 1 };
+    }
     f.files = f.files.filter((x) => !(x.host === host && named.includes(x.path)));
     return { out: "", code: 0 };
   }
 
-  // `sha256sum <executable>` — the read-back of what root installed on the path. MATCHED WHEREVER IT
-  // STANDS for the reason `rm -f` is: a raised command carries `sudo -S` in front of it. Answered with
-  // the digest of the bytes the machine holds under that name, so a test that swapped a file is
-  // answered with what is there and not with what the step meant to put there.
-  const sum = words.indexOf("sha256sum");
-  if (sum !== -1 && words.length === sum + 2) {
-    const named = executableNamed(words[sum + 1] ?? "");
+  // `sha256sum <executable>` — the read-back of what root installed on the path. Answered with the
+  // digest of the bytes the machine holds under that name, so a test that swapped a file is answered
+  // with what is there and not with what the step meant to put there. Only the unraised reading is
+  // answered: the files it reads are readable by every account, so a raised one falls through.
+  if (words[0] === "sha256sum" && words.length === 2) {
+    const named = executableNamed(words[1] ?? "");
     if (named === undefined) return undefined;
     const content = fileAt(f, host, named);
-    if (content === undefined) return { out: `sha256sum: ${words[sum + 1]}: No such file or directory`, code: 1 };
-    return { out: `${createHash("sha256").update(content, "utf8").digest("hex")}  ${words[sum + 1]}`, code: 0 };
+    if (content === undefined) return { out: `sha256sum: ${words[1]}: No such file or directory`, code: 1 };
+    return { out: `${createHash("sha256").update(content, "utf8").digest("hex")}  ${words[1]}`, code: 0 };
   }
 
   const programs = answerProgramsCommand(f, words);

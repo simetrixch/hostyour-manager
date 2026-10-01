@@ -308,10 +308,11 @@ describe("the bootstrap with no manager behind it", () => {
       { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, digests: ansiwiseDigestMap(ANSIWISE_PIN), elevationPassword: ELEVATION_PASSWORD },
     );
 
-    // The path is written by the install, and by the removal of a copy that failed its digest; the
-    // reading of the path after it needs nothing, because its files are readable by every account.
+    // The path is written by the install; the reading of the path after it needs nothing, because its
+    // files are readable by every account. The removal of a copy that failed its digest is raised the
+    // same way, and place-ansiwise.digests.test.ts holds that down where a removal happens.
     for (const act of hosts.log) {
-      if (act.command.startsWith("sudo -S install ") || act.command.startsWith(`sudo -S rm -f ${PATH_HOME}`)) continue;
+      if (act.command.startsWith("sudo -S install ")) continue;
       expect(act.stdin, `${act.command} carried a credential`).toBeUndefined();
       expect(act.command).not.toContain("sudo");
     }

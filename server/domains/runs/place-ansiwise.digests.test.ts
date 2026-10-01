@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
   makeHarness, disposeHarnesses, scriptedHosts, ELEVATION_PASSWORD,
-  ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, ansiwiseDigestMap, ansiwiseDigests,
+  ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, ansiwiseDigestMap, ansiwiseDigests, type HostsScript,
 } from "./deploy-slave.fixture.ts";
 import { assetBytes, ScriptedReleases, ON_PATH } from "./deploy-slave.placement.fixture.ts";
-import { ports, placeCtx, target, transferred, onPath, sessionMachine } from "./place-ansiwise.fixture.ts";
+import { ports, placeCtx, target, transferred, onPath, sessionMachine, FIRST_INSTALL_FQDN } from "./place-ansiwise.fixture.ts";
 import { placeAnsiwiseStep } from "./defs/place-ansiwise.step.ts";
 import {
   placeAnsiwise, ANSIWISE_EXECUTABLES, ANSIWISE_TOOL, ANSIWISE_REST_TOOL, EXECUTABLE_MODE, BOOTSTRAP_HOME, PATH_HOME,
@@ -20,10 +20,44 @@ import {
 
 afterEach(() => disposeHarnesses());
 
+const HOST = "10.1.1.11";
+const genuine = (name: string): string => assetBytes(name, ANSIWISE_PIN).toString("utf8");
+const swappedCopy = (name: string): string => `#!ansiwise\n${name} ${ANSIWISE_PIN}\n# swapped before the install\n`;
+const lastOnPath = (hosts: HostsScript, name: string): string | undefined =>
+  onPath(hosts).filter((f) => f.path === name).at(-1)?.content;
+const installOf = (name: string): string => `sudo -S install -m 755 ${BOOTSTRAP_HOME}${name} `;
+
+/** What a placement is handed: the release reader and the request, as the step builds them. */
+function placement() {
+  const releases = new ScriptedReleases();
+  return {
+    releases,
+    read: { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) },
+    request: { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, digests: ansiwiseDigestMap(ANSIWISE_PIN), elevationPassword: ELEVATION_PASSWORD },
+  };
+}
+
+/** The machine of a session, each command passing through `wrap` first: the state a process running
+ *  as the operating account can make, or a session that ends, is planted there. */
+async function machineWith(
+  hosts: HostsScript,
+  wrap: (line: string, run: () => ReturnType<PlacementMachine["run"]>) => ReturnType<PlacementMachine["run"]>,
+): Promise<PlacementMachine> {
+  const honest = await sessionMachine(hosts, []);
+  return { ...honest, run: (argv, o) => wrap(argv.join(" "), () => honest.run(argv, o)) };
+}
+
+/** Swaps the home copy of each executable named, at the moment root installs it. */
+const swapAtInstall = (hosts: HostsScript, names: readonly string[]) => (line: string): void => {
+  for (const name of names) {
+    if (line.startsWith(installOf(name))) hosts.files.push({ host: HOST, path: name, content: swappedCopy(name), mode: EXECUTABLE_MODE });
+  }
+};
+
 describe("place-ansiwise: the engine held against its digests", () => {
   // THE PIN SAYS WHICH RELEASE IS FETCHED, AND NOT WHICH BYTES ARRIVE. The asset planted here answers
-  // --version with the pin, exactly as a replaced one built to pass would, so the read-back above
-  // cannot see it: only the digest the platform repository states can. Run twice, planted and not,
+  // --version with the pin, exactly as a replaced one built to pass would, so the `--version`
+  // read-back cannot see it: only the digest the platform repository states can. Run twice, planted and not,
   // so the refusal is shown to come from the digest and from nothing else about the run.
   for (const planted of [true, false]) {
     it(`places an asset that answers the pin only at the digest the platform repository states — ${planted ? "a planted asset" : "the released asset"}`, async () => {
@@ -74,32 +108,6 @@ describe("place-ansiwise: the engine held against its digests", () => {
     expect(h.releases.read, "an asset was fetched that no digest could hold").toEqual([]);
     expect(transferred(hosts)).toHaveLength(0);
   });
-  it("takes a home copy swapped between the transfer and the install off the path again, and refuses the run", async () => {
-    // The window the transfer cannot close: `install` reads the home copy when it runs, and the
-    // account can write it in between. The machine below swaps ~/ansiwise for a copy that answers the
-    // pin at the moment root installs it, which is the state a process running as that account can make.
-    const hosts = scriptedHosts();
-    const releases = new ScriptedReleases();
-    const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
-    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, digests: ansiwiseDigestMap(ANSIWISE_PIN), elevationPassword: ELEVATION_PASSWORD };
-    const swapped = `#!ansiwise\n${ANSIWISE_TOOL} ${ANSIWISE_PIN}\n# swapped before the install\n`;
-    const honest = await sessionMachine(hosts, []);
-    const racing: PlacementMachine = {
-      ...honest,
-      run: async (argv, o) => {
-        if (argv.join(" ").startsWith(`sudo -S install -m 755 ${BOOTSTRAP_HOME}${ANSIWISE_TOOL} `)) {
-          hosts.files.push({ host: "10.1.1.11", path: ANSIWISE_TOOL, content: swapped, mode: EXECUTABLE_MODE });
-        }
-        return honest.run(argv, o);
-      },
-    };
-
-    await expect(placeAnsiwise(racing, read, request))
-      .rejects.toThrow(new RegExp(`${PATH_HOME}${ANSIWISE_TOOL} on .* hashes to [0-9a-f]{64} after the install, .* it was taken off the path again`));
-    expect(onPath(hosts).filter((f) => f.path === ANSIWISE_TOOL).at(-1)?.content, "the swapped copy stayed on the path")
-      .not.toBe(swapped);
-  });
-
   it("installs onto the path only what this run placed, and leaves an executable at the pin in both places alone", async () => {
     // ansiwise answers the pin at home and on the path, and its home copy is not the release's bytes;
     // ansiwise-rest has drifted. Only ansiwise-rest is placed, so the unhashed home copy of ansiwise
@@ -160,5 +168,138 @@ describe("place-ansiwise: the engine held against its digests", () => {
 
     const installed = onPath(hosts).find((f) => f.path === ANSIWISE_TOOL);
     expect(installed?.content, "the planted home copy reached the path").toBe(assetBytes(ANSIWISE_TOOL, ANSIWISE_PIN).toString("utf8"));
+  });
+});
+
+describe("place-ansiwise: what root installed, read back off the path", () => {
+  // THE WINDOW THE TRANSFER CANNOT CLOSE: `install` reads the home copy when it runs, and the account
+  // can write that copy in between. Each machine below makes a state a process running as that
+  // account can make, and each test goes red without the read-back or the digest it names.
+
+  it("refuses a home copy swapped for the install even where it is put back right after, because the path is read", async () => {
+    const hosts = scriptedHosts();
+    const { read, request } = placement();
+    const swap = swapAtInstall(hosts, [ANSIWISE_TOOL]);
+    const machine = await machineWith(hosts, async (line, run) => {
+      swap(line);
+      const done = await run();
+      if (line.startsWith(installOf(ANSIWISE_TOOL))) {
+        hosts.files.push({ host: HOST, path: ANSIWISE_TOOL, content: genuine(ANSIWISE_TOOL), mode: EXECUTABLE_MODE });
+      }
+      return done;
+    });
+
+    await expect(placeAnsiwise(machine, read, request))
+      .rejects.toThrow(new RegExp(`${PATH_HOME}${ANSIWISE_TOOL} on .* hashes to [0-9a-f]{64} after the install, .* it was taken off the path again`));
+    expect(lastOnPath(hosts, ANSIWISE_TOOL), "the swapped copy stayed on the path").toBeUndefined();
+    // Taken off as root, with the password on stdin and nowhere in the command.
+    const removal = hosts.log.find((act) => act.command === `sudo -S rm -f ${PATH_HOME}${ANSIWISE_TOOL}`);
+    expect(removal?.stdin?.toString("utf8")).toBe(`${ELEVATION_PASSWORD}\n`);
+  });
+
+  it("installs the second executable only once the first is read back, so a refusal leaves no swapped copy on the path", async () => {
+    const hosts = scriptedHosts();
+    const { read, request } = placement();
+    const swap = swapAtInstall(hosts, ANSIWISE_EXECUTABLES);
+    const machine = await machineWith(hosts, (line, run) => { swap(line); return run(); });
+
+    await expect(placeAnsiwise(machine, read, request)).rejects.toThrow(new RegExp(`${PATH_HOME}${ANSIWISE_TOOL} on .* hashes to`));
+    for (const name of ANSIWISE_EXECUTABLES) expect(lastOnPath(hosts, name), `a swapped ${name} stayed on the path`).toBeUndefined();
+
+    expect(await placeAnsiwise(await sessionMachine(hosts, []), read, request)).toEqual({ version: ANSIWISE_PIN, placed: true });
+    for (const name of ANSIWISE_EXECUTABLES) expect(lastOnPath(hosts, name)).toBe(genuine(name));
+  });
+
+  it("reads back the second executable as well, and takes off only that one", async () => {
+    const hosts = scriptedHosts();
+    const { read, request } = placement();
+    const swap = swapAtInstall(hosts, [ANSIWISE_REST_TOOL]);
+    const machine = await machineWith(hosts, (line, run) => { swap(line); return run(); });
+
+    await expect(placeAnsiwise(machine, read, request))
+      .rejects.toThrow(new RegExp(`${PATH_HOME}${ANSIWISE_REST_TOOL} on .* hashes to [0-9a-f]{64} after the install`));
+    expect(lastOnPath(hosts, ANSIWISE_REST_TOOL)).toBeUndefined();
+    expect(lastOnPath(hosts, ANSIWISE_TOOL), "the first executable, read back and held, was taken off too").toBe(genuine(ANSIWISE_TOOL));
+  });
+
+  it("leaves no unread copy on the path when the account also breaks the install after it", async () => {
+    const hosts = scriptedHosts();
+    const { read, request } = placement();
+    const swap = swapAtInstall(hosts, [ANSIWISE_TOOL]);
+    const machine = await machineWith(hosts, (line, run) => {
+      swap(line);
+      // The account deletes its ~/ansiwise-rest just before root installs it, so that install fails.
+      if (line.startsWith(installOf(ANSIWISE_REST_TOOL))) {
+        hosts.files = hosts.files.filter((f) => !(f.host === HOST && f.path === ANSIWISE_REST_TOOL));
+      }
+      return run();
+    });
+
+    await expect(placeAnsiwise(machine, read, request)).rejects.toThrow(new RegExp(`${PATH_HOME}${ANSIWISE_TOOL} on .* hashes to`));
+    expect(lastOnPath(hosts, ANSIWISE_TOOL), "the swapped ansiwise stayed on the path").toBeUndefined();
+  });
+
+  it("refuses a copy whose read-back could not be read, and names the reading rather than a swap", async () => {
+    const hosts = scriptedHosts();
+    const { read, request } = placement();
+    const machine = await machineWith(hosts, (line, run) =>
+      (line.startsWith("sha256sum ") ? Promise.resolve({ code: 127, stdout: "" }) : run()));
+
+    const refusal = await placeAnsiwise(machine, read, request).then(() => "no refusal", (e: Error) => e.message);
+    expect(refusal).toContain(`${PATH_HOME}${ANSIWISE_TOOL} on ${FIRST_INSTALL_FQDN} could not be read back after the install (sha256sum exit 127)`);
+    expect(refusal).not.toMatch(/hashes to/);
+    expect(lastOnPath(hosts, ANSIWISE_TOOL), "a copy nobody read stayed on the path").toBeUndefined();
+  });
+
+  it("says a copy that could not be taken off is still there, and the next run places over it", async () => {
+    const hosts = scriptedHosts();
+    const { read, request } = placement();
+    const swap = swapAtInstall(hosts, [ANSIWISE_TOOL]);
+    const machine = await machineWith(hosts, (line, run) => {
+      swap(line);
+      return line.startsWith("sudo -S rm -f ") ? Promise.resolve({ code: 1, stdout: "" }) : run();
+    });
+
+    await expect(placeAnsiwise(machine, read, request))
+      .rejects.toThrow("it could not be taken off the path again (exit 1), so it is still there until the next placement places over it");
+    expect(lastOnPath(hosts, ANSIWISE_TOOL)).toBe(swappedCopy(ANSIWISE_TOOL));
+    expect(await placeAnsiwise(await sessionMachine(hosts, []), read, request)).toEqual({ version: ANSIWISE_PIN, placed: true });
+    expect(lastOnPath(hosts, ANSIWISE_TOOL)).toBe(genuine(ANSIWISE_TOOL));
+  });
+
+  it("places again over a copy left on the path when the session ended before its read-back", async () => {
+    // THE WINDOW THIS DOES NOT CLOSE: the installed copy stands unread under the name root runs until
+    // the next placement hashes it.
+    const hosts = scriptedHosts();
+    const { read, request } = placement();
+    const swap = swapAtInstall(hosts, [ANSIWISE_TOOL]);
+    let installed = false;
+    const machine = await machineWith(hosts, (line, run) => {
+      swap(line);
+      if (line.startsWith("sudo -S install ")) installed = true;
+      return installed && line.startsWith("sha256sum ") ? Promise.reject(new Error("the session ended before the read-back")) : run();
+    });
+
+    await expect(placeAnsiwise(machine, read, request)).rejects.toThrow("the session ended before the read-back");
+    expect(lastOnPath(hosts, ANSIWISE_TOOL)).toBe(swappedCopy(ANSIWISE_TOOL));
+    expect(await placeAnsiwise(await sessionMachine(hosts, []), read, request)).toEqual({ version: ANSIWISE_PIN, placed: true });
+    expect(lastOnPath(hosts, ANSIWISE_TOOL)).toBe(genuine(ANSIWISE_TOOL));
+  });
+
+  it("places again over a path copy that answers the pin and is not the release's bytes, and says why", async () => {
+    const hosts = scriptedHosts();
+    const { releases, read, request } = placement();
+    const machine = await sessionMachine(hosts, []);
+    for (const name of ANSIWISE_EXECUTABLES) {
+      await machine.putFile(name, assetBytes(name, ANSIWISE_PIN), EXECUTABLE_MODE);
+      const content = name === ANSIWISE_TOOL ? swappedCopy(name) : genuine(name);
+      hosts.files.push({ host: HOST, path: `${ON_PATH}${name}`, content, mode: EXECUTABLE_MODE });
+    }
+
+    const said: string[] = [];
+    expect(await placeAnsiwise(await sessionMachine(hosts, said), read, request)).toEqual({ version: ANSIWISE_PIN, placed: true });
+    expect(said.join("\n")).toContain(`${PATH_HOME}${ANSIWISE_TOOL} answers ${ANSIWISE_PIN} and does not hash to its stated SHA-256`);
+    expect(releases.read).toEqual([`https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`]);
+    expect(lastOnPath(hosts, ANSIWISE_TOOL)).toBe(genuine(ANSIWISE_TOOL));
   });
 });

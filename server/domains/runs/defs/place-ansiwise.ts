@@ -377,13 +377,23 @@ export interface BootstrapVerdict {
 }
 
 /** Give the machine both executables at the version the request pins, and fetch neither of them
- *  where its home copy and its path copy both answer that version. An executable with either copy off
- *  the pin is fetched, held against its digest and placed again.
+ *  where its home copy and its path copy both answer that version and the path copy hashes to its
+ *  stated digest. Any other executable is fetched, held against its digest and placed again.
  *
  *  MEASURED, PLACED, MEASURED AGAIN, and the verdict is the second reading. A transfer that wrote an
  *  error page would set the mode on it and resolve happily; what says the machine carries the pin is
- *  the machine answering the pin. What root installed is read back off the path as well, and held
- *  against its digest. */
+ *  the machine answering the pin. Each copy root installs is read back off the path and held against
+ *  its digest before the next one is installed.
+ *
+ *  WHAT THIS HOLDS: a file swapped in the account's home between the transfer and the install never
+ *  stays on the path, and a later run places again over any path copy that is not the release's bytes.
+ *  Two bounds remain.
+ *  - THE WINDOW. Between an install and its read-back, the installed copy stands unread under the
+ *    name root runs. A swapped copy is executable there until the read-back removes it, and where the
+ *    run ends before the read-back, until the next placement hashes it and places again.
+ *  - THE SHELL. Every command here is answered by the operating account's own shell, which reads that
+ *    account's start-up files. An account whose start-up answers in place of `sha256sum`, or reads the
+ *    password piped to `sudo -S`, is stopped by nothing in this module. */
 export async function placeAnsiwise(
   machine: PlacementMachine,
   assets: ReleaseAssets,
@@ -396,23 +406,10 @@ export async function placeAnsiwise(
   // the transfer had nothing to do and the copy onto the path had never been made at all.
   const standing = await readVersions(machine, BOOTSTRAP_HOME);
   const onPath = await readVersions(machine, PATH_HOME);
-  // PLACED AGAIN WHERE EITHER COPY IS OFF THE PIN, and fetched again for it. A home copy that answers
-  // the pin is no proof the release built it: an earlier run's copy, or one the account itself wrote,
-  // answers the pin as readily, and what reaches the path is installed there as root.
-  const toPlace = ANSIWISE_EXECUTABLES.filter((name) => standing[name] !== version || onPath[name] !== version);
-  if (toPlace.length === 0) {
-    machine.log(`${machine.name} already carries ${describeExecutables(version)} — nothing to place`);
-    return { version, placed: false };
-  }
-  machine.log(
-    `placing on ${machine.name}: ${toPlace.map((name) =>
-      `${name} ${version} (${BOOTSTRAP_HOME}${name} answers ${standing[name] ?? "nothing"}, ` +
-      `${PATH_HOME}${name} answers ${onPath[name] ?? "nothing"})`).join(", ")}`,
-  );
 
-  // EVERY ASSET IS ADDRESSED, FETCHED AND HELD BEFORE ANY IS WRITTEN, so a refusal of one leaves the
-  // machine as it stood, and a pin whose digests were never written costs no download at all.
-  const addressed = toPlace.map((name) => {
+  // EVERY ASSET IS ADDRESSED BEFORE ANYTHING IS DECIDED, because the decision holds each path copy
+  // against its digest. A pin whose digests were never written is refused here and costs no download.
+  const addressed = ANSIWISE_EXECUTABLES.map((name) => {
     const from = downloadAddress(req.downloadUrl, name, version);
     // ANY slot and not only the two this fills. Nothing else fills one, so an address still carrying
     // `<arch>` or `<os>` would be sent to the release host with the angle brackets in it and whatever
@@ -437,8 +434,31 @@ export async function placeAnsiwise(
     }
     return { name, from, asset, stated };
   });
+  const pathDigests: Record<string, string | undefined> = {};
+  for (const { name } of addressed) pathDigests[name] = (await readDigest(machine, `${PATH_HOME}${name}`)).digest;
+
+  // PLACED AGAIN WHERE EITHER COPY IS OFF THE PIN, OR WHERE THE PATH COPY IS NOT THE RELEASE'S BYTES.
+  // A copy that answers the pin is no proof the release built it: an earlier run's copy, one the
+  // account itself wrote, or one swapped in before an earlier run could read it back answers the pin
+  // as readily. Root runs the path copy, so the path copy is the one held against its digest.
+  const toPlace = addressed.filter(({ name, stated }) =>
+    standing[name] !== version || onPath[name] !== version || pathDigests[name] !== stated);
+  if (toPlace.length === 0) {
+    machine.log(`${machine.name} already carries ${describeExecutables(version)}, each at its stated SHA-256 — nothing to place`);
+    return { version, placed: false };
+  }
+  machine.log(
+    `placing on ${machine.name}: ${toPlace.map(({ name, stated }) =>
+      `${name} ${version} (${BOOTSTRAP_HOME}${name} answers ${standing[name] ?? "nothing"}, ` +
+      `${PATH_HOME}${name} answers ${onPath[name] ?? "nothing"}` +
+      (onPath[name] === version && pathDigests[name] !== stated ? " and does not hash to its stated SHA-256" : "") +
+      ")").join(", ")}`,
+  );
+
+  // EVERY ASSET IS FETCHED AND HELD BEFORE ANY IS WRITTEN, so a refusal of one leaves the machine as
+  // it stood.
   const held: { name: string; from: string; bytes: Buffer }[] = [];
-  for (const { name, from, asset, stated } of addressed) {
+  for (const { name, from, asset, stated } of toPlace) {
     const bytes = await assets.read(from);
     if (bytes.length === 0) {
       throw errValidation(
@@ -473,13 +493,13 @@ export async function placeAnsiwise(
     );
   }
 
-  // ONTO THE PATH, only what this run fetched and held against its digest: the bytes that answered
-  // the pin are the bytes that go where everything else looks for them, and a copy nobody here held
-  // never goes there. `install` writes the new file in place of the standing one, so an install that
-  // is interrupted can leave the path without a whole executable. The read-backs below then refuse
-  // the run, and the next placement measures the path off the pin and places again.
+  // ONTO THE PATH, only what this run fetched and held against its digest, ONE EXECUTABLE AT A TIME:
+  // each copy is read back before the next one is installed, so no refusal leaves a copy of this run
+  // on the path unread. `install` writes the new file in place of the standing one, so an install that
+  // fails part-way can leave the path without a whole executable; the next placement finds that copy
+  // off its digest and places again.
   const stdin = Buffer.from(req.elevationPassword + NEWLINE, "utf8");
-  for (const name of toPlace) {
+  for (const { name, asset, stated } of toPlace) {
     const done = await machine.run(
       ["sudo", "-S", "install", "-m", EXECUTABLE_MODE.toString(8), `${BOOTSTRAP_HOME}${name}`, `${PATH_HOME}${name}`],
       { timeoutMs: COMMAND_TIMEOUT_MS, stdin },
@@ -492,26 +512,27 @@ export async function placeAnsiwise(
         "programs written for a version it is not",
       );
     }
-  }
 
-  // WHAT ROOT INSTALLED IS HELD AGAINST ITS DIGEST, read back off the path. `install` reads the home
-  // copy at the moment it runs, and the account this run logged in as can write that copy: between
-  // the transfer above and the install it could have been replaced by a file that answers the pin as
-  // well. The path belongs to root and its files are readable by every account, so the reading needs
-  // no credential, and what it reads is what every later run executes: nothing below root can change
-  // it any more.
-  for (const { name, asset, stated } of addressed) {
-    const hashed = await machine.run(["sha256sum", `${PATH_HOME}${name}`], { timeoutMs: COMMAND_TIMEOUT_MS });
-    const installed = hashed.code === 0 ? hashed.stdout.trim().split(/\s+/)[0] : undefined;
-    if (installed === stated) continue;
+    // WHAT ROOT INSTALLED IS HELD AGAINST ITS DIGEST, read back off the path. `install` reads the home
+    // copy at the moment it runs, and the account this run logged in as can write that copy: between
+    // the transfer above and the install it could have been replaced by a file that answers the pin
+    // as well. The path belongs to root and its files are readable by every account, so the reading
+    // needs no credential.
+    const installed = await readDigest(machine, `${PATH_HOME}${name}`);
+    if (installed.digest === stated) continue;
     const removed = await machine.run(["sudo", "-S", "rm", "-f", `${PATH_HOME}${name}`], { timeoutMs: COMMAND_TIMEOUT_MS, stdin });
     throw errValidation(
-      `${PATH_HOME}${name} on ${machine.name} hashes to ${installed ?? "nothing"} after the install, and the platform ` +
-      `repository states ${stated} for ${asset} — ` +
+      `${PATH_HOME}${name} on ${machine.name} ` +
+      (installed.digest === undefined
+        ? `could not be read back after the install (sha256sum exit ${installed.code}), so it was not held against ` +
+          `the ${stated} the platform repository states for ${asset}`
+        : `hashes to ${installed.digest} after the install, and the platform repository states ${stated} for ${asset}, ` +
+          `the digest of the bytes this run wrote to ${BOOTSTRAP_HOME}${name}`) +
+      " — " +
       (removed.code === 0
-        ? "it was taken off the path again. "
-        : `and it could not be taken off the path again (exit ${removed.code}), so it is still there. `) +
-      `Something on ${machine.name} replaced ${BOOTSTRAP_HOME}${name} between the transfer and the install`,
+        ? `it was taken off the path again, and ${machine.name} has no ${name} on its path until the next placement`
+        : `and it could not be taken off the path again (exit ${removed.code}), so it is still there until the next ` +
+          "placement places over it"),
     );
   }
 
@@ -550,6 +571,14 @@ async function readVersions(
     answers[name] = await readVersion(machine, `${where}${name}`);
   }
   return answers;
+}
+
+/** The SHA-256 of the file at `path`, as `sha256sum` answers it, and the exit code of that reading.
+ *  The digest is undefined where the reading failed, which is also what a machine carrying no such
+ *  file looks like from here. */
+async function readDigest(machine: PlacementMachine, path: string): Promise<{ digest: string | undefined; code: number }> {
+  const hashed = await machine.run(["sha256sum", path], { timeoutMs: COMMAND_TIMEOUT_MS });
+  return { digest: hashed.code === 0 ? hashed.stdout.trim().split(/\s+/)[0] : undefined, code: hashed.code };
 }
 
 /** The release the executable at `path` answers with, or undefined where nothing answered — which is
