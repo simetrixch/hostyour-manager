@@ -24,6 +24,7 @@ import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/port.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { runRelocationJob, type RelocationPorts, type RelocationWorld, type WorldOf } from "#unit/server/relocation.ts";
+import { targetOf } from "#unit/server/relocation-restore.ts";
 import {
   consumerDumpJobs, claimsIdentity, tarredClaims,
   consumerRestoreJobs, consumerGenerationClaimsJob, parseClaimLines,
@@ -68,11 +69,13 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
     const image = ports.dbtoolsImage ?? "";
     // The registration + PVC list are read lazily, per closure: a restore resolves this world while
     // the unit's registration is deliberately ABSENT (offboarded), and must not fail on it.
-    const jobInputs = async (): Promise<{ name: string; namespace: string; stage: typeof ac.stage; databases: string[]; services: ConsumerStageRegistration["services"]; pvcs: string[]; image: string }> => {
+    const registrationInputs = async (): Promise<{ name: string; namespace: string; stage: typeof ac.stage; databases: string[]; services: ConsumerStageRegistration["services"]; image: string }> => {
       const reg = await readStageRegistration(ports, ac.stage, ac.name);
+      return { name: ac.name, namespace, stage: ac.stage, databases: reg.databases, services: reg.services, image };
+    };
+    const jobInputs = async (): Promise<Awaited<ReturnType<typeof registrationInputs>> & { pvcs: string[] }> => {
       const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
-      const pvcs = await clusterReader.listPersistentVolumeClaims(namespace);
-      return { name: ac.name, namespace, stage: ac.stage, databases: reg.databases, services: reg.services, pvcs, image };
+      return { ...(await registrationInputs()), pvcs: await clusterReader.listPersistentVolumeClaims(namespace) };
     };
     // Whose files the tarred claims hold on `clusterId`: the user of the workloads mounting them there.
     const claimsIdentityOn = async (clusterId: string, inputs: { pvcs: readonly string[]; services: ConsumerStageRegistration["services"] }) => {
@@ -108,23 +111,25 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         return consumerDumpJobs({ ...inputs, ...(pvcUser !== undefined ? { pvcUser } : {}), folder, registrationYaml });
       },
       expectedDumpEntries: async () => consumerExpectedDumpEntries(await jobInputs()),
-      // The restore writes the files as the workloads that will read them on the TARGET, which the
-      // target renders quiesced before any data is back, so their templates already stand. What the
-      // generation holds decides what must come back: a claim it holds that the restore does not
-      // extract is refused by name before any store is written, so a restore never settles green over
-      // data it left behind.
+      // What comes back is what the generation holds, written into the claims that stand on the TARGET:
+      // the old cluster may have lost the namespace to an offboard, released it to a move, or be gone.
+      // A claim the generation holds and the target lacks is refused by name before any store is
+      // written, so a restore never settles green over data it left behind. The files are written as
+      // the workloads that will read them there, which the target renders quiesced before any data is
+      // back, so their templates already stand.
       restoreJobs: async (folder, ctx, targetClusterId) => {
-        const inputs = await jobInputs();
+        const inputs = await registrationInputs();
         const held = parseClaimLines(await runRelocationJob(ports, ctx, targetClusterId, consumerGenerationClaimsJob({ name: ac.name, namespace, folder, image })));
-        const extracted = tarredClaims(inputs);
-        const unplaced = tarredClaims({ pvcs: held, services: inputs.services }).filter((claim) => !extracted.includes(claim));
+        const claims = tarredClaims({ pvcs: held, services: inputs.services });
+        const standing = await (await ports.resolver.resolve(targetClusterId)).clusterReader.listPersistentVolumeClaims(namespace);
+        const unplaced = claims.filter((claim) => !standing.includes(claim));
         if (unplaced.length > 0) {
-          throw errValidation(`the generation ${folder} holds ${unplaced.join(", ")}, and the restore has no claim of that name in ${namespace} to write into, so it stops before any store is written`);
+          throw errValidation(`the generation ${folder} holds ${unplaced.join(", ")}, and no claim of that name stands in ${namespace} on ${targetOf(ctx, targetClusterId).cluster}, so the restore stops before any store is written`);
         }
-        const pvcUser = await claimsIdentityOn(targetClusterId, inputs);
-        return consumerRestoreJobs({ ...inputs, ...(pvcUser !== undefined ? { pvcUser } : {}), folder });
+        const pvcUser = await claimsIdentityOn(targetClusterId, { pvcs: claims, services: inputs.services });
+        return consumerRestoreJobs({ ...inputs, pvcs: claims, ...(pvcUser !== undefined ? { pvcUser } : {}), folder });
       },
-      verifyCompletenessJobs: async (folder) => consumerVerifyCompletenessJobs({ ...(await jobInputs()), folder }),
+      verifyCompletenessJobs: async (folder) => consumerVerifyCompletenessJobs({ ...(await registrationInputs()), folder }),
       sourceDbListJob: async () => {
         const i = await jobInputs();
         return consumerSourceDbListJob({ name: i.name, stage: i.stage, databases: i.databases, services: i.services, image });

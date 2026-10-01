@@ -177,20 +177,19 @@ describe("restore (consumer)", () => {
     seedConsumerRow(db, "offboarded");
     seedGeneration(db, "consumer", CONSUMER);
     const f = makeFakes();
-    const ports = consumerPorts(f);
-    const dumped = serializePointer(ConsumerRegistrationSchema, {
-      name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false, removing: false,
-      chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services: ["mongodb", "postgresql"], size: "medium", mongodb: "shared",
-      quota: seedQuota("medium"),
-    });
-    scriptDumpedRegistration(f.target.reader, CONSUMER, dumped);
+    scriptDumpedRegistration(f.target.reader, CONSUMER, dumpedConsumer(["mongodb", "postgresql"]));
+    // The offboard deleted the namespace on the old cluster, and that cluster may be gone for good: the
+    // restore reads the claims off the generation and the target alone. This older generation still
+    // carries the per-consumer PostgreSQL's tar, which restore-pg replaces and so is never extracted.
+    f.source.reader.listPersistentVolumeClaims = async () => { throw new Error("the old cluster answers nothing"); };
+    f.target.reader.setJobResult(`reloc-list-pvc-${CONSUMER}`, { succeeded: true, logs: "CLAIM postgres-data\nCLAIM queue-mta-0" });
     // The chart moved its MTA from 2000 to 1000: the target renders the new user, quiesced, before any
-    // data is back. The per-consumer PostgreSQL's claim runs as 999 and is no tar, so it refuses nothing.
+    // data is back. The PostgreSQL claim runs as 999 and is no tar, so it refuses nothing. cache-0 is
+    // newer than the generation, which holds no tar of it, so nothing is extracted into it.
     const pg = { claim: "postgres-data", ordinals: false, user: 999, group: 999 };
-    f.source.reader.setClaims(`${CONSUMER}-prod`, ["postgres-data", "queue-mta-0"], [pg, { claim: "queue-mta", ordinals: true, user: 2000, group: 2000 }]);
-    f.target.reader.setClaims(`${CONSUMER}-prod`, ["postgres-data", "queue-mta-0"], [pg, { claim: "queue-mta", ordinals: true, user: 1000, group: 1000 }]);
+    f.target.reader.setClaims(`${CONSUMER}-prod`, ["postgres-data", "queue-mta-0", "cache-0"], [pg, { claim: "queue-mta", ordinals: true, user: 1000, group: 1000 }, { claim: "cache", ordinals: true, user: 3000, group: 3000 }]);
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, makeRestoreDef(ports).steps(params), params, []);
+    await driveSteps(db, makeRestoreDef(consumerPorts(f)).steps(params), params, []);
     const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`);
     expect(restore?.spec.runAs).toEqual({ user: 1000, group: 1000 });
     expect(restore?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
@@ -206,7 +205,7 @@ describe("restore (consumer)", () => {
     // generation still holds the claim's tar.
     f.target.reader.setJobResult(`reloc-list-pvc-${CONSUMER}`, { succeeded: true, logs: "CLAIM queue-mta-0" });
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await expect(driveSteps(db, makeRestoreDef(consumerPorts(f)).steps(params), params, [])).rejects.toThrow(/holds queue-mta-0/);
+    await expect(driveSteps(db, makeRestoreDef(consumerPorts(f)).steps(params), params, [])).rejects.toThrow(/holds queue-mta-0, and no claim of that name stands in acme-prod on s2/);
     expect(jobNames(f.target).filter((n) => n.startsWith("reloc-restore-"))).toEqual([]);
   });
 

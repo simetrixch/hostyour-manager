@@ -235,7 +235,7 @@ PGPASSWORD="$POSTGRES_PASSWORD" psql -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_
 /** Completeness on the TARGET for a consumer — every dumped Mongo archive has its database, and the
  *  bucket matches the box copy's object count. PostgreSQL and PVCs are proven by their restore jobs
  *  themselves (psql/tar fail non-zero on a broken restore). */
-export function consumerVerifyCompletenessJobs(i: ConsumerJobInputs): RelocationJob[] {
+export function consumerVerifyCompletenessJobs(i: Omit<ConsumerJobInputs, "pvcs">): RelocationJob[] {
   const jobs: RelocationJob[] = [];
   if (i.services.includes("mongodb") && i.databases.length > 0) {
     jobs.push({
