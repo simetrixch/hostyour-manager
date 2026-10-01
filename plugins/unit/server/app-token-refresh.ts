@@ -10,12 +10,13 @@
 // how four PAT units stood on `cannot find secret data for key: "packages"` on the first installation.
 //
 // A REWRITE ALONE REACHES NO CLONE. The pipeline's clone task reads the Secret `build-git-https`
-// in <unit>-build, and that Secret is what an ExternalSecret materialized out of Vault at ONE of two
-// moments: its deploy, or the deletion of the Secret it targets (`refreshPolicy: OnChange`,
-// `refreshInterval: "0"` — hostyour-cloud's delivery rule, stated in
-// clusters/charts/external-secret/templates/externalsecret.yaml; nothing on the platform reads Vault
-// on a timer). So every successful rewrite is followed by the deletion of the unit's three target
-// Secrets, which is the one act that makes ESO fetch the new value.
+// in <unit>-build, and that Secret is what an ExternalSecret wrote out of Vault when it was deployed
+// or when it last CHANGED (`refreshPolicy: OnChange`, `refreshInterval: "0"` — hostyour-cloud's
+// delivery rule, stated in clusters/charts/external-secret/templates/externalsecret.yaml; nothing on
+// the platform reads Vault on a timer). So every successful rewrite is followed by a refresh request
+// on the unit's three build ExternalSecrets: an annotation that changes their metadata, which ESO
+// answers by writing the targets again. The Secrets are never deleted for it, so an ESO that does not
+// answer leaves the value it wrote before, and no clone meets a missing Secret.
 //
 // WHICH units: every build registration. The credential each unit's repository is reached with is
 // the owner's, resolved from the URL at every tick (repo-identity.ts resolveRepoCredentialId, #226):
@@ -23,7 +24,8 @@
 import type { Logger } from "#core/server/kernel/logger.ts";
 import type { CredentialStore, UseContext } from "#core/server/security/store.ts";
 import type { VaultSeeder } from "./adapters/vault/seeder-port.ts";
-import type { ClusterReader } from "#core/server/adapters/kube/port.ts";
+import type { ClusterReader, ExternalSecretRow } from "#core/server/adapters/kube/port.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
 import type { Registrations } from "./registrations.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";
 import { packagesReaderFor, resolveRepoCredentialId, type OwnerIdentityReader } from "./repo-identity.ts";
@@ -34,7 +36,7 @@ import { appReachesRepoURL } from "./repo-identity.ts";
  *  the ExternalSecret that materializes each — hostyour-cloud
  *  clusters/inventories/consumer-build/templates/externalsecret-git-https.yaml (the clone
  *  credential), externalsecret-bump.yaml (the bump's push credential) and externalsecret-npmrc.yaml
- *  (the package read). Deleting one is what makes its ExternalSecret read Vault again. */
+ *  (the package read). A refresh request on that ExternalSecret makes it read Vault again. */
 export const BUILD_TARGET_SECRETS = ["build-git-https", "bump-git-https", "build-npmrc"] as const;
 
 /** The entry the release pipeline's bump pushes the deploy repository's books branch with
@@ -55,16 +57,16 @@ export interface AppTokenRefreshDeps {
   /** The platform's GitHub App — measured against the deploy repository and minting the bump token. */
   githubApp: Pick<GitHubApp, "reachesRepository" | "installationToken" | "installationOrg">;
   /** The build plane's cluster reader — the master's own, the cluster this Manager runs on. Absent
-   *  on a Manager whose kube is not wired: the entries are still rewritten, and the deletion that
-   *  would carry them into the Secrets is logged as skipped, per unit. */
-  kube?: Pick<ClusterReader, "deleteSecret">;
+   *  on a Manager whose kube is not wired: the entries are still rewritten, and the refresh request
+   *  that would carry them into the Secrets is logged as skipped, per unit. */
+  kube?: Pick<ClusterReader, "listExternalSecrets" | "refreshExternalSecret">;
   logger: Logger;
 }
 
 /** ONE unit's entry, rewritten with the value its credential opens to now — a token minted by the
  *  App for a `github-app` credential. The value is zeroed after the write and never logged. Throws
- *  where the open or the write fails. Writes Vault only: the deletion that lets the value reach the
- *  pipeline is `deleteBuildSecrets`, called by both callers after this succeeded. */
+ *  where the open or the write fails. Writes Vault only: the refresh request that lets the value reach
+ *  the pipeline is `refreshBuildSecrets`, called by both callers after this succeeded. */
 export async function refreshUnitRepoPat(deps: { store: Pick<CredentialStore, "open">; seeder: Pick<VaultSeeder, "refreshBuildRepoPat"> }, unit: string, credentialId: string, packagesCredentialId: string | null, use: UseContext): Promise<void> {
   const token = await deps.store.open(credentialId, use);
   const packages = packagesCredentialId ? await deps.store.open(packagesCredentialId, use).catch((e: unknown) => { token.fill(0); throw e; }) : Buffer.alloc(0);
@@ -76,29 +78,41 @@ export async function refreshUnitRepoPat(deps: { store: Pick<CredentialStore, "o
   }
 }
 
-/** Delete the unit's three target Secrets in <unit>-build, so each ExternalSecret materializes the
- *  entry again from Vault. An absent Secret is done (the port treats a 404 as success); a refused
- *  delete throws with the namespace and the name. */
-export async function deleteBuildSecrets(kube: Pick<ClusterReader, "deleteSecret">, unit: string): Promise<void> {
+/** Whether `row` is the ExternalSecret that writes the Secret `target`: its `target.name`, or its own
+ *  name where it states none, which is the name ESO then gives the Secret. */
+function writesSecret(row: ExternalSecretRow, target: string): boolean {
+  return (row.targetSecret || row.name) === target;
+}
+
+/** Ask ESO to write `targets` in <unit>-build again, the unit's three build Secrets unless named:
+ *  one refresh request on the ExternalSecret that writes each, read off the namespace's rows, so the
+ *  request reaches the object ESO watches whatever it is named. Where no ExternalSecret writes a
+ *  target, it throws naming the namespace and every such Secret before it asks for any; a refused
+ *  request throws from the port. */
+export async function refreshBuildSecrets(kube: Pick<ClusterReader, "listExternalSecrets" | "refreshExternalSecret">, unit: string, targets: readonly string[] = BUILD_TARGET_SECRETS): Promise<void> {
   const namespace = unitBuildNamespace(unit);
-  for (const name of BUILD_TARGET_SECRETS) await kube.deleteSecret(namespace, name);
+  const rows = await kube.listExternalSecrets(namespace);
+  const writers = targets.map((target) => ({ target, row: rows.find((r) => writesSecret(r, target)) }));
+  const unwritten = writers.filter((w) => w.row === undefined).map((w) => w.target);
+  if (unwritten.length > 0) throw errValidation(`no ExternalSecret in ${namespace} writes ${unwritten.join(", ")}, so ESO cannot be asked to write ${unwritten.length === 1 ? "it" : "them"} again`);
+  for (const { row } of writers) await kube.refreshExternalSecret(namespace, row!.name);
 }
 
 /** When ESO last wrote each of the three, off the ExternalSecret rows of <unit>-build: the
- *  `refreshTime` of the row targeting each Secret, keyed by that Secret's name, the empty text where
- *  no row targets it or it never materialized. Read before a deletion and again after it, the two
- *  readings say whether the Secret stands again: its time moved. */
+ *  `refreshTime` of the row that writes each Secret, keyed by that Secret's name, the empty text where
+ *  no row writes it or it never materialized. Read before a refresh request and again after it, the
+ *  two readings say whether ESO wrote the Secret again: its time moved. */
 export async function readBuildSecretRefreshTimes(kube: Pick<ClusterReader, "listExternalSecrets">, unit: string): Promise<Record<string, string>> {
   const rows = await kube.listExternalSecrets(unitBuildNamespace(unit));
-  return Object.fromEntries(BUILD_TARGET_SECRETS.map((name) => [name, rows.find((r) => r.targetSecret === name)?.refreshTime ?? ""]));
+  return Object.fromEntries(BUILD_TARGET_SECRETS.map((name) => [name, rows.find((r) => writesSecret(r, name))?.refreshTime ?? ""]));
 }
 
 /** Every unit whose build registration names a credential, refreshed one by one: a
  *  unit whose open or write fails is logged with its name and the rest go on, and a registration
- *  tree that cannot be read is logged as one failure. After each rewrite the unit's three build
- *  Secrets are deleted, which is what makes ESO's `OnChange` ExternalSecrets fetch the new value —
- *  a unit whose deletion fails is logged with its name and counted failed, because its clone still
- *  reads the value ESO wrote before. The timer does not wait for the Secrets to return; the release
+ *  tree that cannot be read is logged as one failure. After each rewrite ESO is asked to write the
+ *  unit's three build Secrets again, which is what makes its `OnChange` ExternalSecrets fetch the new
+ *  value — a unit whose request fails is logged with its name and counted failed, because its clone
+ *  still reads the value ESO wrote before. The timer does not wait for ESO to write; the release
  *  step (refreshRepoPatStep) does. NEVER rejects — boot starts it unawaited and the timer fires it
  *  unattended. Answers what it did, so a caller can read it back. */
 export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ refreshed: string[]; failed: string[] }> {
@@ -115,7 +129,7 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
     deps.logger.error({ err: err instanceof Error ? err.message : String(err) }, "the repo-pat refresh could not read which units are registered — no repo-pat was rewritten this time");
     return { refreshed, failed };
   }
-  const undeleted: string[] = [];
+  const unrequested: string[] = [];
   for (const { unit, repoURL } of units) {
     // THE UNIT'S OWN FAILURE (#240): a repository the App no longer reaches — deleted by hand, moved,
     // its owner's PAT forgotten — is that unit's, logged by name and counted failed; the other units
@@ -137,28 +151,28 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
       continue;
     }
     if (!deps.kube) {
-      undeleted.push(unit);
+      unrequested.push(unit);
       refreshed.push(unit);
       continue;
     }
     try {
-      await deleteBuildSecrets(deps.kube, unit);
+      await refreshBuildSecrets(deps.kube, unit);
       refreshed.push(unit);
     } catch (err) {
       failed.push(unit);
-      deps.logger.error({ unit, namespace: unitBuildNamespace(unit), err: err instanceof Error ? err.message : String(err) }, "the build repo-pat of this unit was rewritten but its build Secrets could not be deleted — ESO keeps the Secrets it wrote before, so the next clone reads the old token");
+      deps.logger.error({ unit, namespace: unitBuildNamespace(unit), err: err instanceof Error ? err.message : String(err) }, "the build repo-pat of this unit was rewritten but ESO could not be asked to write its build Secrets again — they keep the value ESO wrote before, so the next clone reads the old token");
     }
   }
-  if (undeleted.length > 0) deps.logger.warn({ units: undeleted }, "no kube is wired on this Manager, so the build Secrets of these units were not deleted after the rewrite — ESO keeps the Secrets it wrote before, and the next clone reads the old token");
+  if (unrequested.length > 0) deps.logger.warn({ units: unrequested }, "no kube is wired on this Manager, so ESO was not asked to write the build Secrets of these units again after the rewrite — they keep the value ESO wrote before, and the next clone reads the old token");
   await refreshDeployBumpToken(deps, buildUnits, refreshed, failed);
-  if (units.length > 0 || refreshed.includes(DEPLOY_BUMP_UNIT)) deps.logger.info({ refreshed, failed }, "build repo-pat entries rewritten (App tokens minted now, PATs with their owner's packages reader) and their build Secrets deleted");
+  if (units.length > 0 || refreshed.includes(DEPLOY_BUMP_UNIT)) deps.logger.info({ refreshed, failed }, "build repo-pat entries rewritten (App tokens minted now, PATs with their owner's packages reader) and ESO asked to write their build Secrets again");
   return { refreshed, failed };
 }
 
 /** The deploy repository's bump entry, written from the App — the deploy repository's one identity
  *  (hostyour-cloud#237), its installation's reach measured now (repo-identity.ts, the rule of #194).
- *  Then `bump-git-https` deleted in EVERY build namespace, because every unit's release pushes the
- *  deploy repository's books branch with this one entry. */
+ *  Then ESO asked to write `bump-git-https` again in EVERY build namespace, because every unit's
+ *  release pushes the deploy repository's books branch with this one entry. */
 async function refreshDeployBumpToken(deps: AppTokenRefreshDeps, buildUnits: readonly string[], refreshed: string[], failed: string[]): Promise<void> {
   const { deployRepo, githubApp } = deps;
   if (!deployRepo) return;
@@ -182,16 +196,16 @@ async function refreshDeployBumpToken(deps: AppTokenRefreshDeps, buildUnits: rea
   }
   if (!deps.kube) {
     refreshed.push(DEPLOY_BUMP_UNIT);
-    if (buildUnits.length > 0) deps.logger.warn({ units: buildUnits }, "no kube is wired on this Manager, so bump-git-https was not deleted in the build namespaces after the deploy repository rewrite — the next bump reads the old token");
+    if (buildUnits.length > 0) deps.logger.warn({ units: buildUnits }, "no kube is wired on this Manager, so ESO was not asked to write bump-git-https again in the build namespaces after the deploy repository rewrite — the next bump reads the old token");
     return;
   }
   const kept: string[] = [];
   for (const unit of buildUnits) {
     try {
-      await deps.kube.deleteSecret(unitBuildNamespace(unit), "bump-git-https");
+      await refreshBuildSecrets(deps.kube, unit, ["bump-git-https"]);
     } catch (err) {
       kept.push(unit);
-      deps.logger.error({ unit, namespace: unitBuildNamespace(unit), err: err instanceof Error ? err.message : String(err) }, "the deploy repository's bump entry was rewritten but this unit's bump-git-https could not be deleted — its next bump reads the old token");
+      deps.logger.error({ unit, namespace: unitBuildNamespace(unit), err: err instanceof Error ? err.message : String(err) }, "the deploy repository's bump entry was rewritten but ESO could not be asked to write this unit's bump-git-https again — its next bump reads the old token");
     }
   }
   (kept.length > 0 ? failed : refreshed).push(DEPLOY_BUMP_UNIT);

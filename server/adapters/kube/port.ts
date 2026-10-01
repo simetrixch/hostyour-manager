@@ -207,6 +207,10 @@ export interface SmokeResult {
   externalSecretsReady: boolean; // every ExternalSecret Ready=True (SecretSynced)
 }
 
+/** The annotation refreshExternalSecret sets on an ExternalSecret, with the time of the request as its
+ *  value: in the cluster, when the Manager last asked ESO to write the target again. */
+export const REFRESH_REQUESTED_ANNOTATION = "hostyour.cloud/refreshRequestedAt";
+
 /** One ExternalSecret a namespace holds: what it is called, whether ESO reports it Ready, WHY it
  *  says so, which Secret it materializes, and WHEN it last did.
  *
@@ -226,8 +230,8 @@ export interface ExternalSecretRow {
   targetSecret: string;
   /** `.status.refreshTime` — the moment ESO last fetched the value AND wrote the target Secret, as
    *  the RFC 3339 text the API serves, or the empty text where it never has. It moves on every
-   *  materialization and on nothing else, so a caller that deleted the target Secret reads its return
-   *  off this field: `ready` stays True across the deletion and cannot say it. The Manager's grants
+   *  materialization and on nothing else, so a caller that asked ESO to write the target again reads
+   *  the write off this field: `ready` stays True across it and cannot say it. The Manager's grants
    *  carry no `get` on Secrets, and this is what stands in for one. */
   refreshTime: string;
 }
@@ -361,6 +365,13 @@ export interface ClusterReader {
    *  inside it. Absent is success: a run whose Job died before the Secret was written must still settle
    *  clean. */
   deleteSecret(namespace: string, name: string): Promise<void>;
+  /** Ask ESO to write an ExternalSecret's target Secret again from its store, by setting the annotation
+   *  REFRESH_REQUESTED_ANNOTATION to the time of the request. Under `refreshPolicy: OnChange` a change
+   *  of the ExternalSecret's metadata is a change ESO answers, and the target Secret stays in place
+   *  until ESO overwrites it, so an ESO that does not answer leaves the value it wrote before. When ESO
+   *  wrote it is the row's `refreshTime` (listExternalSecrets). Throws where the patch is refused,
+   *  with the namespace and the name. */
+  refreshExternalSecret(namespace: string, name: string): Promise<void>;
   /** Offboard teardown: delete the target-cluster namespace by name (the G1 identity law makes it the
    *  consumer name; for a tenant it is ONE member namespace <guid>-<member>). ArgoCD's
    *  CreateNamespace=true CREATES the namespace but does NOT delete it on prune, so the offboard Run

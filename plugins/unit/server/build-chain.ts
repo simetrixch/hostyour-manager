@@ -106,17 +106,17 @@ export interface BuildPorts {
   releaseBuildAppearMs: number;
   /** Poll tick of the release watches; overridable for tests. */
   releasePollIntervalMs?: number;
-  /** How long the unit's three build Secrets may take to stand again after refresh-repo-pat deleted
-   *  them; the release is dispatched only once they do, or the clone would race the materialization.
-   *  Defaults to two minutes (ESO materializes an OnChange ExternalSecret whose target is gone within
+  /** How long ESO may take to write the unit's three build Secrets again after refresh-repo-pat asked
+   *  it to; the release is dispatched only once it has, or the clone would read the old token.
+   *  Defaults to two minutes (ESO writes an OnChange ExternalSecret whose metadata changed within
    *  seconds; two minutes outlasts a controller that is restarting); overridable for tests. */
   buildSecretsMaterializeMs?: number;
   /** The BUILD PLANE's cluster reader — this Manager's own cluster, where every unit's `<name>-build`
-   *  namespace stands (refresh-repo-pat deletes the unit's build Secrets there and reads their
-   *  ExternalSecrets' return). Injected directly, exactly as buildArgo is and for the same reason: the
+   *  namespace stands (refresh-repo-pat asks ESO there to write the unit's build Secrets again and reads
+   *  their ExternalSecrets' refreshTime). Injected directly, exactly as buildArgo is and for the same reason: the
    *  build namespace is master-local whatever cluster the unit targets, and a build-only unit has no
    *  clusterId to resolve one from. Optional but UNCONDITIONALLY needed by the release re-run —
-   *  absent ⇒ the step fails loud, because a rewrite whose Secrets are not deleted is a release that
+   *  absent ⇒ the step fails loud, because a rewrite ESO is not asked to deliver is a release that
    *  clones with the old token. */
   buildClusterReader?: ClusterReader;
   /** The trigger's 404 retry window (a just-committed workflow indexes with a lag); overridable for

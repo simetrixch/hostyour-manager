@@ -1,7 +1,7 @@
 // The `refresh-repo-pat` step (plugins/unit/server/seed-repo-pat.ts): the unit's build repo-pat is rewritten,
-// its three build Secrets are deleted behind the rewrite, and the step holds until ESO has
-// materialized them again — read off the ExternalSecrets' refreshTime — before the release is
-// dispatched. Kept apart from onboard.run.test.ts like the other per-step files; the step is built
+// ESO is asked to write its three build Secrets again behind the rewrite, and the step holds until it
+// has — read off the ExternalSecrets' refreshTime — before the release is dispatched. No Secret is
+// deleted for it. Kept apart from onboard.run.test.ts like the other per-step files; the step is built
 // against the shared fixture's port set with only the build plane's cluster reader varied.
 import { dropCredentialRows } from "../../security/store.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -23,7 +23,7 @@ const NS = "acme-build";
 let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
-const DELETES = BUILD_TARGET_SECRETS.map((name) => ({ op: "delete" as const, namespace: NS, name }));
+const REFRESHES = BUILD_TARGET_SECRETS.map((name) => `${NS}/${name}`);
 
 function params(): BuildOnlyParams {
   return BuildOnlyParams.parse({
@@ -54,25 +54,33 @@ function step(over: Partial<OnboardPorts> = {}): { run: (c: StepCtx) => Promise<
 }
 
 describe("onboard refresh-repo-pat step", () => {
-  it("rewrites the entry, THEN deletes the three target Secrets by name in <unit>-build, and holds until their ExternalSecrets materialized them again", async () => {
+  it("rewrites the entry, THEN asks ESO to write the three Secrets again in <unit>-build, deleting none, and holds until it has", async () => {
     const kube = new FakeBuildPlaneClusterReader("acme");
     const { run, seeder } = step({ buildClusterReader: kube });
+    // The order is the mechanism: ESO asked before the rewrite would write the dead value again.
+    const order: string[] = [];
+    const rewrite = seeder.refreshBuildRepoPat.bind(seeder);
+    seeder.refreshBuildRepoPat = async (input) => { order.push("vault"); return rewrite(input); };
+    const refresh = kube.refreshExternalSecret.bind(kube);
+    kube.refreshExternalSecret = async (namespace, name) => { order.push("refresh"); return refresh(namespace, name); };
     const logs: string[] = [];
     await run(ctx(logs));
+    expect(order).toEqual(["vault", "refresh", "refresh", "refresh"]);
     expect(seeder.refreshedRepoPats).toEqual([{ consumerName: "acme", pat: "ghs_minted_now", packages: "ghp_packages_x" }]);
-    expect(kube.secretWrites).toEqual(DELETES);
-    // The order is the mechanism: a Secret deleted BEFORE the rewrite would make ESO materialize the
-    // dead value, so the rewrite is logged first and the deletion after it.
-    expect(logs.findIndex((l) => l.includes("rewritten (properties pat, packages)"))).toBeLessThan(logs.findIndex((l) => l.includes("deleted in acme-build")));
-    expect(logs.at(-1)).toContain("build-git-https, bump-git-https, build-npmrc stand again in acme-build");
-    // Read before the deletion and again after it — never off the Ready bit.
+    expect(kube.refreshedExternalSecrets).toEqual(REFRESHES);
+    expect(kube.secretWrites).toEqual([]);
+    // The order is the mechanism: a refresh asked BEFORE the rewrite would make ESO write the dead
+    // value, so the rewrite is logged first and the request after it.
+    expect(logs.findIndex((l) => l.includes("rewritten (properties pat, packages)"))).toBeLessThan(logs.findIndex((l) => l.includes("in acme-build again")));
+    expect(logs.at(-1)).toContain("build-git-https, bump-git-https, build-npmrc written again in acme-build");
+    // Read before the request and again after it — never off the Ready bit.
     expect(kube.listedExternalSecrets.length).toBeGreaterThanOrEqual(2);
     for (const l of logs) expect(l).not.toContain("ghs_minted_now");
   });
 
-  it("polls: the Secrets are absent at first and present later, and the step proceeds only once every one of the three moved", async () => {
+  it("polls: ESO writes the Secrets later, and the step proceeds only once every one of the three moved", async () => {
     // A plain reader with ESO scripted by hand: the rows keep their old refreshTime for a while after
-    // the deletion, then two of the three move, then the third — the step must wait for the third.
+    // the request, then two of the three move, then the third — the step must wait for the third.
     const kube = new FakeClusterReader({ externalSecretsByNamespace: { [NS]: buildSecretRows() } });
     const { run } = step({ buildClusterReader: kube, releasePollIntervalMs: 1, buildSecretsMaterializeMs: 5_000 });
     const later = "2026-01-01T00:00:05Z";
@@ -80,53 +88,54 @@ describe("onboard refresh-repo-pat step", () => {
     setTimeout(() => kube.setExternalSecrets(NS, buildSecretRows(later)), 25);
     const logs: string[] = [];
     await run(ctx(logs));
-    // One read before the deletion, then more than one poll after it: the wait was a wait.
+    // One read before the request, one by the request itself, then more than one poll: the wait was a wait.
     expect(kube.listedExternalSecrets.length).toBeGreaterThan(3);
-    expect(logs.at(-1)).toContain("stand again");
+    expect(logs.at(-1)).toContain("written again");
   });
 
-  it("refuses BY NAME when the Secrets do not materialize again within the bound, naming the ones still missing and the namespace", async () => {
-    // ESO never comes back: the rows keep the refreshTime read before the deletion.
+  it("refuses BY NAME when ESO does not write the Secrets again within the bound, naming the ones not written and the namespace, and leaves the Secrets standing", async () => {
+    // ESO never answers: the rows keep the refreshTime read before the request.
     const kube = new FakeClusterReader({ externalSecretsByNamespace: { [NS]: buildSecretRows() } });
     const { run, seeder } = step({ buildClusterReader: kube, releasePollIntervalMs: 1, buildSecretsMaterializeMs: 20 });
-    await expect(run(ctx([]))).rejects.toThrow(/build-git-https, bump-git-https, build-npmrc in acme-build did not materialize again within 0s of their deletion/);
-    // The rewrite and the deletion did happen — what did not is the return, and the release was not dispatched.
+    await expect(run(ctx([]))).rejects.toThrow(/build-git-https, bump-git-https, build-npmrc in acme-build were not written again within 0s of the refresh request.*The Secrets still stand/);
+    // The rewrite and the request did happen — what did not is ESO's write, and the release was not dispatched.
     expect(seeder.refreshedRepoPats).toHaveLength(1);
-    expect(kube.secretWrites).toEqual(DELETES);
+    expect(kube.refreshedExternalSecrets).toEqual(REFRESHES);
+    expect(kube.secretWrites).toEqual([]);
   });
 
   it("names only the Secret still missing when two of the three came back", async () => {
     const kube = new FakeClusterReader({ externalSecretsByNamespace: { [NS]: buildSecretRows() } });
-    // Two of the three come back the moment the step deletes them, before its first poll; bump-git-https
-    // never does. No timer races the step's poll.
+    // Two of the three are written the moment the step asks, before its first poll; bump-git-https
+    // never is. No timer races the step's poll.
     const restored = buildSecretRows().map((r) => (r.targetSecret === "bump-git-https" ? r : { ...r, refreshTime: "2026-01-01T00:00:09Z" }));
-    const deleteSecret = kube.deleteSecret.bind(kube);
-    kube.deleteSecret = async (namespace, name) => {
-      await deleteSecret(namespace, name);
+    const refreshExternalSecret = kube.refreshExternalSecret.bind(kube);
+    kube.refreshExternalSecret = async (namespace, name) => {
+      await refreshExternalSecret(namespace, name);
       kube.setExternalSecrets(NS, restored);
     };
     const { run } = step({ buildClusterReader: kube, releasePollIntervalMs: 1, buildSecretsMaterializeMs: 20 });
-    await expect(run(ctx([]))).rejects.toThrow(/^bump-git-https in acme-build did not materialize/);
+    await expect(run(ctx([]))).rejects.toThrow(/^bump-git-https in acme-build were not written again/);
   });
 
-  it("an ExternalSecret that never materialized (no refreshTime at all) is still missing after the deletion, even though nothing moved", async () => {
+  it("an ExternalSecret that never materialized (no refreshTime at all) still counts as not written after the request, even though nothing moved", async () => {
     const kube = new FakeClusterReader({ externalSecretsByNamespace: { [NS]: buildSecretRows("") } });
     const { run } = step({ buildClusterReader: kube, releasePollIntervalMs: 1, buildSecretsMaterializeMs: 20 });
-    await expect(run(ctx([]))).rejects.toThrow(/build-git-https, bump-git-https, build-npmrc in acme-build did not materialize/);
+    await expect(run(ctx([]))).rejects.toThrow(/build-git-https, bump-git-https, build-npmrc in acme-build were not written again/);
   });
 
-  it("refuses by name, and writes NOTHING, when no build plane cluster reader is wired — a rewrite whose Secrets are not deleted is a release on the old token", async () => {
+  it("refuses by name, and writes NOTHING, when no build plane cluster reader is wired — a rewrite ESO is not asked to deliver is a release on the old token", async () => {
     const prt = ports();
     delete prt.buildClusterReader;
     await expect(refreshRepoPatStep(prt, params()).run(ctx([]))).rejects.toThrow(/requires the build plane's cluster reader/);
     expect((prt.seeder as FakeSeeder).refreshedRepoPats).toEqual([]);
   });
 
-  it("the fixture's build plane reader models ESO's OnChange: a deletion moves the targeting row's refreshTime and nothing else", async () => {
+  it("the fixture's build plane reader models ESO's OnChange: a refresh request moves that row's refreshTime and nothing else", async () => {
     const kube = new FakeBuildPlaneClusterReader("acme");
     const before = await kube.listExternalSecrets(NS);
     expect(before.map((r) => r.refreshTime)).toEqual([BUILD_SECRETS_MATERIALIZED_AT, BUILD_SECRETS_MATERIALIZED_AT, BUILD_SECRETS_MATERIALIZED_AT]);
-    await kube.deleteSecret(NS, "bump-git-https");
+    await kube.refreshExternalSecret(NS, "bump-git-https");
     const after = await kube.listExternalSecrets(NS);
     expect(after.find((r) => r.targetSecret === "bump-git-https")?.refreshTime).not.toBe(BUILD_SECRETS_MATERIALIZED_AT);
     expect(after.filter((r) => r.targetSecret !== "bump-git-https").map((r) => r.refreshTime)).toEqual([BUILD_SECRETS_MATERIALIZED_AT, BUILD_SECRETS_MATERIALIZED_AT]);

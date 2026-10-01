@@ -1,7 +1,7 @@
 // The repo-pat refresh (app-token-refresh.ts): every unit whose build registration names a
 // credential has its build repo-pat rewritten with the value the store opens to now — a token minted
-// for the App, the PAT itself for a pat unit — beside its owner's packages reader, and its
-// three build Secrets deleted behind the rewrite (#230); one unit's failure is logged and the rest go
+// for the App, the PAT itself for a pat unit — beside its owner's packages reader, and ESO asked to
+// write its three build Secrets again behind the rewrite; one unit's failure is logged and the rest go
 // on; nothing rejects.
 import { describe, it, expect } from "vitest";
 import type { Logger } from "#core/server/kernel/logger.ts";
@@ -11,11 +11,18 @@ import { FakePlatformRepo } from "#core/server/adapters/git/testing/fake.ts";
 import { FakeClusterReader } from "#core/server/adapters/kube/testing/fake.ts";
 import { Registrations } from "./registrations.ts";
 import { FakeGitHubApp } from "#core/server/adapters/github-app/testing/fake.ts";
-import { BUILD_TARGET_SECRETS, DEPLOY_BUMP_UNIT, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshAppTokens, refreshUnitRepoPat } from "./app-token-refresh.ts";
+import { BUILD_TARGET_SECRETS, DEPLOY_BUMP_UNIT, readBuildSecretRefreshTimes, refreshAppTokens, refreshBuildSecrets, refreshUnitRepoPat } from "./app-token-refresh.ts";
 import type { OwnerIdentityReader } from "./repo-identity.ts";
 
 /** The three deletes one unit's refresh issues, in the order the names are declared. */
-const deletesOf = (unit: string) => BUILD_TARGET_SECRETS.map((name) => ({ op: "delete" as const, namespace: `${unit}-build`, name }));
+const refreshesOf = (unit: string) => BUILD_TARGET_SECRETS.map((name) => `${unit}-build/${name}`);
+
+/** The build plane with ESO's rows standing: in each unit's build namespace, the three ExternalSecrets
+ *  as consumer-build renders them, each named after the Secret it writes. */
+function buildPlane(options: { throwOnRefreshExternalSecret?: Error } = {}, units: readonly string[] = ["acme-apps", "shop", "beta-apps"]): FakeClusterReader {
+  const rows = BUILD_TARGET_SECRETS.map((name) => ({ name, ready: true, reason: "SecretSynced", targetSecret: name, refreshTime: "2026-01-01T00:00:00Z" }));
+  return new FakeClusterReader({ externalSecretsByNamespace: Object.fromEntries(units.map((u) => [`${u}-build`, rows])), ...options });
+}
 
 /** A store of two credentials, both the OWNER acme's (#226): the App's one row (kind github-app),
  *  which opens to whatever `minted` says at the moment of the open, and the owner's repository PAT. */
@@ -95,18 +102,19 @@ async function registrations(): Promise<Registrations> {
 describe("refreshAppTokens — the deploy repository bump credential from the App", () => {
   const deployRepoOf = (owner: string) => ({ repoURL: `https://github.com/${owner}/deploy.git` });
 
-  it("writes the App's token to the deploy repository entry and deletes bump-git-https in every build namespace, the pat unit's included", async () => {
+  it("writes the App's token to the deploy repository entry and asks ESO to write bump-git-https again in every build namespace, the pat unit's included, deleting nothing", async () => {
     const { store } = fakeStore({ value: "ghs_unit" });
     const { seeder, written } = fakeSeeder();
     const { logger, errors } = fakeLogger();
-    const kube = new FakeClusterReader();
+    const kube = buildPlane();
     const githubApp = app();
     githubApp.token = "ghs_deploy_now";
     const r = await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, deployRepo: deployRepoOf("acme"), githubApp });
     expect(r.refreshed).toEqual(["acme-apps", "shop", "beta-apps", DEPLOY_BUMP_UNIT]);
     expect(written.at(-1)).toEqual({ consumerName: DEPLOY_BUMP_UNIT, pat: "ghs_deploy_now", packages: "" }); // the bump entry installs nothing
-    const bumpDeletes = kube.secretWrites.filter((w) => w.name === "bump-git-https").map((w) => w.namespace);
-    expect(bumpDeletes.slice(-3)).toEqual(["acme-apps-build", "shop-build", "beta-apps-build"]);
+    const bumpRefreshes = kube.refreshedExternalSecrets.filter((r) => r.endsWith("/bump-git-https"));
+    expect(bumpRefreshes.slice(-3)).toEqual(["acme-apps-build/bump-git-https", "shop-build/bump-git-https", "beta-apps-build/bump-git-https"]);
+    expect(kube.secretWrites).toEqual([]);
     expect(errors).toEqual([]);
   });
 
@@ -115,7 +123,7 @@ describe("refreshAppTokens — the deploy repository bump credential from the Ap
     const { seeder, written } = fakeSeeder();
     const { logger, errors } = fakeLogger();
     const githubApp = app();
-    const unreached = await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube: new FakeClusterReader(), logger, deployRepo: deployRepoOf("other-org"), githubApp });
+    const unreached = await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube: buildPlane(), logger, deployRepo: deployRepoOf("other-org"), githubApp });
     expect(unreached.failed).toEqual([DEPLOY_BUMP_UNIT]);
     expect(written.some((w) => w.consumerName === DEPLOY_BUMP_UNIT)).toBe(false);
     expect(errors.at(-1)).toContain("does not reach the deploy repository");
@@ -123,12 +131,12 @@ describe("refreshAppTokens — the deploy repository bump credential from the Ap
 });
 
 describe("refreshAppTokens", () => {
-  it("rewrites the repo-pat of every unit whose build registration names a credential with the value opened NOW — the pat unit's PAT included — and deletes its three build Secrets behind the rewrite", async () => {
+  it("rewrites the repo-pat of every unit whose build registration names a credential with the value opened NOW — the pat unit's PAT included — and asks ESO to write its three build Secrets again behind the rewrite, deleting none", async () => {
     const minted = { value: "ghs_minted_at_tick_1" };
     const { store, opened } = fakeStore(minted);
     const { seeder, written } = fakeSeeder();
     const { logger, errors, warns, infos } = fakeLogger();
-    const kube = new FakeClusterReader();
+    const kube = buildPlane();
     const reg = await registrations();
     expect(await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: ["acme-apps", "shop", "beta-apps"], failed: [] });
     expect(written).toEqual([
@@ -137,18 +145,19 @@ describe("refreshAppTokens", () => {
       { consumerName: "beta-apps", pat: "ghs_minted_at_tick_1", packages: "ghp_packages_acme" },
     ]);
     expect(opened).toEqual(["cred_app", "cred_pkg", "cred_pat", "cred_pkg", "cred_app", "cred_pkg"]); // the unit's credential and the owner's packages reader, per unit
-    // The three target Secrets of each unit, by name, in ITS build namespace. None of them stood in
-    // the fake — an absent Secret is done, not an error, exactly as the live port treats a 404.
-    expect(kube.secretWrites).toEqual([...deletesOf("acme-apps"), ...deletesOf("shop"), ...deletesOf("beta-apps")]);
+    // The ExternalSecret that writes each of the three, in ITS build namespace. No Secret is deleted
+    // for it, so an ESO that does not answer leaves the Secrets it wrote before standing.
+    expect(kube.refreshedExternalSecrets).toEqual([...refreshesOf("acme-apps"), ...refreshesOf("shop"), ...refreshesOf("beta-apps")]);
+    expect(kube.secretWrites).toEqual([]);
     expect(errors).toEqual([]);
     expect(warns).toEqual([]);
     expect(infos.some((l) => l.includes("build repo-pat entries rewritten"))).toBe(true);
     // The next tick writes the token of that hour — the value is never remembered between ticks —
-    // and deletes the Secrets again, because ESO reads Vault at no other moment.
+    // and asks ESO again, because ESO reads Vault at no other moment.
     minted.value = "ghs_minted_at_tick_2";
     await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: app() });
     expect(written.at(-1)).toEqual({ consumerName: "beta-apps", pat: "ghs_minted_at_tick_2", packages: "ghp_packages_acme" });
-    expect(kube.secretWrites).toHaveLength(18);
+    expect(kube.refreshedExternalSecrets).toHaveLength(18);
   });
 
   // ONE UNREACHABLE UNIT IS ITS OWN FAILURE (#240): the tick goes on to the others and the deploy
@@ -160,7 +169,9 @@ describe("refreshAppTokens", () => {
     const reg = await registrations();
     await reg.commitRegistration({ unit: { name: "gone", repoURL: "https://github.com/nobody/gone.git", owner: "nobody", onboardedAt: "2026-01-01T00:00:00Z", suspended: false, quiesced: false }, builds: ["gone"], runId: "run_4" });
     const githubApp = app();
-    const r = await refreshAppTokens({ store, owners, registrations: reg, seeder, kube: new FakeClusterReader(), logger, deployRepo: { repoURL: "https://github.com/acme/deploy.git" }, githubApp });
+    // The unreached unit's build namespace stands as an onboarding left it, its bump ExternalSecret included.
+    const kube = buildPlane({}, ["acme-apps", "shop", "beta-apps", "gone"]);
+    const r = await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, deployRepo: { repoURL: "https://github.com/acme/deploy.git" }, githubApp });
     expect(r.failed).toEqual(["gone"]);
     expect(r.refreshed).toEqual(["acme-apps", "shop", "beta-apps", DEPLOY_BUMP_UNIT]);
     expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "shop", "beta-apps", DEPLOY_BUMP_UNIT]);
@@ -171,40 +182,40 @@ describe("refreshAppTokens", () => {
     expect(errors[0]).toContain("owner nobody records no repository PAT");
   });
 
-  it("logs the unit whose write fails, with its name, deletes none of its Secrets, and refreshes the others", async () => {
+  it("logs the unit whose write fails, with its name, asks no refresh of its Secrets, and refreshes the others", async () => {
     const { store } = fakeStore({ value: "ghs_x" });
     const { seeder, written } = fakeSeeder(["acme-apps"]);
     const { logger, errors } = fakeLogger();
-    const kube = new FakeClusterReader();
+    const kube = buildPlane();
     expect(await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: ["shop", "beta-apps"], failed: ["acme-apps"] });
     expect(written.map((w) => w.consumerName)).toEqual(["shop", "beta-apps"]);
-    // A Secret deleted behind a write that did not happen would make ESO materialize the DEAD value
-    // again — nothing is gained, so nothing is deleted.
-    expect(kube.secretWrites).toEqual([...deletesOf("shop"), ...deletesOf("beta-apps")]);
+    // A refresh behind a write that did not happen would make ESO write the DEAD value again —
+    // nothing is gained, so nothing is asked.
+    expect(kube.refreshedExternalSecrets).toEqual([...refreshesOf("shop"), ...refreshesOf("beta-apps")]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('"unit":"acme-apps"');
     expect(errors[0]).toContain("repo-pat put failed");
     expect(errors[0]).not.toContain("ghs_x");
   });
 
-  it("logs the unit whose Secret deletion fails, with its name and its build namespace, counts it failed, and the tick goes on to the next unit without rejecting", async () => {
+  it("logs the unit whose refresh request fails, with its name and its build namespace, counts it failed, and the tick goes on to the next unit without rejecting", async () => {
     const { store } = fakeStore({ value: "ghs_x" });
     const { seeder, written } = fakeSeeder();
     const { logger, errors } = fakeLogger();
-    const kube = new FakeClusterReader({ throwOnDeleteSecret: new Error("delete Secret acme-apps-build/build-git-https: secrets is forbidden (403)") });
+    const kube = buildPlane({ throwOnRefreshExternalSecret: new Error("annotate ExternalSecret acme-apps-build/build-git-https for a refresh: externalsecrets.external-secrets.io is forbidden (403)") });
     expect(await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: [], failed: ["acme-apps", "shop", "beta-apps"] });
     // Every Vault write happened: the failure is behind the write, and the next unit was reached.
     expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "shop", "beta-apps"]);
     expect(errors).toHaveLength(3);
     expect(errors[0]).toContain('"unit":"acme-apps"');
     expect(errors[0]).toContain('"namespace":"acme-apps-build"');
-    expect(errors[0]).toContain("could not be deleted");
+    expect(errors[0]).toContain("could not be asked to write its build Secrets again");
     expect(errors[1]).toContain('"unit":"shop"');
     expect(errors[2]).toContain('"unit":"beta-apps"');
     for (const l of errors) expect(l).not.toContain("ghs_x");
   });
 
-  it("without a wired kube it rewrites Vault, counts the units refreshed, and logs the skipped deletion naming them", async () => {
+  it("without a wired kube it rewrites Vault, counts the units refreshed, and logs the skipped refresh request naming them", async () => {
     const { store } = fakeStore({ value: "ghs_x" });
     const { seeder, written } = fakeSeeder();
     const { logger, errors, warns } = fakeLogger();
@@ -220,11 +231,11 @@ describe("refreshAppTokens", () => {
     const { store } = fakeStore({ value: "ghs_x" });
     const { seeder, written } = fakeSeeder();
     const { logger, errors } = fakeLogger();
-    const kube = new FakeClusterReader();
+    const kube = buildPlane();
     const broken = { listBuildRegistrations: async () => { throw new Error("registrations/broken/build.yaml is not a readable build registration"); } };
     expect(await refreshAppTokens({ store, owners, registrations: broken, seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: [], failed: [] });
     expect(written).toEqual([]);
-    expect(kube.secretWrites).toEqual([]);
+    expect(kube.refreshedExternalSecrets).toEqual([]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("could not read which units");
   });
@@ -233,23 +244,37 @@ describe("refreshAppTokens", () => {
     const { store } = fakeStore({ value: "ghs_x" });
     const { seeder, written } = fakeSeeder();
     const { logger, errors, warns, infos } = fakeLogger();
-    const kube = new FakeClusterReader();
+    const kube = buildPlane();
     const reg = new Registrations(new FakePlatformRepo()); // no build registration at all
     expect(await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: [], failed: [] });
     expect(written).toEqual([]);
-    expect(kube.secretWrites).toEqual([]);
+    expect(kube.refreshedExternalSecrets).toEqual([]);
     expect(errors).toEqual([]);
     expect(warns).toEqual([]);
     expect(infos).toEqual([]);
   });
 });
 
-describe("deleteBuildSecrets / readBuildSecretRefreshTimes", () => {
-  it("deletes exactly the three target Secrets of the ExternalSecrets in <unit>-build, in the declared order", async () => {
-    const kube = new FakeClusterReader();
-    await deleteBuildSecrets(kube, "acme-apps");
-    expect(kube.secretWrites).toEqual(deletesOf("acme-apps"));
+describe("refreshBuildSecrets / readBuildSecretRefreshTimes", () => {
+  it("asks ESO to write exactly the three Secrets again, through the ExternalSecret that writes each, in the declared order, and deletes none", async () => {
+    const kube = new FakeClusterReader({ externalSecretsByNamespace: { "acme-apps-build": [
+      // Matched by the Secret written, not by the ExternalSecret's own name; one without a target writes its own name.
+      { name: "git", ready: true, reason: "SecretSynced", targetSecret: "build-git-https", refreshTime: "" },
+      { name: "bump-git-https", ready: true, reason: "SecretSynced", targetSecret: "", refreshTime: "" },
+      { name: "build-npmrc", ready: true, reason: "SecretSynced", targetSecret: "build-npmrc", refreshTime: "" },
+    ] } });
+    await refreshBuildSecrets(kube, "acme-apps");
+    expect(kube.refreshedExternalSecrets).toEqual(["acme-apps-build/git", "acme-apps-build/bump-git-https", "acme-apps-build/build-npmrc"]);
+    expect(kube.secretWrites).toEqual([]);
     expect(BUILD_TARGET_SECRETS).toEqual(["build-git-https", "bump-git-https", "build-npmrc"]);
+  });
+
+  it("refuses by namespace and Secret where no ExternalSecret writes a target, before it asks for any", async () => {
+    const kube = new FakeClusterReader({ externalSecretsByNamespace: { "acme-apps-build": [
+      { name: "build-git-https", ready: true, reason: "SecretSynced", targetSecret: "build-git-https", refreshTime: "" },
+    ] } });
+    await expect(refreshBuildSecrets(kube, "acme-apps")).rejects.toThrow("no ExternalSecret in acme-apps-build writes bump-git-https, build-npmrc, so ESO cannot be asked to write them again");
+    expect(kube.refreshedExternalSecrets).toEqual([]);
   });
 
   it("reads each Secret's refreshTime off the ExternalSecret row that TARGETS it, and the empty text where no row does", async () => {

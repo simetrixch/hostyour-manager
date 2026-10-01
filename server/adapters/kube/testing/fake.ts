@@ -155,6 +155,9 @@ export class FakeClusterReader implements ClusterReader {
        *  UPSTREAM of an API server that is away. The App-token refresh has to log the unit and go on
        *  to the next one rather than die in its timer. */
       throwOnDeleteSecret?: Error;
+      /** Makes refreshExternalSecret THROW — the 403 a credential without `patch` on ExternalSecrets
+       *  gets. The App-token refresh logs the unit and goes on to the next one. */
+      throwOnRefreshExternalSecret?: Error;
     } = {},
   ) {}
 
@@ -321,6 +324,15 @@ export class FakeClusterReader implements ClusterReader {
   async applySecret(namespace: string, name: string, data: Record<string, string>): Promise<void> {
     this.secretWrites.push({ op: "apply", namespace, name });
     this.secrets.set(`${namespace}/${name}`, { ...data });
+  }
+
+  /** Every refreshExternalSecret in order, `${namespace}/${name}` — the record a refresh test asserts. */
+  readonly refreshedExternalSecrets: string[] = [];
+
+  /** Records the request; whether ESO answers it is the build-plane fixture's business. */
+  async refreshExternalSecret(namespace: string, name: string): Promise<void> {
+    if (this.scripted.throwOnRefreshExternalSecret) throw this.scripted.throwOnRefreshExternalSecret;
+    this.refreshedExternalSecrets.push(`${namespace}/${name}`);
   }
 
   /** Absent is success, exactly as the live client treats a 404. */

@@ -13,7 +13,7 @@ import type {
   MasterArgoReader, ClusterReader, ArgoAppStatus, ArgoAppStatusMap, ArgoApplicationRow, ExternalSecretRow,
   SmokeResult, DeployState, WorkloadStatus, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, JobSpec, JobResult, ClaimUser,
 } from "./port.ts";
-import { RESTART_ANNOTATION } from "./port.ts";
+import { REFRESH_REQUESTED_ANNOTATION, RESTART_ANNOTATION } from "./port.ts";
 import { runKubeJob } from "./kube-job.ts";
 import * as ns from "./kube-namespace.ts";
 import { AppError, errUpstream } from "../../kernel/errors.ts";
@@ -370,6 +370,16 @@ export class KubeClusterReader implements ClusterReader {
     } catch (e) {
       if (isNotFound(e)) return;
       throw upstream(`delete Secret ${namespace}/${name}`, e);
+    }
+  }
+
+  /** A merge patch of one annotation, so nothing else of the ExternalSecret changes. NEEDS a live cluster. */
+  async refreshExternalSecret(namespace: string, name: string): Promise<void> {
+    const body = { metadata: { annotations: { [REFRESH_REQUESTED_ANNOTATION]: new Date().toISOString() } } };
+    try {
+      await this.custom.patchNamespacedCustomObject({ ...EXTERNAL_SECRETS, namespace, name, body }, setHeaderOptions("Content-Type", PatchStrategy.MergePatch));
+    } catch (e) {
+      throw upstream(`annotate ExternalSecret ${namespace}/${name} for a refresh`, e);
     }
   }
 

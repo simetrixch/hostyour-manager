@@ -88,8 +88,8 @@ export interface Wired {
    *  state behind, never a wrong one. */
   carryDeployTrunk: () => Promise<void>;
   /** The build repo-pat of every unit whose credential is the platform's GitHub App, rewritten with
-   *  a token minted now, and the unit's three build Secrets deleted so ESO materializes the entry
-   *  again (plugins/unit/server/app-token-refresh.ts). boot.ts runs it once behind the listening server
+   *  a token minted now, and ESO asked to write the unit's three build Secrets again from it
+   *  (plugins/unit/server/app-token-refresh.ts). boot.ts runs it once behind the listening server
    *  and then every 45 minutes. Never rejects — every failure is logged per unit. A no-op where the
    *  consumer family is not wired: there are then no build registrations. */
   refreshAppTokens: () => Promise<void>;

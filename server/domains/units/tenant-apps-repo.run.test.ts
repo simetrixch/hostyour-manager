@@ -55,7 +55,7 @@ interface Harness {
   github: FakeGitHubConsumer;
   seeder: FakeSeeder;
   buildPlane: FakeBuildPlane;
-  /** The build plane's cluster reader: what the release re-run deletes the unit's build Secrets through. */
+  /** The build plane's cluster reader: what the release re-run asks ESO through to write the build Secrets. */
   buildCluster: FakeBuildPlaneClusterReader;
 }
 
@@ -384,7 +384,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
     h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, UNIT) } });
     await expect(run("onboard-build-only").run(ctx(p, [], creds.store))).rejects.toThrow(/states no image-tag result/);
   });
-  it("re-runs the release of a unit already registered build-only: rewrites its build repo-pat with a token minted now, deletes its build Secrets, waits for their return, then dispatches with the same", async () => {
+  it("re-runs the release of a unit already registered build-only: rewrites its build repo-pat with a token minted now, asks ESO to write its build Secrets again, waits for it, then dispatches with the same", async () => {
     const h = harness({ ports: { buildUnitRegistration: async (unit) => (unit === UNIT ? { form: "build-only", repoCredentialId: "cred_old" } : null) } });
     const p = await planned(h);
     h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, UNIT) } });
@@ -396,12 +396,11 @@ describe("create-repository and onboard-build-only — a github-app credential a
     // Not the create-only seed: the entry stands from the onboarding and holds a dead token.
     expect(h.seeder.buildRepoPats).toEqual([]);
     expect(h.seeder.refreshedRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_rerun", packages: "ghp_packages_org" }]);
-    // The three target Secrets of the unit's ExternalSecrets, deleted in ITS build namespace behind
-    // the rewrite, and the dispatch only after they stood again — a clone that started between the
-    // deletion and the materialization would read no credential.
-    expect(h.buildCluster.secretWrites).toEqual(["build-git-https", "bump-git-https", "build-npmrc"].map((name) => ({ op: "delete", namespace: `${UNIT}-build`, name })));
-    expect(logs.findIndex((l) => l.includes("repo PAT rewritten"))).toBeLessThan(logs.findIndex((l) => l.includes(`deleted in ${UNIT}-build`)));
-    expect(logs.findIndex((l) => l.includes(`stand again in ${UNIT}-build`))).toBeLessThan(logs.findIndex((l) => l.includes("release workflow dispatched")));
+    // ESO asked to write the three again in ITS build namespace behind the rewrite, nothing deleted,
+    // and the dispatch only after it wrote them — a clone that started before would read the dead token.
+    expect([h.buildCluster.refreshedExternalSecrets, h.buildCluster.secretWrites]).toEqual([["build-git-https", "bump-git-https", "build-npmrc"].map((name) => `${UNIT}-build/${name}`), []]);
+    expect(logs.findIndex((l) => l.includes("repo PAT rewritten"))).toBeLessThan(logs.findIndex((l) => l.includes(`in ${UNIT}-build again`)));
+    expect(logs.findIndex((l) => l.includes(`written again in ${UNIT}-build`))).toBeLessThan(logs.findIndex((l) => l.includes("release workflow dispatched")));
     expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
     expect(h.github.dispatches[0]?.token).toBe("ghs_rerun");
   });

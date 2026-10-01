@@ -1,11 +1,11 @@
 // The App-token refresh on a TIMER (plugins/unit/server/app-token-refresh.ts): every 45 minutes, the build
 // repo-pat of every unit whose credential is the platform's GitHub App is rewritten with a token
-// minted now, and the unit's three build Secrets are deleted behind the rewrite. A token lives 60
-// minutes, so 45 keeps the entry alive across one missed tick's worth of drift and never lets the
-// pipeline's clone read a value older than the token behind it. The deletion is what carries the
-// rewrite to the clone: the Secrets are materialized by ExternalSecrets that read Vault on deploy and
-// on the deletion of their target, never on a timer (`refreshPolicy: OnChange`), so a rewrite alone
-// leaves the clone on the token ESO fetched at the deploy. Boot fires the same act once behind the
+// minted now, and ESO is asked to write the unit's three build Secrets again behind the rewrite. A
+// token lives 60 minutes, so 45 keeps the entry alive across one missed tick's worth of drift and never
+// lets the pipeline's clone read a value older than the token behind it. The request is what carries
+// the rewrite to the clone: the Secrets are written by ExternalSecrets that read Vault on deploy and on
+// a change of their metadata or spec, never on a timer (`refreshPolicy: OnChange`), so a rewrite alone
+// leaves the clone on the token ESO fetched before. Boot fires the same act once behind the
 // listener (boot.ts), so the first tick is not the first refresh.
 import type { Logger } from "../kernel/logger.ts";
 import { scheduleEvery } from "./schedule.ts";
