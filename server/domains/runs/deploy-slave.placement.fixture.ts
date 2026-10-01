@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { DownloadFailed, type ReleaseDownloads } from "../../adapters/downloads/port.ts";
 import type { HostsScript } from "./deploy-slave.fixture.ts";
 import { ANSIWISE_REST_TOOL, ANSIWISE_SESSION_PROGRAM, PATH_HOME } from "./defs/place-ansiwise.ts";
@@ -133,6 +134,19 @@ export function answerPlacementCommand(
     if (named.length === 0 || named.some((name) => name === undefined)) return undefined;
     f.files = f.files.filter((x) => !(x.host === host && named.includes(x.path)));
     return { out: "", code: 0 };
+  }
+
+  // `sha256sum <executable>` — the read-back of what root installed on the path. MATCHED WHEREVER IT
+  // STANDS for the reason `rm -f` is: a raised command carries `sudo -S` in front of it. Answered with
+  // the digest of the bytes the machine holds under that name, so a test that swapped a file is
+  // answered with what is there and not with what the step meant to put there.
+  const sum = words.indexOf("sha256sum");
+  if (sum !== -1 && words.length === sum + 2) {
+    const named = executableNamed(words[sum + 1] ?? "");
+    if (named === undefined) return undefined;
+    const content = fileAt(f, host, named);
+    if (content === undefined) return { out: `sha256sum: ${words[sum + 1]}: No such file or directory`, code: 1 };
+    return { out: `${createHash("sha256").update(content, "utf8").digest("hex")}  ${words[sum + 1]}`, code: 0 };
   }
 
   const programs = answerProgramsCommand(f, words);

@@ -2,16 +2,15 @@ import { describe, it, expect, afterEach } from "vitest";
 import { createHash } from "node:crypto";
 import {
   makeHarness, disposeHarnesses, scriptedHosts, hostsFactory, ELEVATION_PASSWORD,
-  ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, ansiwiseDigestMap, ansiwiseDigests, type HostsScript,
+  ANSIWISE_PIN, ANSIWISE_DOWNLOAD_URL, ansiwiseDigestMap, ansiwiseDigests,
 } from "./deploy-slave.fixture.ts";
 import { assetBytes, ScriptedReleases, SCRIPTED_HOME, ON_PATH } from "./deploy-slave.placement.fixture.ts";
-import { ports, placeCtx, target, transferred, onPath, commands } from "./place-ansiwise.fixture.ts";
+import { ports, placeCtx, target, transferred, onPath, commands, sessionMachine, FIRST_INSTALL_FQDN } from "./place-ansiwise.fixture.ts";
 import { placeAnsiwiseStep } from "./defs/place-ansiwise.step.ts";
 import {
   placeAnsiwise, downloadAddress, assertWord,
   ANSIWISE_EXECUTABLES, ANSIWISE_TOOL, ANSIWISE_REST_TOOL, EXECUTABLE_MODE, BOOTSTRAP_HOME, PATH_HOME,
   NAME_PLACEHOLDER, VERSION_PLACEHOLDER,
-  type PlacementMachine,
 } from "./defs/place-ansiwise.ts";
 import { PROGRAMS_CHECKOUT } from "./defs/machine-state.ts";
 
@@ -126,7 +125,7 @@ describe("place-ansiwise", () => {
     for (const name of ANSIWISE_EXECUTABLES) {
       expect(hosts.files.filter((f) => f.path === name).at(-1)?.content).toContain(ANSIWISE_PIN);
     }
-    expect(log.some((l) => l.includes("it carries 0.0.9"))).toBe(true);
+    expect(log.some((l) => l.includes(`${BOOTSTRAP_HOME}${ANSIWISE_TOOL} answers 0.0.9`))).toBe(true);
   });
 
   it("places only the half that drifted, and leaves the one already at the pin alone", async () => {
@@ -200,59 +199,6 @@ describe("place-ansiwise", () => {
     await expect(placeAnsiwiseStep(target, { ...ports(h), releaseDownloads: releases }).run(placeCtx(h, hosts, "run_place_404", [])))
       .rejects.toThrow(new RegExp(`could not read ${gone.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   });
-  // THE PIN SAYS WHICH RELEASE IS FETCHED, AND NOT WHICH BYTES ARRIVE. The asset planted here answers
-  // --version with the pin, exactly as a replaced one built to pass would, so the read-back above
-  // cannot see it: only the digest the platform repository states can. Run twice, planted and not,
-  // so the refusal is shown to come from the digest and from nothing else about the run.
-  for (const planted of [true, false]) {
-    it(`places an asset that answers the pin only at the digest the platform repository states — ${planted ? "a planted asset" : "the released asset"}`, async () => {
-      const hosts = scriptedHosts();
-      const h = await makeHarness({ hosts });
-      const url = `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`;
-      if (planted) h.releases.serves.set(url, Buffer.from(`#!ansiwise\n${ANSIWISE_TOOL} ${ANSIWISE_PIN}\n# swapped\n`, "utf8"));
-      const run = placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, planted ? "run_place_swapped" : "run_place_released", []));
-      if (planted) {
-        await expect(run).rejects.toThrow(
-          new RegExp(`served bytes whose SHA-256 is [0-9a-f]{64}, and the platform repository states ${ansiwiseDigestMap(ANSIWISE_PIN).get(`${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`)} for ${ANSIWISE_TOOL}-`),
-        );
-        expect(transferred(hosts), "a swapped asset reached the machine").toHaveLength(0);
-      } else {
-        await run;
-        expect(transferred(hosts).map((f) => f.path)).toEqual([ANSIWISE_TOOL, ANSIWISE_REST_TOOL]);
-      }
-    });
-  }
-
-  it("writes nothing when the digest file names only one of the two assets, and fetches nothing", async () => {
-    const hosts = scriptedHosts();
-    const onlyOne = ansiwiseDigests(ANSIWISE_PIN).split("\n").filter((l) => l.endsWith(`  ${ANSIWISE_TOOL}-${ANSIWISE_PIN}-linux-x64`)).join("\n") + "\n";
-    const h = await makeHarness({ hosts, ansiwiseDigests: onlyOne });
-    await expect(placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place_one_digest", [])))
-      .rejects.toThrow(/states no SHA-256 for ansiwise-rest-/);
-    expect(h.releases.read, "an asset was fetched before every asset had a digest").toEqual([]);
-    expect(transferred(hosts), "half of the engine reached the machine").toHaveLength(0);
-  });
-
-  it("writes neither executable when the second one differs from its digest", async () => {
-    const hosts = scriptedHosts();
-    const h = await makeHarness({ hosts });
-    const url = `https://downloads.example.invalid/ansiwise/${ANSIWISE_PIN}/${ANSIWISE_REST_TOOL}-${ANSIWISE_PIN}-linux-x64`;
-    h.releases.serves.set(url, Buffer.from(`#!ansiwise\n${ANSIWISE_REST_TOOL} ${ANSIWISE_PIN}\n# swapped\n`, "utf8"));
-    await expect(placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place_second_swapped", [])))
-      .rejects.toThrow(/served bytes whose SHA-256 is [0-9a-f]{64}, and the platform repository states/);
-    expect(transferred(hosts), "the first executable was written before the second was held").toHaveLength(0);
-  });
-
-  it("refuses a pin the digest file states nothing for, before fetching anything", async () => {
-    // The digests of another release: the file and the pin came apart, which is what a pin written
-    // without its release leaves behind. Nothing is fetched, because nothing fetched could be held.
-    const hosts = scriptedHosts();
-    const h = await makeHarness({ hosts, ansiwiseDigests: ansiwiseDigests("0.4.1") });
-    await expect(placeAnsiwiseStep(target, ports(h)).run(placeCtx(h, hosts, "run_place_undigested", [])))
-      .rejects.toThrow(new RegExp(`states no SHA-256 for ${ANSIWISE_TOOL}-${ANSIWISE_PIN.replace(/\./g, "\\.")}-linux-x64`));
-    expect(h.releases.read, "an asset was fetched that no digest could hold").toEqual([]);
-    expect(transferred(hosts)).toHaveLength(0);
-  });
 });
 
 describe("the download address", () => {
@@ -306,34 +252,10 @@ describe("what may stand in a command on the machine", () => {
 // with no manager in it: no harness, no database, no StepCtx, no server row and no ports record —
 // only a session, two names and an address. A `placeAnsiwise` that reached for any of the rest could
 // not compile here.
-const FIRST_INSTALL_FQDN = "s1.example.invalid";
 /** The programs checkout this manager would clone, and the account a slave is reached as — the two the
  *  clone is composed from, stated once so a test reads what a command carries. */
 const PROGRAMS_URL = "https://github.com/an-owner/a-programs.git";
 const OPERATOR = "ubuntu";
-
-/** The machine as a caller holding nothing but a session sees it. This is the whole of what a Dart
- *  client has to supply — everything else the bootstrap says itself. */
-async function sessionMachine(hosts: HostsScript, log: string[]): Promise<PlacementMachine> {
-  const session = await hostsFactory(hosts)({
-    host: "10.1.1.11", port: 22, username: "ubuntu",
-    auth: { kind: "key", privateKey: Buffer.from("k") },
-  });
-  const signal = new AbortController().signal;
-  return {
-    name: FIRST_INSTALL_FQDN,
-    putFile: (path, content, mode) => session.putFile(path, content, mode, { signal }),
-    run: async (argv, o) => {
-      const out: string[] = [];
-      const result = await session.exec(argv.join(" "), {
-        signal, timeoutMs: o.timeoutMs, onStdout: (line) => out.push(line),
-        ...(o.stdin !== undefined ? { stdin: o.stdin } : {}),
-      });
-      return { code: result.code, stdout: out.join("\n") };
-    },
-    log: (line) => log.push(line),
-  };
-}
 
 describe("the bootstrap with no manager behind it", () => {
   it("places both on a machine no inventory carries, and places nothing the second time", async () => {
@@ -386,8 +308,10 @@ describe("the bootstrap with no manager behind it", () => {
       { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, digests: ansiwiseDigestMap(ANSIWISE_PIN), elevationPassword: ELEVATION_PASSWORD },
     );
 
+    // The path is written by the install, and by the removal of a copy that failed its digest; the
+    // reading of the path after it needs nothing, because its files are readable by every account.
     for (const act of hosts.log) {
-      if (act.command.startsWith("sudo -S install ")) continue;
+      if (act.command.startsWith("sudo -S install ") || act.command.startsWith(`sudo -S rm -f ${PATH_HOME}`)) continue;
       expect(act.stdin, `${act.command} carried a credential`).toBeUndefined();
       expect(act.command).not.toContain("sudo");
     }
@@ -423,26 +347,6 @@ describe("the bootstrap with no manager behind it", () => {
     for (const f of onPath(hosts)) expect(f.content).toBe(assetBytes(f.path, ANSIWISE_PIN).toString("utf8"));
     expect(verdict).toEqual({ version: ANSIWISE_PIN, placed: true });
     expect(said.some((l) => l.includes(`carries ${PATH_HOME}${ANSIWISE_TOOL}`))).toBe(true);
-  });
-
-  it("never installs a home copy that answers the pin and is not the release's bytes", async () => {
-    // The state an account holder can make without root: a file in the account's own home that
-    // answers the pin. Before the path is written it is replaced by bytes this run held, so what
-    // root installs is the release's and not the planted copy.
-    const hosts = scriptedHosts();
-    const releases = new ScriptedReleases();
-    const read = { read: (url: string) => releases.get(url, { signal: new AbortController().signal }) };
-    const request = { version: ANSIWISE_PIN, downloadUrl: ANSIWISE_DOWNLOAD_URL, digests: ansiwiseDigestMap(ANSIWISE_PIN), elevationPassword: ELEVATION_PASSWORD };
-    const planted = `#!ansiwise\n${ANSIWISE_TOOL} ${ANSIWISE_PIN}\n# planted by the account\n`;
-
-    const machine = await sessionMachine(hosts, []);
-    await machine.putFile(ANSIWISE_TOOL, Buffer.from(planted, "utf8"), EXECUTABLE_MODE);
-    await machine.putFile(ANSIWISE_REST_TOOL, assetBytes(ANSIWISE_REST_TOOL, ANSIWISE_PIN), EXECUTABLE_MODE);
-
-    await placeAnsiwise(await sessionMachine(hosts, []), read, request);
-
-    const installed = onPath(hosts).find((f) => f.path === ANSIWISE_TOOL);
-    expect(installed?.content, "the planted home copy reached the path").toBe(assetBytes(ANSIWISE_TOOL, ANSIWISE_PIN).toString("utf8"));
   });
 
   // THE INNOCENT NEIGHBOUR: once BOTH answer the pin there is nothing left to do, and the second

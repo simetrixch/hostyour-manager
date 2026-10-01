@@ -376,12 +376,14 @@ export interface BootstrapVerdict {
   placed: boolean;
 }
 
-/** Give the machine both executables at the version the request pins, and transfer neither of them
- *  where the file already standing there answers that version.
+/** Give the machine both executables at the version the request pins, and fetch neither of them
+ *  where its home copy and its path copy both answer that version. An executable with either copy off
+ *  the pin is fetched, held against its digest and placed again.
  *
  *  MEASURED, PLACED, MEASURED AGAIN, and the verdict is the second reading. A transfer that wrote an
  *  error page would set the mode on it and resolve happily; what says the machine carries the pin is
- *  the machine answering the pin. */
+ *  the machine answering the pin. What root installed is read back off the path as well, and held
+ *  against its digest. */
 export async function placeAnsiwise(
   machine: PlacementMachine,
   assets: ReleaseAssets,
@@ -403,7 +405,9 @@ export async function placeAnsiwise(
     return { version, placed: false };
   }
   machine.log(
-    `placing on ${machine.name}: ${toPlace.map((name) => `${name} ${version} (it carries ${standing[name] ?? "none"})`).join(", ")}`,
+    `placing on ${machine.name}: ${toPlace.map((name) =>
+      `${name} ${version} (${BOOTSTRAP_HOME}${name} answers ${standing[name] ?? "nothing"}, ` +
+      `${PATH_HOME}${name} answers ${onPath[name] ?? "nothing"})`).join(", ")}`,
   );
 
   // EVERY ASSET IS ADDRESSED, FETCHED AND HELD BEFORE ANY IS WRITTEN, so a refusal of one leaves the
@@ -471,8 +475,9 @@ export async function placeAnsiwise(
 
   // ONTO THE PATH, only what this run fetched and held against its digest: the bytes that answered
   // the pin are the bytes that go where everything else looks for them, and a copy nobody here held
-  // never goes there. `install` replaces a standing file by writing a new one and renaming it over,
-  // so a machine is never left with a half-written executable on its path.
+  // never goes there. `install` writes the new file in place of the standing one, so an install that
+  // is interrupted can leave the path without a whole executable. The read-backs below then refuse
+  // the run, and the next placement measures the path off the pin and places again.
   const stdin = Buffer.from(req.elevationPassword + NEWLINE, "utf8");
   for (const name of toPlace) {
     const done = await machine.run(
@@ -487,6 +492,27 @@ export async function placeAnsiwise(
         "programs written for a version it is not",
       );
     }
+  }
+
+  // WHAT ROOT INSTALLED IS HELD AGAINST ITS DIGEST, read back off the path. `install` reads the home
+  // copy at the moment it runs, and the account this run logged in as can write that copy: between
+  // the transfer above and the install it could have been replaced by a file that answers the pin as
+  // well. The path belongs to root and its files are readable by every account, so the reading needs
+  // no credential, and what it reads is what every later run executes: nothing below root can change
+  // it any more.
+  for (const { name, asset, stated } of addressed) {
+    const hashed = await machine.run(["sha256sum", `${PATH_HOME}${name}`], { timeoutMs: COMMAND_TIMEOUT_MS });
+    const installed = hashed.code === 0 ? hashed.stdout.trim().split(/\s+/)[0] : undefined;
+    if (installed === stated) continue;
+    const removed = await machine.run(["sudo", "-S", "rm", "-f", `${PATH_HOME}${name}`], { timeoutMs: COMMAND_TIMEOUT_MS, stdin });
+    throw errValidation(
+      `${PATH_HOME}${name} on ${machine.name} hashes to ${installed ?? "nothing"} after the install, and the platform ` +
+      `repository states ${stated} for ${asset} — ` +
+      (removed.code === 0
+        ? "it was taken off the path again. "
+        : `and it could not be taken off the path again (exit ${removed.code}), so it is still there. `) +
+      `Something on ${machine.name} replaced ${BOOTSTRAP_HOME}${name} between the transfer and the install`,
+    );
   }
 
   // READ BACK OFF THE PATH, for the reason the home copies are read back: an `install` that reported

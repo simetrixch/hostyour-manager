@@ -6,6 +6,7 @@ import {
   type HostsScript, type Harness,
 } from "./deploy-slave.fixture.ts";
 import { statedTarget, type DeploySlavePorts } from "./defs/deploy-slave.kit.ts";
+import type { PlacementMachine } from "./defs/place-ansiwise.ts";
 import { ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 
 // What the bootstrap suite is stated with: the values a placement takes, the ports record the
@@ -87,4 +88,30 @@ export function onPath(hosts: HostsScript, from = 0): { path: string; content: s
  *  show up here as a line with a shell in it — and there is one assertion that says so. */
 export function commands(hosts: HostsScript): string[] {
   return hosts.log.map((l) => l.command);
+}
+
+/** The name the machine reached with no manager behind it is known by. */
+export const FIRST_INSTALL_FQDN = "s1.example.invalid";
+
+/** The machine as a caller holding nothing but a session sees it. This is the whole of what a Dart
+ *  client has to supply — everything else the bootstrap says itself. */
+export async function sessionMachine(hosts: HostsScript, log: string[]): Promise<PlacementMachine> {
+  const session = await hostsFactory(hosts)({
+    host: "10.1.1.11", port: 22, username: "ubuntu",
+    auth: { kind: "key", privateKey: Buffer.from("k") },
+  });
+  const signal = new AbortController().signal;
+  return {
+    name: FIRST_INSTALL_FQDN,
+    putFile: (path, content, mode) => session.putFile(path, content, mode, { signal }),
+    run: async (argv, o) => {
+      const out: string[] = [];
+      const result = await session.exec(argv.join(" "), {
+        signal, timeoutMs: o.timeoutMs, onStdout: (line) => out.push(line),
+        ...(o.stdin !== undefined ? { stdin: o.stdin } : {}),
+      });
+      return { code: result.code, stdout: out.join("\n") };
+    },
+    log: (line) => log.push(line),
+  };
 }
