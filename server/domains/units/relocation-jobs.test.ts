@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DbHandle } from "../../db/client.ts";
@@ -295,7 +295,35 @@ describe("restoring a consumer's claims", () => {
     const restore = named(consumerRestoreJobs({ ...consumer, pvcs: ["queue-mta-0"], pvcUser: { user: 1000, group: 1000 } }), "reloc-restore-pvc")!;
     expect(restore.spec.runAs).toEqual({ user: 1000, group: 1000 });
     expect(restore.spec.script).toContain(extractClaimLine("/tmp/queue-mta-0.tar.gz", "/pvc/queue-mta-0"));
-    expect(extractClaimLine("/tmp/a.tar.gz", "/pvc/a")).toBe('tar xzf "/tmp/a.tar.gz" -C "/pvc/a" --no-overwrite-dir');
+    expect(extractClaimLine("/tmp/a.tar.gz", "/pvc/a")).toBe('tar xzf "/tmp/a.tar.gz" -C "/pvc/a" --no-overwrite-dir --preserve-permissions');
+  });
+
+  // Root keeps an archive's modes by default; the restore job never runs as root.
+  it.skipIf(process.getuid?.() === 0)("keeps the archive's modes as the running user, where the umask takes group write and setgid without the flag", () => {
+    const source = mkdtempSync(join(tmpdir(), "claim-src-"));
+    const box = mkdtempSync(join(tmpdir(), "claim-box-"));
+    try {
+      mkdirSync(join(source, "spool"));
+      chmodSync(join(source, "spool"), 0o2770);
+      writeFileSync(join(source, "spool", "queued"), "a mail\n");
+      chmodSync(join(source, "spool", "queued"), 0o660);
+      const archive = join(box, "claim.tar.gz");
+      execFileSync("tar", ["czf", archive, "-C", source, "."]);
+      const modesAfter = (line: (root: string) => string): string[] => {
+        const root = mkdtempSync(join(tmpdir(), "claim-root-"));
+        try {
+          execFileSync("sh", ["-c", `umask 022; ${line(root)}`], { stdio: "pipe" });
+          return [join(root, "spool"), join(root, "spool", "queued")].map((path) => (statSync(path).mode & 0o7777).toString(8));
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      };
+      expect(modesAfter((root) => `tar xzf "${archive}" -C "${root}" --no-overwrite-dir`)).not.toEqual(["2770", "660"]);
+      expect(modesAfter((root) => extractClaimLine(archive, root))).toEqual(["2770", "660"]);
+    } finally {
+      rmSync(source, { recursive: true, force: true });
+      rmSync(box, { recursive: true, force: true });
+    }
   });
 
   it.skipIf(!rootOwnedAndWritable("/tmp"))("extracts into an existing root-owned claim root as the running user, where the extract without the flag fails", () => {

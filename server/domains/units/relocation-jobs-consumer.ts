@@ -25,9 +25,11 @@ export function tarredClaims(i: Pick<ConsumerJobInputs, "pvcs" | "services">): s
 
 /** The shell line that extracts one claim's archive into its mounted root. `--no-overwrite-dir` leaves
  *  the root as the volume made it: as the workload's user, tar may not set the mode or the time of a
- *  root-owned directory and would fail on it ("Cannot utime", exit 2). */
+ *  root-owned directory and would fail on it ("Cannot utime", exit 2). `--preserve-permissions` keeps
+ *  the archive's modes: a user that is not root otherwise has them cut by the umask, so a directory
+ *  the workload's group writes comes back without group write and without setgid. */
 export function extractClaimLine(archive: string, root: string): string {
-  return `tar xzf "${archive}" -C "${root}" --no-overwrite-dir`;
+  return `tar xzf "${archive}" -C "${root}" --no-overwrite-dir --preserve-permissions`;
 }
 
 /** The job that lists the claims a generation holds: one `CLAIM <name>` line per `pvc/<name>.tar.gz`,
