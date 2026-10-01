@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { ATTEST_TARGET_STEP } from "../../executor/guards.ts";
-import { deriveServerLocks } from "../../executor/locks.ts";
-import type { AnyRunDefinition, RunDefinition } from "../../executor/types.ts";
+import { acquireLocks, deriveServerLocks } from "../../executor/locks.ts";
+import type { AnyRunDefinition, LockClaim, RunDefinition } from "../../executor/types.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
 import { makeTailnetDisconnectDef, makeTailnetReadDef, makeTailnetReconnectDef, makeTailnetRejoinDef, type TailnetParams } from "./defs/tailnet.ts";
@@ -106,7 +106,8 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
       expect(deriveServerLocks(plan.targets ?? [])).toEqual([{ resource: "server", key: SLAVE_ID }]);
       // The master is driven, not owned — only the host being repaired is claimed.
       expect(plan.targets?.filter((t) => t.ownsHost).map((t) => t.serverId)).toEqual([SLAVE_ID]);
-      expect(plan.locks ?? []).toEqual([]);
+      // The rejoin places the engine on the master, so it holds the lock every placing run holds.
+      expect(plan.locks ?? []).toEqual(kind === "cluster-tailnet-rejoin" ? [{ resource: "master-kube", key: "m" }] : []);
     });
 
     it(`${kind} runs ${ATTEST_TARGET_STEP}, then ${MIDDLE_STEP[kind] ?? "nothing of its own"}, then reads the membership back`, async () => {
@@ -130,6 +131,31 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
       expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     });
   }
+
+  it("lets no second rejoin start while a first one may place the engine on the master", async () => {
+    // Two rejoins on two slaves each place the engine on the master. Without a shared lock both
+    // could install it at once, and each read-back could take the other's copy off the path.
+    const db = setup();
+    db.db.insert(servers).values({
+      id: "srv_s2", name: "s2", host: "203.0.113.12", lanHost: "10.1.1.12", sshPort: 22, sshUser: "hostyour2",
+      role: "slave", status: "healthy",
+    }).run();
+    db.db.insert(clusters).values({
+      id: "cls_2", serverId: "srv_s2", stage: "prod", domain: "s2.example.com", name: "s2", status: "active", slaveId: 2,
+    }).run();
+    db.sqlite.prepare("INSERT OR IGNORE INTO operators (id, username, display_name) VALUES ('op','op','op')").run();
+    const claimsOf = async (runId: string, serverId: string): Promise<LockClaim[]> => {
+      const plan = await DEFS["cluster-tailnet-rejoin"].plan({ serverId }, { db: db.db });
+      db.sqlite
+        .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
+        .run(runId, "cluster-tailnet-rejoin", "server", serverId, "{}", "{}", "approved", "op");
+      return [...deriveServerLocks(plan.targets ?? []), ...(plan.locks ?? [])];
+    };
+
+    acquireLocks(db.db, "run_rejoin_s1", await claimsOf("run_rejoin_s1", SLAVE_ID));
+    const second = await claimsOf("run_rejoin_s2", "srv_s2");
+    expect(() => acquireLocks(db.db, "run_rejoin_s2", second)).toThrow("Resource busy");
+  });
 
   it("only a rejoin declares the master at all, and on its usual address — the other two touch one host", async () => {
     const db = setup();
