@@ -96,7 +96,7 @@ async function registrations(): Promise<Registrations> {
 }
 
 // THE DEPLOY REPOSITORY'S BUMP ENTRY (#197): the App's token is written to build/deploy/repo-pat on
-// every tick and bump-git-https is deleted in EVERY build namespace, because every unit's release
+// every tick and ESO is asked to write bump-git-https again in EVERY build namespace, because every unit's release
 // pushes the deploy repository's books branch with that one entry — the App is the deploy
 // repository's one identity (hostyour-cloud#237).
 describe("refreshAppTokens — the deploy repository bump credential from the App", () => {
@@ -112,8 +112,10 @@ describe("refreshAppTokens — the deploy repository bump credential from the Ap
     const r = await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, deployRepo: deployRepoOf("acme"), githubApp });
     expect(r.refreshed).toEqual(["acme-apps", "shop", "beta-apps", DEPLOY_BUMP_UNIT]);
     expect(written.at(-1)).toEqual({ consumerName: DEPLOY_BUMP_UNIT, pat: "ghs_deploy_now", packages: "" }); // the bump entry installs nothing
-    const bumpRefreshes = kube.refreshedExternalSecrets.filter((r) => r.endsWith("/bump-git-https"));
-    expect(bumpRefreshes.slice(-3)).toEqual(["acme-apps-build/bump-git-https", "shop-build/bump-git-https", "beta-apps-build/bump-git-https"]);
+    // Each unit's own rewrite asks for its three Secrets; the deploy repository's rewrite behind them
+    // asks for bump-git-https alone, the one Secret that carries its entry.
+    expect(kube.refreshedExternalSecrets).toHaveLength(3 * 3 + 3);
+    expect(kube.refreshedExternalSecrets.slice(-3)).toEqual(["acme-apps-build/bump-git-https", "shop-build/bump-git-https", "beta-apps-build/bump-git-https"]);
     expect(kube.secretWrites).toEqual([]);
     expect(errors).toEqual([]);
   });
