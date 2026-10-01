@@ -43,12 +43,24 @@ export function tenantAppRows<R extends TenantAppRowInput>(catalog: readonly Ten
   return [...listed, ...rest];
 }
 
+const SETTLED: readonly string[] = TENANT_SETTLED_STATUS;
+const websiteRows = <R extends TenantAppRowInput>(rows: readonly R[]): (R & { site: string })[] =>
+  rows.filter((r): r is R & { site: string } => typeof r.site === "string" && r.site !== "");
+
 /** The websites the tenant ran and removed: inventory rows that name a site and whose status is a
  *  settled one. Read off the row alone, so a catalog still loading, or one that answered without its
  *  websites, never turns a live website into a removed one. */
 export function removedWebsites<R extends TenantAppRowInput>(rows: readonly R[]): (R & { site: string })[] {
-  const settled: readonly string[] = TENANT_SETTLED_STATUS;
-  return rows.filter((r): r is R & { site: string } => typeof r.site === "string" && r.site !== "" && settled.includes(r.status));
+  return websiteRows(rows).filter((r) => SETTLED.includes(r.status));
+}
+
+/** The websites the Websites section lists as live: the catalog's, each with its domain, or, where the
+ *  catalog has not answered them (still loading, unreadable or degraded), the inventory's rows that name
+ *  a site and are not settled, by name and site. The Apps list leaves every row with a site out, so
+ *  without this a live website would vanish from the page with the catalog. */
+export function listedWebsites(catalog: Pick<TenantAppCatalogView, "websites"> | null, rows: readonly TenantAppRowInput[]): { name: string; site: string; domain: string | null }[] {
+  if (catalog?.websites !== undefined) return catalog.websites.map((w) => ({ name: w.name, site: w.site, domain: w.domain }));
+  return websiteRows(rows).filter((r) => !SETTLED.includes(r.status)).map((r) => ({ name: r.name, site: r.site, domain: null }));
 }
 
 /** The apps the add-app control offers: the bundle's undeployed ones, in catalog order, no website

@@ -8,7 +8,7 @@ import {
   type TenantDetailView,
 } from "../api.ts";
 import { tenantRowOffer } from "../tenantRows.ts";
-import { removedWebsites, tenantAppRows } from "../tenantAppRows.ts";
+import { listedWebsites, removedWebsites, tenantAppRows } from "../tenantAppRows.ts";
 import { TenantAddAppForm, type TenantAddAppChoice } from "../components/TenantAddAppForm.tsx";
 import { relocationRun, relocationLine } from "../relocationBand.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
@@ -260,7 +260,7 @@ export function TenantDetail() {
 
       {!settled && !unfinished && <TenantAddAppForm catalog={catalog} busy={busy} onAdd={addApp} onRecordPackagesReader={recordPackagesReader} />}
 
-      {!settled && !unfinished && <TenantWebsites tenantId={tenantId} catalog={catalog} removed={removedWebsites(t.apps)} busy={busy} act={act} onRemove={setRemoveApp} onRecordPackagesReader={recordPackagesReader} />}
+      {!settled && !unfinished && <TenantWebsites tenantId={tenantId} catalog={catalog} websites={listedWebsites(catalog, t.apps)} removed={removedWebsites(t.apps)} busy={busy} act={act} onRemove={setRemoveApp} onRecordPackagesReader={recordPackagesReader} />}
 
       {!settled && (
         <div className="actionbar">

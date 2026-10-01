@@ -13,6 +13,8 @@ import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 export function TenantWebsites(props: {
   tenantId: string;
   catalog: TenantAppCatalogView | null;
+  /** The live websites (listedWebsites): a domain is null where only the inventory could name the website. */
+  websites: readonly { name: string; site: string; domain: string | null }[];
   /** The websites the tenant removed: name, site and the run that removed each. */
   removed: readonly { name: string; site: string; lastRunId: string | null }[];
   busy: boolean;
@@ -22,7 +24,7 @@ export function TenantWebsites(props: {
 }) {
   const { tenantId, catalog, busy, act } = props;
   const folder = catalog ? websiteFolder(catalog.apps) : null;
-  const websites = catalog?.websites ?? [];
+  const websites = props.websites;
   const [domain, setDomain] = useState("");
   const [site, setSite] = useState("");
   const [moving, setMoving] = useState<TenantWebsiteView | null>(null);
@@ -52,12 +54,14 @@ export function TenantWebsites(props: {
               <div className="row">
                 <span className="row__title">{w.name}</span>
                 <span className="row__meta">
-                  <a href={`https://${w.domain}/`} target="_blank" rel="noreferrer">{w.domain}</a> · site {w.site}
+                  {w.domain !== null ? <a href={`https://${w.domain}/`} target="_blank" rel="noreferrer">{w.domain}</a> : "domain unknown until the catalog answers"} · site {w.site}
                 </span>
                 <span className="row__end">
-                  <button type="button" className="btn" disabled={busy} onClick={() => { setNext(w.domain); setMoving(w); }}>
-                    Change domain…
-                  </button>
+                  {w.domain !== null && (
+                    <button type="button" className="btn" disabled={busy} onClick={() => { const domain = w.domain!; setNext(domain); setMoving({ name: w.name, site: w.site, domain }); }}>
+                      Change domain…
+                    </button>
+                  )}
                   <button type="button" className="btn btn--danger" disabled={busy} onClick={() => props.onRemove(w.name)}>
                     Remove
                   </button>

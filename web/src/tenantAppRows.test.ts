@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { newWebsiteName, removedWebsites, tenantAppRows, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
+import { listedWebsites, newWebsiteName, removedWebsites, tenantAppRows, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
 import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 
 // The tenant page's Apps list: the bundle's apps folded with the inventory's rows. Pure, so it is
@@ -58,6 +58,16 @@ describe("undeployedApps", () => {
     expect(removedWebsites(rows)).toEqual([removed]);
     // A catalog still loading, or one that answered without its websites, never turns a live website into a removed one.
     expect(removedWebsites([standing])).toEqual([]);
+  });
+
+  it("lists the catalog's websites with their domains, and the inventory's standing ones where the catalog has not answered them", () => {
+    const live = { ...row("veloluck"), site: "veloluck" };
+    const gone = { ...row("old", "offboarded"), site: "old" };
+    expect(listedWebsites({ websites: [{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }] }, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }]);
+    // Loading, unreadable or degraded: a live website stays on the page, by name and site, without the
+    // domain only the catalog knows, and a removed one is not listed as live.
+    expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "veloluck", site: "veloluck", domain: null }]);
+    expect(listedWebsites({}, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: null }]);
   });
 
   it("PLANTED INNOCENT: a removed app names no site and stays under Apps as offboarded", () => {
