@@ -530,6 +530,8 @@ export interface TenantAppView {
   name: string;
   status: TenantStatus;
   lastRunId: string | null;
+  /** The site a website serves, null for an app — also once the website is removed. */
+  site: string | null;
   createdAt: number;
 }
 /** GET /api/tenants/:id — the tenant row plus its per-app rows. */

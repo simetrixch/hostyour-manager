@@ -53,7 +53,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
@@ -152,6 +152,42 @@ describe("openDb — migration phase + append-only invariants", () => {
       { id: "cred_pkg_only", subject_kind: "owner", subject_id: "acme-org", purpose: "packages-reader" },
     ]);
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([]);
+    expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+  });
+
+  // A tenant_apps row records no site before 0020, so a website removed since read as an offboarded
+  // app; 0020 fills the site of every row an add-app run added as a website, off that run's params.
+  it("backfills the site of a website's row from the run that added it, and leaves an app's row null", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-db-"));
+    dirs.push(dir);
+    const upTo0019 = join(dir, "up-to-0019");
+    mkdirSync(join(upTo0019, "meta"), { recursive: true });
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
+    const before = journal.entries.slice(0, journal.entries.findIndex((e) => e.tag === "0020_tenant-app-site"));
+    writeFileSync(join(upTo0019, "meta/_journal.json"), JSON.stringify({ ...journal, entries: before }));
+    for (const e of before) copyFileSync(join(MIGRATIONS_DIR, `${e.tag}.sql`), join(upTo0019, `${e.tag}.sql`));
+    const file = join(dir, "manager.db");
+    const standing = new Database(file);
+    migrate(drizzle(standing), { migrationsFolder: upTo0019 });
+    standing.prepare("INSERT INTO servers (id, name, host, ssh_user) VALUES ('srv_1', 's1', '10.0.0.1', 'root')").run();
+    standing.prepare("INSERT INTO clusters (id, server_id, stage, domain, name) VALUES ('cls_1', 'srv_1', 'prod', 's1.example', 's1')").run();
+    standing.prepare("INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members) VALUES ('tnt_1', 'cls_1', 'zsjs023ctne0', 'show', 'prod', 'auth', '[\"auth\"]')").run();
+    standing.prepare("INSERT INTO tenant_apps (id, tenant_id, name, status) VALUES ('tna_web', 'tnt_1', 'veloluck-show-digitapla-a9665c', 'offboarded'), ('tna_app', 'tnt_1', 'workshop', 'active')").run();
+    const run = standing.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by, created_at) VALUES (?, 'tenant-add-app', 'tenant', 'tnt_1', ?, '{}', 'succeeded', 'op_system', ?)");
+    // The newest add-app run of the row wins: an older one named another site.
+    run.run("run_web_old", JSON.stringify({ tenantId: "tnt_1", app: "veloluck-show-digitapla-a9665c", website: { folder: "web", site: "old-site", domain: "old.show.example" } }), 1);
+    run.run("run_web", JSON.stringify({ tenantId: "tnt_1", app: "veloluck-show-digitapla-a9665c", website: { folder: "web", site: "veloluck", domain: "veloluck.show.example" } }), 3);
+    run.run("run_app", JSON.stringify({ tenantId: "tnt_1", app: "workshop" }), 2);
+    // Neither a run of another kind nor another tenant's website of the same name marks the app's row.
+    standing.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by, created_at) VALUES ('run_kind', 'tenant-set-website-domain', 'tenant', 'tnt_1', ?, '{}', 'succeeded', 'op_system', 4)").run(JSON.stringify({ tenantId: "tnt_1", app: "workshop", website: { site: "wrong-kind" } }));
+    run.run("run_other", JSON.stringify({ tenantId: "tnt_2", app: "workshop", website: { folder: "web", site: "other-tenant", domain: "w.other.example" } }), 5);
+    standing.close();
+    const h = openDb(file);
+    handles.push(h);
+    expect(h.sqlite.prepare("SELECT id, site FROM tenant_apps ORDER BY id").all()).toEqual([
+      { id: "tna_app", site: null },
+      { id: "tna_web", site: "veloluck" },
+    ]);
     expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
   });
 

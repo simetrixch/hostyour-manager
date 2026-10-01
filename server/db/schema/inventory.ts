@@ -271,5 +271,8 @@ export const tenantApps = sqliteTable("tenant_apps", {
   name: text("name").notNull(),
   status: text("status", { enum: TENANT_STATUS }).notNull().default("active"),
   lastRunId: text("last_run_id"),                                 // loose ref to runs(id)
+  // The site a website serves, null for an app: what keeps a removed website out of the Apps list
+  // once the registration no longer names it.
+  site: text("site"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
 }, (t) => [uniqueIndex("tenant_apps_tenant_name_uq").on(t.tenantId, t.name)]);

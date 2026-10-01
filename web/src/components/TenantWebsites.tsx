@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router";
 import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/apps-manifest.ts";
 import { newWebsiteName, websiteFolder } from "../tenantAppRows.ts";
 import { addTenantWebsite, setTenantWebsiteDomain } from "../api.ts";
@@ -12,6 +13,8 @@ import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 export function TenantWebsites(props: {
   tenantId: string;
   catalog: TenantAppCatalogView | null;
+  /** The websites the tenant removed: name, site and the run that removed each. */
+  removed: readonly { name: string; site: string; lastRunId: string | null }[];
   busy: boolean;
   act: (fn: () => Promise<{ runId: string }>) => Promise<void>;
   onRemove: (app: string) => void;
@@ -34,11 +37,11 @@ export function TenantWebsites(props: {
     e.preventDefault();
     if (folder && typed && site) void act(() => addTenantWebsite(tenantId, { app: named, domain: typed, site, folder: folder.name }));
   };
-  if (!folder && websites.length === 0) return null;
+  if (!folder && websites.length === 0 && props.removed.length === 0) return null;
   return (
     <>
       <h3 className="steps-panel__title">Websites</h3>
-      {websites.length === 0 ? (
+      {websites.length === 0 && props.removed.length === 0 ? (
         <div className="empty">
           <p>No website yet.</p>
         </div>
@@ -58,6 +61,22 @@ export function TenantWebsites(props: {
                   <button type="button" className="btn btn--danger" disabled={busy} onClick={() => props.onRemove(w.name)}>
                     Remove
                   </button>
+                </span>
+              </div>
+            </li>
+          ))}
+          {props.removed.map((w) => (
+            <li key={w.name}>
+              <div className="row">
+                <span className="chip">removed</span>
+                <span className="row__title">{w.name}</span>
+                <span className="row__meta">site {w.site}</span>
+                <span className="row__end">
+                  {w.lastRunId && (
+                    <Link className="btn" to={`/runs/${w.lastRunId}`}>
+                      Last run →
+                    </Link>
+                  )}
                 </span>
               </div>
             </li>

@@ -437,9 +437,9 @@ describe("tenant API", () => {
   it("returns one tenant with its per-app rows", async () => {
     seedTenant();
     const { app, cookie } = await makeTenant(true);
-    const body = (await (await app.request("/api/tenants/tnt_1", authed(cookie))).json()) as { guid: string; apps: Array<{ name: string }> };
+    const body = (await (await app.request("/api/tenants/tnt_1", authed(cookie))).json()) as { guid: string; apps: Array<{ name: string; site: string | null }> };
     expect(body.guid).toBe(TGUID);
-    expect(body.apps.map((a) => a.name)).toEqual(["erp"]);
+    expect(body.apps.map((a) => [a.name, a.site])).toEqual([["erp", null]]); // an app names no site, and the key is there
   });
 
   it("404 for an unknown tenant", async () => {

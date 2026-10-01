@@ -1,0 +1,2 @@
+ALTER TABLE `tenant_apps` ADD `site` text;--> statement-breakpoint
+UPDATE `tenant_apps` SET `site` = (SELECT json_extract(`r`.`params_json`, '$.website.site') FROM `runs` `r` WHERE `r`.`kind` = 'tenant-add-app' AND json_extract(`r`.`params_json`, '$.tenantId') = `tenant_apps`.`tenant_id` AND json_extract(`r`.`params_json`, '$.app') = `tenant_apps`.`name` AND json_extract(`r`.`params_json`, '$.website.site') IS NOT NULL ORDER BY `r`.`created_at` DESC LIMIT 1) WHERE `site` IS NULL;

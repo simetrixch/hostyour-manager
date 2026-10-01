@@ -646,7 +646,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     const tenant = db.select(TENANT_COLUMNS).from(tenants).innerJoin(clusters, eq(tenants.clusterId, clusters.id)).where(eq(tenants.id, id)).get();
     if (!tenant) throw errNotFound(`tenant ${id}`);
     const appRows = db
-      .select({ id: tenantApps.id, name: tenantApps.name, status: tenantApps.status, lastRunId: tenantApps.lastRunId, createdAt: tenantApps.createdAt })
+      .select({ id: tenantApps.id, name: tenantApps.name, status: tenantApps.status, lastRunId: tenantApps.lastRunId, site: tenantApps.site, createdAt: tenantApps.createdAt })
       .from(tenantApps)
       .where(eq(tenantApps.tenantId, id))
       .all();

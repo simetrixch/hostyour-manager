@@ -1,5 +1,6 @@
 import type { TenantAppCatalogView, TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 import { websiteAppName } from "../../shared/tenant.ts";
+import { TENANT_SETTLED_STATUS } from "../../shared/enums.ts";
 
 // The Apps list of the tenant page, stated once and out of the component: the tenant's own catalog
 // (its bundle's apps.yaml, each marked deployed off the registration) folded with the inventory's
@@ -10,12 +11,14 @@ import { websiteAppName } from "../../shared/tenant.ts";
 // from the bundle after it was deployed, or every row while the catalog is unreadable — because a
 // recorded app that vanished from the list would read as never deployed.
 
-/** One inventory row as the page needs it: the fields the row renders and the remove needs. */
+/** One inventory row as the page needs it: the fields the row renders and the remove needs, and the
+ *  site of a website (null for an app), which keeps a removed website out of the Apps list. */
 export interface TenantAppRowInput {
   id: string;
   name: string;
   status: string;
   lastRunId: string | null;
+  site?: string | null;
 }
 
 export interface TenantAppRow<R extends TenantAppRowInput> {
@@ -36,8 +39,16 @@ export function tenantAppRows<R extends TenantAppRowInput>(catalog: readonly Ten
   const byName = new Map(rows.map((r) => [r.name, r]));
   const listed = apps.map((entry) => ({ name: entry.name, entry, row: byName.get(entry.name) ?? null, deployed: entry.deployed }));
   const named = new Set(apps.map((e) => e.name));
-  const rest = rows.filter((r) => !named.has(r.name) && !site.has(r.name)).map((row) => ({ name: row.name, entry: null, row, deployed: true }));
+  const rest = rows.filter((r) => !named.has(r.name) && !site.has(r.name) && !r.site).map((row) => ({ name: row.name, entry: null, row, deployed: true }));
   return [...listed, ...rest];
+}
+
+/** The websites the tenant ran and removed: inventory rows that name a site and whose status is a
+ *  settled one. Read off the row alone, so a catalog still loading, or one that answered without its
+ *  websites, never turns a live website into a removed one. */
+export function removedWebsites<R extends TenantAppRowInput>(rows: readonly R[]): (R & { site: string })[] {
+  const settled: readonly string[] = TENANT_SETTLED_STATUS;
+  return rows.filter((r): r is R & { site: string } => typeof r.site === "string" && r.site !== "" && settled.includes(r.status));
 }
 
 /** The apps the add-app control offers: the bundle's undeployed ones, in catalog order, no website

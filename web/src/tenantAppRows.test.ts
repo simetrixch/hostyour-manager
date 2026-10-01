@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { newWebsiteName, tenantAppRows, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
+import { newWebsiteName, removedWebsites, tenantAppRows, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
 import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 
 // The tenant page's Apps list: the bundle's apps folded with the inventory's rows. Pure, so it is
@@ -48,6 +48,22 @@ describe("undeployedApps", () => {
     expect(newWebsiteName(catalog, "auth")).toBe("auth-2");
     expect(newWebsiteName(catalog, "veloluck")).toBe("veloluck-2");
     expect(newWebsiteName(catalog, "workshop")).toBe("workshop-2");
+  });
+
+  it("keeps a removed website out of the Apps list and hands it to the Websites section, with its site and last run", () => {
+    const removed = { id: "tna_old", name: "veloluck-show-digitapla-a9665c", status: "offboarded", lastRunId: "run_rm", site: "veloluck" };
+    const standing = { id: "tna_v", name: "veloluck", status: "active", lastRunId: "run_add", site: "veloluck" };
+    const rows = [row("erp"), removed, standing];
+    expect(tenantAppRows([entry("erp", true)], rows, [{ name: "veloluck" }]).map((r) => r.name)).toEqual(["erp"]);
+    expect(removedWebsites(rows)).toEqual([removed]);
+    // A catalog still loading, or one that answered without its websites, never turns a live website into a removed one.
+    expect(removedWebsites([standing])).toEqual([]);
+  });
+
+  it("PLANTED INNOCENT: a removed app names no site and stays under Apps as offboarded", () => {
+    const rows = [row("erp"), { ...row("crm", "offboarded"), site: null }];
+    expect(tenantAppRows([entry("erp", true)], rows).map((r) => [r.name, r.row?.status])).toEqual([["erp", "active"], ["crm", "offboarded"]]);
+    expect(removedWebsites(rows)).toEqual([]);
   });
 
   it("offers only the bundle's undeployed apps, in catalog order", () => {

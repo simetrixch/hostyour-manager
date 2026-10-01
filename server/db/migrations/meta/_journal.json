@@ -141,6 +141,13 @@
       "when": 1790796966934,
       "tag": "0019_tenant-nests-under",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1790890484288,
+      "tag": "0020_tenant-app-site",
+      "breakpoints": true
     }
   ]
 }

@@ -6,8 +6,8 @@ import { makeAddAppDef } from "./add-app.run.ts";
 import { makeRemoveAppDef } from "./tenant-lifecycle.run.ts";
 import { makeTenantSetOwnDomainDef, TenantSetOwnDomainParams } from "./tenant-own-domain.run.ts";
 import { CreateTenantRequest } from "./create-tenant.run.ts";
-import { tenants } from "../../db/schema/inventory.ts";
-import { eq } from "drizzle-orm";
+import { tenants, tenantApps } from "../../db/schema/inventory.ts";
+import { and, eq } from "drizzle-orm";
 import { makeTenantSetWebsiteDomainDef } from "./tenant-website-domain.run.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { recordDnsWrite } from "../../db/dns-writes.ts";
@@ -144,6 +144,19 @@ describe("add-app for a website", () => {
     const own = tenantWith([], { ownDomain: "www.example.ch", ownDomainRedirects: ["example.ch"] });
     const result = await makeAddAppDef(ports({ registrations: own }, WEBSITE_APPS)).planStream!(WEBSITE, planCtx());
     expect(result.outcome === "planned" && result.params.websiteRecordHosts).toEqual([]);
+  });
+
+  it("records the site of a website in the inventory, which keeps it out of the Apps list once it is removed", async () => {
+    seedWebsiteTenant();
+    const p = params({ app: "main", website: { folder: "web", site: "main", domain: "example.ch" } });
+    await makeAddAppDef(ports({})).steps(p).find((s) => s.name === "record-inventory")!.run(ctx(p, "record-inventory", []));
+    const site = (name: string) => db.db.select({ site: tenantApps.site }).from(tenantApps).where(and(eq(tenantApps.tenantId, "tnt_1"), eq(tenantApps.name, name))).get()?.site;
+    expect(site("main")).toBe("main");
+    expect(site("erp")).toBeNull(); // an app's row names no site
+    // A website added again under a name its earlier row still holds writes the site on that row too.
+    db.db.update(tenantApps).set({ status: "offboarded", site: null }).where(and(eq(tenantApps.tenantId, "tnt_1"), eq(tenantApps.name, "main"))).run();
+    await makeAddAppDef(ports({})).steps(p).find((s) => s.name === "record-inventory")!.run(ctx(p, "record-inventory", []));
+    expect(site("main")).toBe("main");
   });
 
   it("points both hosts at the tenant's zone, then waits until the site answers at its domain and its www host redirects", async () => {

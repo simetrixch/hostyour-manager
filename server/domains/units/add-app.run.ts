@@ -307,8 +307,9 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
         // row's lastRunId/updatedAt. ONE tx so a crash leaves a consistent, resumable picture.
         localTx(ctx, (tx) => {
           const ex = tx.select().from(tenantApps).where(and(eq(tenantApps.tenantId, p.tenantId), eq(tenantApps.name, p.app))).get();
-          if (ex) tx.update(tenantApps).set({ status: "active", lastRunId: ctx.runId }).where(eq(tenantApps.id, ex.id)).run();
-          else tx.insert(tenantApps).values({ id: mintTenantAppId(), tenantId: p.tenantId, name: p.app, status: "active", lastRunId: ctx.runId }).run();
+          const site = p.website?.site ?? null;
+          if (ex) tx.update(tenantApps).set({ status: "active", lastRunId: ctx.runId, site }).where(eq(tenantApps.id, ex.id)).run();
+          else tx.insert(tenantApps).values({ id: mintTenantAppId(), tenantId: p.tenantId, name: p.app, status: "active", lastRunId: ctx.runId, site }).run();
           tx.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         });
         ctx.log("meta", `app "${p.app}" recorded in tenant ${p.guid}`);
