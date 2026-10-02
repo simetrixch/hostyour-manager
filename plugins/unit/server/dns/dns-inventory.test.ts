@@ -15,7 +15,7 @@ const S1 = "s1.example.com";
 const M1_ADDRESS = "203.0.113.9";
 
 /** The five rows the Mail page measures for one sender domain, as that page composes them. */
-const mailView = (): MailDnsView => ({
+const mailView = (publishRefusal: string | null = null): MailDnsView => ({
   master: { serverId: "srv_m", name: "m1", fqdn: M1, stage: "prod" },
   sender: null,
   egress: { name: M1, address: M1_ADDRESS },
@@ -30,6 +30,7 @@ const mailView = (): MailDnsView => ({
         { record: "dmarc", name: "_dmarc.example.com", expected: "one v=DMARC1 record with a policy and a report mailbox", found: null, ok: false, note: "publish" },
         { record: "ptr", name: M1_ADDRESS, expected: "example.com", found: "example.com", ok: true },
       ],
+      publishRefusal,
     },
   ],
   measuredAt: new Date().toISOString(),
@@ -111,6 +112,20 @@ describe("readDnsInventory", () => {
     ]);
     expect(view.rows.find((r) => r.name === "_dmarc.example.com")).toMatchObject({ verdict: "absent", found: null });
     expect(view.rows.find((r) => r.name === "example.com" && r.type === "TXT")?.verdict).toBe("standing");
+  });
+
+  it("PLANTED DEFECT: under a domain whose mail runs on its own mail service, its apex SPF and DMARC are that service's and listed read-only", async () => {
+    const platform = mailView("example.com is the platform domain");
+    platform.domains[0]!.rows.splice(1, 0, { record: "envelope-spf", name: "mail.example.com", expected: `one v=spf1 record naming ip4:${M1_ADDRESS}`, found: null, ok: false, note: "publish the envelope SPF" });
+    const view = await readDnsInventory(deps({ mail: async () => platform }));
+    expect(view.rows.filter((r) => r.record !== undefined).map((r) => `${r.owner.kind} ${r.type} ${r.name} ${r.removable}`)).toEqual([
+      "mail-service TXT example.com false",
+      "mail TXT mail.example.com true", // the envelope sender's SPF is the platform's
+      "installer A example.com false",
+      "mail TXT prod._domainkey.example.com true", // the key under the platform's selector stays the platform's
+      "mail-service TXT _dmarc.example.com false",
+      `installer PTR ${M1_ADDRESS} false`,
+    ]);
   });
 
   it("names what it could not list instead of answering with a zone that looks empty", async () => {

@@ -2,12 +2,12 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import { useNavigate } from "react-router";
 import { DMARC_POLICY, type DmarcPolicy } from "../../../shared/enums.ts";
 import type { MailDnsDomainView, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
-import { getMailDns, publishMailDns, unpublishMailDns } from "../api.ts";
+import { getMailDns, publishEnvelopeSpf, publishMailDns, unpublishMailDns } from "../api.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** The five records, named as the records are named, in the order a receiver judges them. */
-const RECORD_LABEL: Record<MailDnsRow["record"], string> = { spf: "SPF", a: "A", dkim: "DKIM", dmarc: "DMARC", ptr: "PTR" };
+/** The records, named as the records are named, in the order a receiver judges them. */
+const RECORD_LABEL: Record<MailDnsRow["record"], string> = { spf: "SPF", "envelope-spf": "SPF (envelope)", a: "A", dkim: "DKIM", dmarc: "DMARC", ptr: "PTR" };
 
 /** The report mailbox a published DMARC record already names, so the form starts from what stands. */
 function reportMailboxOf(rows: MailDnsRow[]): string {
@@ -35,12 +35,28 @@ function DomainCard({ view, masterId, onError }: { view: MailDnsDomainView; mast
   const [mailbox, setMailbox] = useState(() => reportMailboxOf(view.rows));
   const [busy, setBusy] = useState(false);
   const green = view.rows.filter((r) => r.ok).length;
+  const envelope = view.rows.find((r) => r.record === "envelope-spf");
 
   async function publish(): Promise<void> {
     setBusy(true);
     onError(null);
     try {
       const { runId } = await publishMailDns({ serverId: masterId, senderDomain: view.domain, dmarcPolicy: policy, dmarcMailbox: mailbox.trim() });
+      nav(`/runs/${runId}`);
+    } catch (err) {
+      onError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** The envelope sender's SPF, the one record of the platform under a domain whose other mail records
+   *  are its own mail service's. A run like the publish, read on the Run screen before it is approved. */
+  async function publishEnvelope(): Promise<void> {
+    setBusy(true);
+    onError(null);
+    try {
+      const { runId } = await publishEnvelopeSpf({ serverId: masterId });
       nav(`/runs/${runId}`);
     } catch (err) {
       onError(msg(err));
@@ -82,36 +98,50 @@ function DomainCard({ view, masterId, onError }: { view: MailDnsDomainView; mast
           </tbody>
         </table>
       </div>
-      <div className="form-grid">
-        <label className="field">
-          <span className="field__label">DMARC policy</span>
-          <select value={policy} onChange={(e: ChangeEvent<HTMLSelectElement>) => setPolicy(e.target.value as DmarcPolicy)}>
-            {DMARC_POLICY.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <span className="field__hint">Start at none — reports without enforcement — and tighten once the reports show only this installation&apos;s mail.</span>
-        </label>
-        <label className="field">
-          <span className="field__label">DMARC report mailbox</span>
-          <input type="email" value={mailbox} onChange={(e) => setMailbox(e.target.value)} placeholder="dmarc@example.com" required />
-          <span className="field__hint">Where receivers send their aggregate reports — a mailbox somebody reads.</span>
-        </label>
+      {envelope && (
         <div className="field">
-          <span className="field__label">Publish</span>
-          <button type="button" className="btn btn--primary" disabled={busy || mailbox.trim() === ""} onClick={() => void publish()}>
-            {busy ? "Planning…" : `Publish the mail DNS of ${view.domain}`}
+          <span className="field__label">Envelope sender</span>
+          <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void publishEnvelope()}>
+            {busy ? "Planning…" : `Publish the SPF of ${envelope.name}`}
           </button>
-          <button type="button" className="btn btn--danger" disabled={busy} onClick={() => void unpublish()}>
-            {busy ? "Planning…" : `Unpublish ${view.domain}`}
-          </button>
-          <span className="field__hint">Unpublishing deletes this domain&apos;s SPF, DKIM and DMARC records at the DNS provider. Its address record stays and the reverse DNS is not in the zone.</span>
+          <span className="field__hint">Writes the one v=spf1 record of {envelope.name}, the name the platform&apos;s mail transfer agent sends its envelope from, and nothing else.</span>
         </div>
-      </div>
+      )}
+      {view.publishRefusal !== null ? (
+        <p className="muted">{view.publishRefusal}.</p>
+      ) : (
+        <div className="form-grid">
+          <label className="field">
+            <span className="field__label">DMARC policy</span>
+            <select value={policy} onChange={(e: ChangeEvent<HTMLSelectElement>) => setPolicy(e.target.value as DmarcPolicy)}>
+              {DMARC_POLICY.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <span className="field__hint">Start at none — reports without enforcement — and tighten once the reports show only this installation&apos;s mail.</span>
+          </label>
+          <label className="field">
+            <span className="field__label">DMARC report mailbox</span>
+            <input type="email" value={mailbox} onChange={(e) => setMailbox(e.target.value)} placeholder="dmarc@example.com" required />
+            <span className="field__hint">Where receivers send their aggregate reports — a mailbox somebody reads.</span>
+          </label>
+          <div className="field">
+            <span className="field__label">Publish</span>
+            <button type="button" className="btn btn--primary" disabled={busy || mailbox.trim() === ""} onClick={() => void publish()}>
+              {busy ? "Planning…" : `Publish the mail DNS of ${view.domain}`}
+            </button>
+            <button type="button" className="btn btn--danger" disabled={busy} onClick={() => void unpublish()}>
+              {busy ? "Planning…" : `Unpublish ${view.domain}`}
+            </button>
+            <span className="field__hint">Unpublishing deletes this domain&apos;s SPF, DKIM and DMARC records at the DNS provider. Its address record stays and the reverse DNS is not in the zone.</span>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
 /** The installation's mail DNS as receivers see it, measured at public resolvers on every load, and
- *  the one act it offers: publishing a sender domain's records through the master. */
+ *  the acts it offers through the master: publishing a sender domain's records, and the envelope
+ *  sender's SPF under the platform domain, whose other records are its own mail service's. */
 export function Mail() {
   const [data, setData] = useState<MailDnsView | null>(null);
   const [error, setError] = useState<string | null>(null);

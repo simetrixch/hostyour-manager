@@ -3,7 +3,7 @@ import type { Db } from "../../db/client.ts";
 import { apps, clusters, servers } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound } from "../../kernel/errors.ts";
 import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
-import { MAIL_RECORD_TAG, mailRecordNames, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type MailEgress, type SenderRole } from "../../../shared/mail.ts";
+import { MAIL_RECORD_TAG, envelopeDomainOf, mailRecordNames, platformDomainRefusal, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type MailEgress, type SenderRole } from "../../../shared/mail.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { PublicDns } from "../../adapters/dns/public-dns.ts";
 import { resolveClusterMarking } from "../inventory/cluster-marking.ts";
@@ -32,9 +32,17 @@ export interface MailDnsNeed {
   /** The key the sender signs THIS domain with, as the base64 a DKIM record carries in `p=` — where the
    *  Manager holds it (the platform domain of a unit that sends); null where the relay's own key is it. */
   dkimPublicKey: string | null;
+  /** The name the platform's MTA sends its envelope from, whose SPF receivers check — the platform
+   *  domain's (envelopeDomainOf); null for the alert domain, whose relay sends from the domain itself. */
+  envelopeDomain: string | null;
+  /** Why no run of this platform publishes this domain's records — null where mail-dns-publish does.
+   *  A row it would point at the publish then says so instead. */
+  publishRefusal: string | null;
 }
 
 const joined = (records: readonly string[]): string | null => (records.length === 0 ? null : records.join(" | "));
+
+const noEgressNote = (egressName: string): { note: string } => ({ note: `give ${egressName} an address record first` });
 
 /** The base64 a DKIM record carries in `p=`: the DER of the SubjectPublicKeyInfo, which is the body
  *  of the SPKI PEM the Manager keeps. */
@@ -42,37 +50,50 @@ export function dkimRecordKey(spkiPem: string): string {
   return spkiPem.replace(/-----(BEGIN|END) PUBLIC KEY-----/g, "").replace(/\s+/g, "");
 }
 
-/** The five rows of one sender domain. Pure over the lookups, so a test scripts DNS and reads verdicts.
- *  A red row's note is ONE sentence naming the act: publish, remove a record by hand, set the reverse
- *  DNS at the provider, or point the mail name back at the address. What the publish does is the run's
- *  summary, not this page's.
+/** The SPF row of one name: one v=spf1 record that names the egress address, or the act that makes it
+ *  so — `publish` names the run that writes it. */
+function spfRow(record: "spf" | "envelope-spf", name: string, found: readonly string[], egress: string | null, egressName: string, publish: string): MailDnsRow {
+  return {
+    record,
+    name,
+    expected: egress === null ? `one v=spf1 record naming the address ${egressName} resolves to` : `one v=spf1 record naming ip4:${egress}`,
+    found: joined(found),
+    ok: egress !== null && found.length === 1 && found[0]!.includes(`ip4:${egress}`),
+    ...(egress === null
+      ? noEgressNote(egressName)
+      : found.length === 0
+        ? { note: publish }
+        : found.length > 1
+          ? { note: `remove ${found.length - 1} of the ${found.length} v=spf1 records by hand, then ${publish}` }
+          : found[0]!.includes(`ip4:${egress}`)
+            ? {}
+            : { note: `${publish}; the address is merged into the record that stands` }),
+  };
+}
+
+/** The rows of one sender domain: its SPF, the envelope sender's SPF where it has one, the mail name's
+ *  address record, its DKIM key, its DMARC policy and the reverse DNS. Pure over the lookups, so a test
+ *  scripts DNS and reads verdicts. A red row's note is ONE sentence naming the act: publish, remove a
+ *  record by hand, set the reverse DNS at the provider, or point the mail name back at the address — or,
+ *  for a domain no run of this platform publishes, why not. What the publish does is the run's summary,
+ *  not this page's.
  *
  *  THE MAIL NAME IS ITS OWN NAME (decided 2026-09-23): the reverse DNS of the address gives a name,
  *  and that name must resolve back to the address — the forward confirmation receivers check. The
  *  sender domain's apex is not asked to answer the address; it stays free for whatever it serves. */
 export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<MailDnsRow[]> {
-  const { domain, stage, egress, egressName, dkimPublicKey } = need;
-  const noEgress = { note: `give ${egressName} an address record first` };
+  const { domain, stage, egress, egressName, dkimPublicKey, envelopeDomain, publishRefusal } = need;
+  const noEgress = noEgressNote(egressName);
   const publish = { note: "publish" };
+  // A row of a domain no run publishes points at nothing to run: it says why instead.
+  const elsewhere = (row: MailDnsRow): MailDnsRow =>
+    publishRefusal === null || row.note === undefined ? row : { ...row, note: `not published here: ${domain}'s mail records are its own mail service's` };
 
   const names = mailRecordNames(domain, stage);
-  const spf = (await dns.txt(names.spf)).filter(MAIL_RECORD_TAG.spf);
-  const spfRow: MailDnsRow = {
-    record: "spf",
-    name: names.spf,
-    expected: egress === null ? `one v=spf1 record naming the address ${egressName} resolves to` : `one v=spf1 record naming ip4:${egress}`,
-    found: joined(spf),
-    ok: egress !== null && spf.length === 1 && spf[0]!.includes(`ip4:${egress}`),
-    ...(egress === null
-      ? noEgress
-      : spf.length === 0
-        ? publish
-        : spf.length > 1
-          ? { note: `remove ${spf.length - 1} of the ${spf.length} v=spf1 records by hand, then publish` }
-          : spf[0]!.includes(`ip4:${egress}`)
-            ? {}
-            : { note: "publish; the address is merged into the record that stands" }),
-  };
+  const spf = elsewhere(spfRow("spf", names.spf, (await dns.txt(names.spf)).filter(MAIL_RECORD_TAG.spf), egress, egressName, "publish"));
+  const envelope = envelopeDomain === null
+    ? []
+    : [spfRow("envelope-spf", envelopeDomain, (await dns.txt(envelopeDomain)).filter(MAIL_RECORD_TAG["envelope-spf"]), egress, egressName, "publish the envelope SPF")];
 
   // The reverse DNS and its forward confirmation, the same for every sender domain: one address, one name.
   const ptrNames = egress === null ? [] : await dns.ptr(egress);
@@ -130,7 +151,7 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
     ...(egress === null ? noEgress : mailName === null ? { note: `set the reverse DNS of ${egress} to the mail name at the hosting provider` } : {}),
   };
 
-  return [spfRow, aRow, dkimRow, dmarcRow, ptrRow];
+  return [spf, ...envelope, aRow, elsewhere(dkimRow), elsewhere(dmarcRow), ptrRow];
 }
 
 export interface MailDnsDeps {
@@ -183,12 +204,18 @@ export async function readMailDns(deps: MailDnsDeps): Promise<MailDnsView> {
   if (marking.unitApex !== marking.platformDomain) senderDomains.push({ domain: marking.unitApex, role: "alert mail" });
   const domains: MailDnsDomainView[] = [];
   for (const s of senderDomains) {
+    const platform = s.role === "customer mail";
+    const publishRefusal = platform ? platformDomainRefusal(s.domain) : null;
     domains.push({
       ...s,
       rows: await mailDnsRows(
-        { ...s, stage: cluster.stage, egressName: out.name, egress: out.address, dkimPublicKey: s.role === "customer mail" ? out.dkimPublicKey : null },
+        {
+          ...s, stage: cluster.stage, egressName: out.name, egress: out.address, dkimPublicKey: platform ? out.dkimPublicKey : null,
+          envelopeDomain: platform ? envelopeDomainOf(s.domain) : null, publishRefusal,
+        },
         deps.publicDns,
       ),
+      publishRefusal,
     });
   }
   return {

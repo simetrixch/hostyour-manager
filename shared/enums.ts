@@ -415,6 +415,7 @@ export const RUN_KIND = [
   // is exactly what it exists to surface.
   "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
   "mail-dns-publish",                                           // the mail DNS of ONE sender domain, published from the master
+  "mail-envelope-spf-publish",                                  // the SPF of the platform MTA's envelope name, published from the master
   // The two run kinds that take a DNS record BACK. `dns-remove` deletes a LIST of records the DNS
   // inventory names as this installation's (plugins/unit/server/dns/dns-inventory.ts), one step each,
   // and refuses the whole list on any other name — the deletion an abandoned installation needs
@@ -507,7 +508,7 @@ export type RunKind = (typeof RUN_KIND)[number];
  * Every literal of the consumer and tenant families carries its family as its first word, so a run
  * kind read off a run row, a log line or a filter names whose act it is without this table being
  * opened. `noop` belongs to no family of the product and is spelled bare for that reason, and the
- * three DNS and mail run kinds of the cluster family are spelled for the thing they act on rather
+ * four DNS and mail run kinds of the cluster family are spelled for the thing they act on rather
  * than for the family: their act is the installation's zone at the provider, not one cluster's.
  */
 export const RUN_FAMILY = {
@@ -517,7 +518,7 @@ export const RUN_FAMILY = {
     "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin", "cluster-tailnet-read",
     "cluster-password-login-disable", "cluster-password-login-enable",
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
-    "mail-dns-publish", "dns-remove", "mail-dns-unpublish",
+    "mail-dns-publish", "mail-envelope-spf-publish", "dns-remove", "mail-dns-unpublish",
   ],
   consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate", "consumer-nightly-backup"],
   tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-refresh-members", "tenant-set-sender-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],

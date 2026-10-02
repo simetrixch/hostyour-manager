@@ -18,8 +18,10 @@ export interface MailDnsPublishInput {
  *  unit apex the alerts. */
 export type SenderRole = "customer mail" | "alert mail";
 
-/** The five records a receiver judges the installation's mail by. */
-export type MailDnsRecord = "spf" | "a" | "dkim" | "dmarc" | "ptr";
+/** The records a receiver judges the installation's mail by: per sender domain its SPF, its address
+ *  record, its DKIM key, its DMARC policy and the reverse DNS of the egress address, and for the
+ *  platform domain the SPF of the envelope sender's name (envelopeDomainOf). */
+export type MailDnsRecord = "spf" | "envelope-spf" | "a" | "dkim" | "dmarc" | "ptr";
 
 /** One record as measured against what the installation needs: the NAME asked, what the master's
  *  map and address say it must carry (`expected`), what public DNS answers (`found`, null for no
@@ -37,6 +39,9 @@ export interface MailDnsDomainView {
   domain: string;
   role: SenderRole;
   rows: MailDnsRow[];
+  /** Why this platform publishes and removes none of this domain's mail records (the sentence
+   *  mail-dns-publish and mail-dns-unpublish refuse with), or null where it publishes them. */
+  publishRefusal: string | null;
 }
 
 /** GET /api/mail/dns — the mail DNS of the installation as receivers see it: the master whose map
@@ -66,6 +71,31 @@ export interface MailEgress {
   dkimPublicKey: string | null;
 }
 
+/** POST /api/runs {kind: "mail-envelope-spf-publish"} — the SPF of the envelope sender's name
+ *  (envelopeDomainOf the platform domain), published from the master by the programs checkout's
+ *  publish-envelope-spf program. The egress address is read the way the Mail page reads it. */
+export interface MailEnvelopeSpfPublishInput {
+  serverId: string;
+}
+
+/** The name the platform's mail transfer agent sends its envelope from (MAIL FROM
+ *  bounces@mail.<platform domain>): the MTA's own name, whose address record and reverse DNS are set
+ *  where the egress address is rented. Receivers check SPF here, not at the platform domain's apex. */
+export function envelopeDomainOf(platformDomain: string): string {
+  return `mail.${platformDomain}`;
+}
+
+/** The refusal for the platform domain's own mail records. Its mail runs on its own mail service,
+ *  which controls its apex SPF, its MX, its DKIM selectors and its DMARC policy, so a write or a
+ *  removal from here would change that service's mail. */
+export function platformDomainRefusal(domain: string): string {
+  return (
+    `${domain} is the platform domain: its mail runs on its own mail service, which controls its records ` +
+    `(the apex SPF, the MX, the DKIM selectors and the DMARC policy), so this Manager publishes and removes none of them. ` +
+    `The SPF of ${envelopeDomainOf(domain)}, the name the platform's mail transfer agent sends its envelope from, is the platform's own and has its own run`
+  );
+}
+
 /** The three records this platform PUBLISHES for a sender domain and can take back: the SPF at the
  *  apex, the DKIM key under the relay's selector (the stage), the DMARC policy. The address record
  *  and the reverse DNS are not here because no run of this Manager owns them. */
@@ -78,10 +108,18 @@ export function mailRecordNames(domain: string, stage: Stage): Record<PublishedM
   return { spf: domain, dkim: `${stage}._domainkey.${domain}`, dmarc: `_dmarc.${domain}` };
 }
 
+/** The TXT records of the mail DNS this platform writes: the three of a sender domain and the
+ *  envelope sender's SPF. */
+export const MAIL_TXT_RECORD = [...PUBLISHED_MAIL_RECORD, "envelope-spf"] as const satisfies readonly MailDnsRecord[];
+export type MailTxtRecord = (typeof MAIL_TXT_RECORD)[number];
+
+const isSpf = (txt: string): boolean => txt.trim().toLowerCase().startsWith("v=spf1");
+
 /** Which TXT at a name IS the published record: the apex carries other services' TXT beside the
  *  SPF, and a receiver picks the record by its version tag, so every reader here does the same. */
-export const MAIL_RECORD_TAG: Record<PublishedMailRecord, (txt: string) => boolean> = {
-  spf: (txt) => txt.trim().toLowerCase().startsWith("v=spf1"),
+export const MAIL_RECORD_TAG: Record<MailTxtRecord, (txt: string) => boolean> = {
+  spf: isSpf,
+  "envelope-spf": isSpf,
   dkim: (txt) => txt.trim().toLowerCase().startsWith("v=dkim1"),
   dmarc: (txt) => txt.trim().toLowerCase().startsWith("v=dmarc1"),
 };

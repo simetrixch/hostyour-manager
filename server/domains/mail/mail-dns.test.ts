@@ -6,15 +6,21 @@ import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
 import { dkimRecordKey, mailDnsRows, readMailDns, type MailDnsNeed } from "./mail-dns.ts";
 
-// The Mail page's check: the five records of a sender domain, measured at public DNS and held against
-// where mail leaves — the name it leaves by, the address that name resolves to, and the key the sender
-// signs with. Pure over scripted DNS, so every verdict and every note is read here as the operator reads it.
+// The Mail page's check: the records of a sender domain, measured at public DNS and held against where
+// mail leaves — the name it leaves by, the address that name resolves to, and the key the sender signs
+// with — and for the platform domain the envelope sender's SPF, beside rows that say why no run here
+// publishes the domain's own records. Pure over scripted DNS, so every verdict and every note is read
+// here as the operator reads it.
 
 const EGRESS = "203.0.113.9";
 const MAIL_NAME = "mail.example.com";
 const PEM = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0B\nAQEFAAOCAQ8A\n-----END PUBLIC KEY-----\n";
 const KEY = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A";
-const need = (over: Partial<MailDnsNeed> = {}): MailDnsNeed => ({ domain: "example.com", role: "customer mail", stage: "prod", egressName: "a1.example.net", egress: EGRESS, dkimPublicKey: KEY, ...over });
+const need = (over: Partial<MailDnsNeed> = {}): MailDnsNeed => ({
+  domain: "example.com", role: "customer mail", stage: "prod", egressName: "a1.example.net", egress: EGRESS, dkimPublicKey: KEY, envelopeDomain: null, publishRefusal: null, ...over,
+});
+/** The platform domain's need: its envelope sender's name, and the refusal of its own records. */
+const platformNeed = (over: Partial<MailDnsNeed> = {}): MailDnsNeed => need({ envelopeDomain: MAIL_NAME, publishRefusal: "example.com is the platform domain", ...over });
 
 function published(): FakePublicDns {
   const dns = new FakePublicDns();
@@ -77,6 +83,35 @@ describe("mailDnsRows", () => {
     expect(rows.find((r) => r.record === "a")).toMatchObject({ ok: false, note: "set the reverse DNS first; the name it gives must resolve back to the address" });
   });
 
+  it("the platform domain: the envelope sender's SPF is a row of its own after the apex SPF, asked at the envelope name", async () => {
+    const dns = published();
+    dns.seedTxt(MAIL_NAME, `v=spf1 ip4:${EGRESS} -all`);
+    const rows = await mailDnsRows(platformNeed(), dns);
+    expect(rows.map((r) => `${r.record}:${r.ok}`)).toEqual(["spf:true", "envelope-spf:true", "a:true", "dkim:true", "dmarc:true", "ptr:true"]);
+    expect(rows.find((r) => r.record === "envelope-spf")).toMatchObject({ name: MAIL_NAME, expected: `one v=spf1 record naming ip4:${EGRESS}`, found: `v=spf1 ip4:${EGRESS} -all` });
+    expect(dns.asked).toContain(`TXT ${MAIL_NAME}`);
+  });
+
+  it("a missing or doubled envelope SPF names the envelope publish as the act", async () => {
+    const dns = published();
+    expect((await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "envelope-spf")).toMatchObject({ ok: false, found: null, note: "publish the envelope SPF" });
+    dns.seedTxt(MAIL_NAME, "v=spf1 ip4:198.51.100.7 -all", `v=spf1 ip4:${EGRESS} -all`);
+    expect((await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "envelope-spf")).toMatchObject({ ok: false, note: "remove 1 of the 2 v=spf1 records by hand, then publish the envelope SPF" });
+  });
+
+  it("PLANTED DEFECT: a domain no run of this platform publishes says why on its red rows, instead of sending the operator to a refused publish", async () => {
+    const dns = published();
+    dns.seedTxt("example.com", "v=spf1 include:spf.protection.outlook.com -all");
+    dns.seedTxt("prod._domainkey.example.com");
+    dns.seedTxt("_dmarc.example.com");
+    const rows = await mailDnsRows(platformNeed(), dns);
+    const why = "not published here: example.com's mail records are its own mail service's";
+    for (const record of ["spf", "dkim", "dmarc"] as const) expect(rows.find((r) => r.record === record)).toMatchObject({ ok: false, note: why });
+    // The envelope sender's SPF is the platform's own, so its act stays the envelope publish.
+    expect(rows.find((r) => r.record === "envelope-spf")?.note).toBe("publish the envelope SPF");
+    expect(rows.find((r) => r.record === "a")?.note).toBeUndefined();
+  });
+
   it("where the name mail leaves by resolves to no address, every address-bound row is red for that ONE reason", async () => {
     const dns = published();
     const rows = await mailDnsRows(need({ egress: null }), dns);
@@ -115,6 +150,11 @@ describe("readMailDns", () => {
     expect(view.sender).toBeNull();
     expect(view.egress).toEqual({ name: "m1.example.com", address: EGRESS });
     expect(view.domains.map((d) => `${d.domain} (${d.role})`)).toEqual(["example.com (customer mail)", "apps.example.net (alert mail)"]);
+    // The platform domain's own records are its mail service's; the alert domain's are published here.
+    expect(view.domains[0]!.publishRefusal).toMatch(/^example\.com is the platform domain: its mail runs on its own mail service/);
+    expect(view.domains[1]!.publishRefusal).toBeNull();
+    expect(view.domains[0]!.rows.find((r) => r.record === "envelope-spf")?.name).toBe("mail.example.com");
+    expect(view.domains[1]!.rows.some((r) => r.record === "envelope-spf")).toBe(false);
     // No sender, so no key the Manager holds: the customer domain's DKIM is the relay's, counted only.
     expect(view.domains[0]!.rows.find((r) => r.record === "dkim")?.expected).toBe("one v=DKIM1 record carrying the relay's public key");
   });
@@ -126,6 +166,7 @@ describe("readMailDns", () => {
     db.db.insert(apps).values({ id: "app_post", clusterId: "cls_a", name: "post", stage: "prod", host: "post", dkimPublicKey: PEM }).run();
     const dns = published();
     dns.seedA("a1.example.com", EGRESS);
+    dns.seedTxt(MAIL_NAME, `v=spf1 ip4:${EGRESS} -all`); // the envelope sender's SPF, under the platform domain
     const view = await readMailDns({ db: db.db, platformRepo, publicDns: dns, smtpSenders: async () => [{ unit: "post", cluster: "a1" }] });
     expect(view.sender).toEqual({ unit: "post", cluster: "a1.example.com" });
     expect(view.egress).toEqual({ name: "a1.example.com", address: EGRESS });

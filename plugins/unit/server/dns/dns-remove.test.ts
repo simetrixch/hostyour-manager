@@ -39,6 +39,16 @@ const DMARC_ROW: DnsRecordRow = {
   name: "_dmarc.example.com", type: "TXT", record: "dmarc", expected: "one v=DMARC1 record", found: "v=DMARC1; p=none", verdict: "standing", removable: true,
 };
 
+/** The platform domain's apex SPF, its own mail service's, and the envelope sender's SPF, the platform's. */
+const SERVICE_SPF_ROW: DnsRecordRow = {
+  owner: { kind: "mail-service", name: "example.com" },
+  name: "example.com", type: "TXT", record: "spf", expected: "one v=spf1 record", found: "v=spf1 include:spf.protection.outlook.com -all", verdict: "standing", removable: false,
+};
+const ENVELOPE_ROW: DnsRecordRow = {
+  owner: { kind: "mail", name: "example.com" },
+  name: "mail.example.com", type: "TXT", record: "envelope-spf", expected: "one v=spf1 record naming ip4:203.0.113.9", found: "v=spf1 ip4:203.0.113.9 -all", verdict: "standing", removable: true,
+};
+
 const inventory = (rows: DnsRecordRow[]): DnsInventoryView => ({ rows, skipped: [], readAt: new Date().toISOString() });
 const ports = (dns?: FakeDnsProvider, rows: DnsRecordRow[] = [CONSUMER_ROW, INSTALLER_ROW]): DnsRecordPorts => ({
   ...(dns ? { dns } : {}),
@@ -117,6 +127,11 @@ describe("dns-remove plan", () => {
       .rejects.toThrow(/2 of the 3 record\(s\) cannot be taken back, so none is: this installation owns no A record foreign\.example; the A record example\.com is listed read-only: it is the installer "example\.com"'s\./);
   });
 
+  it("refuses the apex SPF of a domain whose mail runs on its own mail service, naming that service as its owner", async () => {
+    await expect(makeDnsRemoveDef(ports(new FakeDnsProvider(), [SERVICE_SPF_ROW, ENVELOPE_ROW])).plan(one("example.com", "TXT"), deps))
+      .rejects.toThrow(/the TXT record example\.com is listed read-only: it is the mail-service "example\.com"'s/);
+  });
+
   it("refuses without a DNS provider rather than reporting a removal nobody made", async () => {
     await expect(makeDnsRemoveDef(ports()).plan(PARAMS, deps)).rejects.toThrow(/no DNS provider is wired into this manager/);
   });
@@ -183,6 +198,15 @@ describe("dns-remove steps", () => {
     await makeDnsRemoveDef(ports(dns, [DMARC_ROW])).steps(params)[1]!.run(ctx([], params));
     expect(dns.deletes).toEqual([{ name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", deleted: 1 }]);
     expect(await dns.listRecordContents({ name: "_dmarc.example.com", type: "TXT" })).toEqual(["somebody-else=verification"]);
+  });
+
+  it("the envelope sender's SPF goes by the SPF tag where no book row names it, and the name's other TXT stays", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("mail.example.com", "TXT", "somebody-else=verification", "v=spf1 ip4:203.0.113.9 -all");
+    const params = one("mail.example.com", "TXT");
+    await makeDnsRemoveDef(ports(dns, [SERVICE_SPF_ROW, ENVELOPE_ROW])).steps(params)[1]!.run(ctx([], params));
+    expect(dns.deletes).toEqual([{ name: "mail.example.com", type: "TXT", content: "v=spf1 ip4:203.0.113.9 -all", deleted: 1 }]);
+    expect(await dns.listRecordContents({ name: "mail.example.com", type: "TXT" })).toEqual(["somebody-else=verification"]);
   });
 
   it("is a no-op on a record that is already absent — a resumed run deletes nothing twice", async () => {

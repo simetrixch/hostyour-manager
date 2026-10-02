@@ -85,6 +85,25 @@ describe("mail-dns-unpublish plan", () => {
   });
 });
 
+/** The platform domain as the inventory lists it: its apex SPF and DMARC are its own mail service's,
+ *  the key under the platform's selector and the envelope sender's SPF are the platform's. */
+const PLATFORM_ROWS: DnsRecordRow[] = MAIL_ROWS.map((r): DnsRecordRow => (r.record === "spf" || r.record === "dmarc" ? { ...r, owner: { kind: "mail-service", name: "example.com" }, removable: false } : r)).concat([
+  { owner: { kind: "mail", name: "example.com" }, name: "mail.example.com", type: "TXT", record: "envelope-spf", expected: `one v=spf1 record naming ip4:${EGRESS}`, found: SPF, verdict: "standing", removable: true },
+]);
+
+describe("mail-dns-unpublish of the platform domain", () => {
+  it("PLANTED DEFECT: refuses the platform domain at the plan, rather than taking its key and its envelope SPF out alone", async () => {
+    await expect(makeMailDnsUnpublishDef(ports(new FakeDnsProvider(), PLATFORM_ROWS)).plan(PARAMS, { db: db.db }))
+      .rejects.toThrow(/example\.com is the platform domain: its mail runs on its own mail service/);
+  });
+
+  it("refuses at the run as well and deletes nothing, where the plan saw the domain as a plain sender domain", async () => {
+    const dns = published();
+    await expect(makeMailDnsUnpublishDef(ports(dns, PLATFORM_ROWS)).steps(PARAMS)[1]!.run(ctx([], PARAMS))).rejects.toThrow(/is the platform domain/);
+    expect(dns.deletes).toEqual([]);
+  });
+});
+
 describe("mail-dns-unpublish steps", () => {
   it("deletes the SPF, the DKIM key and the DMARC policy by the content the book holds, forgets the three, and leaves the address record and the neighbour TXT standing", async () => {
     const dns = published();

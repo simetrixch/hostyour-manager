@@ -3,7 +3,7 @@ import type { Step, StepCtx, RunDefinition } from "../../../executor/types.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import { recordDnsWrite } from "../../../db/dns-writes.ts";
 import { DMARC_POLICY, isMasterRole, type Stage } from "../../../../shared/enums.ts";
-import { MAIL_RECORD_TAG, PUBLISHED_MAIL_RECORD, mailRecordNames, type MailEgress, type PublishedMailRecord } from "../../../../shared/mail.ts";
+import { MAIL_RECORD_TAG, PUBLISHED_MAIL_RECORD, mailRecordNames, platformDomainRefusal, type MailEgress } from "../../../../shared/mail.ts";
 import type { DnsProvider } from "../../../adapters/dns/port.ts";
 import { resolveClusterMarking } from "../../inventory/cluster-marking.ts";
 import { activeClusterTarget, requirePlatformRepo, type DeploySlavePorts } from "./deploy-slave.kit.ts";
@@ -20,15 +20,17 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, typ
 // WHICH DOMAINS. An installation sends as exactly two: customer mail as its platform domain and
 // alert mail as its unit apex — the two names deploy-branch writes into the relay's
 // ALLOWED_SENDER_DOMAINS. Both stand on the master's cluster map (platformDomain, unitApex), so the
-// plan reads them there and refuses any other name. One run publishes one domain, exactly as the
-// program does; the Mail page offers one run per domain.
+// plan reads them there and refuses any other name. The platform domain is refused as well: its mail
+// runs on its own mail service, which controls its apex SPF, its DKIM selectors and its DMARC
+// policy, and the program would write all three (shared/mail.ts platformDomainRefusal). What this
+// platform owns under it is the envelope sender's SPF, which mail-envelope-spf-publish writes. One
+// run publishes one domain, exactly as the program does.
 //
 // WHAT IS ANSWERED, AND FROM WHERE. `stage` is the cluster row's (composeAnswers reads the inventory);
-// `mail_domain` is the run's; `egress_address` and `dkim_public_key` come from the Mail page's own
-// reading of where the stage's mail leaves (MailEgress) — the address the name mail leaves by
-// resolves to at public DNS, never typed; the key the stage's sender signs the platform domain with,
-// answered for that domain only (the alert domain is signed by the relay, whose key the program reads
-// out of the store). `dkim_selector` is left to the program's default, the stage;
+// `mail_domain` is the run's; `egress_address` comes from the Mail page's own reading of where the
+// stage's mail leaves (MailEgress) — the address the name mail leaves by resolves to at public DNS,
+// never typed. No `dkim_public_key` is answered: the alert domain is signed by the relay, whose key
+// the program reads out of the store. `dkim_selector` is left to the program's default, the stage;
 // `dmarc_policy` and `dmarc_mailbox` are the operator's on the Mail page.
 //
 // WHAT THIS DOES NOT DO. It writes no address record: the mail name is its own name, given by the
@@ -89,83 +91,101 @@ export function senderRoleOf(domain: string, sender: { platformDomain: string; u
   return undefined;
 }
 
+/** The role the run's domain plays, refused where it is no sender domain of the master's map and
+ *  where it is the platform domain, whose mail records belong to its own mail service. The plan asks
+ *  and the run asks again, because the map may have changed in between. */
+async function publishableRole(ports: MailDnsPublishPorts, clusterDomain: string, domain: string): Promise<"alert mail"> {
+  const sender = await senderDomainsOf(ports, clusterDomain);
+  const role = senderRoleOf(domain, sender);
+  if (role === undefined) {
+    throw errValidation(
+      `${domain} is not a sender domain of ${clusterDomain}: its map names ${sender.platformDomain} (customer mail, platformDomain) ` +
+        `and ${sender.unitApex} (alert mail, unitApex), and mail leaves this installation as nothing else`,
+    );
+  }
+  if (role === "customer mail") throw errValidation(platformDomainRefusal(domain));
+  return role;
+}
+
 /** What `publish-mail-dns` is answered with beyond the inventory (composeAnswers reads `stage` off
- *  the cluster row): the run's domain and DMARC choices, the address mail leaves from, and for the
- *  customer-mail domain the key the stage's sender signs it with. Fail-closed where the name mail
- *  leaves by resolves to no address, and where a sender stands whose key the Manager does not hold:
- *  a guessed address, or the relay's key standing in for the sender's, makes receivers fail the mail. */
+ *  the cluster row): the run's domain and DMARC choices, and the address mail leaves from.
+ *  Fail-closed where the name mail leaves by resolves to no address: a guessed address in the SPF
+ *  makes receivers fail the mail. */
 export function mailDnsAnswers(params: MailDnsPublishParams, ports: MailDnsPublishPorts): ExtraAnswers {
   return async (ctx) => {
     const { cluster } = loadActiveCluster(ctx.db, params.serverId);
-    const sender = await senderDomainsOf(ports, cluster.domain);
-    const role = senderRoleOf(params.senderDomain, sender);
-    if (role === undefined) {
-      throw errValidation(`${params.senderDomain} is not a sender domain of ${cluster.domain} — its map names ${sender.platformDomain} (customer mail) and ${sender.unitApex} (alert mail)`);
-    }
-    if (!ports.mailEgress) throw errValidation("no mail reading is wired into this manager — the egress address and the sender's key have no other source");
+    const role = await publishableRole(ports, cluster.domain, params.senderDomain);
+    if (!ports.mailEgress) throw errValidation("no mail reading is wired into this manager — the egress address has no other source");
     const out = await ports.mailEgress(cluster.stage, cluster.domain);
     if (out.address === null) {
       throw errValidation(`${out.name} resolves to no address at public DNS — mail leaves from that address, and the SPF names it`);
     }
-    const signer = role === "customer mail" && out.sender !== null ? out.sender.unit : null;
-    if (signer !== null && out.dkimPublicKey === null) {
-      throw errValidation(
-        `the mail sender ${signer} signs ${params.senderDomain}, and the Manager holds no key of it — its SMTP entry names no dkimKey, ` +
-          "or its secrets stood before it named one",
-      );
-    }
-    const dkim = signer !== null ? out.dkimPublicKey : null;
     ctx.log(
       "meta",
       `${MAIL_DNS_PROGRAM} is told mail_domain=${params.senderDomain} (${role}), egress_address=${out.address} (${out.name}` +
         `${out.sender !== null ? `, where the mail sender ${out.sender.unit} stands` : ", the master"}), ` +
-        `${dkim !== null ? `dkim_public_key=the public half of ${signer}'s key` : "no dkim_public_key (the relay's key is read out of the store)"}, ` +
+        "no dkim_public_key (the relay's key is read out of the store), " +
         `dmarc_policy=${params.dmarcPolicy}, dmarc_mailbox=${params.dmarcMailbox}; dkim_selector is left to the stage`,
     );
     return {
       mail_domain: params.senderDomain,
       egress_address: out.address,
-      ...(dkim !== null ? { dkim_public_key: dkim } : {}),
       dmarc_policy: params.dmarcPolicy,
       dmarc_mailbox: params.dmarcMailbox,
     };
   };
 }
 
-/** What stands under the three published names at the provider, each picked by its version tag
- *  among the TXT of the name (the apex carries other services' TXT beside the SPF) — null where no
- *  such record stands. */
-export async function readPublishedRecords(dns: DnsProvider, domain: string, stage: Stage, signal: AbortSignal): Promise<Record<PublishedMailRecord, string | null>> {
-  const names = mailRecordNames(domain, stage);
-  const standing: Record<PublishedMailRecord, string | null> = { spf: null, dkim: null, dmarc: null };
-  for (const record of PUBLISHED_MAIL_RECORD) {
-    standing[record] = (await dns.listRecordContents({ name: names[record], type: "TXT", signal })).find(MAIL_RECORD_TAG[record]) ?? null;
-  }
+/** One TXT record a program may write: its name, and the tag that picks it among the TXT of that
+ *  name (an apex carries other services' TXT beside the SPF). */
+export interface PublishedTxt {
+  name: string;
+  tag: (txt: string) => boolean;
+}
+
+/** What stands under each published name at the provider, picked by its tag — null where no such
+ *  record stands. Keyed by the name. */
+export async function readPublishedTxt(dns: DnsProvider, published: readonly PublishedTxt[], signal: AbortSignal): Promise<Record<string, string | null>> {
+  const standing: Record<string, string | null> = {};
+  for (const { name, tag } of published) standing[name] = (await dns.listRecordContents({ name, type: "TXT", signal })).find(tag) ?? null;
   return standing;
+}
+
+/** The three records publish-mail-dns writes for a sender domain, under their names at `stage`. */
+export function senderDomainTxt(domain: string, stage: Stage): PublishedTxt[] {
+  const names = mailRecordNames(domain, stage);
+  return PUBLISHED_MAIL_RECORD.map((record) => ({ name: names[record], tag: MAIL_RECORD_TAG[record] }));
 }
 
 /** The program step's checkpoint and, beside it, the reading this decoration took before the
  *  program ran — one slot, because a step has one. */
 interface BookedCheckpoint {
-  before?: Record<PublishedMailRecord, string | null>;
+  before?: Record<string, string | null>;
   program?: unknown;
 }
 
-/** The program step with the book around it: the three published names are read before the program
- *  and after it, and every record the program changed enters the book of DNS writes. The reading
- *  before is checkpointed the moment it is taken and the program's own checkpoint is kept under
- *  `program`, so a step re-entered after a crash judges against what stood before the FIRST attempt
- *  rather than against what the program has already written. */
-export function bookedProgramStep(params: MailDnsPublishParams, ports: MailDnsPublishPorts, program: Step): Step {
+/** What a booked program step books: the sender domain its records belong to, and the TXT records
+ *  the program may write. Resolved at the run, against the active cluster, because the platform
+ *  domain is read off the master's map. */
+export type TxtBooking = (cluster: { domain: string; stage: Stage }) => Promise<{ owner: string; published: PublishedTxt[] }>;
+
+/** A program step with the book around it: the TXT records the program may write are read at the
+ *  provider before the program and after it, and every one it changed enters the book of DNS writes
+ *  as the mail records of the booking's owner. The reading before is checkpointed the moment it is taken and the
+ *  program's own checkpoint is kept under `program`, so a step re-entered after a crash judges
+ *  against what stood before the FIRST attempt rather than against what the program has already
+ *  written. Both readings are taken at the provider, not at public resolvers, which answer from a
+ *  cache for the record's TTL. */
+export function bookedTxtProgramStep(ports: Pick<MailDnsPublishPorts, "dns">, serverId: string, booking: TxtBooking, program: Step): Step {
   return {
     name: program.name,
     title: program.title,
     run: async (ctx: StepCtx) => {
       const dns = requireMailDns(ports);
-      const { cluster } = loadActiveCluster(ctx.db, params.serverId);
-      const names = mailRecordNames(params.senderDomain, cluster.stage);
+      const { cluster } = loadActiveCluster(ctx.db, serverId);
+      const { owner, published } = await booking(cluster);
       const cp = ctx.readCheckpoint<BookedCheckpoint>() ?? {};
-      const before = cp.before ?? (await readPublishedRecords(dns, params.senderDomain, cluster.stage, ctx.signal));
+      const before = cp.before ?? (await readPublishedTxt(dns, published, ctx.signal));
       cp.before = before;
       ctx.checkpoint(cp);
       await program.run({
@@ -173,19 +193,25 @@ export function bookedProgramStep(params: MailDnsPublishParams, ports: MailDnsPu
         checkpoint: (data) => { cp.program = data; ctx.checkpoint(cp); },
         readCheckpoint: <T>() => cp.program as T | undefined,
       });
-      const after = await readPublishedRecords(dns, params.senderDomain, cluster.stage, ctx.signal);
-      for (const record of PUBLISHED_MAIL_RECORD) {
-        const stands = after[record];
-        if (stands === null || stands === before[record]) continue;
-        const act = before[record] === null ? "inserted" : "updated";
-        recordDnsWrite(ctx.db, { name: names[record], type: "TXT", content: stands, act, owner: { kind: "mail", name: params.senderDomain }, runId: ctx.runId });
-        ctx.log("meta", `TXT ${names[record]} ${act === "inserted" ? "inserted" : `updated from ${before[record]}`} → ${stands} — entered into the book of DNS writes`);
+      const after = await readPublishedTxt(dns, published, ctx.signal);
+      for (const { name } of published) {
+        const stands = after[name] ?? null;
+        const stood = before[name] ?? null;
+        if (stands === null || stands === stood) continue;
+        const act = stood === null ? "inserted" : "updated";
+        recordDnsWrite(ctx.db, { name, type: "TXT", content: stands, act, owner: { kind: "mail", name: owner }, runId: ctx.runId });
+        ctx.log("meta", `TXT ${name} ${act === "inserted" ? "inserted" : `updated from ${stood}`} → ${stands} — entered into the book of DNS writes`);
       }
     },
   };
 }
 
-function requireMailDns(ports: MailDnsPublishPorts): DnsProvider {
+/** The publish-mail-dns step with the book around it, over the sender domain's three records. */
+export function bookedProgramStep(params: MailDnsPublishParams, ports: MailDnsPublishPorts, program: Step): Step {
+  return bookedTxtProgramStep(ports, params.serverId, async ({ stage }) => ({ owner: params.senderDomain, published: senderDomainTxt(params.senderDomain, stage) }), program);
+}
+
+function requireMailDns(ports: Pick<MailDnsPublishPorts, "dns">): DnsProvider {
   if (!ports.dns) {
     throw errValidation("no DNS provider is wired into this manager — the published records are read there before and after the program, for the book of DNS writes");
   }
@@ -218,14 +244,7 @@ export function makeMailDnsPublishDef(ports: MailDnsPublishPorts): RunDefinition
             "with the DNS token stands there, and the egress address the records name is the master's",
         );
       }
-      const sender = await senderDomainsOf(ports, cluster.domain);
-      const role = senderRoleOf(params.senderDomain, sender);
-      if (role === undefined) {
-        throw errValidation(
-          `${params.senderDomain} is not a sender domain of ${cluster.domain}: its map names ${sender.platformDomain} (customer mail, platformDomain) ` +
-            `and ${sender.unitApex} (alert mail, unitApex), and mail leaves this installation as nothing else`,
-        );
-      }
+      const role = await publishableRole(ports, cluster.domain, params.senderDomain);
       const stepDefs = mailDnsPublishSteps(params, ports);
       return {
         kind: "mail-dns-publish",

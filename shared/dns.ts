@@ -31,8 +31,11 @@ export type DnsRowType = DnsRecordType | "PTR";
  *   - mail             — a sender domain's SPF, DKIM or DMARC, published by mail-dns-publish.
  *   - installer        — a record of the installation that no run of this Manager wrote: the sender
  *                        domain's own address record, and the reverse DNS of the egress address,
- *                        which is set where the address is rented. Listed read-only. */
-export type DnsOwnerKind = DnsWriteOwnerKind | "installer";
+ *                        which is set where the address is rented. Listed read-only.
+ *   - mail-service     — the apex SPF and the DMARC policy of a sender domain whose mail runs on its
+ *                        own mail service (the platform domain, shared/mail.ts platformDomainRefusal).
+ *                        Listed read-only: a removal here would change that service's mail. */
+export type DnsOwnerKind = DnsWriteOwnerKind | "installer" | "mail-service";
 
 /** Who a record belongs to, in the words the operator knows the thing by: a consumer's unit name, a
  *  tenant's subdomain, a sender domain. `stage` is carried where the owner HAS one — a unit stands

@@ -3,6 +3,7 @@ import type { RunDefinition, Step } from "../../../executor/types.ts";
 import { ATTEST_TARGET_STEP } from "../../../executor/guards.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import type { DnsRecordRow } from "../../../../shared/dns.ts";
+import { platformDomainRefusal } from "../../../../shared/mail.ts";
 import { deleteRecord, ownedRecords, requireDnsProvider, type DnsRecordPorts, type RemovableRecordRow } from "#unit/server/dns/dns-record.kit.ts";
 
 // mail-dns-unpublish: the inverse of mail-dns-publish — take the mail records of ONE sender domain
@@ -35,8 +36,11 @@ export type MailDnsUnpublishParams = z.infer<typeof MailDnsUnpublishParams>;
 /** The removable mail records of one sender domain, REFUSED for a domain this installation does not
  *  send as: mail leaves an installation as its platform domain (customer mail) and its unit apex
  *  (alert mail) and as nothing else, and a name outside those two is a domain whose records belong
- *  to somebody else entirely. */
+ *  to somebody else entirely. REFUSED for the platform domain too, whose mail records are its own
+ *  mail service's. */
 function publishedRecordsOf(rows: DnsRecordRow[], domain: string): RemovableRecordRow[] {
+  // The platform domain: the inventory lists its apex SPF and DMARC as its own mail service's.
+  if (rows.some((r) => r.owner.kind === "mail-service" && r.owner.name === domain)) throw errValidation(platformDomainRefusal(domain));
   const mine = rows.filter((r): r is RemovableRecordRow => r.owner.kind === "mail" && r.owner.name === domain && r.removable && r.type === "TXT");
   if (mine.length === 0) {
     const senders = [...new Set(rows.filter((r) => r.owner.kind === "mail").map((r) => r.owner.name))];

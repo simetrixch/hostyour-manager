@@ -18,7 +18,7 @@ import type { ServerReachView } from "../../shared/api-types-reach.ts";
 // clusters/platform/values-common.yaml) and what the prefill answers, identity included.
 import type { ChannelStagesView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
 import type { LatestBackupsView, UnitBackupView } from "../../shared/api-types-backups.ts";
-import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
+import type { MailDnsPublishInput, MailDnsView, MailEnvelopeSpfPublishInput } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
 import type { AppsManifest, TenantAppCatalogView } from "../../shared/apps-manifest.ts";
@@ -165,6 +165,9 @@ export const publishMailDns = (input: MailDnsPublishInput): Promise<{ runId: str
 /** The inverse: the SPF, DKIM and DMARC of ONE sender domain, deleted at the DNS provider in one
  *  act. The domain's address record and the reverse DNS of the egress are not touched. */
 export const unpublishMailDns = (domain: string): Promise<{ runId: string }> => planRun("mail-dns-unpublish", { domain });
+/** The SPF of the name the platform's mail transfer agent sends its envelope from, published from the master. */
+export const publishEnvelopeSpf = (input: MailEnvelopeSpfPublishInput): Promise<{ runId: string }> =>
+  planRun("mail-envelope-spf-publish", input as unknown as Record<string, unknown>);
 /** Every record this installation is responsible for at the DNS provider, read there now (the DNS page). */
 export const getDnsInventory = (): Promise<DnsInventoryView> => req("/api/dns");
 /** The book of the records a run of this Manager actually wrote, each read at the provider now. */

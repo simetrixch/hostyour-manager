@@ -6,6 +6,7 @@ import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
 import { makeRedeploySlavesDef } from "./defs/redeploy-slaves.ts";
 import { makeMailDnsPublishDef } from "./defs/mail-dns-publish.ts";
+import { makeMailEnvelopeSpfPublishDef } from "./defs/mail-envelope-spf-publish.ts";
 import { makeDnsRemoveDef } from "#unit/server/dns/dns-remove.ts";
 import { makeMailDnsUnpublishDef } from "./defs/mail-dns-unpublish.ts";
 import type { DnsRecordPorts } from "#unit/server/dns/dns-record.kit.ts";
@@ -62,6 +63,9 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // The mail DNS of one sender domain, published by running the programs checkout's publish-mail-dns on the
   // master — a master-side act like redeploy's master arm, so it takes the same ports.
   register(runDefinitions, makeMailDnsPublishDef(ports));
+  // The SPF of the name the platform's MTA sends its envelope from, by the same route: the platform
+  // domain's own records are its mail service's, and this is the one record of the platform there.
+  register(runDefinitions, makeMailEnvelopeSpfPublishDef(ports));
   // The two run kinds that take a record BACK out of the zone: one record the DNS inventory names
   // as this installation's, or the three mail records of one sender domain. Registered
   // unconditionally like every other cluster run kind — a manager with no DNS provider and no

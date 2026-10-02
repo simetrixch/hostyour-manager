@@ -32,7 +32,7 @@ import { clusters } from "#core/server/db/schema/inventory.ts";
 import { DnsZoneUnknownError, type DnsProvider } from "#core/server/adapters/dns/port.ts";
 import { STAGE, type MemberRouting, type Stage } from "#core/shared/enums.ts";
 import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantZone } from "../../shared/unit-host.ts";
-import type { MailDnsRecord, MailDnsRow, MailDnsView } from "#core/shared/mail.ts";
+import type { MailDnsDomainView, MailDnsRecord, MailDnsRow, MailDnsView } from "#core/shared/mail.ts";
 import type { DnsInventoryView, DnsOwner, DnsRecordRow, DnsRowType } from "#core/shared/dns.ts";
 
 export interface DnsInventoryDeps {
@@ -58,12 +58,17 @@ export interface DnsInventoryDeps {
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** Which of the five mail records this platform PUBLISHES, and is therefore able to take back. */
-const MAIL_PUBLISHED: ReadonlySet<MailDnsRecord> = new Set<MailDnsRecord>(["spf", "dkim", "dmarc"]);
+/** Which of the mail records this platform PUBLISHES, and is therefore able to take back. */
+const MAIL_PUBLISHED: ReadonlySet<MailDnsRecord> = new Set<MailDnsRecord>(["spf", "envelope-spf", "dkim", "dmarc"]);
+
+/** The records a domain's own mail service keeps where its mail runs there: its apex SPF and its
+ *  DMARC policy. The DKIM key under the platform's selector and the envelope sender's SPF stay the
+ *  platform's. */
+const MAIL_SERVICE_RECORDS: ReadonlySet<MailDnsRecord> = new Set<MailDnsRecord>(["spf", "dmarc"]);
 
 /** The type each mail record stands as. The address record is the installer's A record and the
  *  reverse DNS is a PTR at the hosting provider, which is why neither is removable below. */
-const MAIL_ROW_TYPE: Record<MailDnsRecord, DnsRowType> = { spf: "TXT", a: "A", dkim: "TXT", dmarc: "TXT", ptr: "PTR" };
+const MAIL_ROW_TYPE: Record<MailDnsRecord, DnsRowType> = { spf: "TXT", "envelope-spf": "TXT", a: "A", dkim: "TXT", dmarc: "TXT", ptr: "PTR" };
 
 /** The reading of ONE unit record: what stands at the name, judged against the FQDN of its cluster,
  *  which the unit's CNAME must name. An address record standing where the CNAME belongs is the row
@@ -86,10 +91,11 @@ async function unitRow(dns: DnsProvider, owner: DnsOwner, name: string, cluster:
 
 /** One row of the Mail page as a row of this inventory: the same name, the same sentence for what
  *  must stand there and the same reading, with the verdict spelled in this page's three words. */
-function mailRow(domain: string, row: MailDnsRow): DnsRecordRow {
-  const published = MAIL_PUBLISHED.has(row.record);
+function mailRow(view: MailDnsDomainView, row: MailDnsRow): DnsRecordRow {
+  const service = view.publishRefusal !== null && MAIL_SERVICE_RECORDS.has(row.record);
+  const published = !service && MAIL_PUBLISHED.has(row.record);
   return {
-    owner: { kind: published ? "mail" : "installer", name: domain },
+    owner: { kind: service ? "mail-service" : published ? "mail" : "installer", name: view.domain },
     name: row.name,
     type: MAIL_ROW_TYPE[row.record],
     record: row.record,
@@ -176,7 +182,7 @@ export async function readDnsInventory(deps: DnsInventoryDeps): Promise<DnsInven
   if (deps.mail) {
     try {
       const view = await deps.mail();
-      for (const domain of view.domains) for (const row of domain.rows) rows.push(mailRow(domain.domain, row));
+      for (const domain of view.domains) for (const row of domain.rows) rows.push(mailRow(domain, row));
     } catch (e) {
       skipped.push(`the mail records are not listed: ${messageOf(e)}`);
     }

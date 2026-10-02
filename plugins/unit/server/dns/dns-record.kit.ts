@@ -24,7 +24,7 @@ import { errValidation } from "#core/server/kernel/errors.ts";
 import { findDnsWrite, forgetDnsWrite } from "#core/server/db/dns-writes.ts";
 import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
 import type { DnsInventoryView, DnsRecordRow, DnsRecordType, DnsRowType } from "#core/shared/dns.ts";
-import { MAIL_RECORD_TAG, PUBLISHED_MAIL_RECORD, type PublishedMailRecord } from "#core/shared/mail.ts";
+import { MAIL_RECORD_TAG, MAIL_TXT_RECORD, type MailTxtRecord } from "#core/shared/mail.ts";
 
 /** A row of the inventory this Manager may take back — never a PTR, which stands where the egress
  *  address is rented rather than in the zone. */
@@ -93,8 +93,8 @@ export function removableRecord(rows: DnsRecordRow[], name: string, type: DnsRow
   return removableRecords(rows, [{ name, type }])[0]!;
 }
 
-const isPublished = (record: DnsRecordRow["record"]): record is PublishedMailRecord =>
-  record !== undefined && (PUBLISHED_MAIL_RECORD as readonly string[]).includes(record);
+const isPublished = (record: DnsRecordRow["record"]): record is MailTxtRecord =>
+  record !== undefined && (MAIL_TXT_RECORD as readonly string[]).includes(record);
 
 /** The content of OUR record under a TXT name, or null where none of ours stands: what the book says
  *  this Manager wrote, else the record the mail record's tag picks among `standing` — a record
