@@ -359,6 +359,7 @@ describe("validateTenant", () => {
       listDir: async () => [],
       isExecutable: async () => false,
       dispose: async () => {},
+      listTags: async () => [],
     };
     const helm = new FakeHelmRenderer();
     await expect(validateTenant(req(), deps(throwingRepo, helm))).rejects.toThrow(/clone failed/);

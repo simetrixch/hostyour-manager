@@ -19,6 +19,8 @@ export interface FakeRepoReaderScript {
   files?: Record<string, string>;
   /** The paths git records as executable (100755); every other file reads as 100644. */
   executable?: readonly string[];
+  /** What listTags answers for the repository, each tag with the commit it peels to. */
+  tags?: readonly { name: string; commit: string }[];
 }
 
 export class FakeRepoReader implements RepoReader {
@@ -34,12 +36,16 @@ export class FakeRepoReader implements RepoReader {
     this.scripted = scripted;
   }
 
+  /** Script one repository, or one ref of it with the key `<repoURL>@<ref>`: a clone at that ref is
+   *  served from it before the repository's own script, as a tag carries files of its own. */
   scriptFor(repoURL: string, scripted: FakeRepoReaderScript): void {
     this.byURL.set(repoURL, scripted);
   }
 
   private scriptOf(workdir: string): FakeRepoReaderScript {
-    return this.byURL.get(decodeURIComponent(workdir.slice("/fake/".length).split("@")[0]!)) ?? this.scripted;
+    const [url, ref] = workdir.slice("/fake/".length).split("@");
+    const repoURL = decodeURIComponent(url!);
+    return this.byURL.get(`${repoURL}@${ref}`) ?? this.byURL.get(repoURL) ?? this.scripted;
   }
 
   async cloneAtRef(input: { repoURL: string; ref: string; credentialId?: string }): Promise<ClonedRepo> {
@@ -76,6 +82,10 @@ export class FakeRepoReader implements RepoReader {
   }
 
   async dispose(_workdir: string): Promise<void> {}
+
+  async listTags(input: { repoURL: string }): Promise<{ name: string; commit: string }[]> {
+    return [...(this.byURL.get(input.repoURL)?.tags ?? this.scripted.tags ?? [])];
+  }
 }
 
 /** The books branch every fake carries unless a test names another one. A real installation's value —

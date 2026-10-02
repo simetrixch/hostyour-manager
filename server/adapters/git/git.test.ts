@@ -7,7 +7,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { computeBackoffMs, GitRepoWriter, GitPlatformRepo, GitRepoReader, type PushBackoff } from "./git.ts";
+import { computeBackoffMs, GitRepoWriter, GitPlatformRepo, GitRepoReader, parseTagRows, type PushBackoff } from "./git.ts";
 import { pathToFileURL } from "node:url";
 import { commitAll, dropRoots, git, makeOrigin, newRoot } from "./testing/origin-fixture.ts";
 
@@ -36,6 +36,30 @@ describe("GitRepoReader", () => {
     },
     SLOW,
   );
+
+  it(
+    "lists every tag with the commit it names, an annotated tag peeled to its commit",
+    async () => {
+      const { originURL, seed, sha } = makeOrigin();
+      git(seed, "tag", "light");
+      git(seed, "tag", "-a", "0.4.000-stable-20261010120000", "-m", "release");
+      git(seed, "push", "-q", "origin", "--tags");
+      const tags = await reader.listTags({ repoURL: originURL });
+      expect(tags.sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+        { name: "0.4.000-stable-20261010120000", commit: sha }, // the commit, not the tag object
+        { name: "light", commit: sha },
+      ]);
+    },
+    SLOW,
+  );
+
+  it("PLANTED DEFECT: parseTagRows takes an annotated tag's peeled row over its tag object, in either order", () => {
+    const object = "a".repeat(40);
+    const commit = "b".repeat(40);
+    expect(parseTagRows(`${object}\trefs/tags/r1\n${commit}\trefs/tags/r1^{}\n`)).toEqual([{ name: "r1", commit }]);
+    expect(parseTagRows(`${commit}\trefs/tags/r1^{}\n${object}\trefs/tags/r1\n`)).toEqual([{ name: "r1", commit }]);
+    expect(parseTagRows(`${commit}\trefs/heads/main\nnot a row\n`)).toEqual([]);
+  });
 
   it(
     "clones a tag and a 40-char SHA to the same commit",

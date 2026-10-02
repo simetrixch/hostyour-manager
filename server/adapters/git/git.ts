@@ -131,6 +131,28 @@ export class GitRepoReader implements RepoReader {
     if (!abs.startsWith(tmp + sep)) throw errValidation(`refusing to remove a directory outside the OS temp dir`);
     await rm(abs, { recursive: true, force: true, maxRetries: 3 });
   }
+
+  async listTags(input: { repoURL: string; credentialId?: string; signal?: AbortSignal }): Promise<{ name: string; commit: string }[]> {
+    assertRepoURL(input.repoURL, this.deps.allowFileURLs);
+    const out = await withAskpass(input.credentialId, this.deps.openCredential, (env) =>
+      runGit(["ls-remote", "--tags", input.repoURL], { cwd: tmpdir(), env, ...(input.signal ? { signal: input.signal } : {}) }));
+    return parseTagRows(out);
+  }
+}
+
+/** The tags of `git ls-remote --tags` output. An annotated tag prints two rows, the tag object's
+ *  `<sha>\trefs/tags/<name>` and the commit it peels to, `<sha>\trefs/tags/<name>^{}`; the peeled
+ *  row wins whatever order the two come in. */
+export function parseTagRows(out: string): { name: string; commit: string }[] {
+  const tags = new Map<string, { commit: string; peeled: boolean }>();
+  for (const line of out.split("\n")) {
+    const [sha, ref] = line.trim().split("\t");
+    if (sha === undefined || ref === undefined || !SHA40.test(sha) || !ref.startsWith("refs/tags/")) continue;
+    const peeled = ref.endsWith("^{}");
+    const name = ref.slice("refs/tags/".length, peeled ? -"^{}".length : undefined);
+    if (peeled || !tags.get(name)?.peeled) tags.set(name, { commit: sha, peeled });
+  }
+  return [...tags].map(([name, t]) => ({ name, commit: t.commit }));
 }
 
 /** Bounded exponential-backoff schedule for commitPush's push-reject retry loop. The consumer

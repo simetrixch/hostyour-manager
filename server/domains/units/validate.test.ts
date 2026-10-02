@@ -255,6 +255,7 @@ describe("validateOnboard", () => {
       listDir: async () => [],
       isExecutable: async () => false,
       dispose: async () => {},
+      listTags: async () => [],
     };
     const runner = new FakeGateRunner({ report: report(g1Pass, "pass") });
     await expect(validateOnboard(req(), target(), deps(throwingRepo, runner))).rejects.toThrow(/clone failed/);

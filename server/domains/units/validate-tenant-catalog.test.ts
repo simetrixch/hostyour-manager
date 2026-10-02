@@ -253,7 +253,7 @@ describe("validateTenant — the app catalog", () => {
     const failing: RepoReader = {
       ...repo,
       cloneAtRef: async (input) => { if (input.repoURL === APPS_REPO) throw errValidation("clone failed: authentication required"); return repo.cloneAtRef(input); },
-      readFile: (w, p) => repo.readFile(w, p), listDir: (w, p) => repo.listDir(w, p), isExecutable: (w, p) => repo.isExecutable(w, p), dispose: (w) => repo.dispose(w),
+      readFile: (w, p) => repo.readFile(w, p), listDir: (w, p) => repo.listDir(w, p), isExecutable: (w, p) => repo.isExecutable(w, p), dispose: (w) => repo.dispose(w), listTags: (input) => repo.listTags(input),
     };
     await expect(validateTenant(req(), deps(failing, helm))).rejects.toThrow(/clone failed/);
   });

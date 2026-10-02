@@ -26,6 +26,9 @@ export interface RepoReader {
    *  from the filesystem, which says nothing on a checkout without executable bits. */
   isExecutable(workdir: string, relPath: string): Promise<boolean>;
   dispose(workdir: string): Promise<void>;
+  /** Every tag of the repository with the commit it names, an annotated tag peeled to its commit: a
+   *  release image's `-<sha7>` is cut from that commit. Read with `git ls-remote`, so nothing is cloned. */
+  listTags(input: { repoURL: string; credentialId?: string; signal?: AbortSignal }): Promise<{ name: string; commit: string }[]>;
 }
 
 export interface CommitInput {
