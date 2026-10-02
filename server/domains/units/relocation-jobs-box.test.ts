@@ -27,8 +27,9 @@ function box(entries: Record<string, string>): string {
 }
 
 /** Run `job` with the stubs on PATH and answer its stdout. `failOn` is the one box path whose listing
- *  fails. The script's /tmp is a directory of this run's own, so a parallel run elsewhere on the
- *  machine never reads its files. */
+ *  fails, or `size` where every count fails, or `count` where rclone answers without a count. The
+ *  script's /tmp is a directory of this run's own, so a parallel run elsewhere on the machine never
+ *  reads its files. */
 function run(job: RelocationJob, root: string, opts: { failOn?: string; databases?: string[]; failMongo?: boolean } = {}): string {
   const bin = temp("bin-");
   const scratch = temp("tmp-");
@@ -39,6 +40,7 @@ function run(job: RelocationJob, root: string, opts: { failOn?: string; database
        for e in "$d"/*; do [ -e "$e" ] || continue; if [ -d "$e" ]; then echo "$(basename "$e")/"; else basename "$e"; fi; done ;;
   copyto) cp "$BOX_ROOT/\${2#box:}" "$3" ;;
   size) [ "$2" != "$FAIL_ON" ] && [ "$FAIL_ON" != "size" ] || { echo "couldn't connect" >&2; exit 1; }
+        [ "$FAIL_ON" != "count" ] || { echo '{"bytes":0}'; exit 0; }
         case "$2" in box:*) d="$BOX_ROOT/\${2#box:}" ;; *) d="$BOX_ROOT/s3/\${2#s3:}" ;; esac
         echo "{\\"count\\":$(find "$d" -type f 2>/dev/null | wc -l | tr -d ' '),\\"bytes\\":0}" ;;
 esac`);
@@ -141,6 +143,10 @@ describe("the jobs that read a count or a listing into a variable", () => {
     const root = box({ "bucket/a": "", [`../s3/${GUID}/a`]: "" });
     expect(() => run(bucketCheck(), root, { failOn: "size" })).toThrow(); // neither count can be read
     expect(() => run(bucketCheck(), root, { failOn: `s3:${GUID}` })).toThrow();
+  });
+
+  it("fails the bucket check where rclone succeeds but answers no count, as a changed output format would", () => {
+    expect(() => run(bucketCheck(), box({ "bucket/a": "", [`../s3/${GUID}/a`]: "" }), { failOn: "count" })).toThrow();
   });
 
   it("fails the consumer's source listing where Mongo cannot be listed, and names the databases it finds otherwise", () => {
