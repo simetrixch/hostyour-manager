@@ -25,6 +25,9 @@ export function TenantWebsites(props: {
   const { tenantId, catalog, busy, act } = props;
   const folder = catalog ? websiteFolder(catalog.apps) : null;
   const websites = props.websites;
+  // A website the inventory records and the catalog's list does not name: say why its domain is not
+  // shown, as far as the page knows it.
+  const unknownDomain = catalog?.websites === undefined ? "domain unknown: the tenant's catalog cannot be read" : "domain unknown: the tenant's registration names no website of this name";
   const [domain, setDomain] = useState("");
   const [site, setSite] = useState("");
   const [moving, setMoving] = useState<TenantWebsiteView | null>(null);
@@ -54,7 +57,7 @@ export function TenantWebsites(props: {
               <div className="row">
                 <span className="row__title">{w.name}</span>
                 <span className="row__meta">
-                  {w.domain !== null ? <a href={`https://${w.domain}/`} target="_blank" rel="noreferrer">{w.domain}</a> : "domain unknown until the catalog answers"} · site {w.site}
+                  {w.domain !== null ? <a href={`https://${w.domain}/`} target="_blank" rel="noreferrer">{w.domain}</a> : unknownDomain} · site {w.site}
                 </span>
                 <span className="row__end">
                   {w.domain !== null && (

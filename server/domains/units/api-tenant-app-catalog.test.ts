@@ -84,10 +84,12 @@ describe("GET /api/tenants/:id/app-catalog", () => {
     const { app, cookie } = await serve({ registrations: registrationsWith(), appCatalog: template });
     const { status, body } = await read(app, cookie);
     expect(status).toBe(200);
-    expect(body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], members: [...STANDING_MEMBER_NAMES, "erp"] });
+    // An answered catalog names the tenant's websites even where there are none, so an absent list
+    // means only that the catalog did not answer.
+    expect(body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], websites: [], members: [...STANDING_MEMBER_NAMES, "erp"] });
     // A tenant onboarded as its platform alone (#211) has no bundle yet: the same template, nothing deployed.
     const noBundle = await serve({ registrations: registrationsWith({ appsImage: "", appsImageTag: "" }), appCatalog: template });
-    expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], members: [...STANDING_MEMBER_NAMES, "erp"] });
+    expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], websites: [], members: [...STANDING_MEMBER_NAMES, "erp"] });
   });
 
   it("names the tenant's websites off its registration, each with its site and domain, and every member name a new website stays clear of", async () => {

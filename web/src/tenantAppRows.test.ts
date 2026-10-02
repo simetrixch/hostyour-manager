@@ -60,12 +60,15 @@ describe("undeployedApps", () => {
     expect(removedWebsites([standing])).toEqual([]);
   });
 
-  it("lists the catalog's websites with their domains, and the inventory's standing ones where the catalog has not answered them", () => {
+  it("lists the catalog's websites with their domains, and every live inventory website the catalog does not name", () => {
     const live = { ...row("veloluck"), site: "veloluck" };
+    const unnamed = { ...row("show"), site: "show" };
     const gone = { ...row("old", "offboarded"), site: "old" };
     expect(listedWebsites({ websites: [{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }] }, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }]);
-    // Loading, unreadable or degraded: a live website stays on the page, by name and site, without the
-    // domain only the catalog knows, and a removed one is not listed as live.
+    // A live website the catalog's list leaves out stays on the page, by name and site, without the
+    // domain only the registration knows, beside the ones the catalog names.
+    expect(listedWebsites({ websites: [{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }] }, [live, unnamed])).toEqual([{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }, { name: "show", site: "show", domain: null }]);
+    // Loading, unreadable or degraded: the same, and a removed website is never listed as live.
     expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "veloluck", site: "veloluck", domain: null }]);
     expect(listedWebsites({}, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: null }]);
   });

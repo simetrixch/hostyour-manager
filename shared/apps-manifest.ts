@@ -113,8 +113,8 @@ export interface TenantWebsiteView {
  *  api-types.ts, which stands at the file-size budget. */
 export interface TenantAppCatalogView {
   apps: TenantCatalogAppView[];
-  /** The tenant's websites, off its registration: each app that names a domain. Absent where
-   *  the tenant has none. */
+  /** The tenant's websites, off its registration: each app that names a domain. Present, empty where
+   *  the tenant has none, whenever the catalog answered; absent beside a `reason` or an `error`. */
   websites?: TenantWebsiteView[];
   /** The name of every member the tenant has, off its registration: its standing members and its apps,
    *  websites included. A new website is named clear of these and of the catalog's apps. */
