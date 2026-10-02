@@ -63,6 +63,7 @@ describe("readLineMove", () => {
     const answer = await read(world({ ...ON_03, pins: BOTH_RELEASED }));
     expect(answer).toEqual({
       line: "0.3",
+      toLine: "0.4",
       refusals: [],
       standing: false,
       target: {
@@ -81,7 +82,7 @@ describe("readLineMove", () => {
   it("PLANTED DEFECT: refuses a line no bundle release declares, and offers nothing where no newer line is released", async () => {
     const w = world({ ...ON_03, pins: BOTH_RELEASED, tags: [B03] });
     expect((await read(w, "0.4")).refusals).toEqual([`no release of ${REPO} that prod takes declares engine line 0.4`]);
-    expect(await read(w)).toEqual({ line: "0.3", target: null, refusals: [], standing: false });
+    expect(await read(w)).toEqual({ line: "0.3", toLine: null, target: null, refusals: [], standing: false });
   });
 
   it("PLANTED DEFECT: refuses a line that is not newer than the tenant's", async () => {

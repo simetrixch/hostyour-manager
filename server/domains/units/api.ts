@@ -10,6 +10,7 @@ import { apps, clusters, servers, tenants, tenantApps } from "../../db/schema/in
 import { errNotConfigured, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { MASTER_ROLES, SLAVE_ROLES, TENANT_SETTLED_STATUS, type Stage, type ArgoSync, type ArgoHealth } from "../../../shared/enums.ts";
 import type { OrphanScanView, DetectedScanView, LiveArgoView, ConsumerLiveView, ConsumerLiveProbeView, TenantLiveView, VersionsView } from "../../../shared/api-types.ts";
+import type { LineMoveView } from "../../../shared/api-types-line-move.ts";
 import type { ChannelStagesView } from "../../../shared/api-types-onboard.ts";
 import { singleSourceRevision, targetedRevisionFor, type ClusterKubeResolver, type ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { tenantArgocdUrl } from "../../../shared/tenant.ts";
@@ -410,6 +411,8 @@ export interface TenantApiDeps extends ConsumerApiDeps {
   /** What the Versions dialog offers for one tenant (tenant-versions.ts readTenantVersions). Absent with
    *  the tenant family unwired; the route then answers 501. */
   versions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
+  /** The engine line a tenant runs and the move to a newer one (tenant-line-move.ts readTenantLineMoves). */
+  lineMoves?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<LineMoveView>;
   /** Moves the tenants that follow releases (tenant-follow.ts). Absent without the tenant family. */
   follower?: TenantFollower;
   /** The public apex (global.unitApex) of a cluster, read off its values chain on the platform repo —
@@ -441,9 +444,9 @@ function rollupFanoutStatus(statuses: readonly ArgoAppStatus[]): { sync: ArgoSyn
 }
 
 export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): void {
-  const { executor, db, onboardingEnabled, appCatalog, resolver, deployRepoUrl, activator, registrations, versions, resolveUnitApex } = deps;
+  const { executor, db, onboardingEnabled, appCatalog, resolver, deployRepoUrl, activator, registrations, versions, lineMoves, resolveUnitApex } = deps;
   // The routing move — a route file of its own, the way the resize is.
-  registerTenantActionRoutes(app, { db, executor, tenantEnabled: onboardingEnabled, ...(versions ? { versions } : {}), ...(deps.follower ? { follower: deps.follower } : {}) });
+  registerTenantActionRoutes(app, { db, executor, tenantEnabled: onboardingEnabled, ...(versions ? { versions } : {}), ...(lineMoves ? { lineMoves } : {}), ...(deps.follower ? { follower: deps.follower } : {}) });
 
   // The tenant inventory: every onboarded tenant + which cluster it fans out on (JOIN clusters for
   // domain/stage). Always live — the read path never degrades on missing config.

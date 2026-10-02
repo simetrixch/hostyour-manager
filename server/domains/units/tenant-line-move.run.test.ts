@@ -16,6 +16,7 @@ import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrat
 import { memberApplication } from "./tenant-fanout.ts";
 import { testMembers, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { makeTenantLineMoveDef, type TenantLineMoveParams, type TenantLineMovePorts } from "./tenant-line-move.run.ts";
+import { readTenantLineMoves } from "./tenant-line-move.ts";
 import type { TenantRelocationPorts } from "./relocation-world-tenant.ts";
 
 // tenant-line-move over a tenant on line 0.3 whose bundle repository has released 0.4 and whose
@@ -249,5 +250,21 @@ describe("tenant-line-move's abort", () => {
     argo.statuses = rendering(ON_04);
     await registrations.setLinePairing("prod", GUID, ON_03, "run_restore");
     await expect(makeTenantLineMoveDef(ports).assertAbortable!(p, { db: db.db })).resolves.toBeUndefined();
+  });
+});
+
+describe("the Versions dialog's offer", () => {
+  it("is the move the plan would write: the newer line, both bundles and the part's tag", async () => {
+    expect(await readTenantLineMoves(world().ports, db.db, "tnt_1")).toEqual({
+      line: "0.3",
+      offer: { line: "0.4", fromBundle: ON_03.appsImageTag, toBundle: ON_04.appsImageTag, part: "example-platform", partTag: P04, builds: ["example-engine", "example-app"], refusals: [] },
+    });
+  });
+
+  it("PLANTED INNOCENT: offers nothing to a tenant already on the newest line, and names no line for a tenant without a bundle", async () => {
+    expect(await readTenantLineMoves(world(ON_04).ports, db.db, "tnt_1")).toEqual({ line: "0.4", offer: null });
+    const { ports, registrations } = world();
+    await registrations.clearTenantAppsRepo("prod", GUID, "run_x");
+    expect(await readTenantLineMoves(ports, db.db, "tnt_1")).toEqual({ line: null, offer: null });
   });
 });

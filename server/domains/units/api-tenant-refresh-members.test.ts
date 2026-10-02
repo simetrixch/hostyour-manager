@@ -5,6 +5,7 @@ import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { Executor } from "../../executor/executor.ts";
 import type { VersionsView } from "../../../shared/api-types.ts";
+import type { LineMoveView } from "../../../shared/api-types-line-move.ts";
 import { registerTenantRefreshMembersRoutes } from "./api-tenant-refresh-members.ts";
 import { toApiError } from "../../http/middleware/error-shape.ts";
 import { eq } from "drizzle-orm";
@@ -21,7 +22,7 @@ describe("the Versions routes of a tenant", () => {
   let h: DbHandle;
   afterEach(() => h.sqlite.close());
 
-  function route(versions?: (db: unknown, tenantId: string) => Promise<VersionsView>) {
+  function route(versions?: (db: unknown, tenantId: string) => Promise<VersionsView>, lineMoves?: (db: unknown, tenantId: string) => Promise<LineMoveView>) {
     h = openDb(":memory:");
     h.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
     h.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
@@ -33,10 +34,11 @@ describe("the Versions routes of a tenant", () => {
     const app = new Hono<AppEnv>();
     app.onError((err, c) => { const { status, body } = toApiError(err); return c.json(body, status as 400); });
     app.use(async (c, next) => { c.set("operator", { sub: "op_1" } as OperatorSession); await next(); });
-    registerTenantRefreshMembersRoutes(app, { db: h.db, executor, tenantEnabled: true, follower, ...(versions ? { versions } : {}) });
+    registerTenantRefreshMembersRoutes(app, { db: h.db, executor, tenantEnabled: true, follower, ...(versions ? { versions } : {}), ...(lineMoves ? { lineMoves } : {}) });
     const post = async (body: unknown): Promise<Response> => app.request("/api/tenants/tnt_1/refresh-members", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const follow = async (body: unknown): Promise<Response> => app.request("/api/tenants/tnt_1/follow-releases", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    return { app, post, follow, planned, checked };
+    const move = async (body: unknown): Promise<Response> => app.request("/api/tenants/tnt_1/line-move", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { app, post, follow, move, planned, checked };
   }
 
   it("answers the versions the reader reads for the tenant, and 501 where no reader is wired", async () => {
@@ -48,6 +50,26 @@ describe("the Versions routes of a tenant", () => {
     expect(asked).toEqual(["tnt_1"]);
     h.sqlite.close();
     expect((await route().app.request("/api/tenants/tnt_1/versions")).status).toBe(501);
+  });
+
+  it("answers the line move the reader reads for the tenant, and 501 where no reader is wired", async () => {
+    const view: LineMoveView = { line: "0.3", offer: { line: "0.4", fromBundle: "0.3.002-stable-20260927000000-aaaaaaa", toBundle: "0.4.000-stable-20261010120000-bbbbbbb", part: "example-platform", partTag: "0.4.001-stable-20261010000000-3333333", builds: ["example-engine"], refusals: [] } };
+    const r = route(undefined, async () => view);
+    const res = await r.app.request("/api/tenants/tnt_1/line-moves");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(view);
+    h.sqlite.close();
+    expect((await route().app.request("/api/tenants/tnt_1/line-moves")).status).toBe(501);
+  });
+
+  it("PLANTED DEFECT: plans the line move with the line asked for, and refuses a line that is no x.y before anything runs", async () => {
+    const r = route();
+    expect((await r.move({ line: "0.4" })).status).toBe(201);
+    expect(r.planned).toEqual([{ tenantId: "tnt_1", line: "0.4" }]);
+    const bad = await r.move({ line: "0.4.1" });
+    expect(bad.status).toBe(400);
+    expect(await bad.text()).toContain("invalid line move request");
+    expect(r.planned).toHaveLength(1);
   });
 
   it("plans with the version chosen per part, with none where the body names none, and refuses a version that is no image tag", async () => {

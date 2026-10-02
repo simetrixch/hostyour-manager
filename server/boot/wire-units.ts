@@ -1,5 +1,6 @@
 import type { Config } from "../kernel/config.ts";
 import type { VersionsView } from "../../shared/api-types.ts";
+import type { LineMoveView } from "../../shared/api-types-line-move.ts";
 import type { Db } from "../db/client.ts";
 import type { Logger } from "../kernel/logger.ts";
 import type { CredentialStore } from "../security/store.ts";
@@ -136,6 +137,7 @@ export interface UnitsWiring {
   tenantRegistrations?: TenantRegistrations;
   /** What the Versions dialog offers for one tenant. Undefined when the tenant family is not configured. */
   tenantVersions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
+  tenantLineMoves?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<LineMoveView>;
   /** The tenants that follow releases, built once the executor stands. Undefined when the tenant family
    *  is not configured. */
   tenantFollow?: (executor: Executor, db: Db) => TenantFollowWiring;
@@ -303,6 +305,7 @@ export function buildUnits(
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
     ...(tenant.versions ? { tenantVersions: tenant.versions } : {}),
+    ...(tenant.lineMoves ? { tenantLineMoves: tenant.lineMoves } : {}),
     ...(tenant.follow ? { tenantFollow: tenant.follow } : {}),
     ...(tenant.carryTrunkToBooksBranch ? { carryTrunkToBooksBranch: tenant.carryTrunkToBooksBranch } : {}),
     ...(tenant.libraryRepos ? { libraryRepos: tenant.libraryRepos } : {}),

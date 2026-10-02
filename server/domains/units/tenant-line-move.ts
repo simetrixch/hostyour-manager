@@ -8,7 +8,11 @@ import type { Stage } from "../../../shared/enums.ts";
 import type { AppsEngine } from "../../../shared/apps-manifest.ts";
 import { parseReleaseTag } from "../../../shared/release.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
-import { errValidation } from "../../kernel/errors.ts";
+import type { LineMoveView } from "../../../shared/api-types-line-move.ts";
+import type { Db } from "../../db/client.ts";
+import { errNotFound, errValidation } from "../../kernel/errors.ts";
+import { loadTenantCluster } from "./lifecycle.ts";
+import { registryHostFromChain } from "./tenant-values.ts";
 import { bundleReleaseTag, engineLineRefusal, repositoryEngine, versionLine } from "./engine-line.ts";
 import { sameApprovals, stagePinsOf, tenantVersionParts, versionRefusal, withChosenVersions, type Approvals } from "./tenant-versions.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -30,6 +34,8 @@ export interface LinePairing {
 export interface LineMoveReading {
   /** The line the tenant runs now, as its bundle's apps.yaml declares it. */
   line: string;
+  /** The line a move goes to: the one asked for, or the newest newer one released; null where none is. */
+  toLine: string | null;
   /** The pairing a move writes; null where no newer line is released at the stage, or where it is refused. */
   target: LinePairing | null;
   /** Why the move cannot be planned; empty where it can. */
@@ -79,11 +85,11 @@ export async function readLineMove(
   let line = input.line;
   if (line === undefined) {
     const newest = releases[0] ? await engineOf(releases[0].release) : undefined;
-    if (newest === undefined || !isNewerLine(newest.line, running.line)) return { line: running.line, target: null, refusals: [], standing: false };
+    if (newest === undefined || !isNewerLine(newest.line, running.line)) return { line: running.line, toLine: null, target: null, refusals: [], standing: false };
     line = newest.line;
   }
   if (line !== running.line && !isNewerLine(line, running.line)) {
-    return { line: running.line, target: null, refusals: [`line ${line} is not newer than line ${running.line}, which tenant ${entry.subdomain} runs`], standing: false };
+    return { line: running.line, toLine: line, target: null, refusals: [`line ${line} is not newer than line ${running.line}, which tenant ${entry.subdomain} runs`], standing: false };
   }
 
   const refusals: string[] = [];
@@ -95,17 +101,17 @@ export async function readLineMove(
       break;
     }
   }
-  if (!bundle) return { line: running.line, target: null, refusals: [`no release of ${appsRepo} that ${stage} takes declares engine line ${line}`], standing: false };
+  if (!bundle) return { line: running.line, toLine: line, target: null, refusals: [`no release of ${appsRepo} that ${stage} takes declares engine line ${line}`], standing: false };
 
   const parts = await tenantVersionParts(ports, stage, entry.members, entry.approvedTags);
   const part = parts.find((p) => p.builds.some((b) => b.name === bundle.engine.build));
-  if (!part) return { line: running.line, target: null, refusals: [`no member of tenant ${entry.subdomain} renders ${bundle.engine.build}, the engine ${bundle.release} is written for`], standing: false };
+  if (!part) return { line: running.line, toLine: line, target: null, refusals: [`no member of tenant ${entry.subdomain} renders ${bundle.engine.build}, the engine ${bundle.release} is written for`], standing: false };
   // versionRefusal holds a tag to every build of the part having released it at the stage.
   const partTag = (part.builds[0]?.released ?? [])
     .filter((t) => versionLine(t) === line && versionRefusal(t, part, channels, stage) === null)
     .sort((a, b) => (b.split("-")[2] ?? "").localeCompare(a.split("-")[2] ?? ""))[0];
   if (partTag === undefined) {
-    return { line: running.line, target: null, refusals: [`no release made ${part.name} ${line}.x available at ${stage} for every build of it (${part.builds.map((b) => b.name).join(", ")})`], standing: false };
+    return { line: running.line, toLine: line, target: null, refusals: [`no release made ${part.name} ${line}.x available at ${stage} for every build of it (${part.builds.map((b) => b.name).join(", ")})`], standing: false };
   }
 
   const appsImageTag = `${bundle.release}-${bundle.commit.slice(0, 7)}`;
@@ -124,5 +130,34 @@ export async function readLineMove(
   if (line === running.line && !standing) {
     refusals.push(`tenant ${entry.subdomain} already runs line ${line}; within a line its releases and the Versions run move it`);
   }
-  return { line: running.line, target: refusals.length === 0 ? target : null, refusals, standing };
+  return { line: running.line, toLine: line, target: refusals.length === 0 ? target : null, refusals, standing };
+}
+
+/** GET /api/tenants/:id/line-moves: the line the tenant runs and the move the dialog offers, read by the
+ *  plan's own reader, so the offer is what the run would write or the reasons it would refuse. */
+export async function readTenantLineMoves(
+  ports: LineMovePorts & Pick<TenantOnboardPorts, "resolveClusterValueFiles">,
+  db: Db,
+  tenantId: string,
+  signal?: AbortSignal,
+): Promise<LineMoveView> {
+  const tc = loadTenantCluster(db, tenantId);
+  const read = await ports.registrations.readTenant(tc.stage, tc.guid);
+  if (!read) throw errNotFound(`tenant ${tc.guid} is not onboarded (no registration at ${tc.stage})`);
+  if (!read.entry.appsImage) return { line: null, offer: null };
+  const registryHost = registryHostFromChain(await ports.resolveClusterValueFiles(tc.domain, tc.stage));
+  const reading = await readLineMove(ports, { stage: tc.stage, entry: read.entry, registryHost, log: () => undefined, signal: signal ?? new AbortController().signal });
+  if (reading.toLine === null || reading.standing) return { line: reading.line, offer: null };
+  return {
+    line: reading.line,
+    offer: {
+      line: reading.toLine,
+      fromBundle: read.entry.appsImageTag ?? "",
+      toBundle: reading.target?.appsImageTag ?? null,
+      part: reading.target?.part ?? null,
+      partTag: reading.target?.partTag ?? null,
+      builds: reading.target?.builds ?? [],
+      refusals: reading.refusals,
+    },
+  };
 }

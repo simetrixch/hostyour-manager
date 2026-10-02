@@ -25,6 +25,7 @@ import { readTenantVersions } from "../domains/units/tenant-versions.ts";
 import { makeTenantFollower, type TenantFollower } from "../domains/units/tenant-follow.ts";
 import type { Executor } from "../executor/executor.ts";
 import type { VersionsView } from "../../shared/api-types.ts";
+import type { LineMoveView } from "../../shared/api-types-line-move.ts";
 import type { Db } from "../db/client.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import type { ObjectStore } from "../adapters/object-store/port.ts";
@@ -51,6 +52,7 @@ import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantSetWebsiteDomainDef } from "../domains/units/tenant-website-domain.run.ts";
 import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-members.run.ts";
 import { makeTenantLineMoveDef } from "../domains/units/tenant-line-move.run.ts";
+import { readTenantLineMoves } from "../domains/units/tenant-line-move.ts";
 import { makeTenantSetSenderDomainDef } from "../domains/units/tenant-sender-domain.run.ts";
 import { makeTenantAppsRepoDef, readTenantSpec } from "../domains/units/tenant-apps-repo.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
@@ -97,6 +99,8 @@ export interface TenantFamily {
   /** What the Versions dialog offers for one tenant, read through the ports its run plans with.
    *  Undefined when the family is not configured. */
   versions?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<VersionsView>;
+  /** The engine line a tenant runs and the move to a newer one the Versions dialog offers. */
+  lineMoves?: (db: Db, tenantId: string, signal?: AbortSignal) => Promise<LineMoveView>;
   /** Bring the deploy repository's books branch into being and to its trunk, so the tenant
    *  ApplicationSet's git generator has a revision to resolve before the first tenant exists and the
    *  member charts on that revision are the current ones. It crosses as a closure because buildUnits
@@ -393,6 +397,7 @@ export function buildTenantOnboarding(
   // through the very registrations the runs commit pointers with — all the same instances (and the same one
   // repoURL the appsets are rendered from) the runs use, never a second one.
   const versions = (db: Db, tenantId: string, signal?: AbortSignal): Promise<VersionsView> => readTenantVersions(onboardPorts, db, tenantId, signal);
+  const lineMoves = (db: Db, tenantId: string, signal?: AbortSignal): Promise<LineMoveView> => readTenantLineMoves(onboardPorts, db, tenantId, signal);
   const libraryRepos = async (): Promise<string[]> => (await readTenantSpec(onboardPorts, {}))?.libraryRepos ?? [];
   // Each standing tenant's lists off its own bundle, read with the deploy repository's credential as the
   // engine line is (engine-line.ts tenantBundleManifest).
@@ -421,5 +426,5 @@ export function buildTenantOnboarding(
     };
     return { follower, start };
   };
-  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, versions, carryTrunkToBooksBranch, libraryRepos, writeTenantAppDatabases, follow };
+  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, versions, lineMoves, carryTrunkToBooksBranch, libraryRepos, writeTenantAppDatabases, follow };
 }
