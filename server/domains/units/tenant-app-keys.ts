@@ -6,7 +6,7 @@
 // start without it. A website's engine also tells its renderer to drop its cache after a save, and
 // signs that call with a revalidate secret the renderer checks; a website engine refuses to start
 // without it. A website's renderer signs each record form it places with a form signing key, and
-// refuses a post no such form could send; a page that places a record form answers 500 without it.
+// refuses a post no such form could send; a website renderer refuses to start without it.
 //
 // WHERE THEY STAND. One Vault entry per app and kind, <stage>/tenants/<guid>/<kind>/<app>, one level
 // below the tenant's entry: that entry is written create-only and takes no property later, so an app
@@ -33,7 +33,7 @@ import { errValidation } from "../../kernel/errors.ts";
 const KEY_KIND_TEXT: Record<TenantAppKeyKind, { keys: string; key: string; lacking: string }> = {
   "password-field-key": { keys: "Password field keys", key: "Password field key", lacking: "an engine without its key cannot encrypt a Password field" },
   "revalidate-secret": { keys: "Revalidate secrets", key: "revalidate secret", lacking: "a website engine without its secret does not start" },
-  "form-signing-key": { keys: "Form signing keys", key: "form signing key", lacking: "a website page that places a record form answers 500 without its key" },
+  "form-signing-key": { keys: "Form signing keys", key: "form signing key", lacking: "a website renderer without its key does not start" },
 };
 
 export interface TenantAppKeysOutcome {
