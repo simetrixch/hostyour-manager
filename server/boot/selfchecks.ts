@@ -6,7 +6,7 @@ import type { RunEventBus } from "../executor/bus.ts";
 import type { RunDefinitions } from "../domains/runs/run-definitions.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
 import { assertGuardsArmed } from "../executor/guards.ts";
-import { RUN_FAMILY, RUN_KIND, type RunFamily, type RunKind } from "../../shared/enums.ts";
+import { RETIRED_RUN_KIND, RUN_FAMILY, RUN_KIND, type RunFamily, type RunKind } from "../../shared/enums.ts";
 import { reconcileLocks } from "../executor/locks.ts";
 import { renderForbidden } from "../domains/access/forbidden.ts";
 import { SessionCodec } from "../domains/access/session.ts";
@@ -152,7 +152,8 @@ function checkRunDefinitionsTotal(runDefinitions: RunDefinitions): void {
 }
 
 /**
- * Every run kind this database STORES is one this process can name. `runs.kind` is a plain text
+ * Every run kind this database STORES is one this process can name, or one it has retired
+ * (RETIRED_RUN_KIND: deleted kinds whose runs stand as history). `runs.kind` is a plain text
  * column with no CHECK (server/db/schema/runs.ts), so nothing in SQLite stops a row standing under a
  * spelling RUN_KIND has since dropped — which is exactly what a data migration over that column
  * leaves behind when it misses one. Such a row reads back on the runs list under a kind no filter,
@@ -163,7 +164,7 @@ function checkRunDefinitionsTotal(runDefinitions: RunDefinitions): void {
  * named on /readyz instead, with every unknown spelling listed rather than counted.
  */
 function checkStoredRunKinds(sqlite: DbHandle["sqlite"]): void {
-  const members = new Set<string>(RUN_KIND);
+  const members = new Set<string>([...RUN_KIND, ...RETIRED_RUN_KIND]);
   const stored = (sqlite.prepare("SELECT DISTINCT kind FROM runs").all() as { kind: string }[]).map((r) => r.kind);
   const unknown = stored.filter((kind) => !members.has(kind)).sort();
   if (unknown.length > 0) {
