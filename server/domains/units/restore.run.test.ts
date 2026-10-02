@@ -12,7 +12,7 @@ import { makeRestoreDef, makeTenantRestoreDef } from "./restore.run.ts";
 import { recordBackupFinished, recordBackupStarted } from "../../db/unit-backups.ts";
 import {
   openFixtureDb, seedClusters, seedConsumerRow, seedTenantRows, makeFakes, consumerPorts, tenantPorts,
-  driveSteps, jobNames, tenantEntry, GUID, CONSUMER, SUBDOMAIN, TARGET, INSTALLATION,
+  driveSteps, jobNames, stepCtx, tenantEntry, GUID, CONSUMER, SUBDOMAIN, TARGET, INSTALLATION,
 } from "./relocation.fixture.ts";
 
 // restore / tenant-restore — the second half of the ONE mechanism, on its own: the picked generation is
@@ -223,6 +223,26 @@ describe("restore (consumer)", () => {
     expect(f.target.reader.createdClaims).toEqual([`${CONSUMER}-prod/queue-mta-0`]);
     const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`);
     expect(restore?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
+  });
+
+  it("re-runs a refused restore into the claim the refused run made, because the generation holds it", async () => {
+    seedClusters(db);
+    seedConsumerRow(db, "offboarded");
+    seedGeneration(db, "consumer", CONSUMER);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    scriptDumpedRegistration(f.target.reader, CONSUMER, dumpedConsumer(["mongodb"]));
+    f.target.reader.setJobResult(`reloc-list-pvc-${CONSUMER}`, { succeeded: true, logs: "CLAIM legacy-data\nCLAIM queue-mta-0\nCLAIMS 2" });
+    const queue = { claim: "queue-mta", ordinals: true, user: 1000, group: 1000 };
+    f.target.reader.setClaims(`${CONSUMER}-prod`, [], [queue]);
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
+    await expect(driveSteps(db, makeRestoreDef(ports).steps(params), params, [])).rejects.toThrow(/holds legacy-data/);
+    expect(f.target.reader.createdClaims).toEqual([`${CONSUMER}-prod/queue-mta-0`]);
+    // The chart gains the missing claim; the restore step runs again and extracts into both.
+    f.target.reader.setClaims(`${CONSUMER}-prod`, ["queue-mta-0", "legacy-data"], [queue, { claim: "legacy-data", ordinals: false, user: 1000, group: 1000 }]);
+    await makeRestoreDef(ports).steps(params).find((s) => s.name === "restore")!.run(stepCtx(db, "restore", params, []));
+    const job = f.target.reader.jobs.filter((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`).at(-1);
+    expect(job?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["legacy-data", "queue-mta-0"]);
   });
 
   it("carries the attested fqdn and the SMTP entry of the dump into the re-committed registration", async () => {

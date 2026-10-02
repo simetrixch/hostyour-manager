@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { V1StatefulSet } from "@kubernetes/client-node";
-import { statefulSetClaimOf } from "./kube-claims.ts";
+import type { AppsV1Api, CoreV1Api, V1PersistentVolumeClaim, V1StatefulSet } from "@kubernetes/client-node";
+import { createStatefulSetClaim, statefulSetClaimOf } from "./kube-claims.ts";
 
 // The claim the Manager makes in place of a StatefulSet at replicas 0 must be the one the StatefulSet
 // would make, or it does not adopt it when it scales up: the name, the template's spec, and labels
@@ -30,5 +30,27 @@ describe("statefulSetClaimOf", () => {
     expect(statefulSetClaimOf([mta], "queue-mta-0-old")).toBeNull();
     expect(statefulSetClaimOf([mta], "queue-mta")).toBeNull();
     expect(statefulSetClaimOf([mta], "cache-0")).toBeNull();
+  });
+});
+
+describe("createStatefulSetClaim", () => {
+  // The two clients it calls, stubbed: the StatefulSets it lists, and every claim it creates.
+  function clients(statefulSets: V1StatefulSet[]): { created: { namespace: string; body: V1PersistentVolumeClaim }[]; api: { apps: AppsV1Api; core: CoreV1Api } } {
+    const created: { namespace: string; body: V1PersistentVolumeClaim }[] = [];
+    const apps = { listNamespacedStatefulSet: async () => ({ items: statefulSets }) };
+    const core = { createNamespacedPersistentVolumeClaim: async (request: { namespace: string; body: V1PersistentVolumeClaim }) => { created.push(request); return request.body; } };
+    return { created, api: { apps: apps as unknown as AppsV1Api, core: core as unknown as CoreV1Api } };
+  }
+
+  it("creates the claim a StatefulSet names, in its namespace, as statefulSetClaimOf writes it", async () => {
+    const { created, api } = clients([mta]);
+    expect(await createStatefulSetClaim(api, "acme-prod", "queue-mta-0")).toBe(true);
+    expect(created).toEqual([{ namespace: "acme-prod", body: statefulSetClaimOf([mta], "queue-mta-0") }]);
+  });
+
+  it("PLANTED INNOCENT: creates nothing for a claim no StatefulSet names", async () => {
+    const { created, api } = clients([mta]);
+    expect(await createStatefulSetClaim(api, "acme-prod", "cache-0")).toBe(false);
+    expect(created).toEqual([]);
   });
 });
