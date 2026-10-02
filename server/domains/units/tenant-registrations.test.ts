@@ -310,6 +310,27 @@ describe("TenantRegistrations", () => {
     expect(repo.commits[0]!.remove).toEqual([`${DIR}/dev.yaml`]);
     expect(await reg.readTenant("dev", GUID)).toBeNull();
   });
+
+  it("setLinePairing writes the bundle tag and the engines' tags in ONE commit, and keeps the bundle's repository and image", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new TenantRegistrations(repo);
+    const bundle = { appsRepo: "https://github.com/acme/catalog-simetrix.git", appsImage: "catalog-simetrix", appsImageTag: "0.3.022-stable-20261002123726-abc1234" };
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: registration({ ...bundle, approvedTags: { erp: { "digita-platform": "0.3.009-stable-20261001000000-1111111" } } }), runId: "run_1" });
+    const approvedTags = { erp: { "digita-platform": "0.4.000-stable-20261010000000-2222222" } };
+    await reg.setLinePairing("prod", GUID, { appsImageTag: "0.4.000-stable-20261010120000-def5678", approvedTags }, "run_2");
+    expect(repo.commits).toHaveLength(2);
+    expect(repo.commits[1]!.message).toBe(`line-move(${GUID}): catalog-simetrix 0.4.000-stable-20261010120000-def5678 [run_2]`);
+    const t = await reg.readTenant("prod", GUID);
+    expect(t?.entry).toMatchObject({ appsRepo: bundle.appsRepo, appsImage: bundle.appsImage, appsImageTag: "0.4.000-stable-20261010120000-def5678", approvedTags });
+  });
+
+  it("PLANTED DEFECT: setLinePairing refuses a tenant that runs no apps bundle, and writes nothing", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new TenantRegistrations(repo);
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: registration(), runId: "run_1" });
+    await expect(reg.setLinePairing("prod", GUID, { appsImageTag: "0.4.000-stable-20261010120000-def5678", approvedTags: {} }, "run_2")).rejects.toThrow(/runs no apps bundle/);
+    expect(repo.commits).toHaveLength(1);
+  });
 });
 
 // The scan is the ONLY thing that can NAME a tenant the inventory does not know,

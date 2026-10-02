@@ -433,6 +433,17 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, ...apps }, `tenant-apps-repo(${guid}): ${apps.appsImage} ${trailer(runId)}`);
   }
 
+  /** Write a tenant's bundle tag and its engines' tags in ONE commit (tenant-line-move). A bundle and
+   *  its engines on different lines are refused everywhere (engine-line.ts), so a move to a new line
+   *  that wrote them one after the other would render a pairing in between that no member can run.
+   *  The bundle's repository and image stay what they are; a tenant without a bundle has no line. */
+  async setLinePairing(stage: Stage, guid: string, pairing: { appsImageTag: string; approvedTags: Record<string, Record<string, string>> }, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
+    if (!current.entry.appsImage) throw errValidation(`tenant "${guid}" runs no apps bundle, so it runs no engine line to move`);
+    return this.write(stage, guid, { ...current.entry, ...pairing }, `line-move(${guid}): ${current.entry.appsImage} ${pairing.appsImageTag} ${trailer(runId)}`);
+  }
+
   /** The inverse of setTenantAppsRepo (tenant-apps-repo-remove.ts): the tenant is its platform alone
    *  again, the three bundle fields gone together the way the schema demands them together. */
   async clearTenantAppsRepo(stage: Stage, guid: string, runId: string): Promise<{ commit: string }> {
