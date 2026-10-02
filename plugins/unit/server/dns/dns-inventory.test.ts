@@ -142,6 +142,12 @@ describe("readDnsInventory", () => {
     ]);
   });
 
+  it("PLANTED INNOCENT: a TXT booked for a tenant whose name carries no underscore label is no mark, and is not listed as one", async () => {
+    recordDnsWrite(db.db, { name: "acme.example.net", type: "TXT", content: "v=spf1 -all", act: "inserted", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_a" });
+    const view = await readDnsInventory(deps());
+    expect(view.rows.filter((r) => r.type === "TXT" && r.owner.kind === "tenant")).toEqual([]);
+  });
+
   it("PLANTED INNOCENT: a sender domain's DMARC record in the book is a mail record, not a tenant's mark", async () => {
     recordDnsWrite(db.db, { name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", act: "inserted", owner: { kind: "mail", name: "example.com" }, runId: "run_mail" });
     const view = await readDnsInventory(deps({ mail: async () => ({ ...mailView(), domains: [] }) }));
