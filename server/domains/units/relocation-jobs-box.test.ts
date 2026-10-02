@@ -1,11 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { RelocationJob } from "#unit/server/relocation-jobs.ts";
-import { consumerGenerationClaimsJob, consumerRestoreJobs, consumerVerifyCompletenessJobs, parseClaimLines } from "./relocation-jobs-consumer.ts";
-import { tenantRestoreJobs, tenantVerifyCompletenessJobs } from "./relocation-jobs-tenant.ts";
+import { consumerClearSourceJobs, consumerGenerationClaimsJob, consumerRestoreJobs, consumerVerifyCompletenessJobs, parseClaimLines } from "./relocation-jobs-consumer.ts";
+import { tenantClearSourceJobs, tenantRestoreJobs, tenantSourceDbListJob, tenantVerifyCompletenessJobs } from "./relocation-jobs-tenant.ts";
 
 // The jobs that list the Storage Box, run the way the pod runs them (`sh -ec`), against stubs: rclone
 // answers off a local directory standing in for the box, mongosh lists the databases a test names, and
@@ -29,7 +29,7 @@ function box(entries: Record<string, string>): string {
 /** Run `job` with the stubs on PATH and answer its stdout. `failOn` is the one box path whose listing
  *  fails. The script's /tmp is a directory of this run's own, so a parallel run elsewhere on the
  *  machine never reads its files. */
-function run(job: RelocationJob, root: string, opts: { failOn?: string; databases?: string[] } = {}): string {
+function run(job: RelocationJob, root: string, opts: { failOn?: string; databases?: string[]; failMongo?: boolean } = {}): string {
   const bin = temp("bin-");
   const scratch = temp("tmp-");
   const stub = (name: string, body: string): void => writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
@@ -39,9 +39,11 @@ function run(job: RelocationJob, root: string, opts: { failOn?: string; database
        for e in "$d"/*; do [ -e "$e" ] || continue; if [ -d "$e" ]; then echo "$(basename "$e")/"; else basename "$e"; fi; done ;;
   copyto) cp "$BOX_ROOT/\${2#box:}" "$3" ;;
 esac`);
-  stub("mongosh", `for d in $DATABASES; do echo "$d"; done`);
+  // mongosh fails where FAIL_MONGO is set, writes down every drop, and otherwise lists DATABASES.
+  stub("mongosh", `[ -z "$FAIL_MONGO" ] || { echo "MongoNetworkError: connect ECONNREFUSED" >&2; exit 1; }
+case "$*" in *dropDatabase*) echo "$*" >> "$BOX_ROOT/dropped" ;; *) for d in $DATABASES; do echo "$d"; done ;; esac`);
   stub("mongorestore", `echo "$*" >> "$BOX_ROOT/restored"`);
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, BOX_ROOT: root, FAIL_ON: opts.failOn ?? "", DATABASES: (opts.databases ?? []).join(" "), STORAGE_BOX_PASSWORD: "x" };
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, BOX_ROOT: root, FAIL_ON: opts.failOn ?? "", DATABASES: (opts.databases ?? []).join(" "), FAIL_MONGO: opts.failMongo ? "1" : "", STORAGE_BOX_PASSWORD: "x" };
   return execFileSync("sh", ["-ec", job.spec.script.replaceAll("/tmp/", `${scratch}/`)], { env, stdio: "pipe" }).toString();
 }
 
@@ -90,5 +92,35 @@ describe("the Mongo jobs that list the generation's archives", () => {
     const out = run(job, root, { databases: [archive] });
     if (job.spec.name.includes("restore")) expect(readFileSync(join(root, "restored"), "utf8")).toContain(`${archive}.archive`);
     else expect(out).toContain("COMPLETE mongo");
+  });
+});
+
+describe("the Mongo jobs that list the databases themselves", () => {
+  const GUID = "zsjs023ctne0";
+  const tenant = { guid: GUID, stage: "prod" as const, image: "dbtools" };
+  const databases = [`${GUID}_web`, `${GUID}_auth`, "other_core"];
+
+  it("clears a tenant's source of its own databases, as the listing names them, and of nothing else", () => {
+    const root = box({});
+    expect(run(tenantClearSourceJobs(tenant)[0]!, root, { databases })).toContain(`DROPPED ${GUID}_web`);
+    const dropped = readFileSync(join(root, "dropped"), "utf8");
+    expect([dropped.includes(`${GUID}_web`), dropped.includes(`${GUID}_auth`), dropped.includes("other_core")]).toEqual([true, true, false]);
+  });
+
+  it("fails a tenant's clear-source where Mongo cannot be listed, and drops nothing", () => {
+    const root = box({});
+    expect(() => run(tenantClearSourceJobs(tenant)[0]!, root, { databases, failMongo: true })).toThrow();
+    expect(existsSync(join(root, "dropped"))).toBe(false);
+  });
+
+  it("fails the source listing where Mongo cannot be listed, rather than answering no database", () => {
+    expect(() => run(tenantSourceDbListJob(tenant), box({}), { databases, failMongo: true })).toThrow();
+    expect(run(tenantSourceDbListJob(tenant), box({}), { databases })).toBe(`DB ${GUID}_web\nDB ${GUID}_auth\n`);
+  });
+
+  it("PLANTED INNOCENT: a consumer's clear-source drops its registered databases, and fails where Mongo does", () => {
+    const job = consumerClearSourceJobs({ name: "acme", stage: "prod", databases: ["acme_main"], services: ["mongodb"], image: "dbtools" })[0]!;
+    expect(run(job, box({}))).toContain("DROPPED acme_main");
+    expect(() => run(job, box({}), { failMongo: true })).toThrow();
   });
 });
