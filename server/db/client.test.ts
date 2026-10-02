@@ -46,7 +46,9 @@ describe("openDb — migration phase + append-only invariants", () => {
   // A database built by the BASELINE ALONE — what every installation before hostyour-manager#222
   // stands on — is carried forward by the migrations that follow it, and the baseline is never run
   // again against it (#222: a re-stamped baseline died on `table audit already exists`).
-  it("carries a database built by the baseline alone forward: every later migration applies, the baseline stays applied once", () => {
+  // Its own timeout, because it applies every migration to a database file: about 1 s alone, and
+  // 5.4 s once in a full parallel run, which the default 5 s turned into a failure.
+  it("carries a database built by the baseline alone forward: every later migration applies, the baseline stays applied once", { timeout: 20_000 }, () => {
     const dir = mkdtempSync(join(tmpdir(), "mgr-db-"));
     dirs.push(dir);
     // The baseline alone, as a migrations folder of its own: the same 0000 file, a journal naming only it.
