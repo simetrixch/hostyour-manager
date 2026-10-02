@@ -16,6 +16,7 @@ import { tenantLocks, tenantSelector, tenantTeardownMembers } from "./tenant-lif
 import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
 import { isTenantRecord, removeBookedRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { listDnsWrites } from "../../db/dns-writes.ts";
 import { tenantKeyName } from "./tenant-storage.ts";
 
 // tenant-purge / force-offboard by GUID — the tenant analogue of the consumer
@@ -381,19 +382,22 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
       run: async (ctx) => {
         // The inverse of create-tenant's provision-dns (no address is left pointing nowhere
         // — without exception; purge runs after failed offboards, exactly where the leftover would
-        // appear, so the step is fail-CLOSED). The book of DNS writes names the tenant's own records by
-        // its guid, so they go first and whatever the target knows: none of them can be a newer
-        // tenant's, and an earlier purge that removed the registration and then failed left them with
-        // no subdomain to find them by. The wildcard's name needs the subdomain, which only the pointer
-        // or the inventory row carries. Where the frozen target's subdomain is empty, this purge may name
-        // no wildcard.
+        // appear, so the step is fail-CLOSED). The wildcard's name needs the subdomain, which only the
+        // pointer or the inventory row carries.
         const c = loadPurgeCluster(ctx.db, p);
-        await removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "tenant", name: p.guid, stage: c.stage }, except: [] });
+        const unitApex = await ports.resolveUnitApex(c.domain, c.stage);
         if (p.target.subdomain === "") {
-          ctx.log("meta", `tenant ${p.guid} has no subdomain this purge may name (no live inventory row or pointer carries one), so its wildcard DNS record is not removed: an offboard removed it for a settled tenant, and the subdomain may belong to a newer tenant by now. A wildcard written before an earlier purge removed the registration stands until it is removed by hand`);
+          // Without it, the book of DNS writes still names the tenant's records, and an earlier purge
+          // that removed the registration and then failed left them with no subdomain to find them by.
+          // A record under the platform's domain may stand for a newer tenant on the same subdomain by
+          // now: its provision finds the record pointing at its cluster already and books nothing, so
+          // the book goes on naming this tenant. Only the records of the tenant's own domains go,
+          // which every writer books again.
+          const platformRecords = listDnsWrites(ctx.db).map((w) => w.name).filter((name) => name === unitApex || name.endsWith(`.${unitApex}`));
+          await removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "tenant", name: p.guid, stage: c.stage }, except: platformRecords });
+          ctx.log("meta", `tenant ${p.guid} has no subdomain this purge may name (no live inventory row or pointer carries one), so no record under ${unitApex} is removed: an offboard removed them for a settled tenant, and a newer tenant may stand on the subdomain by now. A record there written before an earlier purge removed the registration stands until it is removed by hand`);
           return;
         }
-        const unitApex = await ports.resolveUnitApex(c.domain, c.stage);
         // The record under EVERY routing, because an orphan's routing is known to no row, but only a
         // record that is the tenant's own (isTenantRecord): the zone name may be another unit's host.
         // Removing an absent record is a no-op (removeUnitDns).
@@ -405,6 +409,8 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
           }
           await removeUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName });
         }
+        // Every other record the book names as this tenant's: its own domain's, where written here.
+        await removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "tenant", name: p.guid, stage: c.stage }, except: [] });
       },
     },
   ];
@@ -555,7 +561,7 @@ export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<T
           `then DESTROY the tenant's Vault crypto entry ${c.stage}/tenants/${req.guid} (its signing keypair, TOTP key, bootstrap token and engine key, every version), withdraw every object-storage key named ${tenantKeyName(req.guid, c.stage)}` +
           (target.subdomain
             ? ", then remove the tenant's wildcard DNS record"
-            : ", and remove only the DNS records the book of DNS writes names as this tenant's own, not its wildcard record: no live inventory row or pointer names this tenant's subdomain, and a subdomain read off anything older may belong to a newer tenant by now") +
+            : ", and remove only the DNS records of its own domains that the book of DNS writes names as this tenant's, none under the platform's domain: no live inventory row or pointer names this tenant's subdomain, and a record there may stand for a newer tenant by now") +
           (target.tenantId
             ? ", and only THEN mark the tenant + its app rows PURGED — a distinct state from the \"offboarded\" an offboard leaves, so this tenant reads as deprovisioned rather than merely un-deployed: it drops off the Tenants list and offers no further removal, while its rows are kept as the trace. The rows are settled LAST, so a delete that fails leaves the tenant visible and purgeable"
             : "") +
