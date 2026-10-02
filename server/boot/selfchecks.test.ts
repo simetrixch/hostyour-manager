@@ -15,7 +15,7 @@ import { RunEventBus } from "../executor/bus.ts";
 import { buildRunDefinitions } from "../domains/runs/run-definitions.ts";
 import { buildUnits } from "./wire-units.ts";
 import { buildPlatformRepo } from "./platform-repo.ts";
-import { RETIRED_RUN_KIND, RUN_FAMILY, RUN_KIND, type RunFamily, type RunKind } from "../../shared/enums.ts";
+import { RUN_FAMILY, RUN_KIND, type RunFamily, type RunKind } from "../../shared/enums.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
 import { FakePlatformRepo } from "../adapters/git/testing/fake.ts";
 import { RELEASE_TAG_RE } from "../../shared/release.ts";
@@ -138,7 +138,7 @@ describe("boot self-checks", () => {
     const { db, store, bus, runDefinitions } = fresh();
     db.sqlite
       .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
-      .run("run_retired", RETIRED_RUN_KIND[0], "tenant", "tnt_1", "{}", "{}", "succeeded", "op_system");
+      .run("run_retired", "tenant-apps-repo-purge", "tenant", "tnt_1", "{}", "{}", "succeeded", "op_system");
     const check = runSelfChecks({ db, config, store, bus, runDefinitions }).find((r) => r.name === "runs.kinds_known");
     expect(check?.ok).toBe(true);
   });
