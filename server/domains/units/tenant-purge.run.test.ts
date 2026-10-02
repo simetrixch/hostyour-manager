@@ -4,6 +4,7 @@
 // share this file's fixtures through the header both copies carry, and they were split along the
 // 400-line budget, not along a seam in the subject.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { eq } from "drizzle-orm";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import type { StepCtx } from "../../executor/types.ts";
@@ -269,27 +270,52 @@ describe("tenant-purge plan", () => {
     const p = { ...ports(new TenantRegistrations(new FakePlatformRepo())), resolveUnitApex: async (domain: string) => (domain === "s2.example" ? "other.example" : "example.com") };
     const dns = p.dns as FakeDnsProvider;
     for (const name of ["*.acme.other.example", "shop.acme.example"]) {
-      recordDnsWrite(db.db, { name, type: "CNAME", content: "s2.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
+      recordDnsWrite(db.db, { name, type: "CNAME", content: "s2.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "dev" }, runId: "run_a" });
       dns.seed(name, "CNAME", "s2.example");
     }
-    const unnamed = await planned(p);
+    // The tenant stands at dev on clusters whose own stage is prod: a cluster's stage says nothing about a unit's.
+    const unnamed = await planned(p, { ...REQUEST, stage: "dev" });
     await makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: () => {} } as unknown as StepCtx);
     expect(dns.record("*.acme.other.example", "CNAME")).toBe("s2.example");
     expect(dns.record("shop.acme.example", "CNAME")).toBeUndefined();
   });
 
-  it("removes no booked record without a subdomain where a cluster's unit apex cannot be read, and says which", async () => {
+  it("leaves the record a newer tenant stands on also where the tenant's stage is not its cluster's own", async () => {
+    seedCluster(); // cls_1 is a prod cluster, and the purged tenant and the newer one stood on it at dev
+    const p = ports(new TenantRegistrations(new FakePlatformRepo()));
+    const dns = p.dns as FakeDnsProvider;
+    const wildcard = "*.acme.example.com";
+    const provision = (unit: string, runId: string) => provisionUnitDns({ runId, db: db.db, log: () => {}, checkpoint: () => {} } as unknown as StepCtx, { dns, unit, kind: "tenant", stage: "dev", recordName: wildcard, clusterFqdn: "s1.example", runKind: "tenant-create" });
+    await provision(GUID, "run_a");
+    await provision("ffffffffffff", "run_b");
+    const unnamed = await planned(p, { ...REQUEST, stage: "dev" });
+    await makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: () => {} } as unknown as StepCtx);
+    expect(dns.record(wildcard, "CNAME")).toBe("s1.example");
+  });
+
+  it("spares the platform records under its own cluster's apex also where that cluster no longer counts as hosting", async () => {
+    seedCluster();
+    db.db.update(clusters).set({ status: "removed" }).where(eq(clusters.id, "cls_1")).run(); // a purge runs for leftovers there
+    const p = ports(new TenantRegistrations(new FakePlatformRepo()));
+    const dns = p.dns as FakeDnsProvider;
+    recordDnsWrite(db.db, { name: "*.acme.example.com", type: "CNAME", content: "s1.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
+    dns.seed("*.acme.example.com", "CNAME", "s1.example");
+    const unnamed = await planned(p);
+    await makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: () => {} } as unknown as StepCtx);
+    expect(dns.record("*.acme.example.com", "CNAME")).toBe("s1.example");
+  });
+
+  it("fails, removing no booked record, where a cluster's unit apex cannot be read without a subdomain, and names the cluster", async () => {
     seedCluster();
     seedSecondCluster();
     const p = { ...ports(new TenantRegistrations(new FakePlatformRepo())), resolveUnitApex: async (domain: string) => { if (domain === "s2.example") throw new Error("no install branch"); return "example.com"; } };
     const dns = p.dns as FakeDnsProvider;
     recordDnsWrite(db.db, { name: "shop.acme.example", type: "CNAME", content: "s1.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
     dns.seed("shop.acme.example", "CNAME", "s1.example");
-    const logs: string[] = [];
     const unnamed = await planned(p);
-    await makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: (_s: string, t: string) => logs.push(t) } as unknown as StepCtx);
+    const run = makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: () => {} } as unknown as StepCtx);
+    await expect(run).rejects.toThrow("the unit apex of s2 cannot be read (no install branch), so this purge cannot tell the platform's records from tenant");
     expect(dns.record("shop.acme.example", "CNAME")).toBe("s1.example");
-    expect(logs.join("\n")).toContain("the unit apex of s2 cannot be read (no install branch), so no booked record of tenant");
   });
 
   it("mutating def starts with attest-target under empty params (the armed check does def.steps({}))", () => {

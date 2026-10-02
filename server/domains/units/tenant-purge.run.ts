@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
@@ -210,13 +210,17 @@ interface TenantPurgeCluster {
   cluster: string; // the cluster short name — what the pointer's `cluster` field names
 }
 
-/** The unit apex of every cluster of this installation at `stage`, where a tenant of that stage may
- *  have stood: a record under any of them is the platform's. Names each cluster whose apex cannot be
- *  read instead. */
-async function platformApexes(db: Db, ports: TenantLifecyclePorts, stage: Stage): Promise<{ apexes: string[]; unread: string[] }> {
-  const apexes = new Set<string>();
+/** The clusters a tenant can stand on now: a newer tenant's record points at one of them. */
+const HOSTING_CLUSTER_STATUS = ["active", "rebuilding", "removing"] as const;
+
+/** The unit apex of the purge's own cluster, and of every cluster a tenant can stand on now, whatever
+ *  that cluster's own stage: a cluster's stage is the platform's and says nothing about a unit's. Each
+ *  is resolved at the tenant's `stage`, and a record under any of them is the platform's. Names each
+ *  cluster whose apex cannot be read instead. */
+async function platformApexes(db: Db, ports: TenantLifecyclePorts, stage: Stage, own: string): Promise<{ apexes: string[]; unread: string[] }> {
+  const apexes = new Set<string>([own]);
   const unread: string[] = [];
-  for (const row of db.select({ domain: clusters.domain, name: clusters.name }).from(clusters).where(eq(clusters.stage, stage)).all()) {
+  for (const row of db.select({ domain: clusters.domain, name: clusters.name }).from(clusters).where(inArray(clusters.status, [...HOSTING_CLUSTER_STATUS])).all()) {
     try {
       apexes.add(await ports.resolveUnitApex(row.domain, stage));
     } catch (e) {
@@ -407,14 +411,12 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
           // that removed the registration and then failed left them with no subdomain to find them by.
           // A record under the platform's domain may stand for a newer tenant on the same subdomain by
           // now: its provision finds the record pointing at its cluster already and books nothing, so
-          // the book goes on naming this tenant. That holds under the unit apex of every cluster the
-          // tenant may have stood on, so only the records of the tenant's own domains go, which every
-          // writer books again; and where an apex cannot be read, none goes.
-          const { apexes, unread } = await platformApexes(ctx.db, ports, c.stage);
+          // the book goes on naming this tenant. That holds under the unit apex of every cluster a
+          // tenant stands on, so only the records of the tenant's own domains go, which every writer
+          // books again; and where an apex cannot be read, the step fails and removes none.
+          const { apexes, unread } = await platformApexes(ctx.db, ports, c.stage, unitApex);
           if (unread.length > 0) {
-            const booked = listDnsWrites(ctx.db).filter((w) => w.type === "CNAME" && w.owner.kind === "tenant" && w.owner.name === p.guid).map((w) => w.name);
-            ctx.log("meta", `the unit apex of ${unread.join("; ")}, so no booked record of tenant ${p.guid} is removed: a record under it may stand for a newer tenant on the same subdomain. The tenant's booked records (${booked.join(", ") || "none"}) stand until they are removed by hand`);
-            return;
+            throw errValidation(`the unit apex of ${unread.join("; ")}, so this purge cannot tell the platform's records from tenant ${p.guid}'s own domains and removes none of them: a record under that apex may stand for a newer tenant on the same subdomain. Run the purge again once the cluster's values can be read`);
           }
           const platformRecords = listDnsWrites(ctx.db).map((w) => w.name).filter((name) => apexes.some((apex) => name === apex || name.endsWith(`.${apex}`)));
           await removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "tenant", name: p.guid, stage: c.stage }, except: platformRecords });
