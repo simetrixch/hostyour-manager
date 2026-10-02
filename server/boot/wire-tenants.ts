@@ -50,6 +50,7 @@ import { ensureTenantAppDatabases } from "../domains/units/tenant-app-databases.
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantSetWebsiteDomainDef } from "../domains/units/tenant-website-domain.run.ts";
 import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-members.run.ts";
+import { makeTenantLineMoveDef } from "../domains/units/tenant-line-move.run.ts";
 import { makeTenantSetSenderDomainDef } from "../domains/units/tenant-sender-domain.run.ts";
 import { makeTenantAppsRepoDef, readTenantSpec } from "../domains/units/tenant-apps-repo.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
@@ -351,6 +352,8 @@ export function buildTenantOnboarding(
     // The members of a standing tenant resolved again off the product's manifest: the same port set
     // add-app judges with, because it renders and gates the same fan-out.
     makeTenantRefreshMembersDef(onboardPorts),
+    // A move to a newer engine line takes an online backup first, so it carries the relocation surface.
+    makeTenantLineMoveDef({ ...onboardPorts, relocation: tenantRelocationPorts }),
     // The tenant's sender domain: the product's manifest names the check, the public probe asks it.
     makeTenantSetSenderDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe }),
     // The tenant's own apps repository, created from the deploy repository's apps bundle through the GitHub App

@@ -1,0 +1,128 @@
+// Which pairing a tenant moves to when it moves to a newer engine line (tenant-line-move). A bundle and
+// the platform part that carries its engine are written for one line, and every writer refuses a
+// pairing across lines (engine-line.ts), so a move takes both at once: the newest bundle release on the
+// line, and the newest tag on the line that every build of the engine's part has released at the
+// stage. The plan and the Versions dialog's offer both read it here, so what the dialog offers is what
+// the run would write.
+import type { Stage } from "../../../shared/enums.ts";
+import type { AppsEngine } from "../../../shared/apps-manifest.ts";
+import { parseReleaseTag } from "../../../shared/release.ts";
+import type { TenantRegistration } from "../../../shared/tenant.ts";
+import { errValidation } from "../../kernel/errors.ts";
+import { bundleReleaseTag, engineLineRefusal, repositoryEngine, versionLine } from "./engine-line.ts";
+import { sameApprovals, stagePinsOf, tenantVersionParts, versionRefusal, withChosenVersions, type Approvals } from "./tenant-versions.ts";
+import type { TenantOnboardPorts } from "./create-tenant.run.ts";
+
+export type LineMovePorts = Pick<TenantOnboardPorts, "repo" | "deployCredentialId" | "registrations" | "attestedBuilds" | "registryProbe" | "channelStages">;
+
+/** What a move to `line` writes: the bundle release on the line, and one tag for every build of the
+ *  part that carries the bundle's engine, inside the tenant's whole approvedTags. */
+export interface LinePairing {
+  line: string;
+  bundleRelease: string;
+  appsImageTag: string;
+  part: string;
+  partTag: string;
+  builds: string[];
+  approvedTags: Approvals;
+}
+
+export interface LineMoveReading {
+  /** The line the tenant runs now, as its bundle's apps.yaml declares it. */
+  line: string;
+  /** The pairing a move writes; null where no newer line is released at the stage, or where it is refused. */
+  target: LinePairing | null;
+  /** Why the move cannot be planned; empty where it can. */
+  refusals: string[];
+  /** The registration already carries the target pairing, so a run only waits for it to render. */
+  standing: boolean;
+}
+
+/** Whether line `a` ("x.y") comes after line `b`. */
+export function isNewerLine(a: string, b: string): boolean {
+  const [ax, ay] = a.split(".").map(Number) as [number, number];
+  const [bx, by] = b.split(".").map(Number) as [number, number];
+  return ax > bx || (ax === bx && ay > by);
+}
+
+/** The tenant's line and the pairing a move to `line` writes; without `line`, the line of the newest
+ *  bundle release the stage takes, where that is newer than the tenant's. THROWS where the tenant runs
+ *  no bundle, or its bundle declares no engine: such a tenant has no line to move from. */
+export async function readLineMove(
+  ports: LineMovePorts,
+  input: { stage: Stage; entry: TenantRegistration; registryHost: string; line?: string; log: (line: string) => void; signal: AbortSignal },
+): Promise<LineMoveReading> {
+  const { entry, stage } = input;
+  if (!entry.appsRepo || !entry.appsImage || !entry.appsImageTag) throw errValidation(`tenant ${entry.subdomain} runs no apps bundle, so it runs no engine line to move`);
+  const appsRepo = entry.appsRepo;
+  const read = { repo: ports.repo, ...(ports.deployCredentialId ? { deployCredentialId: ports.deployCredentialId } : {}) };
+  const ctx = { log: input.log, signal: input.signal };
+  const engines = new Map<string, Promise<AppsEngine | undefined>>();
+  const engineOf = (release: string): Promise<AppsEngine | undefined> => {
+    if (!engines.has(release)) engines.set(release, repositoryEngine(read, { repoURL: appsRepo, ref: release }, ctx));
+    return engines.get(release)!;
+  };
+
+  const runningRelease = bundleReleaseTag(entry.appsImageTag);
+  const running = await engineOf(runningRelease);
+  if (running === undefined) throw errValidation(`the apps bundle of tenant ${entry.subdomain} at ${runningRelease} declares no engine, so the line it runs is unknown`);
+  const channels = await ports.channelStages();
+  const runningTs14 = parseReleaseTag(runningRelease)?.ts14 ?? "";
+  // The bundle releases the stage takes, from the one the tenant runs on, newest first.
+  const releases = (await ports.repo.listTags({ repoURL: appsRepo, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), signal: input.signal }))
+    .flatMap((t) => {
+      const parsed = parseReleaseTag(t.name);
+      return parsed && parsed.ts14 >= runningTs14 && (channels[parsed.channel] ?? []).includes(stage) ? [{ release: t.name, commit: t.commit, ts14: parsed.ts14 }] : [];
+    })
+    .sort((a, b) => b.ts14.localeCompare(a.ts14));
+
+  let line = input.line;
+  if (line === undefined) {
+    const newest = releases[0] ? await engineOf(releases[0].release) : undefined;
+    if (newest === undefined || !isNewerLine(newest.line, running.line)) return { line: running.line, target: null, refusals: [], standing: false };
+    line = newest.line;
+  }
+  if (line !== running.line && !isNewerLine(line, running.line)) {
+    return { line: running.line, target: null, refusals: [`line ${line} is not newer than line ${running.line}, which tenant ${entry.subdomain} runs`], standing: false };
+  }
+
+  const refusals: string[] = [];
+  let bundle: { release: string; commit: string; engine: AppsEngine } | undefined;
+  for (const r of releases) {
+    const engine = await engineOf(r.release);
+    if (engine?.line === line) {
+      bundle = { release: r.release, commit: r.commit, engine };
+      break;
+    }
+  }
+  if (!bundle) return { line: running.line, target: null, refusals: [`no release of ${appsRepo} that ${stage} takes declares engine line ${line}`], standing: false };
+
+  const parts = await tenantVersionParts(ports, stage, entry.members, entry.approvedTags);
+  const part = parts.find((p) => p.builds.some((b) => b.name === bundle.engine.build));
+  if (!part) return { line: running.line, target: null, refusals: [`no member of tenant ${entry.subdomain} renders ${bundle.engine.build}, the engine ${bundle.release} is written for`], standing: false };
+  // versionRefusal holds a tag to every build of the part having released it at the stage.
+  const partTag = (part.builds[0]?.released ?? [])
+    .filter((t) => versionLine(t) === line && versionRefusal(t, part, channels, stage) === null)
+    .sort((a, b) => (b.split("-")[2] ?? "").localeCompare(a.split("-")[2] ?? ""))[0];
+  if (partTag === undefined) {
+    return { line: running.line, target: null, refusals: [`no release made ${part.name} ${line}.x available at ${stage} for every build of it (${part.builds.map((b) => b.name).join(", ")})`], standing: false };
+  }
+
+  const appsImageTag = `${bundle.release}-${bundle.commit.slice(0, 7)}`;
+  const images = [{ repo: entry.appsImage, tag: appsImageTag }, ...part.builds.map((b) => ({ repo: b.image, tag: partTag }))];
+  for (const image of images) {
+    if (!(await ports.registryProbe.imageExists({ registryHost: input.registryHost, ...image }, { signal: input.signal }))) {
+      refusals.push(`${input.registryHost}/${image.repo}:${image.tag} is not in the registry`);
+    }
+  }
+  const pins = await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(stage, chart), entry.members);
+  const approvedTags = withChosenVersions(entry.approvedTags, pins, Object.fromEntries(part.builds.map((b) => [b.name, partTag])));
+  const mismatch = engineLineRefusal(bundle.engine, approvedTags);
+  if (mismatch !== null) refusals.push(mismatch);
+  const target: LinePairing = { line, bundleRelease: bundle.release, appsImageTag, part: part.name, partTag, builds: part.builds.map((b) => b.name), approvedTags };
+  const standing = refusals.length === 0 && entry.appsImageTag === appsImageTag && sameApprovals(entry.approvedTags, approvedTags);
+  if (line === running.line && !standing) {
+    refusals.push(`tenant ${entry.subdomain} already runs line ${line}; within a line its releases and the Versions run move it`);
+  }
+  return { line: running.line, target: refusals.length === 0 ? target : null, refusals, standing };
+}

@@ -460,6 +460,9 @@ export const RUN_KIND = [
   // Put the parts of a standing tenant on the versions chosen for them, and resolve every member again
   // off its product's manifest: also the one way a renamed chart reaches a tenant that already stands.
   "tenant-refresh-members",
+  // Move a standing tenant to a newer engine line: its bundle and the platform part that carries the
+  // bundle's engine together, in one registration commit, after an online backup.
+  "tenant-line-move",
   // Set, switch or clear the domain a tenant's mail is sent as, after the product's check answered
   // that mail from it is signed.
   "tenant-set-sender-domain",
@@ -529,7 +532,7 @@ export const RUN_FAMILY = {
     "mail-dns-publish", "mail-envelope-spf-publish", "dns-remove", "mail-dns-unpublish",
   ],
   consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate", "consumer-nightly-backup"],
-  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-refresh-members", "tenant-set-sender-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],
+  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-refresh-members", "tenant-line-move", "tenant-set-sender-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;
 
@@ -599,9 +602,9 @@ export const SECRET_WRITE_ACT = ["seeded", "set", "minted"] as const;
 export type SecretWriteAct = (typeof SECRET_WRITE_ACT)[number];
 
 /** What took ONE generation of a unit's backup, as the book of backups (unit_backups) records it: the
- *  Backup run (`manual`), a move, which dumps before it restores (`move`), or the Manager's nightly
- *  pass (`nightly`). */
-export const BACKUP_TRIGGER = ["manual", "move", "nightly"] as const;
+ *  Backup run (`manual`), a move, which dumps before it restores (`move`), the Manager's nightly
+ *  pass (`nightly`), or a tenant's move to a newer engine line (`line-move`), the way back from it. */
+export const BACKUP_TRIGGER = ["manual", "move", "nightly", "line-move"] as const;
 export type BackupTrigger = (typeof BACKUP_TRIGGER)[number];
 
 /** Where ONE generation stands: being written, written and verified, failed (its folder is deleted),

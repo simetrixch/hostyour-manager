@@ -49,7 +49,7 @@ async function backUpUnit(ports: RelocationPorts, ctx: StepCtx, u: NightlyUnit, 
     const settled = findBackupOfRun(ctx.db, ctx.runId, backupUnitOf(w));
     if (settled?.state === "failed") failed.push(`${u.label} (${settled.detail ?? "failed"})`);
     if (settled && settled.state !== "taking") return;
-    const g = await takeOnlineGeneration(ports, ctx, w);
+    const g = await takeOnlineGeneration(ports, ctx, w, "nightly");
     ctx.log("meta", `${u.label}: generation ${g.generation} written and verified in ${g.folder}/`);
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);

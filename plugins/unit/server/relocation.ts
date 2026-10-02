@@ -333,10 +333,10 @@ export function verifyDumpStep(ports: RelocationPorts, worldOf: WorldOf): Step {
  *  access, its manifest and its verification — and settle it in the book either way. A write that
  *  lands during the dump may or may not be in it; the Backup run is the frozen copy. A failed
  *  generation is deleted from the box before the failure is thrown. */
-export async function takeOnlineGeneration(ports: RelocationPorts, ctx: StepCtx, w: RelocationWorld): Promise<UnitBackup> {
-  requireStorageBox(ports, "the nightly backup");
-  const image = requireDbtoolsImage(ports, "the nightly backup");
-  const g = openGeneration(ctx, w, "nightly");
+export async function takeOnlineGeneration(ports: RelocationPorts, ctx: StepCtx, w: RelocationWorld, trigger: BackupTrigger): Promise<UnitBackup> {
+  requireStorageBox(ports, `the ${trigger} backup`);
+  const image = requireDbtoolsImage(ports, `the ${trigger} backup`);
+  const g = openGeneration(ctx, w, trigger);
   try {
     await dumpInto(ports, ctx, w, g, image);
     await verifyInto(ports, ctx, w, g, image);
