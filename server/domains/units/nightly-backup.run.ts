@@ -9,7 +9,7 @@ import { apps, tenants } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { findBackupOfRun, listBackups, recordBackupPruned } from "../../db/unit-backups.ts";
 import {
-  backupUnitOf, requireDbtoolsImage, requireStorageBox, runRelocationJob, takeOnlineGeneration,
+  backupUnitOf, discardGenerationsCleanup, requireDbtoolsImage, requireStorageBox, runRelocationJob, takeOnlineGeneration,
   type RelocationPorts, type RelocationWorld, type WorldOf,
 } from "#unit/server/relocation.ts";
 import { MONGO_NAMESPACE, purgeGenerationJob } from "#unit/server/relocation-jobs.ts";
@@ -109,6 +109,8 @@ function nightlyDef(kind: "consumer-nightly-backup" | "tenant-nightly-backup", f
       };
     },
     steps: () => [nightlyStep(ports, family, unitsOf)],
+    // The step backs up every unit, so its abort discards the unfinished generation of every unit.
+    cleanups: () => [discardGenerationsCleanup(ports, (ctx) => unitsOf(ctx).map((u) => u.worldOf))],
   };
 }
 

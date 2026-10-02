@@ -14,7 +14,7 @@ import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts"
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
-import { takeOnlineGeneration } from "#unit/server/relocation.ts";
+import { discardGenerationCleanup, takeOnlineGeneration } from "#unit/server/relocation.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { loadTenantCluster } from "./lifecycle.ts";
 import { memberApplication } from "./tenant-fanout.ts";
@@ -271,7 +271,7 @@ export function makeTenantLineMoveDef(ports: TenantLineMovePorts): RunDefinition
       return { outcome: "planned", params, plan };
     },
     steps: (params) => tenantLineMoveSteps(ports, params),
-    cleanups: (params) => (params.standing ? [] : [restorePairingCleanup(ports, params)]),
+    cleanups: (params) => (params.standing ? [] : [discardGenerationCleanup(ports.relocation, tenantWorld(ports.relocation, params.tenantId)), restorePairingCleanup(ports, params)]),
     assertAbortable: (params, deps) => assertLineMoveAbortable(ports, params, deps.db),
   };
 }

@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import type { Cleanup } from "../../executor/types.ts";
 import type { DbHandle } from "../../db/client.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { listBackups, recordBackupFinished, recordBackupStarted } from "../../db/unit-backups.ts";
 import { makeConsumerNightlyBackupDef, makeTenantNightlyBackupDef } from "./nightly-backup.run.ts";
 import {
   openFixtureDb, seedClusters, seedMaster, seedConsumerRow, seedConsumerRegistration, seedTenantRows, seedTenantWorld,
-  makeFakes, consumerPorts, tenantPorts, driveSteps, jobNames, CONSUMER, GUID, INSTALLATION, SOURCE,
+  makeFakes, consumerPorts, tenantPorts, driveSteps, jobNames, stepCtx, CONSUMER, GUID, INSTALLATION, SOURCE,
 } from "./relocation.fixture.ts";
 
 // The nightly pass of hostyour-cloud#254: every standing unit backed up online into a new generation,
@@ -85,6 +86,59 @@ describe("consumer-nightly-backup", () => {
     expect(ghost[0]!.detail).toMatch(/not registered at prod/);
     // The failed generation was taken off the box again, before the failure was reported.
     expect(jobNames(f.source)).toContain("reloc-purge-generation-ghost");
+  });
+});
+
+describe("a nightly run whose Manager died mid-dump", () => {
+  /** The pass over acme and a second consumer, ghost, whose world resolves as the dump's does. */
+  function twoConsumers(): { ports: ReturnType<typeof consumerPorts>; f: ReturnType<typeof makeFakes> } {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    db.db.insert(apps).values({ id: "app_2", clusterId: SOURCE.clusterId, name: "ghost", stage: "prod", host: "ghost", repoUrl: "https://github.com/x/ghost.git", chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
+    const f = makeFakes();
+    return { ports: consumerPorts(f), f };
+  }
+  /** A generation the dead run opened, as the book holds it after the restart. */
+  function opened(unit: string, state: "taking" | "ok"): void {
+    const g = { ...consumer, unit, generation: "20261003T030000Z" };
+    recordBackupStarted(db.db, { ...g, folder: `${INSTALLATION}/prod/consumers/${unit}/${g.generation}`, trigger: "nightly", runId: "run_reloc" });
+    if (state === "ok") recordBackupFinished(db.db, g, { state: "ok" });
+  }
+
+  it("arms the discard on the run as it opens a generation, before the dump can die", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const ports = consumerPorts(makeFakes());
+    await seedConsumerRegistration(ports.registrations);
+    const armed: string[] = [];
+    const [step] = makeConsumerNightlyBackupDef(ports).steps({});
+    await step!.run({ ...stepCtx(db, step!.name, {}, []), registerCleanup: (c: Cleanup) => armed.push(c.name) });
+    expect(armed).toEqual(["discard-generation"]);
+    expect(makeConsumerNightlyBackupDef(ports).cleanups!({}).map((c) => c.name)).toEqual(["discard-generation"]);
+  });
+
+  it("PLANTED DEFECT: its abort deletes the unfinished generation of every unit, not only the first", async () => {
+    const { ports, f } = twoConsumers();
+    opened(CONSUMER, "taking");
+    opened("ghost", "taking");
+    const [discard] = makeConsumerNightlyBackupDef(ports).cleanups!({});
+    await discard!.run(stepCtx(db, discard!.name, {}, []));
+    expect(listBackups(db.db, consumer).map((b) => b.state)).toEqual(["failed"]);
+    expect(listBackups(db.db, { ...consumer, unit: "ghost" }).map((b) => b.state)).toEqual(["failed"]);
+    expect(jobNames(f.source)).toEqual(expect.arrayContaining([`reloc-purge-generation-${CONSUMER}`, "reloc-purge-generation-ghost"]));
+  });
+
+  it("PLANTED INNOCENT: its abort leaves a generation the dead run had verified", async () => {
+    const { ports, f } = twoConsumers();
+    opened(CONSUMER, "ok");
+    opened("ghost", "taking");
+    const [discard] = makeConsumerNightlyBackupDef(ports).cleanups!({});
+    await discard!.run(stepCtx(db, discard!.name, {}, []));
+    expect(listBackups(db.db, consumer).map((b) => b.state)).toEqual(["ok"]);
+    expect(listBackups(db.db, { ...consumer, unit: "ghost" }).map((b) => b.state)).toEqual(["failed"]);
+    expect(jobNames(f.source)).not.toContain(`reloc-purge-generation-${CONSUMER}`);
   });
 });
 

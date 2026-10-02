@@ -161,6 +161,12 @@ describe("tenant-line-move writes", () => {
     expect(cleanups.map((c) => c.name)).toEqual(["restore-pairing"]);
   });
 
+  it("PLANTED DEFECT: its abort can resolve the discard its backup arms, so a Manager that died mid-dump leaves no taking generation", async () => {
+    const { ports } = world();
+    const p = await planned(ports);
+    expect(makeTenantLineMoveDef(ports).cleanups!(p).map((c) => c.name)).toEqual(["discard-generation", "restore-pairing"]);
+  });
+
   it("PLANTED DEFECT: refuses where the registration carries neither pairing, as another run moved the tenant since", async () => {
     const { ports, registrations } = world();
     const p = await planned(ports);

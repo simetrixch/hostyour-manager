@@ -246,8 +246,8 @@ export function verifyQuiescedStep(ports: RelocationPorts, worldOf: WorldOf): St
 }
 
 /** The generation this run writes of the world's unit: entered in the book of backups the first time,
- *  the same one again when the step resumes. A Backup or a move arms the inverse that deletes an
- *  unfinished one; the nightly pass deletes it itself. */
+ *  the same one again when the step resumes. `inverse` is armed on the run, so an abort deletes the
+ *  generation while it is unfinished. */
 function openGeneration(ctx: StepCtx, w: RelocationWorld, trigger: BackupTrigger, inverse?: Cleanup): UnitBackup {
   const taken = findBackupOfRun(ctx.db, ctx.runId, backupUnitOf(w));
   if (taken) return taken;
@@ -336,7 +336,9 @@ export function verifyDumpStep(ports: RelocationPorts, worldOf: WorldOf): Step {
 export async function takeOnlineGeneration(ports: RelocationPorts, ctx: StepCtx, w: RelocationWorld, trigger: BackupTrigger): Promise<UnitBackup> {
   requireStorageBox(ports, `the ${trigger} backup`);
   const image = requireDbtoolsImage(ports, `the ${trigger} backup`);
-  const g = openGeneration(ctx, w, trigger);
+  // Armed although a failure below deletes the generation itself: a Manager that dies mid-dump runs
+  // no catch, and only the abort's cleanup then takes the `taking` row and its folder away.
+  const g = openGeneration(ctx, w, trigger, discardGenerationCleanup(ports, () => Promise.resolve(w)));
   try {
     await dumpInto(ports, ctx, w, g, image);
     await verifyInto(ports, ctx, w, g, image);
@@ -351,22 +353,30 @@ export async function takeOnlineGeneration(ports: RelocationPorts, ctx: StepCtx,
 /** The name the dump step arms its inverse under; the run definition supplies the cleanup itself. */
 export const DISCARD_GENERATION = "discard-generation";
 
-/** The inverse of the dump, for an aborted run: a generation that never became `ok` is deleted from
- *  the box and marked failed. A verified one stays, because it is a complete backup whatever failed
- *  after it. */
+/** The inverse of the dump, for an aborted run of one unit. */
 export function discardGenerationCleanup(ports: RelocationPorts, worldOf: WorldOf): Cleanup {
+  return discardGenerationsCleanup(ports, () => [worldOf]);
+}
+
+/** The inverse of the dump, for an aborted run: every generation the run opened of the units
+ *  `worldsOf` names that never became `ok` is deleted from the box and marked failed. A verified one
+ *  stays, because it is a complete backup whatever failed after it. A unit that cannot be discarded
+ *  fails the cleanup, and a second abort runs it again past the units already settled. */
+export function discardGenerationsCleanup(ports: RelocationPorts, worldsOf: (ctx: StepCtx) => WorldOf[]): Cleanup {
   return {
     name: DISCARD_GENERATION,
     title: "Delete the unfinished backup generation from the Storage Box",
     run: async (ctx) => {
-      const w = await worldOf(ctx);
-      const g = findBackupOfRun(ctx.db, ctx.runId, backupUnitOf(w));
-      if (!g || g.state !== "taking") {
-        ctx.log("meta", g ? `generation ${g.generation} is ${g.state} — it stays` : "this run opened no generation — nothing to delete");
-        return;
+      for (const worldOf of worldsOf(ctx)) {
+        const w = await worldOf(ctx);
+        const g = findBackupOfRun(ctx.db, ctx.runId, backupUnitOf(w));
+        if (!g || g.state !== "taking") {
+          ctx.log("meta", g ? `generation ${g.generation} of ${w.unit} is ${g.state} — it stays` : `this run opened no generation of ${w.unit} — nothing to delete`);
+          continue;
+        }
+        await discardGeneration(ports, ctx, w, g, `run ${ctx.runId} was aborted before the generation was verified`);
+        ctx.log("meta", `unfinished generation ${g.folder}/ deleted from the storage box and marked failed`);
       }
-      await discardGeneration(ports, ctx, w, g, `run ${ctx.runId} was aborted before the generation was verified`);
-      ctx.log("meta", `unfinished generation ${g.folder}/ deleted from the storage box and marked failed`);
     },
   };
 }
