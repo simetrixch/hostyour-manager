@@ -293,6 +293,19 @@ describe("tenant-purge plan", () => {
     expect(dns.record(wildcard, "CNAME")).toBe("s1.example");
   });
 
+  it("spares the platform records under the apex of a cluster that still hosts tenants while it is being removed", async () => {
+    seedCluster();
+    seedSecondCluster();
+    db.db.update(clusters).set({ status: "removing" }).where(eq(clusters.id, "cls_2")).run(); // its tenants are being moved off
+    const p = { ...ports(new TenantRegistrations(new FakePlatformRepo())), resolveUnitApex: async (domain: string) => (domain === "s2.example" ? "other.example" : "example.com") };
+    const dns = p.dns as FakeDnsProvider;
+    recordDnsWrite(db.db, { name: "*.acme.other.example", type: "CNAME", content: "s2.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
+    dns.seed("*.acme.other.example", "CNAME", "s2.example");
+    const unnamed = await planned(p);
+    await makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: () => {} } as unknown as StepCtx);
+    expect(dns.record("*.acme.other.example", "CNAME")).toBe("s2.example");
+  });
+
   it("spares the platform records under its own cluster's apex also where that cluster no longer counts as hosting", async () => {
     seedCluster();
     db.db.update(clusters).set({ status: "removed" }).where(eq(clusters.id, "cls_1")).run(); // a purge runs for leftovers there
