@@ -92,7 +92,8 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
   // more (mail-dns-publish is refused for the domain).
   const serviceNote = { note: `${domain}'s own mail service keeps this record` };
   const serviceKeeps = (row: MailDnsRow): MailDnsRow => (row.note === undefined ? row : { ...row, ...serviceNote });
-  const keyUnpublished = (row: MailDnsRow): MailDnsRow => (row.note === undefined ? row : { ...row, note: `no run here publishes this key: mail-dns-publish is refused for ${domain}` });
+  // A doubled key keeps its act, a removal by hand at the provider: no run here chooses between two keys.
+  const keyUnpublished = (row: MailDnsRow): MailDnsRow => (row.note === undefined || row.note.startsWith("remove ") ? row : { ...row, note: `no run here publishes this key: mail-dns-publish is refused for ${domain}` });
 
   const names = mailRecordNames(domain, stage);
   const apexSpf = (await dns.txt(names.spf)).filter(MAIL_RECORD_TAG.spf);

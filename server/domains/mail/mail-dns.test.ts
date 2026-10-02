@@ -88,6 +88,7 @@ describe("mailDnsRows", () => {
     dns.seedTxt(MAIL_NAME, `v=spf1 ip4:${EGRESS} -all`);
     const rows = await mailDnsRows(platformNeed(), dns);
     expect(rows.map((r) => `${r.record}:${r.ok}`)).toEqual(["spf:true", "envelope-spf:true", "a:true", "dkim:true", "dmarc:true", "ptr:true"]);
+    expect(rows.every((r) => r.note === undefined)).toBe(true); // a green row carries no act
     expect(rows.find((r) => r.record === "envelope-spf")).toMatchObject({ name: MAIL_NAME, expected: `one v=spf1 record naming ip4:${EGRESS}`, found: `v=spf1 ip4:${EGRESS} -all` });
     expect(dns.asked).toContain(`TXT ${MAIL_NAME}`);
   });
@@ -117,9 +118,18 @@ describe("mailDnsRows", () => {
   it("the platform domain's apex SPF is judged as its mail service's one record, whatever addresses it names", async () => {
     const dns = published();
     dns.seedTxt("example.com", "v=spf1 include:spf.protection.outlook.com -all");
-    expect((await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "spf")).toMatchObject({
-      ok: true, expected: "one v=spf1 record, kept by the domain's own mail service", found: "v=spf1 include:spf.protection.outlook.com -all",
-    });
+    const green = (await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "spf");
+    expect(green).toMatchObject({ ok: true, expected: "one v=spf1 record, kept by the domain's own mail service", found: "v=spf1 include:spf.protection.outlook.com -all" });
+    expect(green?.note).toBeUndefined();
+    // No apex SPF at all is red as well: SPF itself asks for one record.
+    dns.seedTxt("example.com", "MS=ms123");
+    expect((await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "spf")).toMatchObject({ ok: false, found: null, note: "example.com's own mail service keeps this record" });
+  });
+
+  it("a doubled key under the platform's selector keeps its act, a removal by hand at the provider", async () => {
+    const dns = published();
+    dns.seedTxt("prod._domainkey.example.com", `v=DKIM1; k=rsa; p=${KEY}`, "v=DKIM1; k=rsa; p=MIIBother");
+    expect((await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "dkim")).toMatchObject({ ok: false, note: "remove 1 of the 2 records under this selector by hand" });
   });
 
   it("PLANTED DEFECT: a red row of the platform domain points at no refused run: the service keeps its records, and no run publishes the platform's key", async () => {
@@ -177,6 +187,10 @@ describe("readMailDns", () => {
     expect(view.domains[0]!.publishRefusal).toMatch(/^example\.com is the platform domain: its mail runs on its own mail service/);
     expect(view.domains[1]!.publishRefusal).toBeNull();
     expect(view.domains[0]!.rows.find((r) => r.record === "envelope-spf")?.name).toBe("mail.example.com");
+    // The platform domain's apex SPF is its mail service's, judged without the egress: one naming none is green.
+    dns.seedTxt("example.com", "v=spf1 include:spf.protection.outlook.com -all");
+    const again = await readMailDns({ db: db.db, platformRepo, publicDns: dns });
+    expect(again.domains[0]!.rows.find((r) => r.record === "spf")?.ok).toBe(true);
     expect(view.domains[1]!.rows.some((r) => r.record === "envelope-spf")).toBe(false);
     // No sender, so no key the Manager holds: the customer domain's DKIM is the relay's, counted only.
     expect(view.domains[0]!.rows.find((r) => r.record === "dkim")?.expected).toBe("one v=DKIM1 record carrying the relay's public key");
