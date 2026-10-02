@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { getTenantVersions } from "../api.ts";
 import { VersionsDialog } from "./VersionsDialog.tsx";
+import { TenantLineMoveOffer } from "./TenantLineMoveOffer.tsx";
 
 /** The action-bar button that opens a tenant's Versions dialog. Confirming only PLANS the run: the parts
  *  named move to the version chosen for each, and the member entries are resolved again off the
  *  product's manifest. Beside it, the switch that lets every release move the tenant by itself: the
  *  Manager then starts this same run when a release of a part the tenant renders succeeds at its
  *  stage (hostyour-manager#328). */
-export function TenantVersionsAction(props: { tenantId: string; subdomain: string; busy: boolean; onSet: (versions: Record<string, string>) => void; following: boolean; onFollow: (on: boolean) => void }) {
+export function TenantVersionsAction(props: { tenantId: string; subdomain: string; busy: boolean; onSet: (versions: Record<string, string>) => void; onMoveLine: (line: string) => void; following: boolean; onFollow: (on: boolean) => void }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -30,6 +31,7 @@ export function TenantVersionsAction(props: { tenantId: string; subdomain: strin
             This <strong>plans</strong> a run and opens it. Every app of this tenant that uses a part moves with it, no other
             tenant changes, and the member entries are resolved again off the product&apos;s manifest.
           </p>
+          <TenantLineMoveOffer tenantId={props.tenantId} busy={props.busy} onMove={(line) => { setOpen(false); props.onMoveLine(line); }} />
         </VersionsDialog>
       )}
     </>

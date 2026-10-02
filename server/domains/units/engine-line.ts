@@ -10,8 +10,8 @@
 // bundle release that was built: a build unit of the same run may have moved a pin the plan could not
 // judge, and a repository an earlier pass left standing keeps its own apps.yaml.
 //
-// A move to a new line needs the bundle and the engines to move together, and nothing here does that:
-// a pairing across lines is refused, and the refusal says so.
+// A move to a new line moves the bundle and the engines together, and only tenant-line-move does that
+// (tenant-line-move.run.ts): everywhere else a pairing across lines is refused, and the refusal names it.
 import type { AppsEngine, AppsManifest } from "../../../shared/apps-manifest.ts";
 import { parseAppsManifest, APPS_MANIFEST_PATH } from "../../../shared/apps-manifest.ts";
 import { approvedImageTag } from "../../../shared/tenant.ts";
@@ -48,7 +48,7 @@ export function engineLineRefusal(engine: AppsEngine | undefined, versions: Memb
     return tag !== undefined && versionLine(tag) !== engine.line ? [`${member} would run ${engine.build} ${tag}`] : [];
   });
   if (off.length === 0) return null;
-  return `the apps bundle is written for ${engine.build} ${engine.line}, and ${off.join(", ")}, of another line. A bundle and an engine on different lines are refused; moving a tenant to a new line needs its bundle and its engines to move together, which the Manager does not do`;
+  return `the apps bundle is written for ${engine.build} ${engine.line}, and ${off.join(", ")}, of another line. A bundle and an engine on different lines are refused; a tenant moves to a new line with its bundle and its engines together, through "Move to line" in its Versions dialog (the run tenant-line-move)`;
 }
 
 /** Whether `next` holds a version the tenant may not run today: a build moved to another line, or one

@@ -18,6 +18,7 @@ import type { ServerReachView } from "../../shared/api-types-reach.ts";
 // clusters/platform/values-common.yaml) and what the prefill answers, identity included.
 import type { ChannelStagesView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
 import type { LatestBackupsView, UnitBackupView } from "../../shared/api-types-backups.ts";
+import type { LineMoveView } from "../../shared/api-types-line-move.ts";
 import type { MailDnsPublishInput, MailDnsView, MailEnvelopeSpfPublishInput } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
@@ -687,6 +688,11 @@ export const getTenantVersions = (tenantId: string): Promise<VersionsView> => re
  *  entry resolved again off the product's manifest. */
 export const setTenantFollowReleases = (tenantId: string, followReleases: boolean): Promise<{ followReleases: boolean }> =>
   put<{ followReleases: boolean }>(`/api/tenants/${tenantId}/follow-releases`, { followReleases });
+/** The engine line a tenant runs and the move to a newer one the Versions dialog offers. */
+export const getTenantLineMoves = (tenantId: string): Promise<LineMoveView> => req<LineMoveView>(`/api/tenants/${tenantId}/line-moves`);
+/** Plan tenant-line-move to `line`: the bundle and the platform part on that line, in one commit. */
+export const planTenantLineMove = (tenantId: string, line: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/line-move`, { line });
 export const setTenantVersions = (tenantId: string, versions: Record<string, string>): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/refresh-members`, { versions });
 

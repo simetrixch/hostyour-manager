@@ -4,7 +4,7 @@ import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
   getTenant, setTenantFollowReleases, getTenantAppCatalog, addTenantApp, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
-  setTenantSize, setTenantRouting, setTenantVersions, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns,
+  setTenantSize, setTenantRouting, setTenantVersions, planTenantLineMove, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns,
   type TenantDetailView,
 } from "../api.ts";
 import { tenantRowOffer } from "../tenantRows.ts";
@@ -297,7 +297,7 @@ export function TenantDetail() {
               answer and the run's wait could not end — the route refuses it too. */}
           {!unfinished && !t.suspended && <SetRoutingAction subdomain={t.subdomain} routing={t.routing} busy={busy} onRoute={(next) => void act(() => setTenantRouting(tenantId, next))} />}
           {!unfinished && !t.suspended && <TenantDomainActions t={t} busy={busy} act={act} />}
-          {!unfinished && !t.suspended && <TenantVersionsAction tenantId={tenantId} subdomain={t.subdomain} busy={busy} onSet={(versions) => void act(() => setTenantVersions(tenantId, versions))} following={t.followReleases} onFollow={(on) => void setTenantFollowReleases(tenantId, on).then(() => setTenant((cur) => cur && { ...cur, followReleases: on })).catch((err: unknown) => setError(msg(err)))} />}
+          {!unfinished && !t.suspended && <TenantVersionsAction tenantId={tenantId} subdomain={t.subdomain} busy={busy} onSet={(versions) => void act(() => setTenantVersions(tenantId, versions))} onMoveLine={(line) => void act(() => planTenantLineMove(tenantId, line))} following={t.followReleases} onFollow={(on) => void setTenantFollowReleases(tenantId, on).then(() => setTenant((cur) => cur && { ...cur, followReleases: on })).catch((err: unknown) => setError(msg(err)))} />}
           {!unfinished && (
             <button type="button" className="btn" disabled={busy} onClick={() => setBackupT(t)}>
               Back up

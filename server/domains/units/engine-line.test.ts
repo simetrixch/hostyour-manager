@@ -32,7 +32,7 @@ describe("the engine line a bundle is written for", () => {
     expect(refusal).toContain("written for example-engine 0.3");
     expect(refusal).toContain("web would run example-engine 0.4.000-stable-20261001000000-abc1234");
     expect(refusal).not.toContain("erp would run");
-    expect(refusal).toContain("which the Manager does not do");
+    expect(refusal).toContain(`through "Move to line" in its Versions dialog (the run tenant-line-move)`);
   });
 
   it("judges nothing for a bundle that declares no engine", () => {
