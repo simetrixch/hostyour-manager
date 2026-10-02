@@ -293,10 +293,10 @@ describe("tenant-purge plan", () => {
     expect(dns.record(wildcard, "CNAME")).toBe("s1.example");
   });
 
-  it("spares the platform records under the apex of a cluster that still hosts tenants while it is being removed", async () => {
+  it.each(["rebuilding", "removing"] as const)("spares the platform records under the apex of a cluster that still hosts tenants while it is %s", async (status) => {
     seedCluster();
     seedSecondCluster();
-    db.db.update(clusters).set({ status: "removing" }).where(eq(clusters.id, "cls_2")).run(); // its tenants are being moved off
+    db.db.update(clusters).set({ status }).where(eq(clusters.id, "cls_2")).run();
     const p = { ...ports(new TenantRegistrations(new FakePlatformRepo())), resolveUnitApex: async (domain: string) => (domain === "s2.example" ? "other.example" : "example.com") };
     const dns = p.dns as FakeDnsProvider;
     recordDnsWrite(db.db, { name: "*.acme.other.example", type: "CNAME", content: "s2.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
