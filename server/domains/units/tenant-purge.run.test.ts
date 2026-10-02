@@ -236,6 +236,19 @@ describe("tenant-purge plan", () => {
     expect((await planned(ports(reg))).plan.summary).toContain("remove the tenant's wildcard DNS record");
   });
 
+  it("removes the tenant's own-domain records the book names also where the purge knows its subdomain", async () => {
+    seedCluster();
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
+    const p = ports(reg);
+    const dns = p.dns as FakeDnsProvider;
+    recordDnsWrite(db.db, { name: "shop.acme.example", type: "CNAME", content: "s1.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_dom" });
+    dns.seed("shop.acme.example", "CNAME", "s1.example");
+    const named = await planned(p);
+    await makeTenantPurgeDef(p).steps(named.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: named.params, log: () => {}, checkpoint: () => {} } as unknown as StepCtx);
+    expect(dns.record("shop.acme.example", "CNAME")).toBeUndefined();
+  });
+
   it("leaves a record under the platform's domain that a newer tenant stands on, although the book still names the purged tenant", async () => {
     seedCluster(); // no row and no pointer: the purge knows no subdomain of this tenant
     const p = ports(new TenantRegistrations(new FakePlatformRepo()));
