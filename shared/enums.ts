@@ -495,6 +495,14 @@ export const RUN_KIND = [
 ] as const;
 export type RunKind = (typeof RUN_KIND)[number];
 
+// Run kinds no build runs any more, whose runs still stand in the runs table. A run is history, so
+// deleting a run kind leaves its rows as they are, and the change that deletes the kind adds it
+// here. runs.kinds_known (server/boot/selfchecks.ts) then reads those rows as known, while a kind
+// in neither list is still a row some migration missed.
+export const RETIRED_RUN_KIND = [
+  "tenant-apps-repo-purge",                                     // deleted with its build scan
+] as const;
+
 /**
  * The run families — the units the run definitions are assembled in, and the units the UI filters runs by.
  * `fixture` and `cluster` are registered unconditionally by buildRunDefinitions (server/domains/runs/
