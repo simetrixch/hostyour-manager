@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/apps-manifest.ts";
-import { newWebsiteName, websiteFolder } from "../tenantAppRows.ts";
+import { newWebsiteName, unknownDomainText, websiteFolder } from "../tenantAppRows.ts";
 import { addTenantWebsite, setTenantWebsiteDomain } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
@@ -25,9 +25,7 @@ export function TenantWebsites(props: {
   const { tenantId, catalog, busy, act } = props;
   const folder = catalog ? websiteFolder(catalog.apps) : null;
   const websites = props.websites;
-  // A website the inventory records and the catalog's list does not name: say why its domain is not
-  // shown, as far as the page knows it.
-  const unknownDomain = catalog?.websites === undefined ? "domain unknown: the tenant's catalog cannot be read" : "domain unknown: the tenant's registration names no website of this name";
+  const unknownDomain = unknownDomainText(catalog);
   const [domain, setDomain] = useState("");
   const [site, setSite] = useState("");
   const [moving, setMoving] = useState<TenantWebsiteView | null>(null);

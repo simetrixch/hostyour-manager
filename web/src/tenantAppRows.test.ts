@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { listedWebsites, newWebsiteName, removedWebsites, tenantAppRows, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
+import { listedWebsites, unknownDomainText, newWebsiteName, removedWebsites, tenantAppRows, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
 import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 
 // The tenant page's Apps list: the bundle's apps folded with the inventory's rows. Pure, so it is
@@ -71,6 +71,13 @@ describe("undeployedApps", () => {
     // Loading, unreadable or degraded: the same, and a removed website is never listed as live.
     expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "veloluck", site: "veloluck", domain: null }]);
     expect(listedWebsites({}, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: null }]);
+  });
+
+  it("says why a website's domain is unknown only as far as the page knows it", () => {
+    expect(unknownDomainText(null)).toBe("domain unknown while the tenant's catalog loads");
+    expect(unknownDomainText({ error: "clone failed" })).toBe("domain unknown: the tenant's catalog cannot be read");
+    expect(unknownDomainText({ reason: "tenant onboarding is not configured on this manager" })).toBe("domain unknown: the catalog is not read for this tenant");
+    expect(unknownDomainText({ websites: [] })).toBe("domain unknown: the tenant's registration names no website of this name");
   });
 
   it("PLANTED INNOCENT: a removed app names no site and stays under Apps as offboarded", () => {

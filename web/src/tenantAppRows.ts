@@ -64,6 +64,16 @@ export function listedWebsites(catalog: Pick<TenantAppCatalogView, "websites"> |
   return [...named, ...unnamed.map((r) => ({ name: r.name, site: r.site, domain: null }))];
 }
 
+/** Why the Websites section shows no domain for a website only the inventory names, as far as the page
+ *  knows it: the catalog still loads, the route reads none for the tenant by design (its `reason`), it
+ *  could not be read, or it answered and the registration names no website of that name. */
+export function unknownDomainText(catalog: Pick<TenantAppCatalogView, "websites" | "reason" | "error"> | null): string {
+  if (catalog === null) return "domain unknown while the tenant's catalog loads";
+  if (catalog.error !== undefined) return "domain unknown: the tenant's catalog cannot be read";
+  if (catalog.reason !== undefined) return "domain unknown: the catalog is not read for this tenant";
+  return "domain unknown: the tenant's registration names no website of this name";
+}
+
 /** The apps the add-app control offers: the bundle's undeployed ones, in catalog order, no website
  *  folder among them. */
 export function undeployedApps(catalog: readonly TenantCatalogAppView[]): TenantCatalogAppView[] {
