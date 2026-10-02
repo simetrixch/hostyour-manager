@@ -159,7 +159,7 @@ export const redeploySlave = (serverId: string): Promise<{ runId: string }> => p
 export const redeployAllSlaves = (): Promise<{ runId: string }> => planRun("cluster-redeploy-slaves", {});
 /** The installation's mail DNS as receivers see it, measured now at public resolvers (the Mail page). */
 export const getMailDns = (): Promise<MailDnsView> => req("/api/mail/dns");
-/** The mail DNS of ONE sender domain, published from the master (the Mail page offers one run per domain). */
+/** The mail DNS of the alert domain, published from the master; the platform domain is refused. */
 export const publishMailDns = (input: MailDnsPublishInput): Promise<{ runId: string }> =>
   planRun("mail-dns-publish", input as unknown as Record<string, unknown>);
 /** The inverse: the SPF, DKIM and DMARC of ONE sender domain, deleted at the DNS provider in one

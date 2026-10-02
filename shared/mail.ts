@@ -4,8 +4,9 @@
 // never the platform's; everything here is about what receivers of OUR mail look up.
 import type { DmarcPolicy, Stage } from "./enums.ts";
 
-/** POST /api/runs {kind: "mail-dns-publish"} — the mail DNS of ONE of the two sender domains (the
- *  master's map names both), published from the master by the programs checkout's publish-mail-dns program.
+/** POST /api/runs {kind: "mail-dns-publish"} — the mail DNS of the alert domain (the master's map
+ *  names it; the platform domain is refused, platformDomainRefusal), published from the master by the
+ *  programs checkout's publish-mail-dns program.
  *  The two DMARC values are the operator's; the egress address is read off the master's own A record. */
 export interface MailDnsPublishInput {
   serverId: string;
@@ -85,13 +86,13 @@ export function envelopeDomainOf(platformDomain: string): string {
   return `mail.${platformDomain}`;
 }
 
-/** The refusal for the platform domain's own mail records. Its mail runs on its own mail service,
- *  which controls its apex SPF, its MX, its DKIM selectors and its DMARC policy, so a write or a
- *  removal from here would change that service's mail. */
+/** The refusal of mail-dns-publish and mail-dns-unpublish for the platform domain. Its mail runs on its
+ *  own mail service, which controls its apex SPF, its MX, the DKIM selectors it signs with and its DMARC
+ *  policy; the two runs write and delete that apex SPF and that DMARC policy. */
 export function platformDomainRefusal(domain: string): string {
   return (
-    `${domain} is the platform domain: its mail runs on its own mail service, which controls its records ` +
-    `(the apex SPF, the MX, the DKIM selectors and the DMARC policy), so this Manager publishes and removes none of them. ` +
+    `${domain} is the platform domain: its mail runs on its own mail service, which controls its apex SPF, its MX, ` +
+    "the DKIM selectors that service signs with and its DMARC policy, so the runs that write and delete the apex SPF and the DMARC policy are refused for it. " +
     `The SPF of ${envelopeDomainOf(domain)}, the name the platform's mail transfer agent sends its envelope from, is the platform's own and has its own run`
   );
 }

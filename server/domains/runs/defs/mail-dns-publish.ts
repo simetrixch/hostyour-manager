@@ -185,7 +185,11 @@ export function bookedTxtProgramStep(ports: Pick<MailDnsPublishPorts, "dns">, se
       const { cluster } = loadActiveCluster(ctx.db, serverId);
       const { owner, published } = await booking(cluster);
       const cp = ctx.readCheckpoint<BookedCheckpoint>() ?? {};
-      const before = cp.before ?? (await readPublishedTxt(dns, published, ctx.signal));
+      // A reading in another shape (one keyed by record kind, taken before the names became the keys)
+      // would answer null for every name and book every record as inserted; it is read again instead,
+      // which can at worst book a write the program made as no change.
+      const held = cp.before !== undefined && published.every(({ name }) => name in cp.before!) ? cp.before : undefined;
+      const before = held ?? (await readPublishedTxt(dns, published, ctx.signal));
       cp.before = before;
       ctx.checkpoint(cp);
       await program.run({

@@ -46,10 +46,14 @@ export function writeOwnerCell(owner: DnsWriteRow["owner"]): string {
   return owner.stage === undefined ? `${owner.kind} ${owner.name}` : `${owner.kind} ${owner.name} (${owner.stage})`;
 }
 
-function WriteRow({ row, selected, onToggle }: { row: DnsWriteRow; selected: boolean; onToggle: () => void }) {
+function WriteRow({ row, selected, onToggle, heldBy }: { row: DnsWriteRow; selected: boolean; onToggle: () => void; heldBy: string | undefined }) {
   return (
     <tr>
-      <td><input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select ${recordKey(row)}`} /></td>
+      <td>
+        {heldBy === undefined
+          ? <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select ${recordKey(row)}`} />
+          : <input type="checkbox" checked={false} disabled title={`read-only: ${heldBy} keeps this record now`} aria-label={`${recordKey(row)} is read-only`} />}
+      </td>
       <td><span className={row.act === "inserted" ? "chip chip--ok" : "chip"}>{row.act}</span></td>
       <td>{writeOwnerCell(row.owner)}</td>
       <td className="mono">{row.name}</td>
@@ -66,9 +70,12 @@ function WriteRow({ row, selected, onToggle }: { row: DnsWriteRow; selected: boo
   );
 }
 
-/** Mount it keyed on `data.readAt`: a fresh reading is a fresh table, and the selection starts empty. */
-export function DnsWritesTable({ data, busy, onRemove }: { data: DnsWritesView; busy: boolean; onRemove: (records: DnsRemoveRecord[]) => void }) {
-  const sel = useRecordSelection(data.rows);
+/** Mount it keyed on `data.readAt`: a fresh reading is a fresh table, and the selection starts empty.
+ *  `heldBy` names, by record key, the rows the inventory lists read-only and who keeps them now: a
+ *  record this Manager once wrote that another party keeps, such as the platform domain's apex SPF.
+ *  Those rows cannot be ticked, because the run would refuse them. */
+export function DnsWritesTable({ data, busy, onRemove, heldBy }: { data: DnsWritesView; busy: boolean; onRemove: (records: DnsRemoveRecord[]) => void; heldBy: ReadonlyMap<string, string> }) {
+  const sel = useRecordSelection(data.rows.filter((row) => !heldBy.has(recordKey(row))));
   return (
     <>
       {data.skipped.map((why) => <div key={why} className="alert alert--warn">{why}</div>)}
@@ -93,7 +100,7 @@ export function DnsWritesTable({ data, busy, onRemove }: { data: DnsWritesView; 
                 </tr>
               </thead>
               <tbody>
-                {data.rows.map((row) => <WriteRow key={recordKey(row)} row={row} selected={sel.isSelected(row)} onToggle={() => sel.toggle(row)} />)}
+                {data.rows.map((row) => <WriteRow key={recordKey(row)} row={row} selected={sel.isSelected(row)} onToggle={() => sel.toggle(row)} heldBy={heldBy.get(recordKey(row))} />)}
               </tbody>
             </table>
           </div>

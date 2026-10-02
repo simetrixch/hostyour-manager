@@ -81,8 +81,9 @@ export function removableRecords(rows: DnsRecordRow[], records: ReadonlyArray<{ 
     throw errValidation(
       `${refused.length} of the ${records.length} record(s) cannot be taken back, so none is: ${refused.join("; ")}. ` +
         `The DNS inventory names ${rows.length} record(s); a name not among them belongs to somebody — the installer, the customer's own mail ` +
-        "service, or an installation this one knows nothing about — and a read-only row is one no run of this Manager wrote: the sender " +
-        "domain's address record is the installer's and the reverse DNS is set where the egress address is rented",
+        "service, or an installation this one knows nothing about — and a read-only row is one this Manager may not take back: the sender " +
+        "domain's address record is the installer's, the reverse DNS is set where the egress address is rented, and the platform domain's apex " +
+        "SPF and DMARC are kept by its own mail service",
     );
   }
   return mine;

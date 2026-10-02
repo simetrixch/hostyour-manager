@@ -35,9 +35,9 @@ export interface MailDnsNeed {
   /** The name the platform's MTA sends its envelope from, whose SPF receivers check — the platform
    *  domain's (envelopeDomainOf); null for the alert domain, whose relay sends from the domain itself. */
   envelopeDomain: string | null;
-  /** Why no run of this platform publishes this domain's records — null where mail-dns-publish does.
-   *  A row it would point at the publish then says so instead. */
-  publishRefusal: string | null;
+  /** Whether the domain's mail runs on its own mail service, which keeps its apex SPF and its DMARC
+   *  policy (the platform domain): mail-dns-publish is refused for it, so no row points at that run. */
+  ownMailService: boolean;
 }
 
 const joined = (records: readonly string[]): string | null => (records.length === 0 ? null : records.join(" | "));
@@ -53,19 +53,21 @@ export function dkimRecordKey(spkiPem: string): string {
 /** The SPF row of one name: one v=spf1 record that names the egress address, or the act that makes it
  *  so — `publish` names the run that writes it. */
 function spfRow(record: "spf" | "envelope-spf", name: string, found: readonly string[], egress: string | null, egressName: string, publish: string): MailDnsRow {
+  // The address as a mechanism of its own, never as a prefix of a longer one (ip4:1.2.3.4 in ip4:1.2.3.45).
+  const names = (txt: string): boolean => txt.trim().split(/\s+/).some((term) => term === `ip4:${egress}` || term === `ip4:${egress}/32`);
   return {
     record,
     name,
     expected: egress === null ? `one v=spf1 record naming the address ${egressName} resolves to` : `one v=spf1 record naming ip4:${egress}`,
     found: joined(found),
-    ok: egress !== null && found.length === 1 && found[0]!.includes(`ip4:${egress}`),
+    ok: egress !== null && found.length === 1 && names(found[0]!),
     ...(egress === null
       ? noEgressNote(egressName)
       : found.length === 0
         ? { note: publish }
         : found.length > 1
           ? { note: `remove ${found.length - 1} of the ${found.length} v=spf1 records by hand, then ${publish}` }
-          : found[0]!.includes(`ip4:${egress}`)
+          : names(found[0]!)
             ? {}
             : { note: `${publish}; the address is merged into the record that stands` }),
   };
@@ -82,15 +84,23 @@ function spfRow(record: "spf" | "envelope-spf", name: string, found: readonly st
  *  and that name must resolve back to the address — the forward confirmation receivers check. The
  *  sender domain's apex is not asked to answer the address; it stays free for whatever it serves. */
 export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<MailDnsRow[]> {
-  const { domain, stage, egress, egressName, dkimPublicKey, envelopeDomain, publishRefusal } = need;
+  const { domain, stage, egress, egressName, dkimPublicKey, envelopeDomain, ownMailService } = need;
   const noEgress = noEgressNote(egressName);
   const publish = { note: "publish" };
-  // A row of a domain no run publishes points at nothing to run: it says why instead.
-  const elsewhere = (row: MailDnsRow): MailDnsRow =>
-    publishRefusal === null || row.note === undefined ? row : { ...row, note: `not published here: ${domain}'s mail records are its own mail service's` };
+  // A red row of a domain whose mail runs on its own mail service points at no run here: its apex SPF
+  // and DMARC are that service's, and the key under the platform's selector is published by no run any
+  // more (mail-dns-publish is refused for the domain).
+  const serviceNote = { note: `${domain}'s own mail service keeps this record` };
+  const serviceKeeps = (row: MailDnsRow): MailDnsRow => (row.note === undefined ? row : { ...row, ...serviceNote });
+  const keyUnpublished = (row: MailDnsRow): MailDnsRow => (row.note === undefined ? row : { ...row, note: `no run here publishes this key: mail-dns-publish is refused for ${domain}` });
 
   const names = mailRecordNames(domain, stage);
-  const spf = elsewhere(spfRow("spf", names.spf, (await dns.txt(names.spf)).filter(MAIL_RECORD_TAG.spf), egress, egressName, "publish"));
+  const apexSpf = (await dns.txt(names.spf)).filter(MAIL_RECORD_TAG.spf);
+  // The service's own SPF need not name this platform's address: receivers check the platform's mail
+  // at the envelope name. What it must be is one record, the rule of SPF itself.
+  const spf: MailDnsRow = ownMailService
+    ? { record: "spf", name: names.spf, expected: "one v=spf1 record, kept by the domain's own mail service", found: joined(apexSpf), ok: apexSpf.length === 1, ...(apexSpf.length === 1 ? {} : serviceNote) }
+    : spfRow("spf", names.spf, apexSpf, egress, egressName, "publish");
   const envelope = envelopeDomain === null
     ? []
     : [spfRow("envelope-spf", envelopeDomain, (await dns.txt(envelopeDomain)).filter(MAIL_RECORD_TAG["envelope-spf"]), egress, egressName, "publish the envelope SPF")];
@@ -151,7 +161,7 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
     ...(egress === null ? noEgress : mailName === null ? { note: `set the reverse DNS of ${egress} to the mail name at the hosting provider` } : {}),
   };
 
-  return [spf, ...envelope, aRow, elsewhere(dkimRow), elsewhere(dmarcRow), ptrRow];
+  return [spf, ...envelope, aRow, ownMailService ? keyUnpublished(dkimRow) : dkimRow, ownMailService ? serviceKeeps(dmarcRow) : dmarcRow, ptrRow];
 }
 
 export interface MailDnsDeps {
@@ -205,17 +215,16 @@ export async function readMailDns(deps: MailDnsDeps): Promise<MailDnsView> {
   const domains: MailDnsDomainView[] = [];
   for (const s of senderDomains) {
     const platform = s.role === "customer mail";
-    const publishRefusal = platform ? platformDomainRefusal(s.domain) : null;
     domains.push({
       ...s,
       rows: await mailDnsRows(
         {
           ...s, stage: cluster.stage, egressName: out.name, egress: out.address, dkimPublicKey: platform ? out.dkimPublicKey : null,
-          envelopeDomain: platform ? envelopeDomainOf(s.domain) : null, publishRefusal,
+          envelopeDomain: platform ? envelopeDomainOf(s.domain) : null, ownMailService: platform,
         },
         deps.publicDns,
       ),
-      publishRefusal,
+      publishRefusal: platform ? platformDomainRefusal(s.domain) : null,
     });
   }
   return {

@@ -17,10 +17,10 @@ const MAIL_NAME = "mail.example.com";
 const PEM = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0B\nAQEFAAOCAQ8A\n-----END PUBLIC KEY-----\n";
 const KEY = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A";
 const need = (over: Partial<MailDnsNeed> = {}): MailDnsNeed => ({
-  domain: "example.com", role: "customer mail", stage: "prod", egressName: "a1.example.net", egress: EGRESS, dkimPublicKey: KEY, envelopeDomain: null, publishRefusal: null, ...over,
+  domain: "example.com", role: "customer mail", stage: "prod", egressName: "a1.example.net", egress: EGRESS, dkimPublicKey: KEY, envelopeDomain: null, ownMailService: false, ...over,
 });
-/** The platform domain's need: its envelope sender's name, and the refusal of its own records. */
-const platformNeed = (over: Partial<MailDnsNeed> = {}): MailDnsNeed => need({ envelopeDomain: MAIL_NAME, publishRefusal: "example.com is the platform domain", ...over });
+/** The platform domain's need: its envelope sender's name, and its mail on its own mail service. */
+const platformNeed = (over: Partial<MailDnsNeed> = {}): MailDnsNeed => need({ envelopeDomain: MAIL_NAME, ownMailService: true, ...over });
 
 function published(): FakePublicDns {
   const dns = new FakePublicDns();
@@ -99,14 +99,37 @@ describe("mailDnsRows", () => {
     expect((await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "envelope-spf")).toMatchObject({ ok: false, note: "remove 1 of the 2 v=spf1 records by hand, then publish the envelope SPF" });
   });
 
-  it("PLANTED DEFECT: a domain no run of this platform publishes says why on its red rows, instead of sending the operator to a refused publish", async () => {
+  it("PLANTED DEFECT: an address that is a prefix of the egress is not read as the egress, in the apex SPF and the envelope SPF alike", async () => {
+    const dns = published();
+    dns.seedTxt("example.com", "v=spf1 ip4:203.0.113.95 -all");
+    dns.seedTxt(MAIL_NAME, "v=spf1 ip4:203.0.113.90 -all");
+    const rows = await mailDnsRows(platformNeed({ ownMailService: false }), dns);
+    expect(rows.find((r) => r.record === "spf")?.ok).toBe(false);
+    expect(rows.find((r) => r.record === "envelope-spf")?.ok).toBe(false);
+    // PLANTED INNOCENT: the address as its own term, bare or with /32, is the egress.
+    dns.seedTxt("example.com", `v=spf1 ip4:${EGRESS}/32 -all`);
+    dns.seedTxt(MAIL_NAME, `v=spf1 ip4:203.0.113.95 ip4:${EGRESS} -all`);
+    const again = await mailDnsRows(platformNeed({ ownMailService: false }), dns);
+    expect(again.find((r) => r.record === "spf")?.ok).toBe(true);
+    expect(again.find((r) => r.record === "envelope-spf")?.ok).toBe(true);
+  });
+
+  it("the platform domain's apex SPF is judged as its mail service's one record, whatever addresses it names", async () => {
     const dns = published();
     dns.seedTxt("example.com", "v=spf1 include:spf.protection.outlook.com -all");
+    expect((await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "spf")).toMatchObject({
+      ok: true, expected: "one v=spf1 record, kept by the domain's own mail service", found: "v=spf1 include:spf.protection.outlook.com -all",
+    });
+  });
+
+  it("PLANTED DEFECT: a red row of the platform domain points at no refused run: the service keeps its records, and no run publishes the platform's key", async () => {
+    const dns = published();
+    dns.seedTxt("example.com", "v=spf1 include:spf.protection.outlook.com -all", `v=spf1 ip4:${EGRESS} -all`);
     dns.seedTxt("prod._domainkey.example.com");
     dns.seedTxt("_dmarc.example.com");
     const rows = await mailDnsRows(platformNeed(), dns);
-    const why = "not published here: example.com's mail records are its own mail service's";
-    for (const record of ["spf", "dkim", "dmarc"] as const) expect(rows.find((r) => r.record === record)).toMatchObject({ ok: false, note: why });
+    for (const record of ["spf", "dmarc"] as const) expect(rows.find((r) => r.record === record)).toMatchObject({ ok: false, note: "example.com's own mail service keeps this record" });
+    expect(rows.find((r) => r.record === "dkim")).toMatchObject({ ok: false, note: "no run here publishes this key: mail-dns-publish is refused for example.com" });
     // The envelope sender's SPF is the platform's own, so its act stays the envelope publish.
     expect(rows.find((r) => r.record === "envelope-spf")?.note).toBe("publish the envelope SPF");
     expect(rows.find((r) => r.record === "a")?.note).toBeUndefined();

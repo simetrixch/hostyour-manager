@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import type { DnsInventoryView, DnsRecordRow, DnsRecordType, DnsWritesView } from "#core/shared/dns.ts";
 import { getDnsInventory, getDnsWrites, removeDnsRecords } from "#core/web/api.ts";
 import { DnsWritesTable, recordKey, useRecordSelection, type DnsRemoveRecord } from "./DnsWrites.tsx";
+import { heldRecords } from "./held-records.ts";
 
 // The DNS page in two tabs. FIRST the book: only the records a run of this Manager inserted or
 // updated, with the run, the time and what stands there now — what an operator asks after a day's
@@ -138,7 +139,7 @@ export function Dns() {
 
       <div role="tabpanel" id="panel-written" aria-labelledby="tab-written" hidden={tab !== "written"}>
         {writes === null && !error && <p className="muted">Reading the book against the provider…</p>}
-        {writes && <DnsWritesTable key={writes.readAt} data={writes} busy={busy} onRemove={(records) => void remove(records)} />}
+        {writes && <DnsWritesTable key={writes.readAt} data={writes} busy={busy} onRemove={(records) => void remove(records)} heldBy={heldRecords(data)} />}
       </div>
 
       <div role="tabpanel" id="panel-derived" aria-labelledby="tab-derived" hidden={tab !== "derived"}>

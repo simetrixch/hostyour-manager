@@ -14,7 +14,7 @@ const M1 = "m1.example.com";
 const S1 = "s1.example.com";
 const M1_ADDRESS = "203.0.113.9";
 
-/** The five rows the Mail page measures for one sender domain, as that page composes them. */
+/** The rows the Mail page measures for one sender domain, as that page composes them. */
 const mailView = (publishRefusal: string | null = null): MailDnsView => ({
   master: { serverId: "srv_m", name: "m1", fqdn: M1, stage: "prod" },
   sender: null,

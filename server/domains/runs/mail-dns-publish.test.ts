@@ -75,7 +75,7 @@ describe("mail-dns-publish plan", () => {
     const h = await makeHarness();
     seedMaster(h);
     await expect(makeMailDnsPublishDef(ports(h)).plan({ ...PARAMS, senderDomain: "example.com" }, { db: h.db.db }))
-      .rejects.toThrow(/example\.com is the platform domain: its mail runs on its own mail service, .* this Manager publishes and removes none of them/);
+      .rejects.toThrow(/example\.com is the platform domain: its mail runs on its own mail service, .* the runs that write and delete the apex SPF and the DMARC policy are refused for it/);
   });
 
   it("refuses the platform domain also where the map names it as the unit apex too, so the one block is the platform's", async () => {
@@ -230,6 +230,19 @@ describe("what the book of DNS writes learns from the publish", () => {
     // The re-entry finds the records already standing; without the checkpointed reading it would book nothing.
     await bookedProgramStep(PARAMS, ports(h, dns), programWriting(dns, { spf: SPF, dkim: DKIM, dmarc: DMARC })).run(ctx(h, [], slot));
     expect(listDnsWrites(h.db.db).map((r) => r.act)).toEqual(["inserted", "inserted", "inserted"]);
+  });
+
+  it("PLANTED DEFECT: a checkpoint keyed by record kind, from before the names were the keys, is read again and books no write nobody made", async () => {
+    const h = await makeHarness();
+    seedMaster(h);
+    const dns = new FakeDnsProvider();
+    dns.seed(ALERT, "TXT", SPF);
+    dns.seed(`prod._domainkey.${ALERT}`, "TXT", DKIM);
+    dns.seed(`_dmarc.${ALERT}`, "TXT", DMARC);
+    // The run crashed before this release, after the earlier attempt's program had written all three.
+    const slot: { checkpoint?: unknown } = { checkpoint: { before: { spf: null, dkim: null, dmarc: null }, program: { program: "publish-mail-dns", machineRunId: "mr_1" } } };
+    await bookedProgramStep(PARAMS, ports(h, dns), programWriting(dns, { spf: SPF, dkim: DKIM, dmarc: DMARC })).run(ctx(h, [], slot));
+    expect(listDnsWrites(h.db.db)).toEqual([]);
   });
 
   it("refuses without a DNS provider before the program runs — the reading has no other source", async () => {

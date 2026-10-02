@@ -55,7 +55,7 @@ export type DnsVerdict = "standing" | "absent" | "other";
 /** ONE record: who owns it, the name asked at the provider, what the owner's state says it must
  *  carry, what was found (null for no record at all), and whether a `dns-remove` run may take it
  *  back — false for every row the installer or the hosting provider owns. A mail row also says
- *  WHICH of the five mail records it is: a TXT name carries other services' records beside ours,
+ *  WHICH mail record it is: a TXT name carries other services' records beside ours,
  *  and the record's tag (shared/mail.ts MAIL_RECORD_TAG) is what picks ours among them. */
 export interface DnsRecordRow {
   owner: DnsOwner;
@@ -103,9 +103,10 @@ export interface DnsWriteRow {
   verdict: DnsVerdict | null;
 }
 
-/** GET /api/dns/writes — the book, read against the provider at `readAt`. Only removable records
- *  ever enter it, so every row may be taken back with `dns-remove`; the run still resolves the name
- *  in the inventory first, which is the permission. */
+/** GET /api/dns/writes — the book, read against the provider at `readAt`. A row may be taken back with
+ *  `dns-remove` where the inventory lists its record as removable; one the inventory lists read-only
+ *  (the platform domain's apex SPF and DMARC, written here before its own mail service kept them) is
+ *  shown as such. The run resolves every name in the inventory first, which is the permission. */
 export interface DnsWritesView {
   rows: DnsWriteRow[];
   skipped: string[];

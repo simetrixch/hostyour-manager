@@ -32,7 +32,7 @@ import { clusters } from "#core/server/db/schema/inventory.ts";
 import { DnsZoneUnknownError, type DnsProvider } from "#core/server/adapters/dns/port.ts";
 import { STAGE, type MemberRouting, type Stage } from "#core/shared/enums.ts";
 import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantZone } from "../../shared/unit-host.ts";
-import type { MailDnsDomainView, MailDnsRecord, MailDnsRow, MailDnsView } from "#core/shared/mail.ts";
+import { MAIL_TXT_RECORD, type MailDnsDomainView, type MailDnsRecord, type MailDnsRow, type MailDnsView } from "#core/shared/mail.ts";
 import type { DnsInventoryView, DnsOwner, DnsRecordRow, DnsRowType } from "#core/shared/dns.ts";
 
 export interface DnsInventoryDeps {
@@ -58,8 +58,8 @@ export interface DnsInventoryDeps {
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** Which of the mail records this platform PUBLISHES, and is therefore able to take back. */
-const MAIL_PUBLISHED: ReadonlySet<MailDnsRecord> = new Set<MailDnsRecord>(["spf", "envelope-spf", "dkim", "dmarc"]);
+/** Which of the mail records this platform writes, and is therefore able to take back. */
+const MAIL_PUBLISHED: ReadonlySet<MailDnsRecord> = new Set<MailDnsRecord>(MAIL_TXT_RECORD);
 
 /** The records a domain's own mail service keeps where its mail runs there: its apex SPF and its
  *  DMARC policy. The DKIM key under the platform's selector and the envelope sender's SPF stay the
