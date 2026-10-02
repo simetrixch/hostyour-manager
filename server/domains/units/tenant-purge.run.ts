@@ -210,6 +210,22 @@ interface TenantPurgeCluster {
   cluster: string; // the cluster short name — what the pointer's `cluster` field names
 }
 
+/** The unit apex of every cluster of this installation at `stage`, where a tenant of that stage may
+ *  have stood: a record under any of them is the platform's. Names each cluster whose apex cannot be
+ *  read instead. */
+async function platformApexes(db: Db, ports: TenantLifecyclePorts, stage: Stage): Promise<{ apexes: string[]; unread: string[] }> {
+  const apexes = new Set<string>();
+  const unread: string[] = [];
+  for (const row of db.select({ domain: clusters.domain, name: clusters.name }).from(clusters).where(eq(clusters.stage, stage)).all()) {
+    try {
+      apexes.add(await ports.resolveUnitApex(row.domain, stage));
+    } catch (e) {
+      unread.push(`${row.name} cannot be read (${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
+  return { apexes: [...apexes], unread };
+}
+
 function loadPurgeCluster(db: Db, p: TenantPurgeRequest): TenantPurgeCluster {
   const row = db
     .select({ id: clusters.id, domain: clusters.domain, name: clusters.name })
@@ -391,11 +407,18 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
           // that removed the registration and then failed left them with no subdomain to find them by.
           // A record under the platform's domain may stand for a newer tenant on the same subdomain by
           // now: its provision finds the record pointing at its cluster already and books nothing, so
-          // the book goes on naming this tenant. Only the records of the tenant's own domains go,
-          // which every writer books again.
-          const platformRecords = listDnsWrites(ctx.db).map((w) => w.name).filter((name) => name === unitApex || name.endsWith(`.${unitApex}`));
+          // the book goes on naming this tenant. That holds under the unit apex of every cluster the
+          // tenant may have stood on, so only the records of the tenant's own domains go, which every
+          // writer books again; and where an apex cannot be read, none goes.
+          const { apexes, unread } = await platformApexes(ctx.db, ports, c.stage);
+          if (unread.length > 0) {
+            const booked = listDnsWrites(ctx.db).filter((w) => w.type === "CNAME" && w.owner.kind === "tenant" && w.owner.name === p.guid).map((w) => w.name);
+            ctx.log("meta", `the unit apex of ${unread.join("; ")}, so no booked record of tenant ${p.guid} is removed: a record under it may stand for a newer tenant on the same subdomain. The tenant's booked records (${booked.join(", ") || "none"}) stand until they are removed by hand`);
+            return;
+          }
+          const platformRecords = listDnsWrites(ctx.db).map((w) => w.name).filter((name) => apexes.some((apex) => name === apex || name.endsWith(`.${apex}`)));
           await removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "tenant", name: p.guid, stage: c.stage }, except: platformRecords });
-          ctx.log("meta", `tenant ${p.guid} has no subdomain this purge may name (no live inventory row or pointer carries one), so no record under ${unitApex} is removed: an offboard removed them for a settled tenant, and a newer tenant may stand on the subdomain by now. A record there written before an earlier purge removed the registration stands until it is removed by hand`);
+          ctx.log("meta", `tenant ${p.guid} has no subdomain this purge may name (no live inventory row or pointer carries one), so no record under ${apexes.join(", ")} is removed: an offboard removed them for a settled tenant, and a newer tenant may stand on the subdomain by now. A record there written before an earlier purge removed the registration stands until it is removed by hand`);
           return;
         }
         // The record under EVERY routing, because an orphan's routing is known to no row, but only a

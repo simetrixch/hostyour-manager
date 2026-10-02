@@ -263,6 +263,35 @@ describe("tenant-purge plan", () => {
     expect(dns.record(wildcard, "CNAME")).toBe("s1.example");
   });
 
+  it("leaves a record under any cluster's platform domain without a subdomain, and still removes the tenant's own-domain record", async () => {
+    seedCluster(); // no row and no pointer: the purge knows no subdomain of this tenant
+    seedSecondCluster(); // the tenant lived there once, under another unit apex
+    const p = { ...ports(new TenantRegistrations(new FakePlatformRepo())), resolveUnitApex: async (domain: string) => (domain === "s2.example" ? "other.example" : "example.com") };
+    const dns = p.dns as FakeDnsProvider;
+    for (const name of ["*.acme.other.example", "shop.acme.example"]) {
+      recordDnsWrite(db.db, { name, type: "CNAME", content: "s2.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
+      dns.seed(name, "CNAME", "s2.example");
+    }
+    const unnamed = await planned(p);
+    await makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: () => {} } as unknown as StepCtx);
+    expect(dns.record("*.acme.other.example", "CNAME")).toBe("s2.example");
+    expect(dns.record("shop.acme.example", "CNAME")).toBeUndefined();
+  });
+
+  it("removes no booked record without a subdomain where a cluster's unit apex cannot be read, and says which", async () => {
+    seedCluster();
+    seedSecondCluster();
+    const p = { ...ports(new TenantRegistrations(new FakePlatformRepo())), resolveUnitApex: async (domain: string) => { if (domain === "s2.example") throw new Error("no install branch"); return "example.com"; } };
+    const dns = p.dns as FakeDnsProvider;
+    recordDnsWrite(db.db, { name: "shop.acme.example", type: "CNAME", content: "s1.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
+    dns.seed("shop.acme.example", "CNAME", "s1.example");
+    const logs: string[] = [];
+    const unnamed = await planned(p);
+    await makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: (_s: string, t: string) => logs.push(t) } as unknown as StepCtx);
+    expect(dns.record("shop.acme.example", "CNAME")).toBe("s1.example");
+    expect(logs.join("\n")).toContain("the unit apex of s2 cannot be read (no install branch), so no booked record of tenant");
+  });
+
   it("mutating def starts with attest-target under empty params (the armed check does def.steps({}))", () => {
     // guards.assertGuardsArmed evaluates def.steps({})[0].name — building the steps must not deref a
     // frozen target, so this must not throw and the first step must be attest-target.
