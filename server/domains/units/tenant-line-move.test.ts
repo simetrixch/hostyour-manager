@@ -17,6 +17,8 @@ const B03 = "0.3.002-stable-20260927000000";
 const B04 = "0.4.000-stable-20261010120000";
 const SHA03 = "a".repeat(40);
 const SHA04 = "b".repeat(40);
+/** A release declaring 0.4, minted before the one the tenant runs. */
+const B04_BEFORE = "0.4.000-stable-20260901000000";
 const P03 = "0.3.009-stable-20261001000000-1111111";
 const P04_OLD = "0.4.000-stable-20261009000000-2222222";
 const P04 = "0.4.001-stable-20261010000000-3333333";
@@ -33,7 +35,7 @@ function world(input: { approved: Record<string, string>; appsImageTag: string; 
   const repo = new FakePlatformRepo();
   for (const pins of input.pins) repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", pinsFile(pins));
   const reader = new FakeRepoReader();
-  const commits: Record<string, string> = { [B03]: SHA03, [B04]: SHA04 };
+  const commits: Record<string, string> = { [B03]: SHA03, [B04]: SHA04, [B04_BEFORE]: "c".repeat(40) };
   reader.scriptFor(REPO, { tags: (input.tags ?? [B03, B04]).map((name) => ({ name, commit: commits[name]! })) });
   reader.scriptFor(`${REPO}@${B03}`, { files: { "apps.yaml": ENGINE("0.3") } });
   reader.scriptFor(`${REPO}@${B04}`, { files: { "apps.yaml": ENGINE("0.4") } });
@@ -76,7 +78,7 @@ describe("readLineMove", () => {
   it("PLANTED DEFECT: refuses where a build of the engine's part has no release on the line at the stage, rather than move the engine alone", async () => {
     const answer = await read(world({ ...ON_03, pins: [{ "example-engine": P03, "example-app": P03 }, { "example-engine": P04, "example-app": P03 }] }), "0.4");
     expect(answer.target).toBeNull();
-    expect(answer.refusals).toEqual(["no release made example-platform 0.4.x available at prod for every build of it (example-engine, example-app)"]);
+    expect(answer.refusals).toEqual(["no release made example-app of example-platform 0.4.x available at prod"]);
   });
 
   it("PLANTED DEFECT: refuses a line no bundle release declares, and offers nothing where no newer line is released", async () => {
@@ -103,6 +105,18 @@ describe("readLineMove", () => {
   it("PLANTED DEFECT: a tenant on the line but not on its newest pairing is refused: within a line its releases and the Versions run move it", async () => {
     const answer = await read(world({ approved: { "example-engine": P04_OLD, "example-app": P04_OLD }, appsImageTag: `${B04}-bbbbbbb`, pins: BOTH_RELEASED }), "0.4");
     expect(answer).toMatchObject({ standing: false, target: null, refusals: ["tenant acme already runs line 0.4; within a line its releases and the Versions run move it"] });
+  });
+
+  it("PLANTED DEFECT: a bundle that declares no engine answers no line and refuses, rather than throw", async () => {
+    const w = world({ ...ON_03, pins: BOTH_RELEASED });
+    (w.ports.repo as FakeRepoReader).scriptFor(`${REPO}@${B03}`, { files: { "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n" } });
+    expect(await read(w)).toEqual({ line: null, toLine: null, target: null, refusals: [`the apps bundle of tenant acme at ${B03} declares no engine, so the line it runs is unknown`], standing: false });
+  });
+
+  it("PLANTED DEFECT: takes no release on the line that is older than the one the tenant runs", async () => {
+    const w = world({ ...ON_03, pins: BOTH_RELEASED, tags: [B03, B04_BEFORE] });
+    (w.ports.repo as FakeRepoReader).scriptFor(`${REPO}@${B04_BEFORE}`, { files: { "apps.yaml": ENGINE("0.4") } });
+    expect((await read(w, "0.4")).refusals).toEqual([`no release of ${REPO} that prod takes declares engine line 0.4`]);
   });
 
   it("throws for a tenant that runs no apps bundle: it has no line", async () => {

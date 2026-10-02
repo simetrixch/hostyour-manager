@@ -105,6 +105,13 @@ function restorePairingCleanup(ports: TenantLineMovePorts, p: TenantLineMovePara
         ctx.log("meta", `tenant ${p.guid}'s registration does not carry the pairing this run writes — this run never wrote it, or a Restore or another run wrote another since; left as it is`);
         return;
       }
+      // Asked again right before the write, as the abort's check is a moment earlier: a member that
+      // started the new line since must not get the old pairing on data the new one may have changed.
+      const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
+      const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, () => true, { timeoutMs: 1, labelSelector: `platform/tenant=${p.guid}` });
+      if (rendersAnyOfTarget(p, ports.deployRepoUrl, byName)) {
+        throw errValidation(`a member of tenant ${p.guid} renders line ${p.line} by now, so the line-${p.fromLine} pairing is not written back; the way back is the Restore of the line-move generation this run took`);
+      }
       const { commit } = await ports.registrations.setLinePairing(p.stage, p.guid, p.previous, ctx.runId);
       ctx.db.update(tenants).set({ approvedTags: p.previous.approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
       ctx.log("meta", `tenant ${p.guid} back on its line-${p.fromLine} pairing (${commit})`);
@@ -219,7 +226,7 @@ export function makeTenantLineMoveDef(ports: TenantLineMovePorts): RunDefinition
       if (!current) throw errNotFound(`tenant ${tc.guid} is not onboarded (no registration at ${tc.stage})`);
       const registryHost = registryHostFromChain(await ports.resolveClusterValueFiles(tc.domain, tc.stage));
       const reading = await readLineMove(ports, { stage: tc.stage, entry: current.entry, registryHost, line: req.line, log: ctx.log, signal: ctx.signal });
-      if (reading.refusals.length > 0 || reading.target === null) {
+      if (reading.line === null || reading.refusals.length > 0 || reading.target === null) {
         const why = reading.refusals.length > 0 ? reading.refusals.join("; ") : `no release of its bundle that ${tc.stage} takes declares line ${req.line}`;
         return { outcome: "rejected", summary: `tenant ${tc.subdomain} cannot move to line ${req.line}: ${why}`, planJson: reading };
       }

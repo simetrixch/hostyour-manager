@@ -33,8 +33,10 @@ const P04 = "0.4.001-stable-20261010000000-3333333";
 const ENGINE = (line: string): string => `apps:\n  - name: erp\n    title: ERP\nengine:\n  build: example-engine\n  line: "${line}"\n`;
 const MEMBERS = testMembers(["erp"]);
 const EXPECTED = MEMBERS.map((m) => memberApplication(GUID, m.name, "prod"));
-const ON_03 = { appsImageTag: `${B03}-aaaaaaa`, approvedTags: { erp: { "example-engine": P03, "example-app": P03 } } };
-const ON_04 = { appsImageTag: `${B04}-bbbbbbb`, approvedTags: { erp: { "example-engine": P04, "example-app": P04 } } };
+/** A build the move leaves alone, which renders before and after it, as a real tenant's auth does. */
+const AUTH = "0.2.004-stable-20260920000000-5555555";
+const ON_03 = { appsImageTag: `${B03}-aaaaaaa`, approvedTags: { auth: { "example-auth": AUTH }, erp: { "example-engine": P03, "example-app": P03 } } };
+const ON_04 = { appsImageTag: `${B04}-bbbbbbb`, approvedTags: { auth: { "example-auth": AUTH }, erp: { "example-engine": P04, "example-app": P04 } } };
 
 const pinsFile = (builds: Record<string, string>): string =>
   `builds:\n${Object.entries(builds).map(([name, tag]) => `  - { name: ${name}, image: ${name}, tag: "${tag}" }`).join("\n")}\n`;
@@ -162,7 +164,7 @@ describe("tenant-line-move writes", () => {
   it("PLANTED DEFECT: refuses where the registration carries neither pairing, as another run moved the tenant since", async () => {
     const { ports, registrations } = world();
     const p = await planned(ports);
-    await registrations.setApprovedTags("prod", GUID, { erp: { "example-engine": P04, "example-app": P03 } }, "run_other");
+    await registrations.setApprovedTags("prod", GUID, { auth: { "example-auth": AUTH }, erp: { "example-engine": P04, "example-app": P03 } }, "run_other");
     await expect(step(ports, p, "write-pairing").run(stepCtx(p))).rejects.toThrow(/changed since this run was planned/);
   });
 
@@ -182,12 +184,22 @@ describe("tenant-line-move writes", () => {
     expect(await pairingOf(registrations)).toEqual(ON_03);
   });
 
+  it("PLANTED DEFECT: its undo writes nothing where a member renders the new line by now, and names the Restore", async () => {
+    const { ports, registrations, argo } = world();
+    const p = await planned(ports);
+    const cleanups: Cleanup[] = [];
+    await step(ports, p, "write-pairing").run(stepCtx(p, cleanups));
+    argo.statuses = rendering(ON_04);
+    await expect(cleanups[0]!.run(stepCtx(p))).rejects.toThrow(/renders line 0.4 by now.*the Restore of the line-move generation/);
+    expect(await pairingOf(registrations)).toEqual(ON_04);
+  });
+
   it("PLANTED INNOCENT: its undo leaves a pairing a Restore or another run wrote since", async () => {
     const { ports, registrations } = world();
     const p = await planned(ports);
     const cleanups: Cleanup[] = [];
     await step(ports, p, "write-pairing").run(stepCtx(p, cleanups));
-    const other = { appsImageTag: ON_04.appsImageTag, approvedTags: { erp: { "example-engine": P04, "example-app": P04, "example-extra": P04 } } };
+    const other = { appsImageTag: ON_04.appsImageTag, approvedTags: { auth: { "example-auth": AUTH }, erp: { "example-engine": P04, "example-app": P04, "example-extra": P04 } } };
     await registrations.setLinePairing("prod", GUID, other, "run_other");
     await cleanups[0]!.run(stepCtx(p));
     expect(await pairingOf(registrations)).toEqual(other);
@@ -265,6 +277,12 @@ describe("the Versions dialog's offer", () => {
     expect(await readTenantLineMoves(world(ON_04).ports, db.db, "tnt_1")).toEqual({ line: "0.4", offer: null });
     const { ports, registrations } = world();
     await registrations.clearTenantAppsRepo("prod", GUID, "run_x");
+    expect(await readTenantLineMoves(ports, db.db, "tnt_1")).toEqual({ line: null, offer: null });
+  });
+
+  it("PLANTED DEFECT: names no line and offers nothing for a bundle that declares no engine, rather than show an error", async () => {
+    const { ports } = world();
+    (ports.repo as FakeRepoReader).scriptFor(`${REPO}@${B03}`, { files: { "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n" } });
     expect(await readTenantLineMoves(ports, db.db, "tnt_1")).toEqual({ line: null, offer: null });
   });
 });

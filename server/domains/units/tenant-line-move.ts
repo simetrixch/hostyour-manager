@@ -32,8 +32,9 @@ export interface LinePairing {
 }
 
 export interface LineMoveReading {
-  /** The line the tenant runs now, as its bundle's apps.yaml declares it. */
-  line: string;
+  /** The line the tenant runs now, as its bundle's apps.yaml declares it; null where it declares no
+   *  engine, which is a bundle the engine-line checks pass, and which has no line to move from. */
+  line: string | null;
   /** The line a move goes to: the one asked for, or the newest newer one released; null where none is. */
   toLine: string | null;
   /** The pairing a move writes; null where no newer line is released at the stage, or where it is refused. */
@@ -53,7 +54,7 @@ export function isNewerLine(a: string, b: string): boolean {
 
 /** The tenant's line and the pairing a move to `line` writes; without `line`, the line of the newest
  *  bundle release the stage takes, where that is newer than the tenant's. THROWS where the tenant runs
- *  no bundle, or its bundle declares no engine: such a tenant has no line to move from. */
+ *  no bundle; a bundle that declares no engine answers no line, with the refusal that says so. */
 export async function readLineMove(
   ports: LineMovePorts,
   input: { stage: Stage; entry: TenantRegistration; registryHost: string; line?: string; log: (line: string) => void; signal: AbortSignal },
@@ -71,7 +72,9 @@ export async function readLineMove(
 
   const runningRelease = bundleReleaseTag(entry.appsImageTag);
   const running = await engineOf(runningRelease);
-  if (running === undefined) throw errValidation(`the apps bundle of tenant ${entry.subdomain} at ${runningRelease} declares no engine, so the line it runs is unknown`);
+  if (running === undefined) {
+    return { line: null, toLine: null, target: null, refusals: [`the apps bundle of tenant ${entry.subdomain} at ${runningRelease} declares no engine, so the line it runs is unknown`], standing: false };
+  }
   const channels = await ports.channelStages();
   const runningTs14 = parseReleaseTag(runningRelease)?.ts14 ?? "";
   // The bundle releases the stage takes, from the one the tenant runs on, newest first.
@@ -111,7 +114,11 @@ export async function readLineMove(
     .filter((t) => versionLine(t) === line && versionRefusal(t, part, channels, stage) === null)
     .sort((a, b) => (b.split("-")[2] ?? "").localeCompare(a.split("-")[2] ?? ""))[0];
   if (partTag === undefined) {
-    return { line: running.line, toLine: line, target: null, refusals: [`no release made ${part.name} ${line}.x available at ${stage} for every build of it (${part.builds.map((b) => b.name).join(", ")})`], standing: false };
+    const unreleased = part.builds.filter((b) => !b.released.some((t) => versionLine(t) === line)).map((b) => b.name);
+    const why = unreleased.length > 0
+      ? `no release made ${unreleased.join(", ")} of ${part.name} ${line}.x available at ${stage}`
+      : `no ${line}.x tag was released at ${stage} for every build of ${part.name} together (${part.builds.map((b) => b.name).join(", ")})`;
+    return { line: running.line, toLine: line, target: null, refusals: [why], standing: false };
   }
 
   const appsImageTag = `${bundle.release}-${bundle.commit.slice(0, 7)}`;
