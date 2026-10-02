@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "#core/server/db/client.ts";
-import { clusters, servers } from "#core/server/db/schema/inventory.ts";
+import { clusters, servers, tenants } from "#core/server/db/schema/inventory.ts";
+import { recordDnsWrite } from "#core/server/db/dns-writes.ts";
 import { FakeDnsProvider } from "#core/server/adapters/dns/testing/fake.ts";
 import type { MailDnsView } from "#core/shared/mail.ts";
 import { readDnsInventory, type DnsInventoryDeps } from "./dns-inventory.ts";
@@ -125,6 +126,19 @@ describe("readDnsInventory", () => {
       "mail TXT prod._domainkey.example.com true", // the key under the platform's selector stays the platform's
       "mail-service TXT _dmarc.example.com false",
       `installer PTR ${M1_ADDRESS} false`,
+    ]);
+  });
+
+  it("lists the identity provider marks the book holds, removable, owned by the tenant's subdomain or, where no row names it, its guid", async () => {
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_m", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", status: "active" }).run();
+    recordDnsWrite(db.db, { name: "_digita-idp.auth.acme.example.net", type: "TXT", content: "https://auth.acme.example.net", act: "inserted", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_a" });
+    recordDnsWrite(db.db, { name: "_digita-idp.auth.gone.example.net", type: "TXT", content: "https://auth.gone.example.net", act: "inserted", owner: { kind: "tenant", name: "ak64h58875qw", stage: "prod" }, runId: "run_b" });
+    dns.seed("_digita-idp.auth.acme.example.net", "TXT", "https://auth.acme.example.net");
+    const view = await readDnsInventory(deps());
+    // The book lists its rows newest first, so the two are compared without their order.
+    expect(view.rows.filter((r) => r.name.startsWith("_digita-idp.")).map((r) => `${r.owner.kind} ${r.owner.name} ${r.name} ${r.verdict} ${r.removable}`).sort()).toEqual([
+      "tenant acme _digita-idp.auth.acme.example.net standing true",
+      "tenant ak64h58875qw _digita-idp.auth.gone.example.net absent true", // a purge left it in the book, so dns-remove can take it back
     ]);
   });
 

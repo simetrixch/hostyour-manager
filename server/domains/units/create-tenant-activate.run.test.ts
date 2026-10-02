@@ -12,6 +12,7 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeC
 import { FakeActivator } from "#unit/server/adapters/activation/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
+import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
 import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
 import { EPHEMERAL_STREAM, type RunOutputStream } from "../../../shared/enums.ts";
 import type { StepCtx, PlanStreamCtx } from "../../executor/types.ts";
@@ -229,6 +230,29 @@ describe("create-tenant first-admin invite (activate step)", () => {
     // no secretValues -> readSecretValue resolves null
     await expect(activateStep(ports({ activator, cluster: new FakeClusterReader({}) }), p).run(ctx(p))).rejects.toThrow(/AUTH_BOOTSTRAP_TOKEN.*absent/);
     expect(activator.calls).toHaveLength(0);
+  });
+
+  it("PLANTED DEFECT: with the product's mark declared, invites only once the mark resolves at a public resolver", async () => {
+    const activator = new FakeActivator();
+    const publicDns = new FakePublicDns();
+    const p = params({ adminEmail: "admin@acme.test", issuerRecordLabel: "_digita-idp" });
+    const step = activateStep(ports({ activator, cluster: withToken(), publicDns }), p);
+    await expect(step.run(ctx(p))).rejects.toThrow(/_digita-idp\.auth\.acme\.example\.com does not resolve to https:\/\/auth\.acme\.example\.com at a public resolver yet .* retry this step once it resolves/);
+    expect(activator.calls).toHaveLength(0);
+    publicDns.seedTxt("_digita-idp.auth.acme.example.com", "https://auth.acme.example.com");
+    await step.run(ctx(p));
+    expect(activator.calls).toHaveLength(1);
+  });
+
+  it("refuses without a public DNS reader where a mark is declared, and asks none where the product declares no label", async () => {
+    const p = params({ adminEmail: "admin@acme.test", issuerRecordLabel: "_digita-idp" });
+    await expect(activateStep(ports({ activator: new FakeActivator(), cluster: withToken() }), p).run(ctx(p))).rejects.toThrow(/no public DNS reader is wired/);
+    const publicDns = new FakePublicDns();
+    const activator = new FakeActivator();
+    const plain = params({ adminEmail: "admin@acme.test" });
+    await activateStep(ports({ activator, cluster: withToken(), publicDns }), plain).run(ctx(plain));
+    expect(publicDns.asked).toEqual([]);
+    expect(activator.calls).toHaveLength(1);
   });
 
   it("skips entirely (no token read, no invite) when no admin email was supplied", async () => {

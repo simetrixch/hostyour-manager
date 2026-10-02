@@ -14,6 +14,7 @@ import { GitRepoReader, GitPlatformRepo } from "../adapters/git/git.ts";
 import type { PlatformRepo } from "../adapters/git/port.ts";
 import { KubeBuildRbacWriter } from "../adapters/kube/kube-rbac.ts";
 import type { DnsProvider } from "../adapters/dns/port.ts";
+import { DohPublicDns } from "../adapters/dns/public-dns.ts";
 import type { ClusterValueFile } from "../../shared/cluster-values.ts";
 import { STAGE, type Stage } from "../../shared/enums.ts";
 import type { ClusterKubeResolver, MasterKubeClients } from "../adapters/kube/port.ts";
@@ -267,6 +268,9 @@ export function buildTenantOnboarding(
     activator,
     // The tenant's ONE wildcard record (provision-dns) + the apex it is composed under.
     ...(dns ? { dns } : {}),
+    // The public resolvers `activate` asks whether the identity provider's DNS mark resolves before
+    // the first invite — the way the product's mail service resolves it.
+    publicDns: new DohPublicDns(),
     resolveUnitApex,
     // The target cluster's whole values chain — the registry host and the member renders both
     // come off it, so the planner reads it once.

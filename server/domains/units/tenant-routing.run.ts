@@ -7,7 +7,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { provisionUnitDns, removeUnitDns, tenantMemberUrl, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { bookedIssuerLabel, provisionIssuerRecord, provisionUnitDns, removeIssuerRecords, removeUnitDns, tenantIssuerRecord, tenantMemberUrl, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { sleep } from "#unit/server/release-cycle.ts";
 
 // `tenant-set-routing` — move a STANDING tenant onto another member routing (MEMBER_ROUTING).
@@ -85,6 +85,12 @@ function removeUnneededRecordCleanup(ports: TenantSetRoutingPorts, p: TenantSetR
       if (tc.routing === p.routing) return;
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName: tenantRecordName(p.routing, tc.subdomain, tc.stage, apex) });
+      // The identity provider's mark of the routing the tenant stays on is the one it keeps.
+      const label = bookedIssuerLabel(ctx.db, tc.guid, tc.stage);
+      if (label !== null) {
+        const kept = tenantIssuerRecord(label, tc.routing, tc.identityProvider, tc.stage, tc.subdomain, apex).name;
+        await removeIssuerRecords(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, except: [kept] });
+      }
     },
   };
 }
@@ -103,6 +109,12 @@ function tenantSetRoutingSteps(ports: TenantSetRoutingPorts, p: TenantSetRouting
           dns: ports.dns, unit: tc.guid, kind: "tenant", stage: tc.stage,
           recordName: tenantRecordName(p.routing, tc.subdomain, tc.stage, apex), clusterFqdn: tc.domain, runKind: "tenant-set-routing",
         });
+        // The identity provider answers at another address under the new routing, so its mark moves
+        // with it: published here, the other routing's mark removed with the other record below.
+        const label = bookedIssuerLabel(ctx.db, tc.guid, tc.stage);
+        if (label !== null) {
+          await provisionIssuerRecord(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, record: tenantIssuerRecord(label, p.routing, tc.identityProvider, tc.stage, tc.subdomain, apex), runKind: "tenant-set-routing" });
+        }
       },
     },
     {
@@ -146,6 +158,11 @@ function tenantSetRoutingSteps(ports: TenantSetRoutingPorts, p: TenantSetRouting
         // tenant does not use is a leftover, and removing an absent record is a no-op.
         for (const other of otherRoutings(p.routing)) {
           await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName: tenantRecordName(other, tc.subdomain, tc.stage, apex) });
+        }
+        const label = bookedIssuerLabel(ctx.db, tc.guid, tc.stage);
+        if (label !== null) {
+          const kept = tenantIssuerRecord(label, p.routing, tc.identityProvider, tc.stage, tc.subdomain, apex).name;
+          await removeIssuerRecords(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, except: [kept] });
         }
       },
     },

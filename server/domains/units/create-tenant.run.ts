@@ -30,8 +30,9 @@ import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
-import { provisionUnitDns, standingHostFrom, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { provisionIssuerRecord, provisionUnitDns, standingHostFrom, tenantIssuerRecord, tenantRecordName } from "#unit/server/unit-dns.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
+import type { PublicDns } from "../../adapters/dns/public-dns.ts";
 import { tenantActivateStep } from "./create-tenant-activate.ts";
 import { mintFreeGuid, writeRegistrationStep } from "./create-tenant-registration.ts";
 import { builtBundleEngine } from "./engine-line.ts";
@@ -121,6 +122,10 @@ export interface TenantOnboardPorts {
    *  and written by provision-dns. Optional but UNCONDITIONALLY needed — absent ⇒ G27 fails the plan
    *  (DNS is a mandatory part of the run kind), never a silent skip. */
   dns?: DnsProvider;
+  /** Public resolvers, asked by the `activate` step whether the identity provider's DNS mark resolves
+   *  before the first invite, as the product's mail service resolves it. Absent where a mark is to be
+   *  published and an invite to be sent ⇒ that step fails loud. */
+  publicDns?: PublicDns;
   /** The public apex (global.unitApex) of the target cluster, read off its values chain on the
    *  platform repo for the TENANT's stage — the tenant family's own repo is the deploy repository, so the apex
    *  arrives as a resolver. */
@@ -188,6 +193,9 @@ export const CreateTenantParams = z.object({
   // How the members are addressed below the zone, as the product's manifest declared it at
   // validation — frozen like the members, and written to the registration, the row and the DNS record.
   routing: z.enum(MEMBER_ROUTING).default("host"),
+  // The DNS label the product marks each tenant's identity provider under (tenant spec
+  // issuerRecordLabel), frozen like the routing; absent where the product declares none.
+  issuerRecordLabel: z.string().optional(),
   seedUsers: z.boolean().default(false), // flips the tenant IdP's user boot-seed; a registration field
   demo: z.boolean().default(false), // a demo tenant: tenant.demo on every member; a registration field
   // The tenant's SIZE — the ceiling EVERY member namespace of it is bounded by. A NAME here, resolved
@@ -449,6 +457,13 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // that changes the routing leaves the old routing's record standing.
         const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
         await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, kind: "tenant", stage: p.stage, recordName: tenantRecordName(p.routing, p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
+        // The mark the product's mail service trusts the tenant's identity provider by, published long
+        // before `activate` sends the first invite through that service.
+        if (p.issuerRecordLabel) {
+          await provisionIssuerRecord(ctx, { dns: ports.dns, guid: p.guid, stage: p.stage, record: tenantIssuerRecord(p.issuerRecordLabel, p.routing, p.identityProvider, p.stage, p.subdomain, unitApex), runKind: "tenant-create" });
+        } else {
+          ctx.log("meta", "the product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is published");
+        }
       },
     },
     writeRegistrationStep(ports, p, runtime),
@@ -624,6 +639,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         // Frozen from the approved validation: the run executes what was approved.
         members: outcome.memberRecords, identityProvider: outcome.identityProvider,
         routing: outcome.spec?.routing ?? "host",
+        ...(outcome.spec?.issuerRecordLabel ? { issuerRecordLabel: outcome.spec.issuerRecordLabel } : {}),
         subdomain: req.subdomain,
         stage: req.stage,
         clusterId: rc.clusterId,
@@ -658,7 +674,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         // The replace sentence carries the SAME data warning tenant-offboard's summary gives, because
         // approving this plan approves the same prune: the replaced tenant's member databases go with
         // its ServiceClaim deletions, and only its identity survives for a purge to reap.
-        summary: `Onboard tenant ${guid} (${req.subdomain}) at ${req.stage} on ${rc.domain} pinned at ${outcome.resolvedSha.slice(0, 7)} with ${req.apps.length} app(s): ${stepDefs.length} steps.${appsUnit ? ` The apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with ${req.apps.map((a) => a.name).join(", ")}, onboarded build-only and built; the engines mount it.` : ""}${replaces.length ? ` Replaces existing ${replaces.map((r) => r.guid).join(", ")} (subdomain "${req.subdomain}" at ${req.stage}) before deploying ${guid}. The replaced tenant's member DATABASES are NOT kept: pruning its fan-out deletes every member's ServiceClaim, and the service-provisioner drops a claim's databases together with its user — run a backup first if the data has to come back. Its identity (the Vault crypto entry, the namespaces) survives until a purge reaps it.` : ""}`,
+        summary: `Onboard tenant ${guid} (${req.subdomain}) at ${req.stage} on ${rc.domain} pinned at ${outcome.resolvedSha.slice(0, 7)} with ${req.apps.length} app(s): ${stepDefs.length} steps.${params.issuerRecordLabel ? ` Its identity provider is marked in DNS under ${params.issuerRecordLabel} beside its zone record, and the first invite waits until the mark resolves.` : ""}${appsUnit ? ` The apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with ${req.apps.map((a) => a.name).join(", ")}, onboarded build-only and built; the engines mount it.` : ""}${replaces.length ? ` Replaces existing ${replaces.map((r) => r.guid).join(", ")} (subdomain "${req.subdomain}" at ${req.stage}) before deploying ${guid}. The replaced tenant's member DATABASES are NOT kept: pruning its fan-out deletes every member's ServiceClaim, and the service-provisioner drops a claim's databases together with its user — run a backup first if the data has to come back. Its identity (the Vault crypto entry, the namespaces) survives until a purge reaps it.` : ""}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [], // no host owned — the Manager acts master-locally
         locks: tenantLocks(ports.registrations),

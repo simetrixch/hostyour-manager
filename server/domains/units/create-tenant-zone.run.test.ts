@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
+import { listDnsWrites } from "../../db/dns-writes.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { validateTenant, type ValidateTenantRequest, type ValidateTenantDeps } from "./validate-tenant.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
@@ -227,5 +228,46 @@ describe("create-tenant plans the zone before the first write", () => {
     expect(dns.record(WILDCARD, "A")).toBeUndefined();
     expect(logs.some((l) => l.includes("stood as A 157.90.201.150") && l.includes("replaced with a CNAME onto s1.example"))).toBe(true);
     expect(logs.some((l) => l.includes("a move is a content update of exactly this record"))).toBe(true);
+  });
+});
+
+describe("create-tenant marks the identity provider in DNS where the product declares the label", () => {
+  const MARK_NAME = `_digita-idp.auth.${SUB}.example.com`;
+  const createParams = (prt: TenantOnboardPorts, over: Record<string, unknown> = {}) => CreateTenantParams.parse({
+    guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: SHA, registryHost: "zot.m1.example",
+    members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
+    report: composeTenantReport({ resolvedSha: SHA, probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
+    ...over,
+  });
+
+  it("provision-dns publishes the mark beside the zone record, booked for the tenant at its stage", async () => {
+    const dns = new FakeDnsProvider();
+    seedClusters();
+    const prt = ports(dns);
+    const p = createParams(prt, { issuerRecordLabel: "_digita-idp" });
+    await makeCreateTenantDef(prt).steps(p).find((s) => s.name === "provision-dns")!.run(ctx(p, []));
+    expect(await dns.listRecordContents({ name: MARK_NAME, type: "TXT" })).toEqual([`https://auth.${SUB}.example.com`]);
+    expect(listDnsWrites(db.db).find((w) => w.name === MARK_NAME)?.owner).toEqual({ kind: "tenant", name: GUID, stage: "prod" });
+  });
+
+  it("PLANTED INNOCENT: a product that declares no label gets no mark, and the log says so", async () => {
+    const dns = new FakeDnsProvider();
+    seedClusters();
+    const prt = ports(dns);
+    const p = createParams(prt);
+    const logs: string[] = [];
+    await makeCreateTenantDef(prt).steps(p).find((s) => s.name === "provision-dns")!.run(ctx(p, logs));
+    expect(await dns.listRecordContents({ name: MARK_NAME, type: "TXT" })).toEqual([]);
+    expect(logs).toContain("the product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is published");
+  });
+
+  it("the plan freezes the product's label into the run and says the first invite waits for the mark", async () => {
+    seedClusters();
+    const prt = ports(new FakeDnsProvider());
+    prt.repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML.replace("tenant:\n  members:", "tenant:\n  issuerRecordLabel: _digita-idp\n  members:"), ...APP_OVERLAYS } });
+    const result = await makeCreateTenantDef(prt).planStream!(REQUEST, planCtx([]));
+    if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
+    expect(result.params.issuerRecordLabel).toBe("_digita-idp");
+    expect(result.plan.summary).toContain("Its identity provider is marked in DNS under _digita-idp beside its zone record, and the first invite waits until the mark resolves.");
   });
 });

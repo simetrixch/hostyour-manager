@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { consumerUnitHost, HOST_LABEL_RE, RESERVED_HOST_LABELS, stageApex, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, ownDomainEntryProblem, ownDomainHosts } from "./unit-host.ts";
+import { consumerUnitHost, HOST_LABEL_RE, RESERVED_HOST_LABELS, stageApex, tenantIssuerRecord, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, ownDomainEntryProblem, ownDomainHosts } from "./unit-host.ts";
 import { ConsumerManifestSchema, consumerHostLabel, hostLabel } from "#core/shared/consumer.ts";
 
 /** THE ONE composition of a unit's public host (simetrixch/hostyour-cloud#208): the stage is a
@@ -91,5 +91,18 @@ describe("a tenant's own domain — typed without www, served at the apex", () =
   it("refuses an entry typed with www, naming the address it would be served at", () => {
     expect(ownDomainEntryProblem("www.example.org")).toBe('type the domain without "www." (example.org); it is served at example.org, and www.example.org redirects there');
     expect(ownDomainEntryProblem("example.org")).toBeNull();
+  });
+});
+
+describe("a tenant identity provider's DNS mark — the issuer under the zone", () => {
+  it("names the record under the identity provider's host on the zone and holds its address there, by the routing", () => {
+    expect(tenantIssuerRecord("_digita-idp", "path", "auth", "prod", "show", "digitacloud.app")).toEqual({ name: "_digita-idp.show.digitacloud.app", content: "https://show.digitacloud.app/auth" });
+    expect(tenantIssuerRecord("_digita-idp", "host", "auth", "dev", "show", "digitacloud.app")).toEqual({ name: "_digita-idp.auth.show.dev.digitacloud.app", content: "https://auth.show.dev.digitacloud.app" });
+  });
+
+  it("PLANTED DEFECT: never names the own domain, whose DNS the customer controls", () => {
+    const mark = tenantIssuerRecord("_idp", "path", "auth", "prod", "show", "digitacloud.app");
+    expect(mark.content).toBe(tenantMemberUrl("path", "auth", "prod", "show", "digitacloud.app", ""));
+    expect(mark.content).not.toBe(tenantMemberUrl("path", "auth", "prod", "show", "digitacloud.app", "show.example.org"));
   });
 });

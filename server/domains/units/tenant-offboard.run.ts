@@ -10,7 +10,7 @@ import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } 
 import { clearRelocationHold } from "#unit/server/lifecycle.ts";
 import { TenantLifecycleParams, tenantLocks, tenantTeardownMembers, allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
 import { deleteTenantArgoSync, deleteTenantMembers, describeTenantMemberDeletes } from "./tenant-teardown.ts";
-import { isTenantRecord, removeBookedRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { isTenantRecord, removeBookedRecords, removeIssuerRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 
 // tenant-offboard — the tenant analogue of the consumer
@@ -133,6 +133,9 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         // what it removes.
         const unbooked = tenantOwnHosts(tc.ownDomain, tc.ownDomainRedirects).filter((host) => !isTenantRecord(ctx.db, host, tc.guid));
         await removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "tenant", name: tc.guid, stage: tc.stage }, except: [recordName] });
+        // The identity provider's mark goes with the tenant: left behind, it would keep the product's
+        // mail service trusting whatever serves that host next.
+        await removeIssuerRecords(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage });
         for (const host of unbooked) ctx.log("meta", `the own host ${host} is not recorded as written here — remove its record at its provider`);
       },
     },

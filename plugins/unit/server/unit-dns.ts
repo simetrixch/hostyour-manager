@@ -71,7 +71,7 @@ import type { DnsWriteOwnerKind, Stage } from "#core/shared/enums.ts";
  *  `<member>.<subdomain>.<stage apex>` under ONE wildcard PER STAGE (host routing) or at
  *  `<subdomain>.<stage apex>/<member>` under ONE record for the zone (path routing). The label is
  *  the registration's / the row's `host`, never the name (simetrixch/hostyour-cloud#208). */
-export { consumerUnitHost, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, stageApex } from "../shared/unit-host.ts";
+export { consumerUnitHost, tenantIssuerRecord, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, stageApex } from "../shared/unit-host.ts";
 
 function requireDns(dns: DnsProvider | undefined, unit: string, runKind: string): DnsProvider {
   if (!dns) {
@@ -240,6 +240,62 @@ export async function removeBookedRecord(ctx: StepCtx, opts: { dns: DnsProvider 
 export async function removeBookedRecords(ctx: StepCtx, opts: { dns: DnsProvider | undefined; owner: BookedOwner & { stage: Stage }; except: readonly string[] }): Promise<void> {
   const booked = listDnsWrites(ctx.db).filter((w) => w.type === "CNAME" && bookedFor(w.owner, opts.owner) && !opts.except.includes(w.name));
   for (const w of booked) await removeBookedRecord(ctx, { dns: opts.dns, owner: opts.owner, recordName: w.name });
+}
+
+/** Publish the TXT that marks a tenant's identity provider (tenantIssuerRecord) and book it for the
+ *  tenant at its stage. The record is the product's trust in that issuer, so it is booked for the tenant
+ *  that stands on its zone NOW: where the mark already stands but the book names another tenant (a
+ *  replaced one on the same subdomain) or nobody (an attempt that died before the book), it is written
+ *  again and booked for this tenant, so it goes with this tenant's offboard or purge and never outlives
+ *  it. Other content at the name is what a gone installation left, since only this installation writes
+ *  the zone: it is replaced, and the log says what stood. */
+export async function provisionIssuerRecord(
+  ctx: StepCtx,
+  opts: { dns: DnsProvider | undefined; guid: string; stage: Stage; record: { name: string; content: string }; runKind: string },
+): Promise<void> {
+  const dns = requireDns(opts.dns, opts.guid, opts.runKind);
+  const { name, content } = opts.record;
+  const owner = { kind: "tenant" as const, name: opts.guid, stage: opts.stage };
+  const standing = await dns.listRecordContents({ name, type: "TXT", signal: ctx.signal });
+  const booked = findDnsWrite(ctx.db, { name, type: "TXT" });
+  if (standing.length === 1 && standing[0] === content && booked !== null && bookedFor(booked.owner, owner)) {
+    ctx.log("meta", `TXT ${name} → ${content} already stands, booked for tenant ${opts.guid}`);
+    return;
+  }
+  if (standing.length > 0) await dns.deleteRecord({ name, type: "TXT", signal: ctx.signal });
+  await dns.createRecord({ name, type: "TXT", content, signal: ctx.signal });
+  recordDnsWrite(ctx.db, { name, type: "TXT", content, act: standing.length > 0 ? "updated" : "inserted", owner, runId: ctx.runId });
+  const stood = standing.length === 0 ? "" : ` in place of ${standing.join(" | ")}${booked === null ? "" : `, booked for the ${booked.owner.kind} ${booked.owner.name}`}`;
+  ctx.log("meta", `TXT ${name} → ${content} published${stood} — entered into the book of DNS writes as tenant ${opts.guid}'s`);
+}
+
+/** The identity provider marks the book names as the tenant's at its stage: its TXT records under a
+ *  label, which always starts with an underscore (tenant spec issuerRecordLabel). */
+function bookedIssuerRecords(db: Db, guid: string, stage: Stage) {
+  const owner = { kind: "tenant" as const, name: guid, stage };
+  return listDnsWrites(db).filter((row) => row.type === "TXT" && row.name.startsWith("_") && bookedFor(row.owner, owner));
+}
+
+/** The label of the identity provider mark the book holds for the tenant at its stage, or null where it
+ *  holds none: what a routing move publishes the mark under again, so the move carries the mark the
+ *  tenant has and creates none it lacks. */
+export function bookedIssuerLabel(db: Db, guid: string, stage: Stage): string | null {
+  const [mark] = bookedIssuerRecords(db, guid, stage);
+  return mark === undefined ? null : mark.name.slice(0, mark.name.indexOf("."));
+}
+
+/** Remove every identity provider mark the book names as the tenant's at its stage but the names in
+ *  `except`, each by the content the book holds: a record re-pointed since is somebody else's and stays.
+ *  Offboard and purge, with or without a registration, and a routing move for the routing it leaves — a
+ *  mark that outlived its tenant would let whatever serves that host's key file next send mail as the
+ *  product's sender domain. Removing nothing is the idempotent no-op. */
+export async function removeIssuerRecords(ctx: StepCtx, opts: { dns: DnsProvider | undefined; guid: string; stage: Stage; except?: readonly string[] }): Promise<void> {
+  for (const w of bookedIssuerRecords(ctx.db, opts.guid, opts.stage).filter((row) => !(opts.except ?? []).includes(row.name))) {
+    const dns = requireDns(opts.dns, opts.guid, "remove");
+    const { deleted } = await dns.deleteRecord({ name: w.name, type: "TXT", content: w.content, signal: ctx.signal });
+    forgetDnsWrite(ctx.db, { name: w.name, type: "TXT" });
+    ctx.log("meta", deleted > 0 ? `TXT ${w.name} → ${w.content} removed` : `TXT ${w.name} no longer carries ${w.content} — left standing, it is not tenant ${opts.guid}'s any more`);
+  }
 }
 
 /** Remove the unit's ONE record (offboard + both purge run kinds). Fail-closed on the API, absent=ok:

@@ -10,6 +10,7 @@ import { registryHostFromChain } from "./tenant-values.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { loadTenantCluster } from "./lifecycle.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
+import { provisionIssuerRecord, tenantIssuerRecord } from "#unit/server/unit-dns.ts";
 import { tenantSyncUnits } from "#unit/server/build-rbac.ts";
 import { memberApplication, withAppDatabases } from "./tenant-fanout.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -85,6 +86,10 @@ export const TenantRefreshMembersParams = z.object({
   apps: z.array(TenantAppSchema),
   seedUsers: z.boolean(),
   demo: z.boolean().default(false),
+  /** The DNS label the product marks each tenant's identity provider under (tenant spec
+   *  issuerRecordLabel), as the manifest declared it at the plan; absent where it declares none. A
+   *  standing tenant gets its mark here, the one run that carries a change of the manifest to it. */
+  issuerRecordLabel: z.string().optional(),
   /** The tenant's own apps bundle and the tag it stands at ("" where it has none). */
   appsImage: z.string(),
   appsImageTag: z.string(),
@@ -179,6 +184,20 @@ async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefres
   }
 }
 
+/** The identity provider's DNS mark under `label`, put in place for the standing tenant: published
+ *  where it does not stand, left where it stands booked for the tenant (provisionIssuerRecord). */
+function publishIssuerRecordStep(ports: TenantOnboardPorts, p: TenantRefreshMembersParams, label: string): Step {
+  return {
+    name: "publish-issuer-record",
+    title: "Publish the identity provider's DNS mark",
+    run: async (ctx) => {
+      const tc = loadTenantCluster(ctx.db, p.tenantId);
+      const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
+      await provisionIssuerRecord(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, record: tenantIssuerRecord(label, tc.routing, tc.identityProvider, tc.stage, tc.subdomain, apex), runKind: "tenant-refresh-members" });
+    },
+  };
+}
+
 function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Step[] {
   // The bundle stands built at its recorded tag: a render again after a unit's build mounts it there.
   const runtime: TenantBuildRuntime = p.appsImage ? { appsImageTag: p.appsImageTag } : {};
@@ -192,6 +211,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         ctx.log("meta", `target ${p.domain} attested for ${p.guid} at ${p.stage} — deploy-state generation ${state.generation}`);
       },
     },
+    ...(p.issuerRecordLabel === undefined ? [] : [publishIssuerRecordStep(ports, p, p.issuerRecordLabel)]),
     // The units that build what the registry lacks, before anything of the tenant is written.
     ...(p.buildUnits ?? []).map((unit) => ({
       ...buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage }, unit),
@@ -402,6 +422,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         buildUnits: planned.builds.units,
         previousApproved: current.entry.approvedTags,
         chosenVersions,
+        ...(outcome.spec?.issuerRecordLabel ? { issuerRecordLabel: outcome.spec.issuerRecordLabel } : {}),
       };
       const steps = tenantRefreshMembersSteps(ports, params);
       const plan: Plan = {
@@ -418,6 +439,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `${recorded.length ? `Recorded as the tenant's own at the stage pin it renders now: ${recorded.join("; ")}. ` : ""}` +
           `${moves.forward.length || moves.back.length ? "No other tenant changes. " : ""}` +
           `${planned.builds.units.length ? `First the build unit(s) ${planned.builds.units.map((u) => `${u.unit} (${u.images.join(", ")})`).join("; ")} release their next version and pin it. ` : ""}` +
+          `${params.issuerRecordLabel ? `The DNS mark of the identity provider under ${params.issuerRecordLabel} is put in place where it does not stand. ` : ""}` +
           `Every image the new render pulls must stand in the registry; then the entries are written and every member must sync. ` +
           `A member whose chart moved does not answer from the carry of the product's change into the books branch until its Application syncs here.`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),

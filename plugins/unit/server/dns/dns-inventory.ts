@@ -28,7 +28,9 @@
 // registrations, the tenant registrations and the mail measurement arrive as FUNCTIONS bound at the
 // composition root (server/boot/wire.ts).
 import type { Db } from "#core/server/db/client.ts";
-import { clusters } from "#core/server/db/schema/inventory.ts";
+import { and, eq } from "drizzle-orm";
+import { clusters, tenants } from "#core/server/db/schema/inventory.ts";
+import { listDnsWrites } from "#core/server/db/dns-writes.ts";
 import { DnsZoneUnknownError, type DnsProvider } from "#core/server/adapters/dns/port.ts";
 import { STAGE, type MemberRouting, type Stage } from "#core/shared/enums.ts";
 import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantZone } from "../../shared/unit-host.ts";
@@ -148,6 +150,29 @@ async function unitRowsOf(
   return rows;
 }
 
+/** The identity provider marks the book holds for tenants (unit-dns.ts provisionIssuerRecord), each read
+ *  at the provider and owned by the tenant's subdomain where a row still names it, by its guid where
+ *  none does. Listed from the book rather than derived from the registrations, so a mark a failed purge
+ *  left behind is on this page for dns-remove to take back. */
+async function issuerRecordRows(dns: DnsProvider, db: Db): Promise<DnsRecordRow[]> {
+  const rows: DnsRecordRow[] = [];
+  for (const w of listDnsWrites(db).filter((row) => row.type === "TXT" && row.owner.kind === "tenant" && row.name.startsWith("_"))) {
+    const standing = await dns.listRecordContents({ name: w.name, type: "TXT" });
+    const stage = w.owner.stage;
+    const tenant = stage === undefined ? undefined : db.select({ subdomain: tenants.subdomain }).from(tenants).where(and(eq(tenants.guid, w.owner.name), eq(tenants.stage, stage))).get();
+    rows.push({
+      owner: { kind: "tenant", name: tenant?.subdomain ?? w.owner.name, ...(stage === undefined ? {} : { stage }) },
+      name: w.name,
+      type: "TXT",
+      expected: w.content,
+      found: standing.length === 0 ? null : standing.join(" | "),
+      verdict: standing.length === 0 ? "absent" : standing.includes(w.content) ? "standing" : "other",
+      removable: true,
+    });
+  }
+  return rows;
+}
+
 /** Every record this installation is responsible for, read now. Fail-SOFT per source: a stage whose
  *  registrations cannot be read and a mail measurement that has no master each leave a sentence in
  *  `skipped` rather than emptying the page — an inventory that quietly listed fewer records would
@@ -172,6 +197,11 @@ export async function readDnsInventory(deps: DnsInventoryDeps): Promise<DnsInven
           skipped.push(`the ${stage} records of ${cluster.domain} could not be listed: ${messageOf(e)}`);
         }
       }
+    }
+    try {
+      rows.push(...(await issuerRecordRows(dns, deps.db)));
+    } catch (e) {
+      skipped.push(`the identity provider marks are not listed: ${messageOf(e)}`);
     }
   } else {
     skipped.push(

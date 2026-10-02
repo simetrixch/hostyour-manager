@@ -58,6 +58,16 @@ export function tenantMemberUrl(routing: MemberRouting, member: string, stage: S
   return routing === "path" ? `https://${ownDomain || zone}/${member}` : `https://${member}.${zone}`;
 }
 
+/** The TXT record that marks a tenant's identity provider for the product's mail service: named
+ *  `<label>.<issuer host>` and holding the issuer, which is the identity provider member's address on
+ *  the tenant's ZONE and never on its own domain. The zone lies under a stage apex this platform alone
+ *  writes, while a customer controls the DNS of its own domain, so only a mark under the zone can be
+ *  trusted. The label is the product's (tenant spec `issuerRecordLabel`). */
+export function tenantIssuerRecord(label: string, routing: MemberRouting, identityProvider: string, stage: Stage, subdomain: string, unitApex: string): { name: string; content: string } {
+  const issuer = tenantMemberUrl(routing, identityProvider, stage, subdomain, unitApex, "");
+  return { name: `${label}.${new URL(issuer).host}`, content: issuer };
+}
+
 /** Every host a tenant answers at beside its zone: its own domain and the hosts that redirect to it;
  *  none without an own domain. */
 export function tenantOwnHosts(ownDomain: string, ownDomainRedirects: readonly string[]): string[] {

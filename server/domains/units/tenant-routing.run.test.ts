@@ -3,6 +3,8 @@ import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { makeTenantSetRoutingDef, type TenantSetRoutingPorts } from "./tenant-routing.run.ts";
+import { listDnsWrites } from "../../db/dns-writes.ts";
+import { provisionIssuerRecord, tenantIssuerRecord } from "#unit/server/unit-dns.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
@@ -160,5 +162,54 @@ describe("tenant-set-routing", () => {
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "provision-record", "write-routing", "retire-previous-record"]);
     expect(plan.summary).toContain(`provision the DNS record ${ZONE}`);
     expect(plan.summary).toContain(`remove ${WILDCARD}`);
+  });
+});
+
+describe("tenant-set-routing carries the identity provider's DNS mark", () => {
+  const HOST_MARK = tenantIssuerRecord("_digita-idp", "host", "auth", "prod", "acme", "example.com");
+  const PATH_MARK = tenantIssuerRecord("_digita-idp", "path", "auth", "prod", "acme", "example.com");
+  const marks = async (dns: FakeDnsProvider): Promise<Record<string, string[]>> => ({
+    [HOST_MARK.name]: await dns.listRecordContents({ name: HOST_MARK.name, type: "TXT" }),
+    [PATH_MARK.name]: await dns.listRecordContents({ name: PATH_MARK.name, type: "TXT" }),
+  });
+
+  it("moves the mark with the routing: the new address's mark beside the zone record, the old one gone once the IdP answers there", async () => {
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await seedTenant(reg, "host");
+    const dns = new FakeDnsProvider();
+    dns.seed(WILDCARD, "CNAME", CLUSTER);
+    const h = { cleanups: [], logs: [] };
+    await provisionIssuerRecord(ctx("provision-dns", {}, h), { dns, guid: GUID, stage: "prod", record: HOST_MARK, runKind: "tenant-create" });
+    const probe = new FakePublicProbe({ [PATH_IDP]: { reachable: true, status: 200, detail: "HTTP 200" } });
+    const params = { tenantId: "tnt_1", routing: "path" as const, previous: "host" as const };
+    await run(makeTenantSetRoutingDef(ports(reg, dns, probe)).steps(params), params, h);
+    expect(await marks(dns)).toEqual({ [HOST_MARK.name]: [], [PATH_MARK.name]: [PATH_MARK.content] });
+    expect(listDnsWrites(db.db).filter((w) => w.type === "TXT").map((w) => `${w.name} ${w.owner.name}`)).toEqual([`${PATH_MARK.name} ${GUID}`]);
+  });
+
+  it("an abort before the routing is recorded keeps the mark of the routing the tenant stays on", async () => {
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await seedTenant(reg, "host");
+    const dns = new FakeDnsProvider();
+    dns.seed(WILDCARD, "CNAME", CLUSTER);
+    const h: Harness = { cleanups: [], logs: [] };
+    await provisionIssuerRecord(ctx("provision-dns", {}, h), { dns, guid: GUID, stage: "prod", record: HOST_MARK, runKind: "tenant-create" });
+    const params = { tenantId: "tnt_1", routing: "path" as const, previous: "host" as const };
+    const def = makeTenantSetRoutingDef(ports(reg, dns, new FakePublicProbe({})));
+    await def.steps(params).find((s) => s.name === "provision-record")!.run(ctx("provision-record", params, h));
+    expect((await marks(dns))[PATH_MARK.name]).toEqual([PATH_MARK.content]);
+    for (const cleanup of def.cleanups!(params)) await cleanup.run(ctx(cleanup.name, params, h));
+    expect(await marks(dns)).toEqual({ [HOST_MARK.name]: [HOST_MARK.content], [PATH_MARK.name]: [] });
+  });
+
+  it("PLANTED INNOCENT: a tenant with no mark booked gets none from a routing move", async () => {
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await seedTenant(reg, "host");
+    const dns = new FakeDnsProvider();
+    dns.seed(WILDCARD, "CNAME", CLUSTER);
+    const probe = new FakePublicProbe({ [PATH_IDP]: { reachable: true, status: 200, detail: "HTTP 200" } });
+    const params = { tenantId: "tnt_1", routing: "path" as const, previous: "host" as const };
+    await run(makeTenantSetRoutingDef(ports(reg, dns, probe)).steps(params), params, { cleanups: [], logs: [] });
+    expect(dns.creates.filter((c) => c.type === "TXT")).toEqual([]);
   });
 });

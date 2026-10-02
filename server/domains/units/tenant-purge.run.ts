@@ -15,7 +15,7 @@ import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { tenantLocks, tenantSelector, tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
-import { isTenantRecord, removeBookedRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { isTenantRecord, removeBookedRecords, removeIssuerRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { listDnsWrites } from "../../db/dns-writes.ts";
 import { tenantKeyName } from "./tenant-storage.ts";
 
@@ -406,6 +406,11 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
         // pointer or the inventory row carries.
         const c = loadPurgeCluster(ctx.db, p);
         const unitApex = await ports.resolveUnitApex(c.domain, c.stage);
+        // The identity provider's marks first, in both branches and before any refusal below: a mark is
+        // booked for the tenant that published it last, so the book naming this tenant means no newer
+        // tenant took it over, and a mark left behind would keep the product's mail service trusting
+        // whatever serves that host next.
+        await removeIssuerRecords(ctx, { dns: ports.dns, guid: p.guid, stage: c.stage });
         if (p.target.subdomain === "") {
           // Without it, the book of DNS writes still names the tenant's records, and an earlier purge
           // that removed the registration and then failed left them with no subdomain to find them by.

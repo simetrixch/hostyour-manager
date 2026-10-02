@@ -16,11 +16,26 @@ import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
 import { EPHEMERAL_STREAM } from "../../../shared/enums.ts";
 import { extractActivateUrl, extractMail, mailLine } from "#unit/server/activation-result.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
-import { tenantMemberUrl } from "#unit/server/unit-dns.ts";
+import { tenantIssuerRecord, tenantMemberUrl } from "#unit/server/unit-dns.ts";
 // The bootstrap-token Secret coordinates live in tenant-admin-invite.ts so this step and the
 // operator-driven POST /api/tenants/:id/invite-admin route share ONE source (no drift).
 import { BOOTSTRAP_TOKEN_KEY } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
+
+/** Refused unless the identity provider's DNS mark resolves at a public resolver. The invite leaves
+ *  through the product's mail service, which trusts the issuer only where it resolves the mark, and
+ *  which caches an answer without it for a while: an invite sent before the mark resolves is refused,
+ *  and so is the next one within that while. */
+async function requireIssuerRecordResolves(ports: TenantOnboardPorts, record: { name: string; content: string }): Promise<void> {
+  if (!ports.publicDns) throw errValidation(`no public DNS reader is wired on this manager, and the invite waits until ${record.name} resolves at a public resolver`);
+  const found = await ports.publicDns.txt(record.name);
+  if (!found.includes(record.content)) {
+    throw errValidation(
+      `${record.name} does not resolve to ${record.content} at a public resolver yet (it answers ${found.length === 0 ? "nothing" : found.join(" | ")}), ` +
+        "and the product's mail service refuses the invite until it does — retry this step once it resolves",
+    );
+  }
+}
 
 /** Build the create-tenant `activate` step. Always appended (so the plan card + step list are stable),
  *  but the invite fires ONLY when the operator supplied an admin email — a tenant onboarded without one
@@ -57,7 +72,9 @@ export function tenantActivateStep(ports: TenantOnboardPorts, p: CreateTenantPar
       // off the TARGET cluster's own values chain (the resolver provision-dns composes the tenant's
       // record from), so the address this posts to is one that record covers.
       // A tenant is created at its zone; an own domain is set on it later (tenant-set-own-domain).
-      const idpUrl = tenantMemberUrl(p.routing, p.identityProvider, p.stage, p.subdomain, await ports.resolveUnitApex(p.domain, p.stage), "");
+      const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
+      if (p.issuerRecordLabel) await requireIssuerRecordResolves(ports, tenantIssuerRecord(p.issuerRecordLabel, p.routing, p.identityProvider, p.stage, p.subdomain, unitApex));
+      const idpUrl = tenantMemberUrl(p.routing, p.identityProvider, p.stage, p.subdomain, unitApex, "");
       const url = `${idpUrl}/api/v1/bootstrap/invite-admin`;
       // The token rides ONLY the declared header — never the URL, the body, or a log line.
       ctx.log("meta", `inviting the first tenant admin: POST ${url} with header X-Bootstrap-Token (token withheld)`);
