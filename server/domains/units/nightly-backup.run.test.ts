@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { eq } from "drizzle-orm";
 import type { Cleanup } from "../../executor/types.ts";
 import type { DbHandle } from "../../db/client.ts";
 import { apps } from "../../db/schema/inventory.ts";
@@ -140,6 +141,26 @@ describe("a nightly run whose Manager died mid-dump", () => {
     expect(listBackups(db.db, { ...consumer, unit: "ghost" }).map((b) => b.state)).toEqual(["failed"]);
     expect(jobNames(f.source)).not.toContain(`reloc-purge-generation-${CONSUMER}`);
   });
+
+  it("PLANTED DEFECT: a unit whose discard fails does not keep the next one taking, and the abort fails naming it", async () => {
+    const { ports, f } = twoConsumers();
+    opened(CONSUMER, "taking");
+    opened("ghost", "taking");
+    f.source.reader.setJobResult(`reloc-purge-generation-${CONSUMER}`, { succeeded: false, logs: "rm: permission denied" });
+    const [discard] = makeConsumerNightlyBackupDef(ports).cleanups!({});
+    await expect(discard!.run(stepCtx(db, discard!.name, {}, []))).rejects.toThrow(new RegExp(`^1 unfinished generation\\(s\\) could not be deleted: consumer ${CONSUMER}: job reloc-purge-generation-${CONSUMER}`));
+    expect(listBackups(db.db, { ...consumer, unit: "ghost" }).map((b) => b.state)).toEqual(["failed"]);
+  });
+
+  it("PLANTED DEFECT: its abort deletes the unfinished generation of a unit offboarded after the dump died", async () => {
+    const { ports, f } = twoConsumers();
+    opened("ghost", "taking");
+    db.db.update(apps).set({ status: "offboarded" }).where(eq(apps.id, "app_2")).run();
+    const [discard] = makeConsumerNightlyBackupDef(ports).cleanups!({});
+    await discard!.run(stepCtx(db, discard!.name, {}, []));
+    expect(listBackups(db.db, { ...consumer, unit: "ghost" }).map((b) => b.state)).toEqual(["failed"]);
+    expect(jobNames(f.source)).toContain("reloc-purge-generation-ghost");
+  });
 });
 
 describe("tenant-nightly-backup", () => {
@@ -157,5 +178,19 @@ describe("tenant-nightly-backup", () => {
     const [g] = listBackups(db.db, { kind: "tenant", unit: GUID, stage: "prod" });
     expect(g).toMatchObject({ trigger: "nightly", state: "ok" });
     expect(jobNames(f.source)).toEqual(expect.arrayContaining([`reloc-dump-mongo-${GUID}`, `reloc-dump-crypto-${GUID}`, `reloc-dump-bucket-${GUID}`, `reloc-manifest-${GUID}`]));
+  });
+
+  it("PLANTED DEFECT: its abort deletes the unfinished generation of a tenant offboarded after the dump died", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedTenantRows(db, "offboarded");
+    const f = makeFakes();
+    const ports = tenantPorts(f);
+    const g = { kind: "tenant" as const, unit: GUID, stage: "prod" as const, generation: "20261003T030000Z" };
+    recordBackupStarted(db.db, { ...g, folder: `${INSTALLATION}/prod/tenants/${GUID}/${g.generation}`, trigger: "nightly", runId: "run_reloc" });
+    const [discard] = makeTenantNightlyBackupDef(ports).cleanups!({});
+    await discard!.run(stepCtx(db, discard!.name, {}, []));
+    expect(listBackups(db.db, { kind: "tenant", unit: GUID, stage: "prod" }).map((b) => b.state)).toEqual(["failed"]);
+    expect(jobNames(f.source)).toContain(`reloc-purge-generation-${GUID}`);
   });
 });

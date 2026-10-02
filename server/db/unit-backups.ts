@@ -83,6 +83,11 @@ export function findBackup(db: Db, g: GenerationKey): UnitBackup | undefined {
   return db.select().from(unitBackups).where(keyOf(g)).get();
 }
 
+/** Every generation a run took or is taking, of any unit. */
+export function listBackupsOfRun(db: Db, runId: string): UnitBackup[] {
+  return db.select().from(unitBackups).where(eq(unitBackups.runId, runId)).all();
+}
+
 /** The generation a run took or is taking of one unit — a run takes at most one per unit. */
 export function findBackupOfRun(db: Db, runId: string, u: BackupUnit): UnitBackup | undefined {
   return db

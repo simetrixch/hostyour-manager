@@ -7,7 +7,7 @@ import { inArray } from "drizzle-orm";
 import type { RunDefinition, Step, StepCtx } from "../../executor/types.ts";
 import { apps, tenants } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { findBackupOfRun, listBackups, recordBackupPruned } from "../../db/unit-backups.ts";
+import { findBackupOfRun, listBackups, listBackupsOfRun, recordBackupPruned, type UnitBackup } from "../../db/unit-backups.ts";
 import {
   backupUnitOf, discardGenerationsCleanup, requireDbtoolsImage, requireStorageBox, runRelocationJob, takeOnlineGeneration,
   type RelocationPorts, type RelocationWorld, type WorldOf,
@@ -88,7 +88,13 @@ const summaryOf = (count: number, family: string): string =>
 /** The definition both families share: one step, the master lock every relocation run takes (a dump
  *  job of a unit carries the same name in a Backup, a move and this pass), and a plan that refuses a
  *  manager without a Storage Box instead of starting a run that can only fail. */
-function nightlyDef(kind: "consumer-nightly-backup" | "tenant-nightly-backup", family: string, ports: RelocationPorts, unitsOf: (ctx: Pick<StepCtx, "db">) => NightlyUnit[]): RunDefinition<NightlyBackupParams> {
+function nightlyDef(
+  kind: "consumer-nightly-backup" | "tenant-nightly-backup",
+  family: string,
+  ports: RelocationPorts,
+  unitsOf: (ctx: Pick<StepCtx, "db">) => NightlyUnit[],
+  unitsOfBackups: (ctx: Pick<StepCtx, "db">, backups: UnitBackup[]) => NightlyUnit[],
+): RunDefinition<NightlyBackupParams> {
   return {
     kind,
     paramsSchema: NightlyBackupParams,
@@ -109,19 +115,28 @@ function nightlyDef(kind: "consumer-nightly-backup" | "tenant-nightly-backup", f
       };
     },
     steps: () => [nightlyStep(ports, family, unitsOf)],
-    // The step backs up every unit, so its abort discards the unfinished generation of every unit.
-    cleanups: () => [discardGenerationsCleanup(ports, (ctx) => unitsOf(ctx).map((u) => u.worldOf))],
+    // The abort discards the unfinished generation of every unit the run opened one of, taken from the
+    // book and not from the standing units: a unit offboarded since then still holds its `taking` row.
+    cleanups: () => [discardGenerationsCleanup(ports, (ctx) =>
+      unitsOfBackups(ctx, listBackupsOfRun(ctx.db, ctx.runId)).map((u) => u.worldOf))],
   };
 }
 
+/** Whether a book row is a generation of the unit with this name and stage. */
+const isGenerationOf = (backups: UnitBackup[], unit: string, stage: string): boolean => backups.some((b) => b.unit === unit && b.stage === stage);
+
 export function makeConsumerNightlyBackupDef(ports: ConsumerRelocationPorts): RunDefinition<NightlyBackupParams> {
-  return nightlyDef("consumer-nightly-backup", "consumer", ports, ({ db }) =>
-    db.select({ id: apps.id, name: apps.name, stage: apps.stage }).from(apps).where(inArray(apps.status, ["active", "suspended"])).all()
-      .map((a) => ({ label: `consumer ${a.name} (${a.stage})`, worldOf: consumerWorld(ports, a.id) })));
+  const columns = { id: apps.id, name: apps.name, stage: apps.stage };
+  const unitOf = (a: { id: string; name: string; stage: string }): NightlyUnit => ({ label: `consumer ${a.name} (${a.stage})`, worldOf: consumerWorld(ports, a.id) });
+  return nightlyDef("consumer-nightly-backup", "consumer", ports,
+    ({ db }) => db.select(columns).from(apps).where(inArray(apps.status, ["active", "suspended"])).all().map(unitOf),
+    ({ db }, backups) => db.select(columns).from(apps).all().filter((a) => isGenerationOf(backups, a.name, a.stage)).map(unitOf));
 }
 
 export function makeTenantNightlyBackupDef(ports: TenantRelocationPorts): RunDefinition<NightlyBackupParams> {
-  return nightlyDef("tenant-nightly-backup", "tenant", ports, ({ db }) =>
-    db.select({ id: tenants.id, guid: tenants.guid, subdomain: tenants.subdomain, stage: tenants.stage }).from(tenants).where(inArray(tenants.status, ["active", "suspended"])).all()
-      .map((t) => ({ label: `tenant ${t.subdomain} (${t.guid}, ${t.stage})`, worldOf: tenantWorld(ports, t.id) })));
+  const columns = { id: tenants.id, guid: tenants.guid, subdomain: tenants.subdomain, stage: tenants.stage };
+  const unitOf = (t: { id: string; guid: string; subdomain: string; stage: string }): NightlyUnit => ({ label: `tenant ${t.subdomain} (${t.guid}, ${t.stage})`, worldOf: tenantWorld(ports, t.id) });
+  return nightlyDef("tenant-nightly-backup", "tenant", ports,
+    ({ db }) => db.select(columns).from(tenants).where(inArray(tenants.status, ["active", "suspended"])).all().map(unitOf),
+    ({ db }, backups) => db.select(columns).from(tenants).all().filter((t) => isGenerationOf(backups, t.guid, t.stage)).map(unitOf));
 }

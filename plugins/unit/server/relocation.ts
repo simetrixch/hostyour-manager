@@ -361,22 +361,32 @@ export function discardGenerationCleanup(ports: RelocationPorts, worldOf: WorldO
 /** The inverse of the dump, for an aborted run: every generation the run opened of the units
  *  `worldsOf` names that never became `ok` is deleted from the box and marked failed. A verified one
  *  stays, because it is a complete backup whatever failed after it. A unit that cannot be discarded
- *  fails the cleanup, and a second abort runs it again past the units already settled. */
+ *  does not stop the next one; the cleanup fails at its end, naming each. A unit whose world could
+ *  not be resolved is still `taking`, and a second abort tries it again. */
 export function discardGenerationsCleanup(ports: RelocationPorts, worldsOf: (ctx: StepCtx) => WorldOf[]): Cleanup {
   return {
     name: DISCARD_GENERATION,
     title: "Delete the unfinished backup generation from the Storage Box",
     run: async (ctx) => {
+      const failed: string[] = [];
       for (const worldOf of worldsOf(ctx)) {
-        const w = await worldOf(ctx);
-        const g = findBackupOfRun(ctx.db, ctx.runId, backupUnitOf(w));
-        if (!g || g.state !== "taking") {
-          ctx.log("meta", g ? `generation ${g.generation} of ${w.unit} is ${g.state} — it stays` : `this run opened no generation of ${w.unit} — nothing to delete`);
-          continue;
+        let w: RelocationWorld | undefined;
+        try {
+          w = await worldOf(ctx);
+          const g = findBackupOfRun(ctx.db, ctx.runId, backupUnitOf(w));
+          if (!g || g.state !== "taking") {
+            ctx.log("meta", g ? `generation ${g.generation} of ${w.unit} is ${g.state} — it stays` : `this run opened no generation of ${w.unit} — nothing to delete`);
+            continue;
+          }
+          await discardGeneration(ports, ctx, w, g, `run ${ctx.runId} was aborted before the generation was verified`);
+          ctx.log("meta", `unfinished generation ${g.folder}/ deleted from the storage box and marked failed`);
+        } catch (e) {
+          const why = e instanceof Error ? e.message : String(e);
+          failed.push(w ? `${w.kindWord} ${w.unit}: ${why}` : why);
+          ctx.log("meta", `${w ? `${w.kindWord} ${w.unit}: ` : ""}unfinished generation NOT deleted — ${why}`);
         }
-        await discardGeneration(ports, ctx, w, g, `run ${ctx.runId} was aborted before the generation was verified`);
-        ctx.log("meta", `unfinished generation ${g.folder}/ deleted from the storage box and marked failed`);
       }
+      if (failed.length > 0) throw errValidation(`${failed.length} unfinished generation(s) could not be deleted: ${failed.join("; ")}`);
     },
   };
 }
