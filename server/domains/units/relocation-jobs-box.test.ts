@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { RelocationJob } from "#unit/server/relocation-jobs.ts";
-import { consumerClearSourceJobs, consumerGenerationClaimsJob, consumerRestoreJobs, consumerVerifyCompletenessJobs, parseClaimLines } from "./relocation-jobs-consumer.ts";
+import { consumerClearSourceJobs, consumerGenerationClaimsJob, consumerRestoreJobs, consumerSourceDbListJob, consumerVerifyCompletenessJobs, parseClaimLines } from "./relocation-jobs-consumer.ts";
 import { tenantClearSourceJobs, tenantRestoreJobs, tenantSourceDbListJob, tenantVerifyCompletenessJobs } from "./relocation-jobs-tenant.ts";
 
 // The jobs that list the Storage Box, run the way the pod runs them (`sh -ec`), against stubs: rclone
@@ -38,6 +38,9 @@ function run(job: RelocationJob, root: string, opts: { failOn?: string; database
   lsf) p="\${2#box:}"; d="$BOX_ROOT/$p"; [ -d "$d" ] && [ "$p" != "$FAIL_ON" ] || { echo "directory not found" >&2; exit 3; }
        for e in "$d"/*; do [ -e "$e" ] || continue; if [ -d "$e" ]; then echo "$(basename "$e")/"; else basename "$e"; fi; done ;;
   copyto) cp "$BOX_ROOT/\${2#box:}" "$3" ;;
+  size) [ "$2" != "$FAIL_ON" ] && [ "$FAIL_ON" != "size" ] || { echo "couldn't connect" >&2; exit 1; }
+        case "$2" in box:*) d="$BOX_ROOT/\${2#box:}" ;; *) d="$BOX_ROOT/s3/\${2#s3:}" ;; esac
+        echo "{\\"count\\":$(find "$d" -type f 2>/dev/null | wc -l | tr -d ' '),\\"bytes\\":0}" ;;
 esac`);
   // mongosh fails where FAIL_MONGO is set, writes down every drop, and otherwise lists DATABASES.
   stub("mongosh", `[ -z "$FAIL_MONGO" ] || { echo "MongoNetworkError: connect ECONNREFUSED" >&2; exit 1; }
@@ -122,5 +125,26 @@ describe("the Mongo jobs that list the databases themselves", () => {
     const job = consumerClearSourceJobs({ name: "acme", stage: "prod", databases: ["acme_main"], services: ["mongodb"], image: "dbtools" })[0]!;
     expect(run(job, box({}))).toContain("DROPPED acme_main");
     expect(() => run(job, box({}), { failMongo: true })).toThrow();
+  });
+});
+
+describe("the jobs that read a count or a listing into a variable", () => {
+  const GUID = "zsjs023ctne0";
+  const bucketCheck = (): RelocationJob => tenantVerifyCompletenessJobs({ guid: GUID, folder: "gen", stage: "prod", apps: ["web"], image: "dbtools", identityProvider: "auth" }).find((j) => j.spec.name.startsWith("reloc-verify-bucket"))!;
+  const consumerList = (): RelocationJob => consumerSourceDbListJob({ name: "acme", stage: "prod", databases: ["acme_main", "acme_logs"], services: ["mongodb"], image: "dbtools" })!;
+
+  it("PLANTED INNOCENT: the bucket check passes where the box and the target hold the same number of objects", () => {
+    expect(run(bucketCheck(), box({ "bucket/a": "", "bucket/b": "", [`../s3/${GUID}/a`]: "", [`../s3/${GUID}/b`]: "" }))).toContain("COMPLETE bucket");
+  });
+
+  it("fails the bucket check where a count cannot be read, rather than finding two empty counts equal", () => {
+    const root = box({ "bucket/a": "", [`../s3/${GUID}/a`]: "" });
+    expect(() => run(bucketCheck(), root, { failOn: "size" })).toThrow(); // neither count can be read
+    expect(() => run(bucketCheck(), root, { failOn: `s3:${GUID}` })).toThrow();
+  });
+
+  it("fails the consumer's source listing where Mongo cannot be listed, and names the databases it finds otherwise", () => {
+    expect(() => run(consumerList(), box({}), { databases: ["acme_main"], failMongo: true })).toThrow();
+    expect(run(consumerList(), box({}), { databases: ["acme_main", "other_db"] })).toBe("DB acme_main\n");
   });
 });

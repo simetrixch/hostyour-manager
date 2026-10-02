@@ -218,8 +218,13 @@ echo "COMPLETE mongo"
         script:
           BOX_REMOTE +
           S3_REMOTE +
-          `want=$(rclone size "box:${i.folder}/bucket" --json | sed 's/.*"count":\\([0-9]*\\).*/\\1/')
-have=$(rclone size "s3:${i.guid}" --json | sed 's/.*"count":\\([0-9]*\\).*/\\1/')
+          // Each count lands in a file first: `sh -e` misses a failure inside a command substitution's
+          // pipe, and two counts that could not be read would otherwise compare equal, both empty.
+          `rclone size "box:${i.folder}/bucket" --json > /tmp/box-size
+rclone size "s3:${i.guid}" --json > /tmp/target-size
+want=$(sed -n 's/.*"count":\\([0-9]*\\).*/\\1/p' /tmp/box-size)
+have=$(sed -n 's/.*"count":\\([0-9]*\\).*/\\1/p' /tmp/target-size)
+[ -n "$want" ] && [ -n "$have" ] || { echo "UNCOUNTED bucket objects: rclone answered no count"; exit 1; }
 echo "COUNT box=$want target=$have"
 [ "$want" = "$have" ] || { echo "MISSING bucket objects: box has $want, target has $have"; exit 1; }
 echo "COMPLETE bucket"

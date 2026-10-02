@@ -299,8 +299,11 @@ export function consumerSourceDbListJob(i: { name: string; stage: Stage; databas
       name: relocationJobName("list-source", i.name),
       image: i.image,
       env: mongoEnv(i.stage),
-      script: `for db in ${quoted(i.databases)}; do
-  mongosh ${MONGO_FLAGS} --quiet --eval 'db.adminCommand({listDatabases:1,nameOnly:true}).databases.forEach(function(d){print(d.name)})' | grep -qx "$db" && echo "DB $db" || true
+      // The listing lands in a file first: `sh -e` misses a failure inside a pipe, and a Mongo that
+      // cannot be listed must fail the job, not read as databases the release destroyed.
+      script: `mongosh ${MONGO_FLAGS} --quiet --eval 'db.adminCommand({listDatabases:1,nameOnly:true}).databases.forEach(function(d){print(d.name)})' > /tmp/mongo-databases
+for db in ${quoted(i.databases)}; do
+  if grep -qx "$db" /tmp/mongo-databases; then echo "DB $db"; fi
 done
 `,
     },
