@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { RelocationJob } from "#unit/server/relocation-jobs.ts";
+import { purgeGenerationJob, type RelocationJob } from "#unit/server/relocation-jobs.ts";
 import { consumerClearSourceJobs, consumerGenerationClaimsJob, consumerRestoreJobs, consumerSourceDbListJob, consumerVerifyCompletenessJobs, parseClaimLines } from "./relocation-jobs-consumer.ts";
 import { tenantClearSourceJobs, tenantRestoreJobs, tenantSourceDbListJob, tenantVerifyCompletenessJobs } from "./relocation-jobs-tenant.ts";
 
@@ -34,15 +34,20 @@ function run(job: RelocationJob, root: string, opts: { failOn?: string; database
   const bin = temp("bin-");
   const scratch = temp("tmp-");
   const stub = (name: string, body: string): void => writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  // The exit codes rclone 1.60.1, the dbtools image's, gives over sftp: 3 for a folder that is not
+  // there, and 1 for a box that refuses the login or cannot be reached.
   stub("rclone", `case "$1" in
   obscure) echo obscured ;;
-  lsf) p="\${2#box:}"; d="$BOX_ROOT/$p"; [ -d "$d" ] && [ "$p" != "$FAIL_ON" ] || { echo "directory not found" >&2; exit 3; }
+  lsf) p="\${2#box:}"; d="$BOX_ROOT/$p"
+       [ "$p" != "$FAIL_ON" ] || { echo "couldn't connect SSH" >&2; exit 1; }
+       [ -d "$d" ] || { echo "directory not found" >&2; exit 3; }
        for e in "$d"/*; do [ -e "$e" ] || continue; if [ -d "$e" ]; then echo "$(basename "$e")/"; else basename "$e"; fi; done ;;
   copyto) cp "$BOX_ROOT/\${2#box:}" "$3" ;;
   size) [ "$2" != "$FAIL_ON" ] && [ "$FAIL_ON" != "size" ] || { echo "couldn't connect" >&2; exit 1; }
         [ "$FAIL_ON" != "count" ] || { echo '{"bytes":0}'; exit 0; }
         case "$2" in box:*) d="$BOX_ROOT/\${2#box:}" ;; *) d="$BOX_ROOT/s3/\${2#s3:}" ;; esac
         echo "{\\"count\\":$(find "$d" -type f 2>/dev/null | wc -l | tr -d ' '),\\"bytes\\":0}" ;;
+  purge) rm -rf "$BOX_ROOT/\${2#box:}" ;;
 esac`);
   // mongosh fails where FAIL_MONGO is set, writes down every drop, and otherwise lists DATABASES.
   stub("mongosh", `[ -z "$FAIL_MONGO" ] || { echo "MongoNetworkError: connect ECONNREFUSED" >&2; exit 1; }
@@ -152,5 +157,26 @@ describe("the jobs that read a count or a listing into a variable", () => {
   it("fails the consumer's source listing where Mongo cannot be listed, and names the databases it finds otherwise", () => {
     expect(() => run(consumerList(), box({}), { databases: ["acme_main"], failMongo: true })).toThrow();
     expect(run(consumerList(), box({}), { databases: ["acme_main", "other_db"] })).toBe("DB acme_main\n");
+  });
+});
+
+describe("purging a generation", () => {
+  const purge = (folder: string): RelocationJob => purgeGenerationJob({ unit: "acme", folder, namespace: "acme-prod", image: "dbtools" });
+
+  it("purges a generation that stands on the box, and nothing beside it", () => {
+    const root = box({ "consumers/acme/G1/registration.yaml": "", "consumers/acme/G2/registration.yaml": "" });
+    expect(run(purge("gen/consumers/acme/G1"), root)).toContain("PURGED gen/consumers/acme/G1");
+    expect(existsSync(join(root, "gen/consumers/acme/G1"))).toBe(false);
+    expect(existsSync(join(root, "gen/consumers/acme/G2"))).toBe(true);
+  });
+
+  it("PLANTED INNOCENT: reports a generation the box does not hold as absent, and succeeds", () => {
+    expect(run(purge("gen/consumers/acme/G1"), box({ "consumers/acme/G2/registration.yaml": "" }))).toContain("ABSENT gen/consumers/acme/G1");
+  });
+
+  it("fails where the box cannot be read, rather than reporting the generation absent", () => {
+    const root = box({ "consumers/acme/G1/registration.yaml": "" });
+    expect(() => run(purge("gen/consumers/acme/G1"), root, { failOn: "gen/consumers/acme/G1" })).toThrow();
+    expect(existsSync(join(root, "gen/consumers/acme/G1"))).toBe(true);
   });
 });

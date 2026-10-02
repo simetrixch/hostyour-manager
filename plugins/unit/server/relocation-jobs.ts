@@ -186,19 +186,23 @@ export function writeManifestJob(i: { unit: string; folder: string; namespace: s
 }
 
 /** Delete ONE generation from the box — a failed one, or one retention drops. A folder that is not
- *  there is the idempotent no-op; any other failure of the delete fails the job. */
+ *  there is the idempotent no-op; any other failure fails the job. rclone tells the two apart by its
+ *  exit code: 3 for a folder that is not there, 1 for a box that refuses the login or cannot be
+ *  reached (rclone 1.60.1 over sftp, the dbtools image's). A box that answers a missing folder in any
+ *  other way therefore fails the purge loudly, and never reads as a generation already gone. */
 export function purgeGenerationJob(i: { unit: string; folder: string; namespace: string; image: string }): RelocationJob {
   return {
     namespace: i.namespace,
     spec: {
       ...boxSpec("purge-generation", i.unit),
       image: i.image,
-      script: BOX_REMOTE + `if rclone lsf "box:${i.folder}" >/dev/null 2>&1; then
-  rclone purge "box:${i.folder}"
-  echo "PURGED ${i.folder}"
-else
-  echo "ABSENT ${i.folder}"
-fi
+      script: BOX_REMOTE + `listed=0
+rclone lsf "box:${i.folder}" > /dev/null || listed=$?
+case "$listed" in
+  0) rclone purge "box:${i.folder}"; echo "PURGED ${i.folder}" ;;
+  3) echo "ABSENT ${i.folder}" ;;
+  *) exit "$listed" ;;
+esac
 `,
     },
   };
