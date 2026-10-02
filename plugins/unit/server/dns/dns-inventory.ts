@@ -150,7 +150,7 @@ async function unitRowsOf(
   return rows;
 }
 
-/** The identity provider marks the book holds for tenants (unit-dns.ts provisionIssuerRecord), each read
+/** The identity provider marks the book holds for tenants (unit-dns.ts publishIssuerRecord), each read
  *  at the provider and owned by the tenant's subdomain where a row still names it, by its guid where
  *  none does. Listed from the book rather than derived from the registrations, so a mark a failed purge
  *  left behind is on this page for dns-remove to take back. */

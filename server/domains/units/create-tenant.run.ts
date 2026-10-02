@@ -30,7 +30,7 @@ import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
-import { provisionIssuerRecord, provisionUnitDns, standingHostFrom, tenantIssuerRecord, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { publishIssuerRecord, provisionUnitDns, standingHostFrom, tenantIssuerRecord, tenantRecordName } from "#unit/server/unit-dns.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import type { PublicDns } from "../../adapters/dns/public-dns.ts";
 import { tenantActivateStep } from "./create-tenant-activate.ts";
@@ -41,7 +41,7 @@ import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tena
 import { assertReplacesOnTargetCluster, ensureSubdomainFreeStep, resolveReplaceTargets, ReplaceTargetSchema } from "./tenant-replace.ts";
 import { probeTenantTarget, probeTenantDns, probeBuildUnit } from "./tenant-probes.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
-import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
+import { removeIssuerRecordsStep, tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
 import { readTenantSpec } from "./tenant-apps-repo.run.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
@@ -289,7 +289,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
   // delete of its own, so the old tenant's identity (namespaces, Vault crypto entry) stands and
   // only tenant-purge deletes any of it. Its member databases go with the prune's ServiceClaim
   // deletions regardless — the plan summary warns the operator before approval.
-  const replaceSteps = (p.replaces ?? []).flatMap((t) => tenantTeardownSteps(ports, t, REPLACE_TEARDOWN, []));
+  const replaceSteps = (p.replaces ?? []).flatMap((t) => tenantTeardownSteps(ports, t, REPLACE_TEARDOWN, [removeIssuerRecordsStep(ports, t, REPLACE_TEARDOWN)]));
   return [
     {
       name: "attest-target",
@@ -460,7 +460,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // The mark the product's mail service trusts the tenant's identity provider by, published long
         // before `activate` sends the first invite through that service.
         if (p.issuerRecordLabel) {
-          await provisionIssuerRecord(ctx, { dns: ports.dns, guid: p.guid, stage: p.stage, record: tenantIssuerRecord(p.issuerRecordLabel, p.routing, p.identityProvider, p.stage, p.subdomain, unitApex), runKind: "tenant-create" });
+          await publishIssuerRecord(ctx, { dns: ports.dns, guid: p.guid, stage: p.stage, record: tenantIssuerRecord(p.issuerRecordLabel, p.routing, p.identityProvider, p.stage, p.subdomain, unitApex), runKind: "tenant-create" });
         } else {
           ctx.log("meta", "the product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is published");
         }
@@ -674,7 +674,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         // The replace sentence carries the SAME data warning tenant-offboard's summary gives, because
         // approving this plan approves the same prune: the replaced tenant's member databases go with
         // its ServiceClaim deletions, and only its identity survives for a purge to reap.
-        summary: `Onboard tenant ${guid} (${req.subdomain}) at ${req.stage} on ${rc.domain} pinned at ${outcome.resolvedSha.slice(0, 7)} with ${req.apps.length} app(s): ${stepDefs.length} steps.${params.issuerRecordLabel ? ` Its identity provider is marked in DNS under ${params.issuerRecordLabel} beside its zone record, and the first invite waits until the mark resolves.` : ""}${appsUnit ? ` The apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with ${req.apps.map((a) => a.name).join(", ")}, onboarded build-only and built; the engines mount it.` : ""}${replaces.length ? ` Replaces existing ${replaces.map((r) => r.guid).join(", ")} (subdomain "${req.subdomain}" at ${req.stage}) before deploying ${guid}. The replaced tenant's member DATABASES are NOT kept: pruning its fan-out deletes every member's ServiceClaim, and the service-provisioner drops a claim's databases together with its user — run a backup first if the data has to come back. Its identity (the Vault crypto entry, the namespaces) survives until a purge reaps it.` : ""}`,
+        summary: `Onboard tenant ${guid} (${req.subdomain}) at ${req.stage} on ${rc.domain} pinned at ${outcome.resolvedSha.slice(0, 7)} with ${req.apps.length} app(s): ${stepDefs.length} steps.${params.issuerRecordLabel ? ` Its identity provider is marked in DNS under ${params.issuerRecordLabel} beside its zone record, and the first invite waits until the mark resolves.` : " The product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is published."}${appsUnit ? ` The apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with ${req.apps.map((a) => a.name).join(", ")}, onboarded build-only and built; the engines mount it.` : ""}${replaces.length ? ` Replaces existing ${replaces.map((r) => r.guid).join(", ")} (subdomain "${req.subdomain}" at ${req.stage}) before deploying ${guid}. The replaced tenant's member DATABASES are NOT kept: pruning its fan-out deletes every member's ServiceClaim, and the service-provisioner drops a claim's databases together with its user — run a backup first if the data has to come back. Its identity (the Vault crypto entry, the namespaces) survives until a purge reaps it.` : ""}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [], // no host owned — the Manager acts master-locally
         locks: tenantLocks(ports.registrations),

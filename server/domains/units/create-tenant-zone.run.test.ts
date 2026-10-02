@@ -269,5 +269,8 @@ describe("create-tenant marks the identity provider in DNS where the product dec
     if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
     expect(result.params.issuerRecordLabel).toBe("_digita-idp");
     expect(result.plan.summary).toContain("Its identity provider is marked in DNS under _digita-idp beside its zone record, and the first invite waits until the mark resolves.");
+    const plain = await makeCreateTenantDef(ports(new FakeDnsProvider())).planStream!({ ...REQUEST, subdomain: "plain" }, planCtx([]));
+    if (plain.outcome !== "planned") throw new Error(`rejected: ${plain.summary}`);
+    expect(plain.plan.summary).toContain("The product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is published.");
   });
 });

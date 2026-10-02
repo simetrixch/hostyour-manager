@@ -577,8 +577,11 @@ export type DmarcPolicy = (typeof DMARC_POLICY)[number];
 
 /** What ONE write of this Manager did to a DNS record, as the book of DNS writes (dns_writes)
  *  records it: `inserted` where no record stood under the name, `updated` where one stood with other
- *  content. A write that found the same content already standing is not a write and is not recorded. */
-export const DNS_WRITE_ACT = ["inserted", "updated"] as const;
+ *  content. A write that found the same content already standing is not a write and is not recorded —
+ *  with one exception, `adopted`: a tenant identity provider's mark that stood exactly as it must, booked
+ *  for another tenant or for nobody, is entered for the tenant that publishes it now, without a write,
+ *  because the book is what removes the mark with its tenant (unit-dns.ts publishIssuerRecord). */
+export const DNS_WRITE_ACT = ["inserted", "updated", "adopted"] as const;
 export type DnsWriteAct = (typeof DNS_WRITE_ACT)[number];
 
 /** What ONE write of this Manager did to a key of a consumer's Vault entry, as the book of secret

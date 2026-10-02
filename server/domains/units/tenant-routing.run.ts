@@ -7,7 +7,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { bookedIssuerLabel, provisionIssuerRecord, provisionUnitDns, removeIssuerRecords, removeUnitDns, tenantIssuerRecord, tenantMemberUrl, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { bookedIssuerLabel, publishIssuerRecord, provisionUnitDns, removeIssuerRecords, removeUnitDns, tenantIssuerRecord, tenantMemberUrl, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { sleep } from "#unit/server/release-cycle.ts";
 
 // `tenant-set-routing` — move a STANDING tenant onto another member routing (MEMBER_ROUTING).
@@ -113,7 +113,7 @@ function tenantSetRoutingSteps(ports: TenantSetRoutingPorts, p: TenantSetRouting
         // with it: published here, the other routing's mark removed with the other record below.
         const label = bookedIssuerLabel(ctx.db, tc.guid, tc.stage);
         if (label !== null) {
-          await provisionIssuerRecord(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, record: tenantIssuerRecord(label, p.routing, tc.identityProvider, tc.stage, tc.subdomain, apex), runKind: "tenant-set-routing" });
+          await publishIssuerRecord(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, record: tenantIssuerRecord(label, p.routing, tc.identityProvider, tc.stage, tc.subdomain, apex), runKind: "tenant-set-routing" });
         }
       },
     },
@@ -187,6 +187,9 @@ export function makeTenantSetRoutingDef(ports: TenantSetRoutingPorts): RunDefini
       const record = tenantRecordName(params.routing, tc.subdomain, tc.stage, apex);
       const url = tenantMemberUrl(params.routing, tc.identityProvider, tc.stage, tc.subdomain, apex, tc.ownDomain);
       const old = otherRoutings(params.routing).map((r) => tenantRecordName(r, tc.subdomain, tc.stage, apex)).join(", ");
+      // The identity provider answers at another address under the other routing, so its mark moves too.
+      const label = bookedIssuerLabel(db, tc.guid, tc.stage);
+      const mark = label === null ? "" : ` The identity provider's DNS mark moves with it: ${tenantIssuerRecord(label, params.routing, tc.identityProvider, tc.stage, tc.subdomain, apex).name} is published with the record, and the other routing's mark goes with the other record.`;
       const stepDefs = tenantSetRoutingSteps(ports, params);
       return {
         kind: "tenant-set-routing",
@@ -195,7 +198,7 @@ export function makeTenantSetRoutingDef(ports: TenantSetRoutingPorts): RunDefini
         summary:
           `${tc.routing === params.routing ? "Re-apply" : `Move tenant ${tc.guid} from ${tc.routing} to`} the ${params.routing} routing on ${tc.domain} (${tc.stage}): ` +
           `provision the DNS record ${record}, record the routing on the registration and the row, wait until ${url}/ answers, ` +
-          `then remove ${old}. The tenant's charts must serve the ${params.routing} routing for the wait to end — the old record stands until they do.`,
+          `then remove ${old}. The tenant's charts must serve the ${params.routing} routing for the wait to end — the old record stands until they do.${mark}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),

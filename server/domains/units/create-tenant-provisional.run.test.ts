@@ -60,7 +60,7 @@ const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const APPS = [{ name: "erp" }];
 const EXPECTED = tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod");
 /** The four cleanup names create-tenant arms — the shared teardown under its ABORT flavour. */
-const ABORT_STEPS = [`abort-${GUID}-remove-apps-registration`, `abort-${GUID}-remove`, `abort-${GUID}-watch-prune`, `abort-${GUID}-delete-projects`, `abort-${GUID}-record`];
+const ABORT_STEPS = [`abort-${GUID}-remove-apps-registration`, `abort-${GUID}-remove`, `abort-${GUID}-watch-prune`, `abort-${GUID}-delete-projects`, `abort-${GUID}-remove-issuer-records`, `abort-${GUID}-record`];
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
@@ -345,7 +345,7 @@ describe("a create-tenant that fails only at `activate` leaves a LIVE tenant", (
 });
 
 describe("create-tenant's abort-with-cleanup IS the shared teardown", () => {
-  it("record-provisional arms all four teardown steps, in teardown order, and they resolve against def.cleanups()", async () => {
+  it("record-provisional arms every teardown step, in teardown order, and they resolve against def.cleanups()", async () => {
     seedClusters();
     const prt = ports();
     const p = params();
@@ -353,7 +353,7 @@ describe("create-tenant's abort-with-cleanup IS the shared teardown", () => {
     await stepNamed(prt, p, "record-provisional").run(ctx(p, "record-provisional", { cleanups }));
     // ONE registration point is what fixes the ORDER: abortWithCleanup reverses across STEPS, not within
     // one, so a single step's cleanups run in registration order — remove -> watch-prune ->
-    // delete-project -> record, the order tenant-offboard runs them in.
+    // delete-project -> the identity provider's DNS marks -> record, the order tenant-offboard runs them in.
     expect(cleanups.map((c) => c.name)).toEqual(ABORT_STEPS);
     // abortWithCleanup resolves the PERSISTED names against def.cleanups(params); a name that does not
     // resolve would leave the compensation un-runnable, so the two must be built from the same source.

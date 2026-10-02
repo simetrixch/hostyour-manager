@@ -8,18 +8,22 @@ import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { listDnsWrites } from "../../db/dns-writes.ts";
 import { makeTenantPurgeDef, type TenantPurgeRequest } from "./tenant-purge.run.ts";
 import { makeOffboardTenantDef } from "./tenant-offboard.run.ts";
+import { createTenantCleanups } from "./create-tenant-abort.ts";
+import { CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
+import { REPLACE_TEARDOWN, removeIssuerRecordsStep } from "./tenant-teardown.ts";
+import { composeTenantReport } from "./gates/tenant-gates.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
-import { provisionIssuerRecord, tenantIssuerRecord } from "#unit/server/unit-dns.ts";
+import { publishIssuerRecord, tenantIssuerRecord } from "#unit/server/unit-dns.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import { ARGO_NS, testMembers } from "./tenant-members.fixture.ts";
 
 // The identity provider's DNS mark goes with its tenant on every removal path: tenant-offboard,
-// tenant-purge with a subdomain, and the re-run tenant-purge whose registration an earlier purge already
-// removed, so it knows no subdomain. A mark left behind would keep the product's mail service trusting
+// tenant-purge with a subdomain, the re-run tenant-purge whose registration an earlier purge already
+// removed, so it knows no subdomain, an aborted tenant-create, and the replace of a tenant. A mark left behind would keep the product's mail service trusting
 // whatever serves that host next. The fixtures are the purge tests' own, cut to what remove-dns reads.
 
 const GUID = "zsjs023ctne0";
@@ -70,7 +74,7 @@ function ctx(params: object): StepCtx {
 
 /** The mark as tenant-create leaves it: standing and booked for the tenant. */
 async function marked(dns: FakeDnsProvider, guid = GUID): Promise<void> {
-  await provisionIssuerRecord(ctx({}), { dns, guid, stage: "prod", record: MARK, runKind: "tenant-create" });
+  await publishIssuerRecord(ctx({}), { dns, guid, stage: "prod", record: MARK, runKind: "tenant-create" });
 }
 
 const standing = (dns: FakeDnsProvider): Promise<string[]> => dns.listRecordContents({ name: MARK.name, type: "TXT" });
@@ -125,5 +129,32 @@ describe("the identity provider's DNS mark goes with its tenant", () => {
     await purgeRemoveDns(ports(new TenantRegistrations(new FakePlatformRepo()), dns));
     expect(await standing(dns)).toEqual([MARK.content]);
     expect(listDnsWrites(db.db).find((w) => w.name === MARK.name)?.owner.name).toBe("ffffffffffff");
+  });
+});
+
+describe("the pointer-only teardowns take the mark too", () => {
+  it("PLANTED DEFECT: an aborted tenant-create removes the mark its provision-dns published, which would trust whatever serves the zone next", async () => {
+    const dns = new FakeDnsProvider();
+    await marked(dns);
+    const prt = ports(new TenantRegistrations(new FakePlatformRepo()), dns) as unknown as TenantOnboardPorts;
+    const p = CreateTenantParams.parse({
+      guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: "a".repeat(40), registryHost: "zot.m1.example",
+      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", expectedApps: [], deployRepoUrl: "https://github.com/acme/acme-deploy.git",
+      report: composeTenantReport({ resolvedSha: "a".repeat(40), probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
+    });
+    const cleanup = createTenantCleanups(prt, p).find((c) => c.name === `abort-${GUID}-remove-issuer-records`);
+    expect(cleanup).toBeDefined();
+    await cleanup!.run(ctx(p));
+    expect(await standing(dns)).toEqual([]);
+  });
+
+  it("the replace of a tenant removes the replaced tenant's mark before the new tenant publishes its own", async () => {
+    const dns = new FakeDnsProvider();
+    await marked(dns, "ffffffffffff");
+    const target = { guid: "ffffffffffff", subdomain: "acme", stage: "prod" as const, clusterId: "cls_1", cluster: "s1", tenantId: null, watchNames: [], members: ["auth"] };
+    const step = removeIssuerRecordsStep(ports(new TenantRegistrations(new FakePlatformRepo()), dns), target, REPLACE_TEARDOWN);
+    expect(step.name).toBe("replace-ffffffffffff-remove-issuer-records");
+    await step.run(ctx({}));
+    expect(await standing(dns)).toEqual([]);
   });
 });

@@ -6,7 +6,7 @@ import { GUID, MANIFEST_YAML, planned, ports, seedTenant, staleMembers, stepCtx,
 
 // tenant-refresh-members is the one run that carries a change of the product's manifest to a standing
 // tenant, so a product that declares the label of the identity provider's DNS mark after its tenants
-// were created gets their marks here. Split from tenant-refresh-members.run.test.ts along its line budget.
+// were created gets their marks here, over the fixtures the run's other tests use.
 
 useMemoryDb();
 

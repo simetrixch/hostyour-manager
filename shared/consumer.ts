@@ -186,7 +186,7 @@ export const TenantSpecSchema = z.object({
   // service: TXT `<label>.<issuer host>` holding the issuer, the identity provider's address on the
   // tenant's zone (plugins/unit/shared/unit-host.ts tenantIssuerRecord). Published with the tenant's
   // zone record and removed with the tenant. Absent, no tenant of this product is marked.
-  issuerRecordLabel: z.string().regex(/^_[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/, "one DNS label that starts with an underscore, such as _idp").optional(),
+  issuerRecordLabel: z.string().regex(/^_[a-z0-9]([a-z0-9-]{0,60}[a-z0-9])?$/, "one DNS label of at most 63 characters that starts with an underscore, such as _idp").optional(),
   /** HOW THE PRODUCT ADDRESSES ITS MEMBERS below the zone (MEMBER_ROUTING, shared/enums.ts): `host`, a
    *  host of their own each, or `path`, every member under a path of the zone itself. The product
    *  says it because its charts are what route; the platform follows it with the DNS record and every

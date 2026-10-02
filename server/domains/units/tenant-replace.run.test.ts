@@ -226,7 +226,7 @@ const ONBOARD_HEAD = ["attest-target", "ensure-subdomain-free", "record-provisio
 // crypto entry written, after the old tenant of this subdomain is torn down and before anything that
 // reads them exists.
 const ONBOARD_TAIL = ["create-repository", "write-tree", "onboard-build-only", "seed-tenant-crypto", "refresh-images", "ensure-images", "apply-appprojects", "provision-argo-sync", "provision-dns", "write-registration", "watch-sync-set", "smoke", "record-inventory", "activate"];
-const replaceStepNames = (guid: string): string[] => [`replace-${guid}-remove-apps-registration`, `replace-${guid}-remove`, `replace-${guid}-watch-prune`, `replace-${guid}-delete-projects`, `replace-${guid}-record`];
+const replaceStepNames = (guid: string): string[] => [`replace-${guid}-remove-apps-registration`, `replace-${guid}-remove`, `replace-${guid}-watch-prune`, `replace-${guid}-delete-projects`, `replace-${guid}-remove-issuer-records`, `replace-${guid}-record`];
 
 describe("create-tenant idempotent-by-subdomain — planStream resolves the replace set", () => {
   it("no existing subdomain: a plain onboard, NO offboard steps prepended", async () => {

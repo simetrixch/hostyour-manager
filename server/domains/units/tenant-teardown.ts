@@ -33,6 +33,7 @@ import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { renderTenantArgoSync } from "#unit/server/build-rbac.ts";
 import { type TenantLifecyclePorts } from "./lifecycle.ts";
 import { clearRelocationHold } from "#unit/server/lifecycle.ts";
+import { removeIssuerRecords } from "#unit/server/unit-dns.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 import { allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
 
@@ -256,11 +257,13 @@ function settlePruneGuardStep(ports: TenantLifecyclePorts, t: TenantTeardownTarg
  *  (settlePruneGuardStep), which is where its tolerated "not pruned" observation is finally made to
  *  answer for itself.
  *
- *  `cascade` is where a composing run puts its OWN destructive cluster-side work: tenant-purge's Tenant
- *  CR delete (the operator's deprovision cascade — Vault path, object-storage credential, Mongo
- *  databases) and its namespace backstop reap. The two pointer-only flavours (REPLACE_TEARDOWN,
- *  create-tenant's ABORT_TEARDOWN) pass [] and that is not a stub: they issue no cluster-side delete of
- *  their own, so the tenant's identity (namespaces, Tenant CR, Vault path) stands for a re-onboard.
+ *  `cascade` is where a composing run puts its OWN destructive work: tenant-purge's Tenant CR delete (the
+ *  operator's deprovision cascade — Vault path, object-storage credential, Mongo databases) and its
+ *  namespace backstop reap. The two pointer-only flavours (REPLACE_TEARDOWN, create-tenant's
+ *  ABORT_TEARDOWN) pass only removeIssuerRecordsStep: they issue no cluster-side delete of their own, so
+ *  the tenant's identity (namespaces, Tenant CR, Vault path) stands for a re-onboard, but the identity
+ *  provider's DNS mark goes, because once the registration is gone the subdomain is free for a consumer
+ *  whose host the mark would make the product's mail service trust.
  *  The prune every flavour waits for is itself destructive one level down — it deletes each member's
  *  ServiceClaim and the service-provisioner drops the claim's databases with its user — so no flavour
  *  keeps the member data, and each composing run's operator text states that.
@@ -276,6 +279,16 @@ function settlePruneGuardStep(ports: TenantLifecyclePorts, t: TenantTeardownTarg
  *  ordering structural instead of a convention every composing run has to remember, and it mirrors
  *  create-tenant's own rule in the opposite direction: record-provisional records INTENT before the first
  *  mutation, record-inventory records SUCCESS only after the work is done. */
+/** The step that removes the tenant's identity provider DNS marks (unit-dns.ts removeIssuerRecords) —
+ *  the cascade of the pointer-only flavours, and the same act offboard and purge take at their remove-dns. */
+export function removeIssuerRecordsStep(ports: TenantLifecyclePorts, t: TenantTeardownTarget, opts: TenantTeardownOpts): Step {
+  return {
+    name: `${opts.stepPrefix}-${t.guid}-remove-issuer-records`,
+    title: `${opts.wording.title} ${t.guid}: remove its identity provider's DNS marks`,
+    run: (ctx) => removeIssuerRecords(ctx, { dns: ports.dns, guid: t.guid, stage: t.stage }),
+  };
+}
+
 export function tenantTeardownSteps(ports: TenantLifecyclePorts, t: TenantTeardownTarget, opts: TenantTeardownOpts, cascade: Step[]): Step[] {
   const pfx = `${opts.stepPrefix}-${t.guid}`;
   const { title, removing, settled } = opts.wording;

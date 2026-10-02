@@ -10,7 +10,7 @@
 import type { Cleanup } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { assertTenantNotLive, type TenantLiveRefusal } from "./tenant-live-guard.ts";
-import { tenantTeardownSteps, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
+import { removeIssuerRecordsStep, tenantTeardownSteps, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
 // Type-only, so there is no runtime import cycle back into create-tenant.run.ts — the same shape
 // create-tenant-activate.ts has.
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
@@ -78,9 +78,10 @@ function abortTeardownTarget(p: CreateTenantParams): TenantTeardownTarget {
  *  resolves the persisted cleanup names against this function, so it MUST build the same names the
  *  registration in record-provisional builds: both call exactly this one function. */
 export function createTenantCleanups(ports: TenantOnboardPorts, p: CreateTenantParams): Cleanup[] {
-  // Empty `cascade`: an abort deletes NO cluster state (see ABORT_TEARDOWN) — the row flip is the last
-  // thing it does because there is nothing after it to do.
-  return tenantTeardownSteps(ports, abortTeardownTarget(p), ABORT_TEARDOWN, []);
+  // The `cascade` deletes NO cluster state (see ABORT_TEARDOWN); it removes the identity provider's DNS
+  // mark provision-dns may have published, which would otherwise outlive the tenant this run never made.
+  const target = abortTeardownTarget(p);
+  return tenantTeardownSteps(ports, target, ABORT_TEARDOWN, [removeIssuerRecordsStep(ports, target, ABORT_TEARDOWN)]);
 }
 
 /** The abort's PRECONDITION (RunDefinition.assertAbortable): the cleanups above are a

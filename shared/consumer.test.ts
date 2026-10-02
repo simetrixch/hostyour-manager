@@ -91,6 +91,12 @@ describe("ConsumerManifestSchema deploy requirement (C1: chart | builds[] | tena
     expect(r.success).toBe(true);
   });
 
+  it("takes the label of the identity provider's DNS mark only as one underscore label of at most 63 characters", () => {
+    const label = (issuerRecordLabel: string): boolean => ConsumerManifestSchema.safeParse({ ...meta, tenant: { ...tenantBlock, issuerRecordLabel } }).success;
+    expect([label("_digita-idp"), label(`_${"a".repeat(62)}`)]).toEqual([true, true]);
+    expect([label("digita-idp"), label("_digita.idp"), label("_Digita"), label("_idp-"), label(`_${"a".repeat(63)}`)]).toEqual([false, false, false, false, false]);
+  });
+
   it("rejects a manifest that declares neither chart, builds[], nor tenant (inert)", () => {
     expect(ConsumerManifestSchema.safeParse({ ...meta }).success).toBe(false);
   });

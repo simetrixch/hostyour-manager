@@ -5,7 +5,7 @@ import { FakeDnsProvider } from "#core/server/adapters/dns/testing/fake.ts";
 import type { StepCtx } from "#core/server/executor/types.ts";
 import type { CredentialStore } from "#core/server/security/store.ts";
 import type { Logger } from "#core/server/kernel/logger.ts";
-import { bookedIssuerLabel, provisionIssuerRecord, removeIssuerRecords, tenantIssuerRecord } from "./unit-dns.ts";
+import { bookedIssuerLabel, publishIssuerRecord, removeIssuerRecords, tenantIssuerRecord } from "./unit-dns.ts";
 
 // The identity provider's DNS mark beside a tenant's zone record: the product's mail service trusts the
 // tenant's issuer only where this TXT names it, so the mark is booked for the tenant that published it
@@ -33,9 +33,9 @@ function ctx(logs: string[], runId = "run_create"): StepCtx {
 
 const book = (): string[] => listDnsWrites(db.db).map((w) => `${w.act} ${w.type} ${w.name} → ${w.content} for ${w.owner.kind} ${w.owner.name} ${w.owner.stage ?? ""} by ${w.runId}`);
 const publish = (dns: FakeDnsProvider, logs: string[] = [], guid = GUID, record = MARK) =>
-  provisionIssuerRecord(ctx(logs), { dns, guid, stage: "prod", record, runKind: "tenant-create" });
+  publishIssuerRecord(ctx(logs), { dns, guid, stage: "prod", record, runKind: "tenant-create" });
 
-describe("provisionIssuerRecord", () => {
+describe("publishIssuerRecord", () => {
   it("publishes the mark where none stands and books it for the tenant at its stage", async () => {
     const dns = new FakeDnsProvider();
     await publish(dns);
@@ -53,37 +53,50 @@ describe("provisionIssuerRecord", () => {
     expect(logs).toEqual([`TXT ${MARK.name} → ${MARK.content} already stands, booked for tenant ${GUID}`]);
   });
 
-  it("PLANTED DEFECT: takes over a mark that stands booked for a replaced tenant, so it goes with the tenant on the zone now", async () => {
+  it("PLANTED DEFECT: adopts a mark that stands booked for a replaced tenant, without a write, so it goes with the tenant on the zone now", async () => {
     const dns = new FakeDnsProvider();
     dns.seed(MARK.name, "TXT", MARK.content);
     recordDnsWrite(db.db, { name: MARK.name, type: "TXT", content: MARK.content, act: "inserted", owner: { kind: "tenant", name: REPLACED, stage: "prod" }, runId: "run_old" });
     const logs: string[] = [];
     await publish(dns, logs);
-    expect(book()).toEqual([`updated TXT ${MARK.name} → ${MARK.content} for tenant ${GUID} prod by run_create`]);
-    expect(logs[0]).toContain(`booked for the tenant ${REPLACED}`);
+    expect(book()).toEqual([`adopted TXT ${MARK.name} → ${MARK.content} for tenant ${GUID} prod by run_create`]);
+    // Never absent in between: the record is neither deleted nor written again.
+    expect([dns.deletes, dns.creates]).toEqual([[], []]);
+    expect(logs[0]).toContain(`booked for the tenant ${REPLACED} — adopted for tenant ${GUID}`);
     // The replaced tenant's purge now finds no mark of its own to remove.
     await removeIssuerRecords(ctx([]), { dns, guid: REPLACED, stage: "prod" });
     expect(await dns.listRecordContents({ name: MARK.name, type: "TXT" })).toEqual([MARK.content]);
   });
 
-  it("books a mark that stands with no book row, the attempt that died before the book", async () => {
+  it("adopts a mark that stands with no book row, the attempt that died before the book", async () => {
     const dns = new FakeDnsProvider();
     dns.seed(MARK.name, "TXT", MARK.content);
     await publish(dns);
-    expect(book()).toEqual([`updated TXT ${MARK.name} → ${MARK.content} for tenant ${GUID} prod by run_create`]);
+    expect(book()).toEqual([`adopted TXT ${MARK.name} → ${MARK.content} for tenant ${GUID} prod by run_create`]);
+    expect(dns.creates).toEqual([]);
   });
 
-  it("replaces what a gone installation left at the name, and says what stood there", async () => {
+  it("PLANTED INNOCENT: publishes beside what a gone installation left at the name, deletes none of it, and says what stands there", async () => {
     const dns = new FakeDnsProvider();
     dns.seed(MARK.name, "TXT", "https://show.digitacloud.app/old-auth", "leftover");
     const logs: string[] = [];
     await publish(dns, logs);
-    expect(await dns.listRecordContents({ name: MARK.name, type: "TXT" })).toEqual([MARK.content]);
-    expect(logs[0]).toContain("in place of https://show.digitacloud.app/old-auth | leftover");
+    expect((await dns.listRecordContents({ name: MARK.name, type: "TXT" })).sort()).toEqual([MARK.content, "https://show.digitacloud.app/old-auth", "leftover"].sort());
+    expect(dns.deletes).toEqual([]);
+    expect(logs[0]).toContain("beside it stands https://show.digitacloud.app/old-auth | leftover, which no run of this Manager wrote and which is left as it is");
+  });
+
+  it("leaves a TXT booked for the tenant whose name carries no underscore label: it is no mark", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("show.digitacloud.app", "TXT", "v=spf1 -all");
+    recordDnsWrite(db.db, { name: "show.digitacloud.app", type: "TXT", content: "v=spf1 -all", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_other" });
+    expect(bookedIssuerLabel(db.db, GUID, "prod")).toBeNull();
+    await removeIssuerRecords(ctx([]), { dns, guid: GUID, stage: "prod" });
+    expect(await dns.listRecordContents({ name: "show.digitacloud.app", type: "TXT" })).toEqual(["v=spf1 -all"]);
   });
 
   it("refuses without a DNS provider, rather than publishing nothing in silence", async () => {
-    await expect(provisionIssuerRecord(ctx([]), { dns: undefined, guid: GUID, stage: "prod", record: MARK, runKind: "tenant-create" })).rejects.toThrow(/requires the DNS provider/);
+    await expect(publishIssuerRecord(ctx([]), { dns: undefined, guid: GUID, stage: "prod", record: MARK, runKind: "tenant-create" })).rejects.toThrow(/requires the DNS provider/);
   });
 });
 

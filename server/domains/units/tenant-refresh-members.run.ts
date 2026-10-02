@@ -10,7 +10,7 @@ import { registryHostFromChain } from "./tenant-values.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { loadTenantCluster } from "./lifecycle.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
-import { provisionIssuerRecord, tenantIssuerRecord } from "#unit/server/unit-dns.ts";
+import { publishIssuerRecord, tenantIssuerRecord } from "#unit/server/unit-dns.ts";
 import { tenantSyncUnits } from "#unit/server/build-rbac.ts";
 import { memberApplication, withAppDatabases } from "./tenant-fanout.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -185,7 +185,7 @@ async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefres
 }
 
 /** The identity provider's DNS mark under `label`, put in place for the standing tenant: published
- *  where it does not stand, left where it stands booked for the tenant (provisionIssuerRecord). */
+ *  where it does not stand, left where it stands booked for the tenant (publishIssuerRecord). */
 function publishIssuerRecordStep(ports: TenantOnboardPorts, p: TenantRefreshMembersParams, label: string): Step {
   return {
     name: "publish-issuer-record",
@@ -193,7 +193,7 @@ function publishIssuerRecordStep(ports: TenantOnboardPorts, p: TenantRefreshMemb
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
-      await provisionIssuerRecord(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, record: tenantIssuerRecord(label, tc.routing, tc.identityProvider, tc.stage, tc.subdomain, apex), runKind: "tenant-refresh-members" });
+      await publishIssuerRecord(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, record: tenantIssuerRecord(label, tc.routing, tc.identityProvider, tc.stage, tc.subdomain, apex), runKind: "tenant-refresh-members" });
     },
   };
 }
@@ -439,7 +439,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `${recorded.length ? `Recorded as the tenant's own at the stage pin it renders now: ${recorded.join("; ")}. ` : ""}` +
           `${moves.forward.length || moves.back.length ? "No other tenant changes. " : ""}` +
           `${planned.builds.units.length ? `First the build unit(s) ${planned.builds.units.map((u) => `${u.unit} (${u.images.join(", ")})`).join("; ")} release their next version and pin it. ` : ""}` +
-          `${params.issuerRecordLabel ? `The DNS mark of the identity provider under ${params.issuerRecordLabel} is put in place where it does not stand. ` : ""}` +
+          `${params.issuerRecordLabel ? `The DNS mark of the identity provider under ${params.issuerRecordLabel} is put in place where it does not stand. ` : "The product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is put in place. "}` +
           `Every image the new render pulls must stand in the registry; then the entries are written and every member must sync. ` +
           `A member whose chart moved does not answer from the carry of the product's change into the books branch until its Application syncs here.`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),

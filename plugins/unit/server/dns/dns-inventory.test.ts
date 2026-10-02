@@ -142,6 +142,12 @@ describe("readDnsInventory", () => {
     ]);
   });
 
+  it("PLANTED INNOCENT: a sender domain's DMARC record in the book is a mail record, not a tenant's mark", async () => {
+    recordDnsWrite(db.db, { name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", act: "inserted", owner: { kind: "mail", name: "example.com" }, runId: "run_mail" });
+    const view = await readDnsInventory(deps({ mail: async () => ({ ...mailView(), domains: [] }) }));
+    expect(view.rows.filter((r) => r.name === "_dmarc.example.com")).toEqual([]);
+  });
+
   it("names what it could not list instead of answering with a zone that looks empty", async () => {
     const { dns: _provider, ...withoutProvider } = deps();
     const noProvider = await readDnsInventory(withoutProvider);

@@ -245,11 +245,12 @@ export async function removeBookedRecords(ctx: StepCtx, opts: { dns: DnsProvider
 /** Publish the TXT that marks a tenant's identity provider (tenantIssuerRecord) and book it for the
  *  tenant at its stage. The record is the product's trust in that issuer, so it is booked for the tenant
  *  that stands on its zone NOW: where the mark already stands but the book names another tenant (a
- *  replaced one on the same subdomain) or nobody (an attempt that died before the book), it is written
- *  again and booked for this tenant, so it goes with this tenant's offboard or purge and never outlives
- *  it. Other content at the name is what a gone installation left, since only this installation writes
- *  the zone: it is replaced, and the log says what stood. */
-export async function provisionIssuerRecord(
+ *  replaced one on the same subdomain) or nobody (an attempt that died before the book), it is adopted
+ *  for this tenant without a write, so it goes with this tenant's offboard or purge and never outlives
+ *  it, and it never stops resolving in between. Other content at the name is left standing and named in
+ *  the log: only this installation writes the zone, so it is what a gone installation left, and the
+ *  product's mail service trusts an issuer only where a record equals it. */
+export async function publishIssuerRecord(
   ctx: StepCtx,
   opts: { dns: DnsProvider | undefined; guid: string; stage: Stage; record: { name: string; content: string }; runKind: string },
 ): Promise<void> {
@@ -257,16 +258,21 @@ export async function provisionIssuerRecord(
   const { name, content } = opts.record;
   const owner = { kind: "tenant" as const, name: opts.guid, stage: opts.stage };
   const standing = await dns.listRecordContents({ name, type: "TXT", signal: ctx.signal });
-  const booked = findDnsWrite(ctx.db, { name, type: "TXT" });
-  if (standing.length === 1 && standing[0] === content && booked !== null && bookedFor(booked.owner, owner)) {
-    ctx.log("meta", `TXT ${name} → ${content} already stands, booked for tenant ${opts.guid}`);
+  const others = standing.filter((txt) => txt !== content);
+  const beside = others.length === 0 ? "" : `; beside it stands ${others.join(" | ")}, which no run of this Manager wrote and which is left as it is`;
+  if (standing.includes(content)) {
+    const booked = findDnsWrite(ctx.db, { name, type: "TXT" });
+    if (booked !== null && bookedFor(booked.owner, owner)) {
+      ctx.log("meta", `TXT ${name} → ${content} already stands, booked for tenant ${opts.guid}${beside}`);
+      return;
+    }
+    recordDnsWrite(ctx.db, { name, type: "TXT", content, act: "adopted", owner, runId: ctx.runId });
+    ctx.log("meta", `TXT ${name} → ${content} already stands${booked === null ? "" : `, booked for the ${booked.owner.kind} ${booked.owner.name}`} — adopted for tenant ${opts.guid}, so it goes with this tenant${beside}`);
     return;
   }
-  if (standing.length > 0) await dns.deleteRecord({ name, type: "TXT", signal: ctx.signal });
   await dns.createRecord({ name, type: "TXT", content, signal: ctx.signal });
-  recordDnsWrite(ctx.db, { name, type: "TXT", content, act: standing.length > 0 ? "updated" : "inserted", owner, runId: ctx.runId });
-  const stood = standing.length === 0 ? "" : ` in place of ${standing.join(" | ")}${booked === null ? "" : `, booked for the ${booked.owner.kind} ${booked.owner.name}`}`;
-  ctx.log("meta", `TXT ${name} → ${content} published${stood} — entered into the book of DNS writes as tenant ${opts.guid}'s`);
+  recordDnsWrite(ctx.db, { name, type: "TXT", content, act: "inserted", owner, runId: ctx.runId });
+  ctx.log("meta", `TXT ${name} → ${content} published — entered into the book of DNS writes as tenant ${opts.guid}'s${beside}`);
 }
 
 /** The identity provider marks the book names as the tenant's at its stage: its TXT records under a
