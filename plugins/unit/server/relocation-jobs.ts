@@ -40,7 +40,9 @@ export interface RelocationJob {
 export const MONGO_NAMESPACE = "mongodb";
 export const MONGO_ROOT_SECRET = { name: "mongodb-credentials", key: "root-password" } as const;
 export function mongoHost(stage: Stage): string {
-  return `mongodb-${stage}-headless.mongodb.svc.cluster.local:27017`;
+  // Discover rs0 before pooling connections: the headless seed resolves to different members,
+  // and a cursor opened on one member cannot be read through another member's connection.
+  return `rs0/mongodb-${stage}-headless.mongodb.svc.cluster.local:27017`;
 }
 
 /** The UTC moment a generation is taken, as its folder names it — `YYYYMMDDTHHMMSSZ`, the form the
