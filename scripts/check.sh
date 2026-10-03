@@ -22,7 +22,7 @@ fail() {
   exit 1
 }
 
-for tool in node npm npx; do
+for tool in node npm; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is not on this machine (PATH)"
 done
 
