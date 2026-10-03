@@ -43,4 +43,11 @@ describe("mongodump failure diagnostics", () => {
     expect(result.stderr).toBe("");
     expect(existsSync(join(dir, "mongodump.stderr"))).toBe(false);
   });
+
+  it("withholds stderr for multiline credentials without changing the dump failure", () => {
+    const { result } = dump(true, "alpha\nbeta");
+    expect(result.status).toBe(7);
+    expect(result.stdout).toBe("DUMP workshop\nFAILED mongodump workshop, exit 7\nmongodump stderr withheld: credential contains a newline\n");
+    expect(result.stderr).toBe("");
+  });
 });

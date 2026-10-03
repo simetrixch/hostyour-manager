@@ -114,8 +114,15 @@ export const mongodumpLine = (db: string, archive: string): string =>
   mongodump ${MONGO_FLAGS} --db "${db}" --archive="${archive}" 2> /tmp/mongodump.stderr || {
     s=$?
     echo "FAILED mongodump ${db}, exit $s"
-    tail -n 20 /tmp/mongodump.stderr | awk '{
-      secret = ENVIRON["MONGO_ROOT_PASSWORD"]; line = $0; out = ""
+    tail -n 20 /tmp/mongodump.stderr | awk '
+    BEGIN {
+      secret = ENVIRON["MONGO_ROOT_PASSWORD"]
+      if (index(secret, "\\n") > 0) {
+        print "mongodump stderr withheld: credential contains a newline"; exit
+      }
+    }
+    {
+      line = $0; out = ""
       while (secret != "" && (p = index(line, secret)) > 0) {
         out = out substr(line, 1, p - 1) "[REDACTED]"; line = substr(line, p + length(secret))
       }
