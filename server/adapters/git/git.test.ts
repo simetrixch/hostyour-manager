@@ -42,7 +42,7 @@ describe("GitRepoReader", () => {
     async () => {
       const { originURL, seed, sha } = makeOrigin();
       git(seed, "tag", "light");
-      git(seed, "tag", "-a", "0.4.000-stable-20261010120000", "-m", "release");
+      git(seed, "-c", "user.name=t", "-c", "user.email=t@t", "tag", "-a", "0.4.000-stable-20261010120000", "-m", "release");
       git(seed, "push", "-q", "origin", "--tags");
       const tags = await reader.listTags({ repoURL: originURL });
       expect(tags.sort((a, b) => a.name.localeCompare(b.name))).toEqual([
