@@ -37,6 +37,9 @@
     7. Where platformRepo is declared: waits for the release-images run of that tag, because a tag is
        a name and not a release until the images exist, and then writes the image pin into that tree,
        on the trunk and on every install branch whose cluster RUNS this unit.
+    8. Where the repository supplies deploy/after-release.sh and .ps1: runs its own spelling last,
+       with the tag, the release commit and the stage (`none` for a library), from the repository
+       root. A failure turns the release red; the release itself stands.
 
   THE THREE SHAPES THIS ONE SCRIPT SERVES, and what tells them apart. A unit whose manifest declares
   NO platformRepo is built and pinned by the platform's build plane, which the deploy ref above
@@ -374,6 +377,35 @@ elseif (-not $Stage) {
   Die "$name declares builds, a chart or a tenant block, so a release of it is put on a stage - name dev, test or prod. Nothing was pushed."
 }
 
+# THE REPOSITORY'S OWN STEP AFTER THE RELEASE. A repository that needs one more act after every release
+# supplies deploy/after-release.sh and deploy/after-release.ps1. They stand outside release/, which a
+# kit replace rewrites whole, so the replace never takes them away. Each spelling runs its own twin,
+# so a repository carrying only one would release differently on Linux and Windows: refused here,
+# before anything is minted or pushed. The step runs last, with the tag, the release commit and the
+# stage (`none` for a library), from the repository root, in a pwsh of its own so its exit code is
+# what it chose. A failure turns the release red, and the release itself stands.
+$afterReleaseSh = Test-Path -LiteralPath (Join-Path $root 'deploy/after-release.sh') -PathType Leaf
+$afterReleasePs1 = Test-Path -LiteralPath (Join-Path $root 'deploy/after-release.ps1') -PathType Leaf
+if ($afterReleaseSh -and -not $afterReleasePs1) {
+  Die "deploy/after-release.sh stands without its twin deploy/after-release.ps1 - each release script runs its own spelling, so a repository supplies both or neither. Nothing was pushed."
+}
+if ($afterReleasePs1 -and -not $afterReleaseSh) {
+  Die "deploy/after-release.ps1 stands without its twin deploy/after-release.sh - each release script runs its own spelling, so a repository supplies both or neither. Nothing was pushed."
+}
+function Invoke-AfterRelease($Tag, $Sha) {
+  if (-not $afterReleasePs1) { return }
+  $stageArgument = if ($Stage) { $Stage } else { 'none' }
+  Say "running deploy/after-release $Tag $Sha $stageArgument"
+  $pwshPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+  # Started as a process of its own and not with `&`: `&` would hand its standard output to this
+  # script's pipeline, where the host rewrites every line ending, while a started process writes to
+  # the handles this one inherited, byte for byte, as the shell twin's child does.
+  $step = Start-Process -FilePath $pwshPath -ArgumentList @('-NoProfile', '-NonInteractive', '-File', 'deploy/after-release.ps1', $Tag, $Sha, $stageArgument) -WorkingDirectory $root -NoNewWindow -Wait -PassThru
+  if ($step.ExitCode -ne 0) {
+    Die "deploy/after-release failed with exit $($step.ExitCode) - $Tag is released and its deploy ref is pushed; only the after-release step is missing: run it again once fixed"
+  }
+}
+
 # ── The pin pre-flight ────────────────────────────────────────────────────────────────────────
 #
 # A RELEASE THAT CANNOT WRITE ITS PIN IS REFUSED BEFORE IT MINTS ANYTHING. Everything below this
@@ -541,6 +573,7 @@ try {
   # A LIBRARY IS RELEASED BY ITS TAG. No build plane reads a deploy ref of it and nothing is pinned, so
   # the run ends here; the Release workflow's publish job reads the tag.
   if ($library) {
+    Invoke-AfterRelease $tag $sha
     Say "$name $tag (commit $sha7) is released; nothing is deployed"
     return
   }
@@ -648,6 +681,7 @@ try {
     }
   }
 
+  Invoke-AfterRelease $tag $sha
   Say "$name $tag (commit $sha7) is on its way to $Stage"
   if ($buildNames.Count -gt 0) {
     Say 'the platform builds these image tags, or skips the build when they already exist:'

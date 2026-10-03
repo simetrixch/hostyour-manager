@@ -51,6 +51,10 @@
 #   7. Where `platformRepo` is declared: waits for this repo's own
 #      release-images run and writes the image pin into that tree, on the
 #      trunk and on every install branch whose cluster RUNS this unit.
+#   8. Where the repository supplies deploy/after-release.sh and .ps1: runs
+#      its own spelling last, with the tag, the release commit and the stage
+#      (`none` for a library), from the repository root. A failure turns the
+#      release red; the release itself stands.
 #
 # THE THREE SHAPES THIS ONE SCRIPT SERVES, and what tells them apart
 #   A unit whose manifest declares NO platformRepo is built and pinned by the
@@ -279,6 +283,30 @@ else
   [ -n "$STAGE" ] || die "${NAME} declares builds, a chart or a tenant block, so a release of it is put on a stage - name dev, test or prod. Nothing was pushed."
 fi
 
+# THE REPOSITORY'S OWN STEP AFTER THE RELEASE. A repository that needs one more act after every release
+# supplies deploy/after-release.sh and deploy/after-release.ps1. They stand outside release/, which a
+# kit replace rewrites whole, so the replace never takes them away. Each spelling runs its own twin,
+# so a repository carrying only one would release differently on Linux and Windows: refused here,
+# before anything is minted or pushed. The step runs last, with the tag, the release commit and the
+# stage (`none` for a library), from the repository root. A failure turns the release red, and the
+# release itself stands.
+AFTER_RELEASE=""
+if [ -f "${ROOT}/deploy/after-release.sh" ] && [ -f "${ROOT}/deploy/after-release.ps1" ]; then
+  AFTER_RELEASE="deploy/after-release.sh"
+elif [ -f "${ROOT}/deploy/after-release.sh" ]; then
+  die "deploy/after-release.sh stands without its twin deploy/after-release.ps1 - each release script runs its own spelling, so a repository supplies both or neither. Nothing was pushed."
+elif [ -f "${ROOT}/deploy/after-release.ps1" ]; then
+  die "deploy/after-release.ps1 stands without its twin deploy/after-release.sh - each release script runs its own spelling, so a repository supplies both or neither. Nothing was pushed."
+fi
+after_release() {
+  [ -n "$AFTER_RELEASE" ] || return 0
+  say "running deploy/after-release ${TAG} ${SHA} ${STAGE:-none}"
+  local status=0
+  (cd "$ROOT" && bash "$AFTER_RELEASE" "$TAG" "$SHA" "${STAGE:-none}") || status=$?
+  [ "$status" = "0" ] \
+    || die "deploy/after-release failed with exit ${status} - ${TAG} is released and its deploy ref is pushed; only the after-release step is missing: run it again once fixed"
+}
+
 # ── The pin pre-flight ────────────────────────────────────────────────────────────────────────
 #
 # A RELEASE THAT CANNOT WRITE ITS PIN IS REFUSED BEFORE IT MINTS ANYTHING. Everything below this
@@ -421,6 +449,7 @@ SHA7="${SHA:0:7}"
 # A LIBRARY IS RELEASED BY ITS TAG. No build plane reads a deploy ref of it and nothing is pinned, so
 # the run ends here; the Release workflow's publish job reads the tag.
 if [ -n "$LIBRARY" ]; then
+  after_release
   say "${NAME} ${TAG} (commit ${SHA7}) is released; nothing is deployed"
   exit 0
 fi
@@ -598,6 +627,7 @@ PIN
     || die "no branch of ${PLATFORM_REPO} carries a values-${STAGE}.yaml pin of ${NAME} - the images are built and no cluster reads them, so this release reaches nothing"
 fi
 
+after_release
 say "${NAME} ${TAG} (commit ${SHA7}) is on its way to ${STAGE}"
 if [ -n "$BUILDS" ]; then
   say "the platform builds these image tags, or skips the build when they already exist:"

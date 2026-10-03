@@ -134,7 +134,7 @@ export function normalise(text: string, root: string): string {
  *  difference between two runs is which spelling performed it. `core.autocrlf false` keeps git's own
  *  normalisation warnings — a property of the developer's global configuration, not of these
  *  scripts — out of a comparison that is about what the two spellings print. */
-export function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; privateRoot?: boolean; workspace?: boolean; ignoredPackage?: boolean; origin?: boolean; dirty?: boolean }): Fixture {
+export function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; privateRoot?: boolean; workspace?: boolean; ignoredPackage?: boolean; origin?: boolean; dirty?: boolean; afterRelease?: { sh?: string; ps1?: string } }): Fixture {
   const base = tempDir();
   const work = join(base, "work");
   mkdirSync(work);
@@ -150,6 +150,9 @@ export function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; pr
     mkdirSync(join(work, "deploy"));
     writeFileSync(join(work, "deploy", "platform.yaml"), opts.manifest);
   }
+  // The repository's own step after the release, in whichever spellings the scenario supplies.
+  if (opts.afterRelease?.sh !== undefined) writeFileSync(join(work, "deploy", "after-release.sh"), opts.afterRelease.sh);
+  if (opts.afterRelease?.ps1 !== undefined) writeFileSync(join(work, "deploy", "after-release.ps1"), opts.afterRelease.ps1);
   if (opts.packageJson) writeFileSync(join(work, "package.json"), `{\n  "name": "probe",${opts.privateRoot ? '\n  "private": true,' : ""}\n  "version": "0.0.1"\n}\n`);
   if (opts.workspace) {
     // Two packages beside the root: one that declares a version, one that declares none.
