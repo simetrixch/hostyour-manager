@@ -28,12 +28,8 @@ done
 
 # npm run check = typecheck (tsc) + lint (eslint) + the boundary law (dependency-cruiser) +
 # the CSS tokens (stylelint) + the SPA build (vite). The same command the pre-commit hook runs.
-echo "check: 1/2 npm run check"
+echo "check: 1/1 npm run check"
 npm run check || fail "npm run check"
 
-# Every suite, the fitness checks under fitness/ among them: vitest.config.ts carries them as their
-# own project, so this one command is the whole test surface.
-echo "check: 2/2 npx vitest run"
-npx vitest run || fail "npx vitest run"
-
-echo "check: OK — every check green"
+echo "check: NOT RUN locally — vitest suites run in GitHub Actions (.github/workflows/tests.yml)"
+echo "check: OK — local lint, types and build green"

@@ -27,11 +27,12 @@ is worse than none.
 ## Running the checks
 
 ```
-npm run check      # typecheck, eslint, module boundaries, stylelint, the web build
-npx vitest run     # the test suite
+scripts/check.sh   # typecheck, eslint, module boundaries, stylelint, the web build
 ```
 
-Both run locally. Nothing hosted runs them.
+The local gate runs no tests. GitHub Actions runs `npx vitest run` on every push and pull
+request. The workflow explicitly permits the existing skip for ansiwise real-serve suites,
+because it has no ansiwise binaries; those suites are not proven by a green Actions run.
 
 ## License
 
