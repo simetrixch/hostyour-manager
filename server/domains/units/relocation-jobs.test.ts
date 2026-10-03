@@ -242,7 +242,8 @@ describe("the nightly backup under pod security restricted (hostyour-manager#333
     const tenantMongo = tenantDumpJobs({ guid: GUID, folder: TENANT_FOLDER, stage: "prod", apps: ["web"], image: IMAGE, identityProvider: "auth", registrationYaml: "guid: x\n" })
       .find((j) => j.spec.name.startsWith("reloc-dump-mongo"))!;
     expect(tenantMongo.spec.script).toContain('echo "DUMP $db"');
-    expect(tenantMongo.spec.script).toContain('echo "FAILED mongodump $db, exit $s"; exit $s;');
+    expect(tenantMongo.spec.script).toContain('echo "FAILED mongodump $db, exit $s"');
+    expect(tenantMongo.spec.script).toContain('exit "$s"');
   });
 
   it("a failed job's error names why its pod ended", async () => {

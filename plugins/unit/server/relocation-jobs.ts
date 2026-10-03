@@ -106,10 +106,25 @@ export RCLONE_CONFIG_BOX_PASS="$(rclone obscure "$STORAGE_BOX_PASSWORD")"
 // Mongo flags shared by every mongodb-namespace script ($MONGO_HOST/$MONGO_ROOT_PASSWORD env).
 export const MONGO_FLAGS = `--host "$MONGO_HOST" --username root --password "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin`;
 
-/** Dump one Mongo database into `archive`, naming it first. `--quiet` keeps a large dump's log short,
- *  so the explicit line is what a failed dump leaves in it: which database, and its exit code. */
+/** Keep successful dumps quiet without suppressing the diagnostic that explains a failed backup.
+ *  Match the password literally: credentials are not regular expressions. */
 export const mongodumpLine = (db: string, archive: string): string =>
-  `echo "DUMP ${db}"\n  mongodump ${MONGO_FLAGS} --db "${db}" --archive="${archive}" --quiet || { s=$?; echo "FAILED mongodump ${db}, exit $s"; exit $s; }\n`;
+  `echo "DUMP ${db}"
+  umask 077
+  mongodump ${MONGO_FLAGS} --db "${db}" --archive="${archive}" 2> /tmp/mongodump.stderr || {
+    s=$?
+    echo "FAILED mongodump ${db}, exit $s"
+    tail -n 20 /tmp/mongodump.stderr | awk '{
+      secret = ENVIRON["MONGO_ROOT_PASSWORD"]; line = $0; out = ""
+      while (secret != "" && (p = index(line, secret)) > 0) {
+        out = out substr(line, 1, p - 1) "[REDACTED]"; line = substr(line, p + length(secret))
+      }
+      print out line
+    }'
+    exit "$s"
+  }
+  rm -f /tmp/mongodump.stderr
+`;
 
 export const mongoEnv = (stage: Stage): JobEnvVar[] => [
   { name: "MONGO_HOST", value: mongoHost(stage) },
