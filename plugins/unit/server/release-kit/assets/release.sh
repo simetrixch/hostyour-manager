@@ -301,10 +301,11 @@ fi
 after_release() {
   [ -n "$AFTER_RELEASE" ] || return 0
   say "running deploy/after-release ${TAG} ${SHA} ${STAGE:-none}"
-  local status=0
+  local status=0 released="is released"
   (cd "$ROOT" && bash "$AFTER_RELEASE" "$TAG" "$SHA" "${STAGE:-none}") || status=$?
+  [ -n "$LIBRARY" ] || released="is released and its deploy ref is pushed"
   [ "$status" = "0" ] \
-    || die "deploy/after-release failed with exit ${status} - ${TAG} is released and its deploy ref is pushed; only the after-release step is missing: run it again once fixed"
+    || die "deploy/after-release failed with exit ${status} - ${TAG} ${released}; only the after-release step is missing: run it again once fixed"
 }
 
 # ── The pin pre-flight ────────────────────────────────────────────────────────────────────────

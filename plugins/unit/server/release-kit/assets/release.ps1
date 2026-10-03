@@ -402,7 +402,8 @@ function Invoke-AfterRelease($Tag, $Sha) {
   # the handles this one inherited, byte for byte, as the shell twin's child does.
   $step = Start-Process -FilePath $pwshPath -ArgumentList @('-NoProfile', '-NonInteractive', '-File', 'deploy/after-release.ps1', $Tag, $Sha, $stageArgument) -WorkingDirectory $root -NoNewWindow -Wait -PassThru
   if ($step.ExitCode -ne 0) {
-    Die "deploy/after-release failed with exit $($step.ExitCode) - $Tag is released and its deploy ref is pushed; only the after-release step is missing: run it again once fixed"
+    $released = if ($library) { 'is released' } else { 'is released and its deploy ref is pushed' }
+    Die "deploy/after-release failed with exit $($step.ExitCode) - $Tag $released; only the after-release step is missing: run it again once fixed"
   }
 }
 

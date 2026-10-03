@@ -47,6 +47,15 @@ describe.skipIf(!BOTH)("the repository's own step after the release", () => {
     expect(originRefs(o.sh)).toMatch(/refs\/tags\/deploy\/dev\/1\.2\.3-stable-\d{14}/);
   });
 
+  it("reports a failed library hook without claiming that a deploy ref was pushed", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, origin: true, afterRelease: step(7) }), ["1.2.3", "stable"]);
+    const { stdout, stderr } = expectSameBytes(o);
+    expect(o.sh.status).toBe(1);
+    expect(stderr).toContain("release: deploy/after-release failed with exit 7 - 1.2.3-stable-<ts14> is released; only the after-release step is missing: run it again once fixed\n");
+    expect(stdout).not.toContain("is released; nothing is deployed");
+    expect(originRefs(o.sh)).not.toContain("refs/tags/deploy/");
+  });
+
   for (const only of ["sh", "ps1"] as const) {
     const other = only === "sh" ? "ps1" : "sh";
     it(`PLANTED DEFECT: refuses a step in the ${only} spelling alone, before anything is pushed`, RUNS, async () => {
