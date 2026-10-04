@@ -128,7 +128,8 @@ export function rendering(members: readonly TenantMemberRecord[], approved: Reco
 class SteppingArgo extends FakeMasterArgoReader {
   private reads = 0;
   constructor(private readonly answers: readonly (() => Map<string, ArgoAppStatus>)[]) { super(); }
-  override async watchApplicationSet(): Promise<ArgoAppStatusMap> {
+  override async watchApplicationSet(namespace: string, names: readonly string[]): Promise<ArgoAppStatusMap> {
+    this.operations.push(`watch-set:${namespace}/${names.join(",")}`);
     return this.answers[Math.min(this.reads++, this.answers.length - 1)]!();
   }
 }
